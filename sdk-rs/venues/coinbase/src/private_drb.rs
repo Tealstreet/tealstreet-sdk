@@ -852,7 +852,7 @@ impl Coinbase {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         kind: WsKind,
-        method: &str,
+        method: drb::ControlMethod,
         params: Value,
     ) -> Result<(), String> {
         let socket = self
@@ -908,7 +908,7 @@ impl Coinbase {
             let params = session.params_at(credentials, cx.now, cx.protocol_now(), |b| {
                 cx.fill_signing_entropy(b)
             })?;
-            self.drb_ws_send(cx, WsKind::Auth, "public/auth", params)
+            self.drb_ws_send(cx, WsKind::Auth, drb::ControlMethod::Authenticate, params)
         }
     }
     pub(crate) fn drb_private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
@@ -974,13 +974,13 @@ impl Coinbase {
                         self.drb_ws_send(
                             cx,
                             WsKind::Subscribe,
-                            "private/subscribe",
+                            drb::ControlMethod::PrivateSubscribe,
                             json!({"channels":CHANNELS}),
                         )?;
                         self.drb_ws_send(
                             cx,
                             WsKind::Heartbeat,
-                            "public/set_heartbeat",
+                            drb::ControlMethod::SetHeartbeat,
                             json!({"interval":10}),
                         )?;
                     }
@@ -1000,7 +1000,7 @@ impl Coinbase {
                 }
             } else if envelope["method"] == "heartbeat" {
                 if envelope["params"]["type"] == "test_request" {
-                    self.drb_ws_send(cx, WsKind::Test, "public/test", json!({}))?;
+                    self.drb_ws_send(cx, WsKind::Test, drb::ControlMethod::Test, json!({}))?;
                 }
             } else if envelope["method"] == "subscription" && self.private_drb.ws_ready {
                 let params = &envelope["params"];

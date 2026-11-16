@@ -415,7 +415,7 @@ impl Transport {
             params,
             cx.now,
         )?;
-        cx.send_signed(socket, body, step(id));
+        cx.send_signed(socket, ControlMethod::Authenticate.frame(body), step(id));
         Ok(id)
     }
 
