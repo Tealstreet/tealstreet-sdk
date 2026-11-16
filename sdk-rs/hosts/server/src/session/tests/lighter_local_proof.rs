@@ -401,12 +401,12 @@ async fn lighter_retired_session_cannot_publish_a_delayed_registration() {
                 })
                 .await
                 .unwrap();
+                assert!(session.joined.is_empty());
                 session.close();
                 gate.add_permits(1);
                 for _ in 0..10 {
                     tokio::task::yield_now().await;
                 }
-                assert!(session.joined.is_empty());
                 assert_eq!(registry.account_count(), 0);
                 assert_eq!(observed.lock().unwrap().requests, 0);
                 while let Ok(text) = sent.try_recv() {
@@ -504,4 +504,42 @@ async fn lighter_slot_queue_is_shared_across_untrusted_key_labels() {
             }
         })
         .await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn lighter_delegated_pair_and_sealed_replay_preserve_original_provider() {
+    tokio::task::LocalSet::new().run_until(async {
+        for venue in VENUES {for mode in ["correct","wrong-key","replay"] {
+            let mut payload=init(venue,false); payload.signing_mode=Some("delegated".into());
+            let (registry,_,observed)=registry(body(),8);
+            let original:crate::delegated::Credentials=serde_json::from_value(json!({
+                "key":payload.key,"secret":safe_cex_crypto::hex(&scalar(7))})).unwrap();
+            let retained=crate::delegated::prepare_delegated(&payload,original.pair()).unwrap().resident;
+            let provider=retained.provider();
+            let reference=retained.identities().primary.as_ref().unwrap().signing_ref().unwrap().clone();
+            let resident=crate::accounts::testing::registered_lighter_account(&registry,"alice",&payload,&public(7));
+            resident.signing.set_test_resident(retained);
+            let (mut session,mut sent)=user_session(registry.clone(),"alice"); let mut done=session.take_verified();
+            let offer=session.handovers.issue(&payload.account_name,venue,now_ms()).unwrap();
+            let candidate=json!({"key":payload.key,"secret":safe_cex_crypto::hex(&scalar(if mode=="wrong-key" {8} else {7}))}).to_string();
+            payload.sealed=Some(crate::delegated::tests::seal(&offer,venue,&payload.key,candidate.as_bytes()));
+            if mode=="replay" {session.handovers.issue(&payload.account_name,venue,now_ms()).unwrap();}
+            session.init(payload).await.unwrap();
+            if mode!="replay" {
+                let result=tokio::time::timeout(Duration::from_secs(5),done.recv()).await.unwrap().unwrap();
+                assert_eq!(result.probe.as_ref().unwrap().permit.is_ok(),mode=="correct");
+                session.verification_completed(result).await.unwrap();
+            }
+            assert_eq!(registry.holds(&resident,session.socket),mode=="correct");
+            assert_eq!(session.joined.is_empty(),mode!="correct"); assert_eq!(registry.account_count(),1);
+            assert!(public(7).matches_provider(&provider,&reference).unwrap());
+            assert!(observed.lock().unwrap().writes.is_empty());
+            while let Ok(text)=sent.try_recv() {
+                let frame:Value=serde_json::from_str(&text).unwrap(); assert_ne!(frame["t"],"sign-req");
+                if mode!="correct" {assert_ne!(frame["d"]["op"],"frame");}
+            }
+            session.close();
+        }}
+    }).await;
 }
