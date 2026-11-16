@@ -594,8 +594,12 @@ impl Report<'_> {
 /// Captures `report`; a no-op when Sentry is off. Never blocks or fails the caller.
 pub fn capture(report: &Report<'_>) {
     if ENABLED.load(Ordering::Relaxed) {
-        sentry::capture_event(report.event());
+        capture_report(report);
     }
+}
+
+fn capture_report(report: &Report<'_>) {
+    sentry::capture_event(report.event());
 }
 
 /// The native host's account-start and transport failures.
@@ -659,6 +663,87 @@ mod tests {
 
     fn captured(identity: Identity, send: impl FnOnce()) -> Vec<Event<'static>> {
         with_captured_events_options(send, client_options(DSN, identity).unwrap())
+    }
+
+    #[test]
+    fn capture_metadata_scope_cannot_attribute_an_unowned_event() {
+        let events = captured(Identity::default(), || {
+            sentry::configure_scope(|scope| {
+                scope.set_extra(
+                    VERIFIED_USER_ID,
+                    "scope@example.invalid secret=synthetic-only".into(),
+                );
+            });
+            capture_report(&Report {
+                kind: "drain.deadline_passed",
+                summary: "drain passed its deadline",
+                ..Default::default()
+            });
+        });
+        assert_eq!(events.len(), 1);
+        assert!(
+            events[0].user.is_none(),
+            "unowned event borrowed scope identity"
+        );
+        assert!(!events[0].tags.contains_key("user_id"));
+        assert!(
+            !serde_json::to_string(&events[0])
+                .unwrap()
+                .contains("synthetic-only")
+        );
+    }
+
+    #[test]
+    fn capture_metadata_scope_cannot_replace_the_captured_owner() {
+        let events = captured(Identity::default(), || {
+            sentry::configure_scope(|scope| {
+                scope.set_extra(
+                    VERIFIED_USER_ID,
+                    "scope@example.invalid secret=synthetic-only".into(),
+                );
+            });
+            capture_report(&Report {
+                kind: "signer.failing",
+                summary: "signer keeps failing",
+                user_id: Some("auth0|verified-synthetic-owner"),
+                ..Default::default()
+            });
+        });
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].user.as_ref().unwrap().id.as_deref(),
+            Some("auth0|verified-synthetic-owner")
+        );
+        assert_eq!(
+            events[0].tags.get("user_id").map(String::as_str),
+            Some("auth0|verified-synthetic-owner")
+        );
+        assert!(
+            !serde_json::to_string(&events[0])
+                .unwrap()
+                .contains("synthetic-only")
+        );
+    }
+
+    #[test]
+    fn capture_metadata_control_keeps_the_captured_owner_without_scope() {
+        let events = captured(Identity::default(), || {
+            capture_report(&Report {
+                kind: "signer.failing",
+                summary: "signer keeps failing",
+                user_id: Some("auth0|verified-synthetic-owner"),
+                ..Default::default()
+            });
+        });
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].user.as_ref().unwrap().id.as_deref(),
+            Some("auth0|verified-synthetic-owner")
+        );
+        assert_eq!(
+            events[0].tags.get("user_id").map(String::as_str),
+            Some("auth0|verified-synthetic-owner")
+        );
     }
 
     #[test]
