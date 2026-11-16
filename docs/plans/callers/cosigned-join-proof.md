@@ -16,6 +16,7 @@ The exact proof-ready venue names are:
 | `bybitdemo`, `bybitspot` | Native demo/spot private startup and shared HMAC/session negatives; exact origin and category checks |
 | `binance` | Native private startup and shared HMAC suite |
 | `binancepm`, `binanceinverse`, `binancespot` | Native PAPI/DAPI/spot private startup and shared HMAC/session negatives; exact product routes |
+| `binanceoptions` | Native EAPI margin-account/position/open-order startup, HMAC key/replay and Session retirement controls; mainnet only |
 | `okx` | Native private startup and shared HMAC suite |
 | `okxdemo` | Native demo startup and shared HMAC/session negatives; exact origin and simulated-trading headers |
 | `okxeu` | Signed config before keyed discovery, full native EEA startup, bounded signature-refusal retry and shared HMAC/session negatives |

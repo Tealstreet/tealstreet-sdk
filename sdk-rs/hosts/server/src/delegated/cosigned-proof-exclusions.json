@@ -13,10 +13,6 @@
       "reason": "Ed25519 native private-startup proof, key encoding, account binding and replay/socket controls are not built."
     },
     {
-      "venue": "binanceoptions",
-      "reason": "Bound native Options private-startup proof with account identity and wrong-key, replay and socket controls is not built."
-    },
-    {
       "venue": "bingxspot",
       "reason": "Production metadata disables Spot and the native Hosted origin/private proof are missing; fixture-only admission is not live support."
     },

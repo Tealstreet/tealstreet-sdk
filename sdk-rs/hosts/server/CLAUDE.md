@@ -125,7 +125,7 @@ DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
 DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
-Binance base/PM/inverse/spot, OKX base/demo/EEA mainnet, Bitget base/USDC,
+Binance base/PM/inverse/spot/options, OKX base/demo/EEA mainnet, Bitget base/USDC,
 Blofin, KuCoin, Phemex, BingX and MEXC names have native private-startup HMAC proof coverage.
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
@@ -166,6 +166,12 @@ ApeX remote signing uses the existing device `apexomni-batch` codec for native
 REST/login graphs and atomic contract dependencies. Only opaque OmniKey refs
 are installed; startup read coverage never proves OmniKey possession or changes
 COSIGNED catalog readiness by itself.
+
+Exact `binanceoptions` mainnet proves possession through its existing signed
+EAPI margin-account, position and open-order startup reads. Public exchange-info,
+ticker and mark responses never establish possession. Tests cover wrong keys,
+replay, replies from other sockets, consumed responses and retired connections
+through the same native probe and Session fences; Options testnet stays refused.
 
 COSIGNED catalog accounting runs in `sdk-rs/harness/cosigned-catalog.test.mjs`.
 Every exact `remoteSigning.enabled` venue needs native proof readiness or a
