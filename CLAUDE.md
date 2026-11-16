@@ -44,3 +44,36 @@ retains the original signing host and owner; it does not activate any server ven
 Shared WASM budget and construction-policy memberships are checked against
 `sdk-rs/artifact-census.json`. Registry builds reject duplicate, missing or unknown
 policy venues; synthetic codegen fixtures use the test-only renderer seam.
+
+## Rust SDK CPU checks: dated measurement
+
+Measured 2026-11-16 using `gh api` for `rust.yml` runs/jobs, commit check-runs,
+PR merge times and branch protection. Validate response shapes, use
+`--paginate --slurp` on paged endpoints, and count the latest check per name.
+Keep cancelled and incomplete runs separate from failures; `updated_at` alone
+does not establish completion. These are observations, not fixed job counts:
+
+| Evidence | Observed result |
+| --- | --- |
+| [PR #3572 run 43924049794](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43924049794), head `6b7aaca074c4` | 148 latest-per-name checks; 32 failed: 31 `Rust / CPU gate (<suite>)` checks and `Rust / shared CPU certification`. |
+| [Master push 43942850047](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43942850047), head `9fa98a6e3417` | All 31 venue CPU gates and shared CPU certification failed; `Rust / required coverage` succeeded. |
+| Latest 12 master pushes, [43833710373](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43833710373) through [43957235270](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43957235270) | All 11 completed runs failed (created 08:44–19:46 UTC); the newest was still in progress. |
+| Latest 30 Rust SDK runs, [43847198220](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43847198220) through [43957235270](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43957235270) | 19 failed with CPU-gate failures, 8 cancelled, 1 succeeded, 2 incomplete. Cancelled runs are not counted as failures. |
+| [PR #3579 run 43871164658](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/43871164658), head `fbb59e4455d4` | All 31 venue CPU gates completed at 13:59:29–13:59:35 UTC, after the [13:55:34 UTC merge](https://github.com/Tealstreet/tealstreet-sdk/pull/3579). |
+
+The source condition in [rust.yml](.github/workflows/rust.yml) is
+`always() && needs.selection.outputs.replayRequired == 'true'`.
+[ci-selection.mjs](sdk-rs/harness/ci-selection.mjs) selects `full: !isPr`, so
+these jobs run on selected PRs **and master**, not PRs alone. Their cardinality
+tracks `cpu-final.strategy.matrix.suite`; the measured matrix has 31 entries.
+
+Branch protection requires `ci` and `Rust / required coverage`, not these CPU
+checks. The required-coverage job does not depend on the CPU jobs, and
+`beta-wasm-release` depends on required coverage rather than CPU certification.
+Thus CPU failures can coexist with a merge/release and can conclude after a PR
+has merged. Standing red Rust SDK runs make a new failure indistinguishable
+from that baseline in the aggregate status; open the job list to diagnose it.
+Thresholds and remeasurement policy remain in
+[the harness CLAUDE.md](sdk-rs/harness/CLAUDE.md).
+
+decision pending with Sam: wait for CPU gates, or remove them from PR runs
