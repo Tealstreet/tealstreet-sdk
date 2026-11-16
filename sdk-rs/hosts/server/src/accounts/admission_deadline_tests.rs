@@ -96,6 +96,7 @@ async fn local_admission_deadline_never_expires_an_admitted_accounts_io_guard() 
         admission_expires_at: None,
         probe_current: Some(Arc::new(AtomicBool::new(true))),
         probe_deadline: Some(tokio::time::Instant::now() + Duration::from_secs(1)),
+        proved_registration: None,
     };
     assert!(authority.check_admission().is_ok());
     tokio::time::advance(Duration::from_secs(2)).await;

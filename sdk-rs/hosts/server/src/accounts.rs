@@ -578,6 +578,7 @@ struct InitAuthority {
     admission_expires_at: Option<u64>,
     probe_current: Option<Arc<AtomicBool>>,
     probe_deadline: Option<tokio::time::Instant>,
+    proved_registration: Option<Arc<safe_cex_crypto::admission::PublicKey>>,
 }
 
 impl InitAuthority {
@@ -790,14 +791,13 @@ type Notices = Arc<Mutex<HashMap<NoticeKey, StopRecord>>>;
 /// How long an undelivered stop notice waits for the account's next init.
 pub const NOTICE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// Engine options for a hosted account: non-secret init fields only.
-/// HyroTrader's origins are browser build configuration the server does not have;
-/// without them its engine would start with no endpoints.
+/// Hyro's hosted endpoint map is derived only from the native canonical origin.
+/// If that origin is absent, refuse instead of falling back to Bybit.
 pub const HYROTRADER_UNHOSTED: &str = "HyroTrader accounts cannot run on the hosted server: its HyroTrader endpoints are not configured. Turn hosted mode off for this account.";
 
 /// A venue the server cannot run correctly is refused at init, never started degraded.
 pub fn refuse_unhosted(venue: &str) -> Result<(), String> {
-    if venue == "hyrotrader" {
+    if venue == "hyrotrader" && resolve::rest_base_url(venue, false).is_err() {
         return Err(HYROTRADER_UNHOSTED.into());
     }
     Ok(())
@@ -862,6 +862,21 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     }
     if init.testnet == Some(true) {
         options.insert("testnet".into(), true.into());
+    }
+    // Use the same canonical challenge origin as native routing; init JSON and
+    // browser build overrides never select the hosted endpoint map.
+    if init.exchange_name == "hyrotrader"
+        && let Ok(rest) = resolve::rest_base_url("hyrotrader", init.testnet.unwrap_or(false))
+        && let Some(authority) = rest.strip_prefix("https://")
+    {
+        options.insert(
+            "endpoints".into(),
+            json!({
+                "rest": rest,
+                "publicWs": format!("wss://{authority}/v5/public/linear"),
+                "privateWs": format!("wss://{authority}/v5/private")
+            }),
+        );
     }
     // The page sets this in production; BloFin refuses orders without its broker id.
     options.insert("brokerAttribution".into(), true.into());
@@ -1367,6 +1382,7 @@ impl Registry {
             admission_expires_at: None,
             probe_current: None,
             probe_deadline: None,
+            proved_registration: None,
         };
         authority.check_admission()?;
         let key = (user.to_owned(), name.to_owned());
@@ -1562,6 +1578,7 @@ impl Registry {
             attempt.authority.admission_expires_at = proof.token_expires_at;
             attempt.authority.probe_current = Some(proof.current.clone());
             attempt.authority.probe_deadline = proof.local_deadline;
+            attempt.authority.proved_registration = proof.registered_public.clone();
             attempt._probe = Some(proof);
         }
         let key = attempt.key.clone();
@@ -1595,6 +1612,16 @@ impl Registry {
                 }
                 attempt.authority.check_admission()?;
                 crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
+                if let Some(expected) = &attempt.authority.proved_registration {
+                    let actual = account
+                        .signing
+                        .public_binding(Family::Schnorr)
+                        .map_err(|_| "Signer registration unavailable")?
+                        .ok_or("Signer registration unavailable")?;
+                    if actual.as_bytes() != expected.as_bytes() {
+                        return Err("Signer registration changed during verification".into());
+                    }
+                }
                 if delegated && account.delegated().is_none() {
                     let resident = match setup {
                         Some(DelegatedSetup::Pair(pair)) => prepare_delegated(init, pair)?.resident,
@@ -1608,11 +1635,15 @@ impl Registry {
                     if account.handle.disposal_cause().is_some() || !account.running.io_allowed() {
                         return Err("Account is retiring; account not attached".into());
                     }
-                    let upgraded = match public {
-                        Some(proof) => account
+                    let upgraded = match (public, attempt.authority.proved_registration.as_deref())
+                    {
+                        (Some(proof), _) => account
                             .signing
                             .upgrade_proven(resident, Some(&proof.public)),
-                        None => account.signing.upgrade(resident),
+                        (None, Some(public)) => {
+                            account.signing.upgrade_proven(resident, Some(public))
+                        }
+                        (None, None) => account.signing.upgrade(resident),
                     }
                     .map_err(|reason| reason.reason().to_owned())?;
                     if upgraded {
@@ -1723,6 +1754,58 @@ impl Registry {
         Ok(account)
     }
 
+    async fn registered_key_for_build(
+        &self,
+        init: &InitPayload,
+        plan: &RoutingPlan,
+        token: Option<(String, u64)>,
+        authority: &InitAuthority,
+    ) -> Result<safe_cex_crypto::admission::PublicKey, String> {
+        let account_index = init
+            .application_id
+            .as_deref()
+            .and_then(|value| value.parse().ok())
+            .ok_or("Missing signer registration account")?;
+        let index = init
+            .api_key_index
+            .as_deref()
+            .and_then(|value| value.parse().ok())
+            .ok_or("Missing signer registration index")?;
+        let captured = authority.clone();
+        let expiry = token.as_ref().map(|(_, expiry)| *expiry);
+        let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
+            captured.check_admission().is_ok() && expiry.is_none_or(|expiry| expiry > now_ms())
+        });
+        let proxy_token = ProxyToken::new();
+        proxy_token.set(token);
+        let transport = NetworkTransport::with_routing(plan.clone(), proxy_token.provider())
+            .with_venue(&init.exchange_name)
+            .with_io_guard(allowed.clone());
+        #[cfg(test)]
+        let transport = crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
+        let network = safe_cex_venues::lighter_registration::Network::from_options(
+            init.exchange_name == "lighter-robinhood",
+            init.testnet == Some(true),
+        );
+        let public = crate::admission::fetch_lighter_registered_key(
+            &transport,
+            network,
+            account_index,
+            index,
+            allowed,
+        )
+        .await
+        .map_err(|_| "Signer registration unavailable")?;
+        authority.check_admission()?;
+        crate::auth::Verifier::check_expiry(expiry, now_ms())?;
+        if let Some(expected) = &authority.proved_registration
+            && expected.as_bytes() != public.as_bytes()
+        {
+            return Err("Signer registration changed during verification".into());
+        }
+        Ok(public)
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn build(
         &self,
@@ -1750,6 +1833,24 @@ impl Registry {
                 DelegatedSetup::Pair(pair) => prepare_delegated(init, pair)?,
                 DelegatedSetup::Resident(resident) => resident.reconfigure(init)?,
             };
+            if authority.proved_registration.is_some() {
+                let public = self
+                    .registered_key_for_build(init, &plan, token.clone(), authority)
+                    .await?;
+                let reference = resident
+                    .identities()
+                    .primary
+                    .as_ref()
+                    .ok_or("Signer registration unavailable")?
+                    .signing_ref()
+                    .map_err(|_| "Signer registration unavailable")?;
+                if !public
+                    .matches_provider(&resident.provider(), reference)
+                    .map_err(|_| "Signer registration unavailable")?
+                {
+                    return Err("Signer registration changed during verification".into());
+                }
+            }
             let signer = Some(resident.provider());
             (None, plan, options, None, signer, Some(resident))
         } else {
@@ -1761,46 +1862,9 @@ impl Registry {
             } = prepare(init, public_only, link.clone())?;
             let remote = match remote {
                 Some(remote) if Family::for_venue(&venue) == Some(Family::Schnorr) => {
-                    let account_index = init
-                        .application_id
-                        .as_deref()
-                        .and_then(|value| value.parse().ok())
-                        .ok_or("Missing signer registration account")?;
-                    let index = init
-                        .api_key_index
-                        .as_deref()
-                        .and_then(|value| value.parse().ok())
-                        .ok_or("Missing signer registration index")?;
-                    let captured = authority.clone();
-                    let expiry = token.as_ref().map(|(_, expiry)| *expiry);
-                    let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
-                        captured.check_admission().is_ok()
-                            && expiry.is_none_or(|expiry| expiry > now_ms())
-                    });
-                    let proxy_token = ProxyToken::new();
-                    proxy_token.set(token.clone());
-                    let transport =
-                        NetworkTransport::with_routing(plan.clone(), proxy_token.provider())
-                            .with_venue(&venue)
-                            .with_io_guard(allowed.clone());
-                    #[cfg(test)]
-                    let transport =
-                        crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
-                    let network = safe_cex_venues::lighter_registration::Network::from_options(
-                        venue == "lighter-robinhood",
-                        init.testnet == Some(true),
-                    );
-                    let public = crate::admission::fetch_lighter_registered_key(
-                        &transport,
-                        network,
-                        account_index,
-                        index,
-                        allowed,
-                    )
-                    .await
-                    .map_err(|_| "Signer registration unavailable")?;
-                    authority.check_admission()?;
-                    crate::auth::Verifier::check_expiry(expiry, now_ms())?;
+                    let public = self
+                        .registered_key_for_build(init, &plan, token.clone(), authority)
+                        .await?;
                     Some(
                         remote
                             .with_registered_public_key(&public)
@@ -2941,6 +3005,49 @@ pub mod testing {
         account
     }
 
+    #[cfg(test)]
+    pub(crate) fn registered_lighter_account(
+        registry: &Registry,
+        user: &str,
+        init: &InitPayload,
+        public: &safe_cex_crypto::admission::PublicKey,
+    ) -> Arc<Account> {
+        let link = SignerLink::new(0, Arc::new(|_| false));
+        let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
+        let (mut account, inbox) = account_on(
+            HeldLoad {
+                placed: Arc::default(),
+                load_after_ms: Some(0.),
+                ticker: true,
+            },
+            (user, &init.account_name, &init.exchange_name),
+            Some(link.clone()),
+            init.fingerprint(),
+            running,
+        );
+        let remote = remote_account(
+            link.clone(),
+            &init.exchange_name,
+            Some(init.account_name.clone()),
+            &engine_options(init, false).to_string(),
+        )
+        .unwrap()
+        .with_registered_public_key(public)
+        .unwrap();
+        let options: Value = serde_json::from_str(&remote.options_json).unwrap();
+        let identities = serde_json::from_value(options["signing"].clone()).unwrap();
+        Arc::get_mut(&mut account).unwrap().signing = AccountSigner::new_bound(
+            Some(remote.provider.clone()),
+            identities,
+            Some(link.clone()),
+            None,
+            remote.public_binding_source(),
+        );
+        let account = run_algos(account, link, inbox);
+        register(registry, &account);
+        account
+    }
+
     /// Sends the web's algo `op` to `account`'s algo host.
     pub fn algo_op(account: &Account, op: &str, data: &str) {
         let input = crate::algos::AlgoInput::Op {
@@ -3411,9 +3518,10 @@ pub(crate) mod tests {
         let old_permit = registry.router_leases.get("u").unwrap().permit();
         assert!(old_permit.allowed());
         registry.pacer.admit().await;
+        // Hyro now has hosted endpoints; TxFlow retains the unhosted preparation control.
         let init = InitPayload {
             account_name: "acct".into(),
-            exchange_name: "hyrotrader".into(),
+            exchange_name: "txflow".into(),
             ..Default::default()
         };
         let expected_control = prepare(&init, false, Some(SignerLink::new(8, Arc::new(|_| true))))
@@ -3468,9 +3576,10 @@ pub(crate) mod tests {
         registry.pacer = crate::pacing::Pacer::new(1, Duration::ZERO);
         let registry = Arc::new(registry);
         registry.pacer.admit().await;
+        // Hyro now has hosted endpoints; TxFlow retains the unhosted preparation control.
         let old = InitPayload {
             account_name: "acct".into(),
-            exchange_name: "hyrotrader".into(),
+            exchange_name: "txflow".into(),
             key: "synthetic-A".into(),
             ..Default::default()
         };
@@ -4074,9 +4183,10 @@ pub(crate) mod tests {
         let registry = Arc::new(registry);
         registry.pacer.admit().await;
         // This venue's ordinary preparation refuses locally, with no venue IO.
+        // Hyro now has hosted endpoints; TxFlow retains the unhosted preparation control.
         let init = InitPayload {
             account_name: "acct".into(),
-            exchange_name: "hyrotrader".into(),
+            exchange_name: "txflow".into(),
             key: "synthetic".into(),
             ..Default::default()
         };
@@ -5106,11 +5216,36 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn hosted_hyrotrader_is_refused_visibly() {
+    fn hosted_hyrotrader_endpoints_are_server_owned_and_testnet_stays_refused() {
+        let mut init: InitPayload = serde_json::from_value(json!({
+            "exchangeName":"hyrotrader", "accountName":"fixture", "key":"synthetic-key",
+            "endpoints":{"rest":"https://client.invalid","publicWs":"wss://client.invalid/public","privateWs":"wss://client.invalid/private"},
+            "hyrotrader":{"mode":"demo","production":{"rest":{"livenet":"https://client.invalid"}}}
+        })).unwrap();
+        let options = engine_options(&init, false);
         assert_eq!(
-            refuse_unhosted("hyrotrader"),
-            Err(HYROTRADER_UNHOSTED.to_owned())
+            options["endpoints"],
+            json!({
+                "rest":"https://sim-tealstreet.hyro.site",
+                "publicWs":"wss://sim-tealstreet.hyro.site/v5/public/linear",
+                "privateWs":"wss://sim-tealstreet.hyro.site/v5/private"
+            })
         );
+        assert!(!options.to_string().contains("client.invalid"));
+        assert!(routing_plan(&init, false).is_ok());
+        init.testnet = Some(true);
+        assert!(engine_options(&init, false).get("endpoints").is_none());
+        assert!(routing_plan(&init, false).is_err());
+        let other = InitPayload {
+            exchange_name: "bybit".into(),
+            ..Default::default()
+        };
+        assert!(engine_options(&other, false).get("endpoints").is_none());
+    }
+
+    #[test]
+    fn hosted_hyrotrader_uses_the_native_origin_gate() {
+        assert_eq!(refuse_unhosted("hyrotrader"), Ok(()));
         assert_eq!(refuse_unhosted("bybit"), Ok(()));
     }
 

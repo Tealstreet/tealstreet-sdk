@@ -3949,3 +3949,18 @@ test('#3530 typed Kraken diagnostics retain measured reserve and historical alia
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+// #3576 refreshed CI43806604286/job133099107519 measures Lighter with hosted-join-proof.
+// Source a86de005afb4, Rust1.99/bindgen0.2.129/Binaryen132, required twice-Oz.
+test('#3576 Lighter admission dispatcher retains measured reserve and alias floors', () => {
+  const measured = 2_227_410;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  for (const venue of ['lighter', 'lighter-robinhood']) {
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= Math.max(2_198_528, required), `${venue}: retain measured reserve and historical floor`);
+    assert.ok(cap - measured >= 10 * 1024);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});

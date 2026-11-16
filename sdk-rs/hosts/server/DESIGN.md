@@ -1226,7 +1226,11 @@ server by its `callMethod` name, using the same list as LOCAL
   - `fetchOptionChain`, `fetchOptionExpiries`, `fetchAccountGreeks`: options are out of scope;
   - `changeStpMode`: AsterDEX only, not a core venue;
   - `fetchSymbolMaxLeverage` with the `rails` source (Polymarket). The `market` source answers on the mirror.
-- HyroTrader accounts are refused at init (`HYROTRADER_UNHOSTED`): their endpoints are browser build configuration.
+- HyroTrader challenge accounts use the canonical native REST origin and its
+  derived public/private WebSocket paths. The server supplies that map for the
+  probe and resident; client endpoint JSON and browser overrides are never used.
+  Native Bybit-shaped private HMAC startup proves the exact `hyrotrader` name.
+  Testnet remains unsupported, with no Bybit origin fallback or network I/O.
 
 ## Not in v1 (after cutover)
 

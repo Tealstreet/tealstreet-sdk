@@ -134,6 +134,13 @@ checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
 Binance base/PM/inverse/spot/options, OKX base/demo and EEA mainnet/demo, Bitget base/USDC,
 Blofin, KuCoin Futures/Spot, Phemex, BingX, MEXC and Crypto.com names have native private-startup HMAC proof coverage.
+Exact HyroTrader challenge accounts reuse native Bybit-shaped private-startup
+HMAC reads on the server-owned canonical native origin. REST and derived public/
+private WebSocket endpoints come from that origin only, never init URLs or a
+Bybit fallback. Testnet has no native origin and remains refused before I/O.
+The same positive, different-key, replay, foreign-socket, consumed-response and
+resident-preservation controls cover this exact catalog name. Private socket
+fixtures also check the real HMAC and correlated handshake before snapshot reads.
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
 HMAC proof with wrong-key, replay and foreign-socket controls.
@@ -163,6 +170,14 @@ It issues a closed admission challenge and verifies the raw reply against the
 actual receiving socket, or verifies the temporary protected DELEGATED provider.
 The permit records its socket only after verification; final attachment checks
 that receipt, the original instance/token/lease and the local admission deadline.
+Exact Lighter and Lighter Robinhood select it after a routed, bounded registration
+read on the captured account/API-key slot. The projection includes the registered
+Schnorr public key and exact network. A slot queue prevents label-based parallel
+proofs. An existing actor's incarnation and immutable pin are captured before
+lookup; retirement or replacement invalidates that attempt. Final attachment
+compares the proved key with that pin or a fresh cold-construction registration
+read in both modes. DELEGATED also matches the actual provider before publication;
+rotation refuses without constructing an actor or changing a resident.
 Exact Backpack selects this strategy using its captured canonical base64
 Ed25519 API public key and authenticated owner; malformed keys refuse before
 signing, without falling back to private-startup reads. Other public-key venues

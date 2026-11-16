@@ -247,69 +247,82 @@ async fn delegated_e2e_sealed_init_probe_admission_and_resident_signed_manual_wr
     }
 }
 
+async fn delegated_refusal_case(case: &str) {
+    let vector = vectors().remove(0);
+    let mut bytes = plaintext(&vector);
+    let venue = mock(&vector);
+    let registry = crate::accounts::testing::e2e_registry(USER, venue.clone());
+    let (mut session, mut sent) = connection(registry.clone());
+    let mut results = session.take_verified();
+    if case == "wrong-pair" {
+        let mut fields: Value = serde_json::from_slice(&bytes).unwrap();
+        fields["secret"] = "synthetic-other-material".into();
+        bytes = serde_json::to_vec(&fields).unwrap();
+    }
+    // Hyro is now hosted; compiled Bitrue retains the missing-origin refusal control.
+    let name = if case == "other-venue" {
+        "bitrue"
+    } else {
+        "bybit"
+    };
+    assert!(
+        safe_cex_venues::supported(name),
+        "exercise admission, not unsupported construction"
+    );
+    assert_eq!(crate::delegated::enabled(name), case != "other-venue");
+    let init = sealed_init(&mut session, &mut sent, &vector, &bytes, name).await;
+    if case == "replay" {
+        // Consume this exact envelope once through the actual opener/probe,
+        // then explicitly release the admitted account before replaying it.
+        wire(&mut session, init.clone()).await;
+        complete(&mut session, &mut results).await;
+        assert!(registry.held(USER, ACCOUNT, session.socket).is_some());
+        wire(
+            &mut session,
+            json!({"t":"dispose","d":{"accountName":ACCOUNT}}),
+        )
+        .await;
+        while sent.try_recv().is_ok() {}
+        assert_empty(&session, &registry).await;
+    }
+    let before = venue.observed.lock().unwrap().reads;
+    let sealed: Sealed = serde_json::from_value(init["d"]["sealed"].clone()).unwrap();
+    wire(&mut session, init).await;
+    if session.pending_verifications.contains_key(ACCOUNT) {
+        complete(&mut session, &mut results).await;
+    }
+    let refusal = next_text(&mut sent, "error").await;
+    let expected = envelope::with_instance_id(envelope::init_unverified(ACCOUNT, false), INSTANCE);
+    assert_eq!(refusal, expected);
+    assert_empty(&session, &registry).await;
+    assert!(
+        session
+            .handovers
+            .take(ACCOUNT, &sealed, crate::accounts::now_ms())
+            .is_err()
+    );
+    let observed = venue.observed.lock().unwrap();
+    assert!(observed.writes.is_empty());
+    if case == "wrong-pair" {
+        assert!(observed.refused > 0);
+    } else {
+        assert_eq!(observed.reads, before);
+        assert_eq!(observed.refused, 0);
+    }
+    drop(observed);
+    session.close();
+}
+
 #[tokio::test]
 async fn delegated_e2e_wrong_pair_replay_and_disabled_venue_leave_no_account() {
-    let vector = vectors().remove(0);
     for case in ["wrong-pair", "replay", "other-venue"] {
-        let mut bytes = plaintext(&vector);
-        let venue = mock(&vector);
-        let registry = crate::accounts::testing::e2e_registry(USER, venue.clone());
-        let (mut session, mut sent) = connection(registry.clone());
-        let mut results = session.take_verified();
-        if case == "wrong-pair" {
-            let mut fields: Value = serde_json::from_slice(&bytes).unwrap();
-            fields["secret"] = "synthetic-other-material".into();
-            bytes = serde_json::to_vec(&fields).unwrap();
-        }
-        let name = if case == "other-venue" {
-            "hyrotrader"
-        } else {
-            "bybit"
-        };
-        assert_eq!(crate::delegated::enabled(name), case != "other-venue");
-        let init = sealed_init(&mut session, &mut sent, &vector, &bytes, name).await;
-        if case == "replay" {
-            // Consume this exact envelope once through the actual opener/probe,
-            // then explicitly release the admitted account before replaying it.
-            wire(&mut session, init.clone()).await;
-            complete(&mut session, &mut results).await;
-            assert!(registry.held(USER, ACCOUNT, session.socket).is_some());
-            wire(
-                &mut session,
-                json!({"t":"dispose","d":{"accountName":ACCOUNT}}),
-            )
-            .await;
-            while sent.try_recv().is_ok() {}
-            assert_empty(&session, &registry).await;
-        }
-        let before = venue.observed.lock().unwrap().reads;
-        let sealed: Sealed = serde_json::from_value(init["d"]["sealed"].clone()).unwrap();
-        wire(&mut session, init).await;
-        if session.pending_verifications.contains_key(ACCOUNT) {
-            complete(&mut session, &mut results).await;
-        }
-        let refusal = next_text(&mut sent, "error").await;
-        let expected =
-            envelope::with_instance_id(envelope::init_unverified(ACCOUNT, false), INSTANCE);
-        assert_eq!(refusal, expected);
-        assert_empty(&session, &registry).await;
-        assert!(
-            session
-                .handovers
-                .take(ACCOUNT, &sealed, crate::accounts::now_ms())
-                .is_err()
-        );
-        let observed = venue.observed.lock().unwrap();
-        assert!(observed.writes.is_empty());
-        if case == "wrong-pair" {
-            assert!(observed.refused > 0);
-        } else {
-            assert_eq!(observed.reads, before);
-            assert_eq!(observed.refused, 0);
-        }
-        drop(observed);
-        session.close();
+        delegated_refusal_case(case).await;
     }
+}
+
+#[tokio::test]
+async fn delegated_e2e_unhosted_bitrue_refuses_without_native_setup() {
+    delegated_refusal_case("other-venue").await;
 }
 
 #[tokio::test]

@@ -5,11 +5,13 @@ use crate::delegated::{
 };
 use safe_cex_crypto::admission::identity::Projection;
 
+mod lighter;
 mod local_proof;
 
 enum ProofStrategy {
     PrivateStartup,
     Local(Arc<Projection>),
+    RegisteredSchnorr,
 }
 
 use safe_cex_crypto::admission::{Family, PublicKey};
@@ -41,6 +43,7 @@ pub(crate) struct ProbePermit {
     pub(super) local_deadline: Option<tokio::time::Instant>,
     verified_socket: Option<u64>,
     pub(super) public_join: Option<PublicJoinProof>,
+    pub(super) registered_public: Option<Arc<PublicKey>>,
 }
 impl ProbePermit {
     pub(super) fn check(&self, user: &str, init: &InitPayload) -> Result<(), ProbeRefusal> {
@@ -62,6 +65,13 @@ impl ProbePermit {
             .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
         {
             return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::ProbeTimeout));
+        }
+        if self.public_join.as_ref().is_some_and(|proof| {
+            proof.account.upgrade().is_none_or(|account| {
+                account.handle.disposal_cause().is_some() || !account.running.io_allowed()
+            })
+        }) {
+            return Err(ProbeRefusal::TRANSIENT);
         }
         if !self.current.load(Ordering::Acquire)
             || self.lease.as_ref().is_some_and(|lease| !lease.allowed())
@@ -123,12 +133,19 @@ impl Registry {
                 identity::backpack_projection(user, init).map_err(|_| ProbeRefusal::INVALID)?;
             return Ok(ProofStrategy::Local(Arc::new(projection)));
         }
+        if matches!(init.exchange_name.as_str(), "lighter" | "lighter-robinhood")
+            && crate::delegated::probe::cosigned_ready(&init.exchange_name)
+        {
+            return Ok(ProofStrategy::RegisteredSchnorr);
+        }
         Ok(ProofStrategy::PrivateStartup)
     }
 
     pub(crate) fn cosigned_proof_ready(&self, user: &str, init: &InitPayload) -> bool {
-        matches!(self.proof_strategy(user, init), Ok(ProofStrategy::Local(_)))
-            || crate::delegated::probe::cosigned_ready(&init.exchange_name)
+        matches!(
+            self.proof_strategy(user, init),
+            Ok(ProofStrategy::Local(_) | ProofStrategy::RegisteredSchnorr)
+        ) || crate::delegated::probe::cosigned_ready(&init.exchange_name)
     }
 
     pub(crate) fn private_join_requires_proof(&self) -> bool {
@@ -154,12 +171,23 @@ impl Registry {
         let strategy = self.proof_strategy(user, init)?;
         let (reservation, local_deadline) = match &strategy {
             ProofStrategy::PrivateStartup => (self.proof_queues.reserve(user, init)?, None),
+            ProofStrategy::RegisteredSchnorr => (
+                self.proof_queues.reserve_identity(
+                    identity::lighter_queue(user, init).map_err(|_| ProbeRefusal::INVALID)?,
+                )?,
+                Some(tokio::time::Instant::now() + proof_timeout()),
+            ),
             ProofStrategy::Local(projection) => (
                 self.proof_queues.reserve_identity(projection.digest())?,
                 Some(tokio::time::Instant::now() + proof_timeout()),
             ),
         };
         let fingerprint = admission_fingerprint(init);
+        let public_join = if matches!(strategy, ProofStrategy::RegisteredSchnorr) {
+            self.capture_public_join(user, init, &registry_name, &fingerprint)?
+        } else {
+            None
+        };
         let current = Arc::new(AtomicBool::new(true));
         let mut pending = self.pending_inits.lock().unwrap();
         pending
@@ -186,37 +214,34 @@ impl Registry {
             instance_id: init.instance_id.clone(),
             local_deadline,
             verified_socket: None,
-            public_join: None,
+            public_join,
+            registered_public: None,
         };
         permit.check(user, init)?;
         Ok(permit)
     }
 
-    async fn prove_public_join(
+    fn capture_public_join(
         &self,
+        user: &str,
         init: &InitPayload,
-        candidate: &ResidentCopy,
-        plan: &RoutingPlan,
-        token: Option<(String, u64)>,
-        permit: &ProbePermit,
+        registry_name: &str,
+        fingerprint: &str,
     ) -> Result<Option<PublicJoinProof>, ProbeRefusal> {
         let Some(family) = Family::for_venue(&init.exchange_name) else {
             return Ok(None);
         };
-        permit.check(&permit.user, init)?;
         let (account, public) = {
             let existing = self
                 .accounts
                 .lock()
                 .unwrap()
-                .get(&(permit.user.clone(), permit.registry_name.clone()))
+                .get(&(user.to_owned(), registry_name.to_owned()))
                 .cloned();
             let Some(account) = existing else {
                 return Ok(None);
             };
-            if account.is_public()
-                || !same_handover_settings(&account.fingerprint, &permit.fingerprint)
-            {
+            if account.is_public() || !same_handover_settings(&account.fingerprint, fingerprint) {
                 return Err(ProbeRefusal::INVALID);
             }
             if account.handle.disposal_cause().is_some() || !account.running.io_allowed() {
@@ -234,6 +259,34 @@ impl Registry {
             })?;
             (Arc::downgrade(&account), public)
         };
+        let public = public.ok_or_else(|| {
+            ProbeRefusal::transition(crate::envelope::ModeTransitionRefusal::Unavailable)
+        })?;
+        Ok(Some(PublicJoinProof { account, public }))
+    }
+
+    async fn prove_public_join(
+        &self,
+        init: &InitPayload,
+        candidate: &ResidentCopy,
+        plan: &RoutingPlan,
+        token: Option<(String, u64)>,
+        permit: &ProbePermit,
+    ) -> Result<Option<PublicJoinProof>, ProbeRefusal> {
+        let Some(family) = Family::for_venue(&init.exchange_name) else {
+            return Ok(None);
+        };
+        permit.check(&permit.user, init)?;
+        let Some(captured) = self.capture_public_join(
+            &permit.user,
+            init,
+            &permit.registry_name,
+            &permit.fingerprint,
+        )?
+        else {
+            return Ok(None);
+        };
+        let PublicJoinProof { account, public } = captured;
         let captured = account.clone();
         let current = permit.current.clone();
         let lease = permit.lease.clone();
@@ -249,9 +302,6 @@ impl Registry {
         if !allowed() {
             return Err(ProbeRefusal::TRANSIENT);
         }
-        let public = public.ok_or_else(|| {
-            ProbeRefusal::transition(crate::envelope::ModeTransitionRefusal::Unavailable)
-        })?;
         if family == Family::Schnorr {
             let index = init
                 .api_key_index
@@ -350,8 +400,27 @@ impl Registry {
                 .start()
                 .await?;
             permit.check(user, init)?;
-            if let ProofStrategy::Local(projection) = &permit.strategy {
-                self.pacer.admit().await;
+            let projection = match &permit.strategy {
+                ProofStrategy::Local(projection) => Some(projection.clone()),
+                ProofStrategy::RegisteredSchnorr => {
+                    self.pacer.admit().await;
+                    permit.check(user, init)?;
+                    let projection =
+                        lighter::resolve(self, user, init, token.clone(), link.clone(), &permit)
+                            .await?;
+                    let public = projection.public_key();
+                    permit.registered_public = Some(Arc::new(
+                        PublicKey::new(public.family(), public.as_bytes())
+                            .map_err(|_| ProbeRefusal::INVALID)?,
+                    ));
+                    Some(Arc::new(projection))
+                }
+                ProofStrategy::PrivateStartup => None,
+            };
+            if let Some(projection) = projection {
+                if matches!(permit.strategy, ProofStrategy::Local(_)) {
+                    self.pacer.admit().await;
+                }
                 permit.check(user, init)?;
                 return local_proof::verify(
                     user,
@@ -359,7 +428,7 @@ impl Registry {
                     candidate,
                     link.as_ref(),
                     socket,
-                    projection,
+                    &projection,
                     &permit,
                 )
                 .await;
