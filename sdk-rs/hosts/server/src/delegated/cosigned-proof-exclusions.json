@@ -10,7 +10,7 @@
     },
     {
       "venue": "binanceoptions",
-      "reason": "Client Hosted gate blocks this venue because no native server origin exists; options startup proof is not built."
+      "reason": "Bound native Options private-startup proof with account identity and wrong-key, replay and socket controls is not built."
     },
     {
       "venue": "bingxspot",
@@ -67,10 +67,6 @@
     {
       "venue": "lighter-robinhood",
       "reason": "Production metadata disables this venue; its distinct origin/chain/account-slot private-startup proof is not built."
-    },
-    {
-      "venue": "okxeu",
-      "reason": "Exact EEA private-startup proof is incomplete; cold signed account/instruments refusal needs its own design, not unsigned discovery or longer deadlines."
     },
     {
       "venue": "okxeudemo",

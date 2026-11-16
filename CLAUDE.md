@@ -28,6 +28,9 @@ engine or local signing, and every write is a typed v1 action over the existing
 hosted WebSocket. Current contract: `docs/plans/callers/delegated-action-frames.md`;
 older mode/transport discussions are explicitly superseded where they disagree.
 
+OKX EEA config-before-catalogue startup and bounded signature refusals are
+documented in [`sdk-rs/venues/okx/README.md`](sdk-rs/venues/okx/README.md#eea-private-startup).
+
 Closed join-proof v1 payloads and canonical public identity facts are documented
 in `docs/plans/callers/public-key-admission.md`. The pure crypto helpers do not
 enable Session admission or venue readiness. The separate SDK/WASM device dispatch

@@ -18,6 +18,7 @@ pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     "binancespot",
     "okx",
     "okxdemo",
+    "okxeu",
     "bitget",
     "bitgetusdc",
     "blofin",

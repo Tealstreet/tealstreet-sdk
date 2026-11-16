@@ -764,6 +764,12 @@ the offline fixture. Wrong-key and replayed signatures fail before attachment,
 foreign sockets cannot settle signing work, and the resident stays unchanged.
 MEXC has no hosted testnet alias; public discovery never proves possession.
 
+OKX EEA mainnet authenticates native signed config before keyed catalogue
+discovery, retaining the config authority until market-dependent settings apply.
+Config alone cannot complete the probe. Consecutive signature refusals allow
+one re-signed read then fail permanently; no admission budget is extended.
+EEA demo remains outside the exact COSIGNED proof-ready catalog.
+
 Exact `bitunix` readiness uses that venue round trip, with the existing native
 double-SHA256 secret-suffix request signer. Its synthetic venue independently
 checks nonce/timestamp/key/query signing bytes on the actual private startup
