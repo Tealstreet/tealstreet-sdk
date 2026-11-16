@@ -24,7 +24,7 @@ dispatch-signing = ["safe-cex-venues/dispatch-signing"]
 # Browser hosted signing captures, for families with a hosted codec only.
 hosted-signing = ["dispatch-signing", "safe-cex-venues/hosted-signing"]
 hosted-wallet = ["dispatch-signing", "safe-cex-venues/hosted-wallet"]
-# Admission recipe linked by the individually validated Backpack and Lighter slices.
+# Opt-in admission recipe; activated candidate families link it by default.
 # Existing constructor custody gates and server readiness remain separate.
 hosted-join-proof = ["safe-cex-venues/hosted-join-proof"]
 bitunix = ["safe-cex-venues/bitunix", "text-ingress", "dispatch-signing", "hosted-signing"]
