@@ -2,8 +2,9 @@
 
 A fresh private COSIGNED connection completes the existing pending-join probe
 before it attaches to an account, becomes its signer or receives account state.
-The server builds native private-startup requests on the account's existing
-route. The joining device returns signatures through the existing `sign-req` /
+For private-startup proofs the server builds native requests on the account's
+existing route; a local public-key proof uses the closed admission challenge.
+The joining device returns signatures through the existing `sign-req` /
 `sign-res` wire; it does not provide the request or a verification result.
 
 COSIGNED proof readiness is independent of DELEGATED hosted eligibility.
@@ -24,12 +25,23 @@ The exact proof-ready venue names are:
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
 | `mexc` | Native signed position-mode/account reads and private-stream HMAC; wrong-key, replay and socket/Session controls; mainnet only |
+| `paradex` | One-use Stark admission challenge bound to the captured account address, subkey public key, authenticated owner and network; wrong-key, replay and foreign-socket controls |
 
 `okxeudemo` remains excluded and does not inherit EEA mainnet proof readiness.
 EEA bootstrap retains the original config authority until catalogue completion;
 config success alone cannot satisfy private readiness. A second consecutive
 `50113` for a bootstrap read refuses permanently after one re-signed retry,
 without extending the captured admission deadline.
+
+Paradex captures its public account/subkey pair before queueing. COSIGNED's public
+init key matches the account address; key-only DELEGATED's public init key matches
+the subkey, with the scalar kept inside the sealed handover. Decimal and hex
+spellings normalize to the existing canonical projection, whose validators reject
+invalid field values and public points. Malformed facts never fall back to a
+private-startup proof. The same local verifier checks a temporary protected
+DELEGATED provider without a device request or retained-provider replacement.
+Normal venue startup still handles subkey authorization and venue refusals;
+local possession proof alone does not assert venue authorization.
 
 Only these exact names are admitted; the catalog never matches a family prefix.
 An unsupported proof returns the existing account error envelope with

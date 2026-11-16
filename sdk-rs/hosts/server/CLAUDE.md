@@ -150,10 +150,15 @@ It issues a closed admission challenge and verifies the raw reply against the
 actual receiving socket, or verifies the temporary protected DELEGATED provider.
 The permit records its socket only after verification; final attachment checks
 that receipt, the original instance/token/lease and the local admission deadline.
-No production public-key venue selects this strategy yet. Synthetic Session
-fixtures select it without changing the readiness catalog; device integration
-and authoritative per-family facts must precede any activation. Matching COSIGNED repeats require the same socket-admitted
-mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
+Exact Paradex selects this strategy using the captured account address and
+subkey public key, authenticated owner and network. Public decimal/hex spellings
+normalize before projection; invalid or mismatched fields refuse without a
+private-startup fallback. COSIGNED init.key must identify the account address;
+key-only DELEGATED init.key must identify the public subkey and retains its sealed
+scalar. Possession proof does not replace ordinary venue authorization at startup.
+Other venues retain their configured proof strategy. Matching COSIGNED repeats
+require the same socket-admitted mode and identity/settings; refused proofs never
+change that mode. Resumed COSIGNED
 accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
 
