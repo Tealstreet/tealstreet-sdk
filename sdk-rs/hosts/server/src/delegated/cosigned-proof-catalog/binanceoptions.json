@@ -1,0 +1,4 @@
+{
+  "status": "excluded",
+  "reason": "Bound native Options private-startup proof with account identity and wrong-key, replay and socket controls is not built."
+}

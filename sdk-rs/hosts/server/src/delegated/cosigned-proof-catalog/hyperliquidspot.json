@@ -1,0 +1,4 @@
+{
+  "status": "excluded",
+  "reason": "Spot address-based reads do not prove the wallet key; exact Spot wallet/agent/vault possession and authorization proof is not built."
+}

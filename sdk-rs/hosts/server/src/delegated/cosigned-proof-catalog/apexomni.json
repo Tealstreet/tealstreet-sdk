@@ -1,0 +1,4 @@
+{
+  "status": "excluded",
+  "reason": "No native Hosted REST origin; native private-read proof and complete zkLink order-signing coverage are not built."
+}
