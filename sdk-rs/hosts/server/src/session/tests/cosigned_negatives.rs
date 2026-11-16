@@ -485,8 +485,9 @@ async fn cosigned_test_admission_does_not_start_unavailable_venue_proofs() {
     let before = f.private_reads.load(Ordering::SeqCst);
     let (mut session, mut sent) = candidate(&f, "alice");
     let mut request = init(Some("other-venue"));
-    // Keep this wire-admission control on the still-excluded AsterDEX family.
+    // AsterDEX V1 is proved; keep this no-IO control on its excluded wallet shape.
     request.exchange_name = "asterdex".into();
+    request.application_id = Some("synthetic-main-wallet".into());
     assert!(crate::delegated::enabled(&request.exchange_name));
     assert!(!crate::delegated::probe::cosigned_ready(&request));
     session.init(request).await.unwrap();
