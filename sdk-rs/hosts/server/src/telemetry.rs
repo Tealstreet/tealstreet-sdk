@@ -636,6 +636,82 @@ mod tests {
     }
 
     #[test]
+    fn hosted_user_identity_survives_the_final_scrubber_without_other_user_fields() {
+        for subject in [
+            "auth0|synthetic-owner-a",
+            "google-oauth2|123456789012345678901",
+            "disrupt:auth0|synthetic-owner-b",
+        ] {
+            let events = captured(Identity::default(), || {
+                let mut event = report_event(&Report {
+                    kind: "account.start_failed",
+                    summary: "account start failed",
+                    ..Default::default()
+                });
+                event
+                    .extra
+                    .insert("_verified_user_id".into(), subject.into());
+                event.user = Some(sentry::User {
+                    id: Some("another-scope-owner".into()),
+                    email: Some("private@example.invalid".into()),
+                    username: Some("private account label".into()),
+                    ..Default::default()
+                });
+                event
+                    .tags
+                    .insert("account".into(), "private account label".into());
+                event.extra.insert("api_key".into(), "synthetic-key".into());
+                event.message = Some("request failed: secret=synthetic-secret".into());
+                sentry::capture_event(event);
+            });
+            assert_eq!(events.len(), 1);
+            let event = &events[0];
+            assert_eq!(event.tags.get("user_id").map(String::as_str), Some(subject));
+            let user = event
+                .user
+                .as_ref()
+                .expect("the captured authenticated subject");
+            assert_eq!(user.id.as_deref(), Some(subject));
+            assert!(user.email.is_none() && user.username.is_none() && user.ip_address.is_none());
+            assert!(!event.extra.contains_key("_verified_user_id"));
+            let serialized = serde_json::to_string(event).unwrap();
+            for private in [
+                "synthetic-key",
+                "synthetic-secret",
+                "private account label",
+                "private@example.invalid",
+                "another-scope-owner",
+            ] {
+                assert!(!serialized.contains(private), "leaked {private}");
+            }
+        }
+    }
+
+    #[test]
+    fn hosted_user_identity_is_not_inferred_from_unowned_errors_or_scope() {
+        let events = captured(Identity::default(), || {
+            let mut event = report_event(&Report {
+                kind: "transport.request_failed",
+                summary: "venue request failed in transport",
+                user_tag: Some("a1b2c3d4e5f6".into()),
+                ..Default::default()
+            });
+            event.user = Some(sentry::User {
+                id: Some("scope-owner".into()),
+                ..Default::default()
+            });
+            event.tags.insert("user_id".into(), "scope-owner".into());
+            sentry::capture_event(event);
+        });
+        assert!(events[0].user.is_none());
+        assert!(!events[0].tags.contains_key("user_id"));
+        assert_eq!(
+            events[0].extra.get("user_tag"),
+            Some(&Value::from("a1b2c3d4e5f6"))
+        );
+    }
+
+    #[test]
     fn router_lease_fence_numeric_work_counts_survive_allowlisting() {
         let events = captured(Identity::default(), || {
             let mut event = report_event(&Report {
