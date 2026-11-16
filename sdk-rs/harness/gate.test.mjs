@@ -46,6 +46,65 @@ test('margin expectation uses native input and preserves unsupported cases', () 
   assert.equal(positions[0].marginSize, 7);
 });
 
+const GATE_CHILD_TIMEOUT_MS = 10000;
+const assertGateChildCompleted = (result, context, timeoutMs = GATE_CHILD_TIMEOUT_MS) => {
+  if (Number.isInteger(result.status) && !result.signal && !result.error) return;
+  const cause = [
+    `status=${result.status}`, `signal=${result.signal ?? 'none'}`, `timeoutMs=${timeoutMs}`,
+    `timedOut=${result.error?.code === 'ETIMEDOUT'}`, `error.code=${result.error?.code ?? 'none'}`,
+    `error.message=${result.error?.message ?? 'none'}`,
+  ].join(' ');
+  assert.fail(`${context}: ${cause}\nstderr:\n${result.stderr ?? ''}\nstdout:\n${result.stdout ?? ''}`);
+};
+
+for (const [cause, signal, code, message] of [
+  ['timeout', 'SIGTERM', 'ETIMEDOUT', 'fixture deadline exceeded'],
+  ['signal', 'SIGKILL', undefined, undefined],
+  ['spawn', null, 'ENOENT', 'fixture executable missing'],
+  ['buffer', 'SIGTERM', 'ENOBUFS', 'fixture output limit exceeded'],
+]) {
+  test(`gate CLI child diagnostics explain ${cause} failures`, () => {
+    const result = { status: null, signal, stdout: 'Replay output: fixture', stderr: 'fixture stderr',
+      ...(code ? { error: Object.assign(new Error(message), { code }) } : {}) };
+    assert.throws(() => assertGateChildCompleted(result, 'fixture child'), (error) => {
+      for (const value of ['fixture child', 'status=null', `signal=${signal ?? 'none'}`,
+        `timeoutMs=${GATE_CHILD_TIMEOUT_MS}`, `timedOut=${code === 'ETIMEDOUT'}`,
+        `error.code=${code ?? 'none'}`, 'stderr:\nfixture stderr', 'stdout:\nReplay output: fixture',
+        ...(message ? [message] : [])]) assert.ok(error.message.includes(value), `${value}\n${error.message}`);
+      return true;
+    });
+  });
+}
+
+test('gate CLI child diagnostics preserve completed success and refusal statuses', () => {
+  for (const status of [0, 1])
+    assert.doesNotThrow(() => assertGateChildCompleted({ status, signal: null, stderr: 'fixture refusal' }, 'fixture child'));
+});
+
+test('gate CLI child diagnostics explain an actual timed-out subprocess', () => {
+  const timeoutMs = 20;
+  const result = spawnSync(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeout: timeoutMs, encoding: 'utf8' });
+  assert.equal(result.status, null);
+  assert.equal(result.error?.code, 'ETIMEDOUT');
+  assert.throws(() => assertGateChildCompleted(result, 'timed fixture', timeoutMs), (error) => {
+    for (const value of ['timed fixture', 'status=null', 'timedOut=true', `timeoutMs=${timeoutMs}`, 'error.code=ETIMEDOUT'])
+      assert.ok(error.message.includes(value), `${value}\n${error.message}`);
+    return true;
+  });
+});
+
+test('gate CLI child diagnostics retain output from an actual signalled subprocess', () => {
+  const script = "require('node:fs').writeSync(2, 'fixture stderr'); require('node:fs').writeSync(1, 'fixture stdout'); process.kill(process.pid, 'SIGTERM');";
+  const result = spawnSync(process.execPath, ['-e', script], { timeout: GATE_CHILD_TIMEOUT_MS, encoding: 'utf8' });
+  assert.equal(result.status, null);
+  assert.equal(result.signal, 'SIGTERM');
+  assert.throws(() => assertGateChildCompleted(result, 'signalled fixture'), (error) => {
+    for (const value of ['signal=SIGTERM', 'timedOut=false', 'stderr:\nfixture stderr', 'stdout:\nfixture stdout'])
+      assert.ok(error.message.includes(value), `${value}\n${error.message}`);
+    return true;
+  });
+});
+
 // Exercise the actual CLI and comparison call sites. Stub only the expensive
 // replay subprocess, supplying independently controlled TS and Rust results.
 const gate = (venue, isPrivate = false, defect, correctnessOnly = false, workflowInvocation = false) => {
@@ -407,11 +466,13 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false, workflo
     const result = spawnSync(executable, args, {
       cwd,
       encoding: 'utf8',
-      timeout: 10000,
+      timeout: GATE_CHILD_TIMEOUT_MS,
       env: { ...process.env, ...(workflowInvocation ? { NODE: process.execPath,
         RECORD: new URL('./record-gate.mjs', import.meta.url).pathname, RUST_REPLAY_CORRECTNESS_ONLY: 'true',
         RUST_REPLAY_CI_WASM: '', CPU_COLLECTION_STATE: '' } : {}) },
     });
+    // A killed child can leave partial artifacts; report its cause before parsing them.
+    assertGateChildCompleted(result, `${venue} private=${isPrivate}`);
     if (workflowInvocation && existsSync(join(cwd, 'sdk-rs/harness/out/ci/ledger.jsonl'))) {
       const ledger = readFileSync(join(cwd, 'sdk-rs/harness/out/ci/ledger.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
       assert.equal(ledger.length, 1); assert.equal(ledger[0].exitCode, 0);
