@@ -5,7 +5,14 @@ export const diagnosticUrl = (url: string): string => {
     const parsed = new URL(url);
     // Blob pathname already embeds its source URL; project that URL only once.
     const source = parsed.protocol === 'blob:' ? new URL(parsed.pathname) : parsed;
-    if (parsed.protocol === 'blob:' && source.origin === 'null') return '[invalid URL]';
+    if (
+      parsed.protocol === 'blob:' &&
+      (parsed.origin === 'null' || source.origin === 'null' ||
+        (source.protocol !== 'http:' && source.protocol !== 'https:') ||
+        source.username !== '' || source.password !== '')
+    ) return '[invalid URL]';
+    source.username = '';
+    source.password = '';
     return `${source.origin}${source.pathname}`;
   } catch {
     return url.startsWith('/') && !url.startsWith('//') ? url.split(/[?#]/, 1)[0] : '[invalid URL]';

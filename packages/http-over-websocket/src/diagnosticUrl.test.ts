@@ -131,9 +131,41 @@ describe('credentials after diagnostic labels', () => {
 it.each([
   ['blob:https://v3.tealstreet.io/uuid:2:1', 'https://v3.tealstreet.io/uuid:2:1'],
   ['blob:https://v3.tealstreet.io/uuid:2:1?apiKey=fake-key#fake-fragment', 'https://v3.tealstreet.io/uuid:2:1'],
-  ['blob:https://fake-user:fake-password@v3.tealstreet.io/uuid?token=fake-token', 'https://v3.tealstreet.io/uuid'],
+  // Credential-bearing blob sources are refused, rather than projected.
+  ['blob:https://fake-user:fake-password@v3.tealstreet.io/uuid?token=fake-token', '[invalid URL]'],
   ['blob:null/uuid?token=fake-token', '[invalid URL]'],
 ])('projects a blob source location once and drops query/userinfo: %s', (input, expected) => {
   expect(diagnosticUrl(input)).toBe(expected);
   expect(diagnosticUrl(diagnosticUrl(input))).toBe(expected);
+});
+
+
+describe('blob source admission', () => {
+  it.each([
+    'blob:blob:https://review-user:review-password@venue.invalid/private?token=review-token#fragment',
+    'blob:blob:http://review-user:review-password@venue.invalid/private',
+    'blob:ftp://review-user:review-password@venue.invalid/private',
+    'blob:blob:https://venue.invalid/private',
+    'blob:ftp://venue.invalid/private',
+    'blob:wss://venue.invalid/private',
+    'blob:data:text/plain,fixture',
+    'blob:https://review-user@venue.invalid/private',
+    'blob:https://:review-password@venue.invalid/private',
+  ])('refuses nested, opaque, non-HTTP or credential-bearing source %s', (input) => {
+    expect(diagnosticUrl(input)).toBe('[invalid URL]');
+    expect(diagnosticUrl(diagnosticUrl(input))).toBe('[invalid URL]');
+  });
+
+  // Preserve the reviewer's five control inputs; blob userinfo now fails closed.
+  it.each([
+    ['blob:https://v3.tealstreet.io/uuid:2:1', 'https://v3.tealstreet.io/uuid:2:1'],
+    ['blob:https://review-user:review-password@v3.tealstreet.io/uuid?token=review-token#fragment', '[invalid URL]'],
+    ['https://review-user:review-password@venue.invalid/path?token=review-token#fragment', 'https://venue.invalid/path'],
+    ['blob:null/uuid?token=review-token', '[invalid URL]'],
+    ['/relative?token=review-token#fragment', '/relative'],
+    ['blob:http://venue.invalid/path?token=review-token#fragment', 'http://venue.invalid/path'],
+  ])('keeps ordinary projection/refusal control %s', (input, expected) => {
+    expect(diagnosticUrl(input)).toBe(expected);
+    expect(diagnosticUrl(diagnosticUrl(input))).toBe(expected);
+  });
 });
