@@ -126,10 +126,14 @@ DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
 Binance base/PM/inverse/spot, OKX base/demo and EEA mainnet/demo, Bitget base/USDC,
-Blofin, KuCoin, Phemex, BingX, MEXC and Crypto.com names have native private-startup HMAC proof coverage.
+Blofin, KuCoin Futures/Spot, Phemex, BingX, MEXC and Crypto.com names have native private-startup HMAC proof coverage.
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
 HMAC proof with wrong-key, replay and foreign-socket controls.
+KuCoin Spot uses its own production origin and native account/active-order reads,
+plus the signed private read-feed token request. Its proof fixtures verify request
+and passphrase MACs; public discovery cannot substitute for private proof. Testnet
+remains unavailable. Each new COSIGNED socket proves its own key before attachment.
 Exact WOO additionally uses its native v1/v3 private account reads and private
 socket HMAC authentication, with wrong-key, replay and foreign-socket controls.
 Exact Bitunix uses its existing native private-startup venue round trip and
