@@ -56,6 +56,7 @@ fn family(venue: &str) -> &str {
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
         "okx" | "okxdemo" | "okxeu" | "okxeudemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
+        "kucoinspot" => "kucoin",
         "blofin" | "kucoin" | "woo" | "bingx" | "mexc" => venue,
         _ => panic!("no private-read fixture for {venue}"),
     }
@@ -158,6 +159,17 @@ fn hyrotrader_admission_socket_checks_key_signature_and_expiry() {
 }
 
 pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
+    if venue == "apexomni" {
+        for route in ["account", "account-balance", "open-orders"] {
+            assert!(
+                seen.urls
+                    .iter()
+                    .any(|url| url == &format!("https://omni.apex.exchange/api/v3/{route}")),
+                "ApeX proof must authenticate its native {route} read"
+            );
+        }
+        return;
+    }
     if venue == "mexc" {
         mexc::assert_startup(seen);
         return;
@@ -233,6 +245,11 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
             "/api/v2/mix/account/accounts",
             "productType=usdc-futures",
         ),
+        "kucoinspot" => (
+            "https://api.kucoin.com",
+            "/api/v1/accounts",
+            "/api/v1/hf/orders/active/symbols",
+        ),
         _ => return,
     };
     assert_eq!(
@@ -290,9 +307,12 @@ impl VenueIo {
             "okx" => route.starts_with("/api/v5/public/") || route.starts_with("/api/v5/market/"),
             "bitget" => route.starts_with("/api/v2/mix/market/"),
             "blofin" => route.starts_with("/api/v1/market/"),
-            "kucoin" => ["contracts/active", "allTickers", "bullet-public"]
-                .iter()
-                .any(|suffix| route.ends_with(*suffix)),
+            "kucoin" => {
+                route == "/api/v2/symbols"
+                    || ["contracts/active", "allTickers", "bullet-public"]
+                        .iter()
+                        .any(|suffix| route.ends_with(*suffix))
+            }
             _ => unreachable!(),
         };
         if public {
@@ -418,6 +438,9 @@ impl VenueIo {
         if self.venue == "phemex" {
             return phemex::response(self, r);
         }
+        if self.venue == "kucoinspot" {
+            return kucoinspot::response(self, r);
+        }
         if self.venue == "bingx" {
             return bingx::response(self, r);
         }
@@ -531,6 +554,9 @@ impl Transport for VenueIo {
         if self.venue == "phemex" {
             return phemex::connect(self, socket, &url, events);
         }
+        if self.venue == "kucoinspot" {
+            return kucoinspot::connect(socket, &url, events);
+        }
         if self.venue == "bingx" {
             return bingx::connect(self, socket, &url, events);
         }
@@ -578,7 +604,7 @@ impl Transport for VenueIo {
                         || (family(self.venue) == "binance" && path(&r).ends_with("listenKey"))
                         || (self.venue == "bingx"
                             && path(&r) == "/openApi/user/auth/userDataStream")
-                        || (self.venue == "kucoin"
+                        || (family(self.venue) == "kucoin"
                             && ["bullet-private", "bullet-public"]
                                 .iter()
                                 .any(|endpoint| path(&r).ends_with(*endpoint))))),
@@ -717,7 +743,15 @@ const KUCOIN_STARTUP_OPERATIONS: &[&str] = &[
     "POST/api/v1/bullet-private",
 ];
 
+pub(crate) const KUCOINSPOT_STARTUP_OPERATIONS: &[&str] = &[
+    "GET/api/v1/accounts?type=trade",
+    "GET/api/v1/hf/orders/active/symbols",
+    "GET/api/v1/hf/orders/active/page?symbol=BTC-USDT&pageNum=1&pageSize=50",
+    "POST/api/v1/bullet-private",
+];
+
 struct KucoinStartupCapture {
+    operations: &'static [&'static str],
     prior: Arc<Mutex<HashMap<String, String>>>,
     held: Mutex<Vec<(HttpRequest, Events)>>,
     balance: Mutex<Option<HttpRequest>>,
@@ -725,16 +759,21 @@ struct KucoinStartupCapture {
 impl KucoinStartupCapture {
     fn new(prior: Arc<Mutex<HashMap<String, String>>>) -> Self {
         Self {
+            operations: KUCOIN_STARTUP_OPERATIONS,
             prior,
             held: Mutex::default(),
             balance: Mutex::default(),
         }
     }
+    fn spot(prior: Arc<Mutex<HashMap<String, String>>>) -> Self {
+        Self {
+            operations: KUCOINSPOT_STARTUP_OPERATIONS,
+            ..Self::new(prior)
+        }
+    }
     fn complete(&self) -> bool {
         let prior = self.prior.lock().unwrap();
-        KUCOIN_STARTUP_OPERATIONS
-            .iter()
-            .all(|key| prior.contains_key(*key))
+        self.operations.iter().all(|key| prior.contains_key(*key))
     }
     fn release(&self, io: &VenueIo) {
         if self.complete() {
@@ -770,7 +809,8 @@ impl Transport for ReplayCaptureIo {
     }
     fn request(&self, request: HttpRequest, events: Events) {
         if let Some(capture) = &self.capture
-            && path(&request).starts_with("/api/v1/account-overview?")
+            && (path(&request).starts_with("/api/v1/account-overview?")
+                || path(&request) == "/api/v1/accounts?type=trade")
         {
             *capture.balance.lock().unwrap() = Some(request.clone());
             // Keep the positive proof alive until its actual startup signatures exist.
@@ -974,9 +1014,44 @@ enum DeviceAnswer {
     DifferentKey,
     Replay,
 }
+// Decode only read/login batches for replay bookkeeping. The actual device
+// always signs the original closed descriptor and native bytes unchanged.
+pub(crate) fn apexomni_text(descriptor: &str) -> String {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ReadPart {
+        bytes: Vec<u8>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ReadBatch {
+        contracts: Vec<Vec<u8>>,
+        payload: Vec<ReadPart>,
+    }
+    let batch: ReadBatch = serde_json::from_str(descriptor).unwrap();
+    assert!(
+        batch.contracts.is_empty(),
+        "join proof never signs order contracts"
+    );
+    assert!(!batch.payload.is_empty());
+    String::from_utf8(
+        batch
+            .payload
+            .into_iter()
+            .flat_map(|part| part.bytes)
+            .collect(),
+    )
+    .unwrap()
+}
+
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
+    if venue == "apexomni" {
+        return apexomni_text(canonical)
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .to_owned();
+    }
     if venue == "cryptocom" {
         // Startup params are empty; the first digit begins the attempt-local nonce/id.
         return canonical
@@ -1024,7 +1099,7 @@ pub(crate) fn operation(venue: &str, canonical: &str) -> String {
             .collect::<Vec<_>>()
             .join("&");
     }
-    let payload = if venue == "kucoin" {
+    let payload = if family(venue) == "kucoin" {
         serde_json::from_str::<Value>(canonical).unwrap()["payload"]
             .as_str()
             .unwrap()
@@ -1077,6 +1152,9 @@ async fn remote(
                     || text.contains("/user/verify")
                     || venue == "binancespot" && text.starts_with("apiKey=")
                     || venue == "woo" && text.starts_with('|')
+                    || venue == "apexomni"
+                        && apexomni_text(text).trim_start_matches(|c: char| c.is_ascii_digit())
+                            == "GET/ws/accounts"
                     || venue == "cryptocom" && text.starts_with("public/auth")
             });
             let canonical = request["wsAuth"]["toSign"].as_str().unwrap();
@@ -1150,13 +1228,23 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
                     DeviceAnswer::DifferentKey,
                     DeviceAnswer::Replay,
                 ] {
-                    if venue == "phemex" && matches!(answer, DeviceAnswer::Replay) {
-                        // Phemex signs whole-second expiry; old-attempt bytes must really differ.
+                    if matches!(venue, "phemex" | "apexomni")
+                        && matches!(answer, DeviceAnswer::Replay)
+                    {
+                        // Phemex expiry and ApeX's signature-retry clock use whole seconds.
+                        // Cross a real boundary; identical signing bytes are not stale proof.
                         tokio::time::sleep(Duration::from_millis(1100)).await;
                     }
                     let (prepared, link, task) = remote(venue, answer, prior.clone()).await;
-                    let capture = (venue == "kucoin" && matches!(answer, DeviceAnswer::Correct))
-                        .then(|| Arc::new(KucoinStartupCapture::new(prior.clone())));
+                    let capture = (matches!(venue, "kucoin" | "kucoinspot")
+                        && matches!(answer, DeviceAnswer::Correct))
+                    .then(|| {
+                        Arc::new(if venue == "kucoinspot" {
+                            KucoinStartupCapture::spot(prior.clone())
+                        } else {
+                            KucoinStartupCapture::new(prior.clone())
+                        })
+                    });
                     let (result, seen) = check_captured(venue, prepared, capture).await;
                     {
                         let seen = seen.lock().unwrap();
@@ -1494,6 +1582,8 @@ mod bingx;
 mod bitunix;
 #[path = "cryptocom_probe_tests.rs"]
 mod cryptocom;
+#[path = "kucoinspot_probe_tests.rs"]
+mod kucoinspot;
 
 #[path = "mexc_probe_tests.rs"]
 mod mexc;
@@ -1501,6 +1591,36 @@ mod mexc;
 mod okxeudemo;
 #[path = "woo_probe_tests.rs"]
 mod woo;
+
+#[test]
+fn apexomni_replay_normalization_preserves_native_route_and_scope() {
+    let descriptor =
+        |text: &str| json!({"contracts":[],"payload":[{"bytes":text.as_bytes()}]}).to_string();
+    for target in [
+        "GET/api/v3/account",
+        "GET/api/v3/account-balance",
+        "GET/api/v3/open-orders",
+        "GET/api/v3/account?scope=USDT",
+        "GET/ws/accounts",
+    ] {
+        for stamp in ["1700000000123", "1700000002000"] {
+            let text = format!("{stamp}{target}");
+            let wire = descriptor(&text);
+            assert_eq!(apexomni_text(&wire), text);
+            assert_eq!(operation("apexomni", &wire), target);
+        }
+    }
+    assert_ne!(
+        operation(
+            "apexomni",
+            &descriptor("1700000000123GET/api/v3/account?scope=USDT")
+        ),
+        operation(
+            "apexomni",
+            &descriptor("1700000000123GET/api/v3/account?scope=USDC")
+        )
+    );
+}
 
 #[test]
 fn generated_readiness_matches_every_per_venue_record() {

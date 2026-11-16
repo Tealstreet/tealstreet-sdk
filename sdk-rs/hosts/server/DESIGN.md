@@ -758,6 +758,11 @@ local provider; it does not build a second set of REST requests. Its result
 classifier uses engine `ErrorKind` values: authentication failures are invalid,
 rate limits and transport failures are transient, and complete private startup
 is accepted.
+Exact `kucoinspot` admission uses the native Spot account and active-order reads
+at `https://api.kucoin.com`, with the existing batch request/passphrase HMAC
+signer and signed private read-feed token. Its production origin is separate
+from Futures; testnet is still refused. Offline proof controls cover other valid
+credentials, wrong signing material, replayed signatures and foreign sockets.
 Unclassified startup failures remain transient refusals. Public-only and
 frame-fed accounts cannot satisfy this check. MEXC mainnet proves its normal
 private position-mode, balance, positions and three order-surface reads using
@@ -795,6 +800,10 @@ validation or the existing server-origin and signing requirements for rollout.
 Exact WOO uses the existing native startup's v1/v3 account reads and private
 socket authentication. Its offline fixture independently checks HMAC bytes,
 rejects unsigned reads, and accepts only startup reads and read-feed traffic.
+
+Exact ApeX uses native `/api/v3/account`, `account-balance` and `open-orders`
+reads through the existing `apexomni-batch` device signer. API credential proof
+does not prove OmniKey/L2-seed possession or change order-signing coverage.
 
 ## Frames (claude-19pt8s, web hosted client)
 
