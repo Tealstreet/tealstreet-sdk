@@ -667,7 +667,7 @@ function resolveTickerPriceConstant(tok: string, ctx: PreprocessContext): number
   // prices, not L1 top-of-book. Other exchanges leave `midPrice`
   // unset; we fall back to the synthesised midpoint.
   if (tok === '$mid' || tok === '$midprice') {
-    const published = (ticker as unknown as Record<string, unknown>).midPrice;
+    const published = ticker.midPrice;
     if (typeof published === 'number' && Number.isFinite(published)) {
       return published;
     }
@@ -687,7 +687,7 @@ function resolveTickerPriceConstant(tok: string, ctx: PreprocessContext): number
   if (!field) {
     throw new Error(`${tok}: unsupported ticker constant`);
   }
-  const value = (ticker as unknown as Record<string, unknown>)[field];
+  const value = ticker[field];
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new Error(`${tok}: ${field} not available on ${ctx.symbol} ticker`);
   }
@@ -718,7 +718,7 @@ function resolveAccountNumber(tok: string, ctx: PreprocessContext): number {
     if (!balance) {
       throw new Error(`${tok}: no balance loaded yet`);
     }
-    const v = (balance as unknown as Record<string, unknown>)[balanceField];
+    const v = balance[balanceField];
     if (typeof v !== 'number' || !Number.isFinite(v)) {
       throw new Error(`${tok}: balance.${balanceField} not available`);
     }
