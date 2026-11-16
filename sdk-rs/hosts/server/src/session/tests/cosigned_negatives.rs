@@ -485,8 +485,12 @@ async fn cosigned_test_admission_does_not_start_unavailable_venue_proofs() {
     let before = f.private_reads.load(Ordering::SeqCst);
     let (mut session, mut sent) = candidate(&f, "alice");
     let mut request = init(Some("other-venue"));
-    // Hyro now proves native reads; exact KuCoin Spot is still outside the proof catalog.
-    request.exchange_name = "kucoinspot".into();
+    // Hyro and KuCoin Spot now prove joins; Hyperliquid Spot still requires possession proof.
+    request.exchange_name = "hyperliquidspot".into();
+    assert!(crate::delegated::enabled(&request.exchange_name));
+    assert!(!crate::delegated::probe::cosigned_ready(
+        &request.exchange_name
+    ));
     session.init(request).await.unwrap();
     unattached_after_refusal(
         &f,
