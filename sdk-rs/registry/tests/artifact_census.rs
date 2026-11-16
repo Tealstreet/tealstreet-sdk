@@ -19,8 +19,8 @@ fn duplicated_production_venue_cannot_erase_its_spot_policy() {
             &POLICY[end..]
         );
         let error = build_support::generate(&source)
-            .err()
-            .expect("duplicate venue must refuse");
+            .map(|_| ())
+            .expect_err("duplicate venue must refuse");
         assert!(
             error.contains("duplicate") && error.contains("krakenspot"),
             "{error}"
@@ -36,8 +36,8 @@ fn deleted_production_venue_cannot_shrink_the_build_census() {
         .unwrap()
         .remove("krakenspot");
     let error = build_support::generate(&source.to_string())
-        .err()
-        .expect("missing policy must refuse");
+        .map(|_| ())
+        .expect_err("missing policy must refuse");
     assert!(
         error.contains("missing") && error.contains("krakenspot"),
         "{error}"
@@ -49,8 +49,8 @@ fn unknown_production_venue_cannot_extend_the_build_census() {
     let mut source: serde_json::Value = serde_json::from_str(POLICY).unwrap();
     source["venues"]["unreviewedvenue"] = serde_json::json!({});
     let error = build_support::generate(&source.to_string())
-        .err()
-        .expect("unknown policy must refuse");
+        .map(|_| ())
+        .expect_err("unknown policy must refuse");
     assert!(
         error.contains("unexpected") && error.contains("unreviewedvenue"),
         "{error}"

@@ -3,6 +3,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { validateWasmBudgetSource } from './artifact-census.mjs';
+
+validateWasmBudgetSource(readFileSync(new URL(import.meta.url), 'utf8'));
 
 // Single-venue family bundles: 1.28125 MiB (RUST_WASM_FAMILIES.md), raised from
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
