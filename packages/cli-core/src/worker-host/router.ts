@@ -1,6 +1,5 @@
 import type { Exchange } from '@tealstreet/safe-cex/src/exchanges/base';
 import { executeCommand, type ExecuteResult } from '../commands/CommandExecutor';
-import type { ExchangeLike } from '../types';
 import { WorkerPlatformAdapter } from './WorkerPlatformAdapter';
 
 /**
@@ -22,14 +21,14 @@ export const commandRouter = async (
   reqId?: string,
 ): Promise<ExecuteResult> => {
   // Create adapter for this exchange - routes output via exec-log events
-  const adapter = new WorkerPlatformAdapter(exchange as unknown as ExchangeLike, reqId);
+  const adapter = new WorkerPlatformAdapter(exchange, reqId);
 
   // Execute command through cli-core
   const result = await executeCommand(
     command,
     symbol,
     undefined, // accountName - not used in webworker context
-    exchange as unknown as ExchangeLike,
+    exchange,
     adapter,
   );
 
