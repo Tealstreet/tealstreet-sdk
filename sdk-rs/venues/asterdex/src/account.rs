@@ -1,6 +1,7 @@
 //! Account reconciliation is split by state domain; failed or stale reads never clear it.
 use crate::sign::Query;
 use crate::{AsterDex, Pending};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
@@ -1193,7 +1194,10 @@ impl AsterDex {
             LifecycleEvent::Opened(epoch) => {
                 self.account.socket = Some(epoch.socket());
                 self.account.key_failures = 0;
-                cx.send(epoch.socket(), r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
+                cx.send(
+                    epoch.socket(),
+                    ControlFrame::subscription(r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#),
+                );
                 // Events before this open were never delivered, the first open included;
                 // a read still in flight may predate it, so it is followed by another.
                 self.reconcile_orders(cx);
@@ -1203,9 +1207,10 @@ impl AsterDex {
                     self.refresh_positions(cx);
                 }
             }
-            LifecycleEvent::Ping(epoch) => {
-                cx.send(epoch.socket(), r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#)
-            }
+            LifecycleEvent::Ping(epoch) => cx.send(
+                epoch.socket(),
+                ControlFrame::subscription(r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#),
+            ),
             // A reconnect needs a fresh listen key; its answer connects the feed.
             LifecycleEvent::Reconnect(_) => self.request_listen_key(cx),
             LifecycleEvent::Retired {

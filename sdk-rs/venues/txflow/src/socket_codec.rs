@@ -1,5 +1,6 @@
 //! Native topic projection; shared feeds own transport, pacing and release.
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::socket_lifecycle::{
     AuthMode, AuthRecovery, ControlPolicy, EncodedBatch, FeedPolicy, Interest, Invalidation,
     LifecycleEvent, RetireReason, TrafficPolicy,
@@ -272,7 +273,10 @@ impl TxFlow {
                     self.account_disconnected(cx);
                 }
             }
-            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), "{\"method\":\"ping\"}"),
+            LifecycleEvent::Ping(epoch) => cx.send(
+                epoch.socket(),
+                ControlFrame::heartbeat("{\"method\":\"ping\"}"),
+            ),
             LifecycleEvent::Reconnect(feed) => {
                 if self.api.feed != Some(feed) && self.node.feed != Some(feed) {
                     return Err(SocketError::Stale);

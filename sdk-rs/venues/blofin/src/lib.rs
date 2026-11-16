@@ -1,4 +1,5 @@
 //! BloFin linear perpetuals on the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod closed;
 #[path = "sign/dispatch.rs"]
@@ -745,7 +746,7 @@ impl Venue for Blofin {
             return;
         }
         if text == "ping" {
-            cx.send(socket, "pong");
+            cx.send(socket, ControlFrame::heartbeat("pong"));
             return;
         }
         let Ok(m) = serde_json::from_str::<Message<'_>>(text) else {
