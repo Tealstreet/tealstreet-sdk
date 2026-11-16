@@ -19,6 +19,7 @@ The exact proof-ready venue names are:
 | `okx` | Native private startup and shared HMAC suite |
 | `okxdemo` | Native demo startup and shared HMAC/session negatives; exact origin and simulated-trading headers |
 | `okxeu` | Signed config before keyed discovery, full native EEA startup, bounded signature-refusal retry and shared HMAC/session negatives |
+| `okxeudemo` | Exact EEA demo startup with one simulated-trading header per private read, bounded signature-refusal retry and fresh connection proof |
 | `bitget` | Native private startup and shared HMAC suite |
 | `bitgetusdc` | Native USDC private startup and shared HMAC/session negatives; exact product type |
 | `blofin` | Native private startup and shared HMAC suite |
@@ -26,7 +27,8 @@ The exact proof-ready venue names are:
 | `mexc` | Native signed position-mode/account reads and private-stream HMAC; wrong-key, replay and socket/Session controls; mainnet only |
 | `lighter`, `lighter-robinhood` | Local Schnorr challenge against routed venue registration for the captured account/API-key slot; wrong-key, replay, foreign-socket, retirement and registration-rotation controls |
 
-`okxeudemo` remains excluded and does not inherit EEA mainnet proof readiness.
+`okxeudemo` has its own exact catalog entry and demo-header/private-startup
+controls; EEA mainnet readiness alone never admits it.
 EEA bootstrap retains the original config authority until catalogue completion;
 config success alone cannot satisfy private readiness. A second consecutive
 `50113` for a bootstrap read refuses permanently after one re-signed retry,

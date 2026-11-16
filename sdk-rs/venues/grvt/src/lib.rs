@@ -1,4 +1,5 @@
 //! GRVT perpetuals: deterministic market, account and order state machines.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod candles;
 mod depth_query;
@@ -515,7 +516,7 @@ impl Grvt {
         if let Some(socket) = self.public.socket {
             cx.send(
                 socket,
-                serde_json::to_string(&message).expect("subscription"),
+                ControlFrame::subscription(serde_json::to_string(&message).expect("subscription")),
             );
         }
     }
@@ -667,13 +668,13 @@ impl Grvt {
         };
         cx.send(
             socket,
-            serde_json::to_string(&msg).expect("candle subscription"),
+            ControlFrame::subscription(serde_json::to_string(&msg).expect("candle subscription")),
         );
     }
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         if text == "ping" {
             if let Some(s) = self.public.socket {
-                cx.send(s, "pong");
+                cx.send(s, ControlFrame::heartbeat("pong"));
             }
             return;
         }
@@ -982,7 +983,7 @@ impl Venue for Grvt {
             connection.last_received = cx.now;
             connection.supervisor.received(cx.now);
             if text == "ping" {
-                cx.send(socket, "pong");
+                cx.send(socket, ControlFrame::heartbeat("pong"));
             } else {
                 self.public_message(cx, text);
             }
@@ -1439,7 +1440,7 @@ impl Venue for Grvt {
                 }
                 SocketTick::Ping if c.open && cx.now - c.last_received >= 6_000. => {
                     if let Some(socket) = c.socket {
-                        cx.send(socket, "ping");
+                        cx.send(socket, ControlFrame::heartbeat("ping"));
                     }
                 }
                 _ => {}
@@ -1454,7 +1455,7 @@ impl Venue for Grvt {
                     if self.public.open && cx.now - self.public.last_received >= 6_000. =>
                 {
                     if let Some(socket) = self.public.socket {
-                        cx.send(socket, "ping");
+                        cx.send(socket, ControlFrame::heartbeat("ping"));
                     }
                 }
                 _ => {}
