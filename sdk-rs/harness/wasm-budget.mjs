@@ -583,7 +583,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust1.99, bindgen0.2.129, Binaryen132, required twice -Oz; current bytes + 10 KiB rounded up (10,634 B reserve).
   // Preserve both parent floors and all provenance above.
   // #3513 CI43629571410: 2_004_367 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
-  grvt: 2_015_232,
+  // GRVT scalar admission source 53f1649d9f2e09d8777127ea28eb53b4d13e75b3.
+  // build.sh --venue grvt, Rust1.99.0/bindgen0.2.129/Binaryen132 twice -Oz.
+  // Optimized web/Node 2,043,354 B; SHA256 19b58267327bb19c7b508b01625e5b50423edd96e37efb96f8c30e3802f2c02b.
+  // Current measured size +10 KiB rounded up, preserving every historical floor.
+  grvt: 2_054_144,
   // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
