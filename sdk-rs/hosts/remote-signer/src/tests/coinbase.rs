@@ -369,3 +369,39 @@ async fn coinbase_remote_refuses_whole_jwts_der_objects_and_noncanonical_signatu
         }
     }
 }
+
+#[test]
+fn coinbase_supplied_public_binding_cannot_hide_material_or_override_the_captured_key() {
+    for venue in ["coinbase", "coinbasespot"] {
+        let link = SignerLink::new(11, Arc::new(|_| panic!("setup never signs")));
+        let binding = json!({"keyName":KEY,"algorithm":"es256"});
+        assert!(
+            remote_account(
+                link.clone(),
+                venue,
+                None,
+                &json!({"key":KEY,"coinbaseSigning":binding}).to_string()
+            )
+            .is_ok()
+        );
+        for field in ["secret", "keyName", "algorithm", "claims"] {
+            let mut changed = binding.clone();
+            changed[field] = match field {
+                "secret" => "synthetic-material".into(),
+                "keyName" => "organizations/foreign/apiKeys/other".into(),
+                "algorithm" => "edDsa".into(),
+                _ => json!({"sub":"client-selected"}),
+            };
+            assert!(
+                remote_account(
+                    link.clone(),
+                    venue,
+                    None,
+                    &json!({"key":KEY,"coinbaseSigning":changed}).to_string()
+                )
+                .is_err(),
+                "{venue}/{field}"
+            );
+        }
+    }
+}
