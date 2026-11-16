@@ -14,14 +14,16 @@ const MATERIAL: &str = "synthetic-material";
 async fn cosigned_catalog_does_not_gate_delegated_wallet_proof() {
     tokio::task::LocalSet::new()
         .run_until(async {
+            assert!(crate::delegated::enabled("asterdex"));
+            assert!(!crate::delegated::probe::cosigned_ready("asterdex"));
             for delegated in [false, true] {
                 let registry = crate::accounts::tests::registry();
                 let (mut session, mut sent) = user_session(registry.clone(), "fixture");
                 let mut completed = session.take_verified();
                 let mut init = InitPayload {
                     account_name: "acct".into(),
-                    // GRVT and Hyperliquid are admitted; TxFlow keeps this excluded-wallet control.
-                    exchange_name: "txflow".into(),
+                    // GRVT and Hyperliquid are admitted; AsterDEX keeps this excluded-wallet control.
+                    exchange_name: "asterdex".into(),
                     key: KEY.into(),
                     ..Default::default()
                 };
@@ -29,11 +31,11 @@ async fn cosigned_catalog_does_not_gate_delegated_wallet_proof() {
                     init.signing_mode = Some("delegated".into());
                     let offer = session
                         .handovers
-                        .issue("acct", "txflow", crate::accounts::now_ms())
+                        .issue("acct", "asterdex", crate::accounts::now_ms())
                         .unwrap();
                     init.sealed = Some(crate::delegated::tests::seal(
                         &offer,
-                        "txflow",
+                        "asterdex",
                         KEY,
                         br#"{"key":"synthetic-key","secret":"synthetic-material"}"#,
                     ));
