@@ -101,14 +101,20 @@ pub(super) fn connect(
     let gate = seen.lock().unwrap().kraken_auth_gate.clone();
     events.send(HostEvent::WsOpened(socket)).unwrap();
     tokio::task::spawn_local(async move {
+        let mut challenge_key: Option<String> = None;
         while let Some(text) = rx.recv().await {
             let frame: Value = serde_json::from_str(&text).unwrap();
             let reply = match frame["event"].as_str().unwrap() {
-                "challenge" => json!({"event":"challenge","message":challenge}),
+                "challenge" => {
+                    challenge_key = frame["api_key"].as_str().map(str::to_owned);
+                    json!({"event":"challenge","message":challenge})
+                }
                 "subscribe" => {
                     let feed = frame["feed"].as_str().unwrap();
                     if matches!(feed, "fills" | "open_orders" | "open_positions") {
-                        let valid = frame["original_challenge"] == challenge
+                        let valid = challenge_key.is_some()
+                            && frame["api_key"].as_str() == challenge_key.as_deref()
+                            && frame["original_challenge"] == challenge
                             && material(frame["api_key"].as_str().unwrap_or("")).is_some_and(
                                 |secret| {
                                     frame["signed_challenge"]
@@ -148,6 +154,70 @@ pub(super) fn connect(
         }
     });
     tx
+}
+
+#[tokio::test]
+async fn kraken_fixture_binds_subscriptions_to_the_challenge_request_key() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (requested, subscribed, expected) in [
+                (KEY, KEY, "subscribed"),
+                ("synthetic-other-key", "synthetic-other-key", "subscribed"),
+                (KEY, "synthetic-other-key", "error"),
+            ] {
+                let io = VenueIo {
+                    venue: "kraken",
+                    seen: Arc::new(Mutex::new(Seen::default())),
+                };
+                let (events, mut received) = mpsc::unbounded_channel();
+                let socket = SocketId(77);
+                let control = connect(&io, socket, "wss://futures.kraken.com/ws/v1", events);
+                assert!(
+                    matches!(received.recv().await, Some(HostEvent::WsOpened(id)) if id == socket)
+                );
+                control
+                    .send(json!({"event":"challenge","api_key":requested}).to_string())
+                    .unwrap();
+                let event = tokio::time::timeout(Duration::from_secs(3), received.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let HostEvent::WsMessage(id, text) = event else {
+                    panic!("expected challenge reply")
+                };
+                assert_eq!(id, socket);
+                let reply: Value = serde_json::from_str(&text).unwrap();
+                let challenge = reply["message"].as_str().unwrap();
+                let signed = signature(material(subscribed).unwrap(), challenge.as_bytes());
+                control
+                    .send(
+                        json!({"event":"subscribe","feed":"fills","api_key":subscribed,
+                "original_challenge":challenge,"signed_challenge":signed})
+                        .to_string(),
+                    )
+                    .unwrap();
+                let event = tokio::time::timeout(Duration::from_secs(3), received.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let HostEvent::WsMessage(id, text) = event else {
+                    panic!("expected subscription reply")
+                };
+                assert_eq!(id, socket);
+                let reply: Value = serde_json::from_str(&text).unwrap();
+                assert_eq!(
+                    reply["event"], expected,
+                    "a valid MAC cannot change the challenge's key"
+                );
+                let seen = io.seen.lock().unwrap();
+                assert_eq!(seen.refused, usize::from(expected == "error"));
+                assert_eq!(
+                    seen.kraken_socket_auths,
+                    usize::from(expected == "subscribed")
+                );
+            }
+        })
+        .await;
 }
 
 #[tokio::test]
@@ -195,7 +265,23 @@ async fn kraken_loaded_rest_waits_for_the_private_challenge_acknowledgments() {
                     .is_err(),
                 "REST loading alone must not admit before fresh private authentication"
             );
-            gate.add_permits(3);
+            for acknowledged in 1..3 {
+                gate.add_permits(1);
+                tokio::time::timeout(Duration::from_secs(3), async {
+                    while seen.lock().unwrap().kraken_socket_auths < acknowledged + 1 {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("the next private feed reached its ACK gate");
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(200), &mut pending)
+                        .await
+                        .is_err(),
+                    "only {acknowledged} private acknowledgments cannot admit the account"
+                );
+            }
+            gate.add_permits(1);
             assert!(
                 tokio::time::timeout(Duration::from_secs(3), pending)
                     .await
