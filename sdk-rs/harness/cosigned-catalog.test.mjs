@@ -255,11 +255,13 @@ test('ready records name existing Rust proof suites within the server crate', ()
 });
 
 test('independent venue promotions compose without editing a shared catalog', () => {
-  const changed = catalogFiles.map(([file, text]) => [file, ['cryptocom.json', 'kucoinspot.json'].includes(file)
+  const promoted = [...excluded.keys()].sort().slice(0, 2);
+  assert.equal(promoted.length, 2);
+  const changed = catalogFiles.map(([file, text]) => [file, promoted.some(name => file === `${name}.json`)
     ? JSON.stringify({ status: 'ready', probeTests: 'src/delegated.rs', sessionTests: 'src/session/tests/cosigned_venues.rs' }) : text]);
   const combined = catalog(changed);
   accounted(declared, combined.ready, combined.excluded);
   assert.equal(combined.ready.size, ready.size + 2);
-  assert(combined.ready.has('cryptocom') && combined.ready.has('kucoinspot'));
+  for (const name of promoted) assert(combined.ready.has(name));
   assert.equal(combined.excluded.size, excluded.size - 2);
 });

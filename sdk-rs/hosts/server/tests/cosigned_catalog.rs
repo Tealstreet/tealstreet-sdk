@@ -72,7 +72,18 @@ fn missing_unknown_duplicate_or_ambiguous_records_refuse_the_build() {
 fn independent_venue_promotions_need_no_shared_registry_edit() {
     let root = root();
     let mut files = records(&root);
-    for name in ["cryptocom.json", "kucoinspot.json"] {
+    let before = catalog::render(&root, files.clone()).unwrap();
+    let mut promoted: Vec<_> = files
+        .iter()
+        .filter(|(_, text)| {
+            serde_json::from_str::<serde_json::Value>(text).unwrap()["status"] == "excluded"
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    promoted.sort();
+    promoted.truncate(2);
+    assert_eq!(promoted.len(), 2);
+    for name in &promoted {
         files.iter_mut().find(|(file, _)| file == name).unwrap().1 =
             r#"{"status":"ready","probeTests":"src/delegated.rs","sessionTests":"src/session/tests/cosigned_venues.rs"}"#.into();
     }
@@ -81,6 +92,17 @@ fn independent_venue_promotions_need_no_shared_registry_edit() {
         .lines()
         .find(|line| line.contains("const PRIVATE_STARTUP_VENUES"))
         .unwrap();
-    assert!(ready.contains("\"cryptocom\""));
-    assert!(ready.contains("\"kucoinspot\""));
+    let previous = before
+        .lines()
+        .find(|line| line.contains("const PRIVATE_STARTUP_VENUES"))
+        .unwrap();
+    assert_eq!(
+        ready.matches('"').count(),
+        previous.matches('"').count() + 4
+    );
+    for name in &promoted {
+        let venue = format!("\"{}\"", name.strip_suffix(".json").unwrap());
+        assert!(!previous.contains(&venue));
+        assert!(ready.contains(&venue));
+    }
 }
