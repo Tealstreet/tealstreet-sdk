@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { venueFamily } from '../hosts/wasm/js/venues.mjs';
@@ -205,4 +205,10 @@ test('commented catalog cannot shadow a live alias or a second live definition',
   assert.throws(() => catalog(`${literal}\n${alias}`), /exactly one/);
   assert.throws(() => catalog(`const NOTE: &str = r#"${literal}"#;\n${alias}`));
   assert.deepEqual([...catalog(`const NOTE: &str = r#"${literal}"#;\n${literal}`)], ['bybit', 'woo']);
+});
+
+
+test('each declared venue has its own independent catalog record', () => {
+  const names = readdirSync(new URL('../hosts/server/src/delegated/cosigned-proof-catalog/', import.meta.url));
+  assert.deepEqual(names.sort(), [...declared].map(name => `${name}.json`).sort());
 });
