@@ -170,6 +170,10 @@ impl Transport for MockVenue {
     }
 
     fn request(&self, request: HttpRequest, events: Events) {
+        if let Some(io) = &self.coinbase {
+            io.request(request, events);
+            return;
+        }
         if let Some(io) = &self.admission {
             return io.request(request, events);
         }

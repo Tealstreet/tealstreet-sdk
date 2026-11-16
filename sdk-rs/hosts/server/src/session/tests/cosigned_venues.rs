@@ -26,6 +26,8 @@ const READY: &[&str] = &[
     "bingx",
     "mexc",
     "bitunix",
+    "coinbase",
+    "coinbasespot",
 ];
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";

@@ -147,7 +147,7 @@ impl CoinbaseIo {
         url.contains("/private/")
             || self.venue == "coinbasespot" && url.contains("/orders/historical/")
     }
-    fn request(&self, request: HttpRequest, events: Events) {
+    fn respond(&self, request: HttpRequest, events: Events) {
         self.seen.lock().unwrap().urls.push(request.url.clone());
         let body = request
             .body
@@ -202,7 +202,7 @@ impl CoinbaseIo {
             let route = request.url.rsplit('/').next().unwrap();
             assert_eq!(method.rsplit('/').next(), Some(route));
             if method == "public/auth" {
-                let jwt = body["params"]["jwt"].as_str().unwrap_or_default();
+                let jwt = body["params"]["token"].as_str().unwrap_or_default();
                 if body["params"]["grant_type"] != "coinbase_cdp"
                     || !valid_jwt(jwt, Some("POST drb.coinbase.com/api/v2/public/auth"))
                 {
@@ -274,7 +274,23 @@ impl CoinbaseIo {
 
 impl Transport for CoinbaseIo {
     fn request(&self, request: HttpRequest, events: Events) {
-        CoinbaseIo::request(self, request, events);
+        let block = self.private_census(&request.url) && {
+            let mut seen = self.seen.lock().unwrap();
+            let block = seen.block_private;
+            if block {
+                seen.blocked_reads += 1;
+            }
+            block
+        };
+        if block {
+            let io = self.clone();
+            tokio::task::spawn_local(async move {
+                io.gate.acquire().await.unwrap().forget();
+                io.respond(request, events);
+            });
+        } else {
+            self.respond(request, events);
+        }
     }
     fn prepare_http(
         &self,
@@ -314,12 +330,13 @@ impl Transport for CoinbaseIo {
         let (send, mut receive) = mpsc::unbounded_channel::<String>();
         events.send(HostEvent::WsOpened(socket)).unwrap();
         tokio::task::spawn_local(async move {
+            let mut sequence = 0;
             while let Some(text) = receive.recv().await {
                 let value: Value = serde_json::from_str(&text).unwrap();
                 let answer = if let Some(method) = value["method"].as_str() {
                     let result = match method {
                         "public/auth" => {
-                            let accepted = value["params"]["jwt"]
+                            let accepted = value["params"]["token"]
                                 .as_str()
                                 .is_some_and(|jwt| valid_jwt(jwt, None));
                             io.seen.lock().unwrap().socket_auths += 1;
@@ -349,7 +366,9 @@ impl Transport for CoinbaseIo {
                                 .is_some_and(|jwt| valid_jwt(jwt, None))
                         );
                     }
-                    json!({"channel":"subscriptions","events":[{"subscriptions":{}}]})
+                    let reply = json!({"channel":"subscriptions","sequence_num":sequence,"events":[{"subscriptions":{}}]});
+                    sequence += 1;
+                    reply
                 };
                 let _ = events.send(HostEvent::WsMessage(socket, answer.to_string()));
             }
@@ -380,7 +399,7 @@ impl BoundHttp for Bound {
         true
     }
     fn dispatch(self: Box<Self>, events: Events) -> tokio::task::AbortHandle {
-        self.0.request(self.1, events);
+        self.0.respond(self.1, events);
         tokio::spawn(async {}).abort_handle()
     }
 }

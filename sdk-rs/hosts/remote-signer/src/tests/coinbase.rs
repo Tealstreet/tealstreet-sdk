@@ -410,6 +410,15 @@ fn coinbase_supplied_public_binding_cannot_hide_material_or_override_the_capture
 fn coinbase_algorithm_metadata_refuses_tagged_objects_instead_of_strings() {
     for venue in ["coinbase", "coinbasespot"] {
         let link = SignerLink::new(11, Arc::new(|_| panic!("metadata never signs")));
+        assert!(
+            remote_account(
+                link.clone(),
+                venue,
+                None,
+                &json!({"key":KEY,"coinbaseJwtAlgorithm":null}).to_string()
+            )
+            .is_ok()
+        );
         for algorithm in [
             json!({"es256":null}),
             json!({"edDsa":null}),

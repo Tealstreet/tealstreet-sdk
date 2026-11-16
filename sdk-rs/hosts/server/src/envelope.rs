@@ -10,7 +10,11 @@ pub struct InitPayload {
     pub exchange_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signing_mode: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "coinbase_algorithm",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub coinbase_jwt_algorithm: Option<safe_cex_remote_signer::CoinbaseJwtAlgorithm>,
     /// Consumed on this connection; never included in serialized settings.
     #[serde(default, skip_serializing)]
@@ -85,6 +89,19 @@ fn text<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Stri
 
 fn key<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
     Ok(text(deserializer)?.unwrap_or_default())
+}
+
+fn coinbase_algorithm<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<safe_cex_remote_signer::CoinbaseJwtAlgorithm>, D::Error> {
+    Option::<String>::deserialize(deserializer)?
+        .map(|value| {
+            safe_cex_remote_signer::CoinbaseJwtAlgorithm::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(value),
+            )
+            .map_err(|_| serde::de::Error::custom("Invalid Coinbase JWT algorithm"))
+        })
+        .transpose()
 }
 
 impl InitPayload {

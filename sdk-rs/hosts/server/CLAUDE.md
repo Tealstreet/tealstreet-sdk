@@ -95,9 +95,10 @@ accounts, and the last account owner drop erases retained engine handles.
 Confirmed joins and upgrades publish `account-signing-mode` to each confirmed
 registration's label/instanceId. Refusals have attached=false and no actualMode.
 Socket handover and possession verification precede any transition. A verified
-resident public-key join uses the local key proof, not an unsigned startup read. Coinbase
-CDP remains explicitly proof-unavailable pending its COSIGNED JWT setup and
-venue-proof implementation; it never silently falls back to another signing mode.
+resident public-key join uses the local key proof, not an unsigned startup read.
+Coinbase COSIGNED proves its opaque CDP key through native JWT/private startup,
+with server-owned claims and a signature-only reply. DELEGATED CDP handover
+remains explicitly proof-unavailable; no fallback selects another signing mode.
 Legacy and typed full-write method admission both use this shared eligibility.
 
 DELEGATED uses `prepare_local_signer_for`, including wallet key-only/agent

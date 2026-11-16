@@ -29,6 +29,10 @@ fn coinbase_effective_algorithm_is_fingerprinted_and_unknown_algorithms_refuse()
     for venue in ["coinbase", "coinbasespot"] {
         let raw = json!({"accountName":"fixture","exchangeName":venue,"key":"organizations/fixture/apiKeys/join"});
         let implicit: InitPayload = serde_json::from_value(raw.clone()).unwrap();
+        let mut null_algorithm = raw.clone();
+        null_algorithm["coinbaseJwtAlgorithm"] = serde_json::Value::Null;
+        let null_algorithm: InitPayload = serde_json::from_value(null_algorithm).unwrap();
+        assert_eq!(implicit.fingerprint(), null_algorithm.fingerprint());
         let mut explicit = raw.clone();
         explicit["coinbaseJwtAlgorithm"] = "es256".into();
         let explicit: InitPayload = serde_json::from_value(explicit).unwrap();

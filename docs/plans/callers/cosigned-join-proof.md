@@ -25,6 +25,7 @@ The exact proof-ready venue names are:
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
 | `mexc` | Native signed position-mode/account reads and private-stream HMAC; wrong-key, replay and socket/Session controls; mainnet only |
+| `coinbase`, `coinbasespot` | Native CDP JWT ES256/Ed25519 and complete DRB/Advanced Trade private startup; server claims, signature-only replies, wrong-key/replay/socket/owner controls; mainnet only |
 
 `okxeudemo` has its own exact catalog entry and demo-header/private-startup
 controls; EEA mainnet readiness alone never admits it.

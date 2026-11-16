@@ -33,6 +33,8 @@ impl Device {
             "a real native private read must request its server-built JWS"
         );
         assert_eq!(frame["d"]["type"], "ws-auth");
+        assert_eq!(frame["d"]["exchangeName"], venue);
+        assert_eq!(frame["d"]["accountName"], "acct");
         assert_eq!(frame["d"]["wsAuth"]["outputFormat"], "coinbase-jws");
         let input = frame["d"]["wsAuth"]["toSign"].as_str().unwrap();
         let (header, claims) = input.split_once('.').unwrap();
@@ -393,7 +395,13 @@ async fn coinbase_authentication_without_private_census_never_admits_and_disposa
                         .await
                         .unwrap();
                     io.gate.add_permits(100);
-                    tokio::task::yield_now().await;
+                    tokio::time::timeout(Duration::from_secs(8), async {
+                        while crate::accounts::testing::engine_count(&registry) != 0 {
+                            tokio::time::sleep(Duration::from_millis(2)).await;
+                        }
+                    })
+                    .await
+                    .unwrap();
                     if let Ok(completed) = done.try_recv() {
                         session.verification_completed(completed).await.unwrap();
                     }

@@ -695,7 +695,7 @@ impl Session {
             self.refuse_handover(&init.account_name, true);
             return;
         }
-        // CDP's hosted JWT setup and venue proof are not implemented yet.
+        // DELEGATED CDP handover remains separate from COSIGNED JWT proof readiness.
         if (!delegated && !self.registry.cosigned_proof_ready(self.user(), &init))
             || cdp_unavailable
         {

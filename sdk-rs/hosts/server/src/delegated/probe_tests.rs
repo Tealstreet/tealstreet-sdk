@@ -1074,10 +1074,14 @@ fn admission_enabled_venues_require_an_offline_suite() {
         "../../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
     ))
     .unwrap();
-    assert_eq!(PRIVATE_STARTUP_VENUES.len(), VENUES.len() + 1);
+    let jwt_venues = super::coinbase_tests::VENUES;
+    assert_eq!(
+        PRIVATE_STARTUP_VENUES.len(),
+        VENUES.len() + 1 + jwt_venues.len()
+    );
     for &venue in PRIVATE_STARTUP_VENUES {
         assert!(
-            venue == "bybit" || VENUES.contains(&venue),
+            venue == "bybit" || VENUES.contains(&venue) || jwt_venues.contains(&venue),
             "{venue}: missing offline suite"
         );
     }

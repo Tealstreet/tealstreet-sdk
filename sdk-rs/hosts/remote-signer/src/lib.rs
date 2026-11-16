@@ -237,9 +237,14 @@ pub fn remote_account(
         let algorithm = options
             .get("coinbaseJwtAlgorithm")
             .filter(|v| !v.is_null())
-            .map(|v| serde_json::from_value::<CoinbaseJwtAlgorithm>(v.clone()))
-            .transpose()
-            .map_err(|_| SetupError("Invalid Coinbase JWT algorithm"))?
+            .map(|value| {
+                if !value.is_string() {
+                    return Err(SetupError("Invalid Coinbase JWT algorithm"));
+                }
+                serde::Deserialize::deserialize(value)
+                    .map_err(|_| SetupError("Invalid Coinbase JWT algorithm"))
+            })
+            .transpose()?
             .unwrap_or_default();
         let binding = safe_cex_venue_coinbase::sign::Binding {
             key_name: String::from_utf8(primary.public.clone())
@@ -250,6 +255,12 @@ pub fn remote_account(
             .get("coinbaseSigning")
             .filter(|value| !value.is_null())
         {
+            if provided
+                .get("algorithm")
+                .is_none_or(|algorithm| !algorithm.is_string())
+            {
+                return Err(SetupError("Invalid Coinbase public binding"));
+            }
             let provided: safe_cex_venue_coinbase::sign::Binding =
                 serde::Deserialize::deserialize(provided)
                     .map_err(|_| SetupError("Invalid Coinbase public binding"))?;

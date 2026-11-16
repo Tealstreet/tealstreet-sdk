@@ -628,8 +628,8 @@ An owned signing-work barrier refuses `mode_transition_busy` while any original
 sign future or setup execution remains unsettled. No work is canceled, retried
 or sent to both signers. The original engine dispatch handle, opaque refs,
 address/public-key seals and nonce ownership stay in place. Missing trusted
-bindings refuse `mode_transition_unavailable`. Coinbase CDP explicitly refuses
-as `proof-unavailable` until its COSIGNED JWT setup and private venue proof exist.
+bindings refuse `mode_transition_unavailable`. Coinbase COSIGNED uses native
+JWT/private startup; DELEGATED CDP handover still refuses as `proof-unavailable`.
 These refusals leave the candidate unattached.
 
 The future provider, actual mode and protected resident are installed together.
