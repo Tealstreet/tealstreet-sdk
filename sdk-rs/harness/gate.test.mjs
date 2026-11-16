@@ -49,7 +49,12 @@ test('margin expectation uses native input and preserves unsupported cases', () 
 const GATE_CHILD_TIMEOUT_MS = 10000;
 const assertGateChildCompleted = (result, context, timeoutMs = GATE_CHILD_TIMEOUT_MS) => {
   if (Number.isInteger(result.status) && !result.signal && !result.error) return;
-  assert.fail(`${context}: ${result.stderr ?? ''}\n${result.stdout ?? ''}`);
+  const cause = [
+    `status=${result.status}`, `signal=${result.signal ?? 'none'}`, `timeoutMs=${timeoutMs}`,
+    `timedOut=${result.error?.code === 'ETIMEDOUT'}`, `error.code=${result.error?.code ?? 'none'}`,
+    `error.message=${result.error?.message ?? 'none'}`,
+  ].join(' ');
+  assert.fail(`${context}: ${cause}\nstderr:\n${result.stderr ?? ''}\nstdout:\n${result.stdout ?? ''}`);
 };
 
 for (const [cause, signal, code, message] of [
@@ -466,6 +471,7 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false, workflo
         RECORD: new URL('./record-gate.mjs', import.meta.url).pathname, RUST_REPLAY_CORRECTNESS_ONLY: 'true',
         RUST_REPLAY_CI_WASM: '', CPU_COLLECTION_STATE: '' } : {}) },
     });
+    // A killed child can leave partial artifacts; report its cause before parsing them.
     assertGateChildCompleted(result, `${venue} private=${isPrivate}`);
     if (workflowInvocation && existsSync(join(cwd, 'sdk-rs/harness/out/ci/ledger.jsonl'))) {
       const ledger = readFileSync(join(cwd, 'sdk-rs/harness/out/ci/ledger.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
