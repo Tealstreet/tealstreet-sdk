@@ -455,6 +455,11 @@ impl InitRefusalReasonClass {
         use safe_cex_engine::ErrorKind;
         match error_kind {
             Some(ErrorKind::AuthPermission) => Self::KeyRejectedIpOrPermissions,
+            // HyroTrader can return 10003 for a disabled challenge with unchanged
+            // valid credentials; its Bybit CLAUDE contract forbids that inference.
+            Some(ErrorKind::AuthInvalid) if venue == "hyrotrader" && venue_code == Some(10003) => {
+                Self::Unknown
+            }
             Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired) => {
                 // Venue CLAUDE contracts and native auth tables define these broad
                 // key refusals; the numeric namespace belongs to the exact venue.
@@ -696,6 +701,26 @@ mod tests {
         assert_eq!(
             InitRefusalReasonClass::from_error("bybit", Some(ErrorKind::Network), Some(10003)),
             VenueUnavailable
+        );
+    }
+
+    #[test]
+    fn refusal_reason_class_hyro_challenge_status_does_not_claim_an_invalid_key() {
+        assert_eq!(
+            InitRefusalReasonClass::from_error(
+                "hyrotrader",
+                Some(safe_cex_engine::ErrorKind::AuthPermission),
+                Some(10010)
+            ),
+            InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+        );
+        assert_eq!(
+            InitRefusalReasonClass::from_error(
+                "hyrotrader",
+                Some(safe_cex_engine::ErrorKind::AuthInvalid),
+                Some(10003)
+            ),
+            InitRefusalReasonClass::Unknown,
         );
     }
 

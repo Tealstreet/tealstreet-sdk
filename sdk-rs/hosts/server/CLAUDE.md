@@ -245,7 +245,9 @@ Permission failures and the Binance -2015/-2014, Bybit 10003/10010 and OKX
 50110/50111 auth refusals use the broad key-rejection class; other invalid/expired
 keys use `key_invalid`. Network, timeout, rate-limit and venue-unavailable errors
 use `venue_unavailable`; missing/unrelated evidence stays `unknown`. Numeric
-namespaces are scoped to exact venue families, not prefixes. This is coarse
+namespaces are scoped to exact venue families, not prefixes. HyroTrader's
+ambiguous 10003 stays `unknown`: a disabled challenge can reject an unchanged
+valid key, as its Bybit CLAUDE contract documents. This is coarse
 recovery guidance, never proof of a specific IP or permission defect. Raw venue
 text/codes never enter this frame. The fixed message, transient flag, registration
 binding and existing eight-field private diagnostic remain unchanged.
