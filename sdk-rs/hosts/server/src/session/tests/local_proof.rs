@@ -127,12 +127,13 @@ async fn local_proof_other_valid_key_cannot_touch_resident() {
 
 #[tokio::test]
 async fn local_proof_unactivated_venue_stays_unavailable_without_fixture_binding() {
-    assert!(!crate::delegated::probe::cosigned_ready("hyperliquidspot"));
+    // Hyperliquid Spot is admitted; GRVT retains the unactivated-venue control.
+    assert!(!crate::delegated::probe::cosigned_ready("grvt"));
     for owner in ["alice", "bob"] {
         let registry = registry(owner == "bob");
         let (mut session, mut sent) = user_session(registry.clone(), owner);
         let mut payload = init();
-        payload.exchange_name = "hyperliquidspot".into();
+        payload.exchange_name = "grvt".into();
         session.init(payload).await.unwrap();
         let frame: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
         assert_eq!(frame["d"]["data"][1]["kind"], "proof-unavailable");
