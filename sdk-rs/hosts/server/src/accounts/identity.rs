@@ -8,7 +8,7 @@ pub(super) fn hyperliquid_projection(
         .hyperliquid_signer_address
         .as_deref()
         .ok_or("Missing Hyperliquid signer address")?;
-    let account_scope = match &init.vault {
+    let account_scope = match init.vault.as_deref().filter(|address| !address.is_empty()) {
         Some(address) => serde_json::json!({"kind":"vault", "address":address}),
         None => serde_json::json!({"kind":"main"}),
     };
