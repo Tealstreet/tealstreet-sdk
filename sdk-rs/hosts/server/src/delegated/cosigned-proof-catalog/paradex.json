@@ -1,0 +1,4 @@
+{
+  "status": "excluded",
+  "reason": "Client Hosted gate awaits a live test; signed auth/JWT, address/subkey/derived-key validation and startup proof are not complete."
+}

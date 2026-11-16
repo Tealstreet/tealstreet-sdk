@@ -1,5 +1,6 @@
 use crate::wire::*;
 use crate::{BitgetFutures, Pending, paths, sign};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, row_skipped};
 use safe_cex_engine::credential_selection::{
@@ -417,7 +418,7 @@ impl BitgetFutures {
         if let Some(identity) = self.options.credentials.clone() {
             cx.send_signed(
                 socket,
-                String::new(),
+                ControlFrame::authentication(String::new()),
                 Box::new(sign::WsLogin::new(
                     identity,
                     if self.account.uta {
@@ -486,11 +487,13 @@ impl BitgetFutures {
         };
         cx.send(
             socket,
-            serde_json::to_string(&Subscribe {
-                op: "subscribe",
-                args,
-            })
-            .expect("private subscription"),
+            ControlFrame::subscription(
+                serde_json::to_string(&Subscribe {
+                    op: "subscribe",
+                    args,
+                })
+                .expect("private subscription"),
+            ),
         );
     }
 

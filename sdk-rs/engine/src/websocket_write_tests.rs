@@ -1,3 +1,4 @@
+use crate::ControlFrame;
 fn websocket_fixture(signed: bool) -> (Engine<Probe>, Context, SocketId) {
     let (mut engine, context, socket) = websocket_connecting_fixture(signed);
     engine.handle(0., Event::WsOpened { socket });
@@ -397,14 +398,101 @@ fn websocket_control_frames_keep_their_existing_path() {
         store: &mut engine.store,
         io: &mut engine.io,
     };
-    cx.send(socket, "subscribe");
-    cx.send_signed(socket, "auth".into(), Box::new(WsRecipe));
+    cx.send(socket, ControlFrame::subscription("subscribe"));
+    cx.send(socket, ControlFrame::heartbeat("ping"));
+    cx.send_signed(
+        socket,
+        ControlFrame::authentication("auth"),
+        Box::new(WsRecipe),
+    );
     let actions = engine.drain_actions().collect::<Vec<_>>();
-    assert_eq!(websocket_frames(&actions), vec!["subscribe"]);
+    assert_eq!(websocket_frames(&actions), vec!["subscribe", "ping"]);
     let (attempt, work) = work(&actions);
     let actions = signed(&mut engine, 10., attempt, work);
     assert_eq!(websocket_frames(&actions), vec!["signed auth"]);
     assert!(engine.venue.releases.is_empty());
+}
+
+#[test]
+fn websocket_write_timeout_diagnostics_are_transport_neutral() {
+    for released in [false, true] {
+        let (mut engine, context, socket) = websocket_fixture(false);
+        let request = queue_websocket_write(&mut engine, &context, socket, false);
+        let timer = engine.io.core.managed_http[&request].timer;
+        if released {
+            assert_eq!(
+                websocket_frames(&drain_websocket_actions(&mut engine)),
+                vec!["order"]
+            );
+        }
+        engine.handle(context.deadline(), Event::TimerFired { timer });
+        let actions = drain_websocket_actions(&mut engine);
+        let error = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 71, error }) => Some(error),
+                _ => None,
+            })
+            .expect("one terminal write failure");
+        assert!(
+            error.message.starts_with("Request timed out ("),
+            "{error:?}"
+        );
+        assert!(!error.message.contains("HTTP"), "{error:?}");
+        assert_eq!(error.kind, Some(ErrorKind::Timeout));
+        assert_eq!(
+            error.outcome,
+            Some(if released {
+                crate::Outcome::Unknown
+            } else {
+                crate::Outcome::NotSent
+            })
+        );
+        assert!(websocket_frames(&actions).is_empty());
+    }
+}
+
+#[test]
+fn websocket_write_unproven_response_diagnostics_are_transport_neutral() {
+    for (status, kind) in [
+        (408, ErrorKind::Timeout),
+        (429, ErrorKind::RateLimited),
+        (503, ErrorKind::VenueUnavailable),
+    ] {
+        let (mut engine, context, socket) = websocket_fixture(false);
+        let request = queue_websocket_write(&mut engine, &context, socket, false);
+        assert_eq!(
+            websocket_frames(&drain_websocket_actions(&mut engine)),
+            vec!["order"]
+        );
+        engine.handle(
+            10.,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: "unproven",
+                },
+            },
+        );
+        let actions = drain_websocket_actions(&mut engine);
+        let error = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 71, error }) => Some(error),
+                _ => None,
+            })
+            .expect("one terminal write failure");
+        assert_eq!(
+            error.message,
+            "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+        );
+        assert_eq!(error.kind, Some(kind));
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
+        assert!(websocket_frames(&actions).is_empty());
+        assert_eq!(engine.venue.releases.len(), 1);
+    }
 }
 
 #[test]

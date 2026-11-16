@@ -4,32 +4,8 @@ use safe_cex_native::{AccountHandle, Outgoing, ServerConfig, Transport};
 use std::sync::Arc;
 use std::time::Duration;
 
-// Exact COSIGNED venues with possession proof and matching negative suites.
-// Other COSIGNED joins refuse explicitly; DELEGATED uses shared hosted eligibility.
-pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
-    "bybit",
-    // Its native inverse proof and Brazil join now have their own positive/negative controls.
-    "bybitinverse",
-    "bybitdemo",
-    "bybitspot",
-    "binance",
-    "binancepm",
-    "binanceinverse",
-    "binancespot",
-    "okx",
-    "okxdemo",
-    "okxeu",
-    "bitget",
-    "bitgetusdc",
-    "blofin",
-    "kucoin",
-    "phemex",
-    "woo",
-    "bingx",
-    "mexc",
-    "bitunix",
-    "backpack",
-];
+// Server-only build output from the per-venue proof records.
+include!(concat!(env!("OUT_DIR"), "/cosigned_catalog.rs"));
 
 pub(crate) fn cosigned_ready(venue: &str) -> bool {
     PRIVATE_STARTUP_VENUES.contains(&venue)

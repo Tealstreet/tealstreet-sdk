@@ -1,0 +1,4 @@
+{
+  "status": "excluded",
+  "reason": "Production metadata disables this variant; exact inverse account-mode/private-startup proof is not built."
+}
