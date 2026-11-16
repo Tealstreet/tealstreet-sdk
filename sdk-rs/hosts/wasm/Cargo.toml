@@ -30,7 +30,7 @@ hosted-join-proof = ["safe-cex-venues/hosted-join-proof"]
 bitunix = ["safe-cex-venues/bitunix", "text-ingress", "dispatch-signing", "hosted-signing"]
 # Paradex streams binary SBE; its JSON control messages use the stable text entry.
 text-ingress = []
-grvt = ["safe-cex-venues/grvt", "text-ingress", "dispatch-signing", "hosted-wallet"]
+grvt = ["safe-cex-venues/grvt", "text-ingress", "dispatch-signing", "hosted-wallet", "hosted-join-proof"]
 polymarket = ["safe-cex-venues/polymarket", "text-ingress", "safe-cex-engine/command-polymarket"]
 coinbase = ["safe-cex-venues/coinbase", "text-ingress", "dispatch-signing", "hosted-signing"]
 # The combined build isolates the startup subscription decoder.
@@ -40,7 +40,7 @@ apexomni = ["safe-cex-venues/apexomni", "text-ingress", "safe-cex-engine/command
 txflow = ["safe-cex-venues/txflow", "text-ingress", "dispatch-signing", "address-nonce", "hosted-wallet"]
 kraken = ["safe-cex-venues/kraken", "text-ingress", "sign-meta", "dispatch-signing", "hosted-signing"]
 asterdex = ["safe-cex-venues/asterdex", "text-ingress", "safe-cex-engine/command-asterdex", "dispatch-signing", "hosted-signing", "hosted-wallet", "address-nonce"]
-lighter = ["safe-cex-venues/lighter", "text-ingress", "dispatch-signing", "hosted-wallet"]
+lighter = ["safe-cex-venues/lighter", "text-ingress", "dispatch-signing", "hosted-wallet", "hosted-join-proof"]
 woo = ["safe-cex-venues/woo", "text-ingress", "dispatch-signing", "hosted-signing"]
 bitrue = ["safe-cex-venues/bitrue", "text-ingress", "dispatch-signing", "hosted-signing"]
 bitget = ["safe-cex-venues/bitget", "text-ingress", "dispatch-signing", "hosted-signing"]

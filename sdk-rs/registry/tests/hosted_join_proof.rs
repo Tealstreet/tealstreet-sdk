@@ -99,6 +99,11 @@ fn ethereum_device_challenge_uses_admission_domain() {
     prove("hyperliquid", Family::Ethereum);
 }
 #[test]
+fn grvt_device_challenge_proves_the_separate_ecdsa_scalar() {
+    prove("grvt", Family::Ethereum);
+}
+
+#[test]
 fn stark_device_challenge_uses_admission_domain() {
     prove("paradex", Family::Stark);
 }

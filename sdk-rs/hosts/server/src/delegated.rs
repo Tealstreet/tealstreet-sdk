@@ -467,6 +467,7 @@ pub(crate) mod tests {
             "bybitspot",
             "bybitinverse",
             "bybitdemo",
+            "hyrotrader",
             "binance",
             "binanceoptions",
             "okx",
@@ -475,13 +476,13 @@ pub(crate) mod tests {
         ] {
             assert!(enabled(venue), "{venue}");
         }
-        for venue in ["hyrotrader", "txflow", "bingxspot", "", "BYBIT", "unknown"] {
+        for venue in ["txflow", "bingxspot", "", "BYBIT", "unknown"] {
             assert!(!enabled(venue), "{venue}");
         }
     }
 
     #[test]
-    fn binanceoptions_hosted_mainnet_support_keeps_testnet_and_proof_gates_closed() {
+    fn binanceoptions_hosted_mainnet_support_keeps_testnet_closed() {
         assert!(enabled("binanceoptions"));
         assert_eq!(
             safe_cex_native::resolve::rest_base_url("binanceoptions", false),
@@ -493,7 +494,7 @@ pub(crate) mod tests {
                 "binanceoptions".into()
             ))
         );
-        assert!(!probe::cosigned_ready("binanceoptions"));
+        assert!(probe::cosigned_ready("binanceoptions"));
     }
 
     #[test]

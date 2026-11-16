@@ -176,9 +176,11 @@ async fn every_unhosted_venue_refuses_before_mutating_a_running_cosigned_account
                     );
                     assert_eq!(
                         refuse_unhosted(venue),
-                        Err(HYROTRADER_UNHOSTED.into()),
-                        "the origin lookup does not provision hosted engine endpoints"
+                        Ok(()),
+                        "mainnet now has the canonical hosted endpoint map"
                     );
+                    // Hyro mainnet is supported; its missing testnet remains the negative control.
+                    init.testnet = Some(true);
                 } else {
                     assert!(
                         safe_cex_native::resolve::rest_base_url(venue, false).is_err(),
@@ -186,11 +188,19 @@ async fn every_unhosted_venue_refuses_before_mutating_a_running_cosigned_account
                     );
                 }
                 init.exchange_name = venue.into();
+                if venue != "hyrotrader" {
+                    init.testnet = None;
+                }
+                let expected = if venue == "hyrotrader" {
+                    "hyrotrader cannot run on the Hosted server. Turn Hosted off to use this account."
+                } else {
+                    "DELEGATED is not enabled for this venue"
+                };
                 let result = registry
                     .obtain_delegated("A", &init, 8, None, Arc::new(|_| true), pair())
                     .await;
                 assert!(
-                    matches!(result, Err(ref e) if e == "DELEGATED is not enabled for this venue")
+                    matches!(result, Err(ref e) if e == expected)
                 );
                 assert!(account.handle.disposal_cause().is_none());
                 assert!(!registry.holds(&account, 8));

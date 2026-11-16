@@ -95,9 +95,10 @@ accounts, and the last account owner drop erases retained engine handles.
 Confirmed joins and upgrades publish `account-signing-mode` to each confirmed
 registration's label/instanceId. Refusals have attached=false and no actualMode.
 Socket handover and possession verification precede any transition. A verified
-resident public-key join uses the local key proof, not an unsigned startup read. Coinbase
-CDP remains explicitly proof-unavailable pending its COSIGNED JWT setup and
-venue-proof implementation; it never silently falls back to another signing mode.
+resident public-key join uses the local key proof, not an unsigned startup read.
+Coinbase COSIGNED proves its opaque CDP key through native JWT/private startup,
+with server-owned claims and a signature-only reply. DELEGATED CDP handover
+remains explicitly proof-unavailable; no fallback selects another signing mode.
 Legacy and typed full-write method admission both use this shared eligibility.
 
 DELEGATED uses `prepare_local_signer_for`, including wallet key-only/agent
@@ -125,11 +126,22 @@ DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
 DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
-Binance base/PM/inverse/spot, OKX base/demo and EEA mainnet/demo, Bitget base/USDC,
-Blofin, KuCoin, Phemex, BingX, MEXC and Crypto.com names have native private-startup HMAC proof coverage.
+Binance base/PM/inverse/spot/options, OKX base/demo and EEA mainnet/demo, Bitget base/USDC,
+Blofin, KuCoin Futures/Spot, Phemex, BingX, MEXC and Crypto.com names have native private-startup HMAC proof coverage.
+Exact HyroTrader challenge accounts reuse native Bybit-shaped private-startup
+HMAC reads on the server-owned canonical native origin. REST and derived public/
+private WebSocket endpoints come from that origin only, never init URLs or a
+Bybit fallback. Testnet has no native origin and remains refused before I/O.
+The same positive, different-key, replay, foreign-socket, consumed-response and
+resident-preservation controls cover this exact catalog name. Private socket
+fixtures also check the real HMAC and correlated handshake before snapshot reads.
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
 HMAC proof with wrong-key, replay and foreign-socket controls.
+KuCoin Spot uses its own production origin and native account/active-order reads,
+plus the signed private read-feed token request. Its proof fixtures verify request
+and passphrase MACs; public discovery cannot substitute for private proof. Testnet
+remains unavailable. Each new COSIGNED socket proves its own key before attachment.
 Exact WOO additionally uses its native v1/v3 private account reads and private
 socket HMAC authentication, with wrong-key, replay and foreign-socket controls.
 Exact Bitunix uses its existing native private-startup venue round trip and
@@ -156,6 +168,24 @@ Exact Hyperliquid and Hyperliquid Spot select this strategy from captured
 `hyperliquidSignerAddress`, network and main/vault scope. Their device family
 signs the closed admission statement with its existing opaque secp256k1 ref;
 missing facts refuse without unsigned-read fallback.
+Exact GRVT selects this strategy with the authenticated owner and the captured
+`grvtTradingAccountId` and `grvtSignerAddress` used by engine construction.
+Both fields are required before proof; API-key login cannot prove its separate
+ECDSA scalar. Before holding an existing DELEGATED actor, local admission also
+compares the captured public key with the actual installed resident key; stale
+init metadata cannot substitute for that binding. Local secp256k1 recovery verifies
+a fresh account/attempt-bound
+admission statement, never a venue transaction. This proves possession, not venue
+authorization: ordinary startup retains login and private-read validation.
+
+Exact Lighter and Lighter Robinhood select it after a routed, bounded registration
+read on the captured account/API-key slot. The projection includes the registered
+Schnorr public key and exact network. A slot queue prevents label-based parallel
+proofs. An existing actor's incarnation and immutable pin are captured before
+lookup; retirement or replacement invalidates that attempt. Final attachment
+compares the proved key with that pin or a fresh cold-construction registration
+read in both modes. DELEGATED also matches the actual provider before publication;
+rotation refuses without constructing an actor or changing a resident.
 Exact Backpack selects this strategy using its captured canonical base64
 Ed25519 API public key and authenticated owner; malformed keys refuse before
 signing, without falling back to private-startup reads. Other public-key venues
@@ -177,6 +207,12 @@ REST/login graphs and atomic contract dependencies. Only opaque OmniKey refs
 are installed. Exact `apexomni` COSIGNED admission proves API credentials through
 native account, account-balance and open-orders reads, with wrong-key, replay
 and foreign-socket controls; this never proves OmniKey/L2-seed possession.
+
+Exact `binanceoptions` mainnet proves possession through its existing signed
+EAPI margin-account, position and open-order startup reads. Public exchange-info,
+ticker and mark responses never establish possession. Tests cover wrong keys,
+replay, replies from other sockets, consumed responses and retired connections
+through the same native probe and Session fences; Options testnet stays refused.
 
 COSIGNED catalog accounting runs in `sdk-rs/harness/cosigned-catalog.test.mjs`.
 Each exact `remoteSigning.enabled` venue owns one JSON record under

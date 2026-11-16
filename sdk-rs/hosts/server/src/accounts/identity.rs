@@ -21,6 +21,35 @@ pub(super) fn hyperliquid_projection(
         .map_err(|_| "Invalid Hyperliquid identity".into())
 }
 
+/// Freeze the same public signer and trading account used by GRVT construction.
+/// A login credential or proof reply cannot substitute for this separate signer.
+/// Venue authorization remains the ordinary engine startup's responsibility.
+pub(super) fn grvt_projection(
+    user: &str,
+    init: &InitPayload,
+) -> Result<safe_cex_crypto::admission::identity::Projection, String> {
+    let invalid = || "Invalid account identity".to_owned();
+    if init.exchange_name != "grvt" {
+        return Err(invalid());
+    }
+    key_id(init)?;
+    let signer = safe_cex_crypto::ethereum::get_address(
+        init.grvt_signer_address.as_deref().ok_or_else(invalid)?,
+    )
+    .map_err(|_| invalid())?;
+    let account = init
+        .grvt_trading_account_id
+        .as_deref()
+        .ok_or_else(invalid)?;
+    let facts = serde_json::json!({
+        "venue": "grvt",
+        "network": if init.testnet == Some(true) { "testnet" } else { "mainnet" },
+        "credential": { "kind": "grvt", "tradingAccount": account, "signer": signer }
+    });
+    safe_cex_crypto::admission::identity::Projection::from_json(user, &facts.to_string())
+        .map_err(|_| invalid())
+}
+
 pub(super) fn backpack_projection(
     user: &str,
     init: &InitPayload,
@@ -99,4 +128,56 @@ pub(crate) fn digest(user: &str, init: &InitPayload) -> Result<Option<String>, S
 
 pub(super) fn registry_name(user: &str, init: &InitPayload) -> Result<String, String> {
     Ok(digest(user, init)?.unwrap_or_else(|| init.account_name.clone()))
+}
+
+// A slot queue is intentionally stricter than a registered-key identity: rotation
+// and alternate client labels cannot run overlapping proofs for the same slot.
+pub(super) fn lighter_queue(user: &str, init: &InitPayload) -> Result<[u8; 32], String> {
+    let (account, index) = lighter_indices(init)?;
+    if user.is_empty() {
+        return Err("Invalid account identity".into());
+    }
+    let mut bytes = b"tealstreet/proof-queue/lighter-slot/v1".to_vec();
+    for field in [
+        user,
+        init.exchange_name.as_str(),
+        if init.testnet == Some(true) {
+            "testnet"
+        } else {
+            "mainnet"
+        },
+        &account.to_string(),
+        &index.to_string(),
+    ] {
+        bytes.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(field.as_bytes());
+    }
+    Ok(safe_cex_crypto::sha256(&bytes))
+}
+
+pub(super) fn lighter_indices(init: &InitPayload) -> Result<(u64, u8), String> {
+    let invalid = || "Invalid account identity".to_owned();
+    if !matches!(init.exchange_name.as_str(), "lighter" | "lighter-robinhood") {
+        return Err(invalid());
+    }
+    let account = init.application_id.as_deref().ok_or_else(invalid)?;
+    let index = init.api_key_index.as_deref().ok_or_else(invalid)?;
+    if account.is_empty()
+        || account.len() > 20
+        || !account.bytes().all(|b| b.is_ascii_digit())
+        || index.is_empty()
+        || index.len() > 3
+        || !index.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(invalid());
+    }
+    let account = account.parse().map_err(|_| invalid())?;
+    let index = index.parse().map_err(|_| invalid())?;
+    let network = safe_cex_venues::lighter_registration::Network::from_options(
+        init.exchange_name == "lighter-robinhood",
+        init.testnet == Some(true),
+    );
+    safe_cex_venues::lighter_registration::request(network, account, index)
+        .map_err(|_| invalid())?;
+    Ok((account, index))
 }

@@ -4,17 +4,21 @@ import test from 'node:test';
 import { EngineHost } from './host.mjs';
 
 const manifest = readFileSync(new URL('../Cargo.toml', import.meta.url), 'utf8');
-for (const family of ['asterdex', 'grvt', 'lighter', 'orderly', 'paradex', 'polymarket', 'txflow']) {
+for (const family of ['asterdex', 'orderly', 'paradex', 'polymarket', 'txflow']) {
   test(`${family} keeps admission dispatch opt-in until its own activation slice`, () => {
     const closure = manifest.split('\n').find(line => line.startsWith(`${family} = [`));
     assert(closure);
     assert(!closure.includes('"hosted-join-proof"'));
   });
 }
-test('Backpack carries the first activation candidate without enabling other family closures', () => {
-  const closure = manifest.split('\n').find(line => line.startsWith('backpack = ['));
-  assert(closure.includes('"hosted-join-proof"'));
-});
+// SDK #3576 and #3578 activate Lighter and GRVT alongside Backpack.
+for (const family of ['backpack', 'grvt', 'lighter']) {
+  test(`${family} carries admission dispatch in its standalone family`, () => {
+    const closure = manifest.split('\n').find(line => line.startsWith(`${family} = [`));
+    assert(closure.includes('"hosted-join-proof"'));
+  });
+}
+
 test('Hyperliquid and spot share the activated device admission dispatch', () => {
   const closure = manifest.split('\n').find(line => line.startsWith('hyperliquid = ['));
   assert(closure.includes('"hosted-join-proof"'));
