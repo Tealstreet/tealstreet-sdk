@@ -34,6 +34,7 @@ pub(crate) struct Seen {
     pub(crate) mexc_socket_auths: usize,
     pub(crate) bitunix_socket_auths: usize,
     pub(crate) cryptocom_socket_auths: usize,
+    pub(crate) bitget_inverse_uta: bool,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -56,7 +57,7 @@ fn family(venue: &str) -> &str {
         "bybitinverse" | "bybitdemo" | "bybitspot" | "hyrotrader" => "bybit",
         "binance" | "binancepm" | "binanceinverse" | "binancespot" | "binanceoptions" => "binance",
         "okx" | "okxdemo" | "okxeu" | "okxeudemo" => "okx",
-        "bitget" | "bitgetusdc" => "bitget",
+        "bitget" | "bitgetusdc" | "bitgetinverse" => "bitget",
         "kucoinspot" => "kucoin",
         "blofin" | "kucoin" | "woo" | "bingx" | "mexc" | "asterdex" => venue,
         _ => panic!("no private-read fixture for {venue}"),
@@ -160,6 +161,10 @@ fn hyrotrader_admission_socket_checks_key_signature_and_expiry() {
 }
 
 pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
+    if venue == "bitgetinverse" {
+        bitgetinverse::assert_startup(seen);
+        return;
+    }
     if venue == "binanceoptions" {
         binanceoptions::assert_startup(seen);
         return;
@@ -434,6 +439,9 @@ impl VenueIo {
         if self.venue == "asterdex" {
             return asterdex::response(self, r);
         }
+        if self.venue == "bitgetinverse" {
+            return bitgetinverse::response(self, r);
+        }
         if self.venue == "binanceoptions" {
             return binanceoptions::response(self, r);
         }
@@ -557,6 +565,9 @@ impl Transport for VenueIo {
         }
         assert_ne!(self.venue, "binanceoptions", "Options startup is REST-only");
         self.seen.lock().unwrap().sockets.push(url.clone());
+        if self.venue == "bitgetinverse" {
+            return bitgetinverse::connect(self, socket, &url, events);
+        }
         if self.venue == "mexc" {
             return mexc::connect(self, socket, &url, events);
         }
@@ -1714,3 +1725,6 @@ fn generated_readiness_matches_every_per_venue_record() {
 
 #[path = "binanceoptions_probe_tests.rs"]
 mod binanceoptions;
+
+#[path = "bitgetinverse_probe_tests.rs"]
+mod bitgetinverse;
