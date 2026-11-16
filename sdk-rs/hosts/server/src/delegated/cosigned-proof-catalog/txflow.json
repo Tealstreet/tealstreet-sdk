@@ -1,0 +1,4 @@
+{
+  "status": "excluded",
+  "reason": "Production metadata and beta/agent gates refuse this venue; native origin, agent signing and bound private-startup proof are not built."
+}

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, lstatSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { relative, isAbsolute, sep } from 'node:path';
 import test from 'node:test';
 import { venueFamily } from '../hosts/wasm/js/venues.mjs';
 
@@ -12,12 +13,15 @@ const manifest = fileURLToPath(new URL('../registry/Cargo.toml', import.meta.url
 const features = JSON.parse(execFileSync('python3', ['-c',
   'import json,sys,tomllib; print(json.dumps(tomllib.load(open(sys.argv[1], "rb"))["features"]))',
   manifest], { encoding: 'utf8' }));
-const catalogSource = read('../hosts/server/src/delegated/probe.rs');
-const exclusionRecords = JSON.parse(read('../hosts/server/src/delegated/cosigned-proof-exclusions.json')).exclusions;
+const server = new URL('../hosts/server/', import.meta.url);
+const directory = new URL('src/delegated/cosigned-proof-catalog/', server);
+const catalogFiles = readdirSync(directory).map(name => {
+  assert(lstatSync(new URL(name, directory)).isFile(), `${name}: expected a regular record`);
+  return [name, readFileSync(new URL(name, directory), 'utf8')];
+});
 
-// Census/client refusesHostedInit gates, not a new runtime policy. Cover ALL
+// Census of the Hosted helper and its remaining live-test hold. Cover ALL
 // declarations below, so a blocked/disabled venue cannot disappear from review.
-const noServerOrigin = new Set(['hyrotrader', 'binanceoptions']);
 const awaitingLiveTest = new Set(['paradex']);
 
 function exactNames(names) {
@@ -30,14 +34,12 @@ function exactNames(names) {
   return new Set(names);
 }
 
-// Preserve offsets while hiding comments and string contents from declaration lookup.
+// Hide comments and string contents before checking real test declarations.
 function rustSource(source) {
-  const text = source.split('');
   const code = source.split('');
-  const hide = (from, to, comment) => {
+  const hide = (from, to) => {
     for (let i = from; i < to; i++) {
       code[i] = ' ';
-      if (comment) text[i] = ' ';
     }
   };
   for (let i = 0; i < source.length;) {
@@ -45,7 +47,7 @@ function rustSource(source) {
     if (source.startsWith('//', i)) {
       i = source.indexOf('\n', i);
       if (i < 0) i = source.length;
-      hide(start, i, true);
+      hide(start, i);
     } else if (source.startsWith('/*', i)) {
       let depth = 1;
       i += 2;
@@ -55,7 +57,7 @@ function rustSource(source) {
         else i++;
       }
       assert.equal(depth, 0, 'unterminated Rust comment');
-      hide(start, i, true);
+      hide(start, i);
     } else {
       const raw = /^r(#{0,255})"/.exec(source.slice(i));
       if (raw) {
@@ -63,32 +65,52 @@ function rustSource(source) {
         i = source.indexOf(end, i + raw[0].length);
         assert(i >= 0, 'unterminated Rust raw string');
         i += end.length;
-        hide(start, i, false);
+        hide(start, i);
       } else if (source[i] === '"') {
         i++;
         while (i < source.length && source[i] !== '"') {
           i += source[i] === '\\' ? 2 : 1;
         }
         assert(i < source.length, 'unterminated Rust string');
-        hide(start, ++i, false);
+        hide(start, ++i);
       } else {
         const character = /^'(?:\\(?:u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^'\\\n])'/u.exec(source.slice(i));
-        if (character) { i += character[0].length; hide(start, i, false); }
+        if (character) { i += character[0].length; hide(start, i); }
         else i++;
       }
     }
   }
-  return { text: text.join(''), code: code.join('') };
+  return code.join('');
 }
 
-function catalog(source) {
-  const { text, code } = rustSource(source);
-  const definitions = [...code.matchAll(/\bconst\s+PRIVATE_STARTUP_VENUES\b/g)];
-  assert.equal(definitions.length, 1, 'expected exactly one live PRIVATE_STARTUP_VENUES');
-  const literal = /^const\s+PRIVATE_STARTUP_VENUES\s*:\s*&\[\s*&str\s*\]\s*=\s*&\[([\s\S]*?)\]\s*;/.exec(text.slice(definitions[0].index));
-  assert(literal, 'expected a literal PRIVATE_STARTUP_VENUES');
-  const body = literal[1].trim().replace(/,\s*$/, '');
-  return exactNames(JSON.parse(`[${body}]`));
+function catalog(files) {
+  const ready = new Set(), excluded = [], records = new Map();
+  for (const [file, raw] of files) {
+    assert(file.endsWith('.json'), 'expected a per-venue JSON file');
+    const venue = file.slice(0, -5);
+    exactNames([venue]);
+    assert(!records.has(venue), `${venue}: duplicate exact venue`);
+    const entry = JSON.parse(raw);
+    assert(entry && !Array.isArray(entry) && typeof entry === 'object', 'expected a closed record');
+    const keys = [...raw.matchAll(/"(?:\\.|[^"\\])*"/g)]
+      .filter(match => raw.slice(match.index + match[0].length).trimStart().startsWith(':'))
+      .map(match => JSON.parse(match[0]));
+    assert.equal(new Set(keys).size, keys.length, 'duplicate record field');
+    if (entry.status === 'ready') {
+      assert.deepEqual(Object.keys(entry).sort(), ['probeTests', 'sessionTests', 'status']);
+      for (const field of ['probeTests', 'sessionTests']) {
+        assert.equal(typeof entry[field], 'string', `missing ${field}`);
+        assert.match(entry[field], /^src\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.rs$/);
+      }
+      ready.add(venue);
+    } else {
+      assert.equal(entry.status, 'excluded', 'unknown proof status');
+      assert.deepEqual(Object.keys(entry).sort(), ['reason', 'status']);
+      excluded.push({ venue, reason: entry.reason });
+    }
+    records.set(venue, entry);
+  }
+  return { ready, excluded: exclusions(excluded), records };
 }
 
 function exclusions(records) {
@@ -123,9 +145,8 @@ function enabledFeatures(root, seen = new Set()) {
 
 const declared = exactNames(Object.entries(rules)
   .filter(([, rule]) => rule.remoteSigning?.enabled === true).map(([name]) => name));
-const ready = catalog(catalogSource);
-const excluded = exclusions(exclusionRecords);
-const helperEligible = new Set([...declared].filter(name => !noServerOrigin.has(name) && !awaitingLiveTest.has(name)));
+const { ready, excluded, records } = catalog(catalogFiles);
+const helperEligible = new Set([...declared].filter(name => !awaitingLiveTest.has(name)));
 // This generated snapshot is checked by rust:metadata:check. It only reconciles
 // the production cohort; the stronger all-declarations guard does not filter on it.
 const productionOffered = new Set([...helperEligible].filter(name => {
@@ -137,12 +158,18 @@ test('every declared remoteSigning venue has an exact proof or a reason', () => 
   accounted(declared, ready, excluded);
 });
 
-test('production cohort reproduces the 41 / 38 / 33 census without hiding disabled venues', () => {
+test('production cohort reproduces the 41 / 40 / 33 census without hiding disabled venues', () => {
   assert.equal(declared.size, 41);
-  assert.equal(helperEligible.size, 38);
+  // NX #9737 removed the origin gate after SDK #3567/#3570 supplied origins.
+  // Retain all seven disabled metadata entries in the declared accounting.
+  assert.equal(helperEligible.size, 40);
   assert.equal(productionOffered.size, 33);
+  for (const venue of ['hyrotrader', 'binanceoptions']) {
+    assert(helperEligible.has(venue), `${venue}: live origin must remain in review`);
+    assert(!productionOffered.has(venue), `${venue}: disabled metadata must remain disabled`);
+  }
   assert.deepEqual([...helperEligible].filter(name => !productionOffered.has(name)).sort(),
-    ['bingxspot', 'bitgetinverse', 'bitrue', 'lighter-robinhood', 'txflow']);
+    ['binanceoptions', 'bingxspot', 'bitgetinverse', 'bitrue', 'hyrotrader', 'lighter-robinhood', 'txflow']);
   for (const name of ready) assert(declared.has(name), `${name}: catalog has no remoteSigning declaration`);
   accounted(productionOffered, ready, new Map([...excluded].filter(([name]) => productionOffered.has(name))));
 });
@@ -187,28 +214,52 @@ test('empty reasons, duplicate exclusions, stale exclusions and overlapping read
 });
 
 test('catalog parsing rejects ambiguous, duplicate, unknown or executable entries', () => {
-  const source = 'const PRIVATE_STARTUP_VENUES: &[&str] = &["bybit", // "woo" is not ready\n];';
-  assert.deepEqual([...catalog(source)], ['bybit']);
-  assert.throws(() => catalog(source + source), /exactly one/);
-  assert.throws(() => catalog(source.replace('"bybit",', '"bybit", "bybit",')), /duplicate exact venue/);
-  assert.throws(() => catalog(source.replace('"bybit"', '"Bybit"')));
-  assert.throws(() => catalog(source.replace('"bybit"', 'include!("other")')));
+  const source = JSON.stringify({ status: 'ready', probeTests: 'src/delegated.rs', sessionTests: 'src/session.rs' });
+  assert.deepEqual([...catalog([['bybit.json', source]]).ready], ['bybit']);
+  assert.throws(() => catalog([['bybit.json', source], ['bybit.json', source]]), /duplicate exact venue/);
+  assert.throws(() => catalog([['Bybit.json', source]]));
+  assert.throws(() => catalog([['bybit.json', 'include!("other")']]));
+  assert.throws(() => catalog([['bybit.json', '{"status":"ready","status":"excluded","reason":"ambiguous"}']]), /duplicate record field/);
+  assert.throws(() => catalog([['bybit.json', JSON.stringify({ status: 'ready', reason: 'still excluded' })]]));
+  assert.throws(() => catalog([['bybit.json', JSON.stringify({ status: 'unknown' })]]));
+  assert.throws(() => catalog([['bybit.json', source.replace('src/delegated.rs', '../outside.rs')]]));
 });
 
 test('commented catalog cannot shadow a live alias or a second live definition', () => {
-  const literal = 'const PRIVATE_STARTUP_VENUES: &[&str] = &["bybit", "woo"];';
-  const alias = 'pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = ACTIVE;';
+  const literal = JSON.stringify({ status: 'excluded', reason: 'no proof' });
   for (const commented of [`// ${literal}\n`, `/* ${literal} */`, `/* outer /* ${literal} */ end */`]) {
-    assert.throws(() => catalog(`const ACTIVE: &[&str] = &["bybit"];\n${commented}\n${alias}`));
-    assert.deepEqual([...catalog(`${commented}\n${literal}`)], ['bybit', 'woo']);
+    assert.throws(() => catalog([['bybit.json', `${commented}${literal}`]]));
   }
-  assert.throws(() => catalog(`${literal}\n${alias}`), /exactly one/);
-  assert.throws(() => catalog(`const NOTE: &str = r#"${literal}"#;\n${alias}`));
-  assert.deepEqual([...catalog(`const NOTE: &str = r#"${literal}"#;\n${literal}`)], ['bybit', 'woo']);
+  assert.throws(() => catalog([['bybit.json', `${literal}\n${literal}`]]));
+  assert.throws(() => catalog([['bybit.json', `const ACTIVE = ${literal};`]]));
 });
-
 
 test('each declared venue has its own independent catalog record', () => {
   const names = readdirSync(new URL('../hosts/server/src/delegated/cosigned-proof-catalog/', import.meta.url));
   assert.deepEqual(names.sort(), [...declared].map(name => `${name}.json`).sort());
+});
+
+
+test('ready records name existing Rust proof suites within the server crate', () => {
+  const root = realpathSync(server);
+  for (const [venue, entry] of records) {
+    if (entry.status !== 'ready') continue;
+    for (const field of ['probeTests', 'sessionTests']) {
+      const file = new URL(entry[field], server);
+      const within = relative(root, realpathSync(file));
+      assert(within && !isAbsolute(within) && !within.split(sep).includes('..'), `${venue}: escaped proof path`);
+      assert(lstatSync(file).isFile(), `${venue}: missing proof suite`);
+      assert.match(rustSource(readFileSync(file, 'utf8')), /#\[\s*(?:tokio::)?test\b/, `${venue}: no test declarations`);
+    }
+  }
+});
+
+test('independent venue promotions compose without editing a shared catalog', () => {
+  const changed = catalogFiles.map(([file, text]) => [file, ['cryptocom.json', 'kucoinspot.json'].includes(file)
+    ? JSON.stringify({ status: 'ready', probeTests: 'src/delegated.rs', sessionTests: 'src/session/tests/cosigned_venues.rs' }) : text]);
+  const combined = catalog(changed);
+  accounted(declared, combined.ready, combined.excluded);
+  assert.equal(combined.ready.size, ready.size + 2);
+  assert(combined.ready.has('cryptocom') && combined.ready.has('kucoinspot'));
+  assert.equal(combined.excluded.size, excluded.size - 2);
 });

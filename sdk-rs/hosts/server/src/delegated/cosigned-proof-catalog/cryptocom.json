@@ -1,0 +1,4 @@
+{
+  "status": "excluded",
+  "reason": "No native Hosted REST origin; structured RPC nonce/params canonicalization and private-startup proof are not built."
+}

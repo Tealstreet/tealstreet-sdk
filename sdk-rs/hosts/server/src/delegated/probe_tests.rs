@@ -11,28 +11,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
 
-const VENUES: &[&str] = &[
-    "bybitinverse",
-    "bybitdemo",
-    "bybitspot",
-    "binance",
-    "binancepm",
-    "binanceinverse",
-    "binancespot",
-    "okx",
-    "okxdemo",
-    "okxeu",
-    "okxeudemo",
-    "bitget",
-    "bitgetusdc",
-    "blofin",
-    "kucoin",
-    "phemex",
-    "woo",
-    "bingx",
-    "mexc",
-    "bitunix",
-];
+const VENUES: &[&str] = SHARED_PROBE_VENUES;
 const KEY: &str = "synthetic-key";
 const SECRET: &str = "synthetic-material";
 const PASS: &str = "synthetic-passphrase";
@@ -1074,10 +1053,13 @@ fn admission_enabled_venues_require_an_offline_suite() {
         "../../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
     ))
     .unwrap();
-    assert_eq!(PRIVATE_STARTUP_VENUES.len(), VENUES.len() + 1);
+    assert_eq!(
+        PRIVATE_STARTUP_VENUES.len(),
+        VENUES.len() + STANDALONE_PROBE_VENUES.len()
+    );
     for &venue in PRIVATE_STARTUP_VENUES {
         assert!(
-            venue == "bybit" || VENUES.contains(&venue),
+            STANDALONE_PROBE_VENUES.contains(&venue) || VENUES.contains(&venue),
             "{venue}: missing offline suite"
         );
     }
@@ -1270,3 +1252,25 @@ mod mexc;
 mod okxeudemo;
 #[path = "woo_probe_tests.rs"]
 mod woo;
+
+#[test]
+fn generated_readiness_matches_every_per_venue_record() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/delegated/cosigned-proof-catalog");
+    let mut count = 0;
+    for entry in std::fs::read_dir(root).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().into_string().unwrap();
+        let venue = name.strip_suffix(".json").unwrap();
+        let record: Value =
+            serde_json::from_str(&std::fs::read_to_string(entry.path()).unwrap()).unwrap();
+        assert_eq!(
+            cosigned_ready(venue),
+            record["status"] == "ready",
+            "{venue}"
+        );
+        count += 1;
+    }
+    assert_eq!(count, 41);
+    assert!(!cosigned_ready("future-unproved-venue"));
+}
