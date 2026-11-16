@@ -607,7 +607,9 @@ async fn cosigned_unready_venues_fail_closed_with_a_typed_refusal() {
     let observed = io.observed.clone();
     let registry = crate::accounts::testing::e2e_registry("alice", io);
     for (venue, rule) in rules["venues"].as_object().unwrap() {
-        if rule["remoteSigning"]["enabled"] != true || crate::delegated::probe::cosigned_ready(venue) {
+        if rule["remoteSigning"]["enabled"] != true
+            || crate::delegated::probe::cosigned_ready(venue)
+        {
             continue;
         }
         let (mut session, mut sent) = user_session(registry.clone(), "alice");
