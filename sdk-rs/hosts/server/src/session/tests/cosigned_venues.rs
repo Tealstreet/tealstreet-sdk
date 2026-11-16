@@ -634,7 +634,10 @@ async fn cosigned_bitgetinverse_missing_signature_or_wrong_passphrase_cannot_att
             tokio::time::advance(budget + Duration::from_millis(1)).await;
             let completion = done.recv().await.unwrap();
             tokio::time::resume();
-            while sent.try_recv().is_ok() {}
+            while let Ok(text) = sent.try_recv() {
+                let frame: Value = serde_json::from_str(&text).unwrap();
+                assert_ne!(frame["d"]["op"], "frame", "no unverified state delivery");
+            }
             session.verification_completed(completion).await.unwrap();
             assert!(session.pending_verifications.is_empty());
             assert!(!link.is_available());
