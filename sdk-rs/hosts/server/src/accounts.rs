@@ -1756,6 +1756,7 @@ impl Registry {
 
     async fn registered_key_for_build(
         &self,
+        user: &str,
         init: &InitPayload,
         plan: &RoutingPlan,
         token: Option<(String, u64)>,
@@ -1780,6 +1781,7 @@ impl Registry {
         proxy_token.set(token);
         let transport = NetworkTransport::with_routing(plan.clone(), proxy_token.provider())
             .with_venue(&init.exchange_name)
+            .with_report_user(safe_cex_native::report::ReportUser::new(user))
             .with_io_guard(allowed.clone());
         #[cfg(test)]
         let transport = crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
@@ -1835,7 +1837,7 @@ impl Registry {
             };
             if authority.proved_registration.is_some() {
                 let public = self
-                    .registered_key_for_build(init, &plan, token.clone(), authority)
+                    .registered_key_for_build(user, init, &plan, token.clone(), authority)
                     .await?;
                 let reference = resident
                     .identities()
@@ -1863,7 +1865,7 @@ impl Registry {
             let remote = match remote {
                 Some(remote) if Family::for_venue(&venue) == Some(Family::Schnorr) => {
                     let public = self
-                        .registered_key_for_build(init, &plan, token.clone(), authority)
+                        .registered_key_for_build(user, init, &plan, token.clone(), authority)
                         .await?;
                     Some(
                         remote

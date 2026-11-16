@@ -42,6 +42,7 @@ pub(super) async fn resolve(
     proxy_token.set(token);
     let transport = NetworkTransport::with_routing(plan, proxy_token.provider())
         .with_venue(&init.exchange_name)
+        .with_report_user(safe_cex_native::report::ReportUser::new(user))
         .with_io_guard(allowed.clone());
     #[cfg(test)]
     let transport = crate::delegated_e2e_io::Io::new(transport, _registry.e2e_venue.clone());
