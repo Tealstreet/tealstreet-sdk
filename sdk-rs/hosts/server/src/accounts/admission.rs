@@ -355,6 +355,7 @@ impl Registry {
             token_provider.set(token);
             let transport = NetworkTransport::with_routing(plan.clone(), token_provider.provider())
                 .with_venue(&init.exchange_name)
+                .with_report_user(safe_cex_native::report::ReportUser::new(&permit.user))
                 .with_io_guard(allowed.clone());
             #[cfg(test)]
             let transport = crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
@@ -515,6 +516,8 @@ impl Registry {
             let token_provider = ProxyToken::new();
             token_provider.set(token);
             config.log_label = None;
+            let report_user = safe_cex_native::report::ReportUser::new(user);
+            config.report_user = Some(report_user.clone());
             config.signing_mode = Some(mode);
             let (mut result, receive) = tokio::sync::oneshot::channel();
             let lease = permit.lease.clone();
@@ -547,6 +550,7 @@ impl Registry {
                     }
                     let transport = NetworkTransport::with_routing(plan, token_provider.provider())
                         .with_venue(&venue)
+                        .with_report_user(report_user)
                         .with_io_guard(allowed.clone());
                     #[cfg(test)]
                     let transport = crate::delegated_e2e_io::Io::new(transport, e2e_venue);

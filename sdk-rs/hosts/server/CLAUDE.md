@@ -5,6 +5,13 @@ changing server behavior. Validate scoped Rust changes with
 `cargo test -p safe-cex-exchange-server` and
 `cargo clippy -p safe-cex-exchange-server --all-targets` from `sdk-rs/`.
 
+## Sentry owner identity
+
+The native Sentry allowlist and captured authentication-subject contract live in
+`DESIGN.md` under native error capture. Diagnostic ownership is separate from
+journal labels and never supplies account or IO authority. Only the trusted
+report capture supplies identity; event extras and SDK scopes are untrusted.
+
 ## Router lease-fence diagnostics
 
 Router lease fences snapshot `Running::jobs()` before disposal. The journal
