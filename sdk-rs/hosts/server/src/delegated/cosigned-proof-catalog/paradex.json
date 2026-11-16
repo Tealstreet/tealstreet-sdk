@@ -1,0 +1,5 @@
+{
+  "status": "ready",
+  "probeTests": "src/session/tests/paradex_local_proof.rs",
+  "sessionTests": "src/session/tests/paradex_local_proof.rs"
+}
