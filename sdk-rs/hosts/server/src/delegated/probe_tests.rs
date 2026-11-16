@@ -109,6 +109,17 @@ fn admission_binance_spot_subscription_checks_valid_and_invalid_hmac() {
 }
 
 pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
+    if venue == "apexomni" {
+        for route in ["account", "account-balance", "open-orders"] {
+            assert!(
+                seen.urls
+                    .iter()
+                    .any(|url| url == &format!("https://omni.apex.exchange/api/v3/{route}")),
+                "ApeX proof must authenticate its native {route} read"
+            );
+        }
+        return;
+    }
     if venue == "mexc" {
         mexc::assert_startup(seen);
         return;
@@ -771,6 +782,36 @@ enum DeviceAnswer {
     DifferentKey,
     Replay,
 }
+// Decode only read/login batches for replay bookkeeping. The actual device
+// always signs the original closed descriptor and native bytes unchanged.
+pub(crate) fn apexomni_text(descriptor: &str) -> String {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ReadPart {
+        bytes: Vec<u8>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ReadBatch {
+        contracts: Vec<Vec<u8>>,
+        payload: Vec<ReadPart>,
+    }
+    let batch: ReadBatch = serde_json::from_str(descriptor).unwrap();
+    assert!(
+        batch.contracts.is_empty(),
+        "join proof never signs order contracts"
+    );
+    assert!(!batch.payload.is_empty());
+    String::from_utf8(
+        batch
+            .payload
+            .into_iter()
+            .flat_map(|part| part.bytes)
+            .collect(),
+    )
+    .unwrap()
+}
+
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
@@ -784,6 +825,11 @@ pub(crate) fn operation(venue: &str, canonical: &str) -> String {
             .unwrap()
             .trim_start_matches(|c: char| c.is_ascii_digit())
             .into();
+    }
+    if venue == "apexomni" {
+        return apexomni_text(canonical)
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .to_owned();
     }
     if venue == "cryptocom" {
         // Startup params are empty; the first digit begins the attempt-local nonce/id.
@@ -894,6 +940,9 @@ async fn remote(
                     || venue == "binancespot" && text.starts_with("apiKey=")
                     || venue == "woo" && text.starts_with('|')
                     || venue == "kraken" && kraken::socket_preimage(text)
+                    || venue == "apexomni"
+                        && apexomni_text(text).trim_start_matches(|c: char| c.is_ascii_digit())
+                            == "GET/ws/accounts"
                     || venue == "cryptocom" && text.starts_with("public/auth")
             });
             let canonical = request["wsAuth"]["toSign"].as_str().unwrap();
@@ -960,8 +1009,11 @@ async fn admission_hmac_negative_suite_uses_the_shared_probe_for_both_modes() {
                     DeviceAnswer::DifferentKey,
                     DeviceAnswer::Replay,
                 ] {
-                    if venue == "phemex" && matches!(answer, DeviceAnswer::Replay) {
-                        // Phemex signs whole-second expiry; old-attempt bytes must really differ.
+                    if matches!(venue, "phemex" | "apexomni")
+                        && matches!(answer, DeviceAnswer::Replay)
+                    {
+                        // Phemex expiry and ApeX's signature-retry clock use whole seconds.
+                        // Cross a real boundary; identical signing bytes are not stale proof.
                         tokio::time::sleep(Duration::from_millis(1100)).await;
                     }
                     let (prepared, link, task) = remote(venue, answer, prior.clone()).await;
@@ -1314,6 +1366,36 @@ mod woo;
 
 #[path = "kraken_probe_tests.rs"]
 pub(crate) mod kraken;
+
+#[test]
+fn apexomni_replay_normalization_preserves_native_route_and_scope() {
+    let descriptor =
+        |text: &str| json!({"contracts":[],"payload":[{"bytes":text.as_bytes()}]}).to_string();
+    for target in [
+        "GET/api/v3/account",
+        "GET/api/v3/account-balance",
+        "GET/api/v3/open-orders",
+        "GET/api/v3/account?scope=USDT",
+        "GET/ws/accounts",
+    ] {
+        for stamp in ["1700000000123", "1700000002000"] {
+            let text = format!("{stamp}{target}");
+            let wire = descriptor(&text);
+            assert_eq!(apexomni_text(&wire), text);
+            assert_eq!(operation("apexomni", &wire), target);
+        }
+    }
+    assert_ne!(
+        operation(
+            "apexomni",
+            &descriptor("1700000000123GET/api/v3/account?scope=USDT")
+        ),
+        operation(
+            "apexomni",
+            &descriptor("1700000000123GET/api/v3/account?scope=USDC")
+        )
+    );
+}
 
 #[test]
 fn generated_readiness_matches_every_per_venue_record() {

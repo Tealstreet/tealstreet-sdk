@@ -1,7 +1,8 @@
 //! Admission through the production Session path, independent of DELEGATED rollout.
 use super::*;
-use crate::delegated::probe::venue_tests::{Seen, assert_variant_startup, operation};
-use crate::delegated::probe::venue_tests::{kraken, signing_material};
+use crate::delegated::probe::venue_tests::{
+    Seen, apexomni_text, assert_variant_startup, kraken, operation, signing_material,
+};
 use crate::delegated_e2e_io::MockVenue;
 use std::time::Duration;
 
@@ -85,6 +86,9 @@ impl Device {
             || venue == "binancespot" && preimage.starts_with("apiKey=")
             || venue == "phemex" && !preimage.starts_with('/')
             || venue == "woo" && preimage.starts_with('|')
+            || venue == "apexomni"
+                && apexomni_text(preimage).trim_start_matches(|c: char| c.is_ascii_digit())
+                    == "GET/ws/accounts"
             || venue == "cryptocom" && preimage.starts_with("public/auth");
         let socket_auth = socket_auth || venue == "kraken" && kraken::socket_preimage(preimage);
         let use_other_key = self.other_key || !socket_auth && matches!(mode, Answer::OtherKey);
@@ -504,8 +508,9 @@ async fn venue_case(venue: &'static str) {
     }
     let original_socket = provider.socket();
     for mode in [Answer::OtherKey, Answer::Replay] {
-        if venue == "phemex" && matches!(mode, Answer::Replay) {
-            // Phemex signs whole-second expiries; cross a real stamp boundary before replay.
+        if matches!(venue, "phemex" | "apexomni") && matches!(mode, Answer::Replay) {
+            // Phemex expiry and ApeX's signature-retry clock use whole seconds.
+            // Cross a real boundary before presenting the old signature.
             tokio::time::sleep(Duration::from_millis(1100)).await;
         }
         let before = seen.lock().unwrap().refused;
@@ -533,6 +538,15 @@ async fn venue_case(venue: &'static str) {
                     && f["d"]["instanceId"] == "proof-registration")
         );
         assert!(!frames.iter().any(|f| f["d"]["op"] == "frame"));
+        if venue == "apexomni" {
+            assert!(
+                frames
+                    .iter()
+                    .any(|f| f["d"]["data"][1]["kind"] == "unverified"
+                        && f["d"]["data"][1]["initRefused"] == true
+                        && f["d"]["data"][1]["transient"] == false)
+            );
+        }
         candidate.close();
     }
     assert!(device.replayed > 0);
@@ -614,7 +628,9 @@ async fn cosigned_unready_venues_fail_closed_with_a_typed_refusal() {
     let observed = io.observed.clone();
     let registry = crate::accounts::testing::e2e_registry("alice", io);
     for (venue, rule) in rules["venues"].as_object().unwrap() {
-        if rule["remoteSigning"]["enabled"] != true || READY.contains(&venue.as_str()) {
+        if rule["remoteSigning"]["enabled"] != true
+            || crate::delegated::probe::cosigned_ready(venue)
+        {
             continue;
         }
         let (mut session, mut sent) = user_session(registry.clone(), "alice");
@@ -807,6 +823,16 @@ async fn cosigned_mexc_requires_connection_proof() {
 #[tokio::test]
 async fn cosigned_bitunix_requires_connection_proof() {
     venue_case("bitunix").await;
+}
+
+#[tokio::test]
+async fn cosigned_apexomni_requires_connection_proof() {
+    venue_case("apexomni").await;
+}
+
+#[tokio::test]
+async fn cosigned_apexomni_login_switch_during_signing_await_is_isolated() {
+    login_switch_case("apexomni").await;
 }
 
 #[tokio::test]
