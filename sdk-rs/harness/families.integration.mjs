@@ -42,9 +42,9 @@ for (const family of selectedFamilies) {
     }
     const engine = await import(new URL(`web/${family}/safe_cex_wasm.js`, pkg));
     await engine.default({ module_or_path: readFileSync(new URL(`web/${family}/safe_cex_wasm_bg.wasm`, pkg)) });
-    // Only the first activation candidate carries the device codec by default.
+    // Prepared families carry the codec; their Hosted offering gates stay separate.
     assert.equal(typeof engine.WasmEngine.prototype.prepareJoinProof,
-      family === 'backpack' ? 'function' : 'undefined', `${family}: admission dispatch must stay opt-in`);
+      ['backpack', 'paradex'].includes(family) ? 'function' : 'undefined', `${family}: only prepared families carry admission dispatch`);
     if (family === 'hyperliquid') {
       await checkHyperliquidLocalSigning(engine.WasmEngine, false);
       await checkHyperliquidLocalSigning(engine.WasmEngine, true);
