@@ -15,6 +15,8 @@ const READY: &[&str] = &[
     "binancespot",
     "okx",
     "okxdemo",
+    "okxeu",
+    "okxeudemo",
     "bitget",
     "bitgetusdc",
     "blofin",
@@ -22,6 +24,7 @@ const READY: &[&str] = &[
     "phemex",
     "woo",
     "bingx",
+    "mexc",
     "bitunix",
     "cryptocom",
 ];
@@ -84,6 +87,8 @@ enum Answer {
     Correct,
     OtherKey,
     Replay,
+    WrongPassphrase,
+    MissingSignature,
 }
 
 #[derive(Default)]
@@ -147,7 +152,11 @@ impl Device {
                 fresh
             }
         };
-        let response = json!({"id":request["id"],"wsAuthSignature":signature});
+        let response = if matches!(mode, Answer::MissingSignature) {
+            json!({"id":request["id"]})
+        } else {
+            json!({"id":request["id"],"wsAuthSignature":signature})
+        };
         let link = session
             .pending_verifications
             .get("acct")
@@ -200,6 +209,9 @@ async fn proof(
 ) {
     let mut done = session.take_verified();
     let mut init = payload(venue);
+    if matches!(answer, Answer::WrongPassphrase) {
+        init.passphrase = Some("synthetic-wrong-passphrase".into());
+    }
     if device.other_key {
         init.key = "synthetic-other-key".into();
     }
@@ -773,6 +785,21 @@ async fn cosigned_bingx_requires_connection_proof() {
 }
 
 #[tokio::test]
+async fn cosigned_okxeu_requires_connection_proof() {
+    venue_case("okxeu").await;
+}
+
+#[tokio::test]
+async fn cosigned_okxeudemo_requires_connection_proof() {
+    venue_case("okxeudemo").await;
+}
+
+#[tokio::test]
+async fn cosigned_mexc_requires_connection_proof() {
+    venue_case("mexc").await;
+}
+
+#[tokio::test]
 async fn cosigned_bitunix_requires_connection_proof() {
     venue_case("bitunix").await;
 }
@@ -786,3 +813,8 @@ async fn cosigned_cryptocom_requires_connection_proof() {
 async fn cosigned_cryptocom_login_switch_during_signing_await_is_isolated() {
     login_switch_case("cryptocom").await;
 }
+#[path = "cosigned_okxeu.rs"]
+mod eea;
+
+#[path = "cosigned_okxeudemo.rs"]
+mod eea_demo;

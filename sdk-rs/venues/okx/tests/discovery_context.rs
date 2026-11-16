@@ -220,7 +220,12 @@ fn an_unanswered_instruments_read_ends_at_the_shared_deadline_and_retries() {
 
 #[test]
 fn eea_private_instruments_read_is_managed_and_signed() {
-    let cycle = Cycle::started(credentialed(true));
+    let mut cycle = Cycle::started(credentialed(true));
+    cycle.answer(
+        "/api/v5/account/config",
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        0.5,
+    );
     let read = cycle
         .requests
         .iter()
@@ -239,6 +244,11 @@ fn eea_private_instruments_read_is_managed_and_signed() {
 fn eea_catalogue_refused_for_the_key_ends_startup_as_a_key_refusal() {
     let mut cycle = Cycle::started(credentialed(true));
     cycle.answer(
+        "/api/v5/account/config",
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        0.5,
+    );
+    cycle.answer(
         PRIVATE_MARKETS,
         r#"{"code":"50110","msg":"Your IP 1.2.3.4 is not included in your API key's IP whitelist.","data":[]}"#,
         1.0,
@@ -255,6 +265,11 @@ fn eea_catalogue_refused_for_the_key_ends_startup_as_a_key_refusal() {
 #[test]
 fn eea_catalogue_server_error_is_still_retried() {
     let mut cycle = Cycle::started(credentialed(true));
+    cycle.answer(
+        "/api/v5/account/config",
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        0.5,
+    );
     cycle.answer(
         PRIVATE_MARKETS,
         r#"{"code":"50001","msg":"Service temporarily unavailable","data":[]}"#,

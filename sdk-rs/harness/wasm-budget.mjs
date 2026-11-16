@@ -301,7 +301,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Optimized web/Node 2,048,859 B; SHA256 2630ae63a9a7ef9d382ac49c264ff62e92a8d232df0a91e10533a2dd0242db60.
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
   // #3513 CI43629571410: 2_049_388 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
-  backpack: 2_060_288,
+  // Rule 5 / #3566: only Backpack links the new admission decoder/capture by default; other families stay opt-in.
+  // Pinned build.sh --venue backpack: optimized local web/Node 2,082,554 B; CI43755040219/job132937508086 web2,076,180 B.
+  // max(measured) +10 KiB rounded up; retain the 2,060,288 B floor/provenance; two independent CLEARs required.
+  backpack: 2_093_056,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
   // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured

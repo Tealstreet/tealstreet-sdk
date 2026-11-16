@@ -390,6 +390,9 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
         "binancepm" => pick("https://papi.binance.com", "https://demo-fapi.binance.com"),
         "binanceinverse" => pick("https://dapi.binance.com", "https://demo-dapi.binance.com"),
         "binancespot" => pick("https://api.binance.com", "https://testnet.binance.vision"),
+        // Hosted Options testnet stays closed despite the engine's legacy testnet mapping.
+        "binanceoptions" if testnet => return Err(RoutingError::NoBaseUrl(name.into())),
+        "binanceoptions" => "https://eapi.binance.com",
         "bybit" | "bybitinverse" | "bybitspot" => {
             pick("https://api.bybit.com", "https://api-testnet.bybit.com")
         }
@@ -397,6 +400,8 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
             "https://api-demo.bybit.com",
             "https://api-testnet.bybit.com",
         ),
+        // Match the TS challenge default, never a Bybit or production-as-testnet fallback.
+        "hyrotrader" if !testnet => "https://sim-tealstreet.hyro.site",
         // Hosted Coinbase engines do not select sandbox endpoints.
         "coinbase" if !testnet => "https://drb.coinbase.com/api/v2",
         "coinbasespot" if !testnet => "https://api.coinbase.com",
@@ -437,6 +442,8 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
         "bitunix" => "https://fapi.bitunix.com",
         // MEXC has no sandbox; never use its live origin for a hosted testnet account.
         "mexc" if !testnet => "https://api.mexc.com",
+        // The legacy Futures demo is retired; no supported hosted sandbox is mapped.
+        "kraken" if !testnet => "https://futures.kraken.com",
         "kucoin" if !testnet => "https://api-futures.kucoin.com",
         // Spot has its own native startup/origin; neither KuCoin name supports testnet.
         "kucoinspot" if !testnet => "https://api.kucoin.com",

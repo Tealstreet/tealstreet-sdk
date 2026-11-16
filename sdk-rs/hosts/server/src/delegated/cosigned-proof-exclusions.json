@@ -14,7 +14,7 @@
     },
     {
       "venue": "binanceoptions",
-      "reason": "Client Hosted gate blocks this venue because no native server origin exists; options startup proof is not built."
+      "reason": "Bound native Options private-startup proof with account identity and wrong-key, replay and socket controls is not built."
     },
     {
       "venue": "bingxspot",
@@ -54,7 +54,7 @@
     },
     {
       "venue": "kraken",
-      "reason": "No native Hosted REST origin; server Present/SHA256/HMAC-SHA512 bridge and private-startup proof are not built."
+      "reason": "Native Futures private-startup proof for the primary key, signed-path custody and replay/socket controls is not built."
     },
     {
       "venue": "kucoinspot",
@@ -67,18 +67,6 @@
     {
       "venue": "lighter-robinhood",
       "reason": "Production metadata disables this venue; its distinct origin/chain/account-slot private-startup proof is not built."
-    },
-    {
-      "venue": "mexc",
-      "reason": "No native Hosted REST origin; native signed private-startup proof distinguishing signing-optional/read/token layouts is not built."
-    },
-    {
-      "venue": "okxeu",
-      "reason": "Exact EEA private-startup proof is incomplete; cold signed account/instruments refusal needs its own design, not unsigned discovery or longer deadlines."
-    },
-    {
-      "venue": "okxeudemo",
-      "reason": "Exact EEA simulated-trading private-startup proof is incomplete; cold signed account/instruments refusal needs its own design."
     },
     {
       "venue": "paradex",

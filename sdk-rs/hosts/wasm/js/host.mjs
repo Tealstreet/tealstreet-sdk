@@ -1254,12 +1254,23 @@ export class EngineHost {
   }
 
   hostedSigning(input) {
+    return this.captureHostedSigning('prepareHostedSigning', () => JSON.stringify(input));
+  }
+
+  hostedJoinProof(requestJson) {
+    if (typeof requestJson !== 'string')
+      return Promise.reject(new ExchangeError('Invalid join proof request', { kind: 'invalidInput', outcome: 'notSent' }));
+    return this.captureHostedSigning('prepareJoinProof', () => requestJson);
+  }
+
+  captureHostedSigning(entry, encode) {
     this.assertHttpHandoffIdle();
     if (this.disposed) return Promise.reject(new EngineDisposedError());
-    if (typeof this.engine.prepareHostedSigning !== 'function')
+    const prepare = this.engine[entry];
+    if (typeof prepare !== 'function')
       return Promise.reject(new ExchangeError('Hosted signing is unsupported', { kind: 'unsupported', outcome: 'notSent' }));
     let prepared;
-    try { prepared = JSON.parse(this.invokeHosted(this.engine.prepareHostedSigning, JSON.stringify(input), this.transport.now())); }
+    try { prepared = JSON.parse(this.invokeHosted(prepare, encode(), this.transport.now())); }
     catch (error) { return Promise.reject(error); }
     const { id, work, deadlineMs } = prepared;
     const duration = deadlineMs - this.transport.now();

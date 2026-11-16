@@ -21,6 +21,8 @@ const VENUES: &[&str] = &[
     "binancespot",
     "okx",
     "okxdemo",
+    "okxeu",
+    "okxeudemo",
     "bitget",
     "bitgetusdc",
     "blofin",
@@ -28,6 +30,7 @@ const VENUES: &[&str] = &[
     "phemex",
     "woo",
     "bingx",
+    "mexc",
     "bitunix",
     "cryptocom",
 ];
@@ -38,6 +41,9 @@ const PASS: &str = "synthetic-passphrase";
 #[derive(Default)]
 pub(crate) struct Seen {
     pub(crate) signed_reads: usize,
+    pub(crate) config_refusals_remaining: usize,
+    pub(crate) refused_private_path: Option<&'static str>,
+    pub(crate) config_refusal_status: Option<u16>,
     pub(crate) refused: usize,
     pub(crate) inverse_private_reads: usize,
     pub(crate) urls: Vec<String>,
@@ -45,6 +51,7 @@ pub(crate) struct Seen {
     pub(crate) phemex_socket_auths: usize,
     pub(crate) woo_socket_auths: usize,
     pub(crate) bingx_private_sockets: usize,
+    pub(crate) mexc_socket_auths: usize,
     pub(crate) bitunix_socket_auths: usize,
     pub(crate) cryptocom_socket_auths: usize,
     paths: Vec<String>,
@@ -68,9 +75,9 @@ fn family(venue: &str) -> &str {
     match venue {
         "bybitinverse" | "bybitdemo" | "bybitspot" => "bybit",
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
-        "okx" | "okxdemo" => "okx",
+        "okx" | "okxdemo" | "okxeu" | "okxeudemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
-        "blofin" | "kucoin" | "woo" | "bingx" => venue,
+        "blofin" | "kucoin" | "woo" | "bingx" | "mexc" => venue,
         _ => panic!("no private-read fixture for {venue}"),
     }
 }
@@ -120,6 +127,10 @@ fn admission_binance_spot_subscription_checks_valid_and_invalid_hmac() {
 }
 
 pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
+    if venue == "mexc" {
+        mexc::assert_startup(seen);
+        return;
+    }
     let (origin, private, product) = match venue {
         "bybitdemo" => (
             "https://api-demo.bybit.com",
@@ -151,6 +162,11 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
             "/api/v5/account/config",
             "/api/v5/trade/orders-pending",
         ),
+        "okxeu" | "okxeudemo" => (
+            "https://eea.okx.com",
+            "/api/v5/account/config",
+            "/api/v5/account/instruments?instType=FUTURES",
+        ),
         "bitgetusdc" => (
             "https://api.bitget.com",
             "/api/v2/mix/account/accounts",
@@ -176,7 +192,18 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
         "{venue}: missing exact product: {:?}",
         seen.urls
     );
-    if venue == "okxdemo" {
+    if matches!(venue, "okxeu" | "okxeudemo") {
+        assert_eq!(
+            seen.paths.first().map(String::as_str),
+            Some("/api/v5/account/config")
+        );
+        assert!(
+            seen.urls
+                .iter()
+                .any(|url| url == "https://eea.okx.com/api/v5/account/instruments?instType=SWAP")
+        );
+    }
+    if matches!(venue, "okxdemo" | "okxeudemo") {
         assert_eq!(
             seen.demo_private_reads, seen.signed_reads,
             "every demo private read needs the simulated header"
@@ -213,6 +240,17 @@ impl VenueIo {
         Some(self.valid_private_signature(r))
     }
     fn valid_private_signature(&self, r: &HttpRequest) -> bool {
+        if self.venue == "okxeudemo" {
+            let simulated: Vec<_> = r
+                .headers
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("x-simulated-trading"))
+                .map(|(_, value)| value.as_str())
+                .collect();
+            if simulated != ["1"] {
+                return false;
+            }
+        }
         let method = if r.method == Method::Get {
             "GET"
         } else {
@@ -307,6 +345,12 @@ impl VenueIo {
         }
     }
     fn response(&self, r: &HttpRequest) -> Value {
+        if self.venue == "mexc" {
+            return mexc::response(self, r);
+        }
+        if self.venue == "apexomni" {
+            return apexomni::response(self, r);
+        }
         if self.venue == "woo" {
             return woo::response(self, r);
         }
@@ -327,7 +371,7 @@ impl VenueIo {
             seen.signed_reads += 1;
             seen.inverse_private_reads += usize::from(r.url.contains("category=inverse"));
             seen.demo_private_reads += usize::from(header(r, "x-simulated-trading") == Some("1"));
-            if !valid {
+            if !valid || seen.refused_private_path == Some(path(r).split('?').next().unwrap()) {
                 seen.refused += 1;
                 return match family(self.venue) {
                     "bybit" => {
@@ -341,6 +385,19 @@ impl VenueIo {
                     _ => unreachable!(),
                 };
             }
+        }
+        if matches!(self.venue, "okxeu" | "okxeudemo") && path(r) == "/api/v5/account/config" {
+            let mut seen = self.seen.lock().unwrap();
+            if seen.config_refusals_remaining > 0 {
+                seen.config_refusals_remaining -= 1;
+                seen.refused += 1;
+                return json!({"code":"50113","msg":"synthetic first signature refusal","data":[]});
+            }
+        }
+        if matches!(self.venue, "okxeu" | "okxeudemo")
+            && path(r) == "/api/v5/account/instruments?instType=FUTURES"
+        {
+            return json!({"code":"0","msg":"","data":[]});
         }
         let fixtures: Value =
             serde_json::from_str(include_str!("../../tests/fixtures/admission-reads.json"))
@@ -356,9 +413,16 @@ impl VenueIo {
             .and_then(Value::as_object)
             .unwrap();
         let url = path(r).split('?').next().unwrap();
+        let fixture_url = if matches!(self.venue, "okxeu" | "okxeudemo")
+            && url == "/api/v5/account/instruments"
+        {
+            "/api/v5/public/instruments"
+        } else {
+            url
+        };
         let mut response = bodies
             .iter()
-            .find(|(key, _)| key.as_str() != "*" && url.ends_with(key.as_str()))
+            .find(|(key, _)| key.as_str() != "*" && fixture_url.ends_with(key.as_str()))
             .map_or(&bodies["*"], |(_, body)| body)
             .clone();
         if family(self.venue) == "bybit" {
@@ -384,6 +448,12 @@ impl Transport for VenueIo {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        if self.venue == "mexc" {
+            return mexc::connect(self, socket, &url, events);
+        }
+        if self.venue == "apexomni" {
+            return apexomni::connect(self, socket, &url, events);
+        }
         if self.venue == "woo" {
             return woo::connect(self, socket, &url, events);
         }
@@ -442,7 +512,16 @@ impl Transport for VenueIo {
             seen.urls.push(r.url.clone());
         }
         let response = self.response(&r);
-        let status = if self.venue == "phemex" && response["code"] == 401 {
+        let status = if self.venue == "okxeu"
+            && path(&r) == "/api/v5/account/config"
+            && response["code"] == "50113"
+        {
+            self.seen
+                .lock()
+                .unwrap()
+                .config_refusal_status
+                .unwrap_or(200)
+        } else if self.venue == "phemex" && response["code"] == 401 {
             401
         } else {
             200
@@ -705,6 +784,9 @@ pub(crate) fn operation(venue: &str, canonical: &str) -> String {
             .next()
             .unwrap()
             .into();
+    }
+    if venue == "mexc" {
+        return mexc::operation(canonical);
     }
     if venue == "woo" {
         return if canonical.contains('|') {
@@ -1192,11 +1274,19 @@ async fn admission_bybitinverse_native_private_startup_validates_key() {
 #[path = "phemex_probe_tests.rs"]
 mod phemex;
 
+#[path = "apexomni_probe_tests.rs"]
+mod apexomni;
 #[path = "bingx_probe_tests.rs"]
 mod bingx;
+
 #[path = "bitunix_probe_tests.rs"]
 mod bitunix;
 #[path = "cryptocom_probe_tests.rs"]
 mod cryptocom;
+
+#[path = "mexc_probe_tests.rs"]
+mod mexc;
+#[path = "okxeudemo_probe_tests.rs"]
+mod okxeudemo;
 #[path = "woo_probe_tests.rs"]
 mod woo;
