@@ -352,3 +352,70 @@ async fn hyperliquid_old_owner_completion_cannot_attach_to_a_successor() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn hyperliquid_empty_null_and_omitted_vault_use_main_scope_without_bypassing_proof() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for venue in ["hyperliquid", "hyperliquidspot"] {
+                for vault in [None, Some(Value::Null), Some(json!(""))] {
+                    for correct in [true, false] {
+                        let (registry, observed) = registry();
+                        let main = init(venue);
+                        let resident =
+                            crate::accounts::testing::trading_account(&registry, "alice", &main);
+                        let original_link = resident.link.clone().unwrap();
+                        let (mut session, mut sent) = user_session(registry.clone(), "alice");
+                        let mut done = session.take_verified();
+                        let mut wire = serde_json::to_value(&main).unwrap();
+                        match &vault {
+                            Some(value) => {
+                                wire["vault"] = value.clone();
+                            }
+                            None => {
+                                wire.as_object_mut().unwrap().remove("vault");
+                            }
+                        }
+                        let payload: InitPayload = serde_json::from_value(wire).unwrap();
+                        assert_eq!(payload.fingerprint(), main.fingerprint());
+                        session.init(payload).await.unwrap();
+                        assert!(session.joined.is_empty());
+                        let request = challenge(&mut sent).await;
+                        let expected = Projection::from_json(
+                    "alice",
+                    &json!({
+                        "venue":venue,"network":"mainnet","credential":{
+                            "kind":"agent","signer":address(7),"accountScope":{"kind":"main"}
+                        }
+                    })
+                    .to_string(),
+                )
+                .unwrap();
+                        assert_eq!(
+                            serde_json::to_value(request.statement()).unwrap()["identityDigest"],
+                            json!(expected.digest())
+                        );
+                        session
+                            .handle(&response(&request, if correct { 7 } else { 8 }))
+                            .await
+                            .unwrap();
+                        let completed = tokio::time::timeout(Duration::from_secs(5), done.recv())
+                            .await
+                            .unwrap()
+                            .unwrap();
+                        assert_eq!(completed.probe.as_ref().unwrap().permit.is_ok(), correct);
+                        session.verification_completed(completed).await.unwrap();
+                        assert_eq!(registry.holds(&resident, session.socket), correct);
+                        assert_eq!(session.joined.is_empty(), !correct);
+                        assert_eq!(registry.account_count(), 1);
+                        if !correct {
+                            assert!(Arc::ptr_eq(resident.link.as_ref().unwrap(), &original_link));
+                        }
+                        no_io(&observed);
+                        session.close();
+                    }
+                }
+            }
+        })
+        .await;
+}
