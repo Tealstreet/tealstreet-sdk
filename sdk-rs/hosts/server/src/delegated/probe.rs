@@ -502,5 +502,9 @@ mod tests {
 pub(crate) mod venue_tests;
 
 #[cfg(test)]
+#[path = "coinbase_probe_tests.rs"]
+pub(crate) mod coinbase_tests;
+
+#[cfg(test)]
 #[path = "wallet_probe_tests.rs"]
 mod wallet_tests;

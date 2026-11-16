@@ -95,9 +95,10 @@ accounts, and the last account owner drop erases retained engine handles.
 Confirmed joins and upgrades publish `account-signing-mode` to each confirmed
 registration's label/instanceId. Refusals have attached=false and no actualMode.
 Socket handover and possession verification precede any transition. A verified
-resident public-key join uses the local key proof, not an unsigned startup read. Coinbase
-CDP remains explicitly proof-unavailable pending its COSIGNED JWT setup and
-venue-proof implementation; it never silently falls back to another signing mode.
+resident public-key join uses the local key proof, not an unsigned startup read.
+Coinbase COSIGNED proves its opaque CDP key through native JWT/private startup,
+with server-owned claims and a signature-only reply. DELEGATED CDP handover
+remains explicitly proof-unavailable; no fallback selects another signing mode.
 Legacy and typed full-write method admission both use this shared eligibility.
 
 DELEGATED uses `prepare_local_signer_for`, including wallet key-only/agent
@@ -125,7 +126,7 @@ DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
 DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
-Binance base/PM/inverse/spot, OKX base/demo and EEA mainnet/demo, Bitget base/USDC,
+Binance base/PM/inverse/spot/options, OKX base/demo and EEA mainnet/demo, Bitget base/USDC,
 Blofin, KuCoin Futures/Spot, Phemex, BingX, MEXC and Crypto.com names have native private-startup HMAC proof coverage.
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
@@ -183,6 +184,12 @@ REST/login graphs and atomic contract dependencies. Only opaque OmniKey refs
 are installed. Exact `apexomni` COSIGNED admission proves API credentials through
 native account, account-balance and open-orders reads, with wrong-key, replay
 and foreign-socket controls; this never proves OmniKey/L2-seed possession.
+
+Exact `binanceoptions` mainnet proves possession through its existing signed
+EAPI margin-account, position and open-order startup reads. Public exchange-info,
+ticker and mark responses never establish possession. Tests cover wrong keys,
+replay, replies from other sockets, consumed responses and retired connections
+through the same native probe and Session fences; Options testnet stays refused.
 
 COSIGNED catalog accounting runs in `sdk-rs/harness/cosigned-catalog.test.mjs`.
 Each exact `remoteSigning.enabled` venue owns one JSON record under

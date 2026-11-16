@@ -53,7 +53,7 @@ fn path(r: &HttpRequest) -> &str {
 fn family(venue: &str) -> &str {
     match venue {
         "bybitinverse" | "bybitdemo" | "bybitspot" => "bybit",
-        "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
+        "binance" | "binancepm" | "binanceinverse" | "binancespot" | "binanceoptions" => "binance",
         "okx" | "okxdemo" | "okxeu" | "okxeudemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
         "kucoinspot" => "kucoin",
@@ -107,6 +107,10 @@ fn admission_binance_spot_subscription_checks_valid_and_invalid_hmac() {
 }
 
 pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
+    if venue == "binanceoptions" {
+        binanceoptions::assert_startup(seen);
+        return;
+    }
     if venue == "apexomni" {
         for route in ["account", "account-balance", "open-orders"] {
             assert!(
@@ -347,6 +351,9 @@ impl VenueIo {
         if self.venue == "asterdex" {
             return asterdex::response(self, r);
         }
+        if self.venue == "binanceoptions" {
+            return binanceoptions::response(self, r);
+        }
         if self.venue == "mexc" {
             return mexc::response(self, r);
         }
@@ -456,6 +463,7 @@ impl Transport for VenueIo {
         if self.venue == "asterdex" {
             return asterdex::connect(self, socket, &url, events);
         }
+        assert_ne!(self.venue, "binanceoptions", "Options startup is REST-only");
         if self.venue == "mexc" {
             return mexc::connect(self, socket, &url, events);
         }
@@ -1473,3 +1481,6 @@ fn generated_readiness_matches_every_per_venue_record() {
         ..Default::default()
     }));
 }
+
+#[path = "binanceoptions_probe_tests.rs"]
+mod binanceoptions;

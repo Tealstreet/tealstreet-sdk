@@ -53,6 +53,23 @@ An older `Unknown` placement sharing a refused attempt's ID stays fenced.
 
 ## Public type changes and NX
 
+Fresh native hosted COSIGNED joins for both exact aliases use the existing
+pending-join queue and native private-startup probe. The server builds the JWT
+header and claims with its own fresh nonce and validity window, then requests
+only the signature over those exact JWS bytes. A CDP key name is opaque: no
+local key derivation or unsigned read establishes possession. DRB authentication
+must be followed by the private state census; an auth-shaped reply alone cannot
+admit the connection. Existing issuer/audience dialects and transaction paths
+retain their behavior. DELEGATED CDP handover remains explicitly unavailable.
+
+Hosted init accepts the closed `coinbaseJwtAlgorithm` enum. Missing and explicit
+`es256` have the same effective fingerprint; `edDsa` changes it, and unknown
+algorithms refuse. NEEDS-NX: forward the actual saved/device algorithm to hosted
+init for both aliases, keeping original instance/owner binding. A missing signer,
+unsupported algorithm or failed proof must remain a visible refusal, with no
+whole-JWT callback or alternate signing-mode fallback. This adds metadata to the
+existing socket protocol; it introduces no channel or protocol version.
+
 - `ExchangeOptions` and saved account config accept optional
   `coinbaseJwtAlgorithm: 'es256' | 'edDsa'`. Hosted origins default to `es256`;
   local devices infer their actual algorithm through the existing Rust parser.

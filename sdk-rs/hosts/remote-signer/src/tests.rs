@@ -13,6 +13,7 @@ use super::*;
 
 mod apexomni;
 mod asterdex;
+mod coinbase;
 mod grvt;
 
 type Answer = Box<dyn Fn(&Value) -> Value + Send + Sync>;
