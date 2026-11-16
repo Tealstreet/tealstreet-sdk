@@ -477,7 +477,7 @@ async fn cosigned_two_users_switch_during_deferred_private_reads() {
 }
 
 #[tokio::test]
-async fn cosigned_test_admission_does_not_start_unhosted_venue_proofs() {
+async fn cosigned_test_admission_does_not_start_unavailable_venue_proofs() {
     let mut f = fixture_with_auth(true).await;
     crate::accounts::testing::set_join_admission(Arc::get_mut(&mut f.registry).unwrap(), true);
     let mut device = Device::default();
@@ -485,7 +485,12 @@ async fn cosigned_test_admission_does_not_start_unhosted_venue_proofs() {
     let before = f.private_reads.load(Ordering::SeqCst);
     let (mut session, mut sent) = candidate(&f, "alice");
     let mut request = init(Some("other-venue"));
-    request.exchange_name = "hyrotrader".into();
+    // Keep this wire-admission control on the still-excluded AsterDEX family.
+    request.exchange_name = "asterdex".into();
+    assert!(crate::delegated::enabled(&request.exchange_name));
+    assert!(!crate::delegated::probe::cosigned_ready(
+        &request.exchange_name
+    ));
     session.init(request).await.unwrap();
     unattached_after_refusal(
         &f,

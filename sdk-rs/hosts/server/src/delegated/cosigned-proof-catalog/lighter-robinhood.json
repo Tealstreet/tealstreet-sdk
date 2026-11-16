@@ -1,4 +1,5 @@
 {
-  "status": "excluded",
-  "reason": "Production metadata disables this venue; its distinct origin/chain/account-slot private-startup proof is not built."
+  "status": "ready",
+  "probeTests": "src/session/tests/lighter_local_proof.rs",
+  "sessionTests": "src/session/tests/lighter_local_proof.rs"
 }

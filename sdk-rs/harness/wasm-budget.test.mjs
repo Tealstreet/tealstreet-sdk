@@ -4,6 +4,23 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #3579 CI43782227341/jobs133022239190+133022239183: web/Node 2,305,365 B.
+// Local pinned build at b323ddf25c4a: web/Node 2,306,669 B; retain the larger reserve.
+// Both aliases share one family; historical 2,279,424 B floor remains authoritative.
+test('#3579 Hyperliquid admission retains both current measurements plus 10 KiB', () => {
+  const measured = Math.max(2_305_365, 2_306_669);
+  const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(requiredCap, 2_317_312);
+  assert.equal(WASM_VENUE_OVERRIDES.hyperliquid, WASM_VENUE_OVERRIDES.hyperliquidspot);
+  for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= Math.max(requiredCap, 2_279_424));
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 // #3566 pinned build.sh --venue backpack: Rust1.99, bindgen0.2.129, Binaryen132 twice-Oz.
 // Local optimized web/Node SHA256 a5336b7d6336e82ac8c8d8c45633be984b4b56e38928662799d0a37e858f381d.
 // CI43755040219/job132937508086 web2076180; only Backpack retains default device dispatch.
@@ -3948,4 +3965,50 @@ test('#3530 typed Kraken diagnostics retain measured reserve and historical alia
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
+});
+
+// GRVT scalar admission at 53f1649d9f2e09d8777127ea28eb53b4d13e75b3.
+// build.sh --venue grvt; Rust1.99.0, bindgen0.2.129, Binaryen132 twice -Oz.
+// Optimized web/Node SHA256 19b58267327bb19c7b508b01625e5b50423edd96e37efb96f8c30e3802f2c02b.
+test('GRVT scalar admission retains its measured 10 KiB reserve and historical floor', () => {
+  const measured = Math.max(2_043_354, 2_004_367);
+  const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.grvt;
+  assert.equal(requiredCap, 2_054_144);
+  assert.ok(cap >= Math.max(requiredCap, 2_015_232));
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'grvt'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'grvt'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'grvt'), /exceeds/);
+});
+
+// #3576 refreshed CI43806604286/job133099107519 measures Lighter with hosted-join-proof.
+// Source a86de005afb4, Rust1.99/bindgen0.2.129/Binaryen132, required twice-Oz.
+test('#3576 Lighter admission dispatcher retains measured reserve and alias floors', () => {
+  const measured = 2_227_410;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  for (const venue of ['lighter', 'lighter-robinhood']) {
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= Math.max(2_198_528, required), `${venue}: retain measured reserve and historical floor`);
+    assert.ok(cap - measured >= 10 * 1024);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+// #3579 source 873c3c199134737b5fd59b0aab5da073f1564fff; Rust1.99/bindgen0.2.129/Binaryen132 twice-Oz.
+// Fresh web/Node 2,228,730 B, also reproduced byte-identically at parent 711dc03e942.
+// SHA256 abd2e36ac525defc7673fc51d3ca7170d7d3f784589016c821c95de511b6f8f9.
+test('#3579 merged Lighter family retains its current measured 10 KiB reserve', () => {
+  const measured = 2_228_730;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(required, 2_239_488);
+  for (const venue of ['lighter', 'lighter-robinhood']) {
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= Math.max(2_238_464, required), `${venue}: retain fresh reserve and parent floors`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
 });

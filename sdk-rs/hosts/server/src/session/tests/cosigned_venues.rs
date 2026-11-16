@@ -14,13 +14,16 @@ const MATERIAL: &str = "synthetic-material";
 async fn cosigned_catalog_does_not_gate_delegated_wallet_proof() {
     tokio::task::LocalSet::new()
         .run_until(async {
+            assert!(crate::delegated::enabled("asterdex"));
+            assert!(!crate::delegated::probe::cosigned_ready("asterdex"));
             for delegated in [false, true] {
                 let registry = crate::accounts::tests::registry();
                 let (mut session, mut sent) = user_session(registry.clone(), "fixture");
                 let mut completed = session.take_verified();
                 let mut init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "hyperliquidspot".into(),
+                    // GRVT and Hyperliquid are admitted; AsterDEX keeps this excluded-wallet control.
+                    exchange_name: "asterdex".into(),
                     key: KEY.into(),
                     ..Default::default()
                 };
@@ -28,11 +31,11 @@ async fn cosigned_catalog_does_not_gate_delegated_wallet_proof() {
                     init.signing_mode = Some("delegated".into());
                     let offer = session
                         .handovers
-                        .issue("acct", "hyperliquidspot", crate::accounts::now_ms())
+                        .issue("acct", "asterdex", crate::accounts::now_ms())
                         .unwrap();
                     init.sealed = Some(crate::delegated::tests::seal(
                         &offer,
-                        "hyperliquidspot",
+                        "asterdex",
                         KEY,
                         br#"{"key":"synthetic-key","secret":"synthetic-material"}"#,
                     ));
@@ -907,6 +910,55 @@ fn cosigned_catalog_requires_an_admission_suite() {
             "{venue}: missing admission suite"
         );
     }
+}
+
+#[tokio::test]
+async fn cosigned_hyrotrader_requires_connection_proof() {
+    venue_case("hyrotrader").await;
+}
+
+#[tokio::test]
+async fn cosigned_hyrotrader_testnet_refuses_without_signing_or_venue_io() {
+    let (io, seen) = MockVenue::for_admission("hyrotrader");
+    let registry = crate::accounts::testing::e2e_registry("alice", io);
+    let (mut session, mut sent) = user_session(registry.clone(), "alice");
+    session.identity.resumable = false;
+    let mut completed = session.take_verified();
+    let mut init = payload("hyrotrader");
+    init.testnet = Some(true);
+    session.init(init).await.unwrap();
+    if session.pending_verifications.contains_key("acct") {
+        let done = tokio::time::timeout(Duration::from_secs(3), completed.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        session.verification_completed(done).await.unwrap();
+    }
+    assert!(session.joined.is_empty());
+    assert!(registry.held("alice", "acct", session.socket).is_none());
+    assert_eq!(registry.account_count(), 0);
+    let frames: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+        .map(|frame| serde_json::from_str(&frame).unwrap())
+        .collect();
+    // Network preparation uses the existing unverified envelope, which has no
+    // write outcome field; pin its full schema and the independent no-I/O proof.
+    let expected: Value = serde_json::from_str(&envelope::with_instance_id(
+        envelope::init_unverified("acct", false),
+        "proof-registration",
+    ))
+    .unwrap();
+    assert!(frames.contains(&expected), "{frames:?}");
+    assert!(
+        !frames
+            .iter()
+            .any(|f| f["t"] == "sign-req" || f["d"]["op"] == "frame")
+    );
+    let observed = seen.lock().unwrap();
+    assert_eq!(observed.signed_reads, 0);
+    assert!(observed.urls.is_empty());
+    assert!(observed.sockets.is_empty());
+    drop(observed);
+    session.close();
 }
 
 #[tokio::test]

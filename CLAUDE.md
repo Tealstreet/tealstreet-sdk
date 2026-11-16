@@ -10,6 +10,9 @@ context.
 The host ownership observation/teardown contract lives in
 [`sdk-rs/README.md`](sdk-rs/README.md#host-ownership-observation-and-teardown).
 
+Native hosted diagnostic owner attribution is documented in
+`sdk-rs/hosts/server/DESIGN.md` under the Sentry event allowlist.
+
 Bybit's sparse ticker freshness contract lives in
 [`sdk-rs/README.md`](sdk-rs/README.md#bybit-ticker-reference-freshness).
 
@@ -35,3 +38,9 @@ Closed join-proof v1 payloads and canonical public identity facts are documented
 in `docs/plans/callers/public-key-admission.md`. The pure crypto helpers do not
 enable Session admission or venue readiness. The separate SDK/WASM device dispatch
 retains the original signing host and owner; it does not activate any server venue.
+
+## Shared artifact census
+
+Shared WASM budget and construction-policy memberships are checked against
+`sdk-rs/artifact-census.json`. Registry builds reject duplicate, missing or unknown
+policy venues; synthetic codegen fixtures use the test-only renderer seam.

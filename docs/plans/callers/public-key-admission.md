@@ -1,5 +1,32 @@
 # Public-key admission helpers
 
+## Hyperliquid hosted admission
+
+Exact `hyperliquid` and `hyperliquidspot` private inits require
+`hyperliquidSignerAddress`: the public Ethereum address of the actual captured
+agent/wallet signing key. `key` remains the account/read address and cannot
+substitute for this field. Missing, malformed or zero signer addresses refuse
+before attachment. Clients must retain their original account/instance and
+dispatch the existing closed `join-proof` request through `signJoinProof`.
+There is no unsigned-read or legacy-signing fallback.
+
+The server projects the authenticated owner, mainnet/testnet, actual signer and
+`vault` (absent means main) before queueing proof. Both aliases share the
+Hyperliquid namespace. The signer metadata also participates in the captured
+init fingerprint; proof replies cannot supply or change it. This does not
+expand the existing identity-keyed account-registry rollout.
+
+COSIGNED uses a fresh server challenge and local secp256k1 EIP-712 recovery.
+DELEGATED checks the temporary protected provider against the same captured
+public facts, without asking the device to sign. Possession is distinct from
+venue authorization: existing engine startup and venue authorization checks
+retain their behavior.
+The Hyperliquid WASM family links device proof dispatch for both exact aliases;
+other family activation remains separate. Hosted callers must forward the new
+public init field before enabling these joins.
+
+## Shared primitives
+
 These helpers reuse the existing signing providers and native HTTP transport.
 They add no account registry, signer storage, engine, socket envelope, or venue
 activation. The join owner retains its existing feature gates, pacing, connection
@@ -145,13 +172,16 @@ continue to verify the domain-separated messages with the existing providers.
 
 ## Pending local verification
 
-The native server has a shared pending local-proof strategy, with no production
-venue activation. It uses the existing isolated SignerLink, one-active/four-waiting
+The native server has a shared pending local-proof strategy, with exact GRVT
+activation. It uses the existing isolated SignerLink, one-active/four-waiting
 identity queue, start pacer and final registry attachment. Canonical public facts
-are captured by the server before queueing; client init/reply JSON never supplies
-an expected key or a verification decision. The production resolver currently
-retains private-startup proofs and the existing COSIGNED readiness catalog.
-Family activation must supply authoritative facts and a complete device handler.
+are frozen from the captured credential construction before queueing; proof
+replies never supply an expected key or a verification decision. The production
+resolver selects local proof for exact GRVT using its captured
+engine-construction signer and trading-account fields, rejecting missing or
+malformed facts before the challenge. The reply cannot replace either fact.
+Its API-key login remains normal startup authorization, never scalar proof.
+Other families retain their existing strategy and require their own activation.
 
 ## Device challenge dispatch
 
@@ -179,9 +209,10 @@ This handler performs no Session admission and enables no server venue. Existing
 constructor/custody and compiled-feature restrictions still apply; a generic
 method's presence is not proof of venue readiness.
 
-The reusable `hosted-join-proof` WASM feature is linked by default only in the
-Backpack candidate family (and therefore the combined build). Other standalone
-families retain their existing size-critical composition. Their activation slices
+The reusable `hosted-join-proof` WASM feature is linked by default in the
+Backpack, Lighter, GRVT and Hyperliquid families (and therefore the combined
+build). Other standalone families retain their existing size-critical composition.
+Their activation slices
 must explicitly opt into the feature and certify their own optimized size before
 shipping. This build selection does not change the server admission catalog.
 

@@ -1,4 +1,5 @@
 {
-  "status": "excluded",
-  "reason": "Native expiring auth-token/private-startup proof bound to account, key slot and replay/socket authority is not built."
+  "status": "ready",
+  "probeTests": "src/session/tests/lighter_local_proof.rs",
+  "sessionTests": "src/session/tests/lighter_local_proof.rs"
 }
