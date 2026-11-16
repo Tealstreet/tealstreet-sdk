@@ -640,7 +640,7 @@ async fn cosigned_unready_venues_fail_closed_with_a_typed_refusal() {
     let registry = crate::accounts::testing::e2e_registry("alice", io);
     for (venue, rule) in rules["venues"].as_object().unwrap() {
         if rule["remoteSigning"]["enabled"] != true
-            || crate::delegated::probe::cosigned_ready(venue)
+            || crate::delegated::probe::cosigned_ready(&payload(venue))
         {
             continue;
         }
