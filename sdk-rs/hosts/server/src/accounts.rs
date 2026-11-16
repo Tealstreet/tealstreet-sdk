@@ -2928,6 +2928,49 @@ pub mod testing {
         account
     }
 
+    #[cfg(test)]
+    pub(crate) fn registered_lighter_account(
+        registry: &Registry,
+        user: &str,
+        init: &InitPayload,
+        public: &safe_cex_crypto::admission::PublicKey,
+    ) -> Arc<Account> {
+        let link = SignerLink::new(0, Arc::new(|_| false));
+        let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
+        let (mut account, inbox) = account_on(
+            HeldLoad {
+                placed: Arc::default(),
+                load_after_ms: Some(0.),
+                ticker: true,
+            },
+            (user, &init.account_name, &init.exchange_name),
+            Some(link.clone()),
+            init.fingerprint(),
+            running,
+        );
+        let remote = remote_account(
+            link.clone(),
+            &init.exchange_name,
+            Some(init.account_name.clone()),
+            &engine_options(init, false).to_string(),
+        )
+        .unwrap()
+        .with_registered_public_key(public)
+        .unwrap();
+        let options: Value = serde_json::from_str(&remote.options_json).unwrap();
+        let identities = serde_json::from_value(options["signing"].clone()).unwrap();
+        Arc::get_mut(&mut account).unwrap().signing = AccountSigner::new_bound(
+            Some(remote.provider.clone()),
+            identities,
+            Some(link.clone()),
+            None,
+            remote.public_binding_source(),
+        );
+        let account = run_algos(account, link, inbox);
+        register(registry, &account);
+        account
+    }
+
     /// Sends the web's algo `op` to `account`'s algo host.
     pub fn algo_op(account: &Account, op: &str, data: &str) {
         let input = crate::algos::AlgoInput::Op {

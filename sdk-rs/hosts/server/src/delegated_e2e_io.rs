@@ -14,6 +14,7 @@ pub(crate) struct Observed {
     pub requests: usize,
     pub sockets: usize,
     pub reads: usize,
+    pub registration_urls: Vec<String>,
     pub refused: usize,
     pub writes: Vec<Value>,
 }
@@ -28,7 +29,7 @@ pub(crate) struct MockVenue {
 }
 #[derive(Clone)]
 struct Registration {
-    body: Value,
+    body: Arc<Mutex<Value>>,
     gate: Arc<tokio::sync::Semaphore>,
 }
 
@@ -56,6 +57,13 @@ impl MockVenue {
     }
 
     pub(crate) fn registered_key(body: Value, gate: Arc<tokio::sync::Semaphore>) -> Self {
+        Self::registered_key_state(Arc::new(Mutex::new(body)), gate)
+    }
+
+    pub(crate) fn registered_key_state(
+        body: Arc<Mutex<Value>>,
+        gate: Arc<tokio::sync::Semaphore>,
+    ) -> Self {
         Self {
             registration: Some(Registration { body, gate }),
             ..Self::new("synthetic".into(), "synthetic".into())
@@ -115,6 +123,12 @@ impl Transport for MockVenue {
         let venue = self.clone();
         Box::pin(async move {
             if let Some(registration) = &venue.registration {
+                venue
+                    .observed
+                    .lock()
+                    .unwrap()
+                    .registration_urls
+                    .push(request.url.clone());
                 assert_eq!(
                     intent,
                     safe_cex_engine::request_context::RoutingIntent::Public
@@ -161,7 +175,11 @@ impl Transport for MockVenue {
         self.observed.lock().unwrap().requests += 1;
         if let Some(registration) = &self.registration {
             self.observed.lock().unwrap().reads += 1;
-            answer(&events, request.id, registration.body.clone());
+            answer(
+                &events,
+                request.id,
+                registration.body.lock().unwrap().clone(),
+            );
             return;
         }
         let path = request.url.split('?').next().unwrap();
