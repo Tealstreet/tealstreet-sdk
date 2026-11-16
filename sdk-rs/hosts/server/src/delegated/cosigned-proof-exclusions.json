@@ -37,10 +37,6 @@
       "reason": "Bound native Advanced Trade Spot private-startup proof for CDP JWT/JWS, account identity, expiry and replay/socket controls is not built."
     },
     {
-      "venue": "cryptocom",
-      "reason": "No native Hosted REST origin; structured RPC nonce/params canonicalization and private-startup proof are not built."
-    },
-    {
       "venue": "grvt",
       "reason": "API-key login alone does not prove the separate ECDSA scalar; a fresh account/attempt-bound signing-key possession proof is not built."
     },
