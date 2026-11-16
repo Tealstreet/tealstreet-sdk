@@ -1305,3 +1305,112 @@ fn startup_watchdog_exposes_stage_original_deadline_and_rate_limit_count() {
     assert!(repeated.fields.contains(&("elapsedMs", 360_000.0.into())));
     assert!(repeated.fields.contains(&("deadlineMs", 60_000.0.into())));
 }
+
+fn subscription_receipts(frame: &[u8]) -> Vec<(String, u32, f64)> {
+    use safe_cex_engine::wire::{section, sections};
+    let stats = sections(frame)
+        .find(|(kind, _)| *kind == section::MESSAGE_HANDLER_STATS)
+        .unwrap()
+        .1;
+    let strings = sections(frame)
+        .find(|(kind, _)| *kind == section::STRINGS)
+        .unwrap()
+        .1;
+    let count = u32::from_le_bytes(strings[..4].try_into().unwrap()) as usize;
+    let text = |index: usize| {
+        let start =
+            u32::from_le_bytes(strings[4 + index * 4..8 + index * 4].try_into().unwrap()) as usize;
+        let end =
+            u32::from_le_bytes(strings[8 + index * 4..12 + index * 4].try_into().unwrap()) as usize;
+        let base = 4 + (count + 1) * 4;
+        std::str::from_utf8(&strings[base + start..base + end])
+            .unwrap()
+            .to_owned()
+    };
+    let rows: Vec<_> = stats[8..]
+        .as_chunks::<24>()
+        .0
+        .iter()
+        .map(|row| {
+            (
+                text(u32::from_le_bytes(row[4..8].try_into().unwrap()) as usize),
+                u32::from_le_bytes(row[8..12].try_into().unwrap()),
+                f64::from_le_bytes(row[16..24].try_into().unwrap()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows.len(),
+        u32::from_le_bytes(stats[..4].try_into().unwrap()) as usize
+    );
+    rows
+}
+
+#[test]
+fn subscription_receipt_is_scoped_to_the_decoded_clearinghouse_dex() {
+    let (mut e, socket) = ready_with_dex("disabled", true);
+    let receipt = |rows: &[(String, u32, f64)], dex: &str| {
+        let row = rows
+            .iter()
+            .find(|(topic, _, _)| {
+                let (_, payload) = topic.split_once('.').unwrap();
+                let value: serde_json::Value = serde_json::from_str(payload).unwrap();
+                value["subscription"]["type"] == "clearinghouseState"
+                    && value["subscription"]["dex"].as_str().unwrap_or("") == dex
+            })
+            .unwrap();
+        (row.1, row.2)
+    };
+    message(
+        &mut e,
+        socket,
+        2000.,
+        r#"{"channel":"clearinghouseState","data":{"dex":"xyz","clearinghouseState":{"assetPositions":[],"time":2000}}}"#,
+    );
+    let rows = subscription_receipts(e.snapshot_frame(2001.));
+    assert_eq!(receipt(&rows, "xyz"), (3, 1.));
+    let untouched = receipt(&rows, "");
+    assert_eq!(untouched.0, 1);
+    assert!(
+        untouched.1.is_nan(),
+        "a sibling dex has not delivered a frame"
+    );
+
+    message(
+        &mut e,
+        socket,
+        3000.,
+        r#"{"channel":"clearinghouseState","data":{"dex":"","clearinghouseState":{"assetPositions":[],"time":3000}}}"#,
+    );
+    let rows = subscription_receipts(e.snapshot_frame(3001.));
+    assert_eq!(receipt(&rows, ""), (3, 1.));
+    assert_eq!(receipt(&rows, "xyz"), (3, 1001.));
+
+    message(
+        &mut e,
+        socket,
+        4000.,
+        r#"{"channel":"clearinghouseState","data":{"dex":"unknown","clearinghouseState":{"assetPositions":[],"time":4000}}}"#,
+    );
+    let rows = subscription_receipts(e.snapshot_frame(4001.));
+    assert_eq!(receipt(&rows, ""), (3, 1001.));
+    assert_eq!(receipt(&rows, "xyz"), (3, 2001.));
+}
+
+#[test]
+fn subscription_receipt_maps_user_data_to_user_events_only() {
+    let (mut e, socket) = ready("disabled");
+    message(
+        &mut e,
+        socket,
+        2000.,
+        r#"{"channel":"user","data":{"orders":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"1"},"status":"open"}]}}"#,
+    );
+    assert!(e.store().order("9").is_some());
+    let rows = subscription_receipts(e.snapshot_frame(2001.));
+    let user = rows.iter().find(|r| r.0.contains("userEvents")).unwrap();
+    assert_eq!((user.1, user.2), (3, 1.));
+    let sibling = rows.iter().find(|r| r.0.contains("orderUpdates")).unwrap();
+    assert_eq!(sibling.1, 1);
+    assert!(sibling.2.is_nan());
+}

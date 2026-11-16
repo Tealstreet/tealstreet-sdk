@@ -453,6 +453,7 @@ export class EngineHost {
     this.socketStats = { public: socketStats(), business: socketStats(), private: socketStats() };
     this.timers = new Map();
     this.commands = new Map();
+    this.commandAdmissions = new Map();
     // Timed commands owning a sign attempt, HTTP request or managed preparation.
     this.stageCauses = new Map();
     this.stageCause = undefined;
@@ -517,13 +518,15 @@ export class EngineHost {
     finally { this.handlers.onDead?.(this.deadError); }
   }
 
-  checkAlgoOwner() {
+  observeAlgoOwner() {
     if (this.disposed) return false;
     if (!this.algoOwnerCurrent) return true;
-    let current = false;
-    try { current = this.algoOwnerCurrent() === true; } catch { /* An unavailable owner retires this host. */ }
-    if (current) return true;
-    this.failEngine(new Error('TWAP owner changed; recreate the account worker'));
+    try { return this.algoOwnerCurrent() === true; } catch { return false; }
+  }
+
+  checkAlgoOwner() {
+    if (this.observeAlgoOwner()) return true;
+    if (!this.disposed) this.failEngine(new Error('TWAP owner changed; recreate the account worker'));
     return false;
   }
 
@@ -583,6 +586,7 @@ export class EngineHost {
     let timeoutMs;
     let onEvent;
     let onStage;
+    let assertCurrent;
     try {
       if (command.op === 'scheduleCancel' && command.time != null
           && (!Number.isSafeInteger(command.time) || command.time < 0)) {
@@ -594,6 +598,16 @@ export class EngineHost {
       if (onEvent !== undefined && typeof onEvent !== 'function') throw new TypeError('Command event observer must be a function');
       onStage = options?.onStage;
       if (onStage !== undefined && typeof onStage !== 'function') throw new TypeError('Command stage observer must be a function');
+      assertCurrent = options?.assertCurrent;
+      if (assertCurrent !== undefined) {
+        if (typeof assertCurrent !== 'function') throw new TypeError('Command owner check must be a function');
+        if (typeof this.engine.httpCommandOwner !== 'function') {
+          throw new ExchangeError('Engine predates command ownership checks; update the SDK/WASM', { kind: 'unsupported', outcome: 'notSent' });
+        }
+        if (assertCurrent() !== undefined) {
+          throw new ExchangeError('Command owner check must complete synchronously', { kind: 'invalidInput', outcome: 'notSent' });
+        }
+      }
     } catch (error) { return Promise.reject(error); }
     const reply = command.op === 'publicFeedUpdate' || command.op === 'setTickerSymbols' || command.op === 'setPollScale' || command.op === 'networkRestored' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles' || command.op === 'repairSubscription'
@@ -607,6 +621,7 @@ export class EngineHost {
         clientOrderId: command.clientOrderId ?? (clientOrderIds?.length === 1 ? clientOrderIds[0] : undefined), clientOrderIds,
         receiptKey: `${this.receiptSession ??= receiptSession(this.entropy)}:${reply}`, commandId: reply, orderIdentities: [] };
     } catch (error) { return Promise.reject(error); }
+    if (reply !== undefined && assertCurrent) this.commandAdmissions.set(reply, assertCurrent);
     const promise = reply === undefined
       ? Promise.resolve()
       : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject, identity, onEvent, onStage }));
@@ -786,15 +801,24 @@ export class EngineHost {
 
   /**
    * Close the open sockets of `channel` (or all) as an abnormal close, so the
-   * venue runs its own reconnect. Returns how many sockets were closed.
+   * venue runs its own reconnect. Optional recovery bounds retain pre-pause
+   * physical receipts until stale, without closing fresh/uninitialized siblings.
    */
-  reconnectSockets(channel) {
+  reconnectSockets(channel, recovery) {
     this.assertHttpHandoffIdle();
     if (this.disposed) return 0;
     let closed = 0;
     for (const [id, record] of [...this.socketRecords]) {
       // A connect in flight is left alone, as in TS: a second connect would leak it.
-      if ((channel !== undefined && !record.channels.includes(channel)) || !record.open || !this.sockets.has(id)) continue;
+      if ((channel !== undefined && !record.channels.includes(channel)) || !record.open ||
+        !this.sockets.has(id) || this.socketRecords.get(id) !== record) continue;
+      if (recovery) {
+        if (!record.initialized || record.lastReceived <= 0) continue;
+        if (recovery.suspendedBefore !== undefined && record.lastReceived <= recovery.suspendedBefore)
+          record.recoveryReceipt = record.lastReceived;
+        if (record.recoveryReceipt !== record.lastReceived || record.lastReceived > recovery.staleBefore) continue;
+        record.recoveryReceipt = undefined;
+      }
       const socket = this.sockets.get(id);
       this.sockets.delete(id);
       this.socketClosed(id, 1006);
@@ -862,7 +886,10 @@ export class EngineHost {
     this.armAlgos();
   }
 
-  get algosRunning() { return this.checkAlgoOwner() && this.algosStarted; }
+  // Status and teardown may observe a retired owner without executing any work.
+  get algosRunning() { return this.observeAlgoOwner() && this.algosStarted; }
+
+  checkAlgosForExecution() { return this.checkAlgoOwner() && this.algosStarted; }
 
   /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if the engine refuses it. */
   algoOp(op, data) {
@@ -890,7 +917,8 @@ export class EngineHost {
    * did not, or the algos ended first. */
   algoStopAll(reason) {
     this.assertHttpHandoffIdle();
-    if (!this.algosRunning) return Promise.resolve({ stoppedChasers: [], stoppedTwaps: [], settled: true });
+    // A user nuke is execution, so keep the strict fence outside the pure getter.
+    if (!this.checkAlgosForExecution()) return Promise.resolve({ stoppedChasers: [], stoppedTwaps: [], settled: true });
     if (typeof this.engine.algoStopAll !== 'function')
       throw new ExchangeError('This engine cannot stop its algos for a nuke', { kind: 'unsupported', outcome: 'notSent' });
     const stopped = new Promise((resolve) => this.algoStopAllWaiters.push(resolve));
@@ -984,6 +1012,7 @@ export class EngineHost {
     };
     for (const [id, pending] of this.commands) this.settleCommand(id, this.deadError
       ? new EngineDeadError(this.deadError.cause, pending.identity) : new EngineDisposedError(pending.identity, true), true);
+    this.commandAdmissions.clear();
     for (const id of this.socketFailures.keys()) attempt(() => this.clearSocketFailure(id));
     for (const controller of this.requests.values()) attempt(() => controller.abort());
     this.requests.clear();
@@ -1225,12 +1254,23 @@ export class EngineHost {
   }
 
   hostedSigning(input) {
+    return this.captureHostedSigning('prepareHostedSigning', () => JSON.stringify(input));
+  }
+
+  hostedJoinProof(requestJson) {
+    if (typeof requestJson !== 'string')
+      return Promise.reject(new ExchangeError('Invalid join proof request', { kind: 'invalidInput', outcome: 'notSent' }));
+    return this.captureHostedSigning('prepareJoinProof', () => requestJson);
+  }
+
+  captureHostedSigning(entry, encode) {
     this.assertHttpHandoffIdle();
     if (this.disposed) return Promise.reject(new EngineDisposedError());
-    if (typeof this.engine.prepareHostedSigning !== 'function')
+    const prepare = this.engine[entry];
+    if (typeof prepare !== 'function')
       return Promise.reject(new ExchangeError('Hosted signing is unsupported', { kind: 'unsupported', outcome: 'notSent' }));
     let prepared;
-    try { prepared = JSON.parse(this.invokeHosted(this.engine.prepareHostedSigning, JSON.stringify(input), this.transport.now())); }
+    try { prepared = JSON.parse(this.invokeHosted(prepare, encode(), this.transport.now())); }
     catch (error) { return Promise.reject(error); }
     const { id, work, deadlineMs } = prepared;
     const duration = deadlineMs - this.transport.now();
@@ -1404,10 +1444,12 @@ export class EngineHost {
         const channel = Object.hasOwn(this.socketStats, action.channel) ? action.channel : 'public';
         const channels = action.publicTopics === true && channel !== 'public' ? [channel, 'public'] : [channel];
         const stats = channels.map((role) => this.socketStats[role]);
-        const record = { channels, stats, open: false, initialized: false };
+        const record = { channels, stats, open: false, initialized: false, lastReceived: 0, recoveryReceipt: undefined };
         // One timestamp per carried channel; state changes notify once per socket.
         const received = () => {
           const now = Date.now();
+          record.lastReceived = now;
+          record.recoveryReceipt = undefined;
           for (const stat of stats) stat.lastReceived = now;
           if (record.initialized || !record.open) return;
           record.initialized = true;
@@ -1615,6 +1657,7 @@ export class EngineHost {
         break;
       }
       case 'done': {
+        this.commandAdmissions.delete(action.command);
         this.stage(action.command, 'reply');
         const pending = this.commands.get(action.command);
         if (!pending) {

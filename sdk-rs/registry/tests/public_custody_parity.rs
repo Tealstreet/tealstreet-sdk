@@ -89,7 +89,8 @@ fn keyless_hyperliquid_spot_remote_signer_keeps_the_declared_private_mode() {
 
 #[test]
 fn outside_beta_native_accounts_refuse_before_public_or_private_custody() {
-    for venue in ["bitrue", "polymarket"] {
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    for venue in ["polymarket"] {
         for flag in ["remoteSigning", "payloadSigner"] {
             for public in [true, false] {
                 let mut value = json!({"key": "unused-key", "secret": "unused-fixture",
@@ -398,9 +399,12 @@ fn disabled_private_payload_checks_callback_configuration_before_admission() {
                                     "coinbase" | "coinbasespot" => format!(
                                         "Rust {venue} payloadSigner requires a configured injected signing provider"
                                     ),
-                                    "kraken" => {
-                                        "Rust kraken has no REST-only PayloadSigner lifecycle"
-                                            .to_owned()
+                                    // #3314 adds TxFlow RemoteSigner, retaining the
+                                    // same exact PayloadSigner refusal as Kraken.
+                                    "kraken" | "txflow" => {
+                                        format!(
+                                            "Rust {venue} has no REST-only PayloadSigner lifecycle"
+                                        )
                                     }
                                     "kodiakfi" | "mode" | "what" | "woofi" => {
                                         "Orderly injected private signing admission is closed"

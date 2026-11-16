@@ -1,5 +1,11 @@
 # Venue construction follow-ups
 
+Current DELEGATED policy (2026-11-13): construction rules describe shared hosted
+support, not a separate DELEGATED venue list. DELEGATED and COSIGNED use the
+same hosted eligibility. Availability and per-user pins use the single runtime
+`DELEGATED` flag; `DELEGATED_BYBIT` is only its compatibility alias. Do not add
+`venues.<venue>.delegated.enabled` declarations or per-venue rollout flags.
+
 Landing branch: `feat/rust-rewrite`. Preserve venue behavior; one PR per phase.
 
 1. Expose AsterDEX's existing native API-version resolver for registry validation

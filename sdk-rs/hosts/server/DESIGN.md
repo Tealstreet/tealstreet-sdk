@@ -126,7 +126,8 @@ What it captures:
   on an engine thread never waits on Sentry), sending the code location and
   never the payload;
 - `Log::error` conditions: drain and break-glass deadlines, router-lease
-  fencing, a failing signer, and algo shutdown deadlines;
+  fencing with running algos, a failing signer, and algo shutdown deadlines;
+  zero-running fences are journal-only info, including paused/pending-only work;
 - the native host's account start failures and venue, relay and HTTP-tunnel
   transport failures, through `safe_cex_native::report`. Each account's
   transport is built `with_venue`, so its failures carry `venue` beside `kind`
@@ -142,7 +143,9 @@ Every event is rebuilt from an allowlist:
 - tags `service`, `box`, `kind`, `error_kind`, `venue_code`, `venue` and
   `target`;
 - extras `user_tag` (a hash, never the user ID) and
-  `suppressed_since_last_event`.
+  `suppressed_since_last_event`; `router_lease.fenced` additionally allows unsigned
+  numeric `running_jobs`, `paused_jobs` and `pending_work` from the pre-disposal
+  work snapshot, never job IDs or payloads.
 
 Account names, URLs with their query, auth headers, key-shaped strings and
 payloads do not leave. Events are throttled to one per fingerprint per 60 s
@@ -527,8 +530,8 @@ explicit user action; no speculative restore or automatic cross-box replay runs.
   - At `exp + 30s` the socket closes with 1008. That 30s is the same reconnect grace as `PROXY_TOKEN_RECONNECT_GRACE_MS`.
 - **Use of the token:** it is also the per-socket proxy token behind the account's `ProxyTokenProvider` (see Routing). It is never logged.
 - **Private COSIGNED join proof:** fresh connections use the same isolated native
-  probe and admission path as DELEGATED, independently of `delegated.enabled`.
-  Exact `bybit`, `binance`, `okx`, `bitget`, `blofin` and `kucoin` are proof-ready.
+  probe and admission path as DELEGATED, using shared hosted eligibility.
+  The exact proof-ready names and variant controls are listed in the host contract below.
   Other private COSIGNED venues return an init refusal with
   `kind: "proof-unavailable"`, `initRefused: true`, `transient: false` and
   `outcome: "notSent"`; they do not fall back to registry attachment.
@@ -606,10 +609,54 @@ dropped. This matches Bun's `idleTimeout: 30` with `sendPingsAutomatically`.
 
 ### DELEGATED handover
 
+A private socket always proves its own candidate credentials before crossing a
+resident mode. A COSIGNED join attaches to an existing DELEGATED actor and cannot
+downgrade it. A verified DELEGATED join can upgrade a supported COSIGNED actor,
+including its own parked copy, without restarting the actor or its jobs. Ethereum,
+Stark and Ed25519 candidates match the original provider's completed/canonical
+public binding locally. Initial COSIGNED Schnorr construction pins a routed,
+validated registration before publishing its provider; later joins require the
+current registration and candidate to match that immutable key. After promotion,
+the actual installed resident supplies the binding. Legacy actors without the
+initial binding refuse explicitly, rather than adopting a rotated slot's key.
+Public proof retains only a weak reference to the
+exact resident actor, and captured init, token and lease guards survive the lookup.
+A retired attempt or different actor cannot inherit it, including after settings
+return to their previous values. Existing DELEGATED residents use the same local
+public-key comparison before attachment; unsigned balance reads are not proof.
+An owned signing-work barrier refuses `mode_transition_busy` while any original
+sign future or setup execution remains unsettled. No work is canceled, retried
+or sent to both signers. The original engine dispatch handle, opaque refs,
+address/public-key seals and nonce ownership stay in place. Missing trusted
+bindings refuse `mode_transition_unavailable`. Coinbase CDP explicitly refuses
+as `proof-unavailable` until its COSIGNED JWT setup and private venue proof exist.
+These refusals leave the candidate unattached.
+
+The future provider, actual mode and protected resident are installed together.
+Only opaque key refs are translated, by primary/secondary identity role; receipt,
+context and literal payload bytes are unchanged. The old browser signer link is
+irreversibly retired for signing while its account-notification identity remains
+usable. The existing protected allocation/erasure rules remain in force.
+
+An attached session receives `msg/op=account-signing-mode` with data
+`{version:1, requestedMode, actualMode, attached:true, reason}`. Modes are
+`cosigned`/`delegated`; reason is `requested` when they match, otherwise
+`delegated-enabled-elsewhere` (another session, not proof of another device).
+An upgrade broadcasts to all confirmed live registrations with their own labels
+and instance IDs. Pending proofs and retired registrations get no confirmation.
+A refused handover uses the existing error envelope with initRefused=true,
+kind=`admission`, reason=`mode_transition_busy` (transient) or
+`mode_transition_unavailable` (permanent), requestedMode, residentMode and
+attached=false; it deliberately omits actualMode.
+
 DELEGATED uses the same hosted eligibility as COSIGNED: a supported parsed
 `remoteSigning` policy and a configured server origin, including the existing
-unhosted refusal. There is no per-venue DELEGATED list. Authenticated connections
-request a handover with `msg` data
+unhosted refusal. There is no per-venue DELEGATED list or feature flag. One
+runtime `DELEGATED` flag supplies the kill switch/per-user pin; the old
+`DELEGATED_BYBIT` name is only its compatibility alias. Bybit was the first test
+account. DELEGATED-only mobile and all DELEGATED clients have no WASM engine or
+local signer; every write is a typed v1 action on the existing hosted WebSocket.
+Authenticated connections request a handover with `msg` data
 `{op:"delegated-key-req", accountName, data:{exchangeName}}`.
 An unjoined caller must supply `data.exchangeName`; a joined account may omit it
 and use its existing venue. Missing or unsupported targets refuse without an
@@ -702,15 +749,31 @@ Public-only accounts, unsupported/unhosted venues and existing early-subscriptio
 handling retain their previous paths. Fixed synthetic interoperability and RFC
 test data live in `tests/data/`.
 
-The shared startup admission runner makes exact `bybit`, `binance`, `okx`,
-`bitget`, `blofin` and `kucoin` proof-ready for COSIGNED. It runs the selected
+The shared startup admission runner uses the exact COSIGNED names in
+`delegated/probe.rs`, documented in the host contract above. It runs the selected
 venue's existing native private startup with either the remote provider or the
 local provider; it does not build a second set of REST requests. Its result
 classifier uses engine `ErrorKind` values: authentication failures are invalid,
 rate limits and transport failures are transient, and complete private startup
 is accepted.
 Unclassified startup failures remain transient refusals. Public-only and
-frame-fed accounts cannot satisfy this check.
+frame-fed accounts cannot satisfy this check. MEXC mainnet proves its normal
+private position-mode, balance, positions and three order-surface reads using
+API-key/timestamp/query HMAC headers; private-stream login is also validated by
+the offline fixture. Wrong-key and replayed signatures fail before attachment,
+foreign sockets cannot settle signing work, and the resident stays unchanged.
+MEXC has no hosted testnet alias; public discovery never proves possession.
+
+OKX EEA mainnet authenticates native signed config before keyed catalogue
+discovery, retaining the config authority until market-dependent settings apply.
+Config alone cannot complete the probe. Consecutive signature refusals allow
+one re-signed read then fail permanently; no admission budget is extended.
+EEA demo remains outside the exact COSIGNED proof-ready catalog.
+
+Exact `bitunix` readiness uses that venue round trip, with the existing native
+double-SHA256 secret-suffix request signer. Its synthetic venue independently
+checks nonce/timestamp/key/query signing bytes on the actual private startup
+reads; a public response or a signer result alone never completes admission.
 
 COSIGNED proof readiness is independent of DELEGATED hosted eligibility.
 The COSIGNED catalog does not gate DELEGATED admission. COSIGNED coverage
@@ -721,6 +784,10 @@ handover. The suite verifies the actual native HTTP signatures against synthetic
 venue responses. Existing Bybit session tests additionally cover resident-account
 and registration preservation. These offline checks do not replace live venue
 validation or the existing server-origin and signing requirements for rollout.
+
+Exact WOO uses the existing native startup's v1/v3 account reads and private
+socket authentication. Its offline fixture independently checks HMAC bytes,
+rejects unsigned reads, and accepts only startup reads and read-feed traffic.
 
 ## Frames (claude-19pt8s, web hosted client)
 

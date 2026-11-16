@@ -1,0 +1,574 @@
+{
+  "bybitdemo": {
+    "instruments-info": {
+      "retCode": 0,
+      "retMsg": "OK",
+      "result": {
+        "category": "linear",
+        "list": [
+          {
+            "symbol": "BTCUSDT",
+            "symbolId": 5,
+            "contractType": "LinearPerpetual",
+            "status": "Trading",
+            "baseCoin": "BTC",
+            "quoteCoin": "USDT",
+            "launchTime": "1585526400000",
+            "deliveryTime": "0",
+            "deliveryFeeRate": "",
+            "priceScale": "2",
+            "leverageFilter": {
+              "minLeverage": "1",
+              "maxLeverage": "100.00",
+              "leverageStep": "0.01"
+            },
+            "priceFilter": {
+              "minPrice": "0.10",
+              "maxPrice": "1999999.80",
+              "tickSize": "0.10"
+            },
+            "lotSizeFilter": {
+              "maxOrderQty": "1190.000",
+              "minOrderQty": "0.001",
+              "qtyStep": "0.001",
+              "postOnlyMaxOrderQty": "1190.000",
+              "maxMktOrderQty": "500.000",
+              "minNotionalValue": "5"
+            },
+            "unifiedMarginTrade": true,
+            "fundingInterval": 480,
+            "settleCoin": "USDT",
+            "copyTrading": "both",
+            "upperFundingRate": "0.00375",
+            "lowerFundingRate": "-0.00375",
+            "isPreListing": false,
+            "preListingInfo": null,
+            "riskParameters": {
+              "priceLimitRatioX": "0.01",
+              "priceLimitRatioY": "0.02"
+            },
+            "symbolType": "",
+            "tags": []
+          },
+          {
+            "symbol": "ETHUSDT",
+            "contractType": "LinearPerpetual",
+            "status": "Trading",
+            "baseCoin": "ETH",
+            "quoteCoin": "USDT",
+            "deliveryTime": "0",
+            "leverageFilter": {
+              "minLeverage": "1",
+              "maxLeverage": "100.00",
+              "leverageStep": "0.01"
+            },
+            "priceFilter": {
+              "minPrice": "0.01",
+              "maxPrice": "199999.98",
+              "tickSize": "0.01"
+            },
+            "lotSizeFilter": {
+              "maxOrderQty": "7240.00",
+              "minOrderQty": "0.01",
+              "qtyStep": "0.01"
+            },
+            "settleCoin": "USDT"
+          }
+        ],
+        "nextPageCursor": ""
+      },
+      "retExtInfo": {},
+      "time": 1735809771618
+    },
+    "tickers": {
+      "retCode": 0,
+      "retMsg": "OK",
+      "result": {
+        "category": "linear",
+        "list": [
+          {
+            "symbol": "BTCUSDT",
+            "lastPrice": "66666.60",
+            "indexPrice": "66660.19",
+            "markPrice": "66666.60",
+            "prevPrice24h": "79206.20",
+            "price24hPcnt": "-0.158315",
+            "highPrice24h": "79266.30",
+            "lowPrice24h": "65076.90",
+            "prevPrice1h": "66666.60",
+            "openInterest": "492373.72",
+            "openInterestValue": "32824881841.75",
+            "turnover24h": "4936790807.6521",
+            "volume24h": "73191.3870",
+            "fundingRate": "-0.005",
+            "nextFundingTime": "1760342400000",
+            "predictedDeliveryPrice": "",
+            "basisRate": "",
+            "deliveryFeeRate": "",
+            "deliveryTime": "0",
+            "ask1Size": "23775.469",
+            "bid1Price": "66666.60",
+            "ask1Price": "66666.70",
+            "bid1Size": "23789.165",
+            "basis": "",
+            "preOpenPrice": "",
+            "preQty": "",
+            "curPreListingPhase": "",
+            "fundingIntervalHour": "8",
+            "fundingCap": "0.005"
+          },
+          {
+            "symbol": "ETHUSDT",
+            "lastPrice": "3000.00",
+            "indexPrice": "2999.50",
+            "markPrice": "3000.00",
+            "price24hPcnt": "0.01",
+            "openInterest": "1000",
+            "turnover24h": "3000000",
+            "volume24h": "1000",
+            "fundingRate": "0.0001",
+            "nextFundingTime": "1760342400000",
+            "bid1Price": "2999.99",
+            "ask1Price": "3000.00"
+          }
+        ]
+      },
+      "retExtInfo": {},
+      "time": 1760352369814
+    },
+    "account/info": {
+      "retCode": 0,
+      "result": {
+        "marginMode": "REGULAR_MARGIN",
+        "unifiedMarginStatus": 4
+      }
+    },
+    "wallet-balance": {
+      "retCode": 0,
+      "result": {
+        "list": [
+          {
+            "accountType": "UNIFIED",
+            "totalEquity": "1000",
+            "totalWalletBalance": "1000",
+            "totalAvailableBalance": "1000",
+            "totalPerpUPL": "0",
+            "coin": [
+              {
+                "coin": "USDT",
+                "walletBalance": "1",
+                "equity": "1",
+                "usdValue": "1000",
+                "availableToWithdraw": "1",
+                "unrealisedPnl": "0",
+                "locked": "0"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "*": {
+      "retCode": 0,
+      "retMsg": "OK",
+      "result": {
+        "list": [],
+        "nextPageCursor": ""
+      }
+    }
+  },
+  "bybitspot": {
+    "instruments-info": {
+      "retCode": 0,
+      "result": {
+        "category": "spot",
+        "list": [
+          {
+            "symbol": "BTCUSDT",
+            "baseCoin": "BTC",
+            "quoteCoin": "USDT",
+            "status": "Trading",
+            "lotSizeFilter": {
+              "basePrecision": "0.000001",
+              "quotePrecision": "0.00000001",
+              "minOrderQty": "0.00001",
+              "minOrderAmt": "5",
+              "maxLimitOrderQty": "100",
+              "maxMarketOrderQty": "10"
+            },
+            "priceFilter": {
+              "tickSize": "0.01"
+            }
+          }
+        ]
+      }
+    },
+    "tickers": {
+      "retCode": 0,
+      "result": {
+        "category": "spot",
+        "list": [
+          {
+            "symbol": "BTCUSDT",
+            "lastPrice": "100",
+            "bid1Price": "99.9",
+            "ask1Price": "100.1",
+            "volume24h": "1",
+            "turnover24h": "100"
+          }
+        ]
+      }
+    },
+    "account/info": {
+      "retCode": 0,
+      "result": {
+        "marginMode": "REGULAR_MARGIN",
+        "unifiedMarginStatus": 4
+      }
+    },
+    "wallet-balance": {
+      "retCode": 0,
+      "result": {
+        "list": [
+          {
+            "accountType": "UNIFIED",
+            "totalEquity": "1000",
+            "totalWalletBalance": "1000",
+            "totalAvailableBalance": "1000",
+            "totalPerpUPL": "0",
+            "coin": [
+              {
+                "coin": "USDT",
+                "walletBalance": "1",
+                "equity": "1",
+                "usdValue": "1000",
+                "availableToWithdraw": "1",
+                "unrealisedPnl": "0",
+                "locked": "0"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "*": {
+      "retCode": 0,
+      "retMsg": "OK",
+      "result": {
+        "list": [],
+        "nextPageCursor": ""
+      }
+    }
+  },
+  "binancepm": {
+    "exchangeInfo": {
+      "symbols": [
+        {
+          "symbol": "BTCUSDT",
+          "status": "TRADING",
+          "baseAsset": "BTC",
+          "quoteAsset": "USDT",
+          "marginAsset": "USDT",
+          "contractType": "PERPETUAL",
+          "filters": [
+            {
+              "filterType": "MIN_NOTIONAL",
+              "notional": "5"
+            },
+            {
+              "filterType": "PRICE_FILTER",
+              "tickSize": "0.10"
+            },
+            {
+              "filterType": "LOT_SIZE",
+              "stepSize": "0.001",
+              "minQty": "0.001",
+              "maxQty": "1000"
+            },
+            {
+              "filterType": "MARKET_LOT_SIZE",
+              "stepSize": "0.001",
+              "minQty": "0.001",
+              "maxQty": "120"
+            }
+          ]
+        }
+      ]
+    },
+    "ticker/24hr": [
+      {
+        "symbol": "BTCUSDT",
+        "lastPrice": "100",
+        "priceChangePercent": "1",
+        "volume": "2",
+        "quoteVolume": "3"
+      }
+    ],
+    "ticker/bookTicker": [
+      {
+        "symbol": "BTCUSDT",
+        "bidPrice": "99.9",
+        "askPrice": "100.1"
+      }
+    ],
+    "premiumIndex": [
+      {
+        "symbol": "BTCUSDT",
+        "markPrice": "100",
+        "indexPrice": "100",
+        "lastFundingRate": "0.0001",
+        "nextFundingTime": 1700000000000
+      }
+    ],
+    "/account": {
+      "assets": [
+        {
+          "asset": "USDT",
+          "walletBalance": "1000",
+          "availableBalance": "1000",
+          "initialMargin": "0",
+          "unrealizedProfit": "0"
+        }
+      ]
+    },
+    "positionSide/dual": {
+      "dualSidePosition": false
+    },
+    "listenKey": {
+      "listenKey": "synthetic-listen-key"
+    },
+    "*": [],
+    "/balance": [
+      {
+        "asset": "USDT",
+        "totalWalletBalance": "1000",
+        "crossMarginFree": "1000",
+        "umUnrealizedPNL": "0"
+      }
+    ]
+  },
+  "binanceinverse": {
+    "exchangeInfo": {
+      "symbols": [
+        {
+          "symbol": "BTCUSD_PERP",
+          "baseAsset": "BTC",
+          "quoteAsset": "USD",
+          "marginAsset": "BTC",
+          "contractType": "PERPETUAL",
+          "filters": [
+            {
+              "filterType": "MIN_NOTIONAL",
+              "notional": "5"
+            },
+            {
+              "filterType": "PRICE_FILTER",
+              "tickSize": "0.10"
+            },
+            {
+              "filterType": "LOT_SIZE",
+              "stepSize": "0.001",
+              "minQty": "0.001",
+              "maxQty": "1000"
+            },
+            {
+              "filterType": "MARKET_LOT_SIZE",
+              "stepSize": "0.001",
+              "minQty": "0.001",
+              "maxQty": "120"
+            }
+          ],
+          "contractStatus": "TRADING",
+          "contractSize": 100
+        }
+      ]
+    },
+    "ticker/24hr": [
+      {
+        "symbol": "BTCUSD_PERP",
+        "lastPrice": "100",
+        "priceChangePercent": "1",
+        "volume": "2",
+        "quoteVolume": "3"
+      }
+    ],
+    "ticker/bookTicker": [
+      {
+        "symbol": "BTCUSD_PERP",
+        "bidPrice": "99.9",
+        "askPrice": "100.1"
+      }
+    ],
+    "premiumIndex": [
+      {
+        "symbol": "BTCUSD_PERP",
+        "markPrice": "100",
+        "indexPrice": "100",
+        "lastFundingRate": "0.0001",
+        "nextFundingTime": 1700000000000
+      }
+    ],
+    "/account": {
+      "assets": [
+        {
+          "asset": "BTC",
+          "walletBalance": "1",
+          "availableBalance": "1",
+          "initialMargin": "0",
+          "unrealizedProfit": "0"
+        }
+      ]
+    },
+    "positionSide/dual": {
+      "dualSidePosition": false
+    },
+    "listenKey": {
+      "listenKey": "synthetic-listen-key"
+    },
+    "*": []
+  },
+  "binancespot": {
+    "exchangeInfo": {
+      "symbols": [
+        {
+          "symbol": "BTCUSDT",
+          "status": "TRADING",
+          "baseAsset": "BTC",
+          "quoteAsset": "USDT",
+          "marginAsset": "USDT",
+          "contractType": "PERPETUAL",
+          "filters": [
+            {
+              "filterType": "MIN_NOTIONAL",
+              "notional": "5"
+            },
+            {
+              "filterType": "PRICE_FILTER",
+              "tickSize": "0.10"
+            },
+            {
+              "filterType": "LOT_SIZE",
+              "stepSize": "0.001",
+              "minQty": "0.001",
+              "maxQty": "1000"
+            },
+            {
+              "filterType": "MARKET_LOT_SIZE",
+              "stepSize": "0.001",
+              "minQty": "0.001",
+              "maxQty": "120"
+            }
+          ],
+          "isSpotTradingAllowed": true
+        }
+      ]
+    },
+    "ticker/24hr": [
+      {
+        "symbol": "BTCUSDT",
+        "lastPrice": "100",
+        "priceChangePercent": "1",
+        "volume": "2",
+        "quoteVolume": "3"
+      }
+    ],
+    "ticker/bookTicker": [
+      {
+        "symbol": "BTCUSDT",
+        "bidPrice": "99.9",
+        "askPrice": "100.1"
+      }
+    ],
+    "premiumIndex": [
+      {
+        "symbol": "BTCUSDT",
+        "markPrice": "100",
+        "indexPrice": "100",
+        "lastFundingRate": "0.0001",
+        "nextFundingTime": 1700000000000
+      }
+    ],
+    "/account": {
+      "balances": [
+        {
+          "asset": "USDT",
+          "free": "1000",
+          "locked": "0"
+        }
+      ]
+    },
+    "positionSide/dual": {
+      "dualSidePosition": false
+    },
+    "listenKey": {
+      "listenKey": "synthetic-listen-key"
+    },
+    "*": []
+  },
+  "bitgetusdc": {
+    "contracts": {
+      "code": "00000",
+      "data": [
+        {
+          "symbol": "BTCUSDC",
+          "baseCoin": "BTC",
+          "quoteCoin": "USDC",
+          "symbolStatus": "normal",
+          "minTradeUSDC": "5",
+          "pricePlace": "1",
+          "priceEndStep": "1",
+          "sizeMultiplier": "0.001",
+          "minTradeNum": "0.001",
+          "maxOrderQty": "120",
+          "maxLever": "125"
+        }
+      ]
+    },
+    "tickers": {
+      "code": "00000",
+      "data": [
+        {
+          "symbol": "BTCUSDC",
+          "bidPr": "99.9",
+          "askPr": "100.1",
+          "lastPr": "100",
+          "indexPrice": "99",
+          "changeUtc24h": "0.01",
+          "baseVolume": "1000",
+          "quoteVolume": "100000",
+          "fundingRate": "0.0001"
+        }
+      ]
+    },
+    "account/settings": {
+      "code": "40084",
+      "msg": "Classic Account mode",
+      "data": null
+    },
+    "account/accounts": {
+      "code": "00000",
+      "data": [
+        {
+          "marginCoin": "USDC",
+          "available": "1000",
+          "accountEquity": "1000",
+          "unrealizedPL": "0",
+          "locked": "0",
+          "crossedMaxAvailable": "1000",
+          "isolatedMaxAvailable": "1000"
+        }
+      ]
+    },
+    "orders-pending": {
+      "code": "00000",
+      "data": {
+        "entrustedList": [],
+        "endId": ""
+      }
+    },
+    "*": {
+      "code": "00000",
+      "data": []
+    }
+  }
+}

@@ -129,6 +129,11 @@ c85ca651b15d165d618d12fbeb385a1bf0c783b9:packages/safe-cex/src/__tests__/audit-r
 # Public reviewer names in historical Lighter plan prose; no credential material.
 # Exact commit/path/rule/line only.
 94f58d0d64773c6c915a6da1ada5d756442f8871:docs/plans/RUST_LIGHTER_REMAINING_FUNNEL.md:generic-api-key:7
+# Coinbase drb private-read tests: the same literal organizations/test/apiKeys/test identity.
+e04fb41d82604593df72ae0f8cda00df6920eac5:sdk-rs/venues/coinbase/tests/support/legacy_account.rs:generic-api-key:45
+e04fb41d82604593df72ae0f8cda00df6920eac5:sdk-rs/venues/coinbase/tests/support/private_drb.rs:generic-api-key:99
+# Coinbase drb trading tests: literal organizations/test/apiKeys/trading identity.
+2eed0db71cc4266533447b132794062520dc9b71:sdk-rs/venues/coinbase/tests/support/trading_drb.rs:generic-api-key:21
 
 # Synthetic Coinbase hosted-signing CDP name in already-pushed history, PR #3301.
 7e157be6d6d3916000c253cee778ea3ab09838b0:packages/safe-cex/src/__tests__/audit-regressions/rust.coinbase-hosted-signing.test.ts:generic-api-key:12
@@ -141,3 +146,16 @@ c231996640e10820a0e8d777b51eb0c52e12789d:packages/safe-cex/src/__tests__/audit-r
 
 # Synthetic Crypto.com WS replay HMAC, independently recomputed from literal test inputs; PR #3298.
 e2df6efb8bc2ee3299f4ed473cf8ed93b686a3cc:packages/safe-cex/src/__tests__/audit-regressions/rust.cryptocom-hosted-signing.test.ts:generic-api-key:175
+
+# Public synthetic dynamic-key/JWT canaries in #3512; current tests assemble identical bytes.
+# Exact historical commit/path/rule/line only; future changes remain scanned.
+9d9769c4b092d78896b68c940d579c48bc2687ed:packages/service-telemetry/src/diagnosticRedaction.test.ts:generic-api-key:370
+9d9769c4b092d78896b68c940d579c48bc2687ed:packages/service-telemetry/src/diagnosticRedaction.test.ts:generic-api-key:371
+9d9769c4b092d78896b68c940d579c48bc2687ed:packages/service-telemetry/src/diagnosticRedaction.test.ts:jwt:410
+
+# Synthetic CDP public names only, not signing material; current fixtures build
+# organizations/synthetic/apiKeys/synthetic from explicit public segments.
+# Exact historical fingerprints only; production and future changes stay scanned.
+49bdb3c28aa59a4042e22b7837e9733be189619d:sdk-rs/hosts/server/src/accounts/provider_lifetimes.rs:generic-api-key:323
+9552becb53db1487e1e1398685c4e48bd4f18220:sdk-rs/hosts/server/src/session/tests/provider_handover_refusals.rs:generic-api-key:13
+9552becb53db1487e1e1398685c4e48bd4f18220:sdk-rs/hosts/server/src/session/tests/provider_handover_refusals.rs:generic-api-key:44

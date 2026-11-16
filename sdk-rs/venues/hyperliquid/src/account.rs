@@ -2182,6 +2182,9 @@ impl Hyperliquid {
         complete: bool,
         settings_revision: Option<u64>,
     ) -> StateApplied {
+        if let Some(user) = self.user() {
+            cx.record_socket_topic(&["@clearinghouseState|||", user, "|", dex, "|||"]);
+        }
         // While discovery retries, unknown nonzero ownership holds the snapshot; once
         // settled the row is skipped and its stored copy kept. Rows TS hides by
         // design (delisted, unquoted) are skipped, as in TS.
@@ -2847,6 +2850,17 @@ impl Hyperliquid {
             return;
         };
         let raw = frame.data.get();
+        // Clearinghouse receipts are attributed only after decoding their dex below.
+        if frame.channel != "clearinghouseState"
+            && let Some(user) = self.user()
+        {
+            let topic = if frame.channel == "user" {
+                "userEvents"
+            } else {
+                &frame.channel
+            };
+            cx.record_socket_topic(&["@", topic, "|||", user, "||||"]);
+        }
         match frame.channel.as_ref() {
             "clearinghouseState" if !self.spot => {
                 if let Ok(env) = serde_json::from_str::<ClearingEnvelope>(raw)
@@ -2869,6 +2883,15 @@ impl Hyperliquid {
                 if let Ok(row) = serde_json::from_str::<ActiveAsset>(raw)
                     && let Some(symbol) = self.symbol(&row.coin).map(str::to_owned)
                 {
+                    if let Some(user) = self.user() {
+                        cx.record_socket_topic(&[
+                            "@activeAssetData|",
+                            &row.coin,
+                            "||",
+                            user,
+                            "||||",
+                        ]);
+                    }
                     let margin = if row.leverage.kind == "cross" {
                         MarginType::Cross
                     } else {

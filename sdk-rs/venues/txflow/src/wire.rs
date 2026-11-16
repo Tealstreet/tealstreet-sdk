@@ -42,7 +42,7 @@ pub struct Instrument {
     #[serde(default)]
     pub only_isolated: bool,
     #[serde(default)]
-    pub use_notional_margin: bool,
+    pub use_notional_margin: Option<bool>,
     #[serde(default)]
     pub max_limit_order_size: Option<f64>,
     #[serde(default)]

@@ -5,6 +5,9 @@ mod support;
 #[path = "partial_stops/proof_terminal.rs"]
 mod proof_terminal;
 
+#[path = "partial_stops/proof_readiness.rs"]
+mod proof_readiness;
+
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::{Command, Event, HttpRequest};
 use safe_cex_venue_bybit::{Endpoints, Variant};
@@ -650,6 +653,7 @@ fn documented_already_gone_batch_status_still_allows_partial_replacement() {
         let original = h.engine.store().order("partial").unwrap().clone();
         h.respond(profile.cancel_path(), 200, r#"{"retCode":0,"retMsg":"OK","retExtInfo":{"list":[{"code":110001,"msg":"order not exists or too late to cancel"}]}}"#);
         confirm_partial_reads(&mut h, profile, &original);
+        h.advance(200.0);
         assert!(h.has_request("/v5/position/trading-stop"));
     }
 }
@@ -1510,8 +1514,9 @@ fn dk2_venue_refusal_after_the_cancel_puts_the_exact_old_stop_back() {
     set_reference_prices(&mut h, 79130.0, 79130.0);
     amend(&mut h, Some(79124.9), None);
     accept_cancel(&mut h, profile);
-    set_reference_prices(&mut h, 79130.0, 79110.8);
     let replacement = h.take("/v5/position/trading-stop");
+    // Move last after release; a change during pacing correctly vetoes the write.
+    set_reference_prices(&mut h, 79130.0, 79110.8);
     assert!(
         body(&replacement).contains(r#""stopLoss":"79124.9""#),
         "{}",
@@ -1589,11 +1594,17 @@ fn review_dk2_duplicate_refusal_and_restore_ack_never_place_twice() {
 }
 
 #[test]
-fn review_dk2_fresh_last_boundary_and_stale_last_both_refuse_before_cancel() {
-    for (age, cause) in [(5000., "would trigger at once"), (5001., "fresh last")] {
+fn review_dk2_live_delta_and_unconfirmed_last_both_refuse_before_cancel() {
+    // A valid delta confirms unchanged LastPrice beyond five seconds; a frame
+    // without that contract cannot. Both paths still refuse before cancel.
+    for (age, kind, cause) in [
+        (5000., "delta", "would trigger at once"),
+        (5001., "delta", "would trigger at once"),
+        (5001., "unconfirmed", "fresh last"),
+    ] {
         let (mut h, profile) = dk2_long_partial_last_stop();
         h.now += age;
-        h.message("/v5/public/linear", r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","markPrice":"79130"}}"#);
+        h.message("/v5/public/linear", &format!(r#"{{"topic":"tickers.BTCUSDT","type":"{kind}","data":{{"symbol":"BTCUSDT","markPrice":"79130"}}}}"#));
         amend(&mut h, Some(79124.9), None);
         assert!(!h.has_request(profile.cancel_path()), "age {age}");
         let error = h.result(91).unwrap().as_ref().unwrap_err();
@@ -1689,31 +1700,50 @@ fn take_partial_preparation(
     path: &str,
 ) -> safe_cex_engine::request_context::Preparation {
     use safe_cex_engine::{Action, request_context::HttpAction};
-    h.engine.prepare_dispatch(h.now);
     let mut preparation = None;
-    for action in h.engine.drain_actions() {
-        match action {
-            Action::ManagedHttp(action) => match *action {
-                HttpAction::Prepare {
-                    preparation: token,
-                    request,
-                    ..
-                } => {
-                    assert!(request.url.contains(path), "{}", request.url);
-                    assert!(preparation.replace(token).is_none());
-                    h.prepared_routes.insert(request.id, (token, request.id.0));
-                }
-                HttpAction::Cancel { preparation, .. } => {
-                    h.prepared_routes
-                        .retain(|_, (token, _)| *token != preparation);
-                }
-                other => panic!("unexpected managed action {other:?}"),
-            },
-            Action::SetTimer { timer, at_ms } => h.timers.push((timer, at_ms)),
-            Action::ClearTimer { timer } => h.timers.retain(|(id, _)| *id != timer),
-            Action::Http(_) => panic!("cancel released before preparation"),
-            _ => {}
+    for _ in 0..3 {
+        h.engine.prepare_dispatch(h.now);
+        for action in h.engine.drain_actions().collect::<Vec<_>>() {
+            match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare {
+                        preparation: token,
+                        request,
+                        ..
+                    } => {
+                        assert!(request.url.contains(path), "{}", request.url);
+                        assert!(preparation.replace(token).is_none());
+                        h.prepared_routes.insert(request.id, (token, request.id.0));
+                    }
+                    HttpAction::Cancel { preparation, .. } => {
+                        h.prepared_routes
+                            .retain(|_, (token, _)| *token != preparation);
+                    }
+                    other => panic!("unexpected managed action {other:?}"),
+                },
+                Action::SetTimer { timer, at_ms } => h.timers.push((timer, at_ms)),
+                Action::ClearTimer { timer } => h.timers.retain(|(id, _)| *id != timer),
+                Action::Http(_) => panic!("cancel released before preparation"),
+                _ => {}
+            }
         }
+        if preparation.is_some() {
+            break;
+        }
+        let next = h
+            .timers
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, at))| *at <= h.now + 1200.0)
+            .min_by(|(_, a), (_, b)| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i);
+        let Some(index) = next else {
+            break;
+        };
+        let (timer, at) = h.timers.remove(index);
+        h.now = h.now.max(at);
+        h.engine
+            .handle(h.now, safe_cex_engine::Event::TimerFired { timer });
     }
     preparation.expect("genuine cancel preparation")
 }
@@ -2157,6 +2187,7 @@ fn partial_cancellation_poll_waits_for_native_terminal_evidence() {
     let empty = r#"{"retCode":0,"result":{"category":"linear","list":[],"nextPageCursor":""}}"#;
     h.respond("&openOnly=0&limit=50", 200, empty);
     h.respond("/v5/order/history", 200, empty);
+    h.advance(200.0);
     assert!(h.has_request("/v5/position/trading-stop"));
     assert_eq!(
         h.engine.store().order("partial").unwrap().status,
@@ -2281,6 +2312,7 @@ fn pinfix_partial_restore_requires_positive_standalone_provenance() {
             r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
         );
         if shape == "standalone" {
+            h.advance(200.0);
             assert!(h.has_request("/v5/position/trading-stop"));
             h.respond("/v5/position/trading-stop", 200, OK);
         } else {
@@ -2411,6 +2443,7 @@ fn partial_history_census_uses_proved_creation_time_and_keeps_incomplete_or_pair
                 200,
                 r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
             );
+            h.advance(200.0);
             assert_eq!(
                 h.has_request("/v5/position/trading-stop"),
                 census == "complete",
@@ -2627,6 +2660,7 @@ fn partial_unproved_creation_time_allows_replacement_without_history_or_put_back
             h.respond("&orderId=partial", 200, &serde_json::json!({"retCode":0,"result":{"category":profile.category(),"list":[target],"nextPageCursor":""}}).to_string());
             h.respond("&openOnly=0&limit=50", 200, &serde_json::json!({"retCode":0,"result":{"category":profile.category(),"list":[],"nextPageCursor":""}}).to_string());
             assert!(!h.has_request("/v5/order/history"), "{created}");
+            h.advance(200.0);
             assert!(h.has_request("/v5/position/trading-stop"), "{created}");
             let replacement = h.take("/v5/position/trading-stop");
             let body: serde_json::Value =
@@ -2922,6 +2956,7 @@ fn partial_final_veto_covers_a_resigned_cancel_replacement_and_put_back() {
             },
         );
         h.collect();
+        h.advance(200.0);
         assert!(!h.has_request("/v5/position/trading-stop"), "{leg}");
         assert!(!h.has_request(profile.cancel_path()), "{leg}");
         assert!(h.result(91).is_some_and(|result| result.is_err()), "{leg}");
@@ -2956,6 +2991,7 @@ fn tp_add_uses_a_known_requested_reference_for_linear_and_inverse() {
                 "category":profile.category(),"symbol":profile.symbol(),"side":"Buy","size":"20","avgPrice":"100","markPrice":"100","leverage":"10","unrealisedPnl":"0","positionIdx":0
             }]}).to_string());
             h.command(Command::PlaceOrders {command:94, orders:vec![serde_json::from_value(serde_json::json!({"symbol":profile.symbol(),"type":"take_profit_market","side":"sell","amount":0,"price":115,"tpTriggerType":typed})).unwrap()]});
+            h.advance(200.0);
             assert!(
                 h.has_request("/v5/position/trading-stop"),
                 "{profile:?}/{typed}: result={:?}, requests={:?}",
@@ -3088,6 +3124,7 @@ fn partial_stop_without_mark_refuses_without_adding_another_stop() {
 
 #[test]
 fn partial_stop_stale_mark_is_not_renewed_by_its_fresh_last_source() {
+    // Without this socket's ticker snapshot, a last-only delta cannot attest a mark.
     let profile = PROFILES[0];
     let mut h = ready(profile);
     seed(
@@ -3112,6 +3149,37 @@ fn partial_stop_stale_mark_is_not_renewed_by_its_fresh_last_source() {
     );
     amend(&mut h, Some(95.), None);
     assert_guard_refused(&h, "fresh mark");
+}
+
+#[test]
+fn partial_stop_accepts_unchanged_mark_from_a_live_ticker_snapshot_lineage() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "MarkPrice",
+        false,
+        true,
+    );
+    let socket = h.socket("/v5/public/linear").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message("/v5/public/linear", r#"{"topic":"tickers.BTCUSDT","type":"snapshot","data":{"symbol":"BTCUSDT","markPrice":"100","lastPrice":"100","indexPrice":"100"}}"#);
+    for _ in 0..10 {
+        h.now += 1_000.;
+        h.message("/v5/public/linear", r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","bid1Price":"99"}}"#);
+    }
+    amend(&mut h, Some(95.), None);
+    assert!(h.has_request(profile.cancel_path()), "{:?}", h.done);
+    assert!(!h.has_request("/v5/position/trading-stop"));
+    accept_cancel(&mut h, profile);
+    let replacement = h.take("/v5/position/trading-stop");
+    assert_eq!(
+        body(&replacement),
+        r#"{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"tpslMode":"Partial","stopLoss":"95","slTriggerBy":"MarkPrice","slSize":"7"}"#
+    );
 }
 
 #[test]

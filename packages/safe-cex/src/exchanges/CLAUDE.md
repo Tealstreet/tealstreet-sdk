@@ -5,6 +5,19 @@ is the single source of truth for boilerplate that would otherwise be repeated
 in every per-exchange `CLAUDE.md`. **Read this first** before diving into any
 individual exchange doc.
 
+Rust page-mirror manual writes use the page engine or refuse locally, except a
+non-DELEGATED mirror whose module explicitly reports no frame-fed support: its
+existing source writer remains authoritative (LOCAL account worker, COSIGNED
+hosted source). Failed supported engines and Unknown writes never
+fall back. Source-write admission rechecks the live signing mode after bridge
+waits: a switch to DELEGATED refuses `unsupported` / `notSent` before dispatch.
+Refusal text explains server-only DELEGATED execution, an unsupported frame-fed
+operation without a source route, unverified page support, or failed page-engine
+initialization; it never recommends changing signing mode or turning cloud off.
+It retains `unsupported` / `notSent` without adding a retry or fallback.
+Account reads retain their source bridge. See `packages/safe-cex/CLAUDE.md` →
+"Rust main-thread trading".
+
 For per-exchange specifics (endpoints, quirks, auth signing details), see
 the `CLAUDE.md` inside each exchange's directory.
 
@@ -214,6 +227,10 @@ check `exchange.capabilities` and convert, rather than storing the `[]`
 `listenOrderBook` return without subscribing unless an external public-data
 provider is configured. Missing overrides for those methods therefore fail
 silently and must be checked explicitly when adding support.
+
+`WORKER_READ_METHODS` classifies venue effects, including reads that refresh worker
+state. Keep `refreshAccountSettings` and `refreshAccountOrders` there so derived
+DELEGATED catalogs bypass write admission; `stopAccountAlgos` remains a write.
 
 Key methods exchanges typically override:
 
@@ -1622,3 +1639,31 @@ whole mixed known/unknown batch before writes. Native ID-only cancel APIs may
 send the supplied identity directly. Empty requested lists remain valid no-ops.
 The family inventory and regression evidence live in
 `docs/plans/RUST_UNKNOWN_CANCEL.md`.
+
+
+Manual page writes retain the original worker-owner generation and bridge through
+internal reads, capability waits and nuke retry timers. Composite operations pass
+that admission to every later cancel/close leg; nested calls cannot recapture a
+successor owner. Unchanged-owner command payloads and ordering remain identical.
+
+## Rust background polling-policy ownership
+
+Background polling-policy updates from auth feedback, multiplier changes and flush
+ticks drop when their captured owner/generation has retired. They send no
+`setPollScale`, do not mark the engine dead or reset its store, and leave account
+retirement to its owning lifetime. A replacement applies its own policy. Initial
+policy delivery remains mandatory before native startup; user-write and algo
+handoff fences remain strict. Current-owner policy failures still report and retry.
+
+The page readiness boundary reports local refusals once, including optional methods
+and the direct schedule-cancel/account-tier paths; caller rejection alone cannot
+replace the exchange error event. Already-reported command failures stay deduped.
+
+Page readiness/error wrappers honor `callerReportsPlacementFailures` for placement
+methods: the web caller owns that message. They must not re-emit a ready command
+failure that `command()` deliberately leaves to its caller. Other manual refusals
+still emit their single exchange error event.
+
+Rust algo actions use `EngineHost.checkAlgosForExecution`, not the observational
+`runsRustAlgos`/`algosRunning` getters. Status reads and disposal do not manufacture
+engine deaths; action admission retains strict ownership retirement.

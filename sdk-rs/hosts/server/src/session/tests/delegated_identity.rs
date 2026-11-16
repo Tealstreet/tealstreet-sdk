@@ -191,7 +191,7 @@ async fn separately_verified_delegated_keys_with_equal_labels_keep_separate_acto
     )
     .await;
     let original = first.joined["acct"].account.clone();
-    let provider = original.delegated.as_ref().unwrap().provider();
+    let provider = original.delegated().as_ref().unwrap().provider();
     admitted(
         &mut second,
         "acct",
@@ -204,7 +204,7 @@ async fn separately_verified_delegated_keys_with_equal_labels_keep_separate_acto
     assert!(Arc::ptr_eq(&original, &first.joined["acct"].account));
     assert!(Arc::ptr_eq(
         &provider,
-        &original.delegated.as_ref().unwrap().provider()
+        &original.delegated().as_ref().unwrap().provider()
     ));
     assert!(original.handle.disposal_cause().is_none());
     assert!(f.registry.holds(&original, first.socket));
@@ -284,7 +284,7 @@ async fn apply_settings_rebuilds_the_same_identity_using_the_existing_provider()
     )
     .await;
     let before = session.joined["acct"].account.clone();
-    let provider = before.delegated.as_ref().unwrap().provider();
+    let provider = before.delegated().as_ref().unwrap().provider();
     let settings = InitPayload {
         account_name: "acct".into(),
         exchange_name: "bybit".into(),
@@ -304,7 +304,7 @@ async fn apply_settings_rebuilds_the_same_identity_using_the_existing_provider()
     assert_ne!(before.fingerprint, after.fingerprint);
     assert!(Arc::ptr_eq(
         &provider,
-        &after.delegated.as_ref().unwrap().provider()
+        &after.delegated().as_ref().unwrap().provider()
     ));
     assert_eq!(f.registry.account_count(), 1);
 }

@@ -331,7 +331,7 @@ fn assert_allocation_quantities(
             serde_json::json!({"retCode":0,"result":results[0]})
         };
         h.reply(request.id, 200, &response.to_string());
-        h.advance(25.0);
+        h.advance(200.0);
     }
     assert_eq!(
         quantities, expected,
@@ -1047,6 +1047,7 @@ fn hyro_identical_concurrent_submissions_share_one_dispatch() {
     created(&mut h, "first");
     assert_eq!(h.result(1), h.result(2));
     place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    h.await_request("/v5/order/create");
     assert!(h.has_request("/v5/order/create"));
 }
 
@@ -1763,6 +1764,7 @@ fn hyro_trailing_stop_noop_succeeds_and_definitive_rejection_allows_retry() {
     );
     assert!(h.result(2).unwrap().is_err());
     place(&mut h, 3, vec![opts]);
+    h.await_request("/v5/position/trading-stop");
     assert!(h.has_request("/v5/position/trading-stop"));
     assert!(
         h.progress.is_empty(),
@@ -2017,6 +2019,7 @@ fn hyro_receipts_cover_shared_write_late_waiter_and_retained_accepted_lots() {
         );
     }
     created(&mut h, "first");
+    h.await_request("/v5/order/create");
     let second = link(h.requests.first().unwrap());
     place(&mut h, 93, orders);
     let late: Vec<_> = h
@@ -2115,6 +2118,7 @@ fn hyro_rejected_later_link_is_not_replayed_as_a_new_waiters_identity() {
         r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
     );
     place(&mut h, 92, orders);
+    h.await_request("/v5/order/create");
     let replacement = link(h.requests.first().unwrap());
     assert_ne!(replacement, rejected);
     let rows: Vec<_> = h
@@ -2816,6 +2820,7 @@ fn hyro_resumed_call_cannot_exceed_two_same_id_creates() {
     for command in [2, 3] {
         place(&mut h, command, vec![order("BTCUSDT", 1.0)]);
         answer_link_absent(&mut h, &id);
+        h.advance(200.0);
         while h.has_request("/v5/order/create") {
             let create = h.take("/v5/order/create");
             sends += 1;
@@ -3841,7 +3846,8 @@ fn managed_mode_redos_do_not_start_the_final_write_plan_deadline() {
         r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
     );
     let write = h.take("/v5/order/create-batch");
-    assert_eq!(write.timeout_ms, Some(20_000));
+    // The native window starts before the 200ms physical-release wait.
+    assert_eq!(write.timeout_ms, Some(19_800));
     h.reply(
         write.id,
         200,
@@ -3982,7 +3988,8 @@ fn hyro_cancel_runs_on_the_ordinary_plan_with_a_native_window() {
         ids: vec!["plan-cancel".into()],
     });
     let cancel = h.take("/v5/order/cancel");
-    assert_eq!(cancel.timeout_ms, Some(20_000), "a managed Plan call");
+    // Pacing spends, rather than extends, the admitted native window.
+    assert_eq!(cancel.timeout_ms, Some(19_800), "a managed Plan call");
 }
 
 /// H1b: a lost Hyro cancel reconciles with one fresh Hyro snapshot.
@@ -5400,6 +5407,7 @@ fn an_unknown_inverse_placement_reconciles_on_the_inverse_category_and_releases(
     while h.has_request("/v5/position/list") {
         resolve_mode(&mut h, "BTCUSD");
     }
+    h.await_request("/v5/order/create-batch");
     assert!(
         h.has_request("/v5/order/create-batch"),
         "the clean inverse read releases the fence: {:?}",
@@ -6229,7 +6237,7 @@ fn fast_713_second_clock_write_retry_is_re_signed_and_never_replayed_twice() {
     );
     assert_eq!(
         Harness::header(&second, "X-BAPI-TIMESTAMP"),
-        Some(server.to_string())
+        Some((server + 200.0).to_string())
     );
     assert_ne!(
         Harness::header(&first, "X-BAPI-SIGN"),
@@ -6401,6 +6409,7 @@ fn assert_serial_plan_failure(status: Option<u16>) {
     let first = h.take("/v5/order/create");
     let first_link = link(&first);
     h.reply(first.id, 200, &serde_json::json!({"retCode":0,"result":{"orderId":"placed-first","orderLinkId":first_link}}).to_string());
+    h.await_request("/v5/order/create");
     assert_eq!(h.requests.len(), 1, "{variant:?}: {:?}", h.done);
     let second = h.take("/v5/order/create");
     let second_link = link(&second);
@@ -7725,4 +7734,330 @@ fn inverse_position_mode_legacy_refusal_has_no_second_coin() {
             .unwrap_err()
             .contains("refused")
     );
+}
+
+#[test]
+fn write_pacing_prevents_a_spot_burst_and_keeps_rate_limit_unknown() {
+    let mut h = ready(Variant::Spot);
+    place(&mut h, 6001, vec![order("BTCUSDT", 0.01); 12]);
+    for index in 0..12 {
+        let request = h.take("/v5/order/create");
+        let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(payload["symbol"], "BTCUSDT");
+        assert_eq!(payload["side"], "Buy");
+        assert_eq!(payload["qty"], "0.01");
+        assert_eq!(payload["price"], "100");
+        if index == 11 {
+            h.reply(
+                request.id,
+                200,
+                r#"{"retCode":10018,"retMsg":"legacy IP rate limit","result":{}}"#,
+            );
+        } else {
+            h.reply(
+                request.id,
+                200,
+                &format!(r#"{{"retCode":0,"retMsg":"OK","result":{{"orderId":"fake-{index}"}}}}"#),
+            );
+            assert!(
+                !h.has_request("/v5/order/create"),
+                "next write must await its physical release floor"
+            );
+            h.advance(199.0);
+            assert!(!h.has_request("/v5/order/create"));
+            h.advance(1.0);
+            assert!(h.has_request("/v5/order/create"));
+        }
+    }
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 6001,
+                error,
+            } => Some(error),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.venue_code.as_deref(), Some("10018"));
+    assert!(
+        error
+            .message
+            .contains("The outcome is unknown. Check Open Orders")
+    );
+    h.advance(2000.0);
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "unknown must never resend"
+    );
+}
+
+fn assert_write_pacing_is_shared_by_concurrent_scaled_commands(variant: Variant) {
+    let mut h = ready(variant);
+    for (command, symbol) in [(7000, "BTCUSDT"), (7001, "ETHUSDT")] {
+        place(&mut h, command, vec![order(symbol, 0.1); 10]);
+    }
+    resolve_mode(&mut h, "BTCUSDT");
+    resolve_mode(&mut h, "ETHUSDT");
+    let first = h.take("/v5/order/create-batch");
+    if variant == Variant::Demo {
+        assert!(first.url.starts_with("https://api-demo.bybit.com/"));
+    }
+    let payload: serde_json::Value = serde_json::from_str(body(&first)).unwrap();
+    assert_eq!(payload["request"].as_array().unwrap().len(), 10);
+    assert!(
+        !h.has_request("/v5/order/create-batch"),
+        "different commands share the batch order budget"
+    );
+    // The next command is paced from release, even while the first reply is pending.
+    h.advance(1199.0);
+    assert!(!h.has_request("/v5/order/create-batch"));
+    h.advance(1.0);
+    let second = h.take("/v5/order/create-batch");
+    let payload: serde_json::Value = serde_json::from_str(body(&second)).unwrap();
+    assert_eq!(payload["request"].as_array().unwrap().len(), 10);
+    assert_eq!(payload["request"][0]["symbol"], "ETHUSDT");
+}
+
+#[test]
+fn write_pacing_is_shared_by_concurrent_scaled_commands() {
+    assert_write_pacing_is_shared_by_concurrent_scaled_commands(Variant::Linear);
+}
+
+#[test]
+fn local_demo_write_pacing_is_shared_by_concurrent_scaled_commands() {
+    assert_write_pacing_is_shared_by_concurrent_scaled_commands(Variant::Demo);
+}
+
+// Exact native 10006 proves non-placement; transport status or contradictory IDs do not.
+#[test]
+fn native_uid_limit_is_rejected_after_managed_http_end_without_resend() {
+    for variant in [Variant::Spot, Variant::Demo] {
+        let mut h = ready(variant);
+        place(&mut h, 9106, vec![order("BTCUSDT", 0.1)]);
+        let path = if variant.is_spot() {
+            "/v5/order/create"
+        } else {
+            resolve_mode(&mut h, "BTCUSDT");
+            "/v5/order/create-batch"
+        };
+        let request = h.take(path);
+        if variant == Variant::Demo {
+            assert!(request.url.starts_with("https://api-demo.bybit.com/"));
+        }
+        let payload = br#"{"retCode":10006,"retMsg":"Too many visits. Exceeded the API Rate Limit.","result":{},"retExtInfo":{},"time":1700000000000}"#;
+        h.event(Event::HttpStart {
+            request: request.id,
+            status: 200,
+            headers: "",
+        });
+        h.event(Event::HttpChunk {
+            request: request.id,
+            data: &payload[..45],
+        });
+        assert!(
+            h.result(9106).is_none(),
+            "no terminal result before httpEnd"
+        );
+        h.event(Event::HttpChunk {
+            request: request.id,
+            data: &payload[45..],
+        });
+        h.event(Event::HttpEnd {
+            request: request.id,
+        });
+        let error = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::CommandFailed {
+                    command: 9106,
+                    error,
+                } => Some(error),
+                _ => None,
+            })
+            .expect("one terminal rate-limit rejection");
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Rejected),
+            "{variant:?}"
+        );
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+        assert_eq!(error.venue_code.as_deref(), Some("10006"));
+        assert!(!error.message.contains("The outcome is unknown"));
+        assert_eq!(
+            h.notices
+                .iter()
+                .filter(|notice| matches!(
+                    notice,
+                    safe_cex_engine::Notice::CommandFailed { command: 9106, .. }
+                ))
+                .count(),
+            1
+        );
+        h.advance(2000.0);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "rejection never grants a resend"
+        );
+    }
+}
+
+#[test]
+fn native_uid_limit_with_unproven_or_contradictory_evidence_stays_unknown() {
+    for (status, payload) in [
+        (
+            429,
+            r#"{"retCode":10006,"retMsg":"rate limited","result":{}}"#,
+        ),
+        (
+            500,
+            r#"{"retCode":10006,"retMsg":"rate limited","result":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10006,"retMsg":"rate limited","result":{"orderId":"contradiction"}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10006,"retMsg":"rate limited","result":{"list":[{"orderId":"contradiction"}]},"retExtInfo":{"list":[{"code":0}]}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10006.5,"retMsg":"rate limited","result":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10006,"retMsg":"rate limited","result":{},"retCode":0}"#,
+        ),
+    ] {
+        let mut h = ready(Variant::Demo);
+        place(&mut h, 9107, vec![order("BTCUSDT", 0.1)]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let request = h.take("/v5/order/create-batch");
+        h.reply(request.id, status, payload);
+        let error = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::CommandFailed {
+                    command: 9107,
+                    error,
+                } => Some(error),
+                _ => None,
+            })
+            .expect("unproven native answer fails");
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}/{payload}"
+        );
+        h.advance(2000.0);
+        assert!(!h.has_request("/v5/order/create"));
+    }
+}
+
+fn assert_malformed_uid_refusal_stays_unknown(payload: &str) {
+    for variant in [Variant::Spot, Variant::Demo] {
+        let mut h = ready(variant);
+        place(&mut h, 9110, vec![order("BTCUSDT", 0.1)]);
+        let path = if variant.is_spot() {
+            "/v5/order/create"
+        } else {
+            resolve_mode(&mut h, "BTCUSDT");
+            "/v5/order/create-batch"
+        };
+        let request = h.take(path);
+        h.reply(request.id, 200, payload);
+        let error = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::CommandFailed {
+                    command: 9110,
+                    error,
+                } => Some(error),
+                _ => None,
+            })
+            .expect("malformed refusal must fail closed");
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{variant:?}/{payload}"
+        );
+        assert!(error.message.contains("The outcome is unknown"));
+        h.advance(2000.0);
+        assert!(!h.has_request("/v5/order/create"));
+        assert!(!h.has_request("/v5/order/create-batch"));
+    }
+}
+
+#[test]
+fn malformed_uid_refusal_duplicate_identity_stays_unknown() {
+    assert_malformed_uid_refusal_stays_unknown(
+        r#"{"retCode":10006,"result":{"orderId":"possibly-accepted","orderId":null}}"#,
+    );
+}
+
+#[test]
+fn malformed_uid_refusal_duplicate_result_list_stays_unknown() {
+    assert_malformed_uid_refusal_stays_unknown(
+        r#"{"retCode":10006,"result":{"list":[{"orderId":"possibly-accepted"}],"list":[]}}"#,
+    );
+}
+
+#[test]
+fn malformed_uid_refusal_duplicate_ext_list_stays_unknown() {
+    assert_malformed_uid_refusal_stays_unknown(
+        r#"{"retCode":10006,"result":{},"retExtInfo":{"list":[{"code":0}],"list":[]}}"#,
+    );
+}
+
+#[test]
+fn malformed_uid_refusal_unproven_nested_shapes_stay_unknown() {
+    for payload in [
+        r#"{"retCode":10006,"result":{"orderId":42}}"#,
+        r#"{"retCode":10006,"result":{"list":null}}"#,
+        r#"{"retCode":10006,"result":{},"retExtInfo":{"list":{}}}"#,
+        r#"{"retCode":10006,"result":{"orderStatus":"New"}}"#,
+    ] {
+        assert_malformed_uid_refusal_stays_unknown(payload);
+    }
+}
+
+#[test]
+fn native_uid_limit_batch_preserves_accepted_ids_without_unknown_or_resend() {
+    let mut h = ready(Variant::Demo);
+    place(&mut h, 9108, vec![order("BTCUSDT", 0.1); 2]);
+    resolve_mode(&mut h, "BTCUSDT");
+    let request = h.take("/v5/order/create-batch");
+    h.reply(request.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"accepted"},{}]},"retExtInfo":{"list":[{"code":0},{"code":10006,"msg":"Too many visits"}]}}"#);
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 9108,
+                error,
+            } => Some(error),
+            _ => None,
+        })
+        .expect("known partial failure");
+    // A known partial must not label the accepted sibling rejected or unknown.
+    assert_eq!(error.outcome, None);
+    let partial = error
+        .partial
+        .as_ref()
+        .expect("accepted sibling remains attributable");
+    assert_eq!(partial.order_ids, ["accepted"]);
+    assert_eq!((partial.total, partial.failed_index), (Some(2), Some(1)));
+    assert!(!h.unknown.contains(&9108));
+    assert_eq!(error.venue_code.as_deref(), Some("10006"));
+    assert!(!error.message.contains("The outcome is unknown"));
+    assert!(h.engine.store().order("accepted").is_some());
+    h.advance(2000.0);
+    assert!(!h.has_request("/v5/order/create"));
 }

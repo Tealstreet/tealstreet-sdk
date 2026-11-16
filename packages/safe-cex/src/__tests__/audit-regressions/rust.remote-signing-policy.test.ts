@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { deriveBridgeConstruction, deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
+import { BETA_VENUES } from '../../exchanges/rust/betaVenues';
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
 describe('shared delegated signing declarations', () => {
@@ -19,7 +20,15 @@ describe('shared delegated signing declarations', () => {
   it('declarations retain the landed dispatch-signing flags without enabling other families', () => {
     for (const name of binance) expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(true);
     for (const name of bybit) expect(deriveBridgeConstruction(name, {} as ExchangeOptions).dispatchSigning).toBe(true);
-    for (const name of ['weex', 'txflow'] as ExchangeName[]) expect(deriveRemoteSigningPolicy(name)).toBeUndefined();
+    // #3314 adds TxFlow device signing; WEEX callback admission stays closed.
+    expect(deriveRemoteSigningPolicy('weex')).toBeUndefined();
+  });
+  it('TxFlow declares RemoteSigner without PayloadSigner or beta activation', () => {
+    expect(deriveRemoteSigningPolicy('txflow')).toEqual({
+      enabled: true, payloadSupported: false, protectedHeaders: [],
+    });
+    expect(deriveBridgeConstruction('txflow', {} as ExchangeOptions).dispatchSigning).toBe(true);
+    expect(BETA_VENUES).not.toContain('txflow');
   });
   it.each(['bitget', 'bitgetinverse', 'bitgetusdc'] as const)('%s admits RemoteSigner on the shared bitget wire while refusing unsupported private PayloadSigner', (name) => {
     expect(deriveRemoteSigningPolicy(name)).toEqual({ enabled: true, payloadSupported: false,

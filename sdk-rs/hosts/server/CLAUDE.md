@@ -5,6 +5,17 @@ changing server behavior. Validate scoped Rust changes with
 `cargo test -p safe-cex-exchange-server` and
 `cargo clippy -p safe-cex-exchange-server --all-targets` from `sdk-rs/`.
 
+## Router lease-fence diagnostics
+
+Router lease fences snapshot `Running::jobs()` before disposal. The journal
+includes `running_jobs`, `paused_jobs` and `pending_work`. Only a positive running
+algo count logs error and sends `router_lease.fenced` to Sentry with the fixed
+summary “router lease fenced; running algos stopped on this box”. Zero running
+algos logs info with “router lease fenced; no running algos on this box”, including
+paused-only or pending-only work; info remains journal-only. Only unsigned numeric
+counts are allowed for that event; job IDs, labels and payloads stay excluded. Lease retirement,
+account disposal and algo stop/pause behavior are unchanged.
+
 ## Public topic diagnostics
 
 `POST /admin/public-topics` accepts an empty body or `{}` (1024-byte limit).
@@ -38,6 +49,13 @@ keys, symbol lists, request payloads, credentials, or per-user breakdowns.
 
 ## DELEGATED construction
 
+DELEGATED is available on every venue admitted by the shared hosted server gate,
+just like COSIGNED. One runtime `DELEGATED` flag provides the kill switch and
+per-user pin; `DELEGATED_BYBIT` is only a compatibility alias. Bybit was the first
+test account, not an admission boundary. Mobile is DELEGATED-only; DELEGATED
+clients have no WASM engine/local signer and send every write as a typed v1
+action over the existing hosted WebSocket.
+
 Authenticated admissions and socket commands recheck the token expiry captured
 by `auth::Verifier`, shared by COSIGNED and DELEGATED. Init, re-init, resume,
 verification completion and deferred startup dispatch do not extend that expiry.
@@ -55,9 +73,31 @@ handover pair. DELEGATED and COSIGNED share hosted eligibility: a supported
 unhosted refusal preserved. There is no separate DELEGATED venue allowlist or
 `delegated.enabled` declaration. The account retains the existing LocalSigner provider,
 passes opaque refs to the engine and creates no remote signer link. Public mode
-is recorded explicitly. COSIGNED and DELEGATED accounts never attach across
-modes; a refused init leaves the running account intact. Socket handover and
-private-read verification must complete before calling this entry point.
+is recorded explicitly. Unproved/trusted construction still refuses cross-mode
+attachment. Socket joins first prove their own credentials: COSIGNED can attach
+to a DELEGATED resident without downgrading it; a proved DELEGATED join upgrades
+a supported COSIGNED resident without replacing its actor, orders or algo jobs.
+Public-key handovers locally match the candidate to the original provider's
+completed Ethereum/Stark binding or canonical Ed25519 public identity. Schnorr
+pins its routed registered key before the original provider is published, then
+rechecks registration against that immutable binding and the candidate on join.
+Already-promoted actors compare their actual installed resident key. Unpinned
+legacy actors refuse explicitly with `mode_transition_unavailable`; a new lookup
+cannot invent their old key. Captured init/lease/expiry guards and exact actor
+binding survive every lookup. Same settings never revive a retired proof.
+All outstanding original sign futures/setup work must join before handover; busy
+handovers refuse transiently without canceling or replaying them. Engine-owned
+address seals, nonce ownership and original opaque refs survive unchanged;
+only dispatch refs map by identity role to the protected resident refs.
+Account-owned signer control retains the protected erasure authority; engine
+dispatch handles never retain it. Reconfiguration shares that authority between
+accounts, and the last account owner drop erases retained engine handles.
+Confirmed joins and upgrades publish `account-signing-mode` to each confirmed
+registration's label/instanceId. Refusals have attached=false and no actualMode.
+Socket handover and possession verification precede any transition. A verified
+resident public-key join uses the local key proof, not an unsigned startup read. Coinbase
+CDP remains explicitly proof-unavailable pending its COSIGNED JWT setup and
+venue-proof implementation; it never silently falls back to another signing mode.
 Legacy and typed full-write method admission both use this shared eligibility.
 
 DELEGATED uses `prepare_local_signer_for`, including wallet key-only/agent
@@ -84,13 +124,55 @@ Private COSIGNED admissions require possession proof independently of
 DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
 DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
-as a fallback when its possession proof is unavailable. Exact Bybit, Binance,
-OKX, Bitget, Blofin and KuCoin base venues have private-startup proof coverage;
-other private COSIGNED joins return the typed `proof-unavailable` init refusal.
+as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
+Binance base/PM/inverse/spot, OKX base/demo/EEA mainnet, Bitget base/USDC,
+Blofin, KuCoin, Phemex, BingX and MEXC names have native private-startup HMAC proof coverage.
+Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
+uses its native USDT/USDC account reads and expiry-bound REST/private-socket
+HMAC proof with wrong-key, replay and foreign-socket controls.
+Exact WOO additionally uses its native v1/v3 private account reads and private
+socket HMAC authentication, with wrong-key, replay and foreign-socket controls.
+Exact Bitunix uses its existing native private-startup venue round trip and
+double-SHA256 secret-suffix signer, with independently checked synthetic private
+reads and wrong-key, replay, foreign-socket and resident-preservation controls.
+There is no server-local proof shortcut or trading write in that probe.
+Variant tests pin product routes, origins and demo headers as well as the
+wrong-key, replay, foreign-socket and resident-preservation controls. BingX perpetuals
+prove signed private account reads independently of API-key-only listen-key acquisition;
+Spot and testnet do not inherit that proof. MEXC mainnet uses native signed
+position-mode and account reads, with private-stream HMAC and wrong-key/replay/socket
+controls. Its missing sandbox remains refused; public discovery is not proof. Other
+private COSIGNED joins return the typed `proof-unavailable` init refusal.
 A pending COSIGNED signer belongs only to its joining connection; probe frames
-are consumed internally. Matching COSIGNED inits on an admitted connection and
-COSIGNED resumes retain their existing snapshot path. The exact wire names and
+are consumed internally. The shared local-proof strategy captures canonical
+server-owned identity facts before entering the same proof queue and pacer.
+It issues a closed admission challenge and verifies the raw reply against the
+actual receiving socket, or verifies the temporary protected DELEGATED provider.
+The permit records its socket only after verification; final attachment checks
+that receipt, the original instance/token/lease and the local admission deadline.
+No production public-key venue selects this strategy yet. Synthetic Session
+fixtures select it without changing the readiness catalog; device integration
+and authoritative per-family facts must precede any activation. Matching COSIGNED repeats require the same socket-admitted
+mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
+accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
+
+OKX EEA mainnet proves signed config before keyed discovery and requires full
+private startup. One re-signed `50113` retry is allowed per bootstrap read; a
+second consecutive refusal is permanent. EEA demo remains explicitly excluded.
+The captured admission budget and socket/init/token/lease fences are unchanged.
+
+ApeX remote signing uses the existing device `apexomni-batch` codec for native
+REST/login graphs and atomic contract dependencies. Only opaque OmniKey refs
+are installed; startup read coverage never proves OmniKey possession or changes
+COSIGNED catalog readiness by itself.
+
+COSIGNED catalog accounting runs in `sdk-rs/harness/cosigned-catalog.test.mjs`.
+Every exact `remoteSigning.enabled` venue needs native proof readiness or a
+reason in `src/delegated/cosigned-proof-exclusions.json`; remove its exclusion
+when proof lands. The 33-production-venue census is checked separately, and
+Cargo signing features are only a family cross-check. The reason list changes
+no runtime availability, admission or client fallback policy.
 
 Shared admission serializes temporary proofs by verified user, credential and
 venue/network/site scope. One proof runs with at most four waiting reservations;
@@ -101,6 +183,13 @@ active reservation remains on the engine thread through probe cleanup, including
 cancellation. Reservation counts retire under the same map lock as admission,
 so concurrent final cancellation removes idle entries even while destructor
 fields still retain queue references. No successful proof is cached.
+
+Admission refusal diagnostics use `hosted.admission_refused`, with a server-issued
+attempt ID (or null before an offer), a catalog-validated venue, refusal kind,
+stage, transient flag, classified error kind and integer venue code. The attempt
+context follows its original pending verification. Never add credential identity,
+account labels, tokens, signatures, handover bytes, raw venue messages or payloads
+to these lines. Diagnostics do not change admission or retry classification.
 
 ## TWAP restore binding
 

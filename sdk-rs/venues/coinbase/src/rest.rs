@@ -104,6 +104,15 @@ impl Coinbase {
                 scope: None,
             },
             Pending::Trading(pending) => pending.signing_role(),
+            Pending::TradingDrb(_) | Pending::PrivateDrb(_) => {
+                self.fail_unsent(
+                    cx,
+                    request.pending,
+                    "drb requests require managed transport",
+                );
+                self.dispatch(cx);
+                return;
+            }
         };
         let selected = self.signers.select(role).ok();
         let recipe = if public {

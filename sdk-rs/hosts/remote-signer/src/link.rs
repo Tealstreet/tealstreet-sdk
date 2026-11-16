@@ -40,20 +40,31 @@ pub enum EchoSize {
     Large,
 }
 
-type Waiter = oneshot::Sender<Result<Value, Failure>>;
+enum Reply {
+    Signing(Value),
+    JoinProof(SocketId, String),
+}
+type Waiter = oneshot::Sender<Result<Reply, Failure>>;
+struct PendingWork {
+    token: u64,
+    socket: SocketId,
+    frame: String,
+    waiter: Waiter,
+    pinned: bool,
+}
 
 struct State {
     socket: SocketId,
     out: Outbox,
     available: bool,
     suspended: bool,
+    server_owned: bool,
     unavailable_since: Option<Instant>,
     /// The last frame of any kind from the signing socket.
     heard_at: Instant,
     /// The last frame from each recent socket, signing or not.
     heard_by: HashMap<SocketId, Instant>,
-    /// id → (token, socket it was sent on, its sign-req frame, waiter).
-    pending: HashMap<String, (u64, SocketId, String, Waiter)>,
+    pending: HashMap<String, PendingWork>,
     next_token: u64,
     last_sign_req_bytes: usize,
     echo: Option<(u64, Instant, EchoSize)>,
@@ -77,6 +88,7 @@ impl SignerLink {
                 out,
                 available: true,
                 suspended: false,
+                server_owned: false,
                 unavailable_since: None,
                 heard_at: Instant::now(),
                 heard_by: HashMap::new(),
@@ -94,6 +106,19 @@ impl SignerLink {
         self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Retire browser signing without aborting or replaying any pending request.
+    pub fn promote_to_server_owned(&self) -> bool {
+        let mut state = self.state();
+        if !state.available || !state.pending.is_empty() {
+            return false;
+        }
+        state.server_owned = true;
+        state.suspended = false;
+        state.unavailable_since = None;
+        state.echo = None;
+        true
     }
 
     pub fn is_available(&self) -> bool {
@@ -146,6 +171,26 @@ impl SignerLink {
     /// session is parked it waits for the browser to come back, all within one
     /// `SIGN_TIMEOUT`, then fails as Suspended: never queued past the timeout.
     pub(crate) async fn round_trip(&self, id: &str, request: &Value) -> Result<Value, Failure> {
+        match self.request(id, request, false).await? {
+            Reply::Signing(value) => Ok(value),
+            Reply::JoinProof(_, _) => Err(Failure::Aborted),
+        }
+    }
+
+    /// Admission waits never resume on a successor socket. Return the actual
+    /// receiving socket and untouched JSON for the caller's closed decoder.
+    pub async fn join_proof(
+        &self,
+        id: &str,
+        request: &Value,
+    ) -> Result<(SocketId, String), Failure> {
+        match self.request(id, request, true).await? {
+            Reply::JoinProof(socket, raw) => Ok((socket, raw)),
+            Reply::Signing(_) => Err(Failure::Aborted),
+        }
+    }
+
+    async fn request(&self, id: &str, request: &Value, pinned: bool) -> Result<Reply, Failure> {
         let deadline = tokio::time::Instant::now() + SIGN_TIMEOUT;
         loop {
             let reattached = self.reattached.notified();
@@ -153,6 +198,9 @@ impl SignerLink {
                 let state = self.state();
                 if !(state.available && state.suspended) {
                     break;
+                }
+                if pinned {
+                    return Err(Failure::Suspended);
                 }
             }
             if tokio::time::timeout_at(deadline, reattached).await.is_err() {
@@ -165,7 +213,7 @@ impl SignerLink {
             if state.available && state.suspended {
                 return Err(Failure::Suspended);
             }
-            if !state.available {
+            if !state.available || state.server_owned {
                 return Err(Failure::Unavailable);
             }
             if state.pending.contains_key(id) {
@@ -177,9 +225,16 @@ impl SignerLink {
             // `t` first: the browser recognises frames by prefix.
             let frame = format!(r#"{{"t":"sign-req","d":{request}}}"#);
             state.last_sign_req_bytes = frame.len();
-            state
-                .pending
-                .insert(id.to_owned(), (token, socket, frame.clone(), sender));
+            state.pending.insert(
+                id.to_owned(),
+                PendingWork {
+                    token,
+                    socket,
+                    frame: frame.clone(),
+                    waiter: sender,
+                    pinned,
+                },
+            );
             (state.out.clone(), frame, token)
         };
         let guard = Pending {
@@ -225,11 +280,11 @@ impl SignerLink {
             if !state
                 .pending
                 .get(&id)
-                .is_some_and(|(_, sent, _, _)| *sent == socket)
+                .is_some_and(|pending| !pending.pinned && pending.socket == socket)
             {
                 return false;
             }
-            state.pending.remove(&id).map(|(_, _, _, sender)| sender)
+            state.pending.remove(&id).map(|pending| pending.waiter)
         };
         let oversized = ["wsAuthSignature", "error"].iter().any(|field| {
             response.get(*field).is_some_and(|value| {
@@ -241,7 +296,36 @@ impl SignerLink {
         if oversized {
             response = serde_json::json!({ "id": id, "error": "invalid response" });
         }
-        sender.is_some_and(|sender| sender.send(Ok(response)).is_ok())
+        sender.is_some_and(|sender| sender.send(Ok(Reply::Signing(response))).is_ok())
+    }
+
+    /// Correlation is only routing. The join owner must decode the original
+    /// bounded JSON and verify its signature before granting admission.
+    pub fn resolve_join_proof(&self, socket: SocketId, raw: &str) -> bool {
+        let Ok(value) = serde_json::from_str::<Value>(raw) else {
+            return false;
+        };
+        let Some(id) = value.get("id").and_then(Value::as_str) else {
+            return false;
+        };
+        let sender = {
+            let mut state = self.state();
+            if !state
+                .pending
+                .get(id)
+                .is_some_and(|pending| pending.pinned && pending.socket == socket)
+            {
+                return false;
+            }
+            state.pending.remove(id).map(|pending| pending.waiter)
+        };
+        // Oversized matching replies settle as invalid, without retaining them.
+        let raw = if raw.len() <= 4096 { raw } else { "{}" };
+        sender.is_some_and(|sender| {
+            sender
+                .send(Ok(Reply::JoinProof(socket, raw.into())))
+                .is_ok()
+        })
     }
 
     /// The socket dropped but the session is parked for a resume. Requests
@@ -249,9 +333,10 @@ impl SignerLink {
     /// re-sends them; new requests wait for `attach` (see `round_trip`).
     pub fn suspend(&self) {
         let mut state = self.state();
-        if !state.available || state.suspended {
+        if !state.available || state.suspended || state.server_owned {
             return;
         }
+        abort_join_proofs(&mut state);
         state.suspended = true;
         state.unavailable_since = Some(Instant::now());
     }
@@ -264,11 +349,12 @@ impl SignerLink {
         if !state.available {
             return;
         }
+        abort_join_proofs(&mut state);
         let mut moved = Vec::new();
         if state.socket != socket {
-            for (id, (_, sent, frame, _)) in state.pending.iter_mut() {
-                *sent = socket;
-                moved.push((id.clone(), frame.clone()));
+            for (id, pending) in state.pending.iter_mut() {
+                pending.socket = socket;
+                moved.push((id.clone(), pending.frame.clone()));
             }
         }
         state.socket = socket;
@@ -280,8 +366,8 @@ impl SignerLink {
         for (id, frame) in moved {
             if !out(frame) {
                 let sender = self.state().pending.remove(&id);
-                if let Some((_, _, _, sender)) = sender {
-                    let _ = sender.send(Err(Failure::Aborted));
+                if let Some(pending) = sender {
+                    let _ = pending.waiter.send(Err(Failure::Aborted));
                 }
             }
         }
@@ -304,7 +390,7 @@ impl SignerLink {
     /// One outstanding echo at a time; false when one is still out or unsent.
     pub fn send_echo(&self) -> bool {
         let mut state = self.state();
-        if state.echo.is_some() || !state.available || state.suspended {
+        if state.echo.is_some() || !state.available || state.suspended || state.server_owned {
             return false;
         }
         state.echo_seq += 1;
@@ -342,8 +428,21 @@ impl SignerLink {
 }
 
 fn abort_all(state: &mut State) {
-    for (_, (_, _, _, sender)) in state.pending.drain() {
-        let _ = sender.send(Err(Failure::Aborted));
+    for (_, pending) in state.pending.drain() {
+        let _ = pending.waiter.send(Err(Failure::Aborted));
+    }
+}
+fn abort_join_proofs(state: &mut State) {
+    let ids: Vec<_> = state
+        .pending
+        .iter()
+        .filter(|(_, pending)| pending.pinned)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in ids {
+        if let Some(pending) = state.pending.remove(&id) {
+            let _ = pending.waiter.send(Err(Failure::Aborted));
+        }
     }
 }
 
@@ -359,9 +458,53 @@ impl Drop for Pending<'_> {
         if state
             .pending
             .get(self.id)
-            .is_some_and(|(token, _, _, _)| *token == self.token)
+            .is_some_and(|pending| pending.token == self.token)
         {
             state.pending.remove(self.id);
         }
+    }
+}
+
+#[cfg(test)]
+mod server_owned_tests {
+    use super::*;
+    use std::{future::Future, task::Poll};
+    #[tokio::test]
+    async fn promotion_refuses_pending_work_then_never_sends_or_replays_browser_signatures() {
+        let (sent, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let link = SignerLink::new(1, Arc::new(move |frame| sent.send(frame).is_ok()));
+        let request = serde_json::json!({"id":"once"});
+        let work = link.round_trip("once", &request);
+        tokio::pin!(work);
+        assert!(
+            std::future::poll_fn(|cx| Poll::Ready(work.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
+        assert!(received.try_recv().is_ok());
+        assert!(!link.promote_to_server_owned());
+        assert!(link.resolve(
+            1,
+            serde_json::json!({"id":"once", "wsAuthSignature":"synthetic"})
+        ));
+        assert!(work.await.is_ok());
+        assert!(link.promote_to_server_owned());
+        link.suspend();
+        assert!(link.is_available());
+        assert!(link.absent_for().is_none());
+        link.attach(
+            2,
+            Arc::new(|_| panic!("retired remote signing must not send")),
+        );
+        assert_eq!(link.socket(), 2);
+        assert_eq!(
+            link.round_trip("new", &request).await,
+            Err(Failure::Unavailable)
+        );
+        assert!(!link.send_echo());
+        assert!(received.try_recv().is_err());
+        link.mark_unavailable();
+        assert!(!link.is_available());
+        assert!(!link.promote_to_server_owned());
     }
 }

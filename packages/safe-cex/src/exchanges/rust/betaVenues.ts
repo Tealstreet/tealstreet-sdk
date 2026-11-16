@@ -54,6 +54,8 @@ export const BETA_VENUES = Object.freeze([
   'what',
   'woofi',
   'backpack',
+  // restored by #3502; #3317 dropped a live venue without a product decision.
+  'bitrue',
 ] as const satisfies readonly ExchangeName[]);
 
 export const isBetaVenue = (name: string): name is (typeof BETA_VENUES)[number] =>

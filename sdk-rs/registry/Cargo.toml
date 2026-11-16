@@ -13,6 +13,8 @@ dispatch-signing = ["dep:safe-cex-crypto"]
 hosted-signing = ["dispatch-signing"]
 # Device-side wallet signing for keyless servers, without the HMAC capture codec.
 hosted-wallet = ["dispatch-signing"]
+# Closed device-only admission challenges; no server readiness activation.
+hosted-join-proof = ["dispatch-signing", "safe-cex-crypto/admission", "dep:serde_json"]
 default = [
     "bitunix",
     "grvt",
@@ -47,7 +49,7 @@ polymarket = ["dep:safe-cex-venue-polymarket"]
 coinbase = ["dep:safe-cex-venue-coinbase", "dispatch-signing", "hosted-signing", "dep:serde_json"]
 paradex = ["dep:safe-cex-venue-paradex", "dispatch-signing", "address-nonce", "hosted-wallet", "safe-cex-crypto/stark", "dep:serde_json"]
 apexomni = ["dep:safe-cex-venue-apexomni", "dispatch-signing", "hosted-signing", "dep:serde_json"]
-txflow = ["dep:safe-cex-venue-txflow"]
+txflow = ["dep:safe-cex-venue-txflow", "address-nonce", "hosted-wallet", "dep:serde_json"]
 kraken = ["dep:safe-cex-venue-kraken", "dispatch-signing", "hosted-signing", "dep:serde_json"]
 asterdex = ["dep:serde_json", "dep:safe-cex-venue-asterdex", "dispatch-signing", "hosted-signing", "hosted-wallet", "address-nonce"]
 lighter = ["dep:safe-cex-venue-lighter", "dispatch-signing", "hosted-wallet", "safe-cex-crypto/schnorr", "dep:serde_json"]
@@ -114,3 +116,7 @@ serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "hosted_join_proof"
+required-features = ["hosted-join-proof", "backpack", "hyperliquid", "paradex", "lighter"]

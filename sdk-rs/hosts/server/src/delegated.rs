@@ -9,7 +9,9 @@ use std::collections::HashMap;
 use zeroize::Zeroizing;
 
 mod construction;
+mod diagnostics;
 mod plaintext;
+pub(crate) use diagnostics::RefusalContext;
 pub(crate) mod probe;
 pub(crate) use construction::fingerprint;
 pub use construction::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_delegated};
@@ -466,21 +468,32 @@ pub(crate) mod tests {
             "bybitinverse",
             "bybitdemo",
             "binance",
+            "binanceoptions",
             "okx",
             "kucoin",
+            "kucoinspot",
         ] {
             assert!(enabled(venue), "{venue}");
         }
-        for venue in [
-            "hyrotrader",
-            "binanceoptions",
-            "kucoinspot",
-            "",
-            "BYBIT",
-            "unknown",
-        ] {
+        for venue in ["hyrotrader", "txflow", "bingxspot", "", "BYBIT", "unknown"] {
             assert!(!enabled(venue), "{venue}");
         }
+    }
+
+    #[test]
+    fn binanceoptions_hosted_mainnet_support_keeps_testnet_and_proof_gates_closed() {
+        assert!(enabled("binanceoptions"));
+        assert_eq!(
+            safe_cex_native::resolve::rest_base_url("binanceoptions", false),
+            Ok("https://eapi.binance.com")
+        );
+        assert_eq!(
+            safe_cex_native::resolve::rest_base_url("binanceoptions", true),
+            Err(safe_cex_native::resolve::RoutingError::NoBaseUrl(
+                "binanceoptions".into()
+            ))
+        );
+        assert!(!probe::cosigned_ready("binanceoptions"));
     }
 
     #[test]

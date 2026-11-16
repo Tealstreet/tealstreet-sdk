@@ -408,7 +408,7 @@ const SIMPLE_MODE_HEDGE: &str =
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Ack<'a> {
+struct Ack<'a, Message: Default = &'a str> {
     #[serde(default)]
     ord_id: &'a str,
     #[serde(default)]
@@ -416,7 +416,7 @@ struct Ack<'a> {
     #[serde(default)]
     s_code: &'a str,
     #[serde(default)]
-    s_msg: &'a str,
+    s_msg: Message,
 }
 
 impl Okx {
@@ -1675,10 +1675,31 @@ impl Okx {
             Ok(envelope) => envelope,
             Err(e) => return self.unproven(cx, request, &e.to_string()),
         };
-        let Some(acks) = envelope
+        let borrowed_acks = envelope
             .data
-            .and_then(|data| serde_json::from_str::<Vec<Ack<'_>>>(data.get()).ok())
-        else {
+            .and_then(|data| serde_json::from_str::<Vec<Ack<'_>>>(data.get()).ok());
+        // Recover escaped rejection text only for a failed, empty-msg envelope.
+        // Successful and nonempty-msg envelopes keep their original decoder.
+        let decoded_acks =
+            if borrowed_acks.is_none() && envelope.code != "0" && envelope.msg.is_empty() {
+                envelope
+                    .data
+                    .and_then(|data| serde_json::from_str::<Vec<Ack<'_, String>>>(data.get()).ok())
+            } else {
+                None
+            };
+        let Some(acks) = borrowed_acks.or_else(|| {
+            decoded_acks.as_ref().map(|acks| {
+                acks.iter()
+                    .map(|ack| Ack {
+                        ord_id: ack.ord_id,
+                        algo_id: ack.algo_id,
+                        s_code: ack.s_code,
+                        s_msg: ack.s_msg.as_str(),
+                    })
+                    .collect()
+            })
+        }) else {
             if matches!(envelope.code, "0" | "2") {
                 return self.unproven(cx, request, "Malformed OKX write response");
             }
@@ -1886,7 +1907,26 @@ impl Okx {
             .collect();
         let (expected, continue_cancel_errors) = (step.expected, job.continue_cancel_errors);
         if expected == 0 && envelope.code != "0" {
-            let message = format!("OKX {}: {}", envelope.code, envelope.msg);
+            // Settings have no order IDs, but a sole refused row still names the
+            // native failure. Never infer a whole-call refusal from mixed rows.
+            if envelope.msg.is_empty()
+                && let [ack] = acks.as_slice()
+                && !matches!(ack.s_code, "" | "0")
+                && !ack.s_msg.is_empty()
+            {
+                return self.failure(
+                    cx,
+                    request,
+                    Some(ack.s_code),
+                    ack.s_msg.to_string(),
+                    response.status,
+                );
+            }
+            let message = if envelope.msg.is_empty() && !errors.is_empty() {
+                errors.join_with("; ")
+            } else {
+                format!("OKX {}: {}", envelope.code, envelope.msg)
+            };
             return self.failure(cx, request, Some(envelope.code), message, response.status);
         }
         // Record the call's fact before any continuation or terminal.

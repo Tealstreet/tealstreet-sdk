@@ -40,6 +40,7 @@ async fn assert_probe_deadline(delegated: bool) {
         Some(("synthetic-token".into(), now_ms() + 60_000)),
         delegated.then_some(&credentials),
         link,
+        7,
         permit,
     );
     tokio::pin!(proof);
@@ -84,4 +85,26 @@ async fn cosigned_probe_deadline_uses_existing_budgets() {
 #[tokio::test(start_paused = true)]
 async fn delegated_probe_deadline_uses_existing_budgets() {
     assert_probe_deadline(true).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn local_admission_deadline_never_expires_an_admitted_accounts_io_guard() {
+    let authority = InitAuthority {
+        current: Arc::new(AtomicBool::new(true)),
+        lease: None,
+        probe_lease: None,
+        admission_expires_at: None,
+        probe_current: Some(Arc::new(AtomicBool::new(true))),
+        probe_deadline: Some(tokio::time::Instant::now() + Duration::from_secs(1)),
+    };
+    assert!(authority.check_admission().is_ok());
+    tokio::time::advance(Duration::from_secs(2)).await;
+    assert!(
+        authority.check().is_ok(),
+        "a completed admission deadline must not fence the live account's continuing IO"
+    );
+    assert!(
+        authority.check_admission().is_err(),
+        "late account attachment must still refuse"
+    );
 }

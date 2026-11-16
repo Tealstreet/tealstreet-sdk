@@ -1648,6 +1648,44 @@ fn reserved_journal_never_grows_leg_backing_for_generic_registration_or_replacem
 }
 
 #[test]
+fn executed_placement_waits_for_bounded_native_identity_proof() {
+    let mut writes = CommandWrites::new(2).unwrap();
+    writes.register(RequestId(1), 1).unwrap();
+    writes.released(RequestId(1)).unwrap();
+    writes.pending_placement(RequestId(1)).unwrap();
+    assert!(writes.validate_success().is_err());
+    let failure = writes
+        .project_failure(VenueError::new("proof timed out"))
+        .unwrap();
+    assert_eq!(failure.outcome, Some(crate::Outcome::Unknown));
+    assert!(
+        writes
+            .resolve_placement(RequestId(2), vec!["foreign".into()])
+            .is_err()
+    );
+    assert!(writes.resolve_placement(RequestId(1), vec![]).is_err());
+    assert!(
+        writes
+            .resolve_placement(RequestId(1), vec!["same".into(), "same".into()])
+            .is_err()
+    );
+    assert!(
+        writes
+            .resolve_placement(RequestId(1), vec!["x".repeat(1025)])
+            .is_err()
+    );
+    writes
+        .resolve_placement(RequestId(1), vec!["native-id".into()])
+        .unwrap();
+    assert!(
+        writes
+            .resolve_placement(RequestId(1), vec!["replayed".into()])
+            .is_err()
+    );
+    assert!(writes.succeed().is_ok());
+}
+
+#[test]
 fn refused_physical_handoff_consumes_no_release_or_pacing() {
     let group = Pacing {
         group: 991,

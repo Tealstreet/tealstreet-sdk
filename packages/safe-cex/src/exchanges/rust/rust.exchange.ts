@@ -14,6 +14,7 @@ import type {
   WasmEngineLike,
 } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeErrorKind } from '../../commandOutcome';
+import type { JoinProofResponse } from '../../joinProof.types';
 import type { Store } from '../../store/store.interface';
 import type {
   AccountGreeks,
@@ -154,7 +155,7 @@ import {
   rustPublicFeedIdentity,
   serveInProcessPublicData,
 } from './publicFeed';
-import { RustSocketHandle } from './rustSockets';
+import { RUST_SOCKET_STALE_MS, RustSocketHandle } from './rustSockets';
 import { failedPrivateReadKind, startupDiagnosticTags } from './startupDiagnostics';
 
 /** The public registry and direct construction share the same beta policy. */
@@ -423,13 +424,6 @@ const notReadOnPublicData = (what: string): ExchangeError => {
 const RUST_FORWARDED_METHODS = ['fetchStpMode', 'changeStpMode', 'fetchOrderBook', 'readPositions'] as const;
 
 /** A frame-fed mirror signs and sends these itself; everything else still goes to the account's data source. */
-/** Placements that wait for the page engine on a mirror instead of taking the source's slower leg. */
-const PAGE_ENGINE_PLACEMENTS: ReadonlySet<string> = new Set([
-  'placeOrder',
-  'placeOrders',
-  'placeOrderWithClientOrderId',
-]);
-
 const FRAME_FED_WRITES: ReadonlySet<string> = new Set([
   'placeOrder',
   'placeOrders',
@@ -514,6 +508,7 @@ const NUKE_ALGO_STOP_GRACE_MS = 1_000;
 const MAX_QUEUED_ALGO_OPS = 100;
 
 type AlgoRows = { activeChasers: ActiveChaser[]; activeTWAPs: ActiveTWAP[] };
+type WorkerAdmission = ((method: string, args: unknown[]) => void) | undefined;
 
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
@@ -528,6 +523,7 @@ const SOCKET_HEALTH_SYNC_MS = 5_000;
 const VALIDATE_ACCOUNT_TIMEOUT_MS = 45_000;
 
 export class RustEngineExchange extends BaseExchange {
+  private readonly sourceWorkerCall: typeof this.callMethodInWorker;
   private workerOwnerSource?: () => { ownerId: string; generation: number } | undefined;
 
   /** Optional owner fencing; hosts without a binding retain legacy bridge dispatch behavior. */
@@ -585,17 +581,65 @@ export class RustEngineExchange extends BaseExchange {
     this.publicFeedDisabled = true;
   }
   private sharedPublicFeed?: RustPublicFeedClient;
+  private signingHost = (): Pick<EngineHostType,
+    'hostedSigning' | 'hostedJoinProof' | 'hostedWalletSigning' | 'hostedSigningClock' | 'coinbaseSigningMetadata'
+  > & { assertCurrent(): void } => {
+    const host = this.host;
+    if (!host) throw this.pageWriterUnavailable('signing');
+    const assertCurrent = () => {
+      if (this.isDelegatedMirror || this.isDisposed || this.host !== host)
+        throw this.pageWriterUnavailable('signing');
+    };
+    return {
+      assertCurrent,
+      hostedSigning: async (input) => {
+        assertCurrent();
+        const result = await host.hostedSigning(input);
+        assertCurrent();
+        return result;
+      },
+      hostedJoinProof: async (input) => {
+        assertCurrent();
+        const result = await host.hostedJoinProof(input);
+        assertCurrent();
+        return result;
+      },
+      hostedWalletSigning: (input) => { assertCurrent(); return host.hostedWalletSigning(input); },
+      hostedSigningClock: () => { assertCurrent(); return host.hostedSigningClock(); },
+      coinbaseSigningMetadata: () => { assertCurrent(); return host.coinbaseSigningMetadata(); },
+    };
+  };
+  signJoinProof = async (requestJson: string): Promise<JoinProofResponse> => {
+    const admitted = this.captureWorkerAdmission();
+    admitted?.('signJoinProof', []);
+    if (!this.bridgeConstruction.dispatchSigning || this.isDelegatedMirror || this.isDisposed)
+      throw this.pageWriterUnavailable('signing');
+    const initialization = this.ensureSigningHost();
+    await initialization;
+    admitted?.('signJoinProof', []);
+    if (this.hostInitialization !== initialization) throw this.pageWriterUnavailable('signing');
+    const host = this.signingHost();
+    const result = await host.hostedJoinProof(requestJson);
+    host.assertCurrent();
+    admitted?.('signJoinProof', []);
+    if (this.hostInitialization !== initialization) throw this.pageWriterUnavailable('signing');
+    return result;
+  };
   override signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
     if (this.bridgeConstruction.dispatchSigning) {
       try {
         await this.ensureSigningHost();
-        return await signHostedHttp(
+        if (this.isDelegatedMirror) throw this.pageWriterUnavailable('signing');
+        const host = this.signingHost();
+        const result = await signHostedHttp(
           this.name,
           this.engineOptions,
           Boolean(this.signerSetup?.primaryComplete),
-          this.host!,
+          host,
           request,
         );
+        host.assertCurrent();
+        return result;
       } catch {
         return { id: request.id, error: 'Hosted HTTP signing failed' };
       }
@@ -607,7 +651,11 @@ export class RustEngineExchange extends BaseExchange {
     if (this.bridgeConstruction.dispatchSigning) {
       try {
         await this.ensureSigningHost();
-        return await signHostedWsAuth(this.host!, request);
+        if (this.isDelegatedMirror) throw this.pageWriterUnavailable('signing');
+        const host = this.signingHost();
+        const result = await signHostedWsAuth(host, request);
+        host.assertCurrent();
+        return result;
       } catch {
         return { id: request.id, error: 'Hosted WS auth signing failed' };
       }
@@ -642,6 +690,8 @@ export class RustEngineExchange extends BaseExchange {
   private readonly attemptedPlacementSymbols = new Set<string>();
   private readonly startupWaiters = new Set<() => void>();
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
+  private socketHealthTimer?: ReturnType<typeof setTimeout>;
+  private socketHealthClock?: () => number;
   private readonly applier: FrameApplier;
   private readonly bookListeners = new Map<string, Map<number, (book: OrderBook) => void>>();
   private nextBookListenerId = 0;
@@ -676,6 +726,7 @@ export class RustEngineExchange extends BaseExchange {
   readonly frameFedReady: Promise<boolean>;
   private frameFed = false;
   private frameFedSettled = false;
+  private pageWriteSupported?: boolean;
   private frameFedEngine = false;
   private sourceBaseline = false;
   /** Recent (source write time - arrival) samples, and the offset last handed to the engine. */
@@ -841,12 +892,16 @@ export class RustEngineExchange extends BaseExchange {
     if (capabilities.fillsByOrderId && !this.isWorkerMirror) this.fetchFillsForOrderIds = this.fetchFilledQuantities;
     if (capabilities.accountTier) {
       this.changeAccountTier = async (tier: LighterAccountTier) => {
+        const change = async () => {
+          await this.command<null>({ op: 'setAccountTier', tier });
+          this.writeLighterTier(tier);
+        };
         if (this.routesToWorker && !this.frameFed) {
+          if (this.isWorkerMirror) return this.withPageWriter('changeAccountTier', [tier], change);
           await this.callWorker('changeAccountTier', tier);
           return;
         }
-        await this.command<null>({ op: 'setAccountTier', tier });
-        this.writeLighterTier(tier);
+        await change();
       };
       this.fetchAccountTier = async () => {
         if (this.routesToWorker) return (await this.callWorker('fetchAccountTier')) as LighterAccountTier | undefined;
@@ -916,12 +971,13 @@ export class RustEngineExchange extends BaseExchange {
     // A setup refusal surfaces at start(), where callers route its message.
     let aster: ReturnType<typeof mapAsterDEXSignerSetup> | undefined;
     let setupError: ExchangeError | undefined;
-    const hyperliquid = deriveSignerSetupMapping(exchangeName) === 'hyperliquid';
-    const hyperliquidAccount = options.key;
-    let hyperliquidSetup: ExchangeOptions | undefined;
-    if (bridgeConstruction.dispatchSigning && !delegated && hyperliquid) {
+    const agentMapping = deriveSignerSetupMapping(exchangeName);
+    const agentWallet = agentMapping === 'hyperliquid' || agentMapping === 'txflow';
+    const agentAccount = options.key;
+    let agentSetup: ExchangeOptions | undefined;
+    if (bridgeConstruction.dispatchSigning && !delegated && agentWallet) {
       try {
-        hyperliquidSetup = mapHyperliquidSignerSetup(options);
+        agentSetup = mapHyperliquidSignerSetup(options, exchangeMetadata[agentMapping].prettyName);
       } catch (error) {
         if (!(error instanceof ExchangeError)) throw error;
         setupError = error;
@@ -963,7 +1019,7 @@ export class RustEngineExchange extends BaseExchange {
                   options.omniKeySeed || undefined,
                 )
               : new LocalSignerSetup(
-                  hyperliquidSetup ??
+                  agentSetup ??
                     paradexSetup ??
                     (deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options),
                   deriveSignerSetupPolicy(exchangeName),
@@ -974,8 +1030,8 @@ export class RustEngineExchange extends BaseExchange {
           exchangeName,
           options,
           undefined,
-          hyperliquid
-            ? { key: Boolean(hyperliquidAccount), secret: signerSetup.credentialPresence.secret }
+          agentWallet
+            ? { key: Boolean(agentAccount), secret: signerSetup.credentialPresence.secret }
             : signerSetup.credentialPresence,
         )
       : undefined;
@@ -993,7 +1049,7 @@ export class RustEngineExchange extends BaseExchange {
     options = withoutDelegatedSigningSnapshot(options);
     if (signerSetup || setupError)
       options = delegated ? withoutDelegatedSigning(options) : withoutSigningCredentials(options);
-    if (hyperliquid && (signerSetup || setupError)) options = { ...options, key: hyperliquidAccount };
+    if (agentWallet && (signerSetup || setupError)) options = { ...options, key: agentAccount };
     const commandTimeoutMs = options.extra?.rustCommandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     if (!Number.isSafeInteger(commandTimeoutMs) || commandTimeoutMs <= 0 || commandTimeoutMs > 2_147_482_647) {
       signerSetup?.dispose();
@@ -1039,10 +1095,14 @@ export class RustEngineExchange extends BaseExchange {
     this.frameFedReady.then(frameFedSettled, frameFedSettled);
     // Hosts that write through `callMethodInWorker` reach the frame-fed engine too.
     const viaWorker = this.callMethodInWorker;
+    // Source dispatch must not re-enter the mirror's manual-write router.
+    this.sourceWorkerCall = viaWorker;
     const members = this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
     this.callMethodInWorker = ((method: string, ...args: unknown[]) =>
-      this.frameFed && FRAME_FED_WRITES.has(method)
-        ? members[method](...args)
+      this.isWorkerMirror && FRAME_FED_WRITES.has(method)
+        ? typeof members[method] === 'function'
+          ? members[method](...args)
+          : this.withPageWriter(method, args, () => Promise.reject(this.pageWriterUnavailable(method)))
         : method === 'fetchOHLCV'
           ? this.callCandleWorker(viaWorker, args)
           : (viaWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args)) as typeof viaWorker;
@@ -1171,7 +1231,7 @@ export class RustEngineExchange extends BaseExchange {
     this.updatePollingPolicy();
   };
 
-  private syncPollingPolicy = (): Promise<void> | undefined => {
+  private syncPollingPolicy = (mode: 'startup' | 'background'): Promise<void> | undefined => {
     if (!this.host || this.isDisposed || this.engineFailure) return;
     const resolved = this.getTickInterval();
     if (resolved === undefined) return;
@@ -1182,6 +1242,9 @@ export class RustEngineExchange extends BaseExchange {
     // The resolved tick still bounds a slowdown (auth backoff and server multiplier
     // caps), unless a venue's native cadence is already slower.
     const ceiling = scale === null ? undefined : resolved;
+    // Background policy has no user intent; the replacement applies its own policy.
+    // Startup still requires delivery, and user commands retain their handoff fence.
+    if (mode === 'background' && !this.algoOwnerCurrent(this.twapOwnerBinding)) return;
     if (this.pollingPolicy?.scale === scale && this.pollingPolicy.ceiling === ceiling)
       return this.pollingPolicy.promise;
     // Install before dispatch: native actions can synchronously change policy again.
@@ -1197,7 +1260,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private updatePollingPolicy = (): void => {
-    void this.syncPollingPolicy()?.catch(() => {
+    void this.syncPollingPolicy('background')?.catch(() => {
       /* command() owns error reporting; the next check can retry. */
     });
   };
@@ -1208,14 +1271,16 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private startFrameFed = async (): Promise<boolean> => {
+    if (this.isDelegatedMirror) return false;
     try {
       // Asked before any engine exists: a family without it builds nothing on main.
       const wasm = await loadWasmEngine(this.name);
-      if (!frameFedSupported(wasm, this.name) || this.isDisposed) return false;
+      this.pageWriteSupported = wasm.WasmEngine.frameFedSupported?.(this.name);
+      if (this.pageWriteSupported !== true || this.isDisposed || this.isDelegatedMirror) return false;
       await this.ensureSigningHost();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      this.log(`${this.name} manual writes stay on the account's data source: ${reason}`, LogSeverity.Warning);
+      this.log(`${this.name} manual writes are unavailable until the page engine is ready: ${reason}`, LogSeverity.Warning);
       return false;
     }
     const host = this.host;
@@ -1224,7 +1289,7 @@ export class RustEngineExchange extends BaseExchange {
     if (!host || this.isDisposed || !this.frameFedEngine || typeof host.applyFrame !== 'function') return false;
     if (construction?.frameFed !== true) return false;
     if (this.signerSetup instanceof DelegatedSignerSetup) await host.prepareAddressSetup();
-    if (this.isDisposed || this.host !== host) return false;
+    if (this.isDisposed || this.host !== host || this.isDelegatedMirror) return false;
     this.frameFed = true;
     host.start();
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
@@ -1253,6 +1318,11 @@ export class RustEngineExchange extends BaseExchange {
       return;
     }
     this.sourceBaseline = true;
+    try {
+      this.applier.applyMessageHandlerStats(new Frame(frame));
+    } catch (error) {
+      diagnosticConsole.error(`${this.name} source subscription stats refused`, error);
+    }
     host.flush();
     if (this.sourceOrdersAwaited !== undefined && sourceFrameHasOrders(frame)) this.settleSourceOrders();
   };
@@ -1396,7 +1466,7 @@ export class RustEngineExchange extends BaseExchange {
   /** The account's running chasers and TWAPs, stopped before a nuke run elsewhere: the
    * worker's run in its Rust algos; an in-process CLI's run in the TS algos. */
   stopAccountAlgos = async (): Promise<AlgoStopWithPlacements> => {
-    const stopped: AlgoStopWithPlacements = this.runsRustAlgos
+    const stopped: AlgoStopWithPlacements = this.host?.checkAlgosForExecution()
       ? await this.stopRustAlgos()
       : await stopLocalAccountAlgos(this);
     return { ...stopped, placedSymbols: [...(stopped.placedSymbols ?? []), ...this.attemptedPlacementSymbols] };
@@ -1435,7 +1505,7 @@ export class RustEngineExchange extends BaseExchange {
   startAlgos = (accountName: string): boolean => {
     const host = this.host;
     if (!host || this.isDisposed || this.engineFailure) return false;
-    if (this.algoRoute) return this.algoRoute === 'rust' && this.runsRustAlgos;
+    if (this.algoRoute) return this.algoRoute === 'rust' && host.checkAlgosForExecution();
     try {
       const owner = this.twapOwnerBinding;
       host.algoStart(accountName, owner, owner === undefined ? undefined : () => this.algoOwnerCurrent(owner));
@@ -1463,7 +1533,7 @@ export class RustEngineExchange extends BaseExchange {
       }
     }
     if (this.algoRoute === 'rust') {
-      if (this.runsRustAlgos) rust();
+      if (this.host?.checkAlgosForExecution()) rust();
       else refuse(`${op} was not run: the ${this.name} engine stopped before it could run algos`);
       return;
     }
@@ -1489,7 +1559,7 @@ export class RustEngineExchange extends BaseExchange {
     for (const { op, rust, refuse, owner } of queued) {
       try {
         if (!this.algoOwnerCurrent(owner)) refuse(`${op} cancelled-for-owner-change`);
-        else if (this.algoRoute === 'rust' && this.runsRustAlgos) rust();
+        else if (this.algoRoute === 'rust' && this.host?.checkAlgosForExecution()) rust();
         else if (this.algoRoute === 'unsupported') refuse(this.noAlgosMessage(op));
         else refuse(`${op} was not run: the ${this.name} engine never started`);
       } catch (error) {
@@ -1502,7 +1572,7 @@ export class RustEngineExchange extends BaseExchange {
   algoOp = (op: string, data: unknown): void => {
     try {
       if (!this.host) throw new Error(`${this.name} engine is not started`);
-      if (!this.runsRustAlgos) throw new Error(`${this.name} algos are not running`);
+      if (!this.host.checkAlgosForExecution()) throw new Error(`${this.name} algos are not running`);
       this.host.algoOp(op, data);
     } catch (error) {
       this.emitter.emit('error', `${op} failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -1575,6 +1645,8 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Hosted signing builds the engine without starting it; a mirror still drops its frames. */
   private ensureSigningHost = (): Promise<void> => {
+    if (this.isDelegatedMirror)
+      return Promise.reject(this.pageWriterUnavailable('signing'));
     if (this.isDisposed) return Promise.reject(new Error('Exchange disposed during startup'));
     return (this.hostInitialization ??= this.createHost().catch((error: unknown) => {
       this.signerSetup?.dispose();
@@ -1646,6 +1718,8 @@ export class RustEngineExchange extends BaseExchange {
       }
     });
     if (this.isDisposed) throw new Error('Exchange disposed during startup');
+    if (this.isDelegatedMirror)
+      throw this.pageWriterUnavailable('startup');
     const { WasmEngine } = wasm;
     // Decided with the build, so a signing host built first is the same frame-fed engine.
     this.frameFedEngine = this.isWorkerMirror && !this.isPublicDataOnly && frameFedSupported(wasm, this.name);
@@ -1692,6 +1766,7 @@ export class RustEngineExchange extends BaseExchange {
       (event, message) => this.emitter.emit(event, message),
       (event) => this.emitter.emit('ws-diagnostic', event),
     );
+    this.socketHealthClock = () => transport.now();
     const engine = constructEngine(
       WasmEngine,
       this.name,
@@ -1894,6 +1969,10 @@ export class RustEngineExchange extends BaseExchange {
     return this.options.workerMirror === true;
   }
 
+  private get isDelegatedMirror(): boolean {
+    return this.isWorkerMirror && this.options.signingMode === 'delegated';
+  }
+
   /** Calls a worker method by name, including Rust-only ones absent from the base `Exchange`. */
   private callWorker = (method: string, ...args: unknown[]): Promise<unknown> =>
     this.callWorkerForOwner(this.captureWorkerAdmission(), method, ...args);
@@ -1906,7 +1985,7 @@ export class RustEngineExchange extends BaseExchange {
     }), { code: 'WORKER_STOPPED', command: method, ...(clientOrderIds ? { clientOrderIds } : {}) });
   };
 
-  private captureWorkerAdmission = (): ((method: string, args: unknown[]) => void) | undefined => {
+  private captureWorkerAdmission = (): WorkerAdmission => {
     const source = this.workerOwnerSource;
     if (!source) return undefined;
     const readOwner = () => {
@@ -1930,8 +2009,15 @@ export class RustEngineExchange extends BaseExchange {
     };
   };
 
+  private capturePageWriteAdmission = (method: string, args: unknown[]): (() => void) => {
+    const admitted = this.isWorkerMirror ? this.captureWorkerAdmission() : undefined;
+    const assertCurrent = () => admitted?.(method, args);
+    assertCurrent();
+    return assertCurrent;
+  };
+
   private callWorkerForOwner = async (
-    admitted: ((method: string, args: unknown[]) => void) | undefined, method: string, ...args: unknown[]
+    admitted: WorkerAdmission, method: string, ...args: unknown[]
   ): Promise<unknown> => {
     const timing = TIMED_WRITE_METHODS.has(method) ? new WriteTiming(method) : undefined;
     timing?.mark('called');
@@ -1941,7 +2027,9 @@ export class RustEngineExchange extends BaseExchange {
     if (admitted && (this.isDisposed || !bridgeIsCurrent())) {
       throw this.workerOwnerChanged(method, args);
     }
-    const call = () => (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+    const workerCall = this.isWorkerMirror && FRAME_FED_WRITES.has(method)
+      ? this.sourceWorkerCall : this.callMethodInWorker;
+    const call = () => (workerCall as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
     return timing ? runWithWriteTiming(timing, call) : call();
   };
 
@@ -1960,7 +2048,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   /**
-   * A placement clicked while the page engine loads. Past the bound it is refused,
+   * A manual write clicked while the page engine loads. Past the bound it is refused,
    * and the rejection and the continuation that sends are exclusive: nothing goes
    * out after the user was told it failed.
    */
@@ -1978,6 +2066,51 @@ export class RustEngineExchange extends BaseExchange {
       };
       this.frameFedReady.then(settled, settled);
     });
+
+  private pageWriterUnavailable = (method: string): ExchangeError => {
+    let reason: string;
+    if (this.isDelegatedMirror) {
+      reason = 'this account uses DELEGATED server-only execution; its writes must use its delegated server connection, not the page manual-write engine.';
+    } else if (this.pageWriteSupported === false) {
+      reason = 'this venue does not support a frame-fed manual-write engine on this page, and this operation has no source-writer route.';
+    } else if (this.pageWriteSupported === true) {
+      reason = "the account's page manual-write engine did not initialize.";
+    } else {
+      reason = "this page could not load or verify the venue's frame-fed manual-write support.";
+    }
+    const message = `${this.name} ${method} was not sent: ${reason}`;
+    return new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+  };
+
+  private withPageWriter = async <T>(
+    method: string, args: unknown[], send: () => Promise<T>, sendSource?: (admitted: WorkerAdmission) => Promise<T>,
+  ): Promise<T> => {
+    try {
+      if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
+      const admitted = this.captureWorkerAdmission();
+      if (!this.frameFedSettled) await this.untilFrameFedSettled(method);
+      admitted?.(method, args);
+      if (this.isDisposed) throw this.workerOwnerChanged(method, args);
+      if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
+      if (!this.frameFed) {
+        // A structurally unsupported LOCAL/COSIGNED mirror keeps its existing source writer.
+        // A missing module/capability or a failed supported page engine must never reroute.
+        if (this.pageWriteSupported === false && sendSource) {
+          return await sendSource((sourceMethod, sourceArgs) => {
+            admitted?.(sourceMethod, sourceArgs);
+            if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
+          });
+        }
+        throw this.pageWriterUnavailable(method);
+      }
+      return await send();
+    } catch (error) {
+      const callerReports = this.options.callerReportsPlacementFailures &&
+        (method === 'placeOrder' || method === 'placeOrders' || method === 'placeOrderWithClientOrderId');
+      if (!callerReports) this.reportCommandError(error);
+      throw error;
+    }
+  };
 
   /** A mirror can be used before its host wires `callMethod`; calls wait for that bridge. */
   private untilWorkerBridge = async (assertCurrent?: () => void): Promise<() => boolean> => {
@@ -2037,33 +2170,27 @@ export class RustEngineExchange extends BaseExchange {
         // The explicit flag, not isPublicDataOnly: a keyed account's mirror holds no key and derives public.
         if (this.routesToWorker && this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method))
           return Promise.reject(notReadOnPublicData(method));
-        if (method === 'fetchOHLCV' && this.routesToWorker && !getExchangeMetadata(this.name).fetchOHLCVInWorker)
+        if (method === 'fetchOHLCV' && this.routesToWorker && !this.isDelegatedMirror &&
+          !getExchangeMetadata(this.name).fetchOHLCVInWorker)
           return Reflect.apply(this.fetchPageCandles, this, args);
-        if (!this.routesToWorker || (this.frameFed && FRAME_FED_WRITES.has(method))) return local(...args);
-        const admitted = this.captureWorkerAdmission();
-        const viaWorker = () =>
+        if (!this.routesToWorker) return local(...args);
+        const viaWorker = (admitted: WorkerAdmission) =>
           this.callWorkerForOwner(admitted, method, ...args).then(
             (result) =>
               // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
               method === 'updateOrder' ? decodeWorkerOrderIds(result) : rowsFromAccountFrame(method, result, args[0]),
             (error: unknown) => {
-              // Never passed through `command` here, and the hosted server marks no failure as
-              // reported. A LOCAL worker's report arrives marked, so this says nothing twice.
-              if (FRAME_FED_WRITES.has(method)) this.reportCommandError(error);
+              // Mirrors report in withPageWriter, which honors caller-owned placement errors.
+              // A LOCAL worker's marked failure is not reported twice by other forwarders.
+              if (FRAME_FED_WRITES.has(method) && !this.isWorkerMirror) this.reportCommandError(error);
               throw error;
             },
           );
-        if (!this.isWorkerMirror || !PAGE_ENGINE_PLACEMENTS.has(method) || this.frameFedSettled) return viaWorker();
-        return this.untilFrameFedSettled(method).then(
-          () => {
-            admitted?.(method, args);
-            return this.frameFed ? local(...args) : viaWorker();
-          },
-          (error: unknown) => {
-            this.reportCommandError(error);
-            throw error;
-          },
-        );
+        if (this.isWorkerMirror && FRAME_FED_WRITES.has(method)) {
+          return this.withPageWriter(method, args, () => local(...args), viaWorker);
+        }
+        if (this.frameFed && FRAME_FED_WRITES.has(method)) return local(...args);
+        return viaWorker(this.captureWorkerAdmission());
       };
       const forwarded = FRAME_FED_WRITES.has(method)
         ? (...args: Args[M]) => this.trackWrite(() => route(...args))
@@ -2196,7 +2323,7 @@ export class RustEngineExchange extends BaseExchange {
     try {
       let applied: Promise<void> | undefined;
       for (;;) {
-        const latest = this.syncPollingPolicy();
+        const latest = this.syncPollingPolicy('startup');
         if (!latest || latest === applied) break;
         await latest;
         applied = latest;
@@ -2225,8 +2352,7 @@ export class RustEngineExchange extends BaseExchange {
         this.host?.flush();
       }, STORE_FLUSH_MS * multiplier),
     );
-    // Staleness has no socket event of its own; re-derive health on a slow clock.
-    this.flushTimers.push(setInterval(this.syncSocketHealthToStore, SOCKET_HEALTH_SYNC_MS));
+    this.startSocketHealthCheck();
     if (bookMs < STORE_FLUSH_MS * multiplier) {
       this.flushTimers.push(setInterval(() => this.host?.flush(true), bookMs));
     }
@@ -2612,7 +2738,41 @@ export class RustEngineExchange extends BaseExchange {
     return this.host;
   }
 
-  /** Engine sockets replace the TS watchdog: venues own their reconnect policy. */
+  private startSocketHealthCheck = () => {
+    if (this.isDisposed || this.socketHealthTimer !== undefined) return;
+    let previousWall = Date.now();
+    let previousEngine = this.socketHealthClock?.();
+    const schedule = () => {
+      this.socketHealthTimer = setTimeout(check, SOCKET_HEALTH_SYNC_MS);
+      this.socketHealthTimer.unref?.();
+    };
+    const check = () => {
+      this.socketHealthTimer = undefined;
+      if (this.isDisposed) return;
+      try {
+        const now = Date.now();
+        const engineNow = this.socketHealthClock?.();
+        const engineElapsed = previousEngine !== undefined && engineNow !== undefined
+          ? engineNow - previousEngine : undefined;
+        const gap = engineElapsed === undefined ? 0 : (now - previousWall) - engineElapsed;
+        // Receipts before the sample predate the pause. Within the sample,
+        // a pause longer than all active time also proves receipts at least gap-old.
+        const suspendedBefore = gap > 1_000 ? Math.max(previousWall,
+          engineElapsed !== undefined && gap > engineElapsed ? now - gap : previousWall) : undefined;
+        previousWall = now;
+        previousEngine = engineNow;
+        // The host retains each physical socket's obligation across normal ticks;
+        // aggregate channel handles cannot distinguish fresh/uninitialized siblings.
+        this.host?.reconnectSockets(undefined, { staleBefore: now - RUST_SOCKET_STALE_MS, suspendedBefore });
+        this.syncSocketHealthToStore();
+      } finally {
+        if (!this.isDisposed) schedule();
+      }
+    };
+    schedule();
+  };
+
+  /** Publish engine socket observations; the engine still owns reconnection. */
   override syncSocketHealthToStore = () => {
     if (this.isDisposed) return;
     const shared = this.sharedPublicFeed
@@ -2745,12 +2905,19 @@ export class RustEngineExchange extends BaseExchange {
   /** `report: false` is for background reads whose caller owns the failure's visibility. */
   private command = async <T>(
     command: { op: string; [field: string]: unknown },
-    { report = true, timing, timeoutMs }: { report?: boolean; timing?: WriteTiming; timeoutMs?: number } = {},
+    {
+      report = true,
+      timing,
+      timeoutMs,
+      assertCurrent,
+    }: { report?: boolean; timing?: WriteTiming; timeoutMs?: number; assertCurrent?: () => void } = {},
   ): Promise<T> => {
     // Unreported: the account has nothing to read, which is not an error the user caused.
     if (this.options.publicDataOnly === true && PRIVATE_HISTORY_OPS.has(command.op))
       return Promise.reject(notReadOnPublicData(command.op));
     try {
+      if (this.isDelegatedMirror)
+        throw this.pageWriterUnavailable(command.op);
       if (this.engineFailure) throw this.engineFailure;
       if (this.isDisposed) throw new Error(`${this.name} engine disposed`);
       // A cold wasm fetch: the worker takes calls before its engine is built. Reads wait.
@@ -2765,6 +2932,7 @@ export class RustEngineExchange extends BaseExchange {
         if (invalid(command)) throw new Error('Coinbase command numbers must be finite');
       }
       const options = {
+        ...(assertCurrent ? { assertCurrent } : {}),
         ...(timing ? { onStage: timing.mark } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       };
@@ -2802,9 +2970,10 @@ export class RustEngineExchange extends BaseExchange {
   private writeCommand = async <T>(
     claimed: ReturnType<typeof claimWriteTiming>,
     command: { op: string; [field: string]: unknown },
+    assertCurrent?: () => void,
   ): Promise<T> => {
     try {
-      const result = await this.command<T>(command, { timing: claimed.timing });
+      const result = await this.command<T>(command, { timing: claimed.timing, assertCurrent });
       if (claimed.owned) emitWriteTiming(this, claimed.timing, 'ok');
       return result;
     } catch (error) {
@@ -2821,6 +2990,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: AsterDEXPlaceOrderOpts[]) => {
+    const assertCurrent = this.capturePageWriteAdmission('placeOrders', [orders]);
     const timing = claimWriteTiming('placeOrders');
     const ready = this.writeCapabilitiesFor('placeOrders');
     const capabilities = ready instanceof Promise ? await ready : ready;
@@ -2878,6 +3048,7 @@ export class RustEngineExchange extends BaseExchange {
     }
     if (capabilities.stpControls) for (const order of orders) this.validateAsterStp(order.stpMode);
     for (const order of orders) this.attemptedPlacementSymbols.add(order.symbol);
+    assertCurrent();
     return this.writeCommand<string[]>(timing, { op: 'placeOrders', orders });
   };
 
@@ -2886,7 +3057,11 @@ export class RustEngineExchange extends BaseExchange {
     return this.placeOrders([opts]);
   };
 
-  updateOrder = async ({ order, update }: UpdateOrderOpts) => {
+  updateOrder = async (options: UpdateOrderOpts) => {
+    const admitted = this.isWorkerMirror ? this.captureWorkerAdmission() : undefined;
+    const assertCurrent = admitted && (() => admitted('updateOrder', [options]));
+    assertCurrent?.();
+    const { order, update } = options;
     const timing = claimWriteTiming('amendOrder');
     const price = 'price' in update ? update.price : undefined;
     const amount = 'amount' in update ? update.amount : undefined;
@@ -2895,13 +3070,17 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Order amendment price and amount must be finite numbers');
     }
     const withSymbol = this.capabilityRecord?.amendWithSymbol;
-    const result = await this.writeCommand<string[] | { orderIds: string[]; clientOrderId: string }>(timing, {
-      op: withSymbol ? 'amendOrderWithSymbol' : 'amendOrder',
-      id: order.id,
-      ...(withSymbol ? { symbol: order.symbol } : {}),
-      ...('price' in update ? { price: update.price } : {}),
-      ...('amount' in update ? { amount: update.amount } : {}),
-    });
+    const result = await this.writeCommand<string[] | { orderIds: string[]; clientOrderId: string }>(
+      timing,
+      {
+        op: withSymbol ? 'amendOrderWithSymbol' : 'amendOrder',
+        id: order.id,
+        ...(withSymbol ? { symbol: order.symbol } : {}),
+        ...('price' in update ? { price: update.price } : {}),
+        ...('amount' in update ? { amount: update.amount } : {}),
+      },
+      assertCurrent,
+    );
     return Array.isArray(result) ? result : withReplacementClientOrderId(result.orderIds, result.clientOrderId);
   };
 
@@ -2927,14 +3106,17 @@ export class RustEngineExchange extends BaseExchange {
   nukePositions = async (_tries = 0) => this.runNativeNuke(false);
 
   override nukeOrders = async (): Promise<NukeResult> => {
+    const assertCurrent = this.capturePageWriteAdmission('nukeOrders', []);
     this.assertEngineAlive();
     if (this.isNuking) this.rejectPreflight('A nuke is already in progress');
     this.isNuking = true;
     let warning: string | undefined;
     try {
       const { placedSymbols, ...stopped } = await this.stopAlgosForNuke();
+      assertCurrent();
       warning = unseenOrdersWarning(await this.capabilitiesFor('nuke'));
-      await this.cancelNukeOrders(placedSymbols);
+      assertCurrent();
+      await this.cancelNukeOrders(assertCurrent, placedSymbols);
       return warning ? { ...stopped, warning } : stopped;
     } catch (error) {
       throw withWarning(error, warning);
@@ -2947,10 +3129,15 @@ export class RustEngineExchange extends BaseExchange {
    * Every traded symbol's cancel, then, where the venue has one, its account-wide cancel:
    * nuke means everything. Each runs whatever the other did; failures are named together.
    */
-  private cancelNukeOrders = async (placedSymbols?: string[]): Promise<void> => {
+  private cancelNukeOrders = async (assertCurrent: () => void, placedSymbols?: string[]): Promise<void> => {
     const failures: unknown[] = [];
-    await this.cancelAllOrders(await this.nukeCancelSymbols(placedSymbols)).catch((error) => failures.push(error));
-    if ((await this.capabilitiesFor('nuke')).nukeAccountCancel)
+    const symbols = await this.nukeCancelSymbols(placedSymbols);
+    assertCurrent();
+    await this.cancelAllOrders(symbols).catch((error) => failures.push(error));
+    assertCurrent();
+    const capabilities = await this.capabilitiesFor('nuke');
+    assertCurrent();
+    if (capabilities.nukeAccountCancel)
       await this.command({ op: 'cancelAccountOrders' }).catch((error) =>
         failures.push(withWarning(error, NUKE_ORDERS_MAY_REMAIN)),
       );
@@ -2981,6 +3168,7 @@ export class RustEngineExchange extends BaseExchange {
   ];
 
   private runNativeNuke = async (cancelOrders: boolean): Promise<NukeResult> => {
+    const assertCurrent = this.capturePageWriteAdmission(cancelOrders ? 'nuke' : 'nukePositions', []);
     this.assertEngineAlive();
     if (this.isNuking) this.rejectPreflight('A nuke is already in progress');
     this.isNuking = true;
@@ -2988,6 +3176,7 @@ export class RustEngineExchange extends BaseExchange {
     let failure: unknown;
     try {
       const { placedSymbols, ...stopped } = await this.stopAlgosForNuke();
+      assertCurrent();
       const leg = async (run: () => Promise<void>) => {
         try {
           await run();
@@ -3001,8 +3190,9 @@ export class RustEngineExchange extends BaseExchange {
         }
       };
       // Orders first: a market close otherwise fills against the user's own resting bid.
-      if (cancelOrders) await leg(() => this.cancelNukeOrders(placedSymbols));
-      await leg(() => this.closeUntilFlat());
+      if (cancelOrders) await leg(() => this.cancelNukeOrders(assertCurrent, placedSymbols));
+      assertCurrent();
+      await leg(() => this.closeUntilFlat(assertCurrent));
       const warning = cancelOrders ? unseenOrdersWarning(await this.capabilitiesFor('nuke')) : undefined;
       if (failed) {
         this.logNukeRemainder();
@@ -3039,11 +3229,14 @@ export class RustEngineExchange extends BaseExchange {
    * read, not assumed: a venue with `freshPositions` is flat only on a read issued at least
    * `NUKE_READ_SETTLE_MS` after the last close. If that read fails, no further close is sent.
    */
-  private closeUntilFlat = async (): Promise<void> => {
+  private closeUntilFlat = async (assertCurrent: () => void): Promise<void> => {
     const capabilities = await this.capabilitiesFor('nuke');
     for (let round = 0; round < NUKE_FLAT_ROUNDS; round += 1) {
-      const closed = await this.closeAllPositions();
-      if (closed || !capabilities.freshPositions) await this.settleAfterClose(capabilities.freshPositions);
+      assertCurrent();
+      const closed = await this.closeAllPositions(assertCurrent);
+      assertCurrent();
+      if (closed || !capabilities.freshPositions) await this.settleAfterClose(capabilities.freshPositions, assertCurrent);
+      assertCurrent();
       if (this.isDisposed) return;
       if (capabilities.freshPositions) {
         const { skipped, open } = await this.freshNukeRead();
@@ -3063,15 +3256,18 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   /** Up to the flat settle while the store shows open; before a proving read, at least the read settle. */
-  private settleAfterClose = async (provingRead: boolean): Promise<void> => {
+  private settleAfterClose = async (provingRead: boolean, assertCurrent: () => void): Promise<void> => {
     const closedAt = Date.now();
     if (provingRead) await new Promise((resolve) => setTimeout(resolve, NUKE_READ_SETTLE_MS));
+    assertCurrent();
     while (
       Date.now() < closedAt + NUKE_FLAT_SETTLE_MS &&
       !this.isDisposed &&
       (await this.positionsStillOpen()).length
     ) {
+      assertCurrent();
       await new Promise((resolve) => setTimeout(resolve, NUKE_CLOSE_RETRY_MS));
+      assertCurrent();
     }
   };
 
@@ -3093,15 +3289,19 @@ export class RustEngineExchange extends BaseExchange {
    * succeeded behind a lagging store is never sent again. Every close is reduce-only.
    * Resolves whether any close was attempted.
    */
-  private closeAllPositions = async (): Promise<boolean> => {
+  private closeAllPositions = async (assertCurrent: () => void): Promise<boolean> => {
     let attempted = false;
     const unusable: { symbol: string; error: unknown }[] = [];
     let failures = new Map<string, { symbol: string; error: unknown }>();
     for (let attempt = 0; attempt <= NUKE_CLOSE_RETRIES; attempt += 1) {
       if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, NUKE_CLOSE_RETRY_MS));
+      assertCurrent();
       const failedLast = failures;
       failures = new Map();
-      for (const position of await this.fetchPositions()) {
+      const positions = await this.fetchPositions();
+      assertCurrent();
+      for (const position of positions) {
+        assertCurrent();
         const key = `${position.symbol}:${position.side}`;
         if (this.isDisposed || (attempt > 0 && !failedLast.has(key))) continue;
         let order: PlaceOrderOpts | undefined;
@@ -3200,9 +3400,11 @@ export class RustEngineExchange extends BaseExchange {
    * covers them; otherwise each is cancelled with the native orders and attempted placements.
    */
   cancelAllOrders = async (alsoSymbols: string[] = []) => {
+    const assertCurrent = this.capturePageWriteAdmission('cancelAllOrders', [alsoSymbols]);
     this.refuseWriteBeforeEngine();
     const ready = this.writeCapabilitiesFor('cancelAllOrders');
     const capabilities = ready instanceof Promise ? await ready : ready;
+    assertCurrent();
     if (capabilities.cancelAll === 'native') {
       await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       return;
@@ -3210,14 +3412,16 @@ export class RustEngineExchange extends BaseExchange {
     // Native current orders, not a JS store that can lag the engine's flush; frames can
     // lag placement ACKs, so attempted scopes stay for the account's lifetime.
     const orders = capabilities.cancelAll === 'eachOpenSymbol' ? await this.fetchOrders() : this.store.orders;
+    assertCurrent();
     await this.cancelEachSymbol(
-      new Set([...orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols, ...alsoSymbols]),
+      assertCurrent, new Set([...orders.map((order) => order.symbol), ...this.attemptedPlacementSymbols, ...alsoSymbols]),
     );
   };
 
-  private cancelEachSymbol = async (symbols: Set<string>) => {
+  private cancelEachSymbol = async (assertCurrent: () => void, symbols: Set<string>) => {
     const failures: string[] = [];
     for (const symbol of symbols) {
+      assertCurrent();
       if (this.isDisposed) continue;
       try {
         await this.cancelSymbolOrders(symbol);
@@ -3241,10 +3445,12 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   setAllLeverage = async (leverage: number) => {
+    const assertCurrent = this.capturePageWriteAdmission('setAllLeverage', [leverage]);
     this.refuseWriteBeforeEngine();
     if (this.capabilityRecord?.accountLeverage) await this.command({ op: 'setLeverage', symbol: '', leverage });
     else {
       const positions = await this.fetchPositions();
+      assertCurrent();
       if (this.isDisposed) return;
       const liveSymbols = new Set(positions.map((position) => position.symbol));
       const flatSymbols = new Set(
@@ -3253,10 +3459,12 @@ export class RustEngineExchange extends BaseExchange {
           .filter((symbol) => !liveSymbols.has(symbol)),
       );
       for (const position of positions) {
+        assertCurrent();
         if (this.isDisposed) return;
         await this.setLeverage(position.symbol, leverage, position.side);
       }
       for (const symbol of flatSymbols) {
+        assertCurrent();
         if (this.isDisposed) return;
         await this.setLeverage(symbol, leverage);
       }
@@ -3293,12 +3501,14 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   changeStpMode = async (mode: AsterDEXStpMode): Promise<void> => {
+    const assertCurrent = this.capturePageWriteAdmission('changeStpMode', [mode]);
     this.refuseWriteBeforeEngine();
     const ready = this.writeCapabilitiesFor('changeStpMode');
     const capabilities = ready instanceof Promise ? await ready : ready;
     if (!capabilities.stpControls) throw new Error('Self-trade prevention is unavailable for this venue');
     this.validateAsterStp('EXPIRE_TAKER');
     if (!isAsterDEXStpMode(mode)) throw new Error(`Invalid AsterDEX self-trade-prevention mode: ${String(mode)}`);
+    assertCurrent();
     await this.command({ op: 'setStpMode', mode });
   };
 
@@ -3483,19 +3693,31 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   fetchSymbolMaxLeverage = async (symbol: string): Promise<number> => {
+    const mirrored = this.routesToWorker;
+    const admitted = this.captureWorkerAdmission();
     const ready = this.capabilitiesFor('fetchSymbolMaxLeverage');
     const capabilities = ready instanceof Promise ? await ready : ready;
     const source = capabilities.maxLeverage;
     if (source === 'unsupported') throw new Error('Not implemented');
     if (source === 'rails') {
-      if (this.routesToWorker) return (await this.callWorker('fetchSymbolMaxLeverage', symbol)) as number;
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
+      if (mirrored) {
+        const leverage = (await this.callWorkerForOwner(admitted, 'fetchSymbolMaxLeverage', symbol)) as number;
+        admitted?.('fetchSymbolMaxLeverage', [symbol]);
+        return leverage;
+      }
       const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
       return Math.max(rails.buyLeverage, rails.sellLeverage);
     }
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market not found for symbol: ${symbol}`);
     if (source === 'query' && !this.isPublicDataOnly) {
-      const leverage = await this.command<number>({ op: 'fetchMaxLeverage', symbol });
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
+      const leverage = mirrored
+        ? (await this.callWorkerForOwner(admitted, 'fetchSymbolMaxLeverage', symbol)) as number
+        : await this.command<number>({ op: 'fetchMaxLeverage', symbol });
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
       if (!Number.isFinite(leverage) || leverage < 1) throw new Error('Invalid Bitrue maximum leverage');
       this.host?.flush();
       return leverage;
@@ -3510,15 +3732,20 @@ export class RustEngineExchange extends BaseExchange {
         throw new Error('Hyperliquid scheduleCancel time must be a safe integer UTC timestamp in milliseconds');
     }
     if (this.routesToWorker && !this.frameFed) {
-      await this.callWorker('scheduleCancel', time);
-      return;
+      if (this.isWorkerMirror) return this.withPageWriter('scheduleCancel', [time], () => this.scheduleCancel(time));
+      else {
+        await this.callWorker('scheduleCancel', time);
+        return;
+      }
     }
+    const assertCurrent = this.capturePageWriteAdmission('scheduleCancel', [time]);
     this.refuseWriteBeforeEngine();
     const ready = this.writeCapabilitiesFor('scheduleCancel');
     const capabilities = ready instanceof Promise ? await ready : ready;
     if (!capabilities.scheduleCancel) throw new Error('scheduleCancel is unavailable for this venue');
     if (time != null && time < this.utcNow() + 5_000)
       throw new Error('Hyperliquid scheduleCancel time must be at least 5 seconds in the future');
+    assertCurrent();
     await this.command({ op: 'scheduleCancel', ...(time == null ? {} : { time }) });
   };
 
@@ -4012,6 +4239,9 @@ export class RustEngineExchange extends BaseExchange {
     this.feedCandleListeners.clear();
     this.stopPollingConfig?.();
     this.stopPollingConfig = undefined;
+    clearTimeout(this.socketHealthTimer);
+    this.socketHealthTimer = undefined;
+    this.socketHealthClock = undefined;
     this.flushTimers.forEach(clearInterval);
     this.flushTimers = [];
     const host = this.host;

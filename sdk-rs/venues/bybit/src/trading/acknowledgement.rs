@@ -800,6 +800,28 @@ pub(crate) fn clean_amend_refusal(
     Ok(())
 }
 
+/// A known UID-limit refusal must have no accepted identity or per-item result.
+/// Duplicate, mistyped and unknown fields leave the outcome unproven.
+pub(crate) fn clean_rate_limit_refusal(
+    result: Option<&RawValue>,
+    ext: Option<&RawValue>,
+) -> Result<(), Malformed> {
+    for raw in [result, ext].into_iter().flatten() {
+        let fields = object(raw)?;
+        for (key, _) in &fields.0 {
+            match key.as_str() {
+                "orderId" if fields.text("orderId")?.as_deref().is_none_or(str::is_empty) => {}
+                "orderLinkId" => {
+                    fields.text("orderLinkId")?;
+                }
+                "list" if elements(fields.required("list")?)?.is_empty() => {}
+                _ => return Err(Malformed),
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Bounded native IDs a malformed or contradictory answer carried, as
 /// reconciliation evidence only: the `result` object's own ID or every row of
 /// its list, and nothing at all when any row is not a well-formed object.

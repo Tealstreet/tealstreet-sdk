@@ -29,7 +29,11 @@ async fn handover_replies_use_current_registration_and_preserve_legacy_bytes() {
             init.instance_id = id.map(str::to_owned);
             init.signing_mode = Some("delegated".into());
             session.init(init).await.unwrap();
+            // Missing handover still refuses; proved cross-mode joins enter admission.
+            // Attempt routing stays separate from the existing live registration.
             assert_eq!(sent.try_recv().unwrap(), expected(envelope::init_unverified("acct", false), id));
+            assert!(session.pending_verifications.is_empty());
+            assert!(account.delegated().is_none());
             assert!(Arc::ptr_eq(&session.joined["acct"].account, &account));
 
             // Existing live-account output retains master's registration routing.

@@ -22,7 +22,7 @@ impl Session {
         self.order_frames_enabled
             && !self.pending_verifications.contains_key(name)
             && self.joined.get(name).is_some_and(|joined| {
-                joined.account.delegated.is_some()
+                joined.account.delegated().is_some()
                     && !joined.account.is_public()
                     && order_contract::enabled_for(&joined.account.venue)
                     && joined.account.running.io_allowed()

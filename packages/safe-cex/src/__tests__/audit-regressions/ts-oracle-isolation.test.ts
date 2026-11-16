@@ -48,16 +48,19 @@ const KEPT_VENUE_FILES = [
   'okx/okx.signing.ts',
   'okx/okx.types.ts',
   'phemex/phemex.types.ts',
+  'txflow/txflow.agent.ts',
   'txflow/txflow.client-id.ts',
 ];
 
 // Pure helpers tealstreet-next imports from source, though the SDK runtime does not:
 // the open-orders Bitget attached TP/SL check and the history-audit Kraken mappers.
+const VENUE_DOC_FILES = ['txflow/README.md'];
+
 const SOURCE_CONSUMER_FILES = ['bitget/bitget.family.ts', 'kraken/kraken.fills.ts', 'kraken/kraken.income.ts'];
 
 // Kept venue code outside the beta families, each for a named runtime consumer.
 const NON_BETA_KEPT_FAMILIES: Record<string, string> = {
-  txflow: 'rust/rust.exchange.ts applies the TxFlow client order ID rule',
+  txflow: 'Rust client-ID validation and index.ts browser wallet-agent approval exports',
 };
 
 const SRC = resolve(__dirname, '../..');
@@ -190,7 +193,7 @@ describe('the TS venue oracle is unreachable from the SDK runtime', () => {
     const production = venueFiles(walk(EXCHANGES).map((file) => relative(SRC, file))).filter(
       (file) => !file.endsWith('/CLAUDE.md'),
     );
-    expect(production).toEqual([...KEPT_VENUE_FILES, ...SOURCE_CONSUMER_FILES].sort());
+    expect(production).toEqual([...KEPT_VENUE_FILES, ...SOURCE_CONSUMER_FILES, ...VENUE_DOC_FILES].sort());
     expect(production.filter((file) => /\.(?:exchange|ws-private|ws-public)\.ts$/.test(file))).toEqual([]);
   });
 

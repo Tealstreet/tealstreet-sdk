@@ -233,6 +233,44 @@ struct Join {
     balance_version: u64,
 }
 
+// Keep the original read authority until market-dependent settings can apply.
+struct EarlyConfig {
+    context: Context,
+    mode_version: u64,
+    hedged: bool,
+    level: Option<u8>,
+}
+
+#[derive(Default)]
+struct SignatureStreak {
+    credential: Option<Credential>,
+    refusals: u8,
+}
+
+fn startup_key_refusal(
+    body: &str,
+    credential: Option<Credential>,
+    streak: &mut SignatureStreak,
+    which: &str,
+) -> Option<VenueError> {
+    if streak.credential != credential {
+        streak.credential = credential;
+        streak.refusals = 0;
+    }
+    let envelope = serde_json::from_str::<Envelope<'_>>(body).ok();
+    if envelope.as_ref().is_some_and(|e| e.code == "50113") {
+        streak.refusals = streak.refusals.saturating_add(1);
+    } else {
+        streak.refusals = 0;
+    }
+    let envelope = envelope?;
+    let kind = rest_key_rejection(envelope.code)?;
+    if envelope.code == "50113" && streak.refusals < 2 {
+        return None;
+    }
+    Some(rejection(which, envelope.code, envelope.msg, kind))
+}
+
 #[derive(Default)]
 pub struct AccountState {
     pub ready: bool,
@@ -278,7 +316,9 @@ pub struct AccountState {
     /// Pause the latest 418/429 config answer asked for; a transport loss has none.
     pub(crate) config_pause_ms: f64,
     /// Consecutive 50113 answers to the config read; two in a row reject the key.
-    signature_rejections: u8,
+    signature_rejections: SignatureStreak,
+    catalogue_rejections: [SignatureStreak; 2],
+    early_config: Option<EarlyConfig>,
     pub startup_rejected: bool,
     pub(crate) fresh_positions: safe_cex_engine::fresh_positions::FreshPositions,
     fresh_positions_timer: Option<TimerId>,
@@ -380,9 +420,13 @@ impl Okx {
         if cx.frame_fed()
             || self.credentials.is_none()
             || self.account.config_in_flight
+            || self.account.early_config.is_some()
             || self.account.startup_rejected
         {
             return;
+        }
+        if self.eea_authenticating(cx) {
+            self.account.catalogue_rejections = Default::default();
         }
         self.account.config_in_flight = true;
         // The shared deadline ends an unanswered read; startup backoff resends it.
@@ -1002,13 +1046,14 @@ impl Okx {
                     cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 }
             }
-            Request::Config { mode_version, .. } => {
+            Request::Config { context, mode_version } => {
                 self.account.config_in_flight = false;
                 // A 200 answer that cannot be read will not read better on a retry:
                 // it ends the start visibly instead of backing off forever.
                 let configs = serde_json::from_str::<Vec<Config<'_>>>(data);
                 let Some(config) = configs.ok().and_then(|configs| configs.into_iter().next())
                 else {
+                    let _ = cx.finish_http_context(&context);
                     self.config_unusable(cx, "OKX account config answered with no readable account".into());
                     return;
                 };
@@ -1029,6 +1074,7 @@ impl Okx {
                         Config { pos_mode: "net_mode", ..config }
                     }
                     other => {
+                        let _ = cx.finish_http_context(&context);
                         self.config_unusable(
                             cx,
                             format!("OKX account reports an unknown position mode '{other}' (acctLv {})", config.acct_lv),
@@ -1040,29 +1086,13 @@ impl Okx {
                 self.account.startup.succeeded(cx, &());
                 let hedged = config.pos_mode == "long_short_mode";
                 let level = config.acct_lv.parse().ok();
-                if self.account.configured {
-                    // A read sent before our own mode write cannot overrule it.
-                    if mode_version != self.account.mode_version {
-                        return;
-                    }
-                    // A mode changed in the OKX app makes every posSide we send wrong.
-                    let level = level.unwrap_or(self.account.account_level);
-                    if hedged != cx.store.hedged() || level != self.account.account_level {
-                        cx.store.set_hedged(hedged);
-                        self.account.account_level = level;
-                        self.account_after_settings(cx);
-                    }
+                if self.eea_authenticating(cx) {
+                    self.account.early_config = Some(EarlyConfig { context, mode_version, hedged, level });
+                    self.load_catalogue(cx);
                     return;
                 }
-                let level = level.unwrap_or(2);
-                cx.store.set_hedged(hedged);
-                self.account.account_level = level;
-                self.account.configured = true;
-                self.ensure_feed(cx, PRIVATE);
-                self.account_refresh(cx);
-                if self.account.tick.is_none() {
-                    self.account.tick = Some(cx.set_timer(2_000.0));
-                }
+                let _ = cx.finish_http_context(&context);
+                self.apply_config(cx, mode_version, hedged, level);
             }
             Request::Balance {
                 generation,
@@ -1476,7 +1506,8 @@ impl Okx {
                 }
             }
             Request::Orders { .. } => self.account.orders_in_flight = false,
-            Request::Config { .. } => {
+            Request::Config { context, .. } => {
+                let _ = cx.finish_http_context(&context);
                 self.config_failed(cx, &error);
                 return;
             }
@@ -1516,7 +1547,16 @@ impl Okx {
             self.account.config_read_at = cx.now;
             cx.notice_error(Level::Warn, code::REQUEST_FAILED, error);
         } else {
-            cx.retried_failure_error("okx.account:841", error);
+            if self.eea_authenticating(cx)
+                && error.venue_code.as_deref() == Some("50113")
+                && self.account.signature_rejections.refusals == 1
+            {
+                // This read still owns its one re-signed retry. A classified
+                // auth event would terminate the shared probe before that retry.
+                cx.retried_failure("okx.account:841", error.message.clone());
+            } else {
+                cx.retried_failure_error("okx.account:841", error);
+            }
             let pause = std::mem::take(&mut self.account.config_pause_ms);
             self.account.startup.failed_after(cx, (), pause);
         }
@@ -1526,39 +1566,121 @@ impl Okx {
     /// of polling. Only documented key codes count; 50113 only twice in a row,
     /// i.e. after one re-signed resend. Any other answer ends the run.
     pub(crate) fn config_rejected(&mut self, cx: &mut Cx<'_, Pending>, body: &str) -> bool {
-        let envelope = serde_json::from_str::<Envelope<'_>>(body).ok();
-        if envelope.as_ref().is_some_and(|e| e.code == "50113") {
-            self.account.signature_rejections += 1;
-        } else {
-            self.account.signature_rejections = 0;
-        }
         if self.account.configured {
             return false;
         }
-        let Some(envelope) = envelope else {
-            return false;
-        };
-        let Some(kind) = rest_key_rejection(envelope.code) else {
-            return false;
-        };
-        if envelope.code == "50113" && self.account.signature_rejections < 2 {
-            return false;
-        }
-        self.account.config_in_flight = false;
+        let credential = self.read_credential();
         let read_key = self.options.read_credentials.is_some();
         let which = if read_key {
             "read-only API key"
         } else {
             "API key"
         };
-        let error = rejection(which, envelope.code, envelope.msg, kind);
-        self.reject_startup(cx, error, kind == ErrorKind::AuthInvalid && !read_key);
+        let Some(error) = startup_key_refusal(
+            body,
+            credential,
+            &mut self.account.signature_rejections,
+            which,
+        ) else {
+            return false;
+        };
+        self.account.config_in_flight = false;
+        let trading_key = error.kind == Some(ErrorKind::AuthInvalid) && !read_key;
+        self.reject_startup(cx, error, trading_key);
         true
     }
 
-    /// A config read lost in transport is not a 50113 answer, so it ends the run.
     pub(crate) fn config_unanswered(&mut self) {
-        self.account.signature_rejections = 0;
+        self.account.signature_rejections = SignatureStreak::default();
+    }
+
+    pub(crate) fn eea_authenticating(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.options.eea
+            && self.credentials.is_some()
+            && !cx.frame_fed()
+            && !self.account.configured
+    }
+
+    pub(crate) fn eea_config_required(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.eea_authenticating(cx) && self.account.early_config.is_none()
+    }
+
+    pub(crate) fn finish_eea_config(&mut self, cx: &mut Cx<'_, Pending>) -> Option<Result<(), ()>> {
+        let staged = self.account.early_config.take()?;
+        let valid = cx.validate_http_context(&staged.context);
+        let _ = cx.finish_http_context(&staged.context);
+        if let Err(error) = valid {
+            self.config_unanswered();
+            self.config_failed(cx, &error.read_venue_error());
+            return Some(Err(()));
+        }
+        self.apply_config(cx, staged.mode_version, staged.hedged, staged.level);
+        Some(Ok(()))
+    }
+
+    fn apply_config(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mode_version: u64,
+        hedged: bool,
+        level: Option<u8>,
+    ) {
+        if self.account.configured {
+            // A read sent before our own mode write cannot overrule it.
+            if mode_version != self.account.mode_version {
+                return;
+            }
+            let level = level.unwrap_or(self.account.account_level);
+            if hedged != cx.store.hedged() || level != self.account.account_level {
+                cx.store.set_hedged(hedged);
+                self.account.account_level = level;
+                self.account_after_settings(cx);
+            }
+            return;
+        }
+        cx.store.set_hedged(hedged);
+        self.account.account_level = level.unwrap_or(2);
+        self.account.configured = true;
+        self.ensure_feed(cx, PRIVATE);
+        self.account_refresh(cx);
+        if self.account.tick.is_none() {
+            self.account.tick = Some(cx.set_timer(2_000.0));
+        }
+    }
+
+    pub(crate) fn catalogue_rejected(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        kind: crate::InstrumentType,
+        body: &str,
+    ) -> bool {
+        if !self.eea_authenticating(cx) {
+            return false;
+        }
+        let credential = self.read_credential();
+        let read_key = self.options.read_credentials.is_some();
+        let which = if read_key {
+            "read-only API key"
+        } else {
+            "API key"
+        };
+        let index = usize::from(kind == crate::InstrumentType::Futures);
+        let Some(error) = startup_key_refusal(
+            body,
+            credential,
+            &mut self.account.catalogue_rejections[index],
+            which,
+        ) else {
+            return false;
+        };
+        let trading_key = error.kind == Some(ErrorKind::AuthInvalid) && !read_key;
+        self.reject_startup(cx, error, trading_key);
+        true
+    }
+
+    pub(crate) fn catalogue_unanswered(&mut self, kind: crate::InstrumentType) {
+        self.account.catalogue_rejections[usize::from(kind == crate::InstrumentType::Futures)] =
+            SignatureStreak::default();
     }
 
     pub(crate) fn socket_account_is_ready(&self) -> bool {
@@ -1607,6 +1729,11 @@ impl Okx {
             return;
         }
         self.account.startup.succeeded(cx, &());
+        if let Some(staged) = self.account.early_config.take() {
+            let _ = cx.finish_http_context(&staged.context);
+        }
+        self.startup.succeeded(cx, crate::DiscoveryRead::Markets);
+        self.startup.succeeded(cx, crate::DiscoveryRead::Tickers);
         self.account.fresh_positions.failed(cx, 0, u32::MAX, &error);
         if let Some(timer) = self.account.retry.take() {
             cx.clear_timer(timer);

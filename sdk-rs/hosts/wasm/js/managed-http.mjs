@@ -38,6 +38,18 @@ export class ManagedHttp {
     return !this.host.disposed && this.resources.get(token) === resource;
   }
 
+  assertCurrent(resource) {
+    const check = resource.assertCurrent;
+    if (!check) return;
+    try {
+      if (this.host.commandAdmissions.get(resource.command) !== check) throw new Error('Retired command');
+      if (check() !== undefined) throw new Error('Invalid owner check');
+    } catch {
+      // Owner retirement is terminal, not a stale-route reprepare permission.
+      throw new HttpPreparationError('invalid');
+    }
+  }
+
   cancel(token) {
     if (this.groupHandoff) throw new Error('HTTP group handoff cannot be interrupted');
     const resource = this.resources.get(token);
@@ -131,6 +143,13 @@ export class ManagedHttp {
     this.resources.set(token, resource);
     if (typeof host.transport.prepareHttp !== 'function') { this.fail(token, resource, 'unsupported'); return; }
     try {
+      resource.command = host.commandAdmissions?.size && typeof host.engine.httpCommandOwner === 'function'
+        ? host.invoke(host.engine.httpCommandOwner, action.packet.request) : undefined;
+      if (resource.command !== undefined && (!Number.isSafeInteger(resource.command) || resource.command < 0)) {
+        throw new HttpPreparationError('invalid');
+      }
+      resource.assertCurrent = host.commandAdmissions?.get(resource.command);
+      this.assertCurrent(resource);
       const nativeReadClass = typeof host.engine.httpReadClass === 'function'
         ? host.invoke(host.engine.httpReadClass, action.packet.request) : 0;
       const readClass = Number.isInteger(nativeReadClass) ? readClasses[nativeReadClass] ?? 'normal' : 'normal';
@@ -145,6 +164,7 @@ export class ManagedHttp {
         return;
       }
       resource.prepared = prepared;
+      this.assertCurrent(resource);
       if (!prepared || typeof prepared.bind !== 'function') { this.fail(token, resource, 'invalid'); return; }
       if (this.next === 0xffff_ffff_ffff_ffffn) { this.fail(token, resource, 'invalid'); return; }
       resource.phase = 'prepared';
@@ -166,7 +186,9 @@ export class ManagedHttp {
     let response;
     try {
       if (!resource.bound.ready()) { this.fail(token, resource, 'timedOut'); return; }
-      const result = JSON.parse(host.invoke(host.engine.httpClaim, permit, host.transport.now()));
+      const now = host.transport.now();
+      this.assertCurrent(resource);
+      const result = JSON.parse(host.invoke(host.engine.httpClaim, permit, now));
       if (result.status === 'wait' && Number.isFinite(result.until)) {
         resource.wake = host.transport.setTimeout(() => {
           resource.wake = undefined;
@@ -183,6 +205,7 @@ export class ManagedHttp {
         return;
       }
       resource.phase = 'released';
+      this.assertCurrent(resource);
       response = resource.bound.dispatch(); // Synchronous transport API handoff.
       host.stage(host.stageCauses.get(`http:${request}`), 'sent');
     } catch (error) {
@@ -211,7 +234,10 @@ export class ManagedHttp {
     const { host } = this;
     try {
       const value = await response;
-      if (this.live(token, resource)) await host.receive(request, value, () => this.live(token, resource));
+      if (this.live(token, resource)) await host.receive(request, value, () => {
+        this.assertCurrent(resource);
+        return this.live(token, resource);
+      });
     } catch {
       if (this.live(token, resource)) {
         this.failure(resource, 'network');

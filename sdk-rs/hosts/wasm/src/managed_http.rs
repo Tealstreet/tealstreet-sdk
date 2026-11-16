@@ -144,6 +144,13 @@ enum ClaimOut {
 
 #[wasm_bindgen]
 impl WasmEngine {
+    #[wasm_bindgen(js_name = httpCommandOwner)]
+    pub fn http_command_owner(&self, request: f64) -> Result<Option<CommandId>, js_sys::Error> {
+        Ok(self
+            .inner
+            .http_command_owner(RequestId(host_resource_id(request)?)))
+    }
+
     #[wasm_bindgen(js_name = signingPending)]
     pub fn signing_pending(&self, attempt: f64) -> Result<bool, js_sys::Error> {
         let attempt = host_resource_id(attempt)?;

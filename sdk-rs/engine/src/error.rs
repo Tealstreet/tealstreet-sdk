@@ -135,6 +135,15 @@ pub enum HistoryDecodeReason {
     Fee,
     Market,
     Economics,
+    QuantityNegative,
+    QuantityZero,
+    FilledQuantityNegative,
+    FilledQuantityExceedsQuantity,
+    QuantityDecimal,
+    FilledQuantityDecimal,
+    TimestampDecimal,
+    LastUpdateTimestampDecimal,
+    LimitPriceDecimal,
 }
 
 #[cfg(feature = "history-row-diagnostics")]

@@ -329,14 +329,20 @@ fn candle_timestamps(frame: &[u8]) -> Vec<f64> {
 }
 
 #[test]
-fn kline_snapshots_never_publish_live_candles() {
+fn kline_snapshots_match_ts_prefix_and_live_lifecycle() {
     let (mut engine, socket) = subscribed_to_candles();
-    // Multi-row, single-row and empty history snapshots must all stay out of
-    // the live path, including a delayed snapshot after a live update.
-    for text in [
-        KLINE_SNAPSHOT.to_owned(),
-        KLINE_INCREMENTAL.replace("incremental", "snapshot"),
-        r#"{"kline_p":[],"symbol":"BTCUSDT","type":"snapshot"}"#.to_owned(),
+    // #3213's snapshot ban contradicted the TS replay oracle's listenOHLCV.
+    // Keep its bounded rows-1-then-0 replay, including later recovery snapshots.
+    for (text, expected) in [
+        (KLINE_SNAPSHOT.to_owned(), vec![1666854060., 1666854120.]),
+        (
+            KLINE_INCREMENTAL.replace("incremental", "snapshot"),
+            vec![1666854180.],
+        ),
+        (
+            r#"{"kline_p":[],"symbol":"BTCUSDT","type":"snapshot"}"#.to_owned(),
+            vec![],
+        ),
     ] {
         engine.handle(
             5.,
@@ -346,9 +352,10 @@ fn kline_snapshots_never_publish_live_candles() {
             },
         );
         let frame = engine.take_frame(5.).unwrap_or_default();
-        assert!(
-            candle_timestamps(frame).is_empty(),
-            "snapshot must never publish a live candle: {text}"
+        assert_eq!(
+            candle_timestamps(frame),
+            expected,
+            "TS snapshot replay: {text}"
         );
     }
     engine.handle(
@@ -367,7 +374,10 @@ fn kline_snapshots_never_publish_live_candles() {
             text: KLINE_SNAPSHOT,
         },
     );
-    assert!(candle_timestamps(engine.take_frame(7.).unwrap_or_default()).is_empty());
+    assert_eq!(
+        candle_timestamps(engine.take_frame(7.).unwrap()),
+        [1666854060., 1666854120.]
+    );
 }
 
 #[test]
@@ -395,7 +405,7 @@ fn live_klines_keep_seconds_and_native_ohlcv() {
 }
 
 #[test]
-fn only_incremental_klines_can_publish_live_candles() {
+fn unclassified_and_backfill_klines_do_not_publish_live_candles() {
     let (mut engine, socket) = subscribed_to_candles();
     for text in [
         KLINE_INCREMENTAL.replace("incremental", "backfill"),
@@ -470,6 +480,10 @@ fn malformed_kline_shapes_are_logged_without_publishing_partial_rows() {
     let bad_type = KLINE_INCREMENTAL.replace(r#""type":"incremental""#, r#""type":123"#);
     for (text, kind) in [
         (mixed.as_str(), r#""incremental""#),
+        (
+            mixed.replace("incremental", "snapshot").as_str(),
+            r#""snapshot""#,
+        ),
         (bad_number.as_str(), r#""incremental""#),
         (bad_type.as_str(), "123"),
         (
@@ -538,4 +552,73 @@ fn other_public_parse_failures_also_log_frame_size_and_type() {
         );
         assert!(notices[0].message.contains(&format!("type={kind}")));
     }
+}
+
+#[test]
+fn legacy_ts_kline_snapshot_replays_previous_then_current() {
+    let (mut engine, socket) = subscribed_to_candles();
+    engine.handle(
+        5.,
+        Event::WsMessage {
+            socket,
+            text: KLINE_SNAPSHOT,
+        },
+    );
+    let frame = engine.take_frame(5.).unwrap_or_default();
+    assert_eq!(candle_timestamps(frame), [1666854060., 1666854120.]);
+    let (_, body) = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == 6)
+        .unwrap();
+    let rows: Vec<_> = body[body.len() - 96..]
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|bytes| f64::from_le_bytes(*bytes))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            1666854060.,
+            20730.,
+            20736.,
+            20729.5,
+            20735.3,
+            0.3,
+            1666854120.,
+            20735.3,
+            20741.,
+            20735.3,
+            20740.1,
+            0.12
+        ]
+    );
+}
+
+#[test]
+fn kline_snapshot_prefix_stays_scoped_to_the_subscribed_symbol_and_interval() {
+    let (mut engine, socket) = subscribed_to_candles();
+    for text in [
+        KLINE_SNAPSHOT.replace("BTCUSDT", "ETHUSDT"),
+        KLINE_SNAPSHOT.replace(",60,", ",300,"),
+    ] {
+        engine.handle(
+            5.,
+            Event::WsMessage {
+                socket,
+                text: &text,
+            },
+        );
+        assert!(candle_timestamps(engine.take_frame(5.).unwrap_or_default()).is_empty());
+    }
+    engine.handle(
+        6.,
+        Event::WsMessage {
+            socket,
+            text: KLINE_SNAPSHOT,
+        },
+    );
+    assert_eq!(
+        candle_timestamps(engine.take_frame(6.).unwrap()),
+        [1666854060., 1666854120.]
+    );
 }

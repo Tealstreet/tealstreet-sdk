@@ -227,29 +227,35 @@ describe('frame-fed main-thread mirror', () => {
       }
     });
 
-    it('forwards to the data source once a family proves to have no page engine', async () => {
+    // SDK #3521 (87d0f386) moves LOCAL writes to rust.cosigned-non-frame-fed's
+    // source matrix; this sibling control retains the DELEGATED refusal.
+    it('refuses DELEGATED locally once a family proves to have no page engine', async () => {
       const fake = fakeEngine({ supported: false });
       const mirror = mirrorWith(fake);
       exchange = mirror.exchange;
+      exchange.options = { ...exchange.options, signingMode: 'delegated' };
 
-      await mirror.exchange.placeOrder(order);
+      await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
 
       expect(fake.commands.map((command) => command.op)).not.toContain('placeOrders');
-      expect(mirror.calls.some((method) => method.startsWith('placeOrder'))).toBe(true);
+      expect(mirror.calls).toEqual([]);
     });
   });
 
-  describe('a write that fails on its data source', () => {
+  describe('a DELEGATED write refused before reaching its data source', () => {
     const failingMirror = async (failure: Record<string, unknown>) => {
       const mirror = mirrorWith(fakeEngine({ supported: false }), failure);
       exchange = mirror.exchange;
+      // SDK #3521 (87d0f386) moves LOCAL source replies to rust.cosigned-non-frame-fed;
+      // both reporting controls here retain the pre-dispatch DELEGATED refusal.
+      exchange.options = { ...exchange.options, signingMode: 'delegated' };
       await mirror.exchange.frameFedReady;
       const errors: unknown[] = [];
       mirror.exchange.on('error', (error: unknown) => errors.push(error));
       return { mirror, errors };
     };
 
-    it('reports it on the page, as a hosted server reports nothing', async () => {
+    it('reports unsupported page execution without contacting the server', async () => {
       const { mirror, errors } = await failingMirror({
         message: 'Signing timed out before dispatch',
         kind: 'timeout',
@@ -259,15 +265,17 @@ describe('frame-fed main-thread mirror', () => {
       await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
 
       expect(errors).toHaveLength(1);
-      expect(String(errors[0])).toContain('Signing timed out before dispatch');
+      expect(String(errors[0])).toContain('manual-write engine');
+      expect(mirror.calls).toEqual([]);
     });
 
-    it('stays quiet on one its worker already reported', async () => {
+    it('reports the local refusal once even if a worker reply would be marked reported', async () => {
       const { mirror, errors } = await failingMirror({ message: 'rejected', outcome: 'rejected', errorReported: true });
 
-      await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'rejected' });
+      await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
 
-      expect(errors).toHaveLength(0);
+      expect(errors).toHaveLength(1);
+      expect(mirror.calls).toEqual([]);
     });
   });
 
@@ -280,16 +288,19 @@ describe('frame-fed main-thread mirror', () => {
     const mirrorOnly = () =>
       new RustEngineExchange('bybit', { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false }, new DefaultStore());
 
-    it('rejects a kept engine at once when the bridge is removed, a write as unknown', async () => {
+    // SDK #3521 (87d0f386) moves LOCAL writes to rust.cosigned-non-frame-fed;
+    // only an ineligible DELEGATED write remains notSent without a page engine.
+    it('rejects the removed read bridge and refuses an unsupported DELEGATED page write as notSent', async () => {
       vi.useFakeTimers();
       try {
         fakeEngine({ supported: false });
         exchange = mirrorOnly();
+        exchange.options = { ...exchange.options, signingMode: 'delegated' };
         const bridge = silentBridge(exchange);
         const pendingRead = exchange.callMethodInWorker('fetchHistoricalFills', { from: 0, to: 1 } as never);
         const pendingWrite = exchange.callMethodInWorker('placeOrder', order as never);
         const read = expect(pendingRead).rejects.toThrow('stopped before answering');
-        const write = expect(pendingWrite).rejects.toMatchObject({ outcome: 'unknown' });
+        const write = expect(pendingWrite).rejects.toMatchObject({ outcome: 'notSent' });
         await vi.advanceTimersByTimeAsync(0);
         exchange.off('callMethod', bridge);
         await read;
@@ -327,11 +338,14 @@ describe('frame-fed main-thread mirror', () => {
       return target;
     };
 
-    it('fails at 30 s while the account loads, and leaves a write on its long bound', async () => {
+    // SDK #3521 (87d0f386) moves LOCAL writes to rust.cosigned-non-frame-fed;
+    // the read bound stays independent of the DELEGATED pre-dispatch refusal.
+    it('bounds the read at 30 s while refusing an unsupported DELEGATED page write locally', async () => {
       vi.useFakeTimers();
       try {
         fakeEngine({ supported: false });
         exchange = silentMirror();
+        exchange.options = { ...exchange.options, signingMode: 'delegated' };
         const read = exchange.callMethodInWorker('fetchOrders');
         const refused = expect(read).rejects.toThrow('has not finished loading');
         const write = vi.fn();
@@ -339,7 +353,7 @@ describe('frame-fed main-thread mirror', () => {
         await vi.advanceTimersByTimeAsync(30_000);
         await refused;
         await vi.advanceTimersByTimeAsync(60_000);
-        expect(write).not.toHaveBeenCalled();
+        expect(write).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ outcome: 'notSent' }));
       } finally {
         vi.useRealTimers();
       }
@@ -803,15 +817,18 @@ describe('frame-fed main-thread mirror', () => {
     });
   });
 
-  it('stays a plain mirror where the family has no frame-fed engine', async () => {
+  // SDK #3521 (87d0f386) moves LOCAL writes to rust.cosigned-non-frame-fed's
+  // source matrix; a structurally unsupported DELEGATED writer still refuses.
+  it('refuses DELEGATED writes where the family has no frame-fed engine', async () => {
     const fake = fakeEngine({ supported: false });
     const mirror = mirrorWith(fake);
     exchange = mirror.exchange;
+    exchange.options = { ...exchange.options, signingMode: 'delegated' };
     await expect(exchange.frameFedReady).resolves.toBe(false);
     expect(fake.started).toBe(0);
     expect(fake.constructed).toBe(0);
-    await exchange.placeOrder(order);
-    expect(mirror.calls).toContain('placeOrder');
+    await expect(exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
+    expect(mirror.calls).toEqual([]);
     expect(fake.commands.map((command) => command.op)).not.toContain('placeOrders');
   });
 
@@ -823,8 +840,8 @@ describe('frame-fed main-thread mirror', () => {
     exchange = mirror.exchange;
     await expect(exchange.frameFedReady).resolves.toBe(false);
     expect(construct).not.toHaveBeenCalled();
-    await exchange.placeOrder(order);
-    expect(mirror.calls).toContain('placeOrder');
+    await expect(exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
+    expect(mirror.calls).toEqual([]);
   });
 
   it('never starts an engine that does not report itself frame-fed', async () => {

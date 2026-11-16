@@ -10,7 +10,7 @@ async fn refused_candidates_leave_the_running_account_and_its_provider_untouched
         resident.init(init).await.unwrap();
         finish(&mut resident, &mut ready).await;
         let original = f.registry.held("alice", "acct", resident.socket).unwrap();
-        let provider = original.delegated.as_ref().unwrap().provider();
+        let provider = original.delegated().as_ref().unwrap().provider();
         f.code.store(code, Ordering::SeqCst);
         let (mut candidate, mut sent) = user_session(f.registry.clone(), "alice");
         let mut done = candidate.take_verified();
@@ -28,7 +28,7 @@ async fn refused_candidates_leave_the_running_account_and_its_provider_untouched
         ));
         assert!(Arc::ptr_eq(
             &provider,
-            &original.delegated.as_ref().unwrap().provider()
+            &original.delegated().as_ref().unwrap().provider()
         ));
         assert!(original.handle.disposal_cause().is_none());
         candidate.close();
@@ -45,7 +45,7 @@ async fn a_valid_pair_joins_without_comparing_or_replacing_resident_material() {
     resident.init(init).await.unwrap();
     finish(&mut resident, &mut ready).await;
     let original = f.registry.held("alice", "acct", resident.socket).unwrap();
-    let provider = original.delegated.as_ref().unwrap().provider();
+    let provider = original.delegated().as_ref().unwrap().provider();
     let (mut candidate, _sent) = user_session(f.registry.clone(), "alice");
     let mut done = candidate.take_verified();
     let mut init = payload(&mut candidate, Some("second"));
@@ -67,7 +67,7 @@ async fn a_valid_pair_joins_without_comparing_or_replacing_resident_material() {
     ));
     assert!(Arc::ptr_eq(
         &provider,
-        &original.delegated.as_ref().unwrap().provider()
+        &original.delegated().as_ref().unwrap().provider()
     ));
     assert!(original.handle.disposal_cause().is_none());
     candidate.close();
@@ -300,4 +300,114 @@ async fn verified_rebuild_retires_previous_output_generation() {
     let current: Value = serde_json::from_str(&current).unwrap();
     assert_eq!(current["d"]["instanceId"], "verified-owner-B");
     session.close();
+}
+
+#[tokio::test]
+async fn bybit_admission_retains_classified_refusal_and_original_attempt_context() {
+    for (code, kind, transient) in [
+        (10003, "authInvalid", false),
+        (10010, "authPermission", false),
+        (10006, "rateLimited", true),
+    ] {
+        let f = fixture_with_auth(true).await;
+        f.code.store(code, Ordering::SeqCst);
+        let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+        let mut results = session.take_verified();
+        let init = payload(&mut session, Some("candidate"));
+        let attempt_id = init.sealed.as_ref().unwrap().attempt_id.clone();
+        let capture = crate::state::log_capture::capture();
+        session.init(init).await.unwrap();
+        let completed = tokio::time::timeout(Duration::from_secs(10), results.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        session.verification_completed(completed).await.unwrap();
+        let warnings: Vec<Value> = capture
+            .finish()
+            .into_iter()
+            .map(|line| serde_json::from_str::<Value>(&line).unwrap())
+            .filter(|line| line["level"] == "warn")
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "exactly one refusal warning must be emitted"
+        );
+        let warning = &warnings[0];
+        assert_eq!(warning["service"], "exchange-server");
+        assert_eq!(warning.as_object().unwrap().len(), 3);
+        let fields: Value = serde_json::from_str(warning["msg"].as_str().unwrap()).unwrap();
+        assert_eq!(fields.as_object().unwrap().len(), 8);
+        assert_eq!(
+            fields,
+            json!({
+                "event":"hosted.admission_refused", "attempt_id":attempt_id,
+                "venue":"bybit", "kind":"unverified", "stage":"private_read",
+                "transient":transient, "error_kind":kind, "venue_code":code,
+            })
+        );
+        assert!(!warning.to_string().contains("synthetic"));
+        assert_eq!(
+            sent.try_recv().unwrap(),
+            envelope::with_instance_id(envelope::init_unverified("acct", transient), "candidate")
+        );
+        assert!(session.joined.is_empty());
+        assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
+        session.close();
+    }
+}
+
+#[tokio::test]
+async fn signing_mode_refusals_report_a_closed_reason_without_claiming_key_failure() {
+    tokio::task::LocalSet::new().run_until(async {
+        // Resident mode changes now enter possession proof; mode_transitions covers that path.
+        for reason in ["invalid_identity", "identity_namespace_conflict"] {
+            let f = fixture().await;
+            let (mut candidate, mut sent) = user_session(f.registry.clone(), "alice");
+            let mut init = payload(&mut candidate, Some("candidate"));
+            let attempt = init.sealed.as_ref().unwrap().attempt_id.clone();
+            let resident = match reason {
+                "resident_mode_conflict" => Some(crate::accounts::testing::trading_account(&f.registry, "alice", &init)),
+                "invalid_identity" => { init.key.clear(); None },
+                "identity_namespace_conflict" => {
+                    let collision = InitPayload {
+                        account_name: crate::accounts::identity::digest("alice", &init).unwrap().unwrap(),
+                        exchange_name: "bybitinverse".into(),
+                        ..init.clone()
+                    };
+                    Some(crate::accounts::testing::trading_account(&f.registry, "alice", &collision))
+                }
+                _ => unreachable!(),
+            };
+            let capture = crate::state::log_capture::capture();
+            candidate.init(init).await.unwrap();
+            let warnings: Vec<Value> = capture.finish().into_iter()
+                .map(|line| serde_json::from_str::<Value>(&line).unwrap())
+                .filter(|line| line["level"] == "warn").collect();
+            assert_eq!(warnings.len(), 1);
+            let fields: Value = serde_json::from_str(warnings[0]["msg"].as_str().unwrap()).unwrap();
+            assert_eq!(fields, json!({
+                "event":"hosted.admission_refused", "attempt_id":attempt, "venue":"bybit",
+                "kind":"signing-mode", "stage":"signing_mode", "reason":reason,
+                "transient":false, "error_kind":null, "venue_code":null,
+            }));
+            let reply: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+            assert_eq!(reply, json!({"t":"msg", "d":{
+                "op":"error", "accountName":"acct", "instanceId":"candidate",
+                "data":["The requested account signing mode is unavailable; account not attached",
+                    {"forceToast":true, "initRefused":true, "kind":"signing-mode", "transient":false}]
+            }}));
+            assert!(!reply.to_string().contains(reason), "private sub-reasons stay off the wire");
+            assert!(candidate.joined.is_empty());
+            assert!(candidate.pending_verifications.is_empty());
+            assert_eq!(f.private_reads.load(Ordering::SeqCst), 0);
+            assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
+            if let Some(account) = resident {
+                assert!(account.handle.disposal_cause().is_none());
+                assert!(!f.registry.holds(&account, candidate.socket));
+                f.registry.dispose(&account, Disposal::PageDisposed);
+            }
+            candidate.close();
+        }
+    }).await;
 }

@@ -688,6 +688,7 @@ impl Venue for PhemexPerpetuals {
             Err(error) => return Self::public_unreadable(cx, &error, text),
         };
         if e.method == "perp_market24h_pack_p.update" {
+            cx.record_socket_topic(&["0:tickers"]);
             #[derive(serde::Deserialize)]
             struct Pack<'a> {
                 #[serde(borrow)]
@@ -743,6 +744,7 @@ impl Venue for PhemexPerpetuals {
                 }
             }
         } else if e.orderbook_p.is_some() {
+            cx.record_socket_topic(&["1:book:", &e.symbol]);
             if let Ok(r) = serde_json::from_str::<DepthEvent<'_>>(text)
                 .inspect_err(|error| Self::public_unreadable(cx, error, text))
             {
@@ -767,12 +769,18 @@ impl Venue for PhemexPerpetuals {
                 Ok(k) => k,
                 Err(error) => return Self::public_unreadable(cx, &error, text),
             };
-            // Subscribe snapshots are history, including their newest row. Only
-            // explicitly incremental frames may enter the live candle path.
-            if k.kind != "incremental" {
-                return;
+            for r in &k.kline_p {
+                cx.record_socket_topic_number(&["2:candle:", &e.symbol, ":"], r.1.0 as u32 as u64);
             }
-            k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
+            match k.kind.as_str() {
+                "snapshot" => {
+                    // TS listenOHLCV replays wire rows 1 then 0, not all history.
+                    k.kline_p.truncate(2);
+                    k.kline_p.reverse();
+                }
+                "incremental" => k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0)),
+                _ => return,
+            }
             for r in k.kline_p {
                 for ((s, i), _) in self.candles.iter().filter(|((s, i), _)| {
                     s == &e.symbol.to_ascii_uppercase()

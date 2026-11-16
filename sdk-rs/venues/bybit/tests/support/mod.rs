@@ -215,6 +215,15 @@ impl Harness {
         self.requests.iter().any(|r| r.url.contains(path))
     }
 
+    pub fn await_request(&mut self, path: &str) {
+        for _ in 0..6 {
+            if self.has_request(path) {
+                break;
+            }
+            self.advance(200.0);
+        }
+    }
+
     pub fn take(&mut self, path: &str) -> HttpRequest {
         // Existing response fixtures await the real pacing timer before taking a page.
         if path.contains("order/history") || path.contains("orderStatus=") {
@@ -224,6 +233,26 @@ impl Harness {
                 }
                 self.advance(250.0);
             }
+        }
+        // Positive response fixtures await the production release clock; timing
+        // regressions use has_request before take, so early writes still fail.
+        let mutation = [
+            "/v5/order/create",
+            "/v5/order/create-batch",
+            "/v5/order/cancel",
+            "/v5/order/cancel-batch",
+            "/v5/order/cancel-all",
+            "/v5/order/amend",
+            "/v5/position/trading-stop",
+            "/v5/position/set-leverage",
+            "/v5/position/switch-isolated",
+            "/v5/account/set-margin-mode",
+            "/v5/position/switch-mode",
+        ]
+        .iter()
+        .any(|endpoint| endpoint.contains(path));
+        if mutation {
+            self.await_request(path);
         }
         let index = self
             .requests

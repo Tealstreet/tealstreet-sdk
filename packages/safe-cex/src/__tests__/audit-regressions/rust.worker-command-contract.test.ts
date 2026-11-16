@@ -61,8 +61,9 @@ it.each([
   }
 });
 
+// RPC codec fixtures use an engine bridge; true page mirrors refuse these writes locally.
 it('rejects a malformed worker amendment success without replaying the write', async () => {
-  const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+  const exchange = account(true, { publicDataOnly: true });
   const bridge = vi.fn(({ requestId }: { requestId: string }) => {
     exchange.emitter.emit('callMethod:done', {
       requestId, success: true, result: { orderIds: ['accepted', 123], clientOrderId: 'replacement-client' },
@@ -77,7 +78,7 @@ it('rejects a malformed worker amendment success without replaying the write', a
 });
 
 it('preserves a valid worker amendment replacement ID after structured cloning', async () => {
-  const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+  const exchange = account(true, { publicDataOnly: true });
   const bridge = vi.fn(({ requestId }: { requestId: string }) => {
     const result = structuredClone(encodeWorkerOrderIds(withReplacementClientOrderId([], 'replacement-client')));
     exchange.emitter.emit('callMethod:done', { requestId, success: true, result });
@@ -90,7 +91,7 @@ it('preserves a valid worker amendment replacement ID after structured cloning',
 });
 
 it.each(['unknown', 'rejected', 'notSent'])('preserves an amendment rejection outcome and partial IDs (%s)', async (outcome) => {
-  const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+  const exchange = account(true, { publicDataOnly: true });
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
   const bridge = vi.fn(({ requestId }: { requestId: string }) => {
     exchange.emitter.emit('callMethod:done', {
@@ -288,20 +289,20 @@ it('labels an interrupted read separately from uncertain writes', async () => {
   expect(((await failure) as Error).message).not.toContain('interrupted writes');
 });
 
-it('dispatches a write unchanged when its ready worker bridge stays attached', async () => {
+it('dispatches a read unchanged when its ready worker bridge stays attached', async () => {
   const exchange = account(true, { publicDataOnly: true, workerMirror: true });
   const ownerA = vi.fn(({ requestId }: { requestId: string }) => {
     exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-A' });
   });
   exchange.on('callMethod', ownerA);
-  await expect(exchange.setLeverage('BTCUSDT', 3)).resolves.toBe('owner-A');
+  await expect(exchange.refreshMarkets()).resolves.toBe('owner-A');
   expect(ownerA).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-    method: 'setLeverage', args: ['BTCUSDT', 3],
+    method: 'refreshMarkets', args: [],
   }));
 });
 
 it.each(['exchange', 'emitter'] as const)(
-  'drops a write when its ready worker bridge changes during the await through %s',
+  'drops a read when its ready worker bridge changes during the await through %s',
   async (subscriptions) => {
     const exchange = account(true, { publicDataOnly: true, workerMirror: true });
     (exchange as RustEngineExchange).setWorkerOwner(() => ({ ownerId: 'A', generation: 1 }));
@@ -310,43 +311,43 @@ it.each(['exchange', 'emitter'] as const)(
       exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-B' });
     });
     exchange.on('callMethod', ownerA);
-    const pending = exchange.setLeverage('BTCUSDT', 3).catch((error: unknown) => error);
+    const pending = exchange.refreshMarkets().catch((error: unknown) => error);
     expect(ownerA).not.toHaveBeenCalled();
 
     // Replace the login on the retained mirror before the ready await resumes.
     const events = subscriptions === 'exchange' ? exchange : exchange.emitter;
     events.off('callMethod', ownerA);
     events.on('callMethod', ownerB);
-    expect(await pending).toMatchObject({ command: 'setLeverage', outcome: 'notSent' });
+    expect(await pending).toMatchObject({ command: 'refreshMarkets', code: 'WORKER_STOPPED' });
     expect(ownerA).not.toHaveBeenCalled();
     expect(ownerB).not.toHaveBeenCalled();
 
-    await expect(exchange.setLeverage('BTCUSDT', 7)).resolves.toBe('owner-B');
+    await expect(exchange.refreshMarkets()).resolves.toBe('owner-B');
     expect(ownerB).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      method: 'setLeverage', args: ['BTCUSDT', 7],
+      method: 'refreshMarkets', args: [],
     }));
   },
 );
 
-it('drops a write when a ready bridge callback is reattached for another owner', async () => {
+it('drops a read when a ready bridge callback is reattached for another owner', async () => {
   const exchange = account(true, { publicDataOnly: true, workerMirror: true });
   (exchange as RustEngineExchange).setWorkerOwner(() => ({ ownerId: 'A', generation: 1 }));
-  const ownerA = { writes: vi.fn() };
-  const ownerB = { writes: vi.fn() };
+  const ownerA = { reads: vi.fn() };
+  const ownerB = { reads: vi.fn() };
   const bridge = function (this: typeof ownerA, { requestId }: { requestId: string }) {
-    this.writes();
+    this.reads();
     exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'current-owner' });
   };
   exchange.emitter.on('callMethod', bridge, ownerA);
-  const pending = exchange.setLeverage('BTCUSDT', 3).catch((error: unknown) => error);
+  const pending = exchange.refreshMarkets().catch((error: unknown) => error);
   exchange.emitter.off('callMethod', bridge);
   exchange.emitter.on('callMethod', bridge, ownerB);
-  expect(await pending).toMatchObject({ command: 'setLeverage', outcome: 'notSent' });
-  expect(ownerA.writes).not.toHaveBeenCalled();
-  expect(ownerB.writes).not.toHaveBeenCalled();
+  expect(await pending).toMatchObject({ command: 'refreshMarkets', code: 'WORKER_STOPPED' });
+  expect(ownerA.reads).not.toHaveBeenCalled();
+  expect(ownerB.reads).not.toHaveBeenCalled();
 
-  await expect(exchange.setLeverage('BTCUSDT', 7)).resolves.toBe('current-owner');
-  expect(ownerB.writes).toHaveBeenCalledOnce();
+  await expect(exchange.refreshMarkets()).resolves.toBe('current-owner');
+  expect(ownerB.reads).toHaveBeenCalledOnce();
 });
 
 it.each(['never-wired', 'detached'] as const)('preserves master bootstrap without an owner hook (%s)', async (phase) => {
@@ -360,13 +361,13 @@ it.each(['never-wired', 'detached'] as const)('preserves master bootstrap withou
     exchange.on('callMethod', previous);
     exchange.off('callMethod', previous);
   }
-  const pending = exchange.setLeverage('BTCUSDT', 3).catch((error: unknown) => error);
+  const pending = exchange.refreshMarkets().catch((error: unknown) => error);
   exchange.on('callMethod', attached);
   await vi.advanceTimersByTimeAsync(25);
   expect(await pending).toBe('owner-A');
   expect(previous).not.toHaveBeenCalled();
   expect(attached).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-    method: 'setLeverage', args: ['BTCUSDT', 3],
+    method: 'refreshMarkets', args: [],
   }));
 });
 
@@ -379,12 +380,12 @@ it.each([false, true])('preserves ready bridge dispatch compatibility (hooked=%s
     exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-B' });
   });
   exchange.on('callMethod', first);
-  const pending = exchange.setLeverage('BTCUSDT', 3).catch((error: unknown) => error);
+  const pending = exchange.refreshMarkets().catch((error: unknown) => error);
   owner = { ownerId: 'B', generation: 2 };
   exchange.off('callMethod', first);
   exchange.on('callMethod', second);
   if (hooked) {
-    expect(await pending).toMatchObject({ command: 'setLeverage', code: 'WORKER_STOPPED', outcome: 'notSent' });
+    expect(await pending).toMatchObject({ command: 'refreshMarkets', code: 'WORKER_STOPPED' });
     expect(second).not.toHaveBeenCalled();
   } else {
     expect(await pending).toBe('owner-B');
@@ -396,8 +397,8 @@ it.each([false, true])('preserves ready bridge dispatch compatibility (hooked=%s
 it('refuses unwired calls when the installed owner hook has no current owner', async () => {
   const exchange = account(true, { publicDataOnly: true, workerMirror: true }) as RustEngineExchange;
   exchange.setWorkerOwner(() => undefined);
-  await expect(exchange.setLeverage('BTCUSDT', 3)).rejects.toMatchObject({
-    command: 'setLeverage', code: 'WORKER_STOPPED', outcome: 'notSent',
+  await expect(exchange.refreshMarkets()).rejects.toMatchObject({
+    command: 'refreshMarkets', code: 'WORKER_STOPPED',
   });
 });
 
@@ -458,7 +459,7 @@ it.each(['same-owner', 'other-owner', 'new-generation', 'logout', 'new-provider'
     const exchange = account(true, { publicDataOnly: true, workerMirror: true }) as RustEngineExchange;
     let owner: { ownerId: string; generation: number } | undefined = { ownerId: 'A', generation: 1 };
     exchange.setWorkerOwner(() => owner);
-    const pending = exchange.setLeverage('BTCUSDT', 3).catch((error: unknown) => error);
+    const pending = exchange.refreshMarkets().catch((error: unknown) => error);
     if (transition === 'other-owner') owner!.ownerId = 'B';
     if (transition === 'new-generation') owner!.generation = 2;
     if (transition === 'logout') owner = undefined;
@@ -471,13 +472,13 @@ it.each(['same-owner', 'other-owner', 'new-generation', 'logout', 'new-provider'
     if (transition === 'same-owner') {
       expect(await pending).toBe('current-owner');
       expect(current).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-        method: 'setLeverage', args: ['BTCUSDT', 3],
+        method: 'refreshMarkets', args: [],
       }));
     } else {
-      expect(await pending).toMatchObject({ command: 'setLeverage', outcome: 'notSent' });
+      expect(await pending).toMatchObject({ command: 'refreshMarkets', code: 'WORKER_STOPPED' });
       expect(current).not.toHaveBeenCalled();
       if (transition !== 'logout') {
-        await expect(exchange.setLeverage('BTCUSDT', 7)).resolves.toBe('current-owner');
+        await expect(exchange.refreshMarkets()).resolves.toBe('current-owner');
         expect(current).toHaveBeenCalledOnce();
       }
     }
@@ -491,7 +492,7 @@ it('keeps a bound owner through a detached bridge with unchanged bootstrap ident
   exchange.setWorkerOwner(() => ({ ownerId: 'A', generation: 1 }));
   exchange.on('callMethod', first);
   exchange.off('callMethod', first);
-  const pending = exchange.setLeverage('BTCUSDT', 3);
+  const pending = exchange.refreshMarkets();
   const reattached = vi.fn(({ requestId }: { requestId: string }) => {
     exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-A' });
   });
@@ -508,25 +509,25 @@ it('drops a retired bound call at the next poll before the replacement bridge ex
   let owner = { ownerId: 'A', generation: 1 };
   exchange.setWorkerOwner(() => owner);
   const settled = vi.fn();
-  const pending = exchange.setLeverage('BTCUSDT', 3).then(settled, settled);
+  const pending = exchange.refreshMarkets().then(settled, settled);
   owner = { ownerId: 'B', generation: 2 };
   await vi.advanceTimersByTimeAsync(25);
   expect(settled).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-    command: 'setLeverage', outcome: 'notSent',
+    command: 'refreshMarkets', code: 'WORKER_STOPPED',
   }));
   await pending;
   const current = vi.fn(({ requestId }: { requestId: string }) => {
     exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-B' });
   });
   exchange.on('callMethod', current);
-  await expect(exchange.setLeverage('BTCUSDT', 7)).resolves.toBe('owner-B');
+  await expect(exchange.refreshMarkets()).resolves.toBe('owner-B');
   expect(current).toHaveBeenCalledOnce();
 });
 
 it.each([
   { keyed: false, hooked: false }, { keyed: true, hooked: false },
   { keyed: false, hooked: true }, { keyed: true, hooked: true },
-])('keeps placement startup compatibility (keyed=$keyed, hooked=$hooked)', async ({ keyed, hooked }) => {
+])('refuses unsupported placement startup without any server fallback (keyed=$keyed, hooked=$hooked)', async ({ keyed, hooked }) => {
   for (const switchOwner of [false, true]) {
     let rejectStartup!: (error: Error) => void;
     setWasmEngineLoader(() => new Promise<WasmEngineModule>((_resolve, reject) => { rejectStartup = reject; }));
@@ -552,19 +553,9 @@ it.each([
       exchange.on('callMethod', ownerB);
     }
     if (keyed) rejectStartup(new Error('controlled page-engine fallback'));
-    if (switchOwner && hooked) {
-      expect(await pending).toMatchObject({ command: 'placeOrders', outcome: 'notSent', clientOrderIds: ['admitted-A'] });
-      expect(ownerA).not.toHaveBeenCalled();
-      expect(ownerB).not.toHaveBeenCalled();
-      await expect(exchange.placeOrders([{
-        symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 2, price: 100,
-      }])).resolves.toEqual(['owner-B-order']);
-      expect(ownerB).toHaveBeenCalledOnce();
-    } else {
-      expect(await pending).toEqual([switchOwner ? 'owner-B-order' : 'owner-A-order']);
-      expect(switchOwner ? ownerB : ownerA).toHaveBeenCalledOnce();
-      expect(switchOwner ? ownerA : ownerB).not.toHaveBeenCalled();
-    }
+    expect(await pending).toMatchObject({ outcome: 'notSent' });
+    expect(ownerA).not.toHaveBeenCalled();
+    expect(ownerB).not.toHaveBeenCalled();
     exchange.dispose();
   }
 });
@@ -648,7 +639,7 @@ it('bounds the replacement bridge wait and never replays an interrupted write', 
   exchange.off('callMethod', first);
   await vi.advanceTimersByTimeAsync(30_100);
   expect(await candle).toMatchObject({ message: 'lighter worker bridge was not wired' });
-  expect(await write).toMatchObject({ code: 'COMMAND_TIMEOUT', outcome: 'unknown' });
+  expect(await write).toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
   const replacement = vi.fn();
   exchange.on('callMethod', replacement);
   await vi.advanceTimersByTimeAsync(100);

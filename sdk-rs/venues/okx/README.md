@@ -71,3 +71,40 @@ KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. HTTP
 408/429/5xx pins still assert the stop, Unknown outcome and the engine's canonical
 text; only their telemetry assertion is deferred. No shared engine code is
 changed to add this venue companion event.
+
+## Native write refusal diagnostics
+
+Failed, empty-message envelopes first use the existing borrowed ACK decoder.
+If JSON escapes prevent that decode, an owned-message fallback preserves the
+native `sCode`/`sMsg`; successful and nonempty-message envelopes never use it.
+When a failed settings envelope has an empty `msg`, a sole failed ACK supplies
+the native code and message. Mixed settings rows retain Unknown and include the
+failed-row reasons; they never prove the whole call was refused. Nonempty
+settings-envelope messages and successful ACK handling are unchanged.
+
+`tests/write_errors.rs` records the [OKX v5 response shape](https://www.okx.com/docs-v5/en/#order-book-trading-trade-post-place-order)
+and pins decoded diagnostics, accepted siblings, unchanged settings on failure,
+and no extra writes after a failure. The fixture uses the public documentation's
+example code/reason, not a private account response.
+
+
+## EEA private startup
+
+Private EEA startup authenticates the existing signed account-config read before
+signed account-instrument discovery, including when public markets are warm.
+Its parsed settings retain the original read authority and apply only after the
+catalogue settles; config alone proves no balance, orders or positions readiness.
+Both EEA aliases retain the EEA origin and demo headers where applicable.
+
+Config and keyed catalogue reads share the native authentication-code policy:
+one freshly signed retry after `50113`, then a permanent typed refusal on a
+second consecutive answer for that read and credential. Transport, rate and
+other replies reset the streak; retry floors and admission deadlines do not grow.
+Pending EEA config reads retain the HTTP rate/transport diagnosis on unproven
+responses, even when their body contains an authentication code. Such a reply
+cannot become a permanent credential refusal in the shared hosted probe.
+Complete JSON catalogue replies without a data list use the same signature
+assessment as list-bearing replies: non-authentication errors reset the streak;
+genuine signature answers still receive only one retry before permanent refusal.
+Public/frame-fed, non-EEA and already-configured refresh paths retain their
+existing behavior. No startup step places or replays a trading write.

@@ -12,14 +12,27 @@ The exact proof-ready venue names are:
 | Venue | Probe |
 | --- | --- |
 | `bybit` | Native private startup, existing Bybit session suite |
+| `bybitinverse` | Native inverse private startup, HMAC valid/wrong-key/replay controls and Brazil-site session suite |
+| `bybitdemo`, `bybitspot` | Native demo/spot private startup and shared HMAC/session negatives; exact origin and category checks |
 | `binance` | Native private startup and shared HMAC suite |
+| `binancepm`, `binanceinverse`, `binancespot` | Native PAPI/DAPI/spot private startup and shared HMAC/session negatives; exact product routes |
 | `okx` | Native private startup and shared HMAC suite |
+| `okxdemo` | Native demo startup and shared HMAC/session negatives; exact origin and simulated-trading headers |
+| `okxeu` | Signed config before keyed discovery, full native EEA startup, bounded signature-refusal retry and shared HMAC/session negatives |
 | `bitget` | Native private startup and shared HMAC suite |
+| `bitgetusdc` | Native USDC private startup and shared HMAC/session negatives; exact product type |
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
+| `mexc` | Native signed position-mode/account reads and private-stream HMAC; wrong-key, replay and socket/Session controls; mainnet only |
 
-These names do not imply readiness for sibling spot, inverse, regional or demo
-variants. An unsupported proof returns the existing account error envelope with
+`okxeudemo` remains excluded and does not inherit EEA mainnet proof readiness.
+EEA bootstrap retains the original config authority until catalogue completion;
+config success alone cannot satisfy private readiness. A second consecutive
+`50113` for a bootstrap read refuses permanently after one re-signed retry,
+without extending the captured admission deadline.
+
+Only these exact names are admitted; the catalog never matches a family prefix.
+An unsupported proof returns the existing account error envelope with
 `initRefused: true`, `kind: "proof-unavailable"`, `transient: false` and
 `outcome: "notSent"`. The server attaches no holder, starts no signing request or
 probe, and leaves an existing resident account intact. An unknown or retired
@@ -46,3 +59,13 @@ signer. KuCoin mainnet now has a configured Futures origin and qualifies under
 that rule; its private-startup proof is still required. Account identity,
 retention and socket protocol version are unchanged, and no refusal grants
 permission to retry an interrupted write.
+
+A pre-probe registry compatibility refusal uses the existing `msg`/`error`
+envelope with `data[1].initRefused: true`, `kind: "signing-mode"` and
+`transient: false`. Its message is "The requested account signing mode is
+unavailable; account not attached". This class does not assert that a key was
+tested or found invalid. Hosts must preserve the class, show the opaque message,
+and keep that registration unadmitted; a fresh handover retry is not a remedy.
+The reason stays off the socket. Existing custody-mode, identity and holder
+checks still apply, and this response does not authorize replacing an account
+or replaying a write.

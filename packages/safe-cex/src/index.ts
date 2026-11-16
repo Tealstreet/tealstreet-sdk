@@ -437,4 +437,15 @@ export type {
   CandleCacheSparseChunk,
 } from './candleCache';
 
+export {
+  TXFLOW_AGENT_DOMAIN,
+  TXFLOW_APPROVE_AGENT_TYPES,
+  buildTxflowAgentApproval,
+  signTxflowAgentApproval,
+  getTxflowAgentAuthorization,
+  createTxflowAgentWithBrowserWallet,
+  revokeTxflowAgentWithBrowserWallet,
+} from './exchanges/txflow/txflow.agent';
+export type { TxflowAgentOptions, TxflowAgentApproval, TxflowAgentAuthorization } from './exchanges/txflow/txflow.agent';
+
 export type { OHLCVFrameRejection, OrderBookFrameRejection } from './exchanges/base';
