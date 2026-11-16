@@ -65,3 +65,7 @@ The exact merged module hashes are recorded beside their budget entries.
 Bybit product parity fixtures service the engine's set/clear timers and retain
 original waiting HTTP permits until release or cancellation. Their monotonic
 virtual clock also validates native signature timestamps; waits never refresh deadlines.
+
+Paradex device join-proof preparation at aadd1c77f682 measured optimized web
+2,348,922 bytes in Rust43827720243/job133165981236. Its 2,359,296-byte floor
+retains 10,374 bytes; fresh final artifact validation must check web and Node.

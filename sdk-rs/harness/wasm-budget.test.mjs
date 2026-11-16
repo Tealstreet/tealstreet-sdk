@@ -3949,3 +3949,17 @@ test('#3530 typed Kraken diagnostics retain measured reserve and historical alia
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+// Paradex device admission: Rust run43827720243/job133165981236 at aadd1c77f682.
+// Pinned optimized web module measured 2,348,922 B; preserve 10 KiB rounded to KiB.
+test('Paradex device join proof retains the measured size reserve and boundary refusals', () => {
+  const measured = 2_348_922;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.paradex;
+  assert.equal(required, 2_359_296);
+  assert.ok(cap >= 2_322_432, 'retain the parent cap');
+  assert.ok(cap >= required, 'retain 10 KiB above the measured device module');
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'paradex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'paradex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'paradex'), /exceeds/);
+});

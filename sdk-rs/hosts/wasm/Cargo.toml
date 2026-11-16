@@ -24,7 +24,7 @@ dispatch-signing = ["safe-cex-venues/dispatch-signing"]
 # Browser hosted signing captures, for families with a hosted codec only.
 hosted-signing = ["dispatch-signing", "safe-cex-venues/hosted-signing"]
 hosted-wallet = ["dispatch-signing", "safe-cex-venues/hosted-wallet"]
-# Opt-in admission recipe; only the first candidate (Backpack) links it by default.
+# Device admission recipe; each prepared family links it explicitly.
 # Existing constructor custody gates and server readiness remain separate.
 hosted-join-proof = ["safe-cex-venues/hosted-join-proof"]
 bitunix = ["safe-cex-venues/bitunix", "text-ingress", "dispatch-signing", "hosted-signing"]
@@ -35,7 +35,7 @@ polymarket = ["safe-cex-venues/polymarket", "text-ingress", "safe-cex-engine/com
 coinbase = ["safe-cex-venues/coinbase", "text-ingress", "dispatch-signing", "hosted-signing"]
 # The combined build isolates the startup subscription decoder.
 cold-subscriptions = []
-paradex = ["safe-cex-venues/paradex", "sign-meta", "dispatch-signing", "address-nonce", "hosted-wallet"]
+paradex = ["safe-cex-venues/paradex", "sign-meta", "dispatch-signing", "address-nonce", "hosted-wallet", "hosted-join-proof"]
 apexomni = ["safe-cex-venues/apexomni", "text-ingress", "safe-cex-engine/command-apexomni", "dispatch-signing", "hosted-signing"]
 txflow = ["safe-cex-venues/txflow", "text-ingress", "dispatch-signing", "address-nonce", "hosted-wallet"]
 kraken = ["safe-cex-venues/kraken", "text-ingress", "sign-meta", "dispatch-signing", "hosted-signing"]

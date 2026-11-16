@@ -69,6 +69,23 @@ DELEGATED provider without a device request or retained-provider replacement.
 Normal venue startup still handles subkey authorization and venue refusals;
 local possession proof alone does not assert venue authorization.
 
+The prepared Paradex WASM family links the existing device admission recipe;
+this changes the WASM fingerprint and needs a measured release/pin. It does not
+lift the separate live Hosted test gate. After building the Paradex family,
+run the real-device Session controls from `sdk-rs/` with Node 22 on PATH:
+
+```sh
+SAFE_CEX_PARADEX_JOIN_WASM="$PWD/hosts/wasm/pkg/node/safe_cex_wasm.js" \
+  cargo test --locked -j1 -p safe-cex-exchange-server --lib \
+  paradex_actual_wasm_session -- --ignored --test-threads=1
+```
+
+These four explicitly selected tests execute positive mainnet/testnet challenges,
+a wrong-key refusal, consumed/previous-attempt replay and foreign-socket refusal
+through the real WASM provider. Their device fixture uses only synthetic scalars
+and forbids venue HTTP and sockets. Default native runs ignore these cases until
+the artifact is supplied; an ignored result is not a device-integration pass.
+
 Only these exact names are admitted; the catalog never matches a family prefix.
 An unsupported proof returns the existing account error envelope with
 `initRefused: true`, `kind: "proof-unavailable"`, `transient: false` and

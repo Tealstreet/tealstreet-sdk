@@ -896,7 +896,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3290 CI43591113196/job132437636274, artifact14112204213; source97507acf9371 (head738ee1289).
   // Optimized web/Node 2,311,211 B; SHA256 5b06471f86a183e59e0f01177a20baad87ae96849c177b00ad7e07253f9ccfef.
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
-  paradex: 2_322_432,
+  // Device join proof: run43827720243/job133165981236, source aadd1c77f682.
+  // Optimized web 2,348,922 B +10 KiB rounded to KiB; retain parent floors.
+  paradex: 2_359_296,
   // #3245 at 46378cfab09, CI run 42367120442: 2,079,779 B + 10 KiB, rounded up to KiB.
   // #3249 CI: web Phemex measured 2,079,916 B; CI size plus 10 KiB, rounded up to KiB.
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,104,206 B + 10 KiB, rounded up.

@@ -102,6 +102,12 @@ fn response(request: &Request, byte: u8) -> String {
 
 #[tokio::test]
 async fn paradex_catalog_uses_captured_account_public_key_and_network() {
+    paradex_catalog_uses_captured_account_public_key_and_network_using(response).await;
+}
+
+async fn paradex_catalog_uses_captured_account_public_key_and_network_using(
+    sign: fn(&Request, u8) -> String,
+) {
     tokio::task::LocalSet::new()
         .run_until(async {
             assert!(crate::delegated::probe::cosigned_ready("paradex"));
@@ -128,7 +134,7 @@ async fn paradex_catalog_uses_captured_account_public_key_and_network() {
                     serde_json::to_value(request.statement()).unwrap()["identityDigest"],
                     json!(expected.digest())
                 );
-                session.handle(&response(&request, 7)).await.unwrap();
+                session.handle(&sign(&request, 7)).await.unwrap();
                 let completed = tokio::time::timeout(Duration::from_secs(5), done.recv())
                     .await
                     .unwrap()
@@ -182,6 +188,12 @@ async fn paradex_decimal_public_fields_complete_the_same_stark_device_proof() {
 
 #[tokio::test]
 async fn paradex_different_valid_key_leaves_resident_and_signer_untouched() {
+    paradex_different_valid_key_leaves_resident_and_signer_untouched_using(response).await;
+}
+
+async fn paradex_different_valid_key_leaves_resident_and_signer_untouched_using(
+    sign: fn(&Request, u8) -> String,
+) {
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = registry();
@@ -191,7 +203,7 @@ async fn paradex_different_valid_key_leaves_resident_and_signer_untouched() {
             let mut done = session.take_verified();
             session.init(init()).await.unwrap();
             let request = challenge(&mut sent).await;
-            session.handle(&response(&request, 8)).await.unwrap();
+            session.handle(&sign(&request, 8)).await.unwrap();
             let completed = tokio::time::timeout(Duration::from_secs(5), done.recv())
                 .await
                 .unwrap()
@@ -212,6 +224,12 @@ async fn paradex_different_valid_key_leaves_resident_and_signer_untouched() {
 
 #[tokio::test]
 async fn paradex_foreign_socket_cannot_complete_the_joining_socket_proof() {
+    paradex_foreign_socket_cannot_complete_the_joining_socket_proof_using(response).await;
+}
+
+async fn paradex_foreign_socket_cannot_complete_the_joining_socket_proof_using(
+    sign: fn(&Request, u8) -> String,
+) {
     tokio::task::LocalSet::new()
         .run_until(async {
             for owner in ["alice", "bob"] {
@@ -223,7 +241,7 @@ async fn paradex_foreign_socket_cannot_complete_the_joining_socket_proof() {
                 let mut done = original.take_verified();
                 original.init(init()).await.unwrap();
                 let request = challenge(&mut sent).await;
-                let reply = response(&request, 7);
+                let reply = sign(&request, 7);
                 foreign.handle(&reply).await.unwrap();
                 tokio::task::yield_now().await;
                 assert!(done.try_recv().is_err());
@@ -245,6 +263,12 @@ async fn paradex_foreign_socket_cannot_complete_the_joining_socket_proof() {
 
 #[tokio::test]
 async fn paradex_previous_attempt_and_consumed_reply_are_not_reused() {
+    paradex_previous_attempt_and_consumed_reply_are_not_reused_using(response).await;
+}
+
+async fn paradex_previous_attempt_and_consumed_reply_are_not_reused_using(
+    sign: fn(&Request, u8) -> String,
+) {
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = registry();
@@ -253,7 +277,7 @@ async fn paradex_previous_attempt_and_consumed_reply_are_not_reused() {
             let mut first_done = first.take_verified();
             first.init(init()).await.unwrap();
             let old = challenge(&mut first_sent).await;
-            let old_reply = response(&old, 7);
+            let old_reply = sign(&old, 7);
             first.handle(&old_reply).await.unwrap();
             let completed = tokio::time::timeout(Duration::from_secs(5), first_done.recv())
                 .await
@@ -292,7 +316,7 @@ async fn paradex_previous_attempt_and_consumed_reply_are_not_reused() {
             }
             second.init(init()).await.unwrap();
             let fresh = challenge(&mut second_sent).await;
-            second.handle(&response(&fresh, 7)).await.unwrap();
+            second.handle(&sign(&fresh, 7)).await.unwrap();
             let completed = tokio::time::timeout(Duration::from_secs(5), second_done.recv())
                 .await
                 .unwrap()
@@ -511,4 +535,58 @@ async fn paradex_delegated_candidate_matches_captured_public_key_without_device_
             }
         })
         .await;
+}
+
+fn wasm_response(request: &Request, scalar: u8) -> String {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/paradex/join-proof-device.mjs"
+        ))
+        .arg(scalar.to_string())
+        .arg(init().subkey_address.unwrap())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&serde_json::to_vec(request).unwrap())
+        .unwrap();
+    let result = child.wait_with_output().unwrap();
+    assert!(
+        result.status.success(),
+        "real Paradex WASM device failed (exit {:?})",
+        result.status.code()
+    );
+    String::from_utf8(result.stdout).unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires Node22 and SAFE_CEX_PARADEX_JOIN_WASM pointing to a fresh Paradex family module"]
+async fn paradex_actual_wasm_session_positive() {
+    paradex_catalog_uses_captured_account_public_key_and_network_using(wasm_response).await;
+}
+
+#[tokio::test]
+#[ignore = "requires Node22 and SAFE_CEX_PARADEX_JOIN_WASM pointing to a fresh Paradex family module"]
+async fn paradex_actual_wasm_session_wrong_key() {
+    paradex_different_valid_key_leaves_resident_and_signer_untouched_using(wasm_response).await;
+}
+
+#[tokio::test]
+#[ignore = "requires Node22 and SAFE_CEX_PARADEX_JOIN_WASM pointing to a fresh Paradex family module"]
+async fn paradex_actual_wasm_session_foreign_socket() {
+    paradex_foreign_socket_cannot_complete_the_joining_socket_proof_using(wasm_response).await;
+}
+
+#[tokio::test]
+#[ignore = "requires Node22 and SAFE_CEX_PARADEX_JOIN_WASM pointing to a fresh Paradex family module"]
+async fn paradex_actual_wasm_session_replay() {
+    paradex_previous_attempt_and_consumed_reply_are_not_reused_using(wasm_response).await;
 }
