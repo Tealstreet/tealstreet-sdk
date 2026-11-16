@@ -316,9 +316,9 @@ async fn backpack_delegated_correct_wrong_key_and_handover_replay_preserve_resid
             let mut payload = init();
             payload.signing_mode = Some("delegated".into());
             let registry = registry();
-            let original: crate::delegated::Credentials = serde_json::from_value(json!({
+            let original: crate::delegated::Credentials = serde_json::from_str(&json!({
                 "key":payload.key, "secret":STANDARD.encode([7; 32])
-            })).unwrap();
+            }).to_string()).unwrap();
             let retained = crate::delegated::prepare_delegated(&payload, original.pair()).unwrap().resident;
             let provider = retained.provider();
             let reference = retained.identities().primary.as_ref().unwrap().signing_ref().unwrap().clone();
