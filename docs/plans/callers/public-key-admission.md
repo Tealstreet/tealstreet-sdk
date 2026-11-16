@@ -210,8 +210,9 @@ constructor/custody and compiled-feature restrictions still apply; a generic
 method's presence is not proof of venue readiness.
 
 The reusable `hosted-join-proof` WASM feature is linked by default in the
-Backpack candidate and GRVT families (and therefore the combined build). Other standalone
-families retain their existing size-critical composition. Their activation slices
+Backpack, Lighter, GRVT and Hyperliquid families (and therefore the combined
+build). Other standalone families retain their existing size-critical composition.
+Their activation slices
 must explicitly opt into the feature and certify their own optimized size before
 shipping. This build selection does not change the server admission catalog.
 
