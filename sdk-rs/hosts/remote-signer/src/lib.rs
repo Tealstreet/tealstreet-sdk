@@ -18,6 +18,7 @@ pub use policy::supports_remote_signing;
 pub use provider::{
     FATAL_MIN_STREAK, MAX_CONSECUTIVE_FAILURES, PublicBindingSource, RemoteProvider,
 };
+pub use safe_cex_venue_coinbase::sign::JwtAlgorithm as CoinbaseJwtAlgorithm;
 
 use policy::PassphraseRule;
 use provider::{Family, Inner, Owned, PublicProvider};
@@ -232,6 +233,58 @@ pub fn remote_account(
         // Device-owned capability only; the server never receives an OmniKey seed.
         zklink_seed: (venue == "apexomni").then(|| reference("zklink-seed")),
     };
+    let coinbase = if Family::of(venue) == Family::Coinbase {
+        let algorithm = options
+            .get("coinbaseJwtAlgorithm")
+            .filter(|v| !v.is_null())
+            .map(|value| {
+                if !value.is_string() {
+                    return Err(SetupError("Invalid Coinbase JWT algorithm"));
+                }
+                serde::Deserialize::deserialize(value)
+                    .map_err(|_| SetupError("Invalid Coinbase JWT algorithm"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let binding = safe_cex_venue_coinbase::sign::Binding {
+            key_name: String::from_utf8(primary.public.clone())
+                .map_err(|_| SetupError("Invalid Coinbase key name"))?,
+            algorithm,
+        };
+        if let Some(provided) = options
+            .get("coinbaseSigning")
+            .filter(|value| !value.is_null())
+        {
+            if provided
+                .get("algorithm")
+                .is_none_or(|algorithm| !algorithm.is_string())
+            {
+                return Err(SetupError("Invalid Coinbase public binding"));
+            }
+            let provided: safe_cex_venue_coinbase::sign::Binding =
+                serde::Deserialize::deserialize(provided)
+                    .map_err(|_| SetupError("Invalid Coinbase public binding"))?;
+            if provided.key_name != binding.key_name || provided.algorithm != binding.algorithm {
+                return Err(SetupError("Inconsistent Coinbase public binding"));
+            }
+        }
+        safe_cex_venue_coinbase::sign::Credentials::external(
+            binding.clone(),
+            safe_cex_engine::signing::Identity::new(
+                primary.credential.clone(),
+                Some(primary.signing.clone()),
+            ),
+        )
+        .map_err(|_| SetupError("Invalid Coinbase key name"))?;
+        options.insert(
+            "coinbaseSigning".into(),
+            serde_json::to_value(&binding)
+                .map_err(|_| SetupError("Invalid Coinbase JWT binding"))?,
+        );
+        Some(binding)
+    } else {
+        None
+    };
     let mut identity = json!({ "credential": primary.credential.0, "signing": primary.signing.0 });
     if let Some(passphrase) = &primary.passphrase {
         identity["passphrase"] = passphrase.0.clone().into();
@@ -264,13 +317,10 @@ pub fn remote_account(
             "apiKeyIndexPresent": api_key_index_present,
         }),
     );
-    let inner = Arc::new(Inner::new(
-        venue.to_owned(),
-        policy,
-        account_name,
-        link,
-        primary,
-    ));
+    let inner = Arc::new(
+        Inner::new(venue.to_owned(), policy, account_name, link, primary)
+            .with_coinbase_binding(coinbase),
+    );
     inner
         .bind_public_metadata(&options)
         .map_err(|_| SetupError("Invalid public signer binding"))?;

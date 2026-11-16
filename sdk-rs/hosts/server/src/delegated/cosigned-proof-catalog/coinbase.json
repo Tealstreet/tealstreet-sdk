@@ -1,4 +1,5 @@
 {
-  "status": "excluded",
-  "reason": "Bound native DRB private-startup proof for CDP JWT/JWS (ES256/EdDSA), account identity, expiry and replay/socket controls is not built."
+  "status": "ready",
+  "probeTests": "src/delegated/coinbase_probe_tests.rs",
+  "sessionTests": "src/session/tests/cosigned_coinbase.rs"
 }

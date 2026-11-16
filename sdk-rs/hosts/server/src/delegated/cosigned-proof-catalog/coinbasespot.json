@@ -1,4 +1,5 @@
 {
-  "status": "excluded",
-  "reason": "Bound native Advanced Trade Spot private-startup proof for CDP JWT/JWS, account identity, expiry and replay/socket controls is not built."
+  "status": "ready",
+  "probeTests": "src/delegated/coinbase_probe_tests.rs",
+  "sessionTests": "src/session/tests/cosigned_coinbase.rs"
 }

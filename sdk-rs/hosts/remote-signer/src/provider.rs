@@ -2,6 +2,7 @@
 //! engine sign work becomes today's ws-auth `RemoteSignerRequest`, so the
 //! browser's existing signing host answers it unchanged.
 mod apexomni;
+mod coinbase;
 mod kraken;
 mod orderly;
 use std::future::Future;
@@ -35,6 +36,7 @@ pub(crate) enum Family {
     Hmac,
     ApexOmni,
     Backpack,
+    Coinbase,
     Kucoin,
     Kraken,
     DoubleSha256,
@@ -49,6 +51,7 @@ impl Family {
         match venue {
             "apexomni" => Self::ApexOmni,
             "backpack" => Self::Backpack,
+            "coinbase" | "coinbasespot" => Self::Coinbase,
             "kucoin" | "kucoinspot" => Self::Kucoin,
             "kraken" => Self::Kraken,
             "bitunix" => Self::DoubleSha256,
@@ -65,6 +68,7 @@ impl Family {
             Self::Hmac | Self::Kucoin | Self::ApexOmni => Algorithm::HmacSha256,
             Self::Kraken => Algorithm::HmacSha512,
             Self::Backpack => Algorithm::Ed25519,
+            Self::Coinbase => Algorithm::Es256,
             Self::DoubleSha256 => Algorithm::Sha256SecretSuffix,
             Self::Hyperliquid | Self::Grvt => Algorithm::Secp256k1Digest,
             Self::Lighter => Algorithm::SchnorrDigest,
@@ -99,6 +103,7 @@ pub(crate) struct Inner {
     pub account_name: Option<String>,
     pub link: Arc<SignerLink>,
     pub primary: Owned,
+    coinbase: Option<safe_cex_venue_coinbase::sign::Binding>,
     bound: Mutex<Option<Vec<u8>>>,
     published: AtomicBool,
     streak: Mutex<Streak>,
@@ -378,12 +383,21 @@ impl Inner {
             account_name,
             link,
             primary,
+            coinbase: None,
             bound: Mutex::new(None),
             published: AtomicBool::new(false),
             streak: Mutex::new(Streak::default()),
             on_fatal: Mutex::new(None),
             warned: Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    pub(crate) fn with_coinbase_binding(
+        mut self,
+        binding: Option<safe_cex_venue_coinbase::sign::Binding>,
+    ) -> Self {
+        self.coinbase = binding;
+        self
     }
 
     /// A signer problem the server could not otherwise see: the browser answers or
@@ -559,6 +573,9 @@ impl Inner {
         self: Arc<Self>,
         request: SignRequest,
     ) -> Result<SignResult, SignError> {
+        if self.family == Family::Coinbase {
+            return self.sign_coinbase(&request).await;
+        }
         if self.family == Family::Orderly {
             return self.sign_orderly(&request).await;
         }
@@ -584,6 +601,7 @@ impl Inner {
             Family::Kucoin => self.sign_kucoin(&operations).await?,
             Family::Kraken => self.sign_kraken(&operations, receipt).await?,
             Family::Backpack => self.sign_backpack(&operations).await?,
+            Family::Coinbase => return refused(),
         };
         Ok(SignResult::new(values, receipt))
     }
@@ -1089,6 +1107,19 @@ impl Signer for RemoteProvider {
 
     fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
         self.inner.publish();
+        if self.inner.family == Family::Coinbase {
+            return if self.inner.owns_signing(key)
+                && self
+                    .inner
+                    .coinbase
+                    .as_ref()
+                    .is_some_and(|binding| algorithm == coinbase::algorithm(binding.algorithm))
+            {
+                Capability::Supported
+            } else {
+                Capability::Unsupported
+            };
+        }
         if self.inner.family == Family::ApexOmni
             && self.inner.primary.zklink_seed.as_ref() == Some(key)
             && algorithm == Algorithm::ZkLinkContract
