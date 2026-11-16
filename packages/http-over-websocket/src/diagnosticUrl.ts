@@ -3,7 +3,10 @@ export const diagnosticUrl = (url: string): string => {
   if (typeof url !== 'string') return '[invalid URL]';
   try {
     const parsed = new URL(url);
-    return `${parsed.origin}${parsed.pathname}`;
+    // Blob pathname already embeds its source URL; project that URL only once.
+    const source = parsed.protocol === 'blob:' ? new URL(parsed.pathname) : parsed;
+    if (parsed.protocol === 'blob:' && source.origin === 'null') return '[invalid URL]';
+    return `${source.origin}${source.pathname}`;
   } catch {
     return url.startsWith('/') && !url.startsWith('//') ? url.split(/[?#]/, 1)[0] : '[invalid URL]';
   }

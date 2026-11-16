@@ -127,3 +127,13 @@ describe('credentials after diagnostic labels', () => {
     expect(stripDiagnosticUrlQueries(message)).toBe(message);
   });
 });
+
+it.each([
+  ['blob:https://v3.tealstreet.io/uuid:2:1', 'https://v3.tealstreet.io/uuid:2:1'],
+  ['blob:https://v3.tealstreet.io/uuid:2:1?apiKey=fake-key#fake-fragment', 'https://v3.tealstreet.io/uuid:2:1'],
+  ['blob:https://fake-user:fake-password@v3.tealstreet.io/uuid?token=fake-token', 'https://v3.tealstreet.io/uuid'],
+  ['blob:null/uuid?token=fake-token', '[invalid URL]'],
+])('projects a blob source location once and drops query/userinfo: %s', (input, expected) => {
+  expect(diagnosticUrl(input)).toBe(expected);
+  expect(diagnosticUrl(diagnosticUrl(input))).toBe(expected);
+});

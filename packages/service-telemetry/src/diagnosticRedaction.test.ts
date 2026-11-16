@@ -483,3 +483,18 @@ it('keeps Sentry URL projections query-free without changes to live inputs', () 
   });
   expect(input.breadcrumbs[0]?.message).toBe('/private?sign=[REDACTED]');
 });
+
+it('keeps a slash-bearing base64 credential in a URL path fully redacted', () => {
+  const pieces = ['Ab3dEf6hJk9mNp2', 'Qr5sTu8vWx1yZa4', 'Bc7dEf0gHi3jKl4='];
+  const material = pieces.join('/');
+  expect(btoa(atob(material))).toBe(material);
+  expect(pieces.every((piece) => piece.length < 32)).toBe(true);
+  expect(material.length).toBeGreaterThan(32);
+  // This boundary keeps the decoder from masking a weakened value-shape matcher.
+  const url = `https://venue.invalid/private;/${material}/orders`;
+  for (const input of [url, { opaque: url }, { exception: { values: [{ value: url }] } }]) {
+    const safe = diagnosticText(input);
+    for (const piece of pieces) expect(safe).not.toContain(piece);
+    expect(safe).toContain('[REDACTED]');
+  }
+});
