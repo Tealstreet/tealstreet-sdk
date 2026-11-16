@@ -125,7 +125,7 @@ DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
 DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
-Binance base/PM/inverse/spot, OKX base/demo and EEA mainnet/demo, Bitget base/USDC,
+Binance base/PM/inverse/spot/options, OKX base/demo and EEA mainnet/demo, Bitget base/USDC,
 Blofin, KuCoin Futures/Spot, Phemex, BingX, MEXC and Crypto.com names have native private-startup HMAC proof coverage.
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
@@ -177,6 +177,12 @@ REST/login graphs and atomic contract dependencies. Only opaque OmniKey refs
 are installed. Exact `apexomni` COSIGNED admission proves API credentials through
 native account, account-balance and open-orders reads, with wrong-key, replay
 and foreign-socket controls; this never proves OmniKey/L2-seed possession.
+
+Exact `binanceoptions` mainnet proves possession through its existing signed
+EAPI margin-account, position and open-order startup reads. Public exchange-info,
+ticker and mark responses never establish possession. Tests cover wrong keys,
+replay, replies from other sockets, consumed responses and retired connections
+through the same native probe and Session fences; Options testnet stays refused.
 
 COSIGNED catalog accounting runs in `sdk-rs/harness/cosigned-catalog.test.mjs`.
 Each exact `remoteSigning.enabled` venue owns one JSON record under

@@ -771,6 +771,13 @@ the offline fixture. Wrong-key and replayed signatures fail before attachment,
 foreign sockets cannot settle signing work, and the resident stays unchanged.
 MEXC has no hosted testnet alias; public discovery never proves possession.
 
+Exact `binanceoptions` mainnet uses native signed EAPI margin-account, position
+and open-order reads. Complete private startup is required; public discovery
+cannot prove the key. Its offline suite checks independent HMAC bytes, a valid
+second credential, wrong keys and signatures from earlier attempts, other sockets,
+consumed responses and owner retirement without replacing a resident or signer.
+Hosted Options testnet remains refused and no socket protocol is added.
+
 OKX EEA mainnet and demo authenticate native signed config before keyed catalogue
 discovery, retaining the config authority until market-dependent settings apply.
 Config alone cannot complete the probe. Consecutive signature refusals allow
