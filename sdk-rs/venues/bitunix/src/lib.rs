@@ -1,4 +1,5 @@
 //! Bitunix USDT futures: sans-I/O public and account state machines.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod codes;
 mod error;
@@ -421,7 +422,10 @@ impl BitunixFutures {
             .iter()
             .find(|s| s.active && s.opened && matches!(s.feed, Feed::Futures))
         {
-            cx.send(s.id, topic_frame(topic, subscribe));
+            cx.send(
+                s.id,
+                ControlFrame::subscription(topic_frame(topic, subscribe)),
+            );
         }
     }
     fn subscriptions(&self, cx: &Cx<'_, Pending>) -> Vec<String> {
@@ -708,7 +712,7 @@ impl Venue for BitunixFutures {
                     .into_iter()
                     .chain(topics.iter().map(String::as_str))
                 {
-                    cx.send(socket, topic_frame(topic, true));
+                    cx.send(socket, ControlFrame::subscription(topic_frame(topic, true)));
                 }
             }
             Feed::Public { channel, range } => {
@@ -733,13 +737,16 @@ impl Venue for BitunixFutures {
                     ));
                 }
                 if let Some(frame) = s.queue.pop_front() {
-                    cx.send(socket, frame);
+                    cx.send(socket, ControlFrame::subscription(frame));
                     s.queue_timer = Some(cx.set_timer(250.0));
                 }
             }
         }
         if matches!(s.feed, Feed::Private) {
-            cx.send(socket, private_ping(cx.protocol_now()));
+            cx.send(
+                socket,
+                ControlFrame::heartbeat(private_ping(cx.protocol_now())),
+            );
             self.account.login_answered = false;
             self.account.private_live = false;
             self.login(cx, socket);
@@ -756,7 +763,10 @@ impl Venue for BitunixFutures {
         } else {
             cx.send(
                 socket,
-                format!(r#"{{"ping":{}}}"#, num::format(cx.protocol_now())),
+                ControlFrame::heartbeat(format!(
+                    r#"{{"ping":{}}}"#,
+                    num::format(cx.protocol_now())
+                )),
             );
         }
     }
@@ -1205,7 +1215,7 @@ impl Venue for BitunixFutures {
         {
             s.queue_timer = None;
             if let Some(frame) = s.queue.pop_front() {
-                cx.send(s.id, frame);
+                cx.send(s.id, ControlFrame::subscription(frame));
                 s.queue_timer = Some(cx.set_timer(250.0));
             }
             return;
@@ -1250,11 +1260,17 @@ impl Venue for BitunixFutures {
                 }
                 SocketTick::Ping if s.active && s.opened => {
                     if matches!(s.feed, Feed::Private) {
-                        cx.send(s.id, private_ping(cx.protocol_now()));
+                        cx.send(
+                            s.id,
+                            ControlFrame::heartbeat(private_ping(cx.protocol_now())),
+                        );
                     } else {
                         cx.send(
                             s.id,
-                            format!(r#"{{"ping":{}}}"#, num::format(cx.protocol_now())),
+                            ControlFrame::heartbeat(format!(
+                                r#"{{"ping":{}}}"#,
+                                num::format(cx.protocol_now())
+                            )),
                         );
                     }
                 }

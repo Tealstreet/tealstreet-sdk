@@ -989,7 +989,15 @@ fn rate_limits_are_unknown_while_definitive_status_refusals_stay_rejected() {
         assert_eq!(failure.outcome, outcome, "{status}");
         assert_eq!(failure.kind, kind, "{status}");
         assert_eq!(failure.retry_after_ms, retry, "{status}");
-        assert!(failure.message.contains("HTTP"), "{status}");
+        if status == 429 {
+            assert_eq!(
+                failure.message,
+                "Response does not prove the write outcome. The outcome is unknown. Check Open Orders",
+                "{status}",
+            );
+        } else {
+            assert!(failure.message.contains("HTTP"), "{status}");
+        }
     }
 }
 
@@ -1110,6 +1118,14 @@ fn released_rate_limit_statuses_without_a_code_are_unknown() {
         assert_eq!(failure.outcome, outcome, "{status}");
         assert_eq!(failure.kind, kind, "{status}");
         assert_eq!(failure.retry_after_ms, retry, "{status}");
-        assert!(failure.message.contains("HTTP"), "{status}");
+        if status == 429 {
+            assert_eq!(
+                failure.message,
+                "Response does not prove the write outcome. The outcome is unknown. Check Open Orders",
+                "{status}",
+            );
+        } else {
+            assert!(failure.message.contains("HTTP"), "{status}");
+        }
     }
 }
