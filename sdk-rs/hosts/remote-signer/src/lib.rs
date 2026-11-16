@@ -246,6 +246,17 @@ pub fn remote_account(
                 .map_err(|_| SetupError("Invalid Coinbase key name"))?,
             algorithm,
         };
+        if let Some(provided) = options
+            .get("coinbaseSigning")
+            .filter(|value| !value.is_null())
+        {
+            let provided: safe_cex_venue_coinbase::sign::Binding =
+                serde::Deserialize::deserialize(provided)
+                    .map_err(|_| SetupError("Invalid Coinbase public binding"))?;
+            if provided.key_name != binding.key_name || provided.algorithm != binding.algorithm {
+                return Err(SetupError("Inconsistent Coinbase public binding"));
+            }
+        }
         safe_cex_venue_coinbase::sign::Credentials::external(
             binding.clone(),
             safe_cex_engine::signing::Identity::new(
