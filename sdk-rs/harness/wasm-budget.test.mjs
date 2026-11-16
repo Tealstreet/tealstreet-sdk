@@ -3995,3 +3995,20 @@ test('#3576 Lighter admission dispatcher retains measured reserve and alias floo
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+// #3579 source 873c3c199134737b5fd59b0aab5da073f1564fff; Rust1.99/bindgen0.2.129/Binaryen132 twice-Oz.
+// Fresh web/Node 2,228,730 B, also reproduced byte-identically at parent 711dc03e942.
+// SHA256 abd2e36ac525defc7673fc51d3ca7170d7d3f784589016c821c95de511b6f8f9.
+test('#3579 merged Lighter family retains its current measured 10 KiB reserve', () => {
+  const measured = 2_228_730;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(required, 2_239_488);
+  for (const venue of ['lighter', 'lighter-robinhood']) {
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= Math.max(2_238_464, required), `${venue}: retain fresh reserve and parent floors`);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
+});

@@ -793,7 +793,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3513 CI43629571410: 2_187_365 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
   // #3576 CI43806604286/job133099107519: 2,227,410 B with device join proof.
   // Fresh size +10 KiB rounded up; retain floors and shared-alias equality.
-  lighter: 2_238_464,
+  // #3579 merged source873c3c199: build.sh --venue lighter; Rust1.99/bindgen0.2.129/Binaryen132 twice-Oz.
+  // Fresh web/Node 2,228,730 B; SHA256 abd2e36ac525defc7673fc51d3ca7170d7d3f784589016c821c95de511b6f8f9.
+  // Same module at master711dc03e942; measured +10 KiB rounded up, retaining both parent floors.
+  lighter: 2_239_488,
   // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3438 run 43204071123, artifact 13936986915, source 0340fd57a506 (head 7464a40315bc tree).
@@ -827,7 +830,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
   // #3513 shares the verified 2,187,365 B Lighter module and its measured reserve floor.
   // #3576: same measured Lighter family and 10 KiB reserve; no metadata activation.
-  'lighter-robinhood': 2_238_464,
+  // #3579 shares the freshly measured 2,228,730 B Lighter module and 10 KiB reserve.
+  'lighter-robinhood': 2_239_488,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075967: 1,888,209 B + 10 KiB rounded up.
   // #3299 run 42437005422 at 94211a4edff: 1,893,996 B + 10 KiB, rounded up; larger parent cap retained.
