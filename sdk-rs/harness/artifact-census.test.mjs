@@ -26,12 +26,17 @@ function probe(t, artifact, source) {
   const args = artifact === budgetPath
     ? ['--input-type=module', '-e', `import('./${budgetPath}')`]
     : ['--test', '--test-reporter=tap', '--test-concurrency=1', 'sdk-rs/harness/construction-features.test.mjs'];
-  return spawnSync(process.execPath, args, { cwd: scratch, encoding: 'utf8', timeout: 15_000 });
+  // The child owns its runner; inheriting node:test's context silently skips it.
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawnSync(process.execPath, args, { cwd: scratch, env, encoding: 'utf8', timeout: 15_000 });
+  if (artifact === policyPath && result.status === 0) assert.match(result.stdout, /^# tests [1-9]/m);
+  return result;
 }
 
 function refuses(result, reason) {
   assert.ifError(result.error);
-  assert.notEqual(result.status, 0, 'mutated artifact was admitted');
+  assert.notEqual(result.status, 0, `mutated artifact was admitted: ${result.stdout.slice(0, 1500)} ${result.stderr.slice(0, 1500)}`);
   assert.match(result.stderr + result.stdout, reason);
 }
 
