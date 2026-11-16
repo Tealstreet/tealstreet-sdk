@@ -537,6 +537,14 @@ async fn venue_case(venue: &'static str) {
                     && f["d"]["instanceId"] == "proof-registration")
         );
         assert!(!frames.iter().any(|f| f["d"]["op"] == "frame"));
+        if venue == "binanceoptions" {
+            assert!(frames.iter().any(|frame| {
+                let refusal = &frame["d"]["data"][1];
+                refusal["kind"] == "unverified"
+                    && refusal["transient"] == false
+                    && refusal["initRefused"] == true
+            }));
+        }
         if venue == "apexomni" {
             assert!(
                 frames
@@ -921,4 +929,59 @@ async fn cosigned_hyrotrader_testnet_refuses_without_signing_or_venue_io() {
     assert!(observed.sockets.is_empty());
     drop(observed);
     session.close();
+}
+
+#[tokio::test]
+async fn cosigned_variant_binanceoptions_requires_connection_proof() {
+    venue_case("binanceoptions").await;
+}
+
+#[tokio::test]
+async fn cosigned_binanceoptions_retired_signing_work_cannot_attach_after_owner_aba() {
+    let venue = "binanceoptions";
+    let (io, _) = MockVenue::for_admission(venue);
+    let registry = crate::accounts::testing::e2e_registry("alice", io);
+    let (mut old, mut sent) = user_session(registry.clone(), "alice");
+    old.identity.resumable = false;
+    let mut completed = old.take_verified();
+    old.init(payload(venue)).await.unwrap();
+    assert!(old.pending_verifications.contains_key("acct"));
+    let frame = tokio::time::timeout(Duration::from_secs(3), sent.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let frame: Value = serde_json::from_str(&frame).unwrap();
+    assert_eq!(frame["t"], "sign-req");
+    let preimage = frame["d"]["wsAuth"]["toSign"].as_str().unwrap();
+    let signature = safe_cex_crypto::hmac_sha256(
+        MATERIAL.as_bytes(),
+        preimage.as_bytes(),
+        safe_cex_crypto::Encoding::Hex,
+    );
+    let response = json!({"id":frame["d"]["id"],"wsAuthSignature":signature});
+    let link = old.pending_verifications["acct"]
+        .cosigned_link
+        .clone()
+        .unwrap();
+    let socket = old.socket;
+    old.close();
+    for user in ["bob", "alice"] {
+        let (mut current, mut output) = user_session(registry.clone(), user);
+        current.identity.resumable = false;
+        let mut device = Device::default();
+        proof(
+            venue,
+            &mut current,
+            &mut output,
+            &mut device,
+            Answer::Correct,
+        )
+        .await;
+        load(venue, &mut current, &mut output, &mut device).await;
+        assert_eq!(current.joined["acct"].account.user, user);
+        assert!(!link.resolve(socket, response.clone()));
+        assert!(registry.held("alice", "acct", socket).is_none());
+        assert!(completed.try_recv().is_err());
+        current.close();
+    }
 }

@@ -826,6 +826,13 @@ pub fn refuse_misplaced_site(init: &InitPayload) -> Result<(), String> {
 
 pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     let mut options = Map::new();
+    if !public_only && matches!(init.exchange_name.as_str(), "coinbase" | "coinbasespot") {
+        options.insert(
+            "coinbaseJwtAlgorithm".into(),
+            serde_json::to_value(init.coinbase_jwt_algorithm.unwrap_or_default())
+                .expect("Coinbase algorithm is a closed enum"),
+        );
+    }
     if !public_only {
         options.insert("key".into(), init.key.clone().into());
     }

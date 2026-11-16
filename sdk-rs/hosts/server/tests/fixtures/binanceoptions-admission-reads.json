@@ -1,0 +1,87 @@
+{
+  "/eapi/v1/exchangeInfo": {
+    "optionContracts": [
+      {
+        "underlying": "BTCUSDT",
+        "baseAsset": "BTC",
+        "settleAsset": "USDT"
+      }
+    ],
+    "optionSymbols": [
+      {
+        "symbol": "BTC-261225-85000-C",
+        "underlying": "BTCUSDT",
+        "quoteAsset": "USDT",
+        "status": "TRADING",
+        "side": "CALL",
+        "strikePrice": "85000.000",
+        "expiryDate": 1798185600000,
+        "filters": [
+          {
+            "filterType": "PRICE_FILTER",
+            "tickSize": "5.000",
+            "minPrice": "775"
+          },
+          {
+            "filterType": "LOT_SIZE",
+            "stepSize": "0.01",
+            "minQty": "0.01",
+            "maxQty": "200"
+          }
+        ]
+      }
+    ]
+  },
+  "/eapi/v1/ticker": [
+    {
+      "symbol": "BTC-261225-85000-C",
+      "priceChangePercent": "0.185",
+      "lastPrice": "4520",
+      "volume": "2.22",
+      "amount": "9831.45",
+      "bidPrice": "3885",
+      "askPrice": "3930",
+      "exercisePrice": "81565.34009019"
+    }
+  ],
+  "/eapi/v1/mark": [
+    {
+      "symbol": "BTC-261225-85000-C",
+      "markPrice": "3845.503"
+    }
+  ],
+  "/eapi/v1/marginAccount": {
+    "asset": [
+      {
+        "asset": "USDT",
+        "equity": "10094.44662",
+        "available": "8725.92524",
+        "initialMargin": "1084.52138",
+        "unrealizedPNL": "-5.00138"
+      }
+    ]
+  },
+  "/eapi/v1/position": [
+    {
+      "symbol": "BTC-261225-85000-C",
+      "side": "SHORT",
+      "quantity": "-0.1",
+      "entryPrice": "1000",
+      "markValue": "105.00138",
+      "unrealizedPNL": "-5.00138"
+    }
+  ],
+  "/eapi/v1/openOrders": [
+    {
+      "orderId": 4611875134427365000,
+      "symbol": "BTC-261225-85000-C",
+      "side": "BUY",
+      "status": "PARTIALLY_FILLED",
+      "quantity": "0.1",
+      "executedQty": "0.02",
+      "price": "1000",
+      "clientOrderId": "existing",
+      "timeInForce": "GTC"
+    }
+  ]
+}

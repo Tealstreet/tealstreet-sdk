@@ -53,7 +53,7 @@ fn path(r: &HttpRequest) -> &str {
 fn family(venue: &str) -> &str {
     match venue {
         "bybitinverse" | "bybitdemo" | "bybitspot" | "hyrotrader" => "bybit",
-        "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
+        "binance" | "binancepm" | "binanceinverse" | "binancespot" | "binanceoptions" => "binance",
         "okx" | "okxdemo" | "okxeu" | "okxeudemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
         "kucoinspot" => "kucoin",
@@ -159,6 +159,10 @@ fn hyrotrader_admission_socket_checks_key_signature_and_expiry() {
 }
 
 pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
+    if venue == "binanceoptions" {
+        binanceoptions::assert_startup(seen);
+        return;
+    }
     if venue == "apexomni" {
         for route in ["account", "account-balance", "open-orders"] {
             assert!(
@@ -426,6 +430,9 @@ impl VenueIo {
         }
     }
     fn response(&self, r: &HttpRequest) -> Value {
+        if self.venue == "binanceoptions" {
+            return binanceoptions::response(self, r);
+        }
         if self.venue == "mexc" {
             return mexc::response(self, r);
         }
@@ -541,6 +548,7 @@ impl Transport for VenueIo {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        assert_ne!(self.venue, "binanceoptions", "Options startup is REST-only");
         self.seen.lock().unwrap().sockets.push(url.clone());
         if self.venue == "mexc" {
             return mexc::connect(self, socket, &url, events);
@@ -1643,3 +1651,6 @@ fn generated_readiness_matches_every_per_venue_record() {
     assert_eq!(count, 41);
     assert!(!cosigned_ready("future-unproved-venue"));
 }
+
+#[path = "binanceoptions_probe_tests.rs"]
+mod binanceoptions;

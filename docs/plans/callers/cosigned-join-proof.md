@@ -18,6 +18,7 @@ The exact proof-ready venue names are:
 | `hyrotrader` | Native challenge-site private startup and shared HMAC/session negatives; server-owned canonical REST/WS map, no Bybit fallback or testnet |
 | `binance` | Native private startup and shared HMAC suite |
 | `binancepm`, `binanceinverse`, `binancespot` | Native PAPI/DAPI/spot private startup and shared HMAC/session negatives; exact product routes |
+| `binanceoptions` | Native EAPI margin-account/position/open-order startup, HMAC key/replay and Session retirement controls; mainnet only |
 | `okx` | Native private startup and shared HMAC suite |
 | `okxdemo` | Native demo startup and shared HMAC/session negatives; exact origin and simulated-trading headers |
 | `okxeu` | Signed config before keyed discovery, full native EEA startup, bounded signature-refusal retry and shared HMAC/session negatives |
@@ -27,6 +28,7 @@ The exact proof-ready venue names are:
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
 | `mexc` | Native signed position-mode/account reads and private-stream HMAC; wrong-key, replay and socket/Session controls; mainnet only |
+| `coinbase`, `coinbasespot` | Native CDP JWT ES256/Ed25519 and complete DRB/Advanced Trade private startup; server claims, signature-only replies, wrong-key/replay/socket/owner controls; mainnet only |
 | `backpack` | Local Ed25519 challenge against the captured canonical base64 API public key; wrong-key, replay, foreign-socket and actual-WASM Session controls |
 
 Backpack public keys must decode canonically to exactly 32 bytes; missing,
