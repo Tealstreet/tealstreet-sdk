@@ -1,0 +1,69 @@
+{
+  "public/get-instruments": {
+    "code": 0,
+    "result": {
+      "data": [
+        {
+          "symbol": "BTCUSD-PERP",
+          "inst_type": "PERPETUAL_SWAP",
+          "tradable": true,
+          "base_ccy": "BTC",
+          "quote_ccy": "USD",
+          "price_tick_size": "0.1",
+          "qty_tick_size": "0.001",
+          "quote_decimals": 1,
+          "quantity_decimals": 3,
+          "max_leverage": "50",
+          "underlying_symbol": "BTCUSD-INDEX"
+        }
+      ]
+    }
+  },
+  "public/get-tickers": {
+    "code": 0,
+    "result": {
+      "data": [
+        {
+          "i": "BTCUSD-PERP",
+          "b": "99",
+          "k": "101",
+          "a": "100",
+          "c": "0.01",
+          "v": "1",
+          "vv": "100"
+        }
+      ]
+    }
+  },
+  "private/user-balance": {
+    "code": 0,
+    "result": {
+      "data": [
+        {
+          "total_margin_balance": "1000",
+          "total_available_balance": "950",
+          "total_initial_margin": "50",
+          "total_session_unrealized_pnl": "10"
+        }
+      ]
+    }
+  },
+  "private/get-positions": {
+    "code": 0,
+    "result": {
+      "data": []
+    }
+  },
+  "private/get-open-orders": {
+    "code": 0,
+    "result": {
+      "data": []
+    }
+  },
+  "private/advanced/get-open-orders": {
+    "code": 0,
+    "result": {
+      "data": []
+    }
+  }
+}

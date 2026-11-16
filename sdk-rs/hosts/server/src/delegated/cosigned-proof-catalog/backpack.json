@@ -1,0 +1,4 @@
+{
+  "status": "excluded",
+  "reason": "Ed25519 native private-startup proof, key encoding, account binding and replay/socket controls are not built."
+}

@@ -1,6 +1,7 @@
 //! Session authentication, private streams and atomic REST reconciliation.
 use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::json::{self, ArrayAt};
@@ -1063,13 +1064,15 @@ impl Grvt {
             if let Some(session) = &self.account.session {
                 cx.send(
                     socket,
-                    serde_json::to_string(&Auth {
-                        r#type: "auth",
-                        session_cookie: format!("rm=true; gravity={}", session.cookie),
-                        account_id: &session.account_id,
-                        testnet: self.options.testnet,
-                    })
-                    .expect("serialize auth"),
+                    ControlFrame::authentication(
+                        serde_json::to_string(&Auth {
+                            r#type: "auth",
+                            session_cookie: format!("rm=true; gravity={}", session.cookie),
+                            account_id: &session.account_id,
+                            testnet: self.options.testnet,
+                        })
+                        .expect("serialize auth"),
+                    ),
                 );
             }
         } else {
@@ -1098,14 +1101,16 @@ impl Grvt {
             self.account.request_id += 1;
             cx.send(
                 socket,
-                serde_json::to_string(&Subscribe {
-                    request_id: self.account.request_id,
-                    method: "subscribe",
-                    stream,
-                    feed: [subaccount],
-                    is_full: false,
-                })
-                .expect("serialize subscription"),
+                ControlFrame::subscription(
+                    serde_json::to_string(&Subscribe {
+                        request_id: self.account.request_id,
+                        method: "subscribe",
+                        stream,
+                        feed: [subaccount],
+                        is_full: false,
+                    })
+                    .expect("serialize subscription"),
+                ),
             );
         }
         // A startup read still running may predate the stream: read again when it settles.
@@ -2093,7 +2098,7 @@ impl Grvt {
             return true;
         }
         if text == "ping" {
-            cx.send(socket, "pong");
+            cx.send(socket, ControlFrame::heartbeat("pong"));
             return true;
         }
         let Ok(message) = serde_json::from_str::<PrivateMessage<'_>>(text) else {
@@ -2323,7 +2328,7 @@ impl Grvt {
                 && self.account.authenticated
                 && !self.account.authentication_failed
             {
-                cx.send(socket, "ping");
+                cx.send(socket, ControlFrame::heartbeat("ping"));
             }
         } else if self.account.login_retry == Some(timer) {
             self.account.login_retry = None;
@@ -2343,7 +2348,7 @@ impl Grvt {
                         && !self.account.ping_sent =>
                 {
                     if let Some(socket) = self.account.socket {
-                        cx.send(socket, "ping");
+                        cx.send(socket, ControlFrame::heartbeat("ping"));
                         self.account.ping_sent = true;
                     }
                 }

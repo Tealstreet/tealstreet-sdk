@@ -1,6 +1,7 @@
 //! Futures account snapshots and the listen-key stream.
 use crate::wire::{Number, Text};
 use crate::{Bitrue, Job, Pending};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotBuilder;
@@ -887,7 +888,9 @@ impl Bitrue {
         ] {
             cx.send(
                 socket,
-                format!("{{\"event\":\"sub\",\"params\":{{\"channel\":\"{channel}\"}}}}"),
+                ControlFrame::subscription(format!(
+                    "{{\"event\":\"sub\",\"params\":{{\"channel\":\"{channel}\"}}}}"
+                )),
             );
         }
         self.account.supervisor.opened(cx);
@@ -978,14 +981,17 @@ impl Bitrue {
             &*message.e
         };
         if let Some(ping) = message.ping {
-            cx.send(socket, format!("{{\"pong\":{}}}", ping.get()));
+            cx.send(
+                socket,
+                ControlFrame::heartbeat(format!("{{\"pong\":{}}}", ping.get())),
+            );
         } else if event == "ping" {
             cx.send(
                 socket,
-                message.ts.map_or_else(
+                ControlFrame::heartbeat(message.ts.map_or_else(
                     || "{\"event\":\"pong\"}".to_owned(),
                     |ts| format!("{{\"event\":\"pong\",\"ts\":{}}}", ts.get()),
-                ),
+                )),
             );
         } else if matches!(event, "BALANCE" | "ACCOUNT_UPDATE") {
             self.fast_refresh(cx, None);

@@ -85,7 +85,7 @@ fn write_failures_classify_http_before_body_and_keep_native_diagnostics() {
         if unproven {
             assert_eq!(
                 error.message,
-                "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
             );
         } else {
             assert_eq!(error.message, "Sign signature error");

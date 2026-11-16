@@ -9,6 +9,7 @@ mod public_trades;
 pub mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::book::{Book, BookSide};
@@ -778,7 +779,10 @@ impl Venue for Kraken {
         }
         self.public.open = true;
         self.ticker_received.clear();
-        cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
+        cx.send(
+            socket,
+            ControlFrame::subscription(r#"{"event":"subscribe","feed":"heartbeat"}"#),
+        );
         self.sync_public_interests(cx);
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
