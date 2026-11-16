@@ -1,5 +1,26 @@
 use crate::envelope::InitPayload;
 
+pub(super) fn hyperliquid_projection(
+    user: &str,
+    init: &InitPayload,
+) -> Result<safe_cex_crypto::admission::identity::Projection, String> {
+    let signer = init
+        .hyperliquid_signer_address
+        .as_deref()
+        .ok_or("Missing Hyperliquid signer address")?;
+    let account_scope = match &init.vault {
+        Some(address) => serde_json::json!({"kind":"vault", "address":address}),
+        None => serde_json::json!({"kind":"main"}),
+    };
+    let facts = serde_json::json!({
+        "venue":init.exchange_name,
+        "network":if init.testnet == Some(true) { "testnet" } else { "mainnet" },
+        "credential":{"kind":"agent", "signer":signer, "accountScope":account_scope}
+    });
+    safe_cex_crypto::admission::identity::Projection::from_json(user, &facts.to_string())
+        .map_err(|_| "Invalid Hyperliquid identity".into())
+}
+
 pub(crate) fn enabled(init: &InitPayload) -> bool {
     init.exchange_name == "bybit"
         && crate::delegated::enabled(&init.exchange_name)

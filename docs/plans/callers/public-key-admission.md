@@ -1,5 +1,32 @@
 # Public-key admission helpers
 
+## Hyperliquid hosted admission
+
+Exact `hyperliquid` and `hyperliquidspot` private inits require
+`hyperliquidSignerAddress`: the public Ethereum address of the actual captured
+agent/wallet signing key. `key` remains the account/read address and cannot
+substitute for this field. Missing, malformed or zero signer addresses refuse
+before attachment. Clients must retain their original account/instance and
+dispatch the existing closed `join-proof` request through `signJoinProof`.
+There is no unsigned-read or legacy-signing fallback.
+
+The server projects the authenticated owner, mainnet/testnet, actual signer and
+`vault` (absent means main) before queueing proof. Both aliases share the
+Hyperliquid namespace. The signer metadata also participates in the captured
+init fingerprint; proof replies cannot supply or change it. This does not
+expand the existing identity-keyed account-registry rollout.
+
+COSIGNED uses a fresh server challenge and local secp256k1 EIP-712 recovery.
+DELEGATED checks the temporary protected provider against the same captured
+public facts, without asking the device to sign. Possession is distinct from
+venue authorization: existing engine startup and venue authorization checks
+retain their behavior.
+The Hyperliquid WASM family links device proof dispatch for both exact aliases;
+other family activation remains separate. Hosted callers must forward the new
+public init field before enabling these joins.
+
+## Shared primitives
+
 These helpers reuse the existing signing providers and native HTTP transport.
 They add no account registry, signer storage, engine, socket envelope, or venue
 activation. The join owner retains its existing feature gates, pacing, connection

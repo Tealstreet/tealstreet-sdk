@@ -971,6 +971,15 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
         _ => Map::new(),
     };
     fields.insert("venue".into(), init.exchange_name.clone().into());
+    if matches!(
+        init.exchange_name.as_str(),
+        "hyperliquid" | "hyperliquidspot"
+    ) {
+        fields.insert(
+            "hyperliquidSignerAddress".into(),
+            init.hyperliquid_signer_address.clone().into(),
+        );
+    }
     // An init that cannot route is refused at build; its raw flags still tell inits apart.
     let routing = match routing_plan(init, public_only) {
         Ok(plan) => serde_json::to_value(plan).unwrap_or(Value::Null),

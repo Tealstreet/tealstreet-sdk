@@ -44,6 +44,9 @@ pub struct InitPayload {
     pub proxy_region: Option<String>,
     pub public_only: Option<bool>,
     pub hyperliquid_builder: Option<HyperliquidBuilder>,
+    /// Actual agent/wallet signer, distinct from the public account read address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hyperliquid_signer_address: Option<String>,
     /// The Hyperliquid vault the account trades; without it orders go to the main wallet.
     #[serde(default, deserialize_with = "text")]
     pub vault: Option<String>,

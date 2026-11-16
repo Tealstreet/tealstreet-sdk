@@ -39,7 +39,8 @@ async fn cosigned_catalog_does_not_gate_delegated_wallet_proof() {
                 let mut completed = session.take_verified();
                 let mut init = InitPayload {
                     account_name: "acct".into(),
-                    exchange_name: "hyperliquidspot".into(),
+                    // Keep an excluded wallet family after Hyperliquid's local-proof activation.
+                    exchange_name: "grvt".into(),
                     key: KEY.into(),
                     ..Default::default()
                 };
@@ -47,11 +48,11 @@ async fn cosigned_catalog_does_not_gate_delegated_wallet_proof() {
                     init.signing_mode = Some("delegated".into());
                     let offer = session
                         .handovers
-                        .issue("acct", "hyperliquidspot", crate::accounts::now_ms())
+                        .issue("acct", "grvt", crate::accounts::now_ms())
                         .unwrap();
                     init.sealed = Some(crate::delegated::tests::seal(
                         &offer,
-                        "hyperliquidspot",
+                        "grvt",
                         KEY,
                         br#"{"key":"synthetic-key","secret":"synthetic-material"}"#,
                     ));

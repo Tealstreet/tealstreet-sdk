@@ -166,32 +166,33 @@ async fn replay_and_foreign_socket(venue: &str) {
     session.close();
 }
 
-macro_rules! venue_tests {
-    ($positive:ident, $negative:ident, $venue:literal) => {
-        #[tokio::test]
-        async fn $positive() {
-            tokio::task::LocalSet::new()
-                .run_until(correct_and_other_key($venue))
-                .await;
-        }
-        #[tokio::test]
-        async fn $negative() {
-            tokio::task::LocalSet::new()
-                .run_until(replay_and_foreign_socket($venue))
-                .await;
-        }
-    };
+#[tokio::test]
+async fn hyperliquid_signer_not_read_wallet() {
+    tokio::task::LocalSet::new()
+        .run_until(correct_and_other_key("hyperliquid"))
+        .await;
 }
-venue_tests!(
-    hyperliquid_signer_not_read_wallet,
-    hyperliquid_replay_and_foreign_socket,
-    "hyperliquid"
-);
-venue_tests!(
-    hyperliquidspot_signer_not_read_wallet,
-    hyperliquidspot_replay_and_foreign_socket,
-    "hyperliquidspot"
-);
+
+#[tokio::test]
+async fn hyperliquid_replay_and_foreign_socket() {
+    tokio::task::LocalSet::new()
+        .run_until(replay_and_foreign_socket("hyperliquid"))
+        .await;
+}
+
+#[tokio::test]
+async fn hyperliquidspot_signer_not_read_wallet() {
+    tokio::task::LocalSet::new()
+        .run_until(correct_and_other_key("hyperliquidspot"))
+        .await;
+}
+
+#[tokio::test]
+async fn hyperliquidspot_replay_and_foreign_socket() {
+    tokio::task::LocalSet::new()
+        .run_until(replay_and_foreign_socket("hyperliquidspot"))
+        .await;
+}
 
 #[tokio::test]
 async fn hyperliquid_scope_captures_main_vault_network_and_verified_owner() {
@@ -225,6 +226,41 @@ async fn hyperliquid_scope_captures_main_vault_network_and_verified_owner() {
         digests[0], digests[1],
         "spot and perpetual share the agent namespace"
     );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn hyperliquid_delegated_candidate_uses_the_same_captured_signer_without_device_or_venue_io()
+{
+    for venue in ["hyperliquid", "hyperliquidspot"] {
+        for correct in [true, false] {
+            let (registry, observed) = registry();
+            let mut payload = init(venue);
+            payload.signing_mode = Some("delegated".into());
+            let credentials: crate::delegated::Credentials = serde_json::from_str(
+                &json!({
+                    "key":payload.key, "secret":scalar(if correct { 7 } else { 8 })
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let permit = registry.probe_permit("alice", &payload).unwrap();
+            let result = registry
+                .probe_join(
+                    "alice",
+                    &payload,
+                    Some(("synthetic-token".into(), now_ms() + 60_000)),
+                    Some(&credentials),
+                    None,
+                    11,
+                    permit,
+                )
+                .await;
+            assert_eq!(result.is_ok(), correct);
+            assert_eq!(registry.account_count(), 0);
+            no_io(&observed);
+        }
+    }
 }
 
 #[test]

@@ -1057,10 +1057,15 @@ fn admission_enabled_venues_require_an_offline_suite() {
         "../../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
     ))
     .unwrap();
-    assert_eq!(PRIVATE_STARTUP_VENUES.len(), VENUES.len() + 1);
+    // These use the Session local-proof positive/negative suite, not unsigned reads.
+    let local_proof_venues = ["hyperliquid", "hyperliquidspot"];
+    assert_eq!(
+        PRIVATE_STARTUP_VENUES.len(),
+        VENUES.len() + 1 + local_proof_venues.len()
+    );
     for &venue in PRIVATE_STARTUP_VENUES {
         assert!(
-            venue == "bybit" || VENUES.contains(&venue),
+            venue == "bybit" || VENUES.contains(&venue) || local_proof_venues.contains(&venue),
             "{venue}: missing offline suite"
         );
     }
