@@ -250,6 +250,9 @@ fired. This reconnects the transport only: no account reload, deadline renewal,
 or replay of HTTP already sent (`HOWWebSocket.connect-timeout.test.ts` and the
 real-stack managed/legacy request-entry controls).
 
+Blob diagnostic URLs unwrap once and require a nonopaque HTTP(S) source without
+userinfo; nested blobs and other sources are refused. Projection clears userinfo
+and keeps only origin/path, omitting queries and fragments.
 Relay failure, readiness, timeout and send-state diagnostics retain only URL
 origin/path; signed queries and outgoing frame bodies/headers are never copied
 into display messages or previews. Original Axios config and signed wire bytes
