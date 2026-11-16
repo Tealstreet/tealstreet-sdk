@@ -989,6 +989,10 @@ impl Inner {
             return refused();
         }
         let descriptor = json!({"slot":"primary","payload":utf8(bytes)?}).to_string();
+        // The device limit includes the JSON envelope and escaping expansion.
+        if descriptor.len() > MAX_PAYLOAD {
+            return refused();
+        }
         self.device(descriptor, "asterdex-hmac", |value| {
             #[derive(serde::Deserialize)]
             #[serde(deny_unknown_fields)]

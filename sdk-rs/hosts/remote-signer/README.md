@@ -39,8 +39,10 @@ Private AsterDEX V1 uses the existing `asterdex-hmac` device codec with
 is sent; credential-only presentation stays local. The atomic reply must contain
 that public credential and one canonical lowercase SHA-256 MAC. Partial, foreign,
 extra-field or malformed replies refuse without publishing any result. The
-original receipt survives unchanged. Wallet/address graphs and nonce-bearing
-V3 work remain unsupported by this V1 bridge.
+original receipt survives unchanged. The serialized UTF-8 descriptor, including
+its JSON envelope and escaping, must fit the inclusive 1 MiB device limit;
+oversized descriptors refuse before device I/O. Wallet/address graphs and
+nonce-bearing V3 work remain unsupported by this V1 bridge.
 
 Admission `join_proof` waits reuse the same pending ID map. They return the actual
 receiving socket plus bounded original JSON to the server's closed proof decoder;
