@@ -353,6 +353,7 @@ const BASE_URLS: &[(&str, &str, Option<&str>)] = &[
         "https://api.binance.com",
         Some("https://testnet.binance.vision"),
     ),
+    ("binanceoptions", "https://eapi.binance.com", None),
     (
         "bybit",
         "https://api.bybit.com",
@@ -461,6 +462,7 @@ const BASE_URLS: &[(&str, &str, Option<&str>)] = &[
     ),
     ("mexc", "https://api.mexc.com", None),
     ("kraken", "https://futures.kraken.com", None),
+    ("hyrotrader", "https://sim-tealstreet.hyro.site", None),
 ];
 
 #[test]
@@ -480,7 +482,7 @@ fn every_core_venue_base_url_pair_is_pinned_and_resolves() {
             resolve_routing_plan(venue, &inputs, base, Provider::Tealstreet).unwrap();
         }
     }
-    assert!(rest_base_url("hyrotrader", false).is_err());
+    assert!(rest_base_url("txflow", false).is_err());
 }
 
 #[test]

@@ -42,6 +42,9 @@ for (const family of selectedFamilies) {
     }
     const engine = await import(new URL(`web/${family}/safe_cex_wasm.js`, pkg));
     await engine.default({ module_or_path: readFileSync(new URL(`web/${family}/safe_cex_wasm_bg.wasm`, pkg)) });
+    // Only the first activation candidate carries the device codec by default.
+    assert.equal(typeof engine.WasmEngine.prototype.prepareJoinProof,
+      family === 'backpack' ? 'function' : 'undefined', `${family}: admission dispatch must stay opt-in`);
     if (family === 'hyperliquid') {
       await checkHyperliquidLocalSigning(engine.WasmEngine, false);
       await checkHyperliquidLocalSigning(engine.WasmEngine, true);

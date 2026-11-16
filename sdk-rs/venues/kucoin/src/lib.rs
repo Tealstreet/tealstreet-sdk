@@ -1,4 +1,5 @@
 //! KuCoin Classic Futures on the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod clock;
 mod funding;
@@ -576,18 +577,20 @@ impl Kucoin {
         }
         cx.send(
             socket,
-            serde_json::to_string(&Subscription {
-                id: self.message_id,
-                kind: if subscribe {
-                    "subscribe"
-                } else {
-                    "unsubscribe"
-                },
-                topic,
-                private_channel: matches!(c.role, Role::Private),
-                response: true,
-            })
-            .unwrap(),
+            ControlFrame::subscription(
+                serde_json::to_string(&Subscription {
+                    id: self.message_id,
+                    kind: if subscribe {
+                        "subscribe"
+                    } else {
+                        "unsubscribe"
+                    },
+                    topic,
+                    private_channel: matches!(c.role, Role::Private),
+                    response: true,
+                })
+                .unwrap(),
+            ),
         );
     }
     fn detail(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, subscribe: bool) {
@@ -691,7 +694,7 @@ impl Kucoin {
             self.message_id += 1;
             cx.send(
                 socket,
-                format!(r#"{{"id":{},"type":"ping"}}"#, self.message_id),
+                ControlFrame::heartbeat(format!(r#"{{"id":{},"type":"ping"}}"#, self.message_id)),
             );
             c.pong = Some(cx.set_timer(c.ping_timeout));
         }

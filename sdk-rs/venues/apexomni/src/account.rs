@@ -1,5 +1,6 @@
 //! Atomic private snapshots, socket healing and execution identity.
 use crate::{ApexOmni, Pending, private_wire as wire, read, sign};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::credential_selection::CredentialUnavailable;
@@ -705,7 +706,7 @@ impl ApexOmni {
         };
         cx.send_signed(
             socket,
-            String::new(),
+            ControlFrame::authentication(String::new()),
             Box::new(sign::WsLogin::new(
                 identity,
                 format!("wss://{host}/realtime_private"),
@@ -714,9 +715,11 @@ impl ApexOmni {
         // The production proxy expects all three subscriptions before a login ACK.
         cx.send(
             socket,
-            r#"{"op":"subscribe","args":["ws_zk_accounts_v3","ws_user_v1","ws_notify_v1"]}"#,
+            ControlFrame::subscription(
+                r#"{"op":"subscribe","args":["ws_zk_accounts_v3","ws_user_v1","ws_notify_v1"]}"#,
+            ),
         );
-        cx.send(socket, r#"{"op":"ping"}"#);
+        cx.send(socket, ControlFrame::heartbeat(r#"{"op":"ping"}"#));
         self.account.ping_at = cx.now;
         self.refresh_account(cx);
         true
@@ -1479,7 +1482,10 @@ impl ApexOmni {
                 .filter(|args| args.starts_with('[') && *args != "[]")
                 .map(str::to_owned)
                 .unwrap_or_else(|| format!(r#"["{}"]"#, cx.protocol_now() as u64));
-            cx.send(socket, format!(r#"{{"op":"pong","args":{args}}}"#));
+            cx.send(
+                socket,
+                ControlFrame::heartbeat(format!(r#"{{"op":"pong","args":{args}}}"#)),
+            );
         }
         if message.op == "pong" || message.ret_msg == "pong" || message.pong.is_some() {
             cx.store

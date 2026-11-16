@@ -3,6 +3,7 @@
 use crate::sign::Query;
 use crate::wire::*;
 use crate::{BinanceFutures, Channel, Pending};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotCoverage;
@@ -3179,7 +3180,7 @@ impl BinanceFutures {
         self.account.spot_subscribe_at = Some(cx.now);
         cx.send_signed(
             socket,
-            String::new(),
+            ControlFrame::authentication(String::new()),
             Box::new(crate::sign::SpotSubscribe::new(credentials.clone(), id)),
         );
     }
@@ -3205,7 +3206,9 @@ impl BinanceFutures {
         let id = self.next_spot_request_id("tealstreet-user-data-heartbeat");
         cx.send(
             socket,
-            format!(r#"{{"id":"{id}","method":"session.subscriptions"}}"#),
+            ControlFrame::subscription(format!(
+                r#"{{"id":"{id}","method":"session.subscriptions"}}"#
+            )),
         );
         self.account.spot_heartbeat_id = Some(id);
         self.account.spot_heartbeat_at = Some(cx.now);

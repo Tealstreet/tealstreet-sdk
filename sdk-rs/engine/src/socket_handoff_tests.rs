@@ -1,4 +1,5 @@
 use super::*;
+use crate::ControlFrame;
 use crate::request_context::{Claim, HttpAction, Operation, Policy, Prepared, RetryPolicy, Scope};
 use crate::socket::Config;
 use crate::socket_lifecycle::{AuthMode, AuthRecovery, Invalidation, TrafficPolicy};
@@ -683,7 +684,11 @@ impl crate::SignStep for ParkedStep {
 fn delayed_signer_blocks_frames_and_wakeup_until_the_real_signing_fifo_releases() {
     let (mut e, epoch) = started(Probe::default());
     queue(&mut e, &["book"], &["book"], 1).unwrap();
-    cx(&mut e).send_signed(epoch.socket(), "login".into(), Box::new(ParkedStep));
+    cx(&mut e).send_signed(
+        epoch.socket(),
+        ControlFrame::authentication("login"),
+        Box::new(ParkedStep),
+    );
     let out: Vec<_> = e.drain_actions().collect();
     let (attempt, receipt) = out
         .iter()
