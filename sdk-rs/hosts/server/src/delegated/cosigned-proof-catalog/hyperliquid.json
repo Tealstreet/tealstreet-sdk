@@ -1,0 +1,5 @@
+{
+  "status": "ready",
+  "probeTests": "src/session/tests/hyperliquid_local_proof.rs",
+  "sessionTests": "src/session/tests/hyperliquid_local_proof.rs"
+}

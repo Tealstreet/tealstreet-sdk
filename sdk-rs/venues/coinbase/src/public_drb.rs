@@ -236,9 +236,9 @@ impl Coinbase {
             cx,
             socket,
             if add {
-                "public/subscribe"
+                crate::drb::ControlMethod::PublicSubscribe
             } else {
-                "public/unsubscribe"
+                crate::drb::ControlMethod::PublicUnsubscribe
             },
             json!({"channels": channels}),
         )?;

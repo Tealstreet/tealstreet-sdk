@@ -11,27 +11,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
 
-const VENUES: &[&str] = &[
-    "bybitinverse",
-    "bybitdemo",
-    "bybitspot",
-    "binance",
-    "binancepm",
-    "binanceinverse",
-    "binancespot",
-    "okx",
-    "okxdemo",
-    "okxeu",
-    "bitget",
-    "bitgetusdc",
-    "blofin",
-    "kucoin",
-    "phemex",
-    "woo",
-    "bingx",
-    "mexc",
-    "bitunix",
-];
+const VENUES: &[&str] = SHARED_PROBE_VENUES;
 const KEY: &str = "synthetic-key";
 const SECRET: &str = "synthetic-material";
 const PASS: &str = "synthetic-passphrase";
@@ -40,6 +20,7 @@ const PASS: &str = "synthetic-passphrase";
 pub(crate) struct Seen {
     pub(crate) signed_reads: usize,
     pub(crate) config_refusals_remaining: usize,
+    pub(crate) refused_private_path: Option<&'static str>,
     pub(crate) config_refusal_status: Option<u16>,
     pub(crate) refused: usize,
     pub(crate) inverse_private_reads: usize,
@@ -50,6 +31,7 @@ pub(crate) struct Seen {
     pub(crate) bingx_private_sockets: usize,
     pub(crate) mexc_socket_auths: usize,
     pub(crate) bitunix_socket_auths: usize,
+    pub(crate) cryptocom_socket_auths: usize,
     paths: Vec<String>,
 }
 #[derive(Clone)]
@@ -71,7 +53,7 @@ fn family(venue: &str) -> &str {
     match venue {
         "bybitinverse" | "bybitdemo" | "bybitspot" => "bybit",
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
-        "okx" | "okxdemo" | "okxeu" => "okx",
+        "okx" | "okxdemo" | "okxeu" | "okxeudemo" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
         "blofin" | "kucoin" | "woo" | "bingx" | "mexc" => venue,
         _ => panic!("no private-read fixture for {venue}"),
@@ -158,7 +140,7 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
             "/api/v5/account/config",
             "/api/v5/trade/orders-pending",
         ),
-        "okxeu" => (
+        "okxeu" | "okxeudemo" => (
             "https://eea.okx.com",
             "/api/v5/account/config",
             "/api/v5/account/instruments?instType=FUTURES",
@@ -188,7 +170,7 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
         "{venue}: missing exact product: {:?}",
         seen.urls
     );
-    if venue == "okxeu" {
+    if matches!(venue, "okxeu" | "okxeudemo") {
         assert_eq!(
             seen.paths.first().map(String::as_str),
             Some("/api/v5/account/config")
@@ -199,7 +181,7 @@ pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
                 .any(|url| url == "https://eea.okx.com/api/v5/account/instruments?instType=SWAP")
         );
     }
-    if venue == "okxdemo" {
+    if matches!(venue, "okxdemo" | "okxeudemo") {
         assert_eq!(
             seen.demo_private_reads, seen.signed_reads,
             "every demo private read needs the simulated header"
@@ -236,6 +218,17 @@ impl VenueIo {
         Some(self.valid_private_signature(r))
     }
     fn valid_private_signature(&self, r: &HttpRequest) -> bool {
+        if self.venue == "okxeudemo" {
+            let simulated: Vec<_> = r
+                .headers
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("x-simulated-trading"))
+                .map(|(_, value)| value.as_str())
+                .collect();
+            if simulated != ["1"] {
+                return false;
+            }
+        }
         let method = if r.method == Method::Get {
             "GET"
         } else {
@@ -348,12 +341,15 @@ impl VenueIo {
         if self.venue == "bitunix" {
             return bitunix::response(self, r);
         }
+        if self.venue == "cryptocom" {
+            return cryptocom::response(self, r);
+        }
         if let Some(valid) = self.authenticated(r) {
             let mut seen = self.seen.lock().unwrap();
             seen.signed_reads += 1;
             seen.inverse_private_reads += usize::from(r.url.contains("category=inverse"));
             seen.demo_private_reads += usize::from(header(r, "x-simulated-trading") == Some("1"));
-            if !valid {
+            if !valid || seen.refused_private_path == Some(path(r).split('?').next().unwrap()) {
                 seen.refused += 1;
                 return match family(self.venue) {
                     "bybit" => {
@@ -368,7 +364,7 @@ impl VenueIo {
                 };
             }
         }
-        if self.venue == "okxeu" && path(r) == "/api/v5/account/config" {
+        if matches!(self.venue, "okxeu" | "okxeudemo") && path(r) == "/api/v5/account/config" {
             let mut seen = self.seen.lock().unwrap();
             if seen.config_refusals_remaining > 0 {
                 seen.config_refusals_remaining -= 1;
@@ -376,7 +372,9 @@ impl VenueIo {
                 return json!({"code":"50113","msg":"synthetic first signature refusal","data":[]});
             }
         }
-        if self.venue == "okxeu" && path(r) == "/api/v5/account/instruments?instType=FUTURES" {
+        if matches!(self.venue, "okxeu" | "okxeudemo")
+            && path(r) == "/api/v5/account/instruments?instType=FUTURES"
+        {
             return json!({"code":"0","msg":"","data":[]});
         }
         let fixtures: Value =
@@ -393,7 +391,9 @@ impl VenueIo {
             .and_then(Value::as_object)
             .unwrap();
         let url = path(r).split('?').next().unwrap();
-        let fixture_url = if self.venue == "okxeu" && url == "/api/v5/account/instruments" {
+        let fixture_url = if matches!(self.venue, "okxeu" | "okxeudemo")
+            && url == "/api/v5/account/instruments"
+        {
             "/api/v5/public/instruments"
         } else {
             url
@@ -444,6 +444,9 @@ impl Transport for VenueIo {
         if self.venue == "bitunix" {
             return bitunix::connect(self, socket, &url, events);
         }
+        if self.venue == "cryptocom" {
+            return cryptocom::connect(self, socket, &url, events);
+        }
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let _ = events.send(HostEvent::WsOpened(socket));
         let _ = events.send(HostEvent::WsMessage(
@@ -471,7 +474,8 @@ impl Transport for VenueIo {
         assert!(
             r.method == Method::Get
                 || (r.method == Method::Post
-                    && ((family(self.venue) == "binance" && path(&r).ends_with("listenKey"))
+                    && (self.venue == "cryptocom"
+                        || (family(self.venue) == "binance" && path(&r).ends_with("listenKey"))
                         || (self.venue == "bingx"
                             && path(&r) == "/openApi/user/auth/userDataStream")
                         || (self.venue == "kucoin"
@@ -751,6 +755,14 @@ enum DeviceAnswer {
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
+    if venue == "cryptocom" {
+        // Startup params are empty; the first digit begins the attempt-local nonce/id.
+        return canonical
+            .split(|c: char| c.is_ascii_digit())
+            .next()
+            .unwrap()
+            .into();
+    }
     if venue == "mexc" {
         return mexc::operation(canonical);
     }
@@ -843,6 +855,7 @@ async fn remote(
                     || text.contains("/user/verify")
                     || venue == "binancespot" && text.starts_with("apiKey=")
                     || venue == "woo" && text.starts_with('|')
+                    || venue == "cryptocom" && text.starts_with("public/auth")
             });
             let canonical = request["wsAuth"]["toSign"].as_str().unwrap();
             let operation = operation(venue, canonical);
@@ -1057,15 +1070,13 @@ fn admission_enabled_venues_require_an_offline_suite() {
         "../../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
     ))
     .unwrap();
-    // These use the Session local-proof positive/negative suite, not unsigned reads.
-    let local_proof_venues = ["hyperliquid", "hyperliquidspot"];
     assert_eq!(
         PRIVATE_STARTUP_VENUES.len(),
-        VENUES.len() + 1 + local_proof_venues.len()
+        VENUES.len() + STANDALONE_PROBE_VENUES.len()
     );
     for &venue in PRIVATE_STARTUP_VENUES {
         assert!(
-            venue == "bybit" || VENUES.contains(&venue) || local_proof_venues.contains(&venue),
+            STANDALONE_PROBE_VENUES.contains(&venue) || VENUES.contains(&venue),
             "{venue}: missing offline suite"
         );
     }
@@ -1251,7 +1262,34 @@ mod bingx;
 
 #[path = "bitunix_probe_tests.rs"]
 mod bitunix;
+#[path = "cryptocom_probe_tests.rs"]
+mod cryptocom;
+
 #[path = "mexc_probe_tests.rs"]
 mod mexc;
+#[path = "okxeudemo_probe_tests.rs"]
+mod okxeudemo;
 #[path = "woo_probe_tests.rs"]
 mod woo;
+
+#[test]
+fn generated_readiness_matches_every_per_venue_record() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/delegated/cosigned-proof-catalog");
+    let mut count = 0;
+    for entry in std::fs::read_dir(root).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().into_string().unwrap();
+        let venue = name.strip_suffix(".json").unwrap();
+        let record: Value =
+            serde_json::from_str(&std::fs::read_to_string(entry.path()).unwrap()).unwrap();
+        assert_eq!(
+            cosigned_ready(venue),
+            record["status"] == "ready",
+            "{venue}"
+        );
+        count += 1;
+    }
+    assert_eq!(count, 41);
+    assert!(!cosigned_ready("future-unproved-venue"));
+}
