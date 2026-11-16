@@ -1,0 +1,63 @@
+{
+  "/api/v2/symbols": {
+    "code": "200000",
+    "data": [
+      {
+        "symbol": "BTC-USDT",
+        "baseCurrency": "BTC",
+        "quoteCurrency": "USDT",
+        "enableTrading": true,
+        "baseIncrement": "0.00001",
+        "priceIncrement": "0.1",
+        "baseMinSize": "0.00001"
+      }
+    ]
+  },
+  "/api/v1/market/allTickers": {
+    "code": "200000",
+    "data": {
+      "ticker": [
+        {
+          "symbol": "BTC-USDT",
+          "last": "60000",
+          "buy": "59999",
+          "sell": "60001",
+          "vol": "12",
+          "volValue": "720000"
+        }
+      ]
+    }
+  },
+  "/api/v1/accounts": {
+    "code": "200000",
+    "data": [
+      { "currency": "USDT", "type": "trade", "balance": "1000", "available": "950", "holds": "50" }
+    ]
+  },
+  "/api/v1/hf/orders/active/symbols": {
+    "code": "200000",
+    "data": { "symbols": ["BTC-USDT"] }
+  },
+  "/api/v1/hf/orders/active/page": {
+    "code": "200000",
+    "data": { "items": [], "pageNum": 1, "pageSize": 50, "totalNum": 0, "totalPage": 1 }
+  },
+  "/api/v1/bullet-public": {
+    "code": "200000",
+    "data": {
+      "token": "synthetic-public-token",
+      "instanceServers": [
+        { "endpoint": "wss://kucoinspot.example.test", "pingInterval": 18000, "pingTimeout": 10000 }
+      ]
+    }
+  },
+  "/api/v1/bullet-private": {
+    "code": "200000",
+    "data": {
+      "token": "synthetic-private-token",
+      "instanceServers": [
+        { "endpoint": "wss://kucoinspot.example.test", "pingInterval": 18000, "pingTimeout": 10000 }
+      ]
+    }
+  }
+}

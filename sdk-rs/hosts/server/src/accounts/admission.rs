@@ -103,21 +103,31 @@ impl Credentials {
 }
 
 impl Registry {
-    fn proof_strategy(&self, _user: &str, _init: &InitPayload) -> ProofStrategy {
-        // No production local venue is ready until its authoritative binding
-        // and device path land. Client JSON can never supply these facts.
-        let local: Option<Arc<Projection>> = None;
+    fn proof_strategy(
+        &self,
+        user: &str,
+        init: &InitPayload,
+    ) -> Result<ProofStrategy, ProbeRefusal> {
         #[cfg(test)]
-        let local = self
+        if let Some(local) = self
             .local_proof_bindings
-            .get(&(_user.into(), admission_fingerprint(_init)))
+            .get(&(user.into(), admission_fingerprint(init)))
             .cloned()
-            .or(local);
-        local.map_or(ProofStrategy::PrivateStartup, ProofStrategy::Local)
+        {
+            return Ok(ProofStrategy::Local(local));
+        }
+        if init.exchange_name == "backpack"
+            && crate::delegated::probe::cosigned_ready(&init.exchange_name)
+        {
+            let projection =
+                identity::backpack_projection(user, init).map_err(|_| ProbeRefusal::INVALID)?;
+            return Ok(ProofStrategy::Local(Arc::new(projection)));
+        }
+        Ok(ProofStrategy::PrivateStartup)
     }
 
     pub(crate) fn cosigned_proof_ready(&self, user: &str, init: &InitPayload) -> bool {
-        matches!(self.proof_strategy(user, init), ProofStrategy::Local(_))
+        matches!(self.proof_strategy(user, init), Ok(ProofStrategy::Local(_)))
             || crate::delegated::probe::cosigned_ready(&init.exchange_name)
     }
 
@@ -141,7 +151,7 @@ impl Registry {
         }
         let registry_name =
             identity::registry_name(user, init).map_err(|_| ProbeRefusal::INVALID)?;
-        let strategy = self.proof_strategy(user, init);
+        let strategy = self.proof_strategy(user, init)?;
         let (reservation, local_deadline) = match &strategy {
             ProofStrategy::PrivateStartup => (self.proof_queues.reserve(user, init)?, None),
             ProofStrategy::Local(projection) => (
