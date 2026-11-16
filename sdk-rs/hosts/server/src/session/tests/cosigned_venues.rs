@@ -552,7 +552,7 @@ async fn venue_case(venue: &'static str) {
                 let refusal = &frame["d"]["data"][1];
                 refusal["kind"] == "unverified"
                     && refusal["transient"] == false
-                    && refusal["outcome"] == "notSent"
+                    && refusal["initRefused"] == true
             }));
         }
         candidate.close();
