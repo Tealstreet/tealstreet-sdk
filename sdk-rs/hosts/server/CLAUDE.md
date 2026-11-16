@@ -128,6 +128,13 @@ checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
 Binance base/PM/inverse/spot/options, OKX base/demo and EEA mainnet/demo, Bitget base/USDC,
 Blofin, KuCoin Futures/Spot, Phemex, BingX, MEXC and Crypto.com names have native private-startup HMAC proof coverage.
+Exact HyroTrader challenge accounts reuse native Bybit-shaped private-startup
+HMAC reads on the server-owned canonical native origin. REST and derived public/
+private WebSocket endpoints come from that origin only, never init URLs or a
+Bybit fallback. Testnet has no native origin and remains refused before I/O.
+The same positive, different-key, replay, foreign-socket, consumed-response and
+resident-preservation controls cover this exact catalog name. Private socket
+fixtures also check the real HMAC and correlated handshake before snapshot reads.
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
 HMAC proof with wrong-key, replay and foreign-socket controls.

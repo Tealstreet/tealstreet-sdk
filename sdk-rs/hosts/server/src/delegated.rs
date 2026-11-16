@@ -467,6 +467,7 @@ pub(crate) mod tests {
             "bybitspot",
             "bybitinverse",
             "bybitdemo",
+            "hyrotrader",
             "binance",
             "binanceoptions",
             "okx",
@@ -475,7 +476,7 @@ pub(crate) mod tests {
         ] {
             assert!(enabled(venue), "{venue}");
         }
-        for venue in ["hyrotrader", "txflow", "bingxspot", "", "BYBIT", "unknown"] {
+        for venue in ["txflow", "bingxspot", "", "BYBIT", "unknown"] {
             assert!(!enabled(venue), "{venue}");
         }
     }
