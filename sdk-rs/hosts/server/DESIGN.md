@@ -153,9 +153,13 @@ Every event is rebuilt from an allowlist:
 
 Private startup, admission and transport diagnostics carry that immutable owner
 separately from log labels, through deferred HTTP preparation and socket opens.
-The internal event metadata is removed by the final allowlist. Shared public
-transports, process-wide errors and panics stay unattributed; they never borrow
-an SDK user scope. Journal labels retain their existing hashed user IDs.
+Only the trusted report capture supplies identity, through a private, thread-local
+context matched to that event ID and consumed synchronously by `before_send`.
+The scope copy and final event discard the reserved `_verified_user_id` extra;
+serialized extras and SDK user fields never supply ownership. Nested captures
+restore their caller's context, and returning or unwinding clears it. Shared
+public transports, process-wide errors and panics stay unattributed; they never
+borrow an SDK user scope. Journal labels retain their existing hashed user IDs.
 
 Account names, URLs with their query, auth headers, key-shaped strings and
 payloads do not leave. Events are throttled to one per fingerprint per 60 s

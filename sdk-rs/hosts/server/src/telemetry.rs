@@ -15,6 +15,7 @@
 //! queue that drops when full; nothing flushes inline, so a failure storm or a
 //! stalled Sentry can never slow a trading path.
 use sentry::protocol::{Event, Exception, Frame, Level, Mechanism, Stacktrace, Value, Values};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -40,11 +41,25 @@ const TAGS: &[&str] = &[
     "user_id",
 ];
 const EXTRAS: &[&str] = &["user_tag", "suppressed_since_last_event"];
-// Only Report's captured owner uses this internal field; SDK user scopes do not.
+// Reserved legacy metadata is untrusted, whether supplied by an event or scope.
 const VERIFIED_USER_ID: &str = "_verified_user_id";
 const LEASE_WORK_COUNTS: &[&str] = &["running_jobs", "paused_jobs", "pending_work"];
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
+
+// Sentry 0.49 prepares events synchronously. Match the exact capture and consume
+// once, so SDK scopes, nested unrelated events and later captures cannot borrow it.
+thread_local! {
+    static CAPTURED_OWNER: RefCell<Option<(sentry::types::Uuid, String)>> = const { RefCell::new(None) };
+}
+
+struct CaptureOwnerGuard(Option<(sentry::types::Uuid, String)>);
+
+impl Drop for CaptureOwnerGuard {
+    fn drop(&mut self) {
+        CAPTURED_OWNER.set(self.0.take());
+    }
+}
 
 /// The identity every event carries, from the box's environment.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -302,13 +317,12 @@ pub fn scrub(text: &str) -> String {
 
 /// The event that leaves: allowlisted fields only, identity set here rather
 /// than inferred by the SDK.
-fn allowlisted(event: Event<'static>, identity: &Identity, suppressed: u32) -> Event<'static> {
-    let user_id = event
-        .extra
-        .get(VERIFIED_USER_ID)
-        .and_then(Value::as_str)
-        .filter(|id| !id.is_empty() && id.len() <= 512 && !id.chars().any(char::is_control))
-        .map(str::to_owned);
+fn allowlisted(
+    event: Event<'static>,
+    identity: &Identity,
+    suppressed: u32,
+    user_id: Option<String>,
+) -> Event<'static> {
     let lease_fence = event
         .tags
         .get("kind")
@@ -481,10 +495,19 @@ pub fn client_options(dsn: &str, identity: Identity) -> Option<sentry::ClientOpt
     options.auto_session_tracking = false;
     options.shutdown_timeout = Duration::from_secs(2);
     options.before_breadcrumb = Some(Arc::new(|_| None));
-    options.before_send = Some(Arc::new(move |event| {
+    options.before_send = Some(Arc::new(move |mut event| {
+        event.extra.remove(VERIFIED_USER_ID);
+        let user_id = CAPTURED_OWNER.with(|owner| {
+            let mut owner = owner.borrow_mut();
+            if owner.as_ref().is_some_and(|(id, _)| *id == event.event_id) {
+                owner.take().map(|(_, subject)| subject)
+            } else {
+                None
+            }
+        });
         let key = throttle_key(&event);
         let suppressed = throttle.lock().ok()?.claim(&key, Instant::now())?;
-        Some(allowlisted(event, &send, suppressed))
+        Some(allowlisted(event, &send, suppressed, user_id))
     }));
     Some(options)
 }
@@ -552,12 +575,6 @@ impl Report<'_> {
             }
         }
         let mut extra = BTreeMap::new();
-        if let Some(user_id) = self.user_id {
-            extra.insert(
-                VERIFIED_USER_ID.to_owned(),
-                Value::String(user_id.to_owned()),
-            );
-        }
         if let Some(user_tag) = &self.user_tag {
             extra.insert("user_tag".to_owned(), Value::String(user_tag.clone()));
         }
@@ -599,7 +616,18 @@ pub fn capture(report: &Report<'_>) {
 }
 
 fn capture_report(report: &Report<'_>) {
-    sentry::capture_event(report.event());
+    let event = report.event();
+    let owner = report
+        .user_id
+        .filter(|id| !id.is_empty() && id.len() <= MAX_TEXT && !id.chars().any(char::is_control))
+        .map(|id| (event.event_id, id.to_owned()));
+    let _owner = CaptureOwnerGuard(CAPTURED_OWNER.replace(owner));
+    sentry::with_scope(
+        |scope| scope.remove_extra(VERIFIED_USER_ID),
+        || {
+            sentry::capture_event(event);
+        },
+    );
 }
 
 /// The native host's account-start and transport failures.
@@ -747,6 +775,169 @@ mod tests {
     }
 
     #[test]
+    fn serialized_owner_markers_never_grant_identity() {
+        for scoped in [false, true] {
+            let events = captured(Identity::default(), || {
+                let mut event = report_event(&Report {
+                    kind: "unowned",
+                    summary: "fixed summary",
+                    user_id: Some("auth0|not-a-trusted-capture"),
+                    ..Default::default()
+                });
+                assert!(
+                    !serde_json::to_string(&event)
+                        .unwrap()
+                        .contains("not-a-trusted-capture")
+                );
+                let forged = "scope@example.invalid secret=synthetic-only";
+                if scoped {
+                    sentry::configure_scope(|scope| {
+                        scope.set_extra(VERIFIED_USER_ID, forged.into())
+                    });
+                } else {
+                    event.extra.insert(VERIFIED_USER_ID.into(), forged.into());
+                }
+                sentry::capture_event(event);
+            });
+            assert_eq!(events.len(), 1);
+            assert!(events[0].user.is_none());
+            assert!(!events[0].tags.contains_key("user_id"));
+            let serialized = serde_json::to_string(&events[0]).unwrap();
+            assert!(!serialized.contains("synthetic-only"));
+            assert!(!serialized.contains(VERIFIED_USER_ID));
+        }
+    }
+
+    #[test]
+    fn reserved_metadata_is_removed_from_scope_and_processed_event() {
+        let events = captured(Identity::default(), || {
+            sentry::configure_scope(|scope| {
+                scope.set_extra(VERIFIED_USER_ID, "scope@example.invalid".into());
+                scope.add_event_processor(|mut event| {
+                    assert!(!event.extra.contains_key(VERIFIED_USER_ID));
+                    event.extra.insert(
+                        VERIFIED_USER_ID.into(),
+                        "processor@example.invalid secret=synthetic-only".into(),
+                    );
+                    Some(event)
+                });
+            });
+            capture_report(&Report {
+                kind: "owned",
+                summary: "fixed summary",
+                user_id: Some("auth0|captured-owner"),
+                ..Default::default()
+            });
+        });
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].user.as_ref().unwrap().id.as_deref(),
+            Some("auth0|captured-owner")
+        );
+        assert_eq!(
+            events[0].tags.get("user_id").map(String::as_str),
+            Some("auth0|captured-owner")
+        );
+        let serialized = serde_json::to_string(&events[0]).unwrap();
+        assert!(!serialized.contains("example.invalid"));
+        assert!(!serialized.contains("synthetic-only"));
+        assert!(!serialized.contains(VERIFIED_USER_ID));
+    }
+
+    #[test]
+    fn nested_and_later_events_cannot_borrow_a_capture_owner() {
+        let events = captured(Identity::default(), || {
+            sentry::configure_scope(|scope| {
+                scope.add_event_processor(|event| {
+                    if event.tags.get("kind").is_some_and(|kind| kind == "outer") {
+                        capture_report(&Report {
+                            kind: "inner",
+                            summary: "fixed summary",
+                            user_id: Some("auth0|inner-owner"),
+                            ..Default::default()
+                        });
+                        sentry::capture_event(report_event(&Report {
+                            kind: "unrelated",
+                            summary: "fixed summary",
+                            ..Default::default()
+                        }));
+                    }
+                    Some(event)
+                })
+            });
+            capture_report(&Report {
+                kind: "outer",
+                summary: "fixed summary",
+                user_id: Some("auth0|outer-owner"),
+                ..Default::default()
+            });
+            assert!(CAPTURED_OWNER.with(|owner| owner.borrow().is_none()));
+            sentry::capture_event(report_event(&Report {
+                kind: "later",
+                summary: "fixed summary",
+                ..Default::default()
+            }));
+        });
+        assert_eq!(events.len(), 4);
+        for (event, kind, owner) in [
+            (&events[0], "inner", Some("auth0|inner-owner")),
+            (&events[1], "unrelated", None),
+            (&events[2], "outer", Some("auth0|outer-owner")),
+            (&events[3], "later", None),
+        ] {
+            assert_eq!(event.tags.get("kind").map(String::as_str), Some(kind));
+            assert_eq!(
+                event.user.as_ref().and_then(|user| user.id.as_deref()),
+                owner
+            );
+            assert_eq!(event.tags.get("user_id").map(String::as_str), owner);
+        }
+    }
+
+    #[test]
+    fn capture_owner_is_cleared_on_unwind_and_never_labels_the_panic() {
+        let events = captured(Identity::default(), || {
+            sentry::configure_scope(|scope| {
+                scope.add_event_processor(|event| {
+                    if event
+                        .tags
+                        .get("kind")
+                        .is_some_and(|kind| kind == "broken-capture")
+                    {
+                        panic!("synthetic processor failure");
+                    }
+                    Some(event)
+                })
+            });
+            assert!(
+                std::panic::catch_unwind(|| capture_report(&Report {
+                    kind: "broken-capture",
+                    summary: "fixed summary",
+                    user_id: Some("auth0|owner-before-unwind"),
+                    ..Default::default()
+                }))
+                .is_err()
+            );
+            assert!(CAPTURED_OWNER.with(|owner| owner.borrow().is_none()));
+            capture_report(&Report {
+                kind: "after-unwind",
+                summary: "fixed summary",
+                ..Default::default()
+            });
+        });
+        assert_eq!(events.len(), 2);
+        for event in events {
+            assert!(event.user.is_none());
+            assert!(!event.tags.contains_key("user_id"));
+            assert!(
+                !serde_json::to_string(&event)
+                    .unwrap()
+                    .contains("owner-before-unwind")
+            );
+        }
+    }
+
+    #[test]
     fn hosted_user_identity_survives_the_final_scrubber_without_other_user_fields() {
         for subject in [
             "auth0|synthetic-owner-a",
@@ -754,26 +945,22 @@ mod tests {
             "disrupt:auth0|synthetic-owner-b",
         ] {
             let events = captured(Identity::default(), || {
-                let mut event = report_event(&Report {
+                sentry::configure_scope(|scope| {
+                    scope.set_user(Some(sentry::User {
+                        id: Some("another-scope-owner".into()),
+                        email: Some("private@example.invalid".into()),
+                        username: Some("private account label".into()),
+                        ..Default::default()
+                    }));
+                    scope.set_tag("account", "private account label");
+                    scope.set_extra("api_key", "synthetic-key".into());
+                });
+                capture_report(&Report {
                     kind: "account.start_failed",
-                    summary: "account start failed",
+                    summary: "request failed: secret=synthetic-secret",
+                    user_id: Some(subject),
                     ..Default::default()
                 });
-                event
-                    .extra
-                    .insert("_verified_user_id".into(), subject.into());
-                event.user = Some(sentry::User {
-                    id: Some("another-scope-owner".into()),
-                    email: Some("private@example.invalid".into()),
-                    username: Some("private account label".into()),
-                    ..Default::default()
-                });
-                event
-                    .tags
-                    .insert("account".into(), "private account label".into());
-                event.extra.insert("api_key".into(), "synthetic-key".into());
-                event.message = Some("request failed: secret=synthetic-secret".into());
-                sentry::capture_event(event);
             });
             assert_eq!(events.len(), 1);
             let event = &events[0];
@@ -833,7 +1020,7 @@ mod tests {
             ErrorKind::RequestFailed,
         ] {
             let events = captured(Identity::default(), || {
-                let event = from_native(&ErrorReport {
+                capture_report(&from_native(&ErrorReport {
                     kind,
                     user: Some(&user),
                     label: Some("other-tag private-account bybit"),
@@ -843,9 +1030,7 @@ mod tests {
                     venue_code: None,
                     startup_unloaded: None,
                     startup_refused: None,
-                })
-                .event();
-                sentry::capture_event(event);
+                }));
             });
             assert_eq!(
                 events[0].user.as_ref().unwrap().id.as_deref(),
@@ -863,12 +1048,12 @@ mod tests {
     #[test]
     fn owned_service_reports_keep_the_verified_subject_but_not_the_internal_field() {
         let events = captured(Identity::default(), || {
-            sentry::capture_event(report_event(&Report {
+            capture_report(&Report {
                 kind: "signer.failing",
                 summary: "signer keeps failing; account disposed",
                 user_id: Some("auth0|synthetic-owner"),
                 ..Default::default()
-            }));
+            });
         });
         assert_eq!(
             events[0].user.as_ref().unwrap().id.as_deref(),
