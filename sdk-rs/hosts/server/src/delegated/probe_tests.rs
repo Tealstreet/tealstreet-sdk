@@ -15,6 +15,7 @@ const VENUES: &[&str] = &[
     "bybitinverse",
     "bybitdemo",
     "bybitspot",
+    "hyrotrader",
     "binance",
     "binancepm",
     "binanceinverse",
@@ -44,6 +45,7 @@ pub(crate) struct Seen {
     pub(crate) refused: usize,
     pub(crate) inverse_private_reads: usize,
     pub(crate) urls: Vec<String>,
+    pub(crate) sockets: Vec<String>,
     pub(crate) demo_private_reads: usize,
     pub(crate) phemex_socket_auths: usize,
     pub(crate) woo_socket_auths: usize,
@@ -69,7 +71,7 @@ fn path(r: &HttpRequest) -> &str {
 }
 fn family(venue: &str) -> &str {
     match venue {
-        "bybitinverse" | "bybitdemo" | "bybitspot" => "bybit",
+        "bybitinverse" | "bybitdemo" | "bybitspot" | "hyrotrader" => "bybit",
         "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
         "okx" | "okxdemo" | "okxeu" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
@@ -122,12 +124,86 @@ fn admission_binance_spot_subscription_checks_valid_and_invalid_hmac() {
     }
 }
 
+fn hyro_socket_auth(value: &Value) -> bool {
+    let args = &value["args"];
+    let material = match args[0].as_str() {
+        Some(KEY) => SECRET,
+        Some("synthetic-other-key") => "synthetic-other-material",
+        _ => return false,
+    };
+    let Some(expires) = args[1].as_u64() else {
+        return false;
+    };
+    expires > crate::accounts::now_ms()
+        && args[2]
+            == hmac_sha256(
+                material.as_bytes(),
+                format!("GET/realtime{expires}").as_bytes(),
+                Encoding::Hex,
+            )
+}
+
+#[test]
+fn hyrotrader_admission_socket_checks_key_signature_and_expiry() {
+    let expires = crate::accounts::now_ms() + 10_000;
+    for (key, material) in [
+        (KEY, SECRET),
+        ("synthetic-other-key", "synthetic-other-material"),
+    ] {
+        let signature = hmac_sha256(
+            material.as_bytes(),
+            format!("GET/realtime{expires}").as_bytes(),
+            Encoding::Hex,
+        );
+        let valid = json!({"args":[key,expires,signature]});
+        assert!(hyro_socket_auth(&valid));
+        for field in [0, 1, 2] {
+            let mut invalid = valid.clone();
+            invalid["args"][field] = "invalid".into();
+            assert!(!hyro_socket_auth(&invalid));
+        }
+    }
+    let expired =
+        json!({"args":[KEY,0,hmac_sha256(SECRET.as_bytes(), b"GET/realtime0", Encoding::Hex)]});
+    assert!(!hyro_socket_auth(&expired));
+}
+
 pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
     if venue == "mexc" {
         mexc::assert_startup(seen);
         return;
     }
+    if venue == "hyrotrader" {
+        let origin = "https://sim-tealstreet.hyro.site";
+        assert!(
+            seen.urls
+                .iter()
+                .all(|url| url.starts_with(&format!("{origin}/"))),
+            "{:?}",
+            seen.urls
+        );
+        assert!(
+            seen.sockets
+                .iter()
+                .any(|url| url == "wss://sim-tealstreet.hyro.site/v5/public/linear")
+        );
+        assert!(
+            seen.sockets
+                .iter()
+                .any(|url| url == "wss://sim-tealstreet.hyro.site/v5/private")
+        );
+        assert!(
+            seen.sockets
+                .iter()
+                .all(|url| url.starts_with("wss://sim-tealstreet.hyro.site/"))
+        );
+    }
     let (origin, private, product) = match venue {
+        "hyrotrader" => (
+            "https://sim-tealstreet.hyro.site",
+            "/v5/account/wallet-balance",
+            "category=linear",
+        ),
         "bybitdemo" => (
             "https://api-demo.bybit.com",
             "/v5/account/wallet-balance",
@@ -426,6 +502,7 @@ impl Transport for VenueIo {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        self.seen.lock().unwrap().sockets.push(url.clone());
         if self.venue == "mexc" {
             return mexc::connect(self, socket, &url, events);
         }
@@ -452,12 +529,19 @@ impl Transport for VenueIo {
         ));
         let venue = self.venue;
         let spot_private = venue == "binancespot" && url.contains("/ws-api/");
+        let hyro_private = venue == "hyrotrader" && url.ends_with("/v5/private");
         tokio::task::spawn_local(async move {
+            let mut hyro_authed = false;
             while let Some(text) = rx.recv().await {
                 let Ok(v) = serde_json::from_str::<Value>(&text) else {
                     continue;
                 };
-                let reply = if spot_private {
+                let reply = if hyro_private {
+                    if v["op"] == "auth" {
+                        hyro_authed = hyro_socket_auth(&v);
+                    }
+                    json!({"op":v["op"],"req_id":v["req_id"],"success":hyro_authed})
+                } else if spot_private {
                     spot_subscription_reply(&v)
                 } else {
                     json!({"event":v["op"],"op":v["op"],"success":true,"code":"0","msg":"","type":"ack","id":v["id"]})
@@ -537,6 +621,17 @@ impl<T: Transport + Send> BoundHttp for Bound<T> {
         tokio::spawn(async {}).abort_handle()
     }
 }
+fn with_hosted_endpoints(venue: &str, mut options: Value) -> Value {
+    if venue == "hyrotrader" {
+        let init = crate::envelope::InitPayload {
+            exchange_name: venue.into(),
+            ..Default::default()
+        };
+        options["endpoints"] = crate::accounts::engine_options(&init, false)["endpoints"].clone();
+    }
+    options
+}
+
 fn local(venue: &str, material: &str) -> super::super::PreparedDelegated {
     let mut options: safe_cex_venues::EngineOptions =
         serde_json::from_value(json!({"key":KEY,"secret":material,"passphrase":PASS})).unwrap();
@@ -546,7 +641,7 @@ fn local(venue: &str, material: &str) -> super::super::PreparedDelegated {
     // admission remains gated separately; no test declaration enables a venue.
     super::super::PreparedDelegated {
         plan: Default::default(),
-        options: json!({"signing":identities,"publicDataOnly":false,"accountStartup":true,"remoteSigning":false,"payloadSigner":false}).to_string(),
+        options: with_hosted_endpoints(venue, json!({"signing":identities,"publicDataOnly":false,"accountStartup":true,"remoteSigning":false,"payloadSigner":false})).to_string(),
         resident: ResidentCopy::test_provider(provider),
     }
 }
@@ -845,6 +940,14 @@ async fn remote(
                     || venue == "woo" && text.starts_with('|')
             });
             let canonical = request["wsAuth"]["toSign"].as_str().unwrap();
+            // Isolate Hyro's private-read refusal behind a valid socket handshake;
+            // wrong socket HMACs have their own fixture controls above.
+            let fresh =
+                if venue == "hyrotrader" && is_ws && matches!(answer, DeviceAnswer::DifferentKey) {
+                    hmac_sha256(SECRET.as_bytes(), canonical.as_bytes(), Encoding::Hex)
+                } else {
+                    fresh
+                };
             let operation = operation(venue, canonical);
             let signature = if !is_ws && matches!(answer, DeviceAnswer::Replay) {
                 let old = prior
@@ -882,7 +985,7 @@ async fn remote(
         link.clone(),
         venue,
         Some("synthetic-pending".into()),
-        &json!({"key":KEY,"passphrase":PASS}).to_string(),
+        &with_hosted_endpoints(venue, json!({"key":KEY,"passphrase":PASS})).to_string(),
     )
     .unwrap();
     (

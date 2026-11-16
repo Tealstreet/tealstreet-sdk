@@ -14,6 +14,7 @@ The exact proof-ready venue names are:
 | `bybit` | Native private startup, existing Bybit session suite |
 | `bybitinverse` | Native inverse private startup, HMAC valid/wrong-key/replay controls and Brazil-site session suite |
 | `bybitdemo`, `bybitspot` | Native demo/spot private startup and shared HMAC/session negatives; exact origin and category checks |
+| `hyrotrader` | Native challenge-site private startup and shared HMAC/session negatives; server-owned canonical REST/WS map, no Bybit fallback or testnet |
 | `binance` | Native private startup and shared HMAC suite |
 | `binancepm`, `binanceinverse`, `binancespot` | Native PAPI/DAPI/spot private startup and shared HMAC/session negatives; exact product routes |
 | `okx` | Native private startup and shared HMAC suite |

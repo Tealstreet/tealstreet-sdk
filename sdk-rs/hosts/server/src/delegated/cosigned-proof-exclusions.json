@@ -53,10 +53,6 @@
       "reason": "Spot address-based reads do not prove the wallet key; exact Spot wallet/agent/vault possession and authorization proof is not built."
     },
     {
-      "venue": "hyrotrader",
-      "reason": "Client Hosted gate blocks this venue because no native server origin exists; exact simulator startup proof is not built."
-    },
-    {
       "venue": "kraken",
       "reason": "Native Futures private-startup proof for the primary key, signed-path custody and replay/socket controls is not built."
     },

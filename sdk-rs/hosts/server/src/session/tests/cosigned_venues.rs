@@ -9,6 +9,8 @@ const READY: &[&str] = &[
     "bybitinverse",
     "bybitdemo",
     "bybitspot",
+    // HyroTrader's exact native proof is pinned below, independently of Bybit readiness.
+    "hyrotrader",
     "binance",
     "binancepm",
     "binanceinverse",
@@ -801,3 +803,51 @@ async fn cosigned_bitunix_requires_connection_proof() {
 
 #[path = "cosigned_okxeu.rs"]
 mod eea;
+
+#[tokio::test]
+async fn cosigned_hyrotrader_requires_connection_proof() {
+    venue_case("hyrotrader").await;
+}
+
+#[tokio::test]
+async fn cosigned_hyrotrader_testnet_refuses_without_signing_or_venue_io() {
+    let (io, seen) = MockVenue::for_admission("hyrotrader");
+    let registry = crate::accounts::testing::e2e_registry("alice", io);
+    let (mut session, mut sent) = user_session(registry.clone(), "alice");
+    session.identity.resumable = false;
+    let mut completed = session.take_verified();
+    let mut init = payload("hyrotrader");
+    init.testnet = Some(true);
+    session.init(init).await.unwrap();
+    if session.pending_verifications.contains_key("acct") {
+        let done = tokio::time::timeout(Duration::from_secs(3), completed.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        session.verification_completed(done).await.unwrap();
+    }
+    assert!(session.joined.is_empty());
+    assert!(registry.held("alice", "acct", session.socket).is_none());
+    assert_eq!(registry.account_count(), 0);
+    let frames: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+        .map(|frame| serde_json::from_str(&frame).unwrap())
+        .collect();
+    assert!(
+        frames
+            .iter()
+            .any(|f| f["d"]["data"][1]["initRefused"] == true
+                && f["d"]["data"][1]["outcome"] == "notSent"
+                && f["d"]["data"][1]["transient"] == false)
+    );
+    assert!(
+        !frames
+            .iter()
+            .any(|f| f["t"] == "sign-req" || f["d"]["op"] == "frame")
+    );
+    let observed = seen.lock().unwrap();
+    assert_eq!(observed.signed_reads, 0);
+    assert!(observed.urls.is_empty());
+    assert!(observed.sockets.is_empty());
+    drop(observed);
+    session.close();
+}

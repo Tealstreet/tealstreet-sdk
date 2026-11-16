@@ -12,6 +12,7 @@ pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
     "bybitinverse",
     "bybitdemo",
     "bybitspot",
+    "hyrotrader",
     "binance",
     "binancepm",
     "binanceinverse",

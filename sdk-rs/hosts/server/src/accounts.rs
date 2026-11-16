@@ -790,14 +790,13 @@ type Notices = Arc<Mutex<HashMap<NoticeKey, StopRecord>>>;
 /// How long an undelivered stop notice waits for the account's next init.
 pub const NOTICE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// Engine options for a hosted account: non-secret init fields only.
-/// HyroTrader's origins are browser build configuration the server does not have;
-/// without them its engine would start with no endpoints.
+/// Hyro's hosted endpoint map is derived only from the native canonical origin.
+/// If that origin is absent, refuse instead of falling back to Bybit.
 pub const HYROTRADER_UNHOSTED: &str = "HyroTrader accounts cannot run on the hosted server: its HyroTrader endpoints are not configured. Turn hosted mode off for this account.";
 
 /// A venue the server cannot run correctly is refused at init, never started degraded.
 pub fn refuse_unhosted(venue: &str) -> Result<(), String> {
-    if venue == "hyrotrader" {
+    if venue == "hyrotrader" && resolve::rest_base_url(venue, false).is_err() {
         return Err(HYROTRADER_UNHOSTED.into());
     }
     Ok(())
@@ -855,6 +854,21 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     }
     if init.testnet == Some(true) {
         options.insert("testnet".into(), true.into());
+    }
+    // Use the same canonical challenge origin as native routing; init JSON and
+    // browser build overrides never select the hosted endpoint map.
+    if init.exchange_name == "hyrotrader"
+        && let Ok(rest) = resolve::rest_base_url("hyrotrader", init.testnet.unwrap_or(false))
+        && let Some(authority) = rest.strip_prefix("https://")
+    {
+        options.insert(
+            "endpoints".into(),
+            json!({
+                "rest": rest,
+                "publicWs": format!("wss://{authority}/v5/public/linear"),
+                "privateWs": format!("wss://{authority}/v5/private")
+            }),
+        );
     }
     // The page sets this in production; BloFin refuses orders without its broker id.
     options.insert("brokerAttribution".into(), true.into());
@@ -3398,9 +3412,10 @@ pub(crate) mod tests {
         let old_permit = registry.router_leases.get("u").unwrap().permit();
         assert!(old_permit.allowed());
         registry.pacer.admit().await;
+        // Hyro now has hosted endpoints; TxFlow retains the unhosted preparation control.
         let init = InitPayload {
             account_name: "acct".into(),
-            exchange_name: "hyrotrader".into(),
+            exchange_name: "txflow".into(),
             ..Default::default()
         };
         let expected_control = prepare(&init, false, Some(SignerLink::new(8, Arc::new(|_| true))))
@@ -3455,9 +3470,10 @@ pub(crate) mod tests {
         registry.pacer = crate::pacing::Pacer::new(1, Duration::ZERO);
         let registry = Arc::new(registry);
         registry.pacer.admit().await;
+        // Hyro now has hosted endpoints; TxFlow retains the unhosted preparation control.
         let old = InitPayload {
             account_name: "acct".into(),
-            exchange_name: "hyrotrader".into(),
+            exchange_name: "txflow".into(),
             key: "synthetic-A".into(),
             ..Default::default()
         };
@@ -4061,9 +4077,10 @@ pub(crate) mod tests {
         let registry = Arc::new(registry);
         registry.pacer.admit().await;
         // This venue's ordinary preparation refuses locally, with no venue IO.
+        // Hyro now has hosted endpoints; TxFlow retains the unhosted preparation control.
         let init = InitPayload {
             account_name: "acct".into(),
-            exchange_name: "hyrotrader".into(),
+            exchange_name: "txflow".into(),
             key: "synthetic".into(),
             ..Default::default()
         };
@@ -5093,11 +5110,36 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn hosted_hyrotrader_is_refused_visibly() {
+    fn hosted_hyrotrader_endpoints_are_server_owned_and_testnet_stays_refused() {
+        let mut init: InitPayload = serde_json::from_value(json!({
+            "exchangeName":"hyrotrader", "accountName":"fixture", "key":"synthetic-key",
+            "endpoints":{"rest":"https://client.invalid","publicWs":"wss://client.invalid/public","privateWs":"wss://client.invalid/private"},
+            "hyrotrader":{"mode":"demo","production":{"rest":{"livenet":"https://client.invalid"}}}
+        })).unwrap();
+        let options = engine_options(&init, false);
         assert_eq!(
-            refuse_unhosted("hyrotrader"),
-            Err(HYROTRADER_UNHOSTED.to_owned())
+            options["endpoints"],
+            json!({
+                "rest":"https://sim-tealstreet.hyro.site",
+                "publicWs":"wss://sim-tealstreet.hyro.site/v5/public/linear",
+                "privateWs":"wss://sim-tealstreet.hyro.site/v5/private"
+            })
         );
+        assert!(!options.to_string().contains("client.invalid"));
+        assert!(routing_plan(&init, false).is_ok());
+        init.testnet = Some(true);
+        assert!(engine_options(&init, false).get("endpoints").is_none());
+        assert!(routing_plan(&init, false).is_err());
+        let other = InitPayload {
+            exchange_name: "bybit".into(),
+            ..Default::default()
+        };
+        assert!(engine_options(&other, false).get("endpoints").is_none());
+    }
+
+    #[test]
+    fn hosted_hyrotrader_uses_the_native_origin_gate() {
+        assert_eq!(refuse_unhosted("hyrotrader"), Ok(()));
         assert_eq!(refuse_unhosted("bybit"), Ok(()));
     }
 
