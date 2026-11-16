@@ -44,6 +44,10 @@ fn deployed_proxy_hosts_join_venue_urls_exactly_as_typescript() {
     for (venue, path) in [
         ("coinbase", "/public/get_instruments?currency=USDC"),
         ("coinbasespot", "/api/v3/brokerage/accounts?limit=1"),
+        (
+            "binanceoptions",
+            "/eapi/v1/openOrders?symbol=BTC-260626-60000-C&timestamp=1&signature=ab%2Bc",
+        ),
     ] {
         let base = safe_cex_native::resolve::rest_base_url(venue, false).unwrap();
         let inputs = account_transport(venue, &account).unwrap();

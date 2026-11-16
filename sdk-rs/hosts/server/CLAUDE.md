@@ -125,8 +125,8 @@ DELEGATED hosted eligibility. The COSIGNED proof-ready catalog does not restrict
 DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
-Binance base/PM/inverse/spot, OKX base/demo, Bitget base/USDC,
-Blofin, KuCoin, Phemex and BingX names have native private-startup HMAC proof coverage.
+Binance base/PM/inverse/spot, OKX base/demo and EEA mainnet/demo, Bitget base/USDC,
+Blofin, KuCoin, Phemex, BingX and MEXC names have native private-startup HMAC proof coverage.
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
 HMAC proof with wrong-key, replay and foreign-socket controls.
@@ -139,7 +139,9 @@ There is no server-local proof shortcut or trading write in that probe.
 Variant tests pin product routes, origins and demo headers as well as the
 wrong-key, replay, foreign-socket and resident-preservation controls. BingX perpetuals
 prove signed private account reads independently of API-key-only listen-key acquisition;
-Spot and testnet do not inherit that proof. Other
+Spot and testnet do not inherit that proof. MEXC mainnet uses native signed
+position-mode and account reads, with private-stream HMAC and wrong-key/replay/socket
+controls. Its missing sandbox remains refused; public discovery is not proof. Other
 private COSIGNED joins return the typed `proof-unavailable` init refusal.
 A pending COSIGNED signer belongs only to its joining connection; probe frames
 are consumed internally. The shared local-proof strategy captures canonical
@@ -154,6 +156,12 @@ and authoritative per-family facts must precede any activation. Matching COSIGNE
 mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
 accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
+
+OKX EEA mainnet and demo prove signed config before keyed discovery and require full
+private startup. One re-signed `50113` retry is allowed per bootstrap read; a
+second consecutive refusal is permanent. Exact EEA demo additionally requires
+one `x-simulated-trading: 1` header on every private startup read.
+The captured admission budget and socket/init/token/lease fences are unchanged.
 
 ApeX remote signing uses the existing device `apexomni-batch` codec for native
 REST/login graphs and atomic contract dependencies. Only opaque OmniKey refs

@@ -54,6 +54,7 @@ export class WasmEngine implements WasmEngineLike {
   useExternalSigner(algorithmsJson?: string): void;
   coinbaseSigningMetadata?(): string;
   hostedSigningClock(now: number): string;
+  prepareJoinProof(requestJson: string, now: number): string;
   prepareHostedSigning(inputJson: string, now: number): string;
   localHostedSigning(id: number, now: number): string;
   finishHostedSigning(id: number, resultJson: string, now: number): string;

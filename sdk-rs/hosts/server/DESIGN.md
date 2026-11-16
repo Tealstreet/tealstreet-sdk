@@ -757,7 +757,19 @@ classifier uses engine `ErrorKind` values: authentication failures are invalid,
 rate limits and transport failures are transient, and complete private startup
 is accepted.
 Unclassified startup failures remain transient refusals. Public-only and
-frame-fed accounts cannot satisfy this check.
+frame-fed accounts cannot satisfy this check. MEXC mainnet proves its normal
+private position-mode, balance, positions and three order-surface reads using
+API-key/timestamp/query HMAC headers; private-stream login is also validated by
+the offline fixture. Wrong-key and replayed signatures fail before attachment,
+foreign sockets cannot settle signing work, and the resident stays unchanged.
+MEXC has no hosted testnet alias; public discovery never proves possession.
+
+OKX EEA mainnet and demo authenticate native signed config before keyed catalogue
+discovery, retaining the config authority until market-dependent settings apply.
+Config alone cannot complete the probe. Consecutive signature refusals allow
+one re-signed read then fail permanently; no admission budget is extended.
+Exact EEA demo also proves its simulated-trading header on native startup reads;
+missing, mainnet-valued or duplicate headers cannot satisfy that proof.
 
 Exact `bitunix` readiness uses that venue round trip, with the existing native
 double-SHA256 secret-suffix request signer. Its synthetic venue independently
