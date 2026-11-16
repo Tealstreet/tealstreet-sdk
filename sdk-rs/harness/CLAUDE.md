@@ -65,3 +65,10 @@ The exact merged module hashes are recorded beside their budget entries.
 Bybit product parity fixtures service the engine's set/clear timers and retain
 original waiting HTTP permits until release or cancellation. Their monotonic
 virtual clock also validates native signature timestamps; waits never refresh deadlines.
+
+Shared artifact membership is frozen in `sdk-rs/artifact-census.json`. Additions
+and retirements update that independent census explicitly; value-only edits do not.
+Budget imports validate raw duplicate/name membership before evaluating the map.
+The closed source scanner ignores nested template text and expressions, rejecting
+unsupported regex/division syntax instead of guessing their lexical boundaries;
+construction feature checks reject raw duplicate keys and missing policy rows.

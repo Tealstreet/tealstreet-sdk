@@ -14,6 +14,7 @@ pub(crate) struct Observed {
     pub requests: usize,
     pub sockets: usize,
     pub reads: usize,
+    pub registration_urls: Vec<String>,
     pub refused: usize,
     pub writes: Vec<Value>,
 }
@@ -25,10 +26,11 @@ pub(crate) struct MockVenue {
     pub observed: Arc<Mutex<Observed>>,
     admission: Option<crate::delegated::probe::venue_tests::VenueIo>,
     registration: Option<Registration>,
+    coinbase: Option<crate::delegated::probe::coinbase_tests::CoinbaseIo>,
 }
 #[derive(Clone)]
 struct Registration {
-    body: Value,
+    body: Arc<Mutex<Value>>,
     gate: Arc<tokio::sync::Semaphore>,
 }
 
@@ -40,6 +42,14 @@ impl MockVenue {
             observed: Arc::default(),
             admission: None,
             registration: None,
+            coinbase: None,
+        }
+    }
+
+    pub(crate) fn for_coinbase(io: crate::delegated::probe::coinbase_tests::CoinbaseIo) -> Self {
+        Self {
+            coinbase: Some(io),
+            ..Self::new("synthetic".into(), "synthetic".into())
         }
     }
 
@@ -56,6 +66,13 @@ impl MockVenue {
     }
 
     pub(crate) fn registered_key(body: Value, gate: Arc<tokio::sync::Semaphore>) -> Self {
+        Self::registered_key_state(Arc::new(Mutex::new(body)), gate)
+    }
+
+    pub(crate) fn registered_key_state(
+        body: Arc<Mutex<Value>>,
+        gate: Arc<tokio::sync::Semaphore>,
+    ) -> Self {
         Self {
             registration: Some(Registration { body, gate }),
             ..Self::new("synthetic".into(), "synthetic".into())
@@ -108,6 +125,9 @@ impl Transport for MockVenue {
         request: HttpRequest,
         intent: safe_cex_engine::request_context::RoutingIntent,
     ) -> HttpPrepareFuture {
+        if let Some(io) = &self.coinbase {
+            return io.prepare_http(request, intent);
+        }
         if let Some(io) = &self.admission {
             return io.prepare_http(request, intent);
         }
@@ -115,6 +135,12 @@ impl Transport for MockVenue {
         let venue = self.clone();
         Box::pin(async move {
             if let Some(registration) = &venue.registration {
+                venue
+                    .observed
+                    .lock()
+                    .unwrap()
+                    .registration_urls
+                    .push(request.url.clone());
                 assert_eq!(
                     intent,
                     safe_cex_engine::request_context::RoutingIntent::Public
@@ -138,6 +164,9 @@ impl Transport for MockVenue {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        if let Some(io) = &self.coinbase {
+            return io.connect(socket, url, events);
+        }
         if let Some(io) = &self.admission {
             return io.connect(socket, url, events);
         }
@@ -155,13 +184,21 @@ impl Transport for MockVenue {
     }
 
     fn request(&self, request: HttpRequest, events: Events) {
+        if let Some(io) = &self.coinbase {
+            io.request(request, events);
+            return;
+        }
         if let Some(io) = &self.admission {
             return io.request(request, events);
         }
         self.observed.lock().unwrap().requests += 1;
         if let Some(registration) = &self.registration {
             self.observed.lock().unwrap().reads += 1;
-            answer(&events, request.id, registration.body.clone());
+            answer(
+                &events,
+                request.id,
+                registration.body.lock().unwrap().clone(),
+            );
             return;
         }
         let path = request.url.split('?').next().unwrap();

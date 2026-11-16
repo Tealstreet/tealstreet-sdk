@@ -3,6 +3,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { validateWasmBudgetSource } from './artifact-census.mjs';
+
+validateWasmBudgetSource(readFileSync(new URL(import.meta.url), 'utf8'));
 
 // Single-venue family bundles: 1.28125 MiB (RUST_WASM_FAMILIES.md), raised from
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
@@ -783,7 +786,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Optimized web/Node 2,186,833 B; SHA256 325adefbb1e7b16e138d05c4d6aef82064041c526ee68156757eb5eafdc722f3.
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
   // #3513 CI43629571410: 2_187_365 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
-  lighter: 2_198_528,
+  // #3576 CI43806604286/job133099107519: 2,227,410 B with device join proof.
+  // Fresh size +10 KiB rounded up; retain floors and shared-alias equality.
+  lighter: 2_238_464,
   // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3438 run 43204071123, artifact 13936986915, source 0340fd57a506 (head 7464a40315bc tree).
@@ -816,7 +821,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Optimized web/Node 2,186,833 B; SHA256 325adefbb1e7b16e138d05c4d6aef82064041c526ee68156757eb5eafdc722f3.
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
   // #3513 shares the verified 2,187,365 B Lighter module and its measured reserve floor.
-  'lighter-robinhood': 2_198_528,
+  // #3576: same measured Lighter family and 10 KiB reserve; no metadata activation.
+  'lighter-robinhood': 2_238_464,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075967: 1,888,209 B + 10 KiB rounded up.
   // #3299 run 42437005422 at 94211a4edff: 1,893,996 B + 10 KiB, rounded up; larger parent cap retained.

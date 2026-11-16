@@ -1,6 +1,4 @@
-use safe_cex_exchange_server::accounts::{
-    HYROTRADER_UNHOSTED, engine_options, prepare, refuse_unhosted,
-};
+use safe_cex_exchange_server::accounts::{engine_options, prepare, refuse_unhosted};
 use safe_cex_exchange_server::delegated::{DelegatedPair, prepare_delegated};
 use safe_cex_exchange_server::envelope::InitPayload;
 use safe_cex_remote_signer::{SignerLink, supports_remote_signing};
@@ -26,7 +24,7 @@ fn pair() -> DelegatedPair {
 #[test]
 fn delegated_uses_hosted_support_and_requires_a_server_origin() {
     assert!(prepare_delegated(&init("binance"), pair()).is_ok());
-    // HyroTrader declares remote signing, but has no server origin configured.
+    // Hyro now has server-owned canonical endpoints and shares hosted eligibility.
     let rules: Value = serde_json::from_str(include_str!(
         "../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
     ))
@@ -35,8 +33,9 @@ fn delegated_uses_hosted_support_and_requires_a_server_origin() {
         rules["venues"]["hyrotrader"]["remoteSigning"]["enabled"],
         true
     );
-    assert!(!safe_cex_exchange_server::delegated::enabled("hyrotrader"));
-    assert!(prepare_delegated(&init("hyrotrader"), pair()).is_err());
+    assert!(safe_cex_exchange_server::delegated::enabled("hyrotrader"));
+    assert_eq!(refuse_unhosted("hyrotrader"), Ok(()));
+    assert!(prepare_delegated(&init("hyrotrader"), pair()).is_ok());
     assert!(!safe_cex_exchange_server::delegated::enabled("unknown"));
 }
 
@@ -75,26 +74,33 @@ fn bybit_delegated_prepares_injected_private_provider_options() {
 
 #[test]
 fn delegated_is_refused_for_unhosted_venues_and_public_accounts() {
-    // Options is supported; HyroTrader still lacks hosted engine endpoint configuration.
-    for venue in ["hyrotrader", "txflow", "unknown"] {
+    // Hyro mainnet is now hosted; compiled Bitrue retains the missing-origin control.
+    for venue in ["bitrue", "txflow", "unknown"] {
         assert!(
             !safe_cex_exchange_server::delegated::enabled(venue),
             "{venue}: missing-origin fixture must be unhosted"
         );
-        if venue == "hyrotrader" {
-            assert_eq!(
-                safe_cex_native::resolve::rest_base_url(venue, false),
-                Ok("https://sim-tealstreet.hyro.site")
-            );
-            assert_eq!(refuse_unhosted(venue), Err(HYROTRADER_UNHOSTED.into()));
-        } else {
-            assert!(safe_cex_native::resolve::rest_base_url(venue, false).is_err());
-        }
+        assert!(safe_cex_native::resolve::rest_base_url(venue, false).is_err());
         assert!(matches!(
             prepare_delegated(&init(venue), pair()),
             Err(ref error) if error == "DELEGATED is not enabled for this venue"
         ));
     }
+    let mut testnet = init("hyrotrader");
+    testnet.testnet = Some(true);
+    assert!(safe_cex_native::resolve::rest_base_url("hyrotrader", true).is_err());
+    assert!(matches!(
+        prepare_delegated(&testnet, pair()),
+        Err(ref error) if error == "hyrotrader cannot run on the Hosted server. Turn Hosted off to use this account."
+    ));
+    assert!(
+        prepare(
+            &testnet,
+            false,
+            Some(SignerLink::new(1, Arc::new(|_| true)))
+        )
+        .is_err()
+    );
     // KuCoin has an origin but this fixture still lacks its required passphrase.
     assert!(prepare_delegated(&init("kucoin"), pair()).is_err());
     let mut public = init("bybit");

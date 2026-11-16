@@ -979,26 +979,30 @@ mod tests {
             json!({"venues": {
                 "bybit": {"remoteSigning":{"enabled":false}},
                 "binance": {"remoteSigning":{"enabled":true}},
-                "hyrotrader": {"remoteSigning":{"enabled":true}}
+                "hyrotrader": {"remoteSigning":{"enabled":true}},
+                "txflow": {"remoteSigning":{"enabled":true}}
             }}),
             async {
                 let args = [json!("BTCUSDT"), json!(10), Value::Null];
-                let plans = translate_delegated_action(
-                    "binance",
-                    "setLeverage",
-                    &args,
-                    &caps(),
-                    &[],
-                    false,
-                )
-                .unwrap();
-                let [Plan::Command { command, .. }] = plans.as_slice() else {
-                    panic!("expected typed leverage plan")
-                };
-                assert_eq!(command, &single("setLeverage", json!(args), &caps()));
+                for venue in ["binance", "hyrotrader"] {
+                    let plans = translate_delegated_action(
+                        venue,
+                        "setLeverage",
+                        &args,
+                        &caps(),
+                        &[],
+                        false,
+                    )
+                    .unwrap();
+                    let [Plan::Command { command, .. }] = plans.as_slice() else {
+                        panic!("expected typed leverage plan")
+                    };
+                    assert_eq!(command, &single("setLeverage", json!(args), &caps()));
+                }
+                // Hyro is now hosted; TxFlow still lacks a native origin.
                 for (venue, public) in [
                     ("bybit", false),
-                    ("hyrotrader", false),
+                    ("txflow", false),
                     ("unknown", false),
                     ("binance", true),
                 ] {
