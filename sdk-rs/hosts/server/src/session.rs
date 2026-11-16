@@ -3197,6 +3197,7 @@ mod tests {
 
     mod apexomni_batch_bridge;
     mod apply_settings;
+    mod backpack_local_proof;
     mod cosigned_venues;
     mod delegated_probe;
     mod hyperliquid_local_proof;

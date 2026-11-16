@@ -21,6 +21,32 @@ pub(super) fn hyperliquid_projection(
         .map_err(|_| "Invalid Hyperliquid identity".into())
 }
 
+pub(super) fn backpack_projection(
+    user: &str,
+    init: &InitPayload,
+) -> Result<safe_cex_crypto::admission::identity::Projection, String> {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    let invalid = || "Invalid account identity".to_owned();
+    if init.exchange_name != "backpack" {
+        return Err(invalid());
+    }
+    let key = key_id(init)?;
+    if key.len() != 44 {
+        return Err(invalid());
+    }
+    let public = STANDARD.decode(key).map_err(|_| invalid())?;
+    if public.len() != 32 || STANDARD.encode(&public) != key {
+        return Err(invalid());
+    }
+    let facts = serde_json::json!({
+        "venue": "backpack",
+        "network": if init.testnet == Some(true) { "testnet" } else { "mainnet" },
+        "credential": { "kind": "ed25519", "publicKey": format!("0x{}", safe_cex_crypto::hex(&public)) }
+    });
+    safe_cex_crypto::admission::identity::Projection::from_json(user, &facts.to_string())
+        .map_err(|_| invalid())
+}
+
 pub(crate) fn enabled(init: &InitPayload) -> bool {
     init.exchange_name == "bybit"
         && crate::delegated::enabled(&init.exchange_name)

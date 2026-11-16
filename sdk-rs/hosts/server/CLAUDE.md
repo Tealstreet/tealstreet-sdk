@@ -155,8 +155,13 @@ that receipt, the original instance/token/lease and the local admission deadline
 Exact Hyperliquid and Hyperliquid Spot select this strategy from captured
 `hyperliquidSignerAddress`, network and main/vault scope. Their device family
 signs the closed admission statement with its existing opaque secp256k1 ref;
-missing facts refuse without unsigned-read fallback. Other public-key venue
-activation remains separate. Matching COSIGNED repeats require the same socket-admitted
+missing facts refuse without unsigned-read fallback.
+Exact Backpack selects this strategy using its captured canonical base64
+Ed25519 API public key and authenticated owner; malformed keys refuse before
+signing, without falling back to private-startup reads. Other public-key venues
+remain unavailable unless a synthetic fixture supplies a binding. Their device
+integration and authoritative per-family facts must precede activation.
+Matching COSIGNED repeats require the same socket-admitted
 mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
 accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
