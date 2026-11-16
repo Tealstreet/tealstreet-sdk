@@ -749,8 +749,10 @@ Public-only accounts, unsupported/unhosted venues and existing early-subscriptio
 handling retain their previous paths. Fixed synthetic interoperability and RFC
 test data live in `tests/data/`.
 
-The shared startup admission runner uses the exact COSIGNED names in
-`delegated/probe.rs`, documented in the host contract above. It runs the selected
+The shared startup admission runner uses exact COSIGNED names generated from
+`src/delegated/cosigned-proof-catalog/<venue>.json`, documented in the host contract
+above. The server build validates the complete roster and derives the runtime
+set and shared test cohorts; a venue promotion changes only its own record. It runs the selected
 venue's existing native private startup with either the remote provider or the
 local provider; it does not build a second set of REST requests. Its result
 classifier uses engine `ErrorKind` values: authentication failures are invalid,

@@ -4,30 +4,7 @@ use crate::delegated::probe::venue_tests::{Seen, assert_variant_startup, operati
 use crate::delegated_e2e_io::MockVenue;
 use std::time::Duration;
 
-const READY: &[&str] = &[
-    "bybit",
-    "bybitinverse",
-    "bybitdemo",
-    "bybitspot",
-    "binance",
-    "binancepm",
-    "binanceinverse",
-    "binancespot",
-    "okx",
-    "okxdemo",
-    "okxeu",
-    "okxeudemo",
-    "bitget",
-    "bitgetusdc",
-    "blofin",
-    "kucoin",
-    "phemex",
-    "woo",
-    "bingx",
-    "mexc",
-    "bitunix",
-    "cryptocom",
-];
+const READY: &[&str] = crate::delegated::probe::SHARED_SESSION_VENUES;
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";
 
@@ -818,3 +795,18 @@ mod eea;
 
 #[path = "cosigned_okxeudemo.rs"]
 mod eea_demo;
+
+#[test]
+fn cosigned_catalog_requires_an_admission_suite() {
+    use crate::delegated::probe::{PRIVATE_STARTUP_VENUES, STANDALONE_SESSION_VENUES};
+    assert_eq!(
+        PRIVATE_STARTUP_VENUES.len(),
+        READY.len() + STANDALONE_SESSION_VENUES.len()
+    );
+    for venue in PRIVATE_STARTUP_VENUES {
+        assert!(
+            READY.contains(venue) || STANDALONE_SESSION_VENUES.contains(venue),
+            "{venue}: missing admission suite"
+        );
+    }
+}

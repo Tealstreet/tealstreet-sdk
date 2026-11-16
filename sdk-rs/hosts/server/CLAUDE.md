@@ -171,11 +171,15 @@ are installed; startup read coverage never proves OmniKey possession or changes
 COSIGNED catalog readiness by itself.
 
 COSIGNED catalog accounting runs in `sdk-rs/harness/cosigned-catalog.test.mjs`.
-Every exact `remoteSigning.enabled` venue needs native proof readiness or a
-reason in `src/delegated/cosigned-proof-exclusions.json`; remove its exclusion
-when proof lands. The 33-production-venue census is checked separately, and
-Cargo signing features are only a family cross-check. The reason list changes
-no runtime availability, admission or client fallback policy.
+Each exact `remoteSigning.enabled` venue owns one JSON record under
+`src/delegated/cosigned-proof-catalog/`: excluded records carry a nonempty reason;
+ready records name their actual probe and Session test sources. The server build
+validates all declarations and derives runtime readiness and shared fixture
+cohorts. There is no shared list to edit when a venue proof lands. Follow
+`src/delegated/cosigned-proof-catalog.md` for the record schema and migration.
+The helper/production census is 41 / 40 / 33; disabled metadata remains visible
+in accounting. Cargo signing features are only a family cross-check. The catalog
+changes no DELEGATED eligibility, client fallback or signing/origin policy.
 
 Shared admission serializes temporary proofs by verified user, credential and
 venue/network/site scope. One proof runs with at most four waiting reservations;
