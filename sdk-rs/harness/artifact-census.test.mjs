@@ -103,3 +103,39 @@ test('construction census treats object order as immaterial', (t) => {
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stderr + result.stdout);
 });
+
+const budgetDeclaration = budget.match(/^export const WASM_VENUE_OVERRIDES = Object\.freeze\(\{[\s\S]*?^\}\);/m)?.[0];
+assert.ok(budgetDeclaration);
+const compactDeclaration = budgetDeclaration.replace(/\/\/[^\n]*/g, '');
+const quotedDeclaration = JSON.stringify(compactDeclaration);
+const templateDeclaration = '`' + compactDeclaration + '`';
+
+for (const [label, expression] of [
+  ['ordinary quoted prose', quotedDeclaration],
+  ['template prose', templateDeclaration],
+  ['interpolated template prose', '`prefix ${"value"} ' + compactDeclaration + '`'],
+  ['nested template prose', '`prefix ${`nested ' + compactDeclaration + '`}`'],
+  ['escaped template delimiters', '`escaped \\` ' + compactDeclaration + ' \\` end`'],
+]) {
+  test(`budget import ignores inert declaration in ${label}`, (t) => {
+    const source = budget + '\nconst prose = ' + expression + ';\n' +
+      'if (WASM_VENUE_OVERRIDES.weex !== 2_043_904) throw new Error("cap changed");';
+    const result = probe(t, budgetPath, source);
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+  });
+}
+
+for (const [label, expression] of [
+  ['plain template', templateDeclaration],
+  ['nested interpolated template', '`prefix ${`nested ' + compactDeclaration + '`}`'],
+]) {
+  test(`budget import refuses grouped duplicate map despite a stale ${label}`, (t) => {
+    const grouped = budgetDeclaration.replace('Object.freeze({', 'Object.freeze(({')
+      .replace('  weex: 2_043_904,', '  weex: 2_043_904,\n  weex: 9_000_000,')
+      .replace(/\}\);$/, '}));');
+    assert.notEqual(grouped, budgetDeclaration);
+    const source = budget.replace(budgetDeclaration, grouped) + '\nconst prose = ' + expression + ';';
+    refuses(probe(t, budgetPath, source), /literal WASM_VENUE_OVERRIDES declaration/i);
+  });
+}
