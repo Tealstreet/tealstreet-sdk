@@ -157,8 +157,9 @@ read on the captured account/API-key slot. The projection includes the registere
 Schnorr public key and exact network. A slot queue prevents label-based parallel
 proofs. An existing actor's incarnation and immutable pin are captured before
 lookup; retirement or replacement invalidates that attempt. Final attachment
-compares the proved key with that pin or the cold actor's registration read;
-mismatch refuses without changing a resident.
+compares the proved key with that pin or a fresh cold-construction registration
+read in both modes. DELEGATED also matches the actual provider before publication;
+rotation refuses without constructing an actor or changing a resident.
 All other public-key families remain gated until their own device/metadata coverage. Matching COSIGNED repeats require the same socket-admitted
 mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
 accounts retain that admission provenance. The exact wire names and

@@ -45,7 +45,9 @@ The pending attempt holds the existing slot queue, pacer and captured
 socket/init/token/lease deadline. Its canonical proof identity includes the
 registered key. An existing actor's incarnation and immutable signer binding
 are captured before lookup and retained through final attachment. A retired
-actor or changed registration refuses instead of rebinding a resident.
+actor or changed registration refuses instead of rebinding a resident. Both cold
+COSIGNED and DELEGATED construction recheck registration under the captured
+authority; a DELEGATED provider must also match before publication.
 Account sharing, venue policy/metadata, beta gates and signing modes are unchanged.
 
 Only these exact names are admitted; the catalog never matches a family prefix.

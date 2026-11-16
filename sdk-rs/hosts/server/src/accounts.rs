@@ -1732,6 +1732,58 @@ impl Registry {
         Ok(account)
     }
 
+    async fn registered_key_for_build(
+        &self,
+        init: &InitPayload,
+        plan: &RoutingPlan,
+        token: Option<(String, u64)>,
+        authority: &InitAuthority,
+    ) -> Result<safe_cex_crypto::admission::PublicKey, String> {
+        let account_index = init
+            .application_id
+            .as_deref()
+            .and_then(|value| value.parse().ok())
+            .ok_or("Missing signer registration account")?;
+        let index = init
+            .api_key_index
+            .as_deref()
+            .and_then(|value| value.parse().ok())
+            .ok_or("Missing signer registration index")?;
+        let captured = authority.clone();
+        let expiry = token.as_ref().map(|(_, expiry)| *expiry);
+        let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
+            captured.check_admission().is_ok() && expiry.is_none_or(|expiry| expiry > now_ms())
+        });
+        let proxy_token = ProxyToken::new();
+        proxy_token.set(token);
+        let transport = NetworkTransport::with_routing(plan.clone(), proxy_token.provider())
+            .with_venue(&init.exchange_name)
+            .with_io_guard(allowed.clone());
+        #[cfg(test)]
+        let transport = crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
+        let network = safe_cex_venues::lighter_registration::Network::from_options(
+            init.exchange_name == "lighter-robinhood",
+            init.testnet == Some(true),
+        );
+        let public = crate::admission::fetch_lighter_registered_key(
+            &transport,
+            network,
+            account_index,
+            index,
+            allowed,
+        )
+        .await
+        .map_err(|_| "Signer registration unavailable")?;
+        authority.check_admission()?;
+        crate::auth::Verifier::check_expiry(expiry, now_ms())?;
+        if let Some(expected) = &authority.proved_registration
+            && expected.as_bytes() != public.as_bytes()
+        {
+            return Err("Signer registration changed during verification".into());
+        }
+        Ok(public)
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn build(
         &self,
@@ -1759,6 +1811,24 @@ impl Registry {
                 DelegatedSetup::Pair(pair) => prepare_delegated(init, pair)?,
                 DelegatedSetup::Resident(resident) => resident.reconfigure(init)?,
             };
+            if authority.proved_registration.is_some() {
+                let public = self
+                    .registered_key_for_build(init, &plan, token.clone(), authority)
+                    .await?;
+                let reference = resident
+                    .identities()
+                    .primary
+                    .as_ref()
+                    .ok_or("Signer registration unavailable")?
+                    .signing_ref()
+                    .map_err(|_| "Signer registration unavailable")?;
+                if !public
+                    .matches_provider(&resident.provider(), reference)
+                    .map_err(|_| "Signer registration unavailable")?
+                {
+                    return Err("Signer registration changed during verification".into());
+                }
+            }
             let signer = Some(resident.provider());
             (None, plan, options, None, signer, Some(resident))
         } else {
@@ -1770,51 +1840,9 @@ impl Registry {
             } = prepare(init, public_only, link.clone())?;
             let remote = match remote {
                 Some(remote) if Family::for_venue(&venue) == Some(Family::Schnorr) => {
-                    let account_index = init
-                        .application_id
-                        .as_deref()
-                        .and_then(|value| value.parse().ok())
-                        .ok_or("Missing signer registration account")?;
-                    let index = init
-                        .api_key_index
-                        .as_deref()
-                        .and_then(|value| value.parse().ok())
-                        .ok_or("Missing signer registration index")?;
-                    let captured = authority.clone();
-                    let expiry = token.as_ref().map(|(_, expiry)| *expiry);
-                    let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
-                        captured.check_admission().is_ok()
-                            && expiry.is_none_or(|expiry| expiry > now_ms())
-                    });
-                    let proxy_token = ProxyToken::new();
-                    proxy_token.set(token.clone());
-                    let transport =
-                        NetworkTransport::with_routing(plan.clone(), proxy_token.provider())
-                            .with_venue(&venue)
-                            .with_io_guard(allowed.clone());
-                    #[cfg(test)]
-                    let transport =
-                        crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
-                    let network = safe_cex_venues::lighter_registration::Network::from_options(
-                        venue == "lighter-robinhood",
-                        init.testnet == Some(true),
-                    );
-                    let public = crate::admission::fetch_lighter_registered_key(
-                        &transport,
-                        network,
-                        account_index,
-                        index,
-                        allowed,
-                    )
-                    .await
-                    .map_err(|_| "Signer registration unavailable")?;
-                    authority.check_admission()?;
-                    crate::auth::Verifier::check_expiry(expiry, now_ms())?;
-                    if let Some(expected) = &authority.proved_registration
-                        && expected.as_bytes() != public.as_bytes()
-                    {
-                        return Err("Signer registration changed during verification".into());
-                    }
+                    let public = self
+                        .registered_key_for_build(init, &plan, token.clone(), authority)
+                        .await?;
                     Some(
                         remote
                             .with_registered_public_key(&public)
