@@ -4,6 +4,23 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #3579 CI43782227341/jobs133022239190+133022239183: web/Node 2,305,365 B.
+// Local pinned build at b323ddf25c4a: web/Node 2,306,669 B; retain the larger reserve.
+// Both aliases share one family; historical 2,279,424 B floor remains authoritative.
+test('#3579 Hyperliquid admission retains both current measurements plus 10 KiB', () => {
+  const measured = Math.max(2_305_365, 2_306_669);
+  const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(requiredCap, 2_317_312);
+  assert.equal(WASM_VENUE_OVERRIDES.hyperliquid, WASM_VENUE_OVERRIDES.hyperliquidspot);
+  for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= Math.max(requiredCap, 2_279_424));
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 // #3566 pinned build.sh --venue backpack: Rust1.99, bindgen0.2.129, Binaryen132 twice-Oz.
 // Local optimized web/Node SHA256 a5336b7d6336e82ac8c8d8c45633be984b4b56e38928662799d0a37e858f381d.
 // CI43755040219/job132937508086 web2076180; only Backpack retains default device dispatch.
