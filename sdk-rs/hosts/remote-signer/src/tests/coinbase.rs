@@ -405,3 +405,37 @@ fn coinbase_supplied_public_binding_cannot_hide_material_or_override_the_capture
         }
     }
 }
+
+#[test]
+fn coinbase_algorithm_metadata_refuses_tagged_objects_instead_of_strings() {
+    for venue in ["coinbase", "coinbasespot"] {
+        let link = SignerLink::new(11, Arc::new(|_| panic!("metadata never signs")));
+        for algorithm in [
+            json!({"es256":null}),
+            json!({"edDsa":null}),
+            json!(true),
+            json!(1),
+            json!([]),
+        ] {
+            assert!(
+                remote_account(
+                    link.clone(),
+                    venue,
+                    None,
+                    &json!({"key":KEY,"coinbaseJwtAlgorithm":algorithm}).to_string()
+                )
+                .is_err()
+            );
+            assert!(
+                remote_account(
+                    link.clone(),
+                    venue,
+                    None,
+                    &json!({"key":KEY,"coinbaseSigning":{"keyName":KEY,"algorithm":algorithm}})
+                        .to_string()
+                )
+                .is_err()
+            );
+        }
+    }
+}

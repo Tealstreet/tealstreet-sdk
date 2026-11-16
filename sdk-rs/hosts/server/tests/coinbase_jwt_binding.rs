@@ -42,3 +42,19 @@ fn coinbase_effective_algorithm_is_fingerprinted_and_unknown_algorithms_refuse()
         assert!(serde_json::from_value::<InitPayload>(unknown).is_err());
     }
 }
+
+#[test]
+fn coinbase_join_algorithm_requires_a_string_or_null() {
+    for venue in ["coinbase", "coinbasespot"] {
+        for algorithm in [
+            json!({"es256":null}),
+            json!({"edDsa":null}),
+            json!(true),
+            json!(1),
+            json!([]),
+        ] {
+            assert!(serde_json::from_value::<InitPayload>(json!({"accountName":"fixture",
+                "exchangeName":venue,"key":"organizations/fixture/apiKeys/join","coinbaseJwtAlgorithm":algorithm})).is_err());
+        }
+    }
+}
