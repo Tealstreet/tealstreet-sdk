@@ -24,7 +24,7 @@ dispatch-signing = ["safe-cex-venues/dispatch-signing"]
 # Browser hosted signing captures, for families with a hosted codec only.
 hosted-signing = ["dispatch-signing", "safe-cex-venues/hosted-signing"]
 hosted-wallet = ["dispatch-signing", "safe-cex-venues/hosted-wallet"]
-# Opt-in admission recipe; only the first candidate (Backpack) links it by default.
+# Opt-in admission recipe; activated candidate families link it by default.
 # Existing constructor custody gates and server readiness remain separate.
 hosted-join-proof = ["safe-cex-venues/hosted-join-proof"]
 bitunix = ["safe-cex-venues/bitunix", "text-ingress", "dispatch-signing", "hosted-signing"]
@@ -40,7 +40,7 @@ apexomni = ["safe-cex-venues/apexomni", "text-ingress", "safe-cex-engine/command
 txflow = ["safe-cex-venues/txflow", "text-ingress", "dispatch-signing", "address-nonce", "hosted-wallet"]
 kraken = ["safe-cex-venues/kraken", "text-ingress", "sign-meta", "dispatch-signing", "hosted-signing"]
 asterdex = ["safe-cex-venues/asterdex", "text-ingress", "safe-cex-engine/command-asterdex", "dispatch-signing", "hosted-signing", "hosted-wallet", "address-nonce"]
-lighter = ["safe-cex-venues/lighter", "text-ingress", "dispatch-signing", "hosted-wallet"]
+lighter = ["safe-cex-venues/lighter", "text-ingress", "dispatch-signing", "hosted-wallet", "hosted-join-proof"]
 woo = ["safe-cex-venues/woo", "text-ingress", "dispatch-signing", "hosted-signing"]
 bitrue = ["safe-cex-venues/bitrue", "text-ingress", "dispatch-signing", "hosted-signing"]
 bitget = ["safe-cex-venues/bitget", "text-ingress", "dispatch-signing", "hosted-signing"]

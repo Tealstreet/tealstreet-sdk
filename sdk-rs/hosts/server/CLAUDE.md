@@ -164,6 +164,14 @@ It issues a closed admission challenge and verifies the raw reply against the
 actual receiving socket, or verifies the temporary protected DELEGATED provider.
 The permit records its socket only after verification; final attachment checks
 that receipt, the original instance/token/lease and the local admission deadline.
+Exact Lighter and Lighter Robinhood select it after a routed, bounded registration
+read on the captured account/API-key slot. The projection includes the registered
+Schnorr public key and exact network. A slot queue prevents label-based parallel
+proofs. An existing actor's incarnation and immutable pin are captured before
+lookup; retirement or replacement invalidates that attempt. Final attachment
+compares the proved key with that pin or a fresh cold-construction registration
+read in both modes. DELEGATED also matches the actual provider before publication;
+rotation refuses without constructing an actor or changing a resident.
 Exact Backpack selects this strategy using its captured canonical base64
 Ed25519 API public key and authenticated owner; malformed keys refuse before
 signing, without falling back to private-startup reads. Other public-key venues

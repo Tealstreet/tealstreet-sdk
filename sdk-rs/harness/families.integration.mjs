@@ -42,9 +42,9 @@ for (const family of selectedFamilies) {
     }
     const engine = await import(new URL(`web/${family}/safe_cex_wasm.js`, pkg));
     await engine.default({ module_or_path: readFileSync(new URL(`web/${family}/safe_cex_wasm_bg.wasm`, pkg)) });
-    // Only the first activation candidate carries the device codec by default.
+    // SDK #3576 activates only Lighter alongside Backpack; all other families stay opt-in.
     assert.equal(typeof engine.WasmEngine.prototype.prepareJoinProof,
-      family === 'backpack' ? 'function' : 'undefined', `${family}: admission dispatch must stay opt-in`);
+      ['backpack', 'lighter'].includes(family) ? 'function' : 'undefined', `${family}: only activated families carry admission dispatch`);
     if (family === 'hyperliquid') {
       await checkHyperliquidLocalSigning(engine.WasmEngine, false);
       await checkHyperliquidLocalSigning(engine.WasmEngine, true);

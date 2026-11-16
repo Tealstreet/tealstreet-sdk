@@ -3201,6 +3201,7 @@ mod tests {
     mod cosigned_coinbase;
     mod cosigned_venues;
     mod delegated_probe;
+    mod lighter_local_proof;
     mod local_proof;
     mod provider_handover_refusals;
     mod token_expiry;
