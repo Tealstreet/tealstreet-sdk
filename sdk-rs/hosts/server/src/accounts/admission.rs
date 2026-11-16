@@ -162,22 +162,18 @@ impl Registry {
                 identity::hyperliquid_projection(user, init).map_err(|_| ProbeRefusal::INVALID)?;
             return Ok(ProofStrategy::Local(Arc::new(projection)));
         }
-        if init.exchange_name == "grvt"
-            && crate::delegated::probe::cosigned_ready(init)
-        {
+        if init.exchange_name == "grvt" && crate::delegated::probe::cosigned_ready(init) {
             let projection = identity::grvt_projection(user, init)
                 .map_err(|_| ProbeRefusal::INVALID.at(RefusalStage::Options))?;
             return Ok(ProofStrategy::Local(Arc::new(projection)));
         }
-        if init.exchange_name == "backpack"
-            && crate::delegated::probe::cosigned_ready(init)
-        {
+        if init.exchange_name == "backpack" && crate::delegated::probe::cosigned_ready(init) {
             let projection =
                 identity::backpack_projection(user, init).map_err(|_| ProbeRefusal::INVALID)?;
             return Ok(ProofStrategy::Local(Arc::new(projection)));
         }
         if matches!(init.exchange_name.as_str(), "lighter" | "lighter-robinhood")
-            && crate::delegated::probe::cosigned_ready(&init.exchange_name)
+            && crate::delegated::probe::cosigned_ready(init)
         {
             return Ok(ProofStrategy::RegisteredSchnorr);
         }
@@ -187,9 +183,7 @@ impl Registry {
     pub(crate) fn cosigned_proof_ready(&self, user: &str, init: &InitPayload) -> bool {
         match self.proof_strategy(user, init) {
             Ok(ProofStrategy::Local(_) | ProofStrategy::RegisteredSchnorr) => true,
-            Ok(ProofStrategy::PrivateStartup) => {
-                crate::delegated::probe::cosigned_ready(init)
-            }
+            Ok(ProofStrategy::PrivateStartup) => crate::delegated::probe::cosigned_ready(init),
             Err(_) => false,
         }
     }

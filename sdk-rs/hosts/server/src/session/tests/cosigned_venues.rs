@@ -15,15 +15,20 @@ async fn cosigned_catalog_does_not_gate_delegated_wallet_proof() {
     tokio::task::LocalSet::new()
         .run_until(async {
             assert!(crate::delegated::enabled("asterdex"));
-            assert!(!crate::delegated::probe::cosigned_ready("asterdex"));
+            assert!(!crate::delegated::probe::cosigned_ready(&InitPayload {
+                exchange_name: "asterdex".into(),
+                application_id: Some("synthetic-main-wallet".into()),
+                ..Default::default()
+            }));
             for delegated in [false, true] {
                 let registry = crate::accounts::tests::registry();
                 let (mut session, mut sent) = user_session(registry.clone(), "fixture");
                 let mut completed = session.take_verified();
                 let mut init = InitPayload {
                     account_name: "acct".into(),
-                    // GRVT and Hyperliquid are admitted; AsterDEX keeps this excluded-wallet control.
+                    // Only AsterDEX's wallet shape stays excluded; V1 has its own proof.
                     exchange_name: "asterdex".into(),
+                    application_id: Some("synthetic-main-wallet".into()),
                     key: KEY.into(),
                     ..Default::default()
                 };
