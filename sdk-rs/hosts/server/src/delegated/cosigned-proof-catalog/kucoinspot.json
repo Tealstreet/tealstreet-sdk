@@ -1,0 +1,4 @@
+{
+  "status": "excluded",
+  "reason": "No native Hosted Spot REST origin; exact Spot bullet/private-startup proof with signed passphrase and socket controls is not built."
+}

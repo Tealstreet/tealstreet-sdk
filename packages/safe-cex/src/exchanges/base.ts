@@ -2,6 +2,7 @@ import type { EngineEvent } from '@tealstreet/safe-cex-wasm/host';
 import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/wire';
 import type { Axios, AxiosInstance } from 'axios';
 import type { TinyEmitter } from 'tiny-emitter';
+import type { JoinProofResponse } from '../joinProof.types';
 import type { PositionRecord } from '../journal/position.types';
 import type { Store } from '../store/store.interface';
 import type { WorkerFrameRejection } from '../store/workerFrameRecoveryScopes';
@@ -611,6 +612,9 @@ export interface Exchange {
    * Returns the signature string for WebSocket authentication.
    */
   signWsAuth: (request: RemoteSignerRequest) => Promise<RemoteSignerResponse>;
+
+  /** Sign only the closed server admission challenge, preserving its raw JSON. */
+  signJoinProof?: (requestJson: string) => Promise<JoinProofResponse>;
 }
 
 export type AccountMarketOverlay = (markets: Market[]) => Market[];

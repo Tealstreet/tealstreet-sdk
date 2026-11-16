@@ -5052,12 +5052,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_venue_with_no_hosted_origin_is_refused_in_plain_words() {
-        // Binance Options is deliberately never hosted; keep this sentinel
-        // independent of venues whose REST-origin prerequisites are being added.
+    fn binanceoptions_hosted_testnet_is_refused_in_plain_words() {
+        // Mainnet gains an origin; hosted Options testnet remains deliberately closed.
         let init = InitPayload {
             account_name: "a".into(),
             exchange_name: "binanceoptions".into(),
+            testnet: Some(true),
             ..InitPayload::default()
         };
         let refusal = routing_plan(&init, true).unwrap_err();
@@ -5065,6 +5065,34 @@ pub(crate) mod tests {
             refusal,
             "binanceoptions cannot run on the Hosted server. Turn Hosted off to use this account."
         );
+    }
+
+    #[test]
+    fn binanceoptions_hosted_mainnet_preserves_existing_japan_and_public_routes() {
+        let init = InitPayload {
+            account_name: "fixture-options".into(),
+            exchange_name: "binanceoptions".into(),
+            tealstreet_proxy: Some(true),
+            tealstreet_tunnel: Some(false),
+            ..InitPayload::default()
+        };
+        let bases = resolve::route_bases().unwrap();
+        for public in [false, true] {
+            let plan = routing_plan(&init, public).unwrap();
+            assert_eq!(plan.http.mode, safe_cex_native::HttpRouteMode::Direct);
+            assert_eq!(
+                plan.http.prefix,
+                if public {
+                    &bases.public_proxy
+                } else {
+                    &bases.private_proxy["jp"]
+                }
+                .as_str()
+            );
+            assert!(plan.http.authorize);
+            assert!(plan.http.header_aliases.is_empty());
+            assert!(plan.http.tunnel_url.is_none());
+        }
     }
 
     #[test]

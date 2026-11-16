@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(feature = "managed-sockets")]
+use crate::ControlFrame;
 use crate::engine::*;
 use crate::engine::{ExecutionHandle, Window};
 use crate::request_context::{
@@ -871,10 +873,13 @@ impl ScopeProbe {
     fn retire_ready_sockets(&mut self, cx: &mut Cx<'_, Context>) {
         let feed = self.socket_feed.unwrap();
         let epoch = cx.socket_epoch(feed).unwrap();
-        cx.send(epoch.socket(), "stale-ready-frame");
+        cx.send(
+            epoch.socket(),
+            ControlFrame::subscription("stale-ready-frame"),
+        );
         cx.send_signed(
             epoch.socket(),
-            "stale-ready-signed".into(),
+            ControlFrame::authentication("stale-ready-signed"),
             Box::new(RetiredSocketRecipe),
         );
         cx.stop_socket_feed(feed);

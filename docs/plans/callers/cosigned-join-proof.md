@@ -18,14 +18,21 @@ The exact proof-ready venue names are:
 | `binancepm`, `binanceinverse`, `binancespot` | Native PAPI/DAPI/spot private startup and shared HMAC/session negatives; exact product routes |
 | `okx` | Native private startup and shared HMAC suite |
 | `okxdemo` | Native demo startup and shared HMAC/session negatives; exact origin and simulated-trading headers |
+| `okxeu` | Signed config before keyed discovery, full native EEA startup, bounded signature-refusal retry and shared HMAC/session negatives |
+| `okxeudemo` | Exact EEA demo startup with one simulated-trading header per private read, bounded signature-refusal retry and fresh connection proof |
 | `bitget` | Native private startup and shared HMAC suite |
 | `bitgetusdc` | Native USDC private startup and shared HMAC/session negatives; exact product type |
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
 | `asterdex` V1 only | Native HMAC private startup on mainnet/testnet, actual device batch codec and connection-bound negative controls |
+| `mexc` | Native signed position-mode/account reads and private-stream HMAC; wrong-key, replay and socket/Session controls; mainnet only |
 
-EEA aliases remain unready: their cold signed catalog discovery retries signature
-error `50113`; it needs separate refusal-policy coverage before admission.
+`okxeudemo` has its own exact catalog entry and demo-header/private-startup
+controls; EEA mainnet readiness alone never admits it.
+EEA bootstrap retains the original config authority until catalogue completion;
+config success alone cannot satisfy private readiness. A second consecutive
+`50113` for a bootstrap read refuses permanently after one re-signed retry,
+without extending the captured admission deadline.
 
 Only these exact names are admitted; the catalog never matches a family prefix.
 AsterDEX additionally checks the init shape: address-prefixed keys or nonempty
