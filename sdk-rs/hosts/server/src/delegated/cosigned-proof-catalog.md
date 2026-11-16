@@ -39,11 +39,12 @@ For an older proof PR: refresh after this structural PR lands, retain its real
 proof implementation/tests, drop edits to the old exclusions array and the
 three shared runtime/fixture lists, and promote only its exact JSON record(s).
 Use the actual shared or standalone test paths. Preserve every other record.
-Do not enable another venue or remove another exclusion. Run:
+Do not enable another venue or remove another exclusion. From the repository
+root, run (the Rust subshell selects the pinned toolchain):
 
 ```sh
 node --test sdk-rs/harness/cosigned-catalog.test.mjs
-cargo test --locked -p safe-cex-exchange-server --test cosigned_catalog -j2
+(cd sdk-rs && cargo test --locked -p safe-cex-exchange-server --test cosigned_catalog -j2)
 ```
 
 The accounting guard also removes a stale origin filter: NX #9737 removed that
