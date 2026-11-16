@@ -80,6 +80,33 @@ impl ProbePermit {
         }
         Ok(())
     }
+
+    /// Old init metadata cannot stand in for an already installed resident key.
+    /// This runs at attachment, after every proof await, before any mode change.
+    pub(super) fn check_resident_public(&self, account: &Account) -> Result<(), String> {
+        let ProofStrategy::Local(projection) = &self.strategy else {
+            return Ok(());
+        };
+        if account.delegated().is_none() {
+            return Ok(());
+        }
+        let expected = projection.public_key();
+        let actual = account
+            .signing
+            .public_binding(expected.family())
+            .map_err(|reason| reason.reason().to_owned())?
+            .ok_or_else(|| {
+                crate::envelope::ModeTransitionRefusal::Unavailable
+                    .reason()
+                    .to_owned()
+            })?;
+        if actual.as_bytes() != expected.as_bytes() {
+            return Err(crate::envelope::ModeTransitionRefusal::Unavailable
+                .reason()
+                .to_owned());
+        }
+        Ok(())
+    }
 }
 
 impl Drop for ProbePermit {
@@ -126,6 +153,22 @@ impl Registry {
         {
             return Ok(ProofStrategy::Local(local));
         }
+        if matches!(
+            init.exchange_name.as_str(),
+            "hyperliquid" | "hyperliquidspot"
+        ) && crate::delegated::probe::cosigned_ready(&init.exchange_name)
+        {
+            let projection =
+                identity::hyperliquid_projection(user, init).map_err(|_| ProbeRefusal::INVALID)?;
+            return Ok(ProofStrategy::Local(Arc::new(projection)));
+        }
+        if init.exchange_name == "grvt"
+            && crate::delegated::probe::cosigned_ready(&init.exchange_name)
+        {
+            let projection = identity::grvt_projection(user, init)
+                .map_err(|_| ProbeRefusal::INVALID.at(RefusalStage::Options))?;
+            return Ok(ProofStrategy::Local(Arc::new(projection)));
+        }
         if init.exchange_name == "backpack"
             && crate::delegated::probe::cosigned_ready(&init.exchange_name)
         {
@@ -142,10 +185,13 @@ impl Registry {
     }
 
     pub(crate) fn cosigned_proof_ready(&self, user: &str, init: &InitPayload) -> bool {
-        matches!(
-            self.proof_strategy(user, init),
-            Ok(ProofStrategy::Local(_) | ProofStrategy::RegisteredSchnorr)
-        ) || crate::delegated::probe::cosigned_ready(&init.exchange_name)
+        match self.proof_strategy(user, init) {
+            Ok(ProofStrategy::Local(_) | ProofStrategy::RegisteredSchnorr) => true,
+            Ok(ProofStrategy::PrivateStartup) => {
+                crate::delegated::probe::cosigned_ready(&init.exchange_name)
+            }
+            Err(_) => false,
+        }
     }
 
     pub(crate) fn private_join_requires_proof(&self) -> bool {
@@ -321,6 +367,7 @@ impl Registry {
             token_provider.set(token);
             let transport = NetworkTransport::with_routing(plan.clone(), token_provider.provider())
                 .with_venue(&init.exchange_name)
+                .with_report_user(safe_cex_native::report::ReportUser::new(&permit.user))
                 .with_io_guard(allowed.clone());
             #[cfg(test)]
             let transport = crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
@@ -481,6 +528,8 @@ impl Registry {
             let token_provider = ProxyToken::new();
             token_provider.set(token);
             config.log_label = None;
+            let report_user = safe_cex_native::report::ReportUser::new(user);
+            config.report_user = Some(report_user.clone());
             config.signing_mode = Some(mode);
             let (mut result, receive) = tokio::sync::oneshot::channel();
             let lease = permit.lease.clone();
@@ -513,6 +562,7 @@ impl Registry {
                     }
                     let transport = NetworkTransport::with_routing(plan, token_provider.provider())
                         .with_venue(&venue)
+                        .with_report_user(report_user)
                         .with_io_guard(allowed.clone());
                     #[cfg(test)]
                     let transport = crate::delegated_e2e_io::Io::new(transport, e2e_venue);

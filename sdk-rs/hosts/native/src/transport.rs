@@ -179,6 +179,7 @@ pub struct NetworkTransport {
     routing: Option<Arc<RoutingState>>,
     io_guard: Option<IoGuard>,
     venue: Option<Arc<str>>,
+    report_user: Option<crate::report::ReportUser>,
 }
 
 pub(crate) type IoGuard = Arc<dyn Fn() -> bool + Send + Sync>;
@@ -198,12 +199,19 @@ impl NetworkTransport {
             routing: None,
             io_guard: None,
             venue: None,
+            report_user: None,
         }
     }
 
     /// Attributes this transport's failure reports to `venue`.
     pub fn with_venue(mut self, venue: &str) -> Self {
         self.venue = Some(venue.into());
+        self
+    }
+
+    /// Captures the verified account owner for failures, never outgoing IO or logs.
+    pub fn with_report_user(mut self, user: crate::report::ReportUser) -> Self {
+        self.report_user = Some(user);
         self
     }
 
@@ -408,9 +416,15 @@ fn log_failure(note: impl FnOnce(&mut OpenFailures) -> Option<String>) -> bool {
 }
 
 /// A transport failure the journal just logged, for the host's error sink.
-fn report_failure(kind: crate::report::ErrorKind, target: &str, venue: Option<&str>) {
+fn report_failure(
+    kind: crate::report::ErrorKind,
+    target: &str,
+    venue: Option<&str>,
+    user: Option<&crate::report::ReportUser>,
+) {
     crate::report::report(&crate::report::ErrorReport {
         kind,
+        user,
         label: None,
         target: Some(target),
         error_kind: None,
@@ -429,12 +443,18 @@ pub(crate) fn host_of(url: &str) -> String {
         .unwrap_or_else(|| "unparsable url".to_owned())
 }
 
-pub(crate) fn log_open_failure(url: &str, error: &str, venue: Option<&str>) {
+pub(crate) fn log_open_failure(
+    url: &str,
+    error: &str,
+    venue: Option<&str>,
+    user: Option<&crate::report::ReportUser>,
+) {
     if log_failure(|failures| failures.note(url, error, std::time::Instant::now())) {
         report_failure(
             crate::report::ErrorKind::SocketOpenFailed,
             &host_of(url),
             venue,
+            user,
         );
     }
 }
@@ -445,11 +465,12 @@ pub(crate) fn log_request_failure(
     error: &str,
     elapsed: Duration,
     venue: Option<&str>,
+    user: Option<&crate::report::ReportUser>,
 ) {
     if log_failure(|failures| {
         failures.note_request(route, error, elapsed, std::time::Instant::now())
     }) {
-        report_failure(crate::report::ErrorKind::RequestFailed, route, venue);
+        report_failure(crate::report::ErrorKind::RequestFailed, route, venue, user);
     }
 }
 
@@ -545,6 +566,7 @@ impl Transport for NetworkTransport {
         let routing = self.routing.clone();
         let guard = self.io_guard.clone();
         let venue = self.venue.clone();
+        let report_user = self.report_user.clone();
         let headers = headers
             .into_iter()
             .map(|(name, value)| (name.to_owned(), value))
@@ -602,8 +624,8 @@ impl Transport for NetworkTransport {
                         },
                         result = &mut opening => match result {
                             Ok(Ok(ws)) => break ws,
-                            Ok(Err(error)) => { log_open_failure(&target, &error, venue.as_deref()); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
-                            Err(_) => { log_open_failure(&target, "timed out after 15s", venue.as_deref()); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
+                            Ok(Err(error)) => { log_open_failure(&target, &error, venue.as_deref(), report_user.as_ref()); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
+                            Err(_) => { log_open_failure(&target, "timed out after 15s", venue.as_deref(), report_user.as_ref()); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
                         },
                     }
                 };
@@ -986,7 +1008,7 @@ mod security_tests {
         assert_eq!(decode_message(b"valid text").unwrap(), "valid text");
     }
 
-    type Reported = (&'static str, String, Option<String>);
+    type Reported = (&'static str, String, Option<String>, Option<String>);
     static REPORTED: std::sync::Mutex<Vec<Reported>> = std::sync::Mutex::new(Vec::new());
 
     fn record(report: &crate::report::ErrorReport<'_>) {
@@ -994,6 +1016,7 @@ mod security_tests {
             report.kind.as_str(),
             report.target.unwrap_or_default().to_owned(),
             report.venue.map(str::to_owned),
+            report.user.map(|user| user.as_str().to_owned()),
         ));
     }
 
@@ -1004,31 +1027,35 @@ mod security_tests {
     async fn a_logged_failure_reaches_the_error_sink_once_per_window_with_its_venue() {
         assert!(crate::report::set_error_sink(record));
         let url = "wss://sink-test.example/tunnel?ts-relay=wss%3A%2F%2Fvenue&token=t";
-        log_open_failure(url, "refused", Some("bybitdemo"));
-        log_open_failure(url, "refused", Some("bybitdemo"));
+        log_open_failure(url, "refused", Some("bybitdemo"), None);
+        log_open_failure(url, "refused", Some("bybitdemo"), None);
         log_request_failure(
             "sink-test.example via HTTP tunnel",
             "reset",
             Duration::ZERO,
+            None,
             None,
         );
         let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = closed.local_addr().unwrap();
         drop(closed);
         let (events, mut received) = mpsc::unbounded_channel();
-        NetworkTransport::new().with_venue("okx").request(
-            HttpRequest {
-                id: safe_cex_engine::RequestId(1),
-                method: safe_cex_engine::Method::Get,
-                route: None,
-                timeout_ms: Some(5_000),
-                url: format!("http://localhost:{}/v5/order?sign=s", address.port()),
-                headers: vec![],
-                signer_headers: vec![],
-                body: None,
-            },
-            events,
-        );
+        NetworkTransport::new()
+            .with_venue("okx")
+            .with_report_user(crate::report::ReportUser::new("auth0|captured-owner"))
+            .request(
+                HttpRequest {
+                    id: safe_cex_engine::RequestId(1),
+                    method: safe_cex_engine::Method::Get,
+                    route: None,
+                    timeout_ms: Some(5_000),
+                    url: format!("http://localhost:{}/v5/order?sign=s", address.port()),
+                    headers: vec![],
+                    signer_headers: vec![],
+                    body: None,
+                },
+                events,
+            );
         assert!(matches!(
             received.recv().await,
             Some(HostEvent::HttpFailed(..))
@@ -1037,7 +1064,7 @@ mod security_tests {
             .lock()
             .unwrap()
             .iter()
-            .filter(|(_, target, _)| {
+            .filter(|(_, target, _, _)| {
                 target.starts_with("sink-test.example") || target.starts_with("localhost")
             })
             .cloned()
@@ -1048,19 +1075,42 @@ mod security_tests {
                 (
                     "transport.socket_open_failed",
                     "sink-test.example".to_owned(),
-                    Some("bybitdemo".to_owned())
+                    Some("bybitdemo".to_owned()),
+                    None
                 ),
                 (
                     "transport.request_failed",
                     "sink-test.example via HTTP tunnel".to_owned(),
+                    None,
                     None
                 ),
                 (
                     "transport.request_failed",
                     "localhost direct".to_owned(),
-                    Some("okx".to_owned())
+                    Some("okx".to_owned()),
+                    Some("auth0|captured-owner".to_owned())
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn diagnostic_owner_is_captured_per_transport_and_hidden_from_config_debug() {
+        let owner = crate::report::ReportUser::new("auth0|owner-a");
+        let old = NetworkTransport::new().with_report_user(owner.clone());
+        let replacement = old
+            .clone()
+            .with_report_user(crate::report::ReportUser::new("auth0|owner-b"));
+        assert_eq!(old.report_user.as_ref().unwrap().as_str(), "auth0|owner-a");
+        assert_eq!(
+            replacement.report_user.as_ref().unwrap().as_str(),
+            "auth0|owner-b"
+        );
+        let config = crate::ServerConfig {
+            report_user: Some(owner),
+            ..Default::default()
+        };
+        assert!(!format!("{config:?}").contains("owner-a"));
+        assert!(NetworkTransport::new().report_user.is_none());
     }
 }

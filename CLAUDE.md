@@ -10,6 +10,9 @@ context.
 The host ownership observation/teardown contract lives in
 [`sdk-rs/README.md`](sdk-rs/README.md#host-ownership-observation-and-teardown).
 
+Native hosted diagnostic owner attribution is documented in
+`sdk-rs/hosts/server/DESIGN.md` under the Sentry event allowlist.
+
 Bybit's sparse ticker freshness contract lives in
 [`sdk-rs/README.md`](sdk-rs/README.md#bybit-ticker-reference-freshness).
 

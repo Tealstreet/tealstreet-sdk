@@ -1,5 +1,55 @@
 use crate::envelope::InitPayload;
 
+pub(super) fn hyperliquid_projection(
+    user: &str,
+    init: &InitPayload,
+) -> Result<safe_cex_crypto::admission::identity::Projection, String> {
+    let signer = init
+        .hyperliquid_signer_address
+        .as_deref()
+        .ok_or("Missing Hyperliquid signer address")?;
+    let account_scope = match init.vault.as_deref().filter(|address| !address.is_empty()) {
+        Some(address) => serde_json::json!({"kind":"vault", "address":address}),
+        None => serde_json::json!({"kind":"main"}),
+    };
+    let facts = serde_json::json!({
+        "venue":init.exchange_name,
+        "network":if init.testnet == Some(true) { "testnet" } else { "mainnet" },
+        "credential":{"kind":"agent", "signer":signer, "accountScope":account_scope}
+    });
+    safe_cex_crypto::admission::identity::Projection::from_json(user, &facts.to_string())
+        .map_err(|_| "Invalid Hyperliquid identity".into())
+}
+
+/// Freeze the same public signer and trading account used by GRVT construction.
+/// A login credential or proof reply cannot substitute for this separate signer.
+/// Venue authorization remains the ordinary engine startup's responsibility.
+pub(super) fn grvt_projection(
+    user: &str,
+    init: &InitPayload,
+) -> Result<safe_cex_crypto::admission::identity::Projection, String> {
+    let invalid = || "Invalid account identity".to_owned();
+    if init.exchange_name != "grvt" {
+        return Err(invalid());
+    }
+    key_id(init)?;
+    let signer = safe_cex_crypto::ethereum::get_address(
+        init.grvt_signer_address.as_deref().ok_or_else(invalid)?,
+    )
+    .map_err(|_| invalid())?;
+    let account = init
+        .grvt_trading_account_id
+        .as_deref()
+        .ok_or_else(invalid)?;
+    let facts = serde_json::json!({
+        "venue": "grvt",
+        "network": if init.testnet == Some(true) { "testnet" } else { "mainnet" },
+        "credential": { "kind": "grvt", "tradingAccount": account, "signer": signer }
+    });
+    safe_cex_crypto::admission::identity::Projection::from_json(user, &facts.to_string())
+        .map_err(|_| invalid())
+}
+
 pub(super) fn backpack_projection(
     user: &str,
     init: &InitPayload,

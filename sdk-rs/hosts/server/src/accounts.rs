@@ -993,6 +993,15 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
         _ => Map::new(),
     };
     fields.insert("venue".into(), init.exchange_name.clone().into());
+    if matches!(
+        init.exchange_name.as_str(),
+        "hyperliquid" | "hyperliquidspot"
+    ) {
+        fields.insert(
+            "hyperliquidSignerAddress".into(),
+            init.hyperliquid_signer_address.clone().into(),
+        );
+    }
     // An init that cannot route is refused at build; its raw flags still tell inits apart.
     let routing = match routing_plan(init, public_only) {
         Ok(plan) => serde_json::to_value(plan).unwrap_or(Value::Null),
@@ -1141,6 +1150,7 @@ impl Registry {
                     &crate::telemetry::Report {
                         kind: "router_lease.fenced",
                         summary,
+                        user_id: (!account.public_only).then_some(account.user.as_str()),
                         user_tag: Some(tag.clone()),
                         venue: Some(&account.venue),
                         running_jobs: Some(running_jobs),
@@ -1611,6 +1621,9 @@ impl Registry {
                 }
                 attempt.authority.check_admission()?;
                 crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
+                if let Some(proof) = attempt._probe.as_ref() {
+                    proof.check_resident_public(&account)?;
+                }
                 if let Some(expected) = &attempt.authority.proved_registration {
                     let actual = account
                         .signing
@@ -1755,6 +1768,7 @@ impl Registry {
 
     async fn registered_key_for_build(
         &self,
+        user: &str,
         init: &InitPayload,
         plan: &RoutingPlan,
         token: Option<(String, u64)>,
@@ -1779,6 +1793,7 @@ impl Registry {
         proxy_token.set(token);
         let transport = NetworkTransport::with_routing(plan.clone(), proxy_token.provider())
             .with_venue(&init.exchange_name)
+            .with_report_user(safe_cex_native::report::ReportUser::new(user))
             .with_io_guard(allowed.clone());
         #[cfg(test)]
         let transport = crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
@@ -1834,7 +1849,7 @@ impl Registry {
             };
             if authority.proved_registration.is_some() {
                 let public = self
-                    .registered_key_for_build(init, &plan, token.clone(), authority)
+                    .registered_key_for_build(user, init, &plan, token.clone(), authority)
                     .await?;
                 let reference = resident
                     .identities()
@@ -1862,7 +1877,7 @@ impl Registry {
             let remote = match remote {
                 Some(remote) if Family::for_venue(&venue) == Some(Family::Schnorr) => {
                     let public = self
-                        .registered_key_for_build(init, &plan, token.clone(), authority)
+                        .registered_key_for_build(user, init, &plan, token.clone(), authority)
                         .await?;
                     Some(
                         remote
@@ -1917,6 +1932,7 @@ impl Registry {
             resident.configure(&mut config);
         }
         config.log_label = Some(self.account_log_label(user, &init.account_name, &venue));
+        config.report_user = (!public_only).then(|| safe_cex_native::report::ReportUser::new(user));
         // Public and COSIGNED diagnostic modes retain their original values.
         config.signing_mode = Some(if public_only {
             "public"
@@ -1983,6 +1999,9 @@ impl Registry {
                 return;
             }
             let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
+            if let Some(user) = &config.report_user {
+                transport = transport.with_report_user(user.clone());
+            }
             transport = transport.with_io_guard(Arc::new(move || authority.check().is_ok()));
             #[cfg(test)]
             let transport = crate::delegated_e2e_io::Io::new(transport, e2e_venue);
@@ -2274,6 +2293,7 @@ impl Registry {
             &crate::telemetry::Report {
                 kind: "signer.failing",
                 summary: "signer keeps failing; account disposed",
+                user_id: Some(&account.user),
                 user_tag: Some(user_tag(&account.user)),
                 venue: Some(&account.venue),
                 ..Default::default()
