@@ -1,4 +1,5 @@
 use super::*;
+use crate::ControlFrame;
 use crate::book::Book;
 use crate::request_context::{Operation, Policy, RetryPolicy, Scope};
 
@@ -374,7 +375,7 @@ fn legacy_http_and_no_id_ws_activity_revoke_only_new_entry_rights() {
             );
         }) as fn(&mut Cx<'_, ()>),
         |cx| {
-            cx.send(SocketId(31), "frame");
+            cx.send(SocketId(31), ControlFrame::subscription("frame"));
         },
         |cx| {
             cx.close(SocketId(31));

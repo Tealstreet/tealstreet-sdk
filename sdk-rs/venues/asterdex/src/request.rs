@@ -794,6 +794,18 @@ impl AsterDex {
                 return;
             }
             if !request.public
+                && request.version == Version::V1
+                && request.method == Method::Get
+                && code == Some(-1022.0)
+            {
+                cx.startup_read_refused(
+                    &VenueError::new(message)
+                        .kind(ErrorKind::AuthInvalid)
+                        .venue_code("-1022")
+                        .venue_message(message),
+                );
+            }
+            if !request.public
                 && code == Some(-1021.0)
                 && message.contains("Timestamp")
                 && !request.timestamp_retried

@@ -54,6 +54,8 @@ mod asterdex_setup;
 #[cfg(feature = "coinbase")]
 mod coinbase_setup;
 mod construction;
+#[cfg(feature = "hosted-join-proof")]
+pub mod hosted_join_proof;
 #[cfg(feature = "hosted-signing")]
 pub mod hosted_signing;
 #[cfg(feature = "hosted-wallet")]

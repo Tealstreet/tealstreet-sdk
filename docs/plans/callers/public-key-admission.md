@@ -153,6 +153,40 @@ an expected key or a verification decision. The production resolver currently
 retains private-startup proofs and the existing COSIGNED readiness catalog.
 Family activation must supply authoritative facts and a complete device handler.
 
+## Device challenge dispatch
+
+`RustEngineExchange.signJoinProof(requestJson)` forwards the original JSON string
+to `EngineHost.hostedJoinProof` and WASM `prepareJoinProof`. It never parses and
+re-serializes the request: the frozen Rust decoder rejects duplicate, mixed and
+missing fields before preparing work. The captured engine venue and owned primary
+signing reference select the existing admission-only family recipe; caller JSON
+cannot select a key or supply transaction bytes. AsterDEX requires explicit V3
+construction policy; HMAC venues have no public-key proof recipe.
+
+Proofs and ordinary hosted signing share one capture pool, provider runner,
+deadline and disposal path. Captured purpose metadata selects the closed output,
+which contains only the original request ID and signature. A proof expires within
+the original statement's 15-second budget and the existing five-second signing
+capture limit. Completion is single-use; malformed output, cancellation, expiry
+and replacement retire the capture. There is no HTTP or socket fallback.
+
+The SDK retains its original worker owner/generation, initialization promise and
+signing host across deferred work. An installed unbound owner refuses; callers
+without the optional owner hook retain the existing same-owner behavior. The NX
+transport must additionally capture the original account, registration, instance
+and socket before calling this entry and recheck them before publishing a reply.
+This handler performs no Session admission and enables no server venue. Existing
+constructor/custody and compiled-feature restrictions still apply; a generic
+method's presence is not proof of venue readiness.
+
+The reusable `hosted-join-proof` WASM feature is linked by default only in the
+Backpack candidate family (and therefore the combined build). Other standalone
+families retain their existing size-critical composition. Their activation slices
+must explicitly opt into the feature and certify their own optimized size before
+shipping. This build selection does not change the server admission catalog.
+
+## Pending verification lifetime
+
 After queue admission, a fresh random server attempt and nonce bind the closed
 statement to that captured identity. COSIGNED replies retain their raw JSON until
 `Response::from_json` has checked duplicates and mixed fields. The local verifier

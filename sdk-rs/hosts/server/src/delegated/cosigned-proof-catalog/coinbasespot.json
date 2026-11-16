@@ -1,0 +1,4 @@
+{
+  "status": "excluded",
+  "reason": "Bound native Advanced Trade Spot private-startup proof for CDP JWT/JWS, account identity, expiry and replay/socket controls is not built."
+}

@@ -586,3 +586,540 @@ fn a_refusal_ends_the_start_however_it_arrives() {
         assert_eq!(rig.failures.len(), 1, "{status} {body}");
     }
 }
+
+fn eea_config(demo: bool, warm: bool) -> (Engine<Okx>, Rig, Action) {
+    let mut engine = crate::support::engine(Options {
+        eea: true,
+        testnet: demo,
+        ..keyed()
+    });
+    if warm {
+        let (seed, _, _) = public(Options {
+            public_data_only: true,
+            ..Options::default()
+        });
+        engine
+            .store_mut()
+            .set_markets(seed.store().markets().to_vec());
+    }
+    let mut rig = Rig::default();
+    engine.start(0.);
+    let out = rig.take(&mut engine, 0.);
+    let reads: Vec<_> = out
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    assert_eq!(reads.len(), 1);
+    assert!(
+        is_config(&reads[0]),
+        "EEA config must precede keyed discovery"
+    );
+    let Action::Http(request) = &reads[0] else {
+        unreachable!()
+    };
+    assert_eq!(request.url, "https://eea.okx.com/api/v5/account/config");
+    assert!(
+        request
+            .headers
+            .iter()
+            .any(|(name, value)| *name == "OK-ACCESS-KEY" && value == "key")
+    );
+    assert_eq!(
+        request
+            .headers
+            .iter()
+            .any(|(name, value)| *name == "x-simulated-trading" && value == "1"),
+        demo
+    );
+    (engine, rig, reads.into_iter().next().unwrap())
+}
+
+fn config_ok(engine: &mut Engine<Okx>, rig: &mut Rig, config: &Action) -> Action {
+    respond(
+        engine,
+        config,
+        200,
+        &envelope(r#"{"posMode":"long_short_mode","acctLv":"3"}"#),
+        1.,
+    );
+    let out = rig.take(engine, 1.);
+    assert!(
+        !engine.store().hedged(),
+        "early config cannot publish settings"
+    );
+    assert!(!out.iter().any(|a| matches!(a, Action::WsConnect { .. })));
+    let reads: Vec<_> = out
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    assert_eq!(reads.len(), 1);
+    assert!(is_get(
+        &reads[0],
+        "/api/v5/account/instruments?instType=SWAP"
+    ));
+    reads.into_iter().next().unwrap()
+}
+
+#[test]
+fn eea_config_authentication_precedes_cold_and_warm_keyed_discovery() {
+    for demo in [false, true] {
+        for warm in [false, true] {
+            let (mut engine, mut rig, config) = eea_config(demo, warm);
+            let swap = config_ok(&mut engine, &mut rig, &config);
+            respond(&mut engine, &swap, 200, &envelope(MARKET), 2.);
+            let out = rig.take(&mut engine, 2.);
+            let futures = out
+                .iter()
+                .find(|a| is_get(a, "/api/v5/account/instruments?instType=FUTURES"))
+                .unwrap();
+            assert!(!engine.store().hedged());
+            respond(&mut engine, futures, 200, &envelope(""), 3.);
+            let out = rig.take(&mut engine, 3.);
+            assert!(engine.store().hedged());
+            assert!(
+                !out.iter().any(is_config),
+                "do not duplicate the authenticated config"
+            );
+            assert!(
+                out.iter()
+                    .any(|a| matches!(a,Action::Http(r)if r.url.contains("account-position-risk")))
+            );
+            let loaded = engine.store().loaded();
+            assert!(
+                !(loaded.balance || loaded.orders || loaded.positions),
+                "config plus catalog is not complete startup proof"
+            );
+        }
+    }
+}
+
+#[test]
+fn eea_config_re_signs_once_then_refuses_without_later_polling() {
+    for demo in [false, true] {
+        let (mut engine, mut rig, first) = eea_config(demo, false);
+        let refused = r#"{"code":"50113","msg":"synthetic refusal","data":[]}"#;
+        respond(&mut engine, &first, 401, refused, 1.);
+        rig.take(&mut engine, 1.);
+        let (at, second) = rig
+            .until(&mut engine, is_config)
+            .expect("one re-signed retry");
+        assert!(jittered(at - 1., 1000.));
+        let signature = |action: &Action| {
+            let Action::Http(r) = action else {
+                unreachable!()
+            };
+            r.headers
+                .iter()
+                .find(|(name, _)| *name == "OK-ACCESS-SIGN")
+                .unwrap()
+                .1
+                .clone()
+        };
+        assert_ne!(signature(&first), signature(&second));
+        respond(&mut engine, &second, 401, refused, at);
+        rig.take(&mut engine, at);
+        assert_eq!(rig.failures.len(), 1);
+        assert_eq!(rig.failures[0].kind, Some(ErrorKind::AuthInvalid));
+        assert_eq!(rig.failures[0].venue_code.as_deref(), Some("50113"));
+        assert!(
+            rig.run(&mut engine, 600_000.)
+                .iter()
+                .all(|a| !matches!(a, Action::Http(_)))
+        );
+    }
+}
+
+#[test]
+fn eea_revocation_during_keyed_catalogue_refuses_after_one_resend() {
+    for demo in [false, true] {
+        let (mut engine, mut rig, config) = eea_config(demo, false);
+        let first = config_ok(&mut engine, &mut rig, &config);
+        let refused = r#"{"code":"50113","msg":"synthetic refusal","data":[]}"#;
+        respond(&mut engine, &first, 401, refused, 2.);
+        rig.take(&mut engine, 2.);
+        let (at, second) = rig
+            .until(&mut engine, |a| {
+                is_get(a, "/api/v5/account/instruments?instType=SWAP")
+            })
+            .expect("one re-signed catalog retry");
+        assert!(jittered(at - 2., 1000.));
+        respond(&mut engine, &second, 401, refused, at);
+        rig.take(&mut engine, at);
+        assert_eq!(rig.failures.len(), 1);
+        assert_eq!(rig.failures[0].kind, Some(ErrorKind::AuthInvalid));
+        assert_eq!(rig.failures[0].venue_code.as_deref(), Some("50113"));
+        assert!(
+            !engine.store().hedged(),
+            "refused catalog cannot publish staged settings"
+        );
+        assert!(
+            rig.run(&mut engine, 600_000.)
+                .iter()
+                .all(|a| !matches!(a, Action::Http(_)))
+        );
+    }
+}
+
+fn streamed(engine: &mut Engine<Okx>, action: &Action, status: u16, body: &str, now: f64) {
+    let Action::Http(request) = action else {
+        unreachable!()
+    };
+    engine.handle(
+        now,
+        Event::HttpStart {
+            request: request.id,
+            status,
+            headers: "",
+        },
+    );
+    engine.handle(
+        now,
+        Event::HttpChunk {
+            request: request.id,
+            data: body.as_bytes(),
+        },
+    );
+    engine.handle(
+        now,
+        Event::HttpEnd {
+            request: request.id,
+        },
+    );
+}
+
+#[test]
+fn eea_streamed_catalogue_refusal_has_the_same_bounded_retry() {
+    let (mut engine, mut rig, config) = eea_config(false, false);
+    let first = config_ok(&mut engine, &mut rig, &config);
+    let refused = r#"{"code":"50113","msg":"synthetic refusal","data":[]}"#;
+    streamed(&mut engine, &first, 200, refused, 2.);
+    rig.take(&mut engine, 2.);
+    let (at, second) = rig
+        .until(&mut engine, |a| {
+            is_get(a, "/api/v5/account/instruments?instType=SWAP")
+        })
+        .unwrap();
+    streamed(&mut engine, &second, 200, refused, at);
+    rig.take(&mut engine, at);
+    assert_eq!(rig.failures.len(), 1);
+    assert_eq!(rig.failures[0].kind, Some(ErrorKind::AuthInvalid));
+    assert_eq!(rig.failures[0].venue_code.as_deref(), Some("50113"));
+    assert!(
+        rig.run(&mut engine, 600_000.)
+            .iter()
+            .all(|a| !matches!(a, Action::Http(_)))
+    );
+}
+
+#[test]
+fn eea_config_rate_limit_with_signature_body_is_a_typed_transient_failure() {
+    for demo in [false, true] {
+        let (mut engine, mut rig, config) = eea_config(demo, false);
+        respond_with(
+            &mut engine,
+            &config,
+            429,
+            "Retry-After: 12",
+            r#"{"code":"50113","msg":"synthetic refusal","data":[]}"#,
+            1.,
+        );
+        let out = rig.take(&mut engine, 1.);
+        assert!(rig.failures.is_empty());
+        let diagnostic = out
+            .iter()
+            .find_map(|action| match action {
+                Action::Notice(Notice::Event(event))
+                    if event.fields.contains(&("kind", "rateLimited".into())) =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .expect("HTTP 429 must retain its typed rate-limit diagnosis");
+        assert_eq!(diagnostic.code, "request.failed");
+        assert!(
+            diagnostic
+                .fields
+                .contains(&("retryAfterMs", 12_000.0.into()))
+        );
+        assert!(!out.iter().any(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == "auth.rejected"
+        )));
+        let (at, _) = rig
+            .until(&mut engine, is_config)
+            .expect("rate limit keeps the retry");
+        assert!(at >= 12_001.);
+    }
+}
+
+#[test]
+fn eea_config_interrupted_signature_streak_remains_transient() {
+    let refused = r#"{"code":"50113","msg":"synthetic refusal","data":[]}"#;
+    for interruption in [Some(503), Some(429), None] {
+        let (mut engine, mut rig, first) = eea_config(false, false);
+        respond(&mut engine, &first, 401, refused, 1.);
+        rig.take(&mut engine, 1.);
+        let (at, retry) = rig.until(&mut engine, is_config).unwrap();
+        if let Some(status) = interruption {
+            respond(&mut engine, &retry, status, refused, at);
+        } else {
+            let Action::Http(request) = retry else {
+                unreachable!()
+            };
+            engine.handle(
+                at,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: "lost reply",
+                },
+            );
+        }
+        let out = rig.take(&mut engine, at);
+        assert!(!out.iter().any(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == "auth.rejected"
+        )));
+        if interruption == Some(429) {
+            assert!(out.iter().any(|action| matches!(action,
+                Action::Notice(Notice::Event(event))
+                    if event.fields.contains(&("kind", "rateLimited".into()))
+            )));
+        }
+        let (next_at, retry) = rig.until(&mut engine, is_config).unwrap();
+        if interruption == Some(429) {
+            assert!(next_at >= at + 10_000.);
+        }
+        respond(&mut engine, &retry, 401, refused, next_at);
+        rig.take(&mut engine, next_at);
+        assert!(rig.failures.is_empty());
+        assert!(rig.until(&mut engine, is_config).is_some());
+    }
+}
+
+#[test]
+fn eea_expired_early_config_cannot_publish_settings_after_slow_catalogue() {
+    let (mut engine, mut rig, config) = eea_config(false, false);
+    let swap = config_ok(&mut engine, &mut rig, &config);
+    respond(&mut engine, &swap, 200, &envelope(MARKET), 2.);
+    let out = rig.take(&mut engine, 2.);
+    let futures = out
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/instruments?instType=FUTURES"))
+        .unwrap();
+    respond(&mut engine, futures, 200, &envelope(""), 20_001.);
+    let out = rig.take(&mut engine, 20_001.);
+    assert!(
+        !engine.store().hedged(),
+        "expired config has no publication authority"
+    );
+    assert!(!out.iter().any(|a| matches!(a, Action::WsConnect { .. })));
+    assert!(
+        rig.until(&mut engine, is_config).is_some(),
+        "fresh config required after its original deadline"
+    );
+}
+
+#[test]
+fn eea_config_signature_retry_can_succeed() {
+    let (mut engine, mut rig, first) = eea_config(false, false);
+    respond(
+        &mut engine,
+        &first,
+        401,
+        r#"{"code":"50113","msg":"synthetic refusal","data":[]}"#,
+        1.,
+    );
+    rig.take(&mut engine, 1.);
+    let (at, retry) = rig.until(&mut engine, is_config).unwrap();
+    respond(
+        &mut engine,
+        &retry,
+        200,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        at,
+    );
+    let out = rig.take(&mut engine, at);
+    assert!(
+        out.iter()
+            .any(|a| is_get(a, "/api/v5/account/instruments?instType=SWAP"))
+    );
+    assert!(rig.failures.is_empty());
+}
+
+#[test]
+fn eea_bad_config_and_documented_permission_refuse_without_keyed_discovery() {
+    for (body, kind) in [
+        (r#"{"code":"0","data":[]}"#, ErrorKind::Unsupported),
+        (
+            r#"{"code":"0","data":[{"posMode":"not-a-mode","acctLv":"2"}]}"#,
+            ErrorKind::Unsupported,
+        ),
+        (
+            r#"{"code":"50120","msg":"synthetic permission refusal","data":[]}"#,
+            ErrorKind::AuthPermission,
+        ),
+    ] {
+        let (mut engine, mut rig, config) = eea_config(false, false);
+        respond(&mut engine, &config, 200, body, 1.);
+        let mut out = rig.take(&mut engine, 1.);
+        out.extend(rig.run(&mut engine, 600_000.));
+        assert_eq!(rig.failures.len(), 1);
+        assert_eq!(rig.failures[0].kind, Some(kind));
+        assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    }
+}
+
+#[test]
+fn eea_read_only_key_refusal_never_deactivates_the_primary() {
+    let mut engine = crate::support::engine(Options {
+        eea: true,
+        read_credentials: Some(ReadCredentials {
+            key: "read".into(),
+            secret: "read-secret".into(),
+            passphrase: Some("read-pass".into()),
+        }),
+        ..keyed()
+    });
+    let mut rig = Rig::default();
+    engine.start(0.);
+    let config = rig
+        .take(&mut engine, 0.)
+        .into_iter()
+        .find(is_config)
+        .unwrap();
+    respond(
+        &mut engine,
+        &config,
+        200,
+        r#"{"code":"50111","msg":"synthetic refused read key","data":[]}"#,
+        1.,
+    );
+    rig.take(&mut engine, 1.);
+    assert_eq!(rig.failures.len(), 1);
+    assert!(rig.failures[0].message.contains("read-only API key"));
+    assert_eq!(rig.deactivated, 0);
+}
+
+#[test]
+fn eea_catalogue_transport_and_rate_interruptions_reset_signature_streak() {
+    let refused = r#"{"code":"50113","msg":"synthetic refusal","data":[]}"#;
+    for interruption in [Some(503), Some(429), None] {
+        let (mut engine, mut rig, config) = eea_config(false, false);
+        let first = config_ok(&mut engine, &mut rig, &config);
+        respond(&mut engine, &first, 401, refused, 2.);
+        rig.take(&mut engine, 2.);
+        let catalog = |a: &Action| is_get(a, "/api/v5/account/instruments?instType=SWAP");
+        let (at, retry) = rig.until(&mut engine, catalog).unwrap();
+        if let Some(status) = interruption {
+            respond(
+                &mut engine,
+                &retry,
+                status,
+                r#"{"code":"50111","msg":"untrusted error body","data":[]}"#,
+                at,
+            );
+        } else {
+            let Action::Http(request) = retry else {
+                unreachable!()
+            };
+            engine.handle(
+                at,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: "lost reply",
+                },
+            );
+        }
+        rig.take(&mut engine, at);
+        let (next_at, retry) = rig.until(&mut engine, catalog).unwrap();
+        if interruption == Some(429) {
+            assert!(next_at >= at + 10_000.);
+        }
+        respond(&mut engine, &retry, 401, refused, next_at);
+        rig.take(&mut engine, next_at);
+        assert!(rig.failures.is_empty());
+        assert!(rig.until(&mut engine, catalog).is_some());
+    }
+}
+
+fn streamed_catalogue_interruption_resets_streak(status: u16, body: &str) {
+    let refused = r#"{"code":"50113","msg":"synthetic refusal","data":[]}"#;
+    let (mut engine, mut rig, config) = eea_config(false, false);
+    let first = config_ok(&mut engine, &mut rig, &config);
+    streamed(&mut engine, &first, 200, refused, 2.);
+    rig.take(&mut engine, 2.);
+    let catalog = |action: &Action| is_get(action, "/api/v5/account/instruments?instType=SWAP");
+    let (at, retry) = rig.until(&mut engine, catalog).unwrap();
+    streamed(&mut engine, &retry, status, body, at);
+    rig.take(&mut engine, at);
+    assert!(rig.failures.is_empty());
+    let (next_at, retry) = rig.until(&mut engine, catalog).expect("rate retry");
+    if status == 429 {
+        assert!(next_at >= at + 10_000.);
+    }
+    streamed(&mut engine, &retry, 200, refused, next_at);
+    rig.take(&mut engine, next_at);
+    assert!(
+        rig.failures.is_empty(),
+        "rate interruption must reset the signature streak"
+    );
+    assert!(
+        rig.until(&mut engine, catalog).is_some(),
+        "a fresh signature retry remains"
+    );
+}
+
+#[test]
+fn eea_streamed_catalogue_no_list_rate_limit_resets_signature_streak() {
+    streamed_catalogue_interruption_resets_streak(
+        429,
+        r#"{"code":"50113","msg":"synthetic rate interruption"}"#,
+    );
+}
+
+#[test]
+fn eea_streamed_catalogue_list_rate_limit_resets_signature_streak() {
+    streamed_catalogue_interruption_resets_streak(
+        429,
+        r#"{"code":"50113","msg":"synthetic rate interruption","data":[]}"#,
+    );
+}
+
+#[test]
+fn eea_streamed_catalogue_no_list_signature_refusal_stays_permanent_on_second_answer() {
+    let (mut engine, mut rig, config) = eea_config(false, false);
+    let first = config_ok(&mut engine, &mut rig, &config);
+    let refused = r#"{"code":"50113","msg":"synthetic refusal"}"#;
+    streamed(&mut engine, &first, 200, refused, 2.);
+    rig.take(&mut engine, 2.);
+    assert!(rig.failures.is_empty());
+    let catalog = |action: &Action| is_get(action, "/api/v5/account/instruments?instType=SWAP");
+    let (at, retry) = rig
+        .until(&mut engine, catalog)
+        .expect("one signature retry");
+    streamed(&mut engine, &retry, 200, refused, at);
+    rig.take(&mut engine, at);
+    assert_eq!(
+        rig.failures.len(),
+        1,
+        "genuine authentication answers are not interruptions"
+    );
+    assert_eq!(rig.failures[0].kind, Some(ErrorKind::AuthInvalid));
+    assert_eq!(rig.failures[0].venue_code.as_deref(), Some("50113"));
+    assert!(!rig.run(&mut engine, 600_000.).iter().any(catalog));
+}
+
+#[test]
+fn eea_streamed_catalogue_no_list_200_error_resets_signature_streak() {
+    streamed_catalogue_interruption_resets_streak(
+        200,
+        r#"{"code":"50011","msg":"synthetic rate interruption"}"#,
+    );
+}
+
+#[test]
+fn eea_streamed_catalogue_list_200_error_resets_signature_streak() {
+    streamed_catalogue_interruption_resets_streak(
+        200,
+        r#"{"code":"50011","msg":"synthetic rate interruption","data":[]}"#,
+    );
+}

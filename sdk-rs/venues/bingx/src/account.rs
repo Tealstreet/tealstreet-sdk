@@ -1,4 +1,5 @@
 //! Private account state and its independently recovered listen key.
+use safe_cex_engine::ControlFrame;
 #[path = "metadata.rs"]
 mod metadata;
 #[path = "open_order.rs"]
@@ -966,7 +967,7 @@ impl Account {
         }
         self.keepalive = Some(cx.set_timer(REFRESH_MS));
         if let Some(socket) = self.socket {
-            cx.send(socket, "Ping");
+            cx.send(socket, ControlFrame::heartbeat("Ping"));
         }
         // Reconnects have a blind interval; any old snapshots are now stale.
         self.bump_orders(cx.store);
@@ -985,7 +986,7 @@ impl Account {
             }
             LifecycleEvent::Retired { .. } => self.invalidate_private(cx),
             LifecycleEvent::Reconnect(_) => self.fetch_key(cx, credentials),
-            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), "Ping"),
+            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), ControlFrame::heartbeat("Ping")),
             _ => {}
         }
         self.resume_key_retry(cx);
@@ -1683,7 +1684,7 @@ impl Account {
     pub fn on_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str, credentials: &Credentials) {
         if text == "Ping" {
             if let Some(socket) = self.socket {
-                cx.send(socket, "Pong");
+                cx.send(socket, ControlFrame::heartbeat("Pong"));
             }
             return;
         }
@@ -1704,7 +1705,7 @@ impl Account {
         };
         if event.ping.is_some() {
             if let Some(socket) = self.socket {
-                cx.send(socket, "Pong");
+                cx.send(socket, ControlFrame::heartbeat("Pong"));
             }
             return;
         }
