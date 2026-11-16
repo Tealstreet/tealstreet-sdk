@@ -628,8 +628,8 @@ An owned signing-work barrier refuses `mode_transition_busy` while any original
 sign future or setup execution remains unsettled. No work is canceled, retried
 or sent to both signers. The original engine dispatch handle, opaque refs,
 address/public-key seals and nonce ownership stay in place. Missing trusted
-bindings refuse `mode_transition_unavailable`. Coinbase CDP explicitly refuses
-as `proof-unavailable` until its COSIGNED JWT setup and private venue proof exist.
+bindings refuse `mode_transition_unavailable`. Coinbase COSIGNED uses native
+JWT/private startup; DELEGATED CDP handover still refuses as `proof-unavailable`.
 These refusals leave the candidate unattached.
 
 The future provider, actual mode and protected resident are installed together.
@@ -758,6 +758,11 @@ local provider; it does not build a second set of REST requests. Its result
 classifier uses engine `ErrorKind` values: authentication failures are invalid,
 rate limits and transport failures are transient, and complete private startup
 is accepted.
+Exact `kucoinspot` admission uses the native Spot account and active-order reads
+at `https://api.kucoin.com`, with the existing batch request/passphrase HMAC
+signer and signed private read-feed token. Its production origin is separate
+from Futures; testnet is still refused. Offline proof controls cover other valid
+credentials, wrong signing material, replayed signatures and foreign sockets.
 Unclassified startup failures remain transient refusals. Public-only and
 frame-fed accounts cannot satisfy this check. MEXC mainnet proves its normal
 private position-mode, balance, positions and three order-surface reads using
@@ -765,6 +770,13 @@ API-key/timestamp/query HMAC headers; private-stream login is also validated by
 the offline fixture. Wrong-key and replayed signatures fail before attachment,
 foreign sockets cannot settle signing work, and the resident stays unchanged.
 MEXC has no hosted testnet alias; public discovery never proves possession.
+
+Exact `binanceoptions` mainnet uses native signed EAPI margin-account, position
+and open-order reads. Complete private startup is required; public discovery
+cannot prove the key. Its offline suite checks independent HMAC bytes, a valid
+second credential, wrong keys and signatures from earlier attempts, other sockets,
+consumed responses and owner retirement without replacing a resident or signer.
+Hosted Options testnet remains refused and no socket protocol is added.
 
 OKX EEA mainnet and demo authenticate native signed config before keyed catalogue
 discovery, retaining the config authority until market-dependent settings apply.
