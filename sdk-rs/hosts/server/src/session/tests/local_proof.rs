@@ -126,12 +126,17 @@ async fn local_proof_other_valid_key_cannot_touch_resident() {
 }
 
 #[tokio::test]
-async fn local_proof_catalog_and_unbound_owner_stay_unavailable() {
-    assert!(!crate::delegated::probe::cosigned_ready(&init()));
+async fn local_proof_unactivated_venue_stays_unavailable_without_fixture_binding() {
+    assert!(!crate::delegated::probe::cosigned_ready(&InitPayload {
+        exchange_name: "hyperliquidspot".into(),
+        ..init()
+    }));
     for owner in ["alice", "bob"] {
         let registry = registry(owner == "bob");
         let (mut session, mut sent) = user_session(registry.clone(), owner);
-        session.init(init()).await.unwrap();
+        let mut payload = init();
+        payload.exchange_name = "hyperliquidspot".into();
+        session.init(payload).await.unwrap();
         let frame: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
         assert_eq!(frame["d"]["data"][1]["kind"], "proof-unavailable");
         assert!(session.pending_verifications.is_empty());
