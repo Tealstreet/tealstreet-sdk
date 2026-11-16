@@ -38,7 +38,9 @@ export const HARNESS_NOT_BUILT = Object.freeze([
   /^sdk-rs\/harness\/gate\.mjs$/,
   /^sdk-rs\/harness\/wasm-budget\.mjs$/,
 ]);
-const notBuilt = (rel) => HARNESS_NOT_BUILT.some((pattern) => pattern.test(rel));
+// Markdown is documentation, including guides outside the harness. Tests reject
+// build/shipped imports or Rust includes that would make excluded docs build data.
+const notBuilt = (rel) => /\.md$/i.test(rel) || HARNESS_NOT_BUILT.some((pattern) => pattern.test(rel));
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 

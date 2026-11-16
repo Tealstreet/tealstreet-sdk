@@ -72,3 +72,16 @@ Budget imports validate raw duplicate/name membership before evaluating the map.
 The closed source scanner ignores nested template text and expressions, rejecting
 unsupported regex/division syntax instead of guessing their lexical boundaries;
 construction feature checks reject raw duplicate keys and missing policy rows.
+
+## Release and pin fingerprint
+
+`beta-wasm-inputs.mjs` is the shared definition used by the SDK release and NX's
+strict pin/prebuild recomputation after Copybara imports the same `sdk-rs/` tree.
+Markdown documentation anywhere under `sdk-rs/` is excluded, including this guide;
+real scripts such as `families.integration.mjs`, fixtures and toolchains still count.
+The import/include tests reject excluded documentation becoming compiled build data.
+The CI artifact `buildInputFingerprint` is a separate immutable Git provenance key.
+
+Changing the fingerprint definition itself still moves the release hash once.
+Coordinate the SDK merge, normal Copybara import, matching release and new NX pin
+in one cut; an old pin with the new function must continue failing closed.

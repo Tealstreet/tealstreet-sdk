@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import { betaWasmInputPaths, betaWasmInputs, HARNESS_NOT_BUILT } from './beta-wasm-inputs.mjs';
+import { rustDocumentInputs } from './ci-selection.mjs';
 
 const TOOLCHAIN = { wasmBindgen: '0.2.129', wasmOpt: 'required', profile: 'release', target: 'wasm32-unknown-unknown' };
 
@@ -47,6 +48,45 @@ test('an added source file or a toolchain change also changes it', () => {
     betaWasmInputs(clean, { ...TOOLCHAIN, wasmBindgen: '0.2.130' }).fingerprint,
     betaWasmInputs(clean, TOOLCHAIN).fingerprint,
   );
+});
+
+test('Markdown edits are neutral across harness docs, nested guides and crate instructions', () => {
+  const root = tree();
+  const documents = [
+    'sdk-rs/harness/CLAUDE.md',
+    'sdk-rs/harness/fixtures/README.md',
+    'sdk-rs/README.md',
+    'sdk-rs/engine/DESIGN.md',
+    'sdk-rs/hosts/wasm/README.md',
+    'sdk-rs/venues/bybit/README.MD',
+  ];
+  for (const path of documents) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), 'original documentation');
+  }
+  const before = betaWasmInputs(root, TOOLCHAIN);
+  for (const path of documents) {
+    writeFileSync(join(root, path), 'updated documentation');
+    assert.deepEqual(betaWasmInputs(root, TOOLCHAIN), before, path);
+    assert.ok(!betaWasmInputPaths(root).includes(path), path);
+  }
+  assert.equal(before.files, 4);
+});
+
+test('family-isolation code still changes the fingerprint', () => {
+  const root = tree();
+  const path = join(root, 'sdk-rs/harness/families.integration.mjs');
+  writeFileSync(path, '// original family-isolation check');
+  const before = betaWasmInputs(root, TOOLCHAIN);
+  writeFileSync(path, '// changed family-isolation check');
+  assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, before.fingerprint);
+  assert.ok(betaWasmInputPaths(root).includes('sdk-rs/harness/families.integration.mjs'));
+});
+
+test('a Markdown-looking symlink still fails closed', () => {
+  const root = tree();
+  symlinkSync('/etc/hosts', join(root, 'sdk-rs/harness/README.md'));
+  assert.throws(() => betaWasmInputs(root, TOOLCHAIN), /symlink/);
 });
 
 test('generated trees are ignored, so installing the packages does not move it', () => {
@@ -226,4 +266,14 @@ test('release family tests import the size gate without making it a build input'
 test('each excluded harness pattern still names a real file', () => {
   const harness = readdirSync(join(REPO, 'sdk-rs/harness')).map((name) => `sdk-rs/harness/${name}`);
   for (const pattern of HARNESS_NOT_BUILT) assert.ok(harness.some((rel) => pattern.test(rel)), String(pattern));
+});
+
+test('excluded Markdown is not a Rust include input', () => {
+  const sources = betaWasmInputPaths(REPO)
+    .filter((path) => path.endsWith('.rs'))
+    .map((path) => [path, read(path)]);
+  const documents = rustDocumentInputs(sources);
+  assert.equal(documents.unresolved, false, 'audit dynamic includes before excluding their possible Markdown inputs');
+  assert.deepEqual([...documents.paths].filter((path) => /\.md$/i.test(path)), [],
+    'compiled Markdown is build data and must be retained, not treated as documentation');
 });
