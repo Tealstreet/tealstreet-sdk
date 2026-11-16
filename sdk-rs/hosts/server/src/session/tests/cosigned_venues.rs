@@ -605,6 +605,124 @@ async fn cosigned_variant_bitgetusdc_requires_connection_proof() {
 }
 
 #[tokio::test]
+async fn cosigned_bitgetinverse_requires_connection_proof() {
+    venue_case("bitgetinverse").await;
+}
+
+#[tokio::test]
+async fn cosigned_bitgetinverse_missing_signature_or_wrong_passphrase_cannot_attach() {
+    let venue = "bitgetinverse";
+    for answer in [Answer::MissingSignature, Answer::WrongPassphrase] {
+        let (io, seen) = MockVenue::for_admission(venue);
+        let registry = crate::accounts::testing::e2e_registry("alice", io);
+        let (mut session, mut sent) = user_session(registry.clone(), "alice");
+        let mut device = Device::default();
+        if matches!(answer, Answer::MissingSignature) {
+            let mut done = session.take_verified();
+            session.init(payload(venue)).await.unwrap();
+            assert!(session.pending_verifications.contains_key("acct"));
+            let first = tokio::time::timeout(Duration::from_secs(3), sent.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let first: Value = serde_json::from_str(&first).unwrap();
+            assert_eq!(first["t"], "sign-req");
+            let link = session.pending_verifications["acct"]
+                .cosigned_link
+                .clone()
+                .unwrap();
+            device.answer(venue, &mut session, first, answer).await;
+            assert!(session.joined.is_empty());
+            assert_eq!(seen.lock().unwrap().signed_reads, 0);
+            // Missing signatures can leave native startup pending until its shared deadline.
+            tokio::time::pause();
+            let budget = safe_cex_remote_signer::SIGN_TIMEOUT
+                + Duration::from_millis(u64::from(
+                    safe_cex_engine::request_budget::RequestClass::Read.budget_ms(),
+                ));
+            tokio::time::advance(budget + Duration::from_millis(1)).await;
+            let completion = done.recv().await.unwrap();
+            tokio::time::resume();
+            while let Ok(text) = sent.try_recv() {
+                let frame: Value = serde_json::from_str(&text).unwrap();
+                assert_ne!(frame["d"]["op"], "frame", "no unverified state delivery");
+            }
+            session.verification_completed(completion).await.unwrap();
+            assert!(session.pending_verifications.is_empty());
+            assert!(!link.is_available());
+        } else {
+            proof(venue, &mut session, &mut sent, &mut device, answer).await;
+        }
+        assert!(session.joined.is_empty());
+        assert_eq!(registry.account_count(), 0);
+        if matches!(answer, Answer::MissingSignature) {
+            assert_eq!(seen.lock().unwrap().signed_reads, 0, "no unsigned fallback");
+        } else {
+            assert!(seen.lock().unwrap().refused > 0);
+        }
+        let frames: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+            .map(|text| serde_json::from_str(&text).unwrap())
+            .collect();
+        assert!(frames.iter().any(|frame| {
+            let refusal = &frame["d"]["data"][1];
+            refusal["kind"] == "unverified" && refusal["initRefused"] == true
+        }));
+        assert!(!frames.iter().any(|frame| frame["d"]["op"] == "frame"));
+        session.close();
+    }
+}
+
+#[tokio::test]
+async fn cosigned_bitgetinverse_retired_signing_work_cannot_attach_after_owner_aba() {
+    let venue = "bitgetinverse";
+    let (io, _) = MockVenue::for_admission(venue);
+    let registry = crate::accounts::testing::e2e_registry("alice", io);
+    let (mut old, mut sent) = user_session(registry.clone(), "alice");
+    old.identity.resumable = false;
+    let mut completed = old.take_verified();
+    old.init(payload(venue)).await.unwrap();
+    assert!(old.pending_verifications.contains_key("acct"));
+    let frame = tokio::time::timeout(Duration::from_secs(3), sent.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let frame: Value = serde_json::from_str(&frame).unwrap();
+    assert_eq!(frame["t"], "sign-req");
+    let preimage = frame["d"]["wsAuth"]["toSign"].as_str().unwrap();
+    let signature = safe_cex_crypto::hmac_sha256(
+        MATERIAL.as_bytes(),
+        preimage.as_bytes(),
+        safe_cex_crypto::Encoding::Base64,
+    );
+    let response = json!({"id":frame["d"]["id"],"wsAuthSignature":signature});
+    let link = old.pending_verifications["acct"]
+        .cosigned_link
+        .clone()
+        .unwrap();
+    let socket = old.socket;
+    old.close();
+    for user in ["bob", "alice"] {
+        let (mut current, mut output) = user_session(registry.clone(), user);
+        current.identity.resumable = false;
+        let mut device = Device::default();
+        proof(
+            venue,
+            &mut current,
+            &mut output,
+            &mut device,
+            Answer::Correct,
+        )
+        .await;
+        load(venue, &mut current, &mut output, &mut device).await;
+        assert_eq!(current.joined["acct"].account.user, user);
+        assert!(!link.resolve(socket, response.clone()));
+        assert!(registry.held("alice", "acct", socket).is_none());
+        assert!(completed.try_recv().is_err());
+        current.close();
+    }
+}
+
+#[tokio::test]
 async fn cosigned_bybitinverse_brazil_requires_connection_proof() {
     venue_case("bybitinverse").await;
 }
