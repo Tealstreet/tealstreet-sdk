@@ -802,6 +802,11 @@ async fn cosigned_apexomni_requires_connection_proof() {
 }
 
 #[tokio::test]
+async fn cosigned_apexomni_login_switch_during_signing_await_is_isolated() {
+    login_switch_case("apexomni").await;
+}
+
+#[tokio::test]
 async fn cosigned_cryptocom_requires_connection_proof() {
     venue_case("cryptocom").await;
 }
