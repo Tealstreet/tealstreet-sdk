@@ -33,6 +33,10 @@ pub(crate) struct Seen {
     pub(crate) aster_private_sockets: usize,
     pub(crate) mexc_socket_auths: usize,
     pub(crate) bitunix_socket_auths: usize,
+    pub(crate) kraken_socket_auths: usize,
+    pub(crate) kraken_authents: Vec<(String, String)>,
+    pub(crate) kraken_challenges: Vec<(String, String)>,
+    pub(crate) kraken_auth_gate: Option<Arc<tokio::sync::Semaphore>>,
     pub(crate) cryptocom_socket_auths: usize,
     pub(crate) bitget_inverse_uta: bool,
     paths: Vec<String>,
@@ -436,6 +440,9 @@ impl VenueIo {
         }
     }
     fn response(&self, r: &HttpRequest) -> Value {
+        if self.venue == "kraken" {
+            return kraken::response(self, r);
+        }
         if self.venue == "asterdex" {
             return asterdex::response(self, r);
         }
@@ -560,6 +567,9 @@ impl Transport for VenueIo {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        if self.venue == "kraken" {
+            return kraken::connect(self, socket, &url, events);
+        }
         if self.venue == "asterdex" {
             return asterdex::connect(self, socket, &url, events);
         }
@@ -742,6 +752,7 @@ fn hyro_private_read_fixture(
 }
 
 fn local(venue: &str, material: &str) -> super::super::PreparedDelegated {
+    let material = signing_material(venue, material);
     let mut options: safe_cex_venues::EngineOptions =
         serde_json::from_value(json!({"key":KEY,"secret":material,"passphrase":PASS})).unwrap();
     let (provider, identities) =
@@ -762,6 +773,14 @@ fn local(venue: &str, material: &str) -> super::super::PreparedDelegated {
         hyro_private_read_fixture(prepared)
     } else {
         prepared
+    }
+}
+
+pub(crate) fn signing_material(venue: &str, material: &str) -> String {
+    if venue == "kraken" {
+        safe_cex_crypto::encode(material.as_bytes(), Encoding::Base64)
+    } else {
+        material.into()
     }
 }
 const KUCOIN_STARTUP_OPERATIONS: &[&str] = &[
@@ -1080,6 +1099,17 @@ pub(crate) fn apexomni_text(descriptor: &str) -> String {
 // Remove only the attempt's changing stamp/nonce, keeping the same native
 // operation and read parameters when looking up its earlier valid signature.
 pub(crate) fn operation(venue: &str, canonical: &str) -> String {
+    if venue == "kraken" {
+        if kraken::socket_preimage(canonical) {
+            return "kraken-private-challenge".into();
+        }
+        let descriptor: Value = serde_json::from_str(canonical).unwrap();
+        return descriptor["payload"]
+            .as_str()
+            .unwrap()
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .into();
+    }
     if venue == "asterdex" {
         let descriptor: Value = serde_json::from_str(canonical).unwrap();
         return descriptor["payload"]
@@ -1174,7 +1204,15 @@ async fn remote(
         safe_cex_remote_signer::SignerLink::new(77, Arc::new(move |frame| tx.send(frame).is_ok()));
     let pending = Arc::downgrade(&link);
     let task = tokio::task::spawn_local(async move {
-        let mut options: safe_cex_venues::EngineOptions = serde_json::from_value(json!({"key":KEY,"secret":if matches!(answer, DeviceAnswer::DifferentKey) { "synthetic-other-material" } else { SECRET },"passphrase":PASS})).unwrap();
+        let material = if matches!(answer, DeviceAnswer::DifferentKey) {
+            "synthetic-other-material"
+        } else {
+            SECRET
+        };
+        let mut options: safe_cex_venues::EngineOptions = serde_json::from_value(
+            json!({"key":KEY,"secret":signing_material(venue, material),"passphrase":PASS}),
+        )
+        .unwrap();
         let (provider, identities) =
             safe_cex_venues::prepare_local_signer_for(venue, &mut options).unwrap();
         while let Some(frame) = rx.recv().await {
@@ -1208,6 +1246,7 @@ async fn remote(
                     || text.contains("/user/verify")
                     || venue == "binancespot" && text.starts_with("apiKey=")
                     || venue == "woo" && text.starts_with('|')
+                    || venue == "kraken" && kraken::socket_preimage(text)
                     || venue == "apexomni"
                         && apexomni_text(text).trim_start_matches(|c: char| c.is_ascii_digit())
                             == "GET/ws/accounts"
@@ -1223,7 +1262,8 @@ async fn remote(
                     fresh
                 };
             let operation = operation(venue, canonical);
-            let signature = if !is_ws && matches!(answer, DeviceAnswer::Replay) {
+            let proof_signature = if venue == "kraken" { is_ws } else { !is_ws };
+            let signature = if proof_signature && matches!(answer, DeviceAnswer::Replay) {
                 let old = prior
                     .lock()
                     .unwrap()
@@ -1233,7 +1273,7 @@ async fn remote(
                 assert_ne!(old, fresh, "a new attempt must sign fresh bytes");
                 old
             } else {
-                if !is_ws && matches!(answer, DeviceAnswer::Correct) {
+                if proof_signature && matches!(answer, DeviceAnswer::Correct) {
                     prior.lock().unwrap().insert(operation, fresh.clone());
                 }
                 fresh
@@ -1662,6 +1702,9 @@ mod mexc;
 mod okxeudemo;
 #[path = "woo_probe_tests.rs"]
 mod woo;
+
+#[path = "kraken_probe_tests.rs"]
+pub(crate) mod kraken;
 
 #[test]
 fn apexomni_replay_normalization_preserves_native_route_and_scope() {

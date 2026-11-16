@@ -15,6 +15,7 @@ mod apexomni;
 mod asterdex;
 mod coinbase;
 mod grvt;
+mod kraken;
 
 type Answer = Box<dyn Fn(&Value) -> Value + Send + Sync>;
 

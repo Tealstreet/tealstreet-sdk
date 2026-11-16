@@ -1,7 +1,7 @@
 //! Admission through the production Session path, independent of DELEGATED rollout.
 use super::*;
 use crate::delegated::probe::venue_tests::{
-    Seen, apexomni_text, assert_variant_startup, operation,
+    Seen, apexomni_text, assert_variant_startup, kraken, operation, signing_material,
 };
 use crate::delegated_e2e_io::MockVenue;
 use std::time::Duration;
@@ -98,6 +98,7 @@ impl Device {
                 && apexomni_text(preimage).trim_start_matches(|c: char| c.is_ascii_digit())
                     == "GET/ws/accounts"
             || venue == "cryptocom" && preimage.starts_with("public/auth");
+        let socket_auth = socket_auth || venue == "kraken" && kraken::socket_preimage(preimage);
         let use_other_key = self.other_key || !socket_auth && matches!(mode, Answer::OtherKey);
         let signing_key = if self.other_key {
             "synthetic-other-key"
@@ -110,7 +111,7 @@ impl Device {
             MATERIAL
         };
         let mut options = serde_json::from_value(
-            json!({"key":signing_key,"secret":material,"passphrase":"synthetic-passphrase"}),
+            json!({"key":signing_key,"secret":signing_material(venue, material),"passphrase":"synthetic-passphrase"}),
         )
         .unwrap();
         let (provider, identities) =
@@ -132,9 +133,12 @@ impl Device {
                 .signature
                 .unwrap()
         };
-        let signature = if socket_auth {
-            fresh
+        let proof_signature = if venue == "kraken" {
+            socket_auth
         } else {
+            !socket_auth
+        };
+        let signature = if proof_signature {
             let key = operation(venue, preimage);
             if matches!(mode, Answer::Replay) {
                 let prior = self
@@ -150,6 +154,8 @@ impl Device {
                 }
                 fresh
             }
+        } else {
+            fresh
         };
         let response = if matches!(mode, Answer::MissingSignature) {
             json!({"id":request["id"]})
@@ -850,11 +856,22 @@ async fn login_switch_case(venue: &'static str) {
     alice.init(payload(venue)).await.unwrap();
     assert!(alice.pending_verifications.contains_key("acct"));
     // Withhold Alice's proof signature: her native proof is genuinely deferred.
-    let request = tokio::time::timeout(Duration::from_secs(30), a_sent.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let request: Value = serde_json::from_str(&request).unwrap();
+    let request = tokio::time::timeout(Duration::from_secs(30), async {
+        let mut device = Device::default();
+        loop {
+            let request: Value = serde_json::from_str(&a_sent.recv().await.unwrap()).unwrap();
+            if venue != "kraken"
+                || kraken::socket_preimage(request["d"]["wsAuth"]["toSign"].as_str().unwrap())
+            {
+                break request;
+            }
+            device
+                .answer(venue, &mut alice, request, Answer::Correct)
+                .await;
+        }
+    })
+    .await
+    .unwrap();
     assert_eq!(request["t"], "sign-req");
     let old_socket = alice.socket;
     alice.close();
@@ -953,6 +970,16 @@ fn kucoinspot_positive_capture_waits_for_every_private_startup_signature() {
 #[tokio::test]
 async fn cosigned_woo_requires_connection_proof() {
     venue_case("woo").await;
+}
+
+#[tokio::test]
+async fn cosigned_kraken_requires_connection_proof() {
+    venue_case("kraken").await;
+}
+
+#[tokio::test]
+async fn cosigned_kraken_login_switch_during_private_challenge_is_isolated() {
+    login_switch_case("kraken").await;
 }
 
 #[tokio::test]

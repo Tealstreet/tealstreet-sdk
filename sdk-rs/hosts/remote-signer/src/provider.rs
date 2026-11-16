@@ -3,6 +3,7 @@
 //! browser's existing signing host answers it unchanged.
 mod apexomni;
 mod coinbase;
+mod kraken;
 mod orderly;
 use std::future::Future;
 use std::pin::Pin;
@@ -37,6 +38,7 @@ pub(crate) enum Family {
     Backpack,
     Coinbase,
     Kucoin,
+    Kraken,
     DoubleSha256,
     Hyperliquid,
     Grvt,
@@ -51,6 +53,7 @@ impl Family {
             "backpack" => Self::Backpack,
             "coinbase" | "coinbasespot" => Self::Coinbase,
             "kucoin" | "kucoinspot" => Self::Kucoin,
+            "kraken" => Self::Kraken,
             "bitunix" => Self::DoubleSha256,
             "hyperliquid" | "hyperliquidspot" => Self::Hyperliquid,
             "grvt" => Self::Grvt,
@@ -63,6 +66,7 @@ impl Family {
     fn algorithm(self) -> Algorithm {
         match self {
             Self::Hmac | Self::Kucoin | Self::ApexOmni => Algorithm::HmacSha256,
+            Self::Kraken => Algorithm::HmacSha512,
             Self::Backpack => Algorithm::Ed25519,
             Self::Coinbase => Algorithm::Es256,
             Self::DoubleSha256 => Algorithm::Sha256SecretSuffix,
@@ -598,6 +602,7 @@ impl Inner {
             Family::ApexOmni => self.sign_apexomni(&operations).await?,
             Family::Orderly => return refused(),
             Family::Kucoin => self.sign_kucoin(&operations).await?,
+            Family::Kraken => self.sign_kraken(&operations, receipt).await?,
             Family::Backpack => self.sign_backpack(&operations).await?,
             Family::Coinbase => return refused(),
         };

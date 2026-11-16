@@ -785,6 +785,13 @@ the offline fixture. Wrong-key and replayed signatures fail before attachment,
 foreign sockets cannot settle signing work, and the resident stays unchanged.
 MEXC has no hosted testnet alias; public discovery never proves possession.
 
+Kraken Futures joins combine native private REST startup with its existing
+[signed WebSocket challenge](https://support.kraken.com/articles/360022635652-sign-challenge-websocket-api-derivatives).
+The temporary probe waits for matching primary-key subscriptions and all three
+private-feed acknowledgments on its captured connection. REST remains nonce-free;
+an old challenge signature, partial handshake or retired owner cannot supply proof.
+This observation stays in the server and changes no native venue signing recipe.
+
 Exact `binanceoptions` mainnet uses native signed EAPI margin-account, position
 and open-order reads. Complete private startup is required; public discovery
 cannot prove the key. Its offline suite checks independent HMAC bytes, a valid

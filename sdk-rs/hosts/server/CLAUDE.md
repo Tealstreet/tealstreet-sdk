@@ -157,6 +157,10 @@ reads and wrong-key, replay, foreign-socket and resident-preservation controls.
 There is no server-local proof shortcut or trading write in that probe.
 Crypto.com proves its signed native JSON positions, balance and regular/advanced
 open-order reads, with wrong-key, replay, foreign-socket and login-switch controls.
+Kraken Futures keeps nonce-free REST. Its temporary native probe also requires
+a fresh venue-issued private challenge, matching primary-key subscriptions and
+all three private-feed acknowledgments; REST loading alone cannot admit a join.
+Connection replacement, close and captured-owner retirement revoke that evidence.
 Variant tests pin product routes, origins and demo headers as well as the
 wrong-key, replay, foreign-socket and resident-preservation controls. BingX perpetuals
 prove signed private account reads independently of API-key-only listen-key acquisition;
