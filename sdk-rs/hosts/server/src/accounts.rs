@@ -1126,6 +1126,7 @@ impl Registry {
                     &crate::telemetry::Report {
                         kind: "router_lease.fenced",
                         summary,
+                        user_id: (!account.public_only).then_some(account.user.as_str()),
                         user_tag: Some(tag.clone()),
                         venue: Some(&account.venue),
                         running_jobs: Some(running_jobs),
@@ -1853,6 +1854,7 @@ impl Registry {
             resident.configure(&mut config);
         }
         config.log_label = Some(self.account_log_label(user, &init.account_name, &venue));
+        config.report_user = (!public_only).then(|| safe_cex_native::report::ReportUser::new(user));
         // Public and COSIGNED diagnostic modes retain their original values.
         config.signing_mode = Some(if public_only {
             "public"
@@ -1919,6 +1921,9 @@ impl Registry {
                 return;
             }
             let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
+            if let Some(user) = &config.report_user {
+                transport = transport.with_report_user(user.clone());
+            }
             transport = transport.with_io_guard(Arc::new(move || authority.check().is_ok()));
             #[cfg(test)]
             let transport = crate::delegated_e2e_io::Io::new(transport, e2e_venue);
@@ -2210,6 +2215,7 @@ impl Registry {
             &crate::telemetry::Report {
                 kind: "signer.failing",
                 summary: "signer keeps failing; account disposed",
+                user_id: Some(&account.user),
                 user_tag: Some(user_tag(&account.user)),
                 venue: Some(&account.venue),
                 ..Default::default()

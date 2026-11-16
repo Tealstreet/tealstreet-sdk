@@ -8,7 +8,8 @@
 //! This process holds users' exchange credentials, so every event is rebuilt
 //! from an allowlist in `before_send`: fixed summaries (never error text or a
 //! panic payload), a fingerprint, stack frames' code locations, and the tags
-//! and extras named below. Nothing else (request data, user, contexts,
+//! and extras named below, plus the captured verified subject as user.id. Nothing
+//! else (request data, other user fields, contexts,
 //! breadcrumbs, frame variables) leaves. Events are throttled per fingerprint
 //! and globally, and sent from Sentry's own transport thread through a bounded
 //! queue that drops when full; nothing flushes inline, so a failure storm or a
@@ -36,8 +37,11 @@ const TAGS: &[&str] = &[
     "target",
     "startup_unloaded",
     "startup_refused",
+    "user_id",
 ];
 const EXTRAS: &[&str] = &["user_tag", "suppressed_since_last_event"];
+// Only Report's captured owner uses this internal field; SDK user scopes do not.
+const VERIFIED_USER_ID: &str = "_verified_user_id";
 const LEASE_WORK_COUNTS: &[&str] = &["running_jobs", "paused_jobs", "pending_work"];
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
@@ -270,7 +274,7 @@ fn redact_named(text: &str) -> String {
     out
 }
 
-/// The scrubber for every string an event carries.
+/// Scrubs diagnostic text; the captured authentication subject is separate.
 pub fn scrub(text: &str) -> String {
     let text = redact_named(&strip_query(text));
     let mut out = String::with_capacity(text.len());
@@ -299,6 +303,12 @@ pub fn scrub(text: &str) -> String {
 /// The event that leaves: allowlisted fields only, identity set here rather
 /// than inferred by the SDK.
 fn allowlisted(event: Event<'static>, identity: &Identity, suppressed: u32) -> Event<'static> {
+    let user_id = event
+        .extra
+        .get(VERIFIED_USER_ID)
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty() && id.len() <= 512 && !id.chars().any(char::is_control))
+        .map(str::to_owned);
     let lease_fence = event
         .tags
         .get("kind")
@@ -306,12 +316,15 @@ fn allowlisted(event: Event<'static>, identity: &Identity, suppressed: u32) -> E
     let mut tags: BTreeMap<String, String> = event
         .tags
         .into_iter()
-        .filter(|(key, _)| TAGS.contains(&key.as_str()) && key != "box")
+        .filter(|(key, _)| TAGS.contains(&key.as_str()) && key != "box" && key != "user_id")
         .map(|(key, value)| (key, scrub(&value).chars().take(200).collect()))
         .collect();
     tags.insert("service".into(), SERVICE.into());
     if let Some(label) = &identity.box_label {
         tags.insert("box".into(), label.clone());
+    }
+    if let Some(id) = &user_id {
+        tags.insert("user_id".into(), id.clone());
     }
     let mut extra: BTreeMap<String, Value> = event
         .extra
@@ -366,6 +379,10 @@ fn allowlisted(event: Event<'static>, identity: &Identity, suppressed: u32) -> E
         exception,
         tags,
         extra,
+        user: user_id.map(|id| sentry::User {
+            id: Some(id),
+            ..Default::default()
+        }),
         release: identity.release.clone().map(Into::into),
         server_name: identity.box_label.clone().map(Into::into),
         ..Default::default()
@@ -498,6 +515,8 @@ pub fn init_from_env() -> Option<sentry::ClientInitGuard> {
 pub struct Report<'a> {
     pub kind: &'static str,
     pub summary: &'a str,
+    /// Original verified subject, never a label, credential or inferred SDK user.
+    pub user_id: Option<&'a str>,
     pub user_tag: Option<String>,
     pub venue: Option<&'a str>,
     pub target: Option<&'a str>,
@@ -533,6 +552,12 @@ impl Report<'_> {
             }
         }
         let mut extra = BTreeMap::new();
+        if let Some(user_id) = self.user_id {
+            extra.insert(
+                VERIFIED_USER_ID.to_owned(),
+                Value::String(user_id.to_owned()),
+            );
+        }
         if let Some(user_tag) = &self.user_tag {
             extra.insert("user_tag".to_owned(), Value::String(user_tag.clone()));
         }
@@ -596,6 +621,7 @@ fn from_native<'a>(report: &safe_cex_native::report::ErrorReport<'a>) -> Report<
     Report {
         kind: report.kind.as_str(),
         summary,
+        user_id: report.user.map(safe_cex_native::report::ReportUser::as_str),
         user_tag: (words.len() >= 2).then(|| words[0].to_owned()),
         venue: report
             .venue
@@ -709,6 +735,65 @@ mod tests {
             events[0].extra.get("user_tag"),
             Some(&Value::from("a1b2c3d4e5f6"))
         );
+    }
+
+    #[test]
+    fn native_reports_keep_their_captured_user_not_the_account_label() {
+        use safe_cex_native::report::{ErrorKind, ErrorReport, ReportUser};
+        let subject = format!("auth0|{}", "a".repeat(64));
+        let user = ReportUser::new(&subject);
+        for kind in [
+            ErrorKind::AccountStartFailed,
+            ErrorKind::SocketOpenFailed,
+            ErrorKind::RequestFailed,
+        ] {
+            let events = captured(Identity::default(), || {
+                let event = from_native(&ErrorReport {
+                    kind,
+                    user: Some(&user),
+                    label: Some("other-tag private-account bybit"),
+                    target: None,
+                    venue: Some("bybit"),
+                    error_kind: None,
+                    venue_code: None,
+                    startup_unloaded: None,
+                    startup_refused: None,
+                })
+                .event();
+                sentry::capture_event(event);
+            });
+            assert_eq!(
+                events[0].user.as_ref().unwrap().id.as_deref(),
+                Some(subject.as_str())
+            );
+            assert_eq!(events[0].tags.get("user_id"), Some(&subject));
+            assert!(
+                !serde_json::to_string(&events[0])
+                    .unwrap()
+                    .contains("private-account")
+            );
+        }
+    }
+
+    #[test]
+    fn owned_service_reports_keep_the_verified_subject_but_not_the_internal_field() {
+        let events = captured(Identity::default(), || {
+            sentry::capture_event(report_event(&Report {
+                kind: "signer.failing",
+                summary: "signer keeps failing; account disposed",
+                user_id: Some("auth0|synthetic-owner"),
+                ..Default::default()
+            }));
+        });
+        assert_eq!(
+            events[0].user.as_ref().unwrap().id.as_deref(),
+            Some("auth0|synthetic-owner")
+        );
+        assert_eq!(
+            events[0].tags.get("user_id").map(String::as_str),
+            Some("auth0|synthetic-owner")
+        );
+        assert!(!events[0].extra.contains_key(VERIFIED_USER_ID));
     }
 
     #[test]
@@ -1002,6 +1087,7 @@ mod tests {
                 "target",
                 "startup_unloaded",
                 "startup_refused",
+                "user_id",
             ]
         );
         assert_eq!(EXTRAS, ["user_tag", "suppressed_since_last_event"]);
@@ -1019,6 +1105,7 @@ mod tests {
         let events = captured(Identity::default(), || {
             let mut event = from_native(&ErrorReport {
                 kind: ErrorKind::AccountStartFailed,
+                user: None,
                 label: Some("a1b2c3 Main account binance"),
                 target: None,
                 error_kind: Some("authInvalid"),
@@ -1171,6 +1258,7 @@ mod tests {
                 sentry::capture_event(
                     from_native(&ErrorReport {
                         kind: ErrorKind::RequestFailed,
+                        user: None,
                         label: None,
                         target: Some(target),
                         error_kind: None,
@@ -1203,6 +1291,7 @@ mod tests {
         // An account's start failure still takes its venue from the label.
         let start = from_native(&ErrorReport {
             kind: ErrorKind::AccountStartFailed,
+            user: None,
             label: Some("a1b2c3 Main account kraken"),
             target: None,
             error_kind: Some("auth"),

@@ -142,10 +142,20 @@ Every event is rebuilt from an allowlist:
 - stack frames' function, module, file, line and column only;
 - tags `service`, `box`, `kind`, `error_kind`, `venue_code`, `venue` and
   `target`;
+- `user.id` and tag `user_id` from the account's captured, verified proxy-token
+  `userId`, identical to the web Sentry authentication subject. This explicit
+  identity is never an account label, key digest, credential or token. Only the
+  ID is retained: no email, username, IP address or arbitrary SDK user scope;
 - extras `user_tag` (a hash, never the user ID) and
   `suppressed_since_last_event`; `router_lease.fenced` additionally allows unsigned
   numeric `running_jobs`, `paused_jobs` and `pending_work` from the pre-disposal
   work snapshot, never job IDs or payloads.
+
+Private startup, admission and transport diagnostics carry that immutable owner
+separately from log labels, through deferred HTTP preparation and socket opens.
+The internal event metadata is removed by the final allowlist. Shared public
+transports, process-wide errors and panics stay unattributed; they never borrow
+an SDK user scope. Journal labels retain their existing hashed user IDs.
 
 Account names, URLs with their query, auth headers, key-shaped strings and
 payloads do not leave. Events are throttled to one per fingerprint per 60 s
