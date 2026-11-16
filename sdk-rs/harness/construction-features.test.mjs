@@ -4,8 +4,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { venueFamily } from '../hosts/wasm/js/venues.mjs';
+import { readConstructionPolicy } from './artifact-census.mjs';
 
-const rules = JSON.parse(readFileSync(new URL('../../packages/safe-cex/src/exchanges/rust/construction-rules.json', import.meta.url)));
+const rules = readConstructionPolicy(readFileSync(new URL('../../packages/safe-cex/src/exchanges/rust/construction-rules.json', import.meta.url), 'utf8'));
 const manifest = fileURLToPath(new URL('../hosts/wasm/Cargo.toml', import.meta.url));
 const features = JSON.parse(execFileSync('python3', ['-c',
   'import json,sys,tomllib; print(json.dumps(tomllib.load(open(sys.argv[1], "rb"))["features"]))', manifest], { encoding: 'utf8' }));

@@ -257,6 +257,7 @@ enum DemoRule {
 #[serde(deny_unknown_fields)]
 struct Rules {
     default: Rule,
+    #[serde(deserialize_with = "unique_venues")]
     venues: BTreeMap<String, Rule>,
 }
 
@@ -393,8 +394,99 @@ fn rule(value: &Rule) -> String {
     )
 }
 
+fn unique_venues<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<String, Rule>, D::Error> {
+    struct Venues;
+    impl<'de> serde::de::Visitor<'de> for Venues {
+        type Value = BTreeMap<String, Rule>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("unique construction policy venues")
+        }
+
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut venues = BTreeMap::new();
+            while let Some(name) = map.next_key::<String>()? {
+                if venues.contains_key(&name) {
+                    return Err(serde::de::Error::custom(format!(
+                        "duplicate policy venue: {name}"
+                    )));
+                }
+                venues.insert(name, map.next_value()?);
+            }
+            Ok(venues)
+        }
+    }
+    deserializer.deserialize_map(Venues)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ArtifactCensus {
+    budget_venues: Vec<String>,
+    construction_policy_venues: Vec<String>,
+}
+
+fn validate_census(rules: &Rules) -> Result<(), String> {
+    let census: ArtifactCensus = serde_json::from_str(include_str!("../artifact-census.json"))
+        .map_err(|error| error.to_string())?;
+    for names in [&census.budget_venues, &census.construction_policy_venues] {
+        if names.is_empty()
+            || names.windows(2).any(|pair| pair[0] >= pair[1])
+            || names.iter().any(|name| {
+                !name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+                    || !name.bytes().all(|byte| {
+                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+                    })
+            })
+        {
+            return Err("invalid, duplicate or unsorted artifact census".into());
+        }
+    }
+    let missing: Vec<_> = census
+        .construction_policy_venues
+        .iter()
+        .filter(|name| !rules.venues.contains_key(*name))
+        .cloned()
+        .collect();
+    let unexpected: Vec<_> = rules
+        .venues
+        .keys()
+        .filter(|name| !census.construction_policy_venues.contains(*name))
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "missing construction policy venues: {}",
+            missing.join(", ")
+        ));
+    }
+    if !unexpected.is_empty() {
+        return Err(format!(
+            "unexpected construction policy venues: {}",
+            unexpected.join(", ")
+        ));
+    }
+    Ok(())
+}
+
 pub fn generate(json: &str) -> Result<String, String> {
     let rules: Rules = serde_json::from_str(json).map_err(|error| error.to_string())?;
+    validate_census(&rules)?;
+    render(rules)
+}
+
+// Synthetic renderer fixtures intentionally use invented venue names.
+#[cfg(test)]
+pub fn generate_fixture(json: &str) -> Result<String, String> {
+    render(serde_json::from_str(json).map_err(|error| error.to_string())?)
+}
+
+fn render(rules: Rules) -> Result<String, String> {
     if rules.default.can_sign.is_none() || rules.default.private_eligible.is_none() {
         return Err("default signing and private conditions are required".into());
     }
@@ -470,7 +562,7 @@ pub fn generate(json: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::generate;
+    use super::generate_fixture as generate;
 
     #[test]
     fn signer_setup_rules_emit_constant_explicit_and_undeclared_fields() {
