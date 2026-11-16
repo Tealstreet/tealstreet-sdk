@@ -913,7 +913,7 @@ async fn cosigned_hyrotrader_testnet_refuses_without_signing_or_venue_io() {
     // Network preparation uses the existing unverified envelope, which has no
     // write outcome field; pin its full schema and the independent no-I/O proof.
     let expected: Value = serde_json::from_str(&envelope::with_instance_id(
-        envelope::init_unverified("acct", false),
+        envelope::init_unverified("acct", false, envelope::InitRefusalReasonClass::Unknown),
         "proof-registration",
     ))
     .unwrap();

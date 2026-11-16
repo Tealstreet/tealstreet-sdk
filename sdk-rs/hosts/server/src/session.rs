@@ -489,7 +489,11 @@ impl Session {
         }
         if !self.admission_token_valid() {
             self.drop_early(&completed.account_name, "verification refused");
-            out.send(envelope::init_unverified(&completed.account_name, false));
+            out.send(envelope::init_unverified(
+                &completed.account_name,
+                false,
+                envelope::InitRefusalReasonClass::Unknown,
+            ));
             return Ok(());
         }
         if let Some(probe) = completed.probe {
@@ -608,6 +612,11 @@ impl Session {
                             None => envelope::init_unverified(
                                 &completed.account_name,
                                 refusal.transient,
+                                envelope::InitRefusalReasonClass::from_error(
+                                    &probe.init.exchange_name,
+                                    refusal.error_kind,
+                                    refusal.venue_code,
+                                ),
                             ),
                         }
                     });
@@ -621,6 +630,7 @@ impl Session {
         out.send(envelope::init_unverified(
             &completed.account_name,
             transient,
+            envelope::InitRefusalReasonClass::Unknown,
         ));
         Ok(())
     }
@@ -923,8 +933,11 @@ impl Session {
     }
 
     fn refuse_handover(&self, name: &str, transient: bool) {
-        self.handover_out(name)
-            .send(envelope::init_unverified(name, transient));
+        self.handover_out(name).send(envelope::init_unverified(
+            name,
+            transient,
+            envelope::InitRefusalReasonClass::Unknown,
+        ));
     }
 
     /// Exercise the trusted construction entry point from this authenticated
