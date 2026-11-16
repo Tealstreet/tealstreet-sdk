@@ -171,6 +171,10 @@ It issues a closed admission challenge and verifies the raw reply against the
 actual receiving socket, or verifies the temporary protected DELEGATED provider.
 The permit records its socket only after verification; final attachment checks
 that receipt, the original instance/token/lease and the local admission deadline.
+Exact Hyperliquid and Hyperliquid Spot select this strategy from captured
+`hyperliquidSignerAddress`, network and main/vault scope. Their device family
+signs the closed admission statement with its existing opaque secp256k1 ref;
+missing facts refuse without unsigned-read fallback.
 Exact GRVT selects this strategy with the authenticated owner and the captured
 `grvtTradingAccountId` and `grvtSignerAddress` used by engine construction.
 Both fields are required before proof; API-key login cannot prove its separate

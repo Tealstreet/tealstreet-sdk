@@ -3202,6 +3202,7 @@ mod tests {
     mod cosigned_venues;
     mod delegated_probe;
     mod grvt_proof;
+    mod hyperliquid_local_proof;
     mod lighter_local_proof;
     mod local_proof;
     mod provider_handover_refusals;

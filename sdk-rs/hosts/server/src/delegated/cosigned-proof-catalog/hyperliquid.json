@@ -1,4 +1,5 @@
 {
-  "status": "excluded",
-  "reason": "Address-based public reads do not prove the wallet key; fresh wallet/agent/vault possession and authorization proof is not built."
+  "status": "ready",
+  "probeTests": "src/session/tests/hyperliquid_local_proof.rs",
+  "sessionTests": "src/session/tests/hyperliquid_local_proof.rs"
 }

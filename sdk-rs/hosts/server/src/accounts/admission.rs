@@ -153,6 +153,15 @@ impl Registry {
         {
             return Ok(ProofStrategy::Local(local));
         }
+        if matches!(
+            init.exchange_name.as_str(),
+            "hyperliquid" | "hyperliquidspot"
+        ) && crate::delegated::probe::cosigned_ready(&init.exchange_name)
+        {
+            let projection =
+                identity::hyperliquid_projection(user, init).map_err(|_| ProbeRefusal::INVALID)?;
+            return Ok(ProofStrategy::Local(Arc::new(projection)));
+        }
         if init.exchange_name == "grvt"
             && crate::delegated::probe::cosigned_ready(&init.exchange_name)
         {
@@ -176,10 +185,13 @@ impl Registry {
     }
 
     pub(crate) fn cosigned_proof_ready(&self, user: &str, init: &InitPayload) -> bool {
-        matches!(
-            self.proof_strategy(user, init),
-            Ok(ProofStrategy::Local(_) | ProofStrategy::RegisteredSchnorr)
-        ) || crate::delegated::probe::cosigned_ready(&init.exchange_name)
+        match self.proof_strategy(user, init) {
+            Ok(ProofStrategy::Local(_) | ProofStrategy::RegisteredSchnorr) => true,
+            Ok(ProofStrategy::PrivateStartup) => {
+                crate::delegated::probe::cosigned_ready(&init.exchange_name)
+            }
+            Err(_) => false,
+        }
     }
 
     pub(crate) fn private_join_requires_proof(&self) -> bool {
