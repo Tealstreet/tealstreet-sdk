@@ -19,6 +19,7 @@ const VENUES: &[&str] = &[
     "binancepm",
     "binanceinverse",
     "binancespot",
+    "binanceoptions",
     "okx",
     "okxdemo",
     "okxeu",
@@ -70,7 +71,7 @@ fn path(r: &HttpRequest) -> &str {
 fn family(venue: &str) -> &str {
     match venue {
         "bybitinverse" | "bybitdemo" | "bybitspot" => "bybit",
-        "binance" | "binancepm" | "binanceinverse" | "binancespot" => "binance",
+        "binance" | "binancepm" | "binanceinverse" | "binancespot" | "binanceoptions" => "binance",
         "okx" | "okxdemo" | "okxeu" => "okx",
         "bitget" | "bitgetusdc" => "bitget",
         "blofin" | "kucoin" | "woo" | "bingx" | "mexc" => venue,
@@ -123,6 +124,10 @@ fn admission_binance_spot_subscription_checks_valid_and_invalid_hmac() {
 }
 
 pub(crate) fn assert_variant_startup(venue: &str, seen: &Seen) {
+    if venue == "binanceoptions" {
+        binanceoptions::assert_startup(seen);
+        return;
+    }
     if venue == "mexc" {
         mexc::assert_startup(seen);
         return;
@@ -330,6 +335,9 @@ impl VenueIo {
         }
     }
     fn response(&self, r: &HttpRequest) -> Value {
+        if self.venue == "binanceoptions" {
+            return binanceoptions::response(self, r);
+        }
         if self.venue == "mexc" {
             return mexc::response(self, r);
         }
@@ -426,6 +434,7 @@ impl Transport for VenueIo {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        assert_ne!(self.venue, "binanceoptions", "Options startup is REST-only");
         if self.venue == "mexc" {
             return mexc::connect(self, socket, &url, events);
         }
@@ -1250,3 +1259,6 @@ mod bitunix;
 mod mexc;
 #[path = "woo_probe_tests.rs"]
 mod woo;
+
+#[path = "binanceoptions_probe_tests.rs"]
+mod binanceoptions;
