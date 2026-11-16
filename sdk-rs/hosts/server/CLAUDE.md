@@ -153,7 +153,10 @@ that receipt, the original instance/token/lease and the local admission deadline
 Exact GRVT selects this strategy with the authenticated owner and the captured
 `grvtTradingAccountId` and `grvtSignerAddress` used by engine construction.
 Both fields are required before proof; API-key login cannot prove its separate
-ECDSA scalar. Local secp256k1 recovery verifies a fresh account/attempt-bound
+ECDSA scalar. Before holding an existing DELEGATED actor, local admission also
+compares the captured public key with the actual installed resident key; stale
+init metadata cannot substitute for that binding. Local secp256k1 recovery verifies
+a fresh account/attempt-bound
 admission statement, never a venue transaction. This proves possession, not venue
 authorization: ordinary startup retains login and private-read validation.
 Other public-key venues remain unavailable unless a synthetic fixture supplies

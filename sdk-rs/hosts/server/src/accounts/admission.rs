@@ -70,6 +70,33 @@ impl ProbePermit {
         }
         Ok(())
     }
+
+    /// Old init metadata cannot stand in for an already installed resident key.
+    /// This runs at attachment, after every proof await, before any mode change.
+    pub(super) fn check_resident_public(&self, account: &Account) -> Result<(), String> {
+        let ProofStrategy::Local(projection) = &self.strategy else {
+            return Ok(());
+        };
+        if account.delegated().is_none() {
+            return Ok(());
+        }
+        let expected = projection.public_key();
+        let actual = account
+            .signing
+            .public_binding(expected.family())
+            .map_err(|reason| reason.reason().to_owned())?
+            .ok_or_else(|| {
+                crate::envelope::ModeTransitionRefusal::Unavailable
+                    .reason()
+                    .to_owned()
+            })?;
+        if actual.as_bytes() != expected.as_bytes() {
+            return Err(crate::envelope::ModeTransitionRefusal::Unavailable
+                .reason()
+                .to_owned());
+        }
+        Ok(())
+    }
 }
 
 impl Drop for ProbePermit {

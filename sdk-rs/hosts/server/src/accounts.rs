@@ -1587,6 +1587,9 @@ impl Registry {
                 }
                 attempt.authority.check_admission()?;
                 crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
+                if let Some(proof) = attempt._probe.as_ref() {
+                    proof.check_resident_public(&account)?;
+                }
                 if delegated && account.delegated().is_none() {
                     let resident = match setup {
                         Some(DelegatedSetup::Pair(pair)) => prepare_delegated(init, pair)?.resident,
