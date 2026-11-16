@@ -161,6 +161,9 @@ normalize before projection; invalid or mismatched fields refuse without a
 private-startup fallback. COSIGNED init.key must identify the account address;
 key-only DELEGATED init.key must identify the public subkey and retains its sealed
 scalar. Possession proof does not replace ordinary venue authorization at startup.
+The prepared Paradex family links the device recipe; its real-WASM Session
+controls use SAFE_CEX_PARADEX_JOIN_WASM and explicit --ignored selection. This
+WASM change does not remove either separate live Hosted test gate.
 Other public-key venues remain unavailable unless a synthetic fixture supplies
 a binding; their device integration and authoritative per-family facts must
 precede activation. Matching COSIGNED repeats
