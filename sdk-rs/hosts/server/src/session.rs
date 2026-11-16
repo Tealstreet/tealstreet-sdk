@@ -3199,6 +3199,7 @@ mod tests {
     mod apply_settings;
     mod cosigned_venues;
     mod delegated_probe;
+    mod hyperliquid_local_proof;
     mod local_proof;
     mod provider_handover_refusals;
     mod token_expiry;

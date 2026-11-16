@@ -4,7 +4,7 @@ import test from 'node:test';
 import { EngineHost } from './host.mjs';
 
 const manifest = readFileSync(new URL('../Cargo.toml', import.meta.url), 'utf8');
-for (const family of ['asterdex', 'grvt', 'hyperliquid', 'lighter', 'orderly', 'paradex', 'polymarket', 'txflow']) {
+for (const family of ['asterdex', 'grvt', 'lighter', 'orderly', 'paradex', 'polymarket', 'txflow']) {
   test(`${family} keeps admission dispatch opt-in until its own activation slice`, () => {
     const closure = manifest.split('\n').find(line => line.startsWith(`${family} = [`));
     assert(closure);
@@ -13,6 +13,10 @@ for (const family of ['asterdex', 'grvt', 'hyperliquid', 'lighter', 'orderly', '
 }
 test('Backpack carries the first activation candidate without enabling other family closures', () => {
   const closure = manifest.split('\n').find(line => line.startsWith('backpack = ['));
+  assert(closure.includes('"hosted-join-proof"'));
+});
+test('Hyperliquid and spot share the activated device admission dispatch', () => {
+  const closure = manifest.split('\n').find(line => line.startsWith('hyperliquid = ['));
   assert(closure.includes('"hosted-join-proof"'));
 });
 
