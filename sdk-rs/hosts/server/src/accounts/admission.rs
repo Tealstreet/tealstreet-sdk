@@ -113,31 +113,38 @@ impl Credentials {
 }
 
 impl Registry {
-    fn proof_strategy(&self, _user: &str, init: &InitPayload) -> ProofStrategy {
-        // Local proofs use captured server/venue facts, never client reply fields.
-        // Injected projections below exist only in test builds.
-        let local: Option<Arc<Projection>> = None;
+    fn proof_strategy(
+        &self,
+        user: &str,
+        init: &InitPayload,
+    ) -> Result<ProofStrategy, ProbeRefusal> {
         #[cfg(test)]
-        let local = self
+        if let Some(local) = self
             .local_proof_bindings
-            .get(&(_user.into(), admission_fingerprint(init)))
+            .get(&(user.into(), admission_fingerprint(init)))
             .cloned()
-            .or(local);
-        if let Some(local) = local {
-            return ProofStrategy::Local(local);
+        {
+            return Ok(ProofStrategy::Local(local));
+        }
+        if init.exchange_name == "backpack"
+            && crate::delegated::probe::cosigned_ready(&init.exchange_name)
+        {
+            let projection =
+                identity::backpack_projection(user, init).map_err(|_| ProbeRefusal::INVALID)?;
+            return Ok(ProofStrategy::Local(Arc::new(projection)));
         }
         if matches!(init.exchange_name.as_str(), "lighter" | "lighter-robinhood")
             && crate::delegated::probe::cosigned_ready(&init.exchange_name)
         {
-            return ProofStrategy::RegisteredSchnorr;
+            return Ok(ProofStrategy::RegisteredSchnorr);
         }
-        ProofStrategy::PrivateStartup
+        Ok(ProofStrategy::PrivateStartup)
     }
 
     pub(crate) fn cosigned_proof_ready(&self, user: &str, init: &InitPayload) -> bool {
         matches!(
             self.proof_strategy(user, init),
-            ProofStrategy::Local(_) | ProofStrategy::RegisteredSchnorr
+            Ok(ProofStrategy::Local(_) | ProofStrategy::RegisteredSchnorr)
         ) || crate::delegated::probe::cosigned_ready(&init.exchange_name)
     }
 
@@ -161,7 +168,7 @@ impl Registry {
         }
         let registry_name =
             identity::registry_name(user, init).map_err(|_| ProbeRefusal::INVALID)?;
-        let strategy = self.proof_strategy(user, init);
+        let strategy = self.proof_strategy(user, init)?;
         let (reservation, local_deadline) = match &strategy {
             ProofStrategy::PrivateStartup => (self.proof_queues.reserve(user, init)?, None),
             ProofStrategy::RegisteredSchnorr => (

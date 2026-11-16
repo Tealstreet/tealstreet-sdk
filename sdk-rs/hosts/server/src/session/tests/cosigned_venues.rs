@@ -622,7 +622,6 @@ async fn cosigned_unready_venues_fail_closed_with_a_typed_refusal() {
     let observed = io.observed.clone();
     let registry = crate::accounts::testing::e2e_registry("alice", io);
     for (venue, rule) in rules["venues"].as_object().unwrap() {
-        // SDK #3576 excludes every proof-ready record here, including standalone suites.
         if rule["remoteSigning"]["enabled"] != true
             || crate::delegated::probe::cosigned_ready(venue)
         {
