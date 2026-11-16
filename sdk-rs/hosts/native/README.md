@@ -22,6 +22,14 @@ Hosted KuCoin Spot resolves its own `https://api.kucoin.com` REST origin,
 independently of Futures' `https://api-futures.kucoin.com`. Both exact names
 refuse testnet rather than falling through to a production origin.
 
+Native HyroTrader routing resolves the TS production/challenge default
+`https://sim-tealstreet.hyro.site`, independently of Bybit's REST hosts, and
+refuses hosted testnet with `NoBaseUrl`. The existing table keeps direct defaults,
+the opt-in regional REST proxy and Singapore HOW for a saved tunnel flag; native
+socket endpoint configuration is unchanged. This origin lookup does not provision
+the HyroTrader engine's endpoint map: the server's separate unhosted refusal
+remains in place, as does COSIGNED private-startup proof readiness.
+
 Hosted MEXC resolves its mainnet REST origin to `https://api.mexc.com` through
 the existing Japan proxy pool, including when the saved proxy flag is false.
 Saved MEXC tunnel flags are normalized off: MEXC cannot use HOW, and an old
@@ -40,6 +48,19 @@ Spot resolves `https://api.coinbase.com`. Both retain the existing regional REST
 proxy and provider-owned JWT handling. Hosted testnet refuses rather than using
 live endpoints: the native engines do not implement the separate static Advanced
 Trade sandbox. Private-startup proof readiness is unchanged.
+
+Hosted Binance Options resolves `https://eapi.binance.com` with the existing
+Japan egress policy and saved transport preferences. Hosted testnet refuses
+`NoBaseUrl`; this prerequisite does not enable the engine/reference's legacy
+testnet endpoint or change the private-startup proof catalog.
+
+Hosted Kraken Futures resolves `https://futures.kraken.com`, retaining the native
+engine's full `/derivatives/api/v3`, `/api/history/v3` and `/api/charts/v1` paths.
+Its existing account defaults select Japan HOW even with saved proxy/tunnel flags
+off; the origin lookup changes no signing headers or request paths. Hosted testnet
+refuses `NoBaseUrl`: Kraken [retired the legacy demo](https://support.kraken.com/articles/360024809011-api-testing-environment-derivatives),
+and the native engine maps no supported replacement sandbox. Kraken Spot and the
+COSIGNED private-startup proof catalog are unchanged.
 
 A JavaScript launcher instead resolves once at the account boundary, after normalizing its `ExchangeOptions`:
 

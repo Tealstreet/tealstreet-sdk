@@ -359,7 +359,10 @@ async fn order_frames_successful_reverification_drops_previous_deferred_completi
             admitted.instance_id = Some("alice-new".into());
             admitted.signing_mode = Some("delegated".into());
             assert_eq!(crate::delegated::fingerprint(&admitted), a.fingerprint);
-            let permit = registry.probe_permit("A", &admitted).unwrap();
+            let permit = registry
+                .probe_permit("A", &admitted)
+                .unwrap()
+                .verified_fixture(alice.socket);
             let candidate: crate::delegated::Credentials = serde_json::from_str(
                 r#"{"key":"synthetic-key-A","secret":"synthetic-signing-fixture-A"}"#,
             )

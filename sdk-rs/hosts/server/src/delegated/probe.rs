@@ -4,31 +4,8 @@ use safe_cex_native::{AccountHandle, Outgoing, ServerConfig, Transport};
 use std::sync::Arc;
 use std::time::Duration;
 
-// Exact COSIGNED venues with a private-startup proof and matching negative suite.
-// Other COSIGNED joins refuse explicitly; DELEGATED uses shared hosted eligibility.
-pub(crate) const PRIVATE_STARTUP_VENUES: &[&str] = &[
-    "bybit",
-    // Its native inverse proof and Brazil join now have their own positive/negative controls.
-    "bybitinverse",
-    "bybitdemo",
-    "bybitspot",
-    "binance",
-    "binancepm",
-    "binanceinverse",
-    "binancespot",
-    "okx",
-    "okxdemo",
-    "bitget",
-    "bitgetusdc",
-    "blofin",
-    "kucoin",
-    // Its own Spot startup/read proof covers key, replay and physical-socket binding.
-    "kucoinspot",
-    "phemex",
-    "woo",
-    "bingx",
-    "bitunix",
-];
+// Server-only build output from the per-venue proof records.
+include!(concat!(env!("OUT_DIR"), "/cosigned_catalog.rs"));
 
 pub(crate) fn cosigned_ready(venue: &str) -> bool {
     PRIVATE_STARTUP_VENUES.contains(&venue)
@@ -108,6 +85,7 @@ pub(crate) enum RefusalStage {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProbeRefusal {
     pub transient: bool,
+    pub unavailable: bool,
     pub transition: Option<crate::envelope::ModeTransitionRefusal>,
     pub stage: RefusalStage,
     pub error_kind: Option<ErrorKind>,
@@ -116,6 +94,7 @@ pub(crate) struct ProbeRefusal {
 impl ProbeRefusal {
     pub const INVALID: Self = Self {
         transient: false,
+        unavailable: false,
         transition: None,
         stage: RefusalStage::Unverified,
         error_kind: None,
@@ -123,6 +102,10 @@ impl ProbeRefusal {
     };
     pub const TRANSIENT: Self = Self {
         transient: true,
+        ..Self::INVALID
+    };
+    pub const UNAVAILABLE: Self = Self {
+        unavailable: true,
         ..Self::INVALID
     };
 
@@ -142,6 +125,7 @@ impl ProbeRefusal {
     fn classified(kind: ErrorKind) -> Self {
         Self {
             transient: classify(Err(Some(kind))) != ProbeOutcome::Invalid,
+            unavailable: false,
             transition: None,
             stage: RefusalStage::PrivateRead,
             error_kind: Some(kind),

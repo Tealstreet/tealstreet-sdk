@@ -5,7 +5,7 @@ type Options = FixtureOptions;
 // The venue-authored literal and engine-sealed messages have distinct owners.
 pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 pub const ENGINE_HTTP_UNKNOWN_TEXT: &str =
-    "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders";
+    "Response does not prove the write outcome. The outcome is unknown. Check Open Orders";
 pub const ENGINE_UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
 pub fn assert_unknown_message(error: &safe_cex_engine::VenueError, text: &str) {
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));

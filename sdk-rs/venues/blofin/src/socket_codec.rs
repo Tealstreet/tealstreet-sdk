@@ -1,5 +1,6 @@
 //! Native wire codecs; the engine owns epochs, authentication and retries.
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
@@ -390,7 +391,7 @@ impl Blofin {
                     cx.book_changed(symbol);
                 }
             }
-            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), "ping"),
+            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), ControlFrame::heartbeat("ping")),
             LifecycleEvent::Reconnect(_) => self.connect_feed(cx, private)?,
             LifecycleEvent::InterestsCommitted { proposal, .. } if !private => {
                 if self

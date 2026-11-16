@@ -4,27 +4,7 @@ use crate::delegated::probe::venue_tests::{Seen, assert_variant_startup, operati
 use crate::delegated_e2e_io::MockVenue;
 use std::time::Duration;
 
-const READY: &[&str] = &[
-    "bybit",
-    "bybitinverse",
-    "bybitdemo",
-    "bybitspot",
-    "binance",
-    "binancepm",
-    "binanceinverse",
-    "binancespot",
-    "okx",
-    "okxdemo",
-    "bitget",
-    "bitgetusdc",
-    "blofin",
-    "kucoin",
-    "kucoinspot",
-    "phemex",
-    "woo",
-    "bingx",
-    "bitunix",
-];
+const READY: &[&str] = crate::delegated::probe::SHARED_SESSION_VENUES;
 const KEY: &str = "synthetic-key";
 const MATERIAL: &str = "synthetic-material";
 
@@ -84,6 +64,8 @@ enum Answer {
     Correct,
     OtherKey,
     Replay,
+    WrongPassphrase,
+    MissingSignature,
 }
 
 #[derive(Default)]
@@ -101,7 +83,8 @@ impl Device {
             || preimage.contains("/user/verify")
             || venue == "binancespot" && preimage.starts_with("apiKey=")
             || venue == "phemex" && !preimage.starts_with('/')
-            || venue == "woo" && preimage.starts_with('|');
+            || venue == "woo" && preimage.starts_with('|')
+            || venue == "cryptocom" && preimage.starts_with("public/auth");
         let use_other_key = self.other_key || !socket_auth && matches!(mode, Answer::OtherKey);
         let signing_key = if self.other_key {
             "synthetic-other-key"
@@ -146,7 +129,11 @@ impl Device {
                 fresh
             }
         };
-        let response = json!({"id":request["id"],"wsAuthSignature":signature});
+        let response = if matches!(mode, Answer::MissingSignature) {
+            json!({"id":request["id"]})
+        } else {
+            json!({"id":request["id"],"wsAuthSignature":signature})
+        };
         let link = session
             .pending_verifications
             .get("acct")
@@ -199,6 +186,9 @@ async fn proof(
 ) {
     let mut done = session.take_verified();
     let mut init = payload(venue);
+    if matches!(answer, Answer::WrongPassphrase) {
+        init.passphrase = Some("synthetic-wrong-passphrase".into());
+    }
     if device.other_key {
         init.key = "synthetic-other-key".into();
     }
@@ -684,7 +674,12 @@ async fn cosigned_unready_venues_fail_closed_with_a_typed_refusal() {
     }
 }
 
-async fn login_switch_during_signing_await_is_isolated(venue: &'static str) {
+#[tokio::test]
+async fn cosigned_login_switch_during_new_family_signing_await_is_isolated() {
+    login_switch_case("binance").await;
+}
+
+async fn login_switch_case(venue: &'static str) {
     let (io, _) = MockVenue::for_admission(venue);
     let registry = crate::accounts::testing::e2e_registry("alice", io);
     let (mut alice, mut a_sent) = user_session(registry.clone(), "alice");
@@ -713,13 +708,8 @@ async fn login_switch_during_signing_await_is_isolated(venue: &'static str) {
 }
 
 #[tokio::test]
-async fn cosigned_login_switch_during_new_family_signing_await_is_isolated() {
-    login_switch_during_signing_await_is_isolated("binance").await;
-}
-
-#[tokio::test]
 async fn cosigned_kucoinspot_login_switch_during_signing_await_is_isolated() {
-    login_switch_during_signing_await_is_isolated("kucoinspot").await;
+    login_switch_case("kucoinspot").await;
 }
 
 #[test]
@@ -808,6 +798,51 @@ async fn cosigned_bingx_requires_connection_proof() {
 }
 
 #[tokio::test]
+async fn cosigned_okxeu_requires_connection_proof() {
+    venue_case("okxeu").await;
+}
+
+#[tokio::test]
+async fn cosigned_okxeudemo_requires_connection_proof() {
+    venue_case("okxeudemo").await;
+}
+
+#[tokio::test]
+async fn cosigned_mexc_requires_connection_proof() {
+    venue_case("mexc").await;
+}
+
+#[tokio::test]
 async fn cosigned_bitunix_requires_connection_proof() {
     venue_case("bitunix").await;
+}
+
+#[tokio::test]
+async fn cosigned_cryptocom_requires_connection_proof() {
+    venue_case("cryptocom").await;
+}
+
+#[tokio::test]
+async fn cosigned_cryptocom_login_switch_during_signing_await_is_isolated() {
+    login_switch_case("cryptocom").await;
+}
+#[path = "cosigned_okxeu.rs"]
+mod eea;
+
+#[path = "cosigned_okxeudemo.rs"]
+mod eea_demo;
+
+#[test]
+fn cosigned_catalog_requires_an_admission_suite() {
+    use crate::delegated::probe::{PRIVATE_STARTUP_VENUES, STANDALONE_SESSION_VENUES};
+    assert_eq!(
+        PRIVATE_STARTUP_VENUES.len(),
+        READY.len() + STANDALONE_SESSION_VENUES.len()
+    );
+    for venue in PRIVATE_STARTUP_VENUES {
+        assert!(
+            READY.contains(venue) || STANDALONE_SESSION_VENUES.contains(venue),
+            "{venue}: missing admission suite"
+        );
+    }
 }
