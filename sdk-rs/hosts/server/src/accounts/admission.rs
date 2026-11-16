@@ -150,6 +150,13 @@ impl Registry {
                 .map_err(|_| ProbeRefusal::INVALID.at(RefusalStage::Options))?;
             return Ok(ProofStrategy::Local(Arc::new(projection)));
         }
+        if init.exchange_name == "backpack"
+            && crate::delegated::probe::cosigned_ready(&init.exchange_name)
+        {
+            let projection =
+                identity::backpack_projection(user, init).map_err(|_| ProbeRefusal::INVALID)?;
+            return Ok(ProofStrategy::Local(Arc::new(projection)));
+        }
         Ok(ProofStrategy::PrivateStartup)
     }
 

@@ -161,8 +161,12 @@ init metadata cannot substitute for that binding. Local secp256k1 recovery verif
 a fresh account/attempt-bound
 admission statement, never a venue transaction. This proves possession, not venue
 authorization: ordinary startup retains login and private-read validation.
-Other public-key venues remain unavailable unless a synthetic fixture supplies
-a binding; their device integration and canonical facts precede activation. Matching COSIGNED repeats require the same socket-admitted
+Exact Backpack selects this strategy using its captured canonical base64
+Ed25519 API public key and authenticated owner; malformed keys refuse before
+signing, without falling back to private-startup reads. Other public-key venues
+remain unavailable unless a synthetic fixture supplies a binding. Their device
+integration and authoritative per-family facts must precede activation.
+Matching COSIGNED repeats require the same socket-admitted
 mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
 accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.
