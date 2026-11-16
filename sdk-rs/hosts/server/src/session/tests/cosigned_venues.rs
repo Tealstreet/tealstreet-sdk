@@ -608,7 +608,39 @@ async fn cosigned_bitgetinverse_missing_signature_or_wrong_passphrase_cannot_att
         let registry = crate::accounts::testing::e2e_registry("alice", io);
         let (mut session, mut sent) = user_session(registry.clone(), "alice");
         let mut device = Device::default();
-        proof(venue, &mut session, &mut sent, &mut device, answer).await;
+        if matches!(answer, Answer::MissingSignature) {
+            let mut done = session.take_verified();
+            session.init(payload(venue)).await.unwrap();
+            assert!(session.pending_verifications.contains_key("acct"));
+            let first = tokio::time::timeout(Duration::from_secs(3), sent.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let first: Value = serde_json::from_str(&first).unwrap();
+            assert_eq!(first["t"], "sign-req");
+            let link = session.pending_verifications["acct"]
+                .cosigned_link
+                .clone()
+                .unwrap();
+            device.answer(venue, &mut session, first, answer).await;
+            assert!(session.joined.is_empty());
+            assert_eq!(seen.lock().unwrap().signed_reads, 0);
+            // Missing signatures can leave native startup pending until its shared deadline.
+            tokio::time::pause();
+            let budget = safe_cex_remote_signer::SIGN_TIMEOUT
+                + Duration::from_millis(u64::from(
+                    safe_cex_engine::request_budget::RequestClass::Read.budget_ms(),
+                ));
+            tokio::time::advance(budget + Duration::from_millis(1)).await;
+            let completion = done.recv().await.unwrap();
+            tokio::time::resume();
+            while sent.try_recv().is_ok() {}
+            session.verification_completed(completion).await.unwrap();
+            assert!(session.pending_verifications.is_empty());
+            assert!(!link.is_available());
+        } else {
+            proof(venue, &mut session, &mut sent, &mut device, answer).await;
+        }
         assert!(session.joined.is_empty());
         assert_eq!(registry.account_count(), 0);
         if matches!(answer, Answer::MissingSignature) {
