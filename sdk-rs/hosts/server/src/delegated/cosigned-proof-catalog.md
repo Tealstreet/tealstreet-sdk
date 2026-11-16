@@ -32,6 +32,12 @@ in that directory.
 These references track coverage; they never substitute for running the real
 positive, wrong-key, replay, foreign-socket and ownership controls.
 
+AsterDEX's ready record additionally requires `"excludedShapes": ["v3"]`:
+only V1 is proved, and wallet-shaped init remains refused before probe IO.
+This optional ready-record field accepts only the known AsterDEX `v3` shape;
+unknown, empty, duplicate, null or foreign-venue lists are rejected. Other ready
+records omit it. Shapes do not add venues to the declared census.
+
 Files are closed JSON objects: no comments, duplicate fields, unknown keys,
 missing sources or simultaneous readiness/exclusion. Proof paths must stay in
 this crate's `src/` and identify existing Rust tests. Every declared venue must

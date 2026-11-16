@@ -7,8 +7,20 @@ use std::time::Duration;
 // Server-only build output from the per-venue proof records.
 include!(concat!(env!("OUT_DIR"), "/cosigned_catalog.rs"));
 
-pub(crate) fn cosigned_ready(venue: &str) -> bool {
-    PRIVATE_STARTUP_VENUES.contains(&venue)
+pub(crate) fn cosigned_ready(init: &crate::envelope::InitPayload) -> bool {
+    PRIVATE_STARTUP_VENUES.contains(&init.exchange_name.as_str())
+        && (init.exchange_name != "asterdex" || asterdex_v1_init(init))
+}
+
+pub(crate) fn asterdex_v1_init(init: &crate::envelope::InitPayload) -> bool {
+    let key = init.key.trim();
+    init.exchange_name == "asterdex"
+        && !key.starts_with("0x")
+        && !key.starts_with("0X")
+        && init
+            .application_id
+            .as_deref()
+            .is_none_or(|s| s.trim().is_empty())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -267,6 +279,37 @@ fn notice_refusal(text: &str) -> Option<ProbeRefusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cosigned_readiness_is_asterdex_v1_shape_scoped() {
+        assert!(cosigned_ready(&crate::envelope::InitPayload {
+            exchange_name: "asterdex".into(),
+            key: "synthetic-key".into(),
+            ..Default::default()
+        }));
+        for &venue in PRIVATE_STARTUP_VENUES {
+            let mut init = crate::envelope::InitPayload {
+                exchange_name: venue.into(),
+                key: "synthetic-key".into(),
+                ..Default::default()
+            };
+            assert!(cosigned_ready(&init));
+            init.key = format!("0x{}", "1".repeat(40));
+            init.application_id = Some(format!("0x{}", "2".repeat(40)));
+            assert_eq!(cosigned_ready(&init), venue != "asterdex");
+        }
+        for key in [
+            format!("0X{}", "1".repeat(40)),
+            format!(" 0x{} ", "1".repeat(40)),
+        ] {
+            let init = crate::envelope::InitPayload {
+                exchange_name: "asterdex".into(),
+                key,
+                ..Default::default()
+            };
+            assert!(!cosigned_ready(&init));
+        }
+    }
     #[derive(Clone, Default)]
     struct Requests(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
 

@@ -129,7 +129,10 @@ async fn local_proof_other_valid_key_cannot_touch_resident() {
 async fn local_proof_unactivated_venue_stays_unavailable_without_fixture_binding() {
     // SDK #3578 moves this unactivated-venue negative from Hyperliquid Spot to
     // TxFlow, which stays excluded while the M32 venue proofs activate.
-    assert!(!crate::delegated::probe::cosigned_ready("txflow"));
+    assert!(!crate::delegated::probe::cosigned_ready(&InitPayload {
+        exchange_name: "txflow".into(),
+        ..init()
+    }));
     for owner in ["alice", "bob"] {
         let registry = registry(owner == "bob");
         let (mut session, mut sent) = user_session(registry.clone(), owner);
@@ -148,7 +151,10 @@ async fn local_proof_unactivated_venue_stays_unavailable_without_fixture_binding
 
 #[tokio::test]
 async fn local_proof_txflow_wire_init_keeps_its_earlier_beta_roster_refusal() {
-    assert!(!crate::delegated::probe::cosigned_ready("txflow"));
+    assert!(!crate::delegated::probe::cosigned_ready(&InitPayload {
+        exchange_name: "txflow".into(),
+        ..init()
+    }));
     for owner in ["alice", "bob"] {
         let registry = registry(owner == "bob");
         let (mut session, mut sent) = user_session(registry.clone(), owner);

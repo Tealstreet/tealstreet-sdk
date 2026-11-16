@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 use super::*;
 
 mod apexomni;
+mod asterdex;
 mod coinbase;
 mod grvt;
 

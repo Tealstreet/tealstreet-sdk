@@ -15,10 +15,24 @@ enum Record {
         probe_tests: String,
         #[serde(rename = "sessionTests")]
         session_tests: String,
+        #[serde(
+            default,
+            rename = "excludedShapes",
+            deserialize_with = "deserialize_shape_exclusions"
+        )]
+        excluded_shapes: Option<Vec<String>>,
     },
     Excluded {
         reason: String,
     },
+}
+
+// An explicitly present exclusion must be a list; null cannot erase accounting.
+fn deserialize_shape_exclusions<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Vec::<String>::deserialize(deserializer).map(Some)
 }
 
 pub fn generate(root: &Path) -> Result<String, String> {
@@ -93,7 +107,17 @@ pub fn render(root: &Path, mut files: Vec<(String, String)>) -> Result<String, S
             Record::Ready {
                 probe_tests,
                 session_tests,
+                excluded_shapes,
             } => {
+                match (name, excluded_shapes.as_deref()) {
+                    ("asterdex", Some([shape])) if shape == "v3" => {}
+                    (_, None) if name != "asterdex" => {}
+                    _ => {
+                        return Err(format!(
+                            "{file}: invalid excludedShapes; only AsterDEX v3 is known"
+                        ));
+                    }
+                }
                 proof_path(root, &probe_tests)?;
                 proof_path(root, &session_tests)?;
                 ready.push(name);

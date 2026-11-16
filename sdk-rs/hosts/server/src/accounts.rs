@@ -836,6 +836,9 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     }
     if !public_only {
         options.insert("key".into(), init.key.clone().into());
+        if crate::delegated::probe::asterdex_v1_init(init) {
+            options.insert("asterdex".into(), json!({"apiVersion":"v1"}));
+        }
     }
     let text = [
         ("passphrase", &init.passphrase),
