@@ -126,7 +126,7 @@ DELEGATED's shared probe. Both modes share refusal classification, token/lease
 checks and account attachment. A private account is never attached
 as a fallback when its possession proof is unavailable. Exact Bybit base/inverse/demo/spot,
 Binance base/PM/inverse/spot, OKX base/demo and EEA mainnet/demo, Bitget base/USDC,
-Blofin, KuCoin, Phemex, BingX and MEXC names have native private-startup HMAC proof coverage.
+Blofin, KuCoin, Phemex, BingX, MEXC and Crypto.com names have native private-startup HMAC proof coverage.
 Bybit inverse retains its inverse-product and Brazil-site session controls. Phemex
 uses its native USDT/USDC account reads and expiry-bound REST/private-socket
 HMAC proof with wrong-key, replay and foreign-socket controls.
@@ -136,6 +136,8 @@ Exact Bitunix uses its existing native private-startup venue round trip and
 double-SHA256 secret-suffix signer, with independently checked synthetic private
 reads and wrong-key, replay, foreign-socket and resident-preservation controls.
 There is no server-local proof shortcut or trading write in that probe.
+Crypto.com proves its signed native JSON positions, balance and regular/advanced
+open-order reads, with wrong-key, replay, foreign-socket and login-switch controls.
 Variant tests pin product routes, origins and demo headers as well as the
 wrong-key, replay, foreign-socket and resident-preservation controls. BingX perpetuals
 prove signed private account reads independently of API-key-only listen-key acquisition;

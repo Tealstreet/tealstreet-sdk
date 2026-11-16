@@ -773,6 +773,10 @@ one re-signed read then fail permanently; no admission budget is extended.
 Exact EEA demo also proves its simulated-trading header on native startup reads;
 missing, mainnet-valued or duplicate headers cannot satisfy that proof.
 
+Crypto.com uses its native signed JSON startup reads for positions, balance and
+regular/advanced open orders. Hosted routing preserves the native mainnet/UAT
+origins; readiness does not replace per-connection proof or scope checks.
+
 Exact `bitunix` readiness uses that venue round trip, with the existing native
 double-SHA256 secret-suffix request signer. Its synthetic venue independently
 checks nonce/timestamp/key/query signing bytes on the actual private startup
