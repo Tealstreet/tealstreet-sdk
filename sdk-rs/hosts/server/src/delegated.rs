@@ -493,7 +493,10 @@ pub(crate) mod tests {
                 "binanceoptions".into()
             ))
         );
-        assert!(!probe::cosigned_ready("binanceoptions"));
+        assert!(!probe::cosigned_ready(&crate::envelope::InitPayload {
+            exchange_name: "binanceoptions".into(),
+            ..Default::default()
+        }));
     }
 
     #[test]

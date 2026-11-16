@@ -269,3 +269,27 @@ test('independent venue promotions compose without editing a shared catalog', ()
   for (const name of promoted) assert(combined.ready.has(name));
   assert.equal(combined.excluded.size, excluded.size - 2);
 });
+
+test('AsterDEX V1 readiness records its V3 exclusion in the per-venue record', () => {
+  const record = records.get('asterdex');
+  assert.equal(record.status, 'ready');
+  assert.deepEqual(record.excludedShapes, ['v3']);
+});
+
+test('partial readiness accepts only the closed AsterDEX V3 shape list', () => {
+  const record = {
+    status: 'ready',
+    probeTests: 'src/delegated/asterdex_probe_tests.rs',
+    sessionTests: 'src/session/tests/cosigned_venues.rs',
+    excludedShapes: ['v3'],
+  };
+  const parse = (entry, venue = 'asterdex') => catalog([[`${venue}.json`, JSON.stringify(entry)]]);
+  assert.deepEqual([...parse(record).ready], ['asterdex']);
+  for (const excludedShapes of [[], ['unknown-shape'], ['v3', 'v3'], 'v3', null]) {
+    assert.throws(() => parse({ ...record, excludedShapes }));
+  }
+  const missing = { ...record };
+  delete missing.excludedShapes;
+  assert.throws(() => parse(missing));
+  assert.throws(() => parse(record, 'bybit'));
+});

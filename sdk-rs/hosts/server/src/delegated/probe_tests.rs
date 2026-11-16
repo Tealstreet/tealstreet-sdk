@@ -1335,13 +1335,21 @@ fn generated_readiness_matches_every_per_venue_record() {
         let venue = name.strip_suffix(".json").unwrap();
         let record: Value =
             serde_json::from_str(&std::fs::read_to_string(entry.path()).unwrap()).unwrap();
+        let init = crate::envelope::InitPayload {
+            exchange_name: venue.into(),
+            key: KEY.into(),
+            ..Default::default()
+        };
         assert_eq!(
-            cosigned_ready(venue),
+            cosigned_ready(&init),
             record["status"] == "ready",
             "{venue}"
         );
         count += 1;
     }
     assert_eq!(count, 41);
-    assert!(!cosigned_ready("future-unproved-venue"));
+    assert!(!cosigned_ready(&crate::envelope::InitPayload {
+        exchange_name: "future-unproved-venue".into(),
+        ..Default::default()
+    }));
 }

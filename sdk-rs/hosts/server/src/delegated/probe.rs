@@ -282,6 +282,11 @@ mod tests {
 
     #[test]
     fn cosigned_readiness_is_asterdex_v1_shape_scoped() {
+        assert!(cosigned_ready(&crate::envelope::InitPayload {
+            exchange_name: "asterdex".into(),
+            key: "synthetic-key".into(),
+            ..Default::default()
+        }));
         for &venue in PRIVATE_STARTUP_VENUES {
             let mut init = crate::envelope::InitPayload {
                 exchange_name: venue.into(),
