@@ -242,3 +242,130 @@ async fn round_trip(venue: &str, algorithm: &str) {
         );
     }
 }
+
+#[tokio::test]
+async fn coinbase_closed_graphs_refuse_foreign_refs_claims_algorithms_and_receipts_before_io() {
+    for venue in ["coinbase", "coinbasespot"] {
+        for algorithm in ["es256", "edDsa"] {
+            let (account, options) = setup(venue, Some(algorithm));
+            let ids: Identities = serde_json::from_value(options["signing"].clone()).unwrap();
+            let canonical = input(algorithm, "server-nonce", None);
+            let base = graph(venue, &ids, &canonical).0;
+            for mutation in [
+                "credential",
+                "signer",
+                "hmac",
+                "extra",
+                "name",
+                "claims-algorithm",
+                "stamp",
+                "expiry",
+                "nonce",
+                "missing-stamp",
+                "transaction",
+            ] {
+                let mut work = base.clone();
+                match mutation {
+                    "credential" => {
+                        work.operations[0] = Operation::Present {
+                            key: KeyRef("foreign".into()),
+                        }
+                    }
+                    "signer" => {
+                        if let Operation::Sign { key, .. } = &mut work.operations[1] {
+                            *key = KeyRef("foreign".into());
+                        }
+                    }
+                    "hmac" => {
+                        if let Operation::Sign { algorithm, .. } = &mut work.operations[1] {
+                            *algorithm = Algorithm::HmacSha256;
+                        }
+                    }
+                    "extra" => work.operations.push(work.operations[0].clone()),
+                    "stamp" => work.receipt.stamp_ms = Some(NOW + 1000.),
+                    "expiry" => work.receipt.expiry_ms = Some(NOW + 121_000.),
+                    "nonce" => work.receipt.nonce = Some(1),
+                    "missing-stamp" => work.receipt.stamp_ms = None,
+                    _ => {
+                        let changed = if mutation == "name" {
+                            safe_cex_venue_coinbase::sign::signing_input_for(
+                                if algorithm == "es256" {
+                                    crate::CoinbaseJwtAlgorithm::Es256
+                                } else {
+                                    crate::CoinbaseJwtAlgorithm::EdDsa
+                                },
+                                "organizations/foreign/apiKeys/other",
+                                "server-nonce",
+                                1_700_000_000,
+                                None,
+                                true,
+                            )
+                            .unwrap()
+                        } else if mutation == "claims-algorithm" {
+                            input(
+                                if algorithm == "es256" {
+                                    "edDsa"
+                                } else {
+                                    "es256"
+                                },
+                                "server-nonce",
+                                None,
+                            )
+                        } else {
+                            "{\"transaction\":\"withdraw\"}".into()
+                        };
+                        if let Operation::Sign { payload, .. } = &mut work.operations[1] {
+                            *payload = vec![PayloadPart::Bytes {
+                                bytes: changed.into_bytes(),
+                            }];
+                        }
+                    }
+                }
+                assert!(
+                    account.provider.sign(work).await.is_err(),
+                    "{venue}/{algorithm}/{mutation}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn coinbase_remote_refuses_whole_jwts_der_objects_and_noncanonical_signature_replies() {
+    for venue in ["coinbase", "coinbasespot"] {
+        for algorithm in ["es256", "edDsa"] {
+            for bad in [
+                Value::Null,
+                json!({"signature":"client","headers":{}}),
+                json!(format!(
+                    "{}.client-signature",
+                    input(algorithm, "server-nonce", None)
+                )),
+                json!(URL_SAFE_NO_PAD.encode([0u8; 70])),
+                json!("A".repeat(85)),
+                json!(format!("{}=", "A".repeat(86))),
+                json!(format!("{}B", "A".repeat(85))),
+            ] {
+                let (sender, mut frames) = mpsc::unbounded_channel();
+                let link = SignerLink::new(11, Arc::new(move |frame| sender.send(frame).is_ok()));
+                let (account, options) = account(
+                    link.clone(),
+                    venue,
+                    json!({"key":KEY,"coinbaseJwtAlgorithm":algorithm}),
+                );
+                let ids = serde_json::from_value(options["signing"].clone()).unwrap();
+                let mut pending = account
+                    .provider
+                    .sign(graph(venue, &ids, &input(algorithm, "server-nonce", None)).0);
+                let frame = tokio::select! {
+                    result = &mut pending => panic!("valid graph must reach device: {result:?}"),
+                    frame = frames.recv() => frame.unwrap(),
+                };
+                let frame: Value = serde_json::from_str(&frame).unwrap();
+                assert!(link.resolve(11, json!({"id":frame["d"]["id"],"wsAuthSignature":bad})));
+                assert!(pending.await.is_err(), "{venue}/{algorithm}");
+                assert!(frames.try_recv().is_err());
+            }
+        }
+    }
+}

@@ -10,6 +10,8 @@ pub struct InitPayload {
     pub exchange_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signing_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coinbase_jwt_algorithm: Option<safe_cex_remote_signer::CoinbaseJwtAlgorithm>,
     /// Consumed on this connection; never included in serialized settings.
     #[serde(default, skip_serializing)]
     pub sealed: Option<crate::delegated::Sealed>,
