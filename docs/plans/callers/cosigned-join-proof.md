@@ -27,6 +27,7 @@ The exact proof-ready venue names are:
 | `bitgetusdc` | Native USDC private startup and shared HMAC/session negatives; exact product type |
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
+| `asterdex` V1 only | Native HMAC private startup on mainnet/testnet, actual device batch codec and connection-bound negative controls |
 | `mexc` | Native signed position-mode/account reads and private-stream HMAC; wrong-key, replay and socket/Session controls; mainnet only |
 | `lighter`, `lighter-robinhood` | Local Schnorr challenge against routed venue registration for the captured account/API-key slot; wrong-key, replay, foreign-socket, retirement and registration-rotation controls |
 | `coinbase`, `coinbasespot` | Native CDP JWT ES256/Ed25519 and complete DRB/Advanced Trade private startup; server claims, signature-only replies, wrong-key/replay/socket/owner controls; mainnet only |
@@ -79,6 +80,10 @@ authority; a DELEGATED provider must also match before publication.
 Account sharing, venue policy/metadata, beta gates and signing modes are unchanged.
 
 Only these exact names are admitted; the catalog never matches a family prefix.
+AsterDEX additionally checks the init shape: address-prefixed keys or nonempty
+main-wallet application IDs remain unavailable. Only its V1 API-key shape gets
+the native `asterdex.apiVersion: "v1"` setting. The accounting ledger explicitly
+excludes the V3 wallet shape; V1 readiness is not wallet possession proof.
 An unsupported proof returns the existing account error envelope with
 `initRefused: true`, `kind: "proof-unavailable"`, `transient: false` and
 `outcome: "notSent"`. The server attaches no holder, starts no signing request or

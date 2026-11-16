@@ -91,7 +91,7 @@ async fn lighter_registered_key_proof_attaches_exact_venue_and_network_using(
 ) {
     tokio::task::LocalSet::new().run_until(async {
         for venue in VENUES { for testnet in [false, true] {
-            assert!(crate::delegated::probe::cosigned_ready(venue));
+            assert!(crate::delegated::probe::cosigned_ready(&init(venue, testnet)));
             let payload = init(venue, testnet);
             let (registry, _, observed) = registry(body(), 8);
             let resident = crate::accounts::testing::registered_lighter_account(&registry, "alice", &payload, &public(7));
@@ -415,7 +415,7 @@ async fn lighter_retired_session_cannot_publish_a_delayed_registration() {
     tokio::task::LocalSet::new()
         .run_until(async {
             for venue in VENUES {
-                assert!(crate::delegated::probe::cosigned_ready(venue));
+                assert!(crate::delegated::probe::cosigned_ready(&init(venue, false)));
                 let (registry, gate, observed) = registry(body(), 0);
                 let (mut session, mut sent) = user_session(registry.clone(), "alice");
                 session.init(init(venue, false)).await.unwrap();
@@ -483,7 +483,7 @@ async fn lighter_slot_queue_is_shared_across_untrusted_key_labels() {
     tokio::task::LocalSet::new()
         .run_until(async {
             for venue in VENUES {
-                assert!(crate::delegated::probe::cosigned_ready(venue));
+                assert!(crate::delegated::probe::cosigned_ready(&init(venue, false)));
                 let (registry, gate, observed) = registry(body(), 0);
                 let (mut first, mut first_sent) = user_session(registry.clone(), "alice");
                 let (mut second, mut second_sent) = user_session(registry.clone(), "alice");

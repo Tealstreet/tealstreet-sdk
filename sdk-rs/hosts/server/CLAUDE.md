@@ -168,6 +168,12 @@ Spot and testnet do not inherit that proof. MEXC mainnet uses native signed
 position-mode and account reads, with private-stream HMAC and wrong-key/replay/socket
 controls. Its missing sandbox remains refused; public discovery is not proof. Other
 private COSIGNED joins return the typed `proof-unavailable` init refusal.
+AsterDEX readiness is V1 HMAC only: both Session and Registry checks inspect
+the init shape. Address-prefixed keys or nonempty main-wallet application IDs
+retain `proof-unavailable` before signing or probe IO. The admitted V1 shape
+carries explicit native `asterdex.apiVersion: "v1"` through setup and settings;
+its signed native account reads and real device codec have wrong-key, replay,
+foreign-socket and pending-isolation controls. Wallet V3 proof remains separate.
 A pending COSIGNED signer belongs only to its joining connection; probe frames
 are consumed internally. The shared local-proof strategy captures canonical
 server-owned identity facts before entering the same proof queue and pacer.
@@ -235,6 +241,9 @@ cohorts. There is no shared list to edit when a venue proof lands. Follow
 The helper/production census is 41 / 40 / 33; disabled metadata remains visible
 in accounting. Cargo signing features are only a family cross-check. The catalog
 changes no DELEGATED eligibility, client fallback or signing/origin policy.
+Partially-ready `asterdex.json` requires the closed `excludedShapes: ["v3"]` field;
+V1 readiness never accounts for its unimplemented wallet proof. The accounting
+test rejects missing, duplicate, stale or unknown shape exclusions.
 
 Shared admission serializes temporary proofs by verified user, credential and
 venue/network/site scope. One proof runs with at most four waiting reservations;

@@ -595,6 +595,9 @@ impl Inner {
             Family::Lighter => self.sign_lighter(&operations).await?,
             Family::Paradex => self.sign_stark(&operations).await?,
             Family::DoubleSha256 => self.sign_double_sha256(&operations).await?,
+            Family::Hmac if self.venue == "asterdex" => {
+                self.sign_aster_v1(&operations, receipt).await?
+            }
             Family::Hmac => self.sign_hmac(&operations, receipt).await?,
             Family::ApexOmni => self.sign_apexomni(&operations).await?,
             Family::Orderly => return refused(),
@@ -950,6 +953,71 @@ impl Inner {
                 values.push(mac(value, Encoding::Base64)?);
             }
             Ok(values)
+        })
+        .await
+    }
+
+    async fn sign_aster_v1(
+        &self,
+        operations: &[Operation],
+        receipt: SignReceipt,
+    ) -> Result<Vec<Vec<u8>>, SignError> {
+        let primary = &self.primary;
+        if let [Operation::Present { key }] = operations {
+            return if *key == primary.credential {
+                Ok(vec![primary.public.clone()])
+            } else {
+                refused()
+            };
+        }
+        let [
+            Operation::Present { key: credential },
+            Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: signing,
+                payload,
+            },
+        ] = operations
+        else {
+            return refused();
+        };
+        if *credential != primary.credential
+            || !self.owns_signing(signing)
+            || receipt.nonce.is_some()
+        {
+            return refused();
+        }
+        let [PayloadPart::Bytes { bytes }] = payload.as_slice() else {
+            return refused();
+        };
+        if bytes.is_empty() || bytes.len() > MAX_PAYLOAD {
+            return refused();
+        }
+        let descriptor = json!({"slot":"primary","payload":utf8(bytes)?}).to_string();
+        // The device limit includes the JSON envelope and escaping expansion.
+        if descriptor.len() > MAX_PAYLOAD {
+            return refused();
+        }
+        self.device(descriptor, "asterdex-hmac", |value| {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Batch {
+                credential: String,
+                signature: String,
+            }
+            let text = value.as_str().ok_or(SignError::Refused)?;
+            let batch: Batch = serde_json::from_str(text).map_err(|_| SignError::Refused)?;
+            if batch.credential.as_bytes() != primary.public
+                || batch.signature.len() != 64
+                || !batch
+                    .signature
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                return refused();
+            }
+            let signature = hex_bytes(&batch.signature).ok_or(SignError::Refused)?;
+            Ok(vec![primary.public.clone(), signature])
         })
         .await
     }

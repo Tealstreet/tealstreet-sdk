@@ -30,6 +30,7 @@ pub(crate) struct Seen {
     pub(crate) phemex_socket_auths: usize,
     pub(crate) woo_socket_auths: usize,
     pub(crate) bingx_private_sockets: usize,
+    pub(crate) aster_private_sockets: usize,
     pub(crate) mexc_socket_auths: usize,
     pub(crate) bitunix_socket_auths: usize,
     pub(crate) kraken_socket_auths: usize,
@@ -62,7 +63,7 @@ fn family(venue: &str) -> &str {
         "okx" | "okxdemo" | "okxeu" | "okxeudemo" => "okx",
         "bitget" | "bitgetusdc" | "bitgetinverse" => "bitget",
         "kucoinspot" => "kucoin",
-        "blofin" | "kucoin" | "woo" | "bingx" | "mexc" => venue,
+        "blofin" | "kucoin" | "woo" | "bingx" | "mexc" | "asterdex" => venue,
         _ => panic!("no private-read fixture for {venue}"),
     }
 }
@@ -442,6 +443,9 @@ impl VenueIo {
         if self.venue == "kraken" {
             return kraken::response(self, r);
         }
+        if self.venue == "asterdex" {
+            return asterdex::response(self, r);
+        }
         if self.venue == "bitgetinverse" {
             return bitgetinverse::response(self, r);
         }
@@ -566,6 +570,9 @@ impl Transport for VenueIo {
         if self.venue == "kraken" {
             return kraken::connect(self, socket, &url, events);
         }
+        if self.venue == "asterdex" {
+            return asterdex::connect(self, socket, &url, events);
+        }
         assert_ne!(self.venue, "binanceoptions", "Options startup is REST-only");
         self.seen.lock().unwrap().sockets.push(url.clone());
         if self.venue == "bitgetinverse" {
@@ -633,6 +640,8 @@ impl Transport for VenueIo {
                         || (family(self.venue) == "binance" && path(&r).ends_with("listenKey"))
                         || (self.venue == "bingx"
                             && path(&r) == "/openApi/user/auth/userDataStream")
+                        || (self.venue == "asterdex"
+                            && path(&r).split('?').next() == Some("/fapi/v1/listenKey"))
                         || (family(self.venue) == "kucoin"
                             && ["bullet-private", "bullet-public"]
                                 .iter()
@@ -748,11 +757,16 @@ fn local(venue: &str, material: &str) -> super::super::PreparedDelegated {
         serde_json::from_value(json!({"key":KEY,"secret":material,"passphrase":PASS})).unwrap();
     let (provider, identities) =
         safe_cex_venues::prepare_local_signer_for(venue, &mut options).unwrap();
+    let mut fields = json!({"signing":identities,"publicDataOnly":false,"accountStartup":true,"remoteSigning":false,"payloadSigner":false});
+    if venue == "asterdex" {
+        fields["asterdex"] =
+            json!({"apiVersion":options.construction(venue).asterdex_api_version.unwrap()});
+    }
     // Test setup uses the registry's real credential normalization. Runtime
     // admission remains gated separately; no test declaration enables a venue.
     let prepared = super::super::PreparedDelegated {
         plan: Default::default(),
-        options: with_hosted_endpoints(venue, json!({"signing":identities,"publicDataOnly":false,"accountStartup":true,"remoteSigning":false,"payloadSigner":false})).to_string(),
+        options: with_hosted_endpoints(venue, fields).to_string(),
         resident: ResidentCopy::test_provider(provider),
     };
     if venue == "hyrotrader" && material != SECRET {
@@ -1096,6 +1110,16 @@ pub(crate) fn operation(venue: &str, canonical: &str) -> String {
             .trim_start_matches(|c: char| c.is_ascii_digit())
             .into();
     }
+    if venue == "asterdex" {
+        let descriptor: Value = serde_json::from_str(canonical).unwrap();
+        return descriptor["payload"]
+            .as_str()
+            .unwrap()
+            .split('&')
+            .filter(|part| !part.starts_with("timestamp="))
+            .collect::<Vec<_>>()
+            .join("&");
+    }
     if venue == "apexomni" {
         return apexomni_text(canonical)
             .trim_start_matches(|c: char| c.is_ascii_digit())
@@ -1195,14 +1219,27 @@ async fn remote(
             let frame: Value = serde_json::from_str(&frame).unwrap();
             let request = &frame["d"];
             assert_eq!(request["type"], "ws-auth");
-            let input = serde_json::from_value(json!({"kind":"wsAuth","toSign":request["wsAuth"]["toSign"],"outputFormat":request["wsAuth"]["outputFormat"]})).unwrap();
-            let (work, output) =
-                safe_cex_venues::hosted_signing::prepare(venue, &identities, input).unwrap();
-            let signed = provider.sign(work).await.unwrap();
-            let fresh = safe_cex_venues::hosted_signing::finish(output, &signed)
-                .unwrap()
-                .signature
-                .unwrap();
+            let fresh = if venue == "asterdex" {
+                asterdex::device_signature(
+                    request,
+                    KEY,
+                    if matches!(answer, DeviceAnswer::DifferentKey) {
+                        "synthetic-other-material"
+                    } else {
+                        SECRET
+                    },
+                )
+                .await
+            } else {
+                let input = serde_json::from_value(json!({"kind":"wsAuth","toSign":request["wsAuth"]["toSign"],"outputFormat":request["wsAuth"]["outputFormat"]})).unwrap();
+                let (work, output) =
+                    safe_cex_venues::hosted_signing::prepare(venue, &identities, input).unwrap();
+                let signed = provider.sign(work).await.unwrap();
+                safe_cex_venues::hosted_signing::finish(output, &signed)
+                    .unwrap()
+                    .signature
+                    .unwrap()
+            };
             let is_ws = request["wsAuth"]["toSign"].as_str().is_some_and(|text| {
                 text.starts_with("GET/realtime")
                     || text.contains("/users/self/verify")
@@ -1258,11 +1295,23 @@ async fn remote(
             );
         }
     });
+    let fields = if venue == "asterdex" {
+        crate::accounts::engine_options(
+            &crate::envelope::InitPayload {
+                exchange_name: venue.into(),
+                key: KEY.into(),
+                ..Default::default()
+            },
+            false,
+        )
+    } else {
+        json!({"key":KEY,"passphrase":PASS})
+    };
     let account = safe_cex_remote_signer::remote_account(
         link.clone(),
         venue,
         Some("synthetic-pending".into()),
-        &with_hosted_endpoints(venue, json!({"key":KEY,"passphrase":PASS})).to_string(),
+        &with_hosted_endpoints(venue, fields).to_string(),
     )
     .unwrap();
     (
@@ -1637,6 +1686,9 @@ mod apexomni;
 #[path = "bingx_probe_tests.rs"]
 mod bingx;
 
+#[path = "asterdex_probe_tests.rs"]
+pub(crate) mod asterdex;
+
 #[path = "bitunix_probe_tests.rs"]
 mod bitunix;
 #[path = "cryptocom_probe_tests.rs"]
@@ -1695,15 +1747,23 @@ fn generated_readiness_matches_every_per_venue_record() {
         let venue = name.strip_suffix(".json").unwrap();
         let record: Value =
             serde_json::from_str(&std::fs::read_to_string(entry.path()).unwrap()).unwrap();
+        let init = crate::envelope::InitPayload {
+            exchange_name: venue.into(),
+            key: KEY.into(),
+            ..Default::default()
+        };
         assert_eq!(
-            cosigned_ready(venue),
+            cosigned_ready(&init),
             record["status"] == "ready",
             "{venue}"
         );
         count += 1;
     }
     assert_eq!(count, 41);
-    assert!(!cosigned_ready("future-unproved-venue"));
+    assert!(!cosigned_ready(&crate::envelope::InitPayload {
+        exchange_name: "future-unproved-venue".into(),
+        ..Default::default()
+    }));
 }
 
 #[path = "binanceoptions_probe_tests.rs"]

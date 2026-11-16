@@ -51,7 +51,7 @@ async fn backpack_catalog_selects_local_proof_before_attachment_using(
 ) {
     tokio::task::LocalSet::new()
         .run_until(async {
-            assert!(crate::delegated::probe::cosigned_ready("backpack"));
+            assert!(crate::delegated::probe::cosigned_ready(&init()));
             let registry = registry();
             let resident = crate::accounts::testing::trading_account(&registry, "alice", &init());
             let (mut session, mut sent) = user_session(registry.clone(), "alice");
