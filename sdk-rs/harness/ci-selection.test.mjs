@@ -100,6 +100,42 @@ test('documentation included by Rust, and unresolved include macros, select full
     assert.equal(selectCi({ paths: ['README.md'], manifests, documents: rustDocumentInputs([['src/lib.rs', text]]) }).full, true);
 });
 
+for (const macro of ['include_str', 'include_bytes']) {
+  for (const [open, close] of [['(', ')'], ['[', ']'], ['{', '}']]) {
+    test(`${macro}!${open}${close} selects full checks for its included Markdown`, () => {
+      const documents = rustDocumentInputs([
+        ['sdk-rs/engine/src/lib.rs', `const DATA = ${macro}! ${open} "../README.md", ${close};`],
+      ]);
+      assert.deepEqual([...documents.paths], ['sdk-rs/engine/README.md']);
+      assert.equal(documents.unresolved, false);
+      assert.equal(selectCi({ paths: ['sdk-rs/engine/README.md'], manifests, documents }).full, true);
+      assert.equal(selectCi({ paths: ['sdk-rs/engine/unrelated.md'], manifests, documents }).full, false);
+    });
+  }
+}
+
+for (const macro of ['include_str', 'include_bytes']) {
+  for (const [open, close] of [['(', ')'], ['[', ']'], ['{', '}']]) {
+    test(`${macro}!${open}${close} fails closed for unsupported arguments`, () => {
+      for (const argument of ['r"../README.md"', 'concat!("../", "README.md")']) {
+        const documents = rustDocumentInputs([
+          ['sdk-rs/engine/src/lib.rs', `${macro}!${open}${argument}${close}`],
+        ]);
+        assert.equal(documents.unresolved, true, argument);
+        assert.equal(selectCi({ paths: ['sdk-rs/engine/unrelated.md'], manifests, documents }).full, true);
+      }
+    });
+  }
+}
+
+test('recognized but unparsed include invocations remain unresolved', () => {
+  for (const text of ['include_str!', 'include_bytes!["../README.md")',
+    'include_str! /* unparsed token spacing */ ["../README.md"]']) {
+    const documents = rustDocumentInputs([['sdk-rs/engine/src/lib.rs', text]]);
+    assert.equal(documents.unresolved, true, text);
+  }
+});
+
 test('docs and inert tests skip replay/size, but unknown and shared inputs select everything', () => {
   for (const path of ['docs/plans/X.md', 'sdk-rs/venues/bitget/tests/ticker.rs',
     'sdk-rs/engine/tests/http.rs', 'sdk-rs/harness/gate.test.mjs', '.github/tests/x.test.cjs']) {

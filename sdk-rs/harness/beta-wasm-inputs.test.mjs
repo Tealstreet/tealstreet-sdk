@@ -268,12 +268,26 @@ test('each excluded harness pattern still names a real file', () => {
   for (const pattern of HARNESS_NOT_BUILT) assert.ok(harness.some((rel) => pattern.test(rel)), String(pattern));
 });
 
-test('excluded Markdown is not a Rust include input', () => {
-  const sources = betaWasmInputPaths(REPO)
+const assertNoCompiledMarkdown = (root) => {
+  const sources = betaWasmInputPaths(root)
     .filter((path) => path.endsWith('.rs'))
-    .map((path) => [path, read(path)]);
+    .map((path) => [path, readFileSync(join(root, path), 'utf8')]);
   const documents = rustDocumentInputs(sources);
   assert.equal(documents.unresolved, false, 'audit dynamic includes before excluding their possible Markdown inputs');
   assert.deepEqual([...documents.paths].filter((path) => /\.md$/i.test(path)), [],
     'compiled Markdown is build data and must be retained, not treated as documentation');
-});
+};
+
+test('excluded Markdown is not a Rust include input', () => assertNoCompiledMarkdown(REPO));
+
+for (const macro of ['include_str', 'include_bytes']) {
+  for (const [open, close] of [['(', ')'], ['[', ']'], ['{', '}']]) {
+    test(`${macro}!${open}${close} rejects compiled Markdown in the exclusion audit`, () => {
+      const root = tree();
+      writeFileSync(join(root, 'sdk-rs/engine/README.md'), 'compiled build data');
+      writeFileSync(join(root, 'sdk-rs/engine/src/lib.rs'), `const DATA = ${macro}!${open}"../README.md"${close};`);
+      assert.ok(!betaWasmInputPaths(root).includes('sdk-rs/engine/README.md'));
+      assert.throws(() => assertNoCompiledMarkdown(root), /compiled Markdown is build data/);
+    });
+  }
+}

@@ -31,9 +31,11 @@ export function rustDocumentInputs(sources) {
   const paths = new Set();
   let unresolved = false;
   for (const [source, text] of sources) {
-    const includes = [...text.matchAll(/\binclude_(?:str|bytes)\s*!\s*\(\s*([^)]*)\)/g)];
+    const includes = [...text.matchAll(/\binclude_(?:str|bytes)\s*!\s*/g)];
     for (const match of includes) {
-      const literal = /^"([^"\\]*)"\s*,?\s*$/.exec(match[1]);
+      // Rust permits all three paired delimiters; unparsed arguments stay unresolved.
+      const body = /^(?:\(\s*([^)]*)\)|\[\s*([^\]]*)\]|\{\s*([^}]*)\})/.exec(text.slice(match.index + match[0].length));
+      const literal = body && /^"([^"\\]*)"\s*,?\s*$/.exec(body[1] ?? body[2] ?? body[3]);
       if (!literal) unresolved = true;
       else paths.add(posix.normalize(posix.join(posix.dirname(source), literal[1])));
     }

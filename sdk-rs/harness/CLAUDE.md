@@ -80,6 +80,9 @@ strict pin/prebuild recomputation after Copybara imports the same `sdk-rs/` tree
 Markdown documentation anywhere under `sdk-rs/` is excluded, including this guide;
 real scripts such as `families.integration.mjs`, fixtures and toolchains still count.
 The import/include tests reject excluded documentation becoming compiled build data.
+The Rust include scan recognizes paired `()`, `[]` and `{}` macro arguments;
+unparsed arguments stay unresolved, so compiled Markdown or unknown includes
+block the exclusion audit instead of silently dropping build data.
 The CI artifact `buildInputFingerprint` is a separate immutable Git provenance key.
 
 Changing the fingerprint definition itself still moves the release hash once.
