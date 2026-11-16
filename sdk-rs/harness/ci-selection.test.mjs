@@ -128,13 +128,95 @@ for (const macro of ['include_str', 'include_bytes']) {
   }
 }
 
+// Resolved comment trivia is covered below; this guard retains only unparsed bodies.
 test('recognized but unparsed include invocations remain unresolved', () => {
   for (const text of ['include_str!', 'include_bytes!["../README.md")',
-    'include_str! /* unparsed token spacing */ ["../README.md"]']) {
+    'include_str![identifier]']) {
     const documents = rustDocumentInputs([['sdk-rs/engine/src/lib.rs', text]]);
     assert.equal(documents.unresolved, true, text);
   }
 });
+
+for (const macro of ['include_str', 'include_bytes']) {
+  for (const [name, trivia] of [
+    ['block', ' /* reason */ '], ['line', ' // reason\n'],
+    ['nested block', ' /* outer /* inner */ end */ '],
+  ]) {
+    test(`${macro} resolves ${name} comments before the bang`, () => {
+      const documents = rustDocumentInputs([
+        ['sdk-rs/engine/src/lib.rs', `${macro}${trivia}!("../README.md")`],
+      ]);
+      assert.deepEqual([...documents.paths], ['sdk-rs/engine/README.md']);
+      assert.equal(documents.unresolved, false);
+      assert.equal(selectCi({ paths: ['sdk-rs/engine/README.md'], manifests, documents }).full, true);
+      assert.equal(selectCi({ paths: ['sdk-rs/engine/unrelated.md'], manifests, documents }).full, false);
+    });
+  }
+}
+
+for (const text of [
+  'include_str?("../README.md")', 'include_bytes["../README.md"]',
+  'let include_str = 1;', 'include_bytes::other("../README.md")',
+  'include_str!!["../README.md"]', 'use std::include_bytes as read; read!("../README.md");',
+]) {
+  test(`unresolved include identifier fails closed: ${text}`, () => {
+    const documents = rustDocumentInputs([['sdk-rs/engine/src/lib.rs', text]]);
+    assert.equal(documents.unresolved, true);
+    assert.equal(selectCi({ paths: ['sdk-rs/engine/unrelated.md'], manifests, documents }).full, true);
+  });
+}
+
+const inertRust = [
+  String.raw`const S = "include_str!(\"ignored.md\")";`,
+  String.raw`const S = r#"include_str!("ignored.md")"#;`,
+  String.raw`const S = br##"include_bytes!["ignored.md"]"##;`,
+  String.raw`const S = cr#"include_str!{"ignored.md"}"#;`,
+  String.raw`const S = b"include_bytes!(\"ignored.md\")";`,
+  String.raw`const S = c"include_str!(\"ignored.md\")";`,
+  String.raw`// include_str!("ignored.md")`,
+  String.raw`/* outer include_str!("ignored.md") /* include_bytes!{"ignored.md"} */ end */`,
+  String.raw`blackhole!(r#"ignored"#include_str);`,
+];
+for (const [index, text] of inertRust.entries()) {
+  test(`include-like text stays inert in Rust literal/comment ${index}`, () => {
+    const ignored = rustDocumentInputs([['sdk-rs/engine/src/lib.rs', text]]);
+    assert.deepEqual([...ignored.paths], []);
+    assert.equal(ignored.unresolved, false);
+    const active = rustDocumentInputs([
+      ['sdk-rs/engine/src/lib.rs', `${text}\ninclude_bytes!["../README.md"];`],
+    ]);
+    assert.deepEqual([...active.paths], ['sdk-rs/engine/README.md']);
+    assert.equal(active.unresolved, false);
+  });
+}
+
+test('nearby identifiers are not include identifiers', () => {
+  const documents = rustDocumentInputs([['src/lib.rs',
+    'let include_str_suffix = 1; let prefix_include_bytes = 2; let éinclude_str = 3;']]);
+  assert.deepEqual([...documents.paths], []);
+  assert.equal(documents.unresolved, false);
+});
+
+for (const prefix of [String.raw`const QUOTE: char = '"';`, "fn identity<'a>(x: &'a str) -> &'a str { x }"]) {
+  test(`character/lifetime syntax cannot hide a later include: ${prefix}`, () => {
+    const documents = rustDocumentInputs([['sdk-rs/engine/src/lib.rs', `${prefix}\ninclude_str!("../README.md");`]]);
+    assert.deepEqual([...documents.paths], ['sdk-rs/engine/README.md']);
+    assert.equal(documents.unresolved, false);
+  });
+}
+
+test('qualified raw include identifiers and trivia resolve concrete paths', () => {
+  const documents = rustDocumentInputs([['sdk-rs/engine/src/lib.rs',
+    'std::r#include_str /* before */ ! /* after */ [ /* body */ "../README.md" /* path */, /* comma */ ];']]);
+  assert.deepEqual([...documents.paths], ['sdk-rs/engine/README.md']);
+  assert.equal(documents.unresolved, false);
+});
+
+for (const text of ['/* unterminated', 'const S = "unterminated', 'const S = r##"unterminated']) {
+  test(`unclosed Rust lexical span fails closed: ${text}`, () => {
+    assert.equal(rustDocumentInputs([['src/lib.rs', text]]).unresolved, true);
+  });
+}
 
 test('docs and inert tests skip replay/size, but unknown and shared inputs select everything', () => {
   for (const path of ['docs/plans/X.md', 'sdk-rs/venues/bitget/tests/ticker.rs',

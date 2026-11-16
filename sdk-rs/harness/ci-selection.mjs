@@ -27,16 +27,81 @@ export function reverseVenueDependencies(manifests) {
   return result;
 }
 
+// Preserve token offsets while hiding comments/literals, including literal suffixes.
+function rustIncludeView(text) {
+  const code = text.split(''), literals = new Map();
+  const identifier = /[_\p{ID_Start}][_\p{ID_Continue}]*/uy;
+  const identifierAt = (offset) => {
+    identifier.lastIndex = offset;
+    return identifier.exec(text)?.[0];
+  };
+  const hide = (start, end) => {
+    for (let i = start; i < end; i++) code[i] = ' ';
+  };
+  let unresolved = false;
+  for (let i = 0; i < text.length;) {
+    const start = i;
+    if (text.startsWith('//', i)) {
+      i = text.indexOf('\n', i);
+      if (i < 0) i = text.length;
+      hide(start, i);
+      continue;
+    }
+    if (text.startsWith('/*', i)) {
+      let depth = 1;
+      i += 2;
+      while (i < text.length && depth) {
+        if (text.startsWith('/*', i)) { depth++; i += 2; }
+        else if (text.startsWith('*/', i)) { depth--; i += 2; }
+        else i++;
+      }
+      unresolved ||= depth !== 0;
+      hide(start, i);
+      continue;
+    }
+    const raw = /^(?:br|cr|r)(#{0,255})"/.exec(text.slice(i));
+    const string = /^(?:b|c)?"/.exec(text.slice(i));
+    const character = /^(?:b)?'(?:\\(?:u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^'\\\n])'/u.exec(text.slice(i));
+    if (raw || string || character) {
+      if (raw) {
+        const close = '"' + raw[1];
+        const end = text.indexOf(close, i + raw[0].length);
+        if (end < 0) { unresolved = true; i = text.length; }
+        else i = end + close.length;
+      } else if (string) {
+        i += string[0].length;
+        while (i < text.length && text[i] !== '"') i += text[i] === '\\' ? 2 : 1;
+        if (i >= text.length) { unresolved = true; i = text.length; }
+        else i++;
+      } else i += character[0].length;
+      i += identifierAt(i)?.length ?? 0;
+      hide(start, i);
+      code[start] = '"';
+      literals.set(start, { text: text.slice(start, i), end: i });
+      continue;
+    }
+    // Consume whole identifiers so an embedded raw-string prefix cannot hide one.
+    const name = identifierAt(i);
+    i += name?.length ?? 1;
+  }
+  return { code: code.join(''), literals, unresolved };
+}
+
 export function rustDocumentInputs(sources) {
   const paths = new Set();
   let unresolved = false;
   for (const [source, text] of sources) {
-    const includes = [...text.matchAll(/\binclude_(?:str|bytes)\s*!\s*/g)];
-    for (const match of includes) {
-      // Rust permits all three paired delimiters; unparsed arguments stay unresolved.
-      const body = /^(?:\(\s*([^)]*)\)|\[\s*([^\]]*)\]|\{\s*([^}]*)\})/.exec(text.slice(match.index + match[0].length));
-      const literal = body && /^"([^"\\]*)"\s*,?\s*$/.exec(body[1] ?? body[2] ?? body[3]);
-      if (!literal) unresolved = true;
+    const view = rustIncludeView(text);
+    unresolved ||= view.unresolved;
+    const identifiers = view.code.matchAll(/(?<![_\p{ID_Continue}])(?:r#)?include_(?:str|bytes)(?![_\p{ID_Continue}])/gu);
+    for (const match of identifiers) {
+      const offset = match.index + match[0].length;
+      const open = /^\s*!\s*([([{])\s*/.exec(view.code.slice(offset));
+      const token = open && view.literals.get(offset + open[0].length);
+      const literal = token && /^"([^"\\]*)"\s*,?\s*$/.exec(token.text);
+      const end = token && /^\s*,?\s*([)\]}])/.exec(view.code.slice(token.end));
+      // Every include identifier must resolve; unsupported syntax cannot pass unseen.
+      if (!literal || !end || end[1] !== { '(': ')', '[': ']', '{': '}' }[open[1]]) unresolved = true;
       else paths.add(posix.normalize(posix.join(posix.dirname(source), literal[1])));
     }
   }

@@ -291,3 +291,23 @@ for (const macro of ['include_str', 'include_bytes']) {
     });
   }
 }
+
+for (const macro of ['include_str', 'include_bytes']) {
+  for (const [name, trivia] of [['block', ' /* reason */ '], ['line', ' // reason\n']]) {
+    test(`${macro} with ${name} trivia cannot bypass the exclusion audit`, () => {
+      const root = tree();
+      writeFileSync(join(root, 'sdk-rs/engine/README.md'), 'compiled build data');
+      writeFileSync(join(root, 'sdk-rs/engine/src/lib.rs'), `${macro}${trivia}!("../README.md");`);
+      const before = betaWasmInputs(root, TOOLCHAIN);
+      writeFileSync(join(root, 'sdk-rs/engine/README.md'), 'edited compiled build data');
+      assert.deepEqual(betaWasmInputs(root, TOOLCHAIN), before);
+      assert.throws(() => assertNoCompiledMarkdown(root), /compiled Markdown is build data|audit dynamic includes/);
+    });
+  }
+}
+
+test('a bare unresolved include identifier blocks the exclusion audit', () => {
+  const root = tree();
+  writeFileSync(join(root, 'sdk-rs/engine/src/lib.rs'), 'let include_bytes = unknown;');
+  assert.throws(() => assertNoCompiledMarkdown(root), /audit dynamic includes/);
+});
