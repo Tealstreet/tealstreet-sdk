@@ -1057,10 +1057,12 @@ fn admission_enabled_venues_require_an_offline_suite() {
         "../../../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
     ))
     .unwrap();
-    assert_eq!(PRIVATE_STARTUP_VENUES.len(), VENUES.len() + 1);
+    // SDK #3576 covers Lighter registered-key local proofs in the production Session suite.
+    let local = ["lighter", "lighter-robinhood"];
+    assert_eq!(PRIVATE_STARTUP_VENUES.len(), VENUES.len() + 1 + local.len());
     for &venue in PRIVATE_STARTUP_VENUES {
         assert!(
-            venue == "bybit" || VENUES.contains(&venue),
+            venue == "bybit" || VENUES.contains(&venue) || local.contains(&venue),
             "{venue}: missing offline suite"
         );
     }

@@ -578,6 +578,7 @@ struct InitAuthority {
     admission_expires_at: Option<u64>,
     probe_current: Option<Arc<AtomicBool>>,
     probe_deadline: Option<tokio::time::Instant>,
+    proved_registration: Option<Arc<safe_cex_crypto::admission::PublicKey>>,
 }
 
 impl InitAuthority {
@@ -1359,6 +1360,7 @@ impl Registry {
             admission_expires_at: None,
             probe_current: None,
             probe_deadline: None,
+            proved_registration: None,
         };
         authority.check_admission()?;
         let key = (user.to_owned(), name.to_owned());
@@ -1554,6 +1556,7 @@ impl Registry {
             attempt.authority.admission_expires_at = proof.token_expires_at;
             attempt.authority.probe_current = Some(proof.current.clone());
             attempt.authority.probe_deadline = proof.local_deadline;
+            attempt.authority.proved_registration = proof.registered_public.clone();
             attempt._probe = Some(proof);
         }
         let key = attempt.key.clone();
@@ -1587,6 +1590,16 @@ impl Registry {
                 }
                 attempt.authority.check_admission()?;
                 crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
+                if let Some(expected) = &attempt.authority.proved_registration {
+                    let actual = account
+                        .signing
+                        .public_binding(Family::Schnorr)
+                        .map_err(|_| "Signer registration unavailable")?
+                        .ok_or("Signer registration unavailable")?;
+                    if actual.as_bytes() != expected.as_bytes() {
+                        return Err("Signer registration changed during verification".into());
+                    }
+                }
                 if delegated && account.delegated().is_none() {
                     let resident = match setup {
                         Some(DelegatedSetup::Pair(pair)) => prepare_delegated(init, pair)?.resident,
@@ -1600,11 +1613,15 @@ impl Registry {
                     if account.handle.disposal_cause().is_some() || !account.running.io_allowed() {
                         return Err("Account is retiring; account not attached".into());
                     }
-                    let upgraded = match public {
-                        Some(proof) => account
+                    let upgraded = match (public, attempt.authority.proved_registration.as_deref())
+                    {
+                        (Some(proof), _) => account
                             .signing
                             .upgrade_proven(resident, Some(&proof.public)),
-                        None => account.signing.upgrade(resident),
+                        (None, Some(public)) => {
+                            account.signing.upgrade_proven(resident, Some(public))
+                        }
+                        (None, None) => account.signing.upgrade(resident),
                     }
                     .map_err(|reason| reason.reason().to_owned())?;
                     if upgraded {
@@ -1793,6 +1810,11 @@ impl Registry {
                     .map_err(|_| "Signer registration unavailable")?;
                     authority.check_admission()?;
                     crate::auth::Verifier::check_expiry(expiry, now_ms())?;
+                    if let Some(expected) = &authority.proved_registration
+                        && expected.as_bytes() != public.as_bytes()
+                    {
+                        return Err("Signer registration changed during verification".into());
+                    }
                     Some(
                         remote
                             .with_registered_public_key(&public)

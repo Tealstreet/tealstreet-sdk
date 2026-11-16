@@ -86,8 +86,9 @@ async fn finish(
     session.verification_completed(result).await.unwrap();
 }
 
-#[tokio::test]
-async fn lighter_registered_key_proof_attaches_exact_venue_and_network() {
+async fn lighter_registered_key_proof_attaches_exact_venue_and_network_using(
+    sign: fn(&Request, u8) -> String,
+) {
     tokio::task::LocalSet::new().run_until(async {
         for venue in VENUES { for testnet in [false, true] {
             assert!(crate::delegated::probe::cosigned_ready(venue));
@@ -107,7 +108,7 @@ async fn lighter_registered_key_proof_attaches_exact_venue_and_network() {
             assert_eq!(serde_json::to_value(request.statement()).unwrap()["identityDigest"], json!(expected.digest()));
             assert_eq!(request.account_name(), payload.account_name);
             assert_eq!(request.instance_id(), payload.instance_id.unwrap());
-            session.handle(&response(&request, 7)).await.unwrap();
+            session.handle(&sign(&request, 7)).await.unwrap();
             finish(&mut session, &mut done).await;
             assert!(Arc::ptr_eq(&session.joined["lighter-local"].account, &resident));
             assert!(registry.holds(&resident, session.socket));
@@ -125,8 +126,9 @@ async fn lighter_registered_key_proof_attaches_exact_venue_and_network() {
     }).await;
 }
 
-#[tokio::test]
-async fn lighter_other_valid_key_preserves_resident_and_original_signer() {
+async fn lighter_other_valid_key_preserves_resident_and_original_signer_using(
+    sign: fn(&Request, u8) -> String,
+) {
     tokio::task::LocalSet::new()
         .run_until(async {
             for venue in VENUES {
@@ -143,7 +145,7 @@ async fn lighter_other_valid_key_preserves_resident_and_original_signer() {
                 let mut done = session.take_verified();
                 session.init(payload).await.unwrap();
                 let request = challenge(&mut sent).await;
-                session.handle(&response(&request, 8)).await.unwrap();
+                session.handle(&sign(&request, 8)).await.unwrap();
                 finish(&mut session, &mut done).await;
                 assert!(session.joined.is_empty());
                 assert!(!registry.holds(&resident, session.socket));
@@ -156,8 +158,9 @@ async fn lighter_other_valid_key_preserves_resident_and_original_signer() {
         .await;
 }
 
-#[tokio::test]
-async fn lighter_replay_refuses_new_attempt_then_fresh_signature_succeeds() {
+async fn lighter_replay_refuses_new_attempt_then_fresh_signature_succeeds_using(
+    sign: fn(&Request, u8) -> String,
+) {
     tokio::task::LocalSet::new()
         .run_until(async {
             for venue in VENUES {
@@ -173,7 +176,7 @@ async fn lighter_replay_refuses_new_attempt_then_fresh_signature_succeeds() {
                 let mut done = session.take_verified();
                 session.init(payload.clone()).await.unwrap();
                 let first = challenge(&mut sent).await;
-                let mut replay: Value = serde_json::from_str(&response(&first, 7)).unwrap();
+                let mut replay: Value = serde_json::from_str(&sign(&first, 7)).unwrap();
                 session.init(payload.clone()).await.unwrap();
                 let second = challenge(&mut sent).await;
                 assert_ne!(first.statement(), second.statement());
@@ -185,7 +188,7 @@ async fn lighter_replay_refuses_new_attempt_then_fresh_signature_succeeds() {
                 while sent.try_recv().is_ok() {}
                 session.init(payload).await.unwrap();
                 let third = challenge(&mut sent).await;
-                let fresh = response(&third, 7);
+                let fresh = sign(&third, 7);
                 session.handle(&fresh).await.unwrap();
                 finish(&mut session, &mut done).await;
                 assert!(registry.holds(&resident, session.socket));
@@ -203,8 +206,9 @@ async fn lighter_replay_refuses_new_attempt_then_fresh_signature_succeeds() {
         .await;
 }
 
-#[tokio::test]
-async fn lighter_foreign_socket_cannot_consume_original_proof() {
+async fn lighter_foreign_socket_cannot_consume_original_proof_using(
+    sign: fn(&Request, u8) -> String,
+) {
     tokio::task::LocalSet::new()
         .run_until(async {
             for venue in VENUES {
@@ -221,7 +225,7 @@ async fn lighter_foreign_socket_cannot_consume_original_proof() {
                 let mut done = original.take_verified();
                 original.init(payload).await.unwrap();
                 let request = challenge(&mut sent).await;
-                let reply = response(&request, 7);
+                let reply = sign(&request, 7);
                 foreign.handle(&reply).await.unwrap();
                 tokio::task::yield_now().await;
                 assert!(done.try_recv().is_err());
@@ -330,9 +334,12 @@ async fn lighter_rotated_registration_cannot_attach_to_the_old_resident() {
                 let (mut session, mut sent) = user_session(registry.clone(), "alice");
                 let mut done = session.take_verified();
                 session.init(payload).await.unwrap();
-                let request = challenge(&mut sent).await;
-                session.handle(&response(&request, 8)).await.unwrap();
+                // SDK #3576 captures the actor pin before lookup; rotation refuses before signing.
                 finish(&mut session, &mut done).await;
+                while let Ok(text) = sent.try_recv() {
+                    let frame: Value = serde_json::from_str(&text).unwrap();
+                    assert_ne!(frame["t"], "sign-req");
+                }
                 assert!(session.joined.is_empty());
                 assert!(!registry.holds(&resident, session.socket));
                 assert!(Arc::ptr_eq(resident.link.as_ref().unwrap(), &original));
@@ -542,4 +549,174 @@ async fn lighter_delegated_pair_and_sealed_replay_preserve_original_provider() {
             session.close();
         }}
     }).await;
+}
+
+#[tokio::test]
+async fn lighter_registered_key_proof_attaches_exact_venue_and_network() {
+    lighter_registered_key_proof_attaches_exact_venue_and_network_using(response).await;
+}
+
+#[tokio::test]
+async fn lighter_other_valid_key_preserves_resident_and_original_signer() {
+    lighter_other_valid_key_preserves_resident_and_original_signer_using(response).await;
+}
+
+#[tokio::test]
+async fn lighter_replay_refuses_new_attempt_then_fresh_signature_succeeds() {
+    lighter_replay_refuses_new_attempt_then_fresh_signature_succeeds_using(response).await;
+}
+
+#[tokio::test]
+async fn lighter_foreign_socket_cannot_consume_original_proof() {
+    lighter_foreign_socket_cannot_consume_original_proof_using(response).await;
+}
+
+fn wasm_response(request: &Request, seed: u8) -> String {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let value = serde_json::to_value(request).unwrap();
+    let venue = value["exchangeName"].as_str().unwrap();
+    let mut child = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/lighter/join-proof-device.mjs"
+        ))
+        .arg(seed.to_string())
+        .arg(venue)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&serde_json::to_vec(request).unwrap())
+        .unwrap();
+    let result = child.wait_with_output().unwrap();
+    assert!(
+        result.status.success(),
+        "real WASM device failed (exit {:?})",
+        result.status.code()
+    );
+    String::from_utf8(result.stdout).unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires Node22 and SAFE_CEX_LIGHTER_JOIN_WASM pointing to a fresh activated Lighter module"]
+async fn lighter_actual_wasm_session_proof_and_negatives() {
+    lighter_registered_key_proof_attaches_exact_venue_and_network_using(wasm_response).await;
+    lighter_other_valid_key_preserves_resident_and_original_signer_using(wasm_response).await;
+    lighter_replay_refuses_new_attempt_then_fresh_signature_succeeds_using(wasm_response).await;
+    lighter_foreign_socket_cannot_consume_original_proof_using(wasm_response).await;
+}
+
+#[tokio::test]
+async fn lighter_actor_aba_during_registration_cannot_transfer_pending_authority() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for venue in VENUES {
+                let payload = init(venue, false);
+                let (registry, gate, observed) = registry(body(), 0);
+                let original = crate::accounts::testing::registered_lighter_account(
+                    &registry,
+                    "alice",
+                    &payload,
+                    &public(7),
+                );
+                let (mut session, mut sent) = user_session(registry.clone(), "alice");
+                let mut done = session.take_verified();
+                session.init(payload.clone()).await.unwrap();
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while observed.lock().unwrap().preparations == 0 {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                original.handle.dispose();
+                let successor = crate::accounts::testing::registered_lighter_account(
+                    &registry,
+                    "alice",
+                    &payload,
+                    &public(7),
+                );
+                assert!(!Arc::ptr_eq(&original, &successor));
+                gate.add_permits(1);
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    tokio::select! {
+                        result=done.recv() => {
+                            let result=result.unwrap();
+                            assert!(result.probe.as_ref().unwrap().permit.is_err());
+                            session.verification_completed(result).await.unwrap();
+                        },
+                        text=sent.recv() => {
+                            let frame:Value=serde_json::from_str(&text.unwrap()).unwrap();
+                            assert_eq!(frame["t"],"sign-req");
+                            let request=Request::from_json(&frame["d"].to_string()).unwrap();
+                            session.handle(&response(&request,7)).await.unwrap();
+                            finish(&mut session,&mut done).await;
+                        },
+                    }
+                })
+                .await
+                .unwrap();
+                assert!(
+                    session.joined.is_empty(),
+                    "old registration authority cannot attach a replacement actor"
+                );
+                assert!(!registry.holds(&successor, session.socket));
+                assert_eq!(
+                    observed.lock().unwrap().requests,
+                    0,
+                    "retired actor cannot dispatch held registration IO"
+                );
+                session.close();
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn lighter_actor_aba_after_proof_cannot_reuse_a_completed_receipt() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for venue in VENUES {
+                let payload = init(venue, false);
+                let (registry, _, _) = registry(body(), 8);
+                let original = crate::accounts::testing::registered_lighter_account(
+                    &registry,
+                    "alice",
+                    &payload,
+                    &public(7),
+                );
+                let (mut session, mut sent) = user_session(registry.clone(), "alice");
+                let mut done = session.take_verified();
+                session.init(payload.clone()).await.unwrap();
+                let request = challenge(&mut sent).await;
+                session.handle(&response(&request, 7)).await.unwrap();
+                let result = tokio::time::timeout(Duration::from_secs(5), done.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(result.probe.as_ref().unwrap().permit.is_ok());
+                original.handle.dispose();
+                let successor = crate::accounts::testing::registered_lighter_account(
+                    &registry,
+                    "alice",
+                    &payload,
+                    &public(7),
+                );
+                session.verification_completed(result).await.unwrap();
+                assert!(
+                    session.joined.is_empty(),
+                    "a completed receipt belongs to its captured actor incarnation"
+                );
+                assert!(!registry.holds(&successor, session.socket));
+                assert_eq!(registry.account_count(), 1);
+                session.close();
+            }
+        })
+        .await;
 }

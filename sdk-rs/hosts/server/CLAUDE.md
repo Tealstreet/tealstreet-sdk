@@ -150,9 +150,14 @@ It issues a closed admission challenge and verifies the raw reply against the
 actual receiving socket, or verifies the temporary protected DELEGATED provider.
 The permit records its socket only after verification; final attachment checks
 that receipt, the original instance/token/lease and the local admission deadline.
-No production public-key venue selects this strategy yet. Synthetic Session
-fixtures select it without changing the readiness catalog; device integration
-and authoritative per-family facts must precede any activation. Matching COSIGNED repeats require the same socket-admitted
+Exact Lighter and Lighter Robinhood select it after a routed, bounded registration
+read on the captured account/API-key slot. The projection includes the registered
+Schnorr public key and exact network. A slot queue prevents label-based parallel
+proofs. An existing actor's incarnation and immutable pin are captured before
+lookup; retirement or replacement invalidates that attempt. Final attachment
+compares the proved key with that pin or the cold actor's registration read;
+mismatch refuses without changing a resident.
+All other public-key families remain gated until their own device/metadata coverage. Matching COSIGNED repeats require the same socket-admitted
 mode and identity/settings; refused proofs never change that mode. Resumed COSIGNED
 accounts retain that admission provenance. The exact wire names and
 rollout boundary are in `docs/plans/callers/cosigned-join-proof.md`.

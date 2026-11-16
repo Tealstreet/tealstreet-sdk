@@ -65,14 +65,6 @@
       "reason": "No native Hosted Spot REST origin; exact Spot bullet/private-startup proof with signed passphrase and socket controls is not built."
     },
     {
-      "venue": "lighter",
-      "reason": "Native expiring auth-token/private-startup proof bound to account, key slot and replay/socket authority is not built."
-    },
-    {
-      "venue": "lighter-robinhood",
-      "reason": "Production metadata disables this venue; its distinct origin/chain/account-slot private-startup proof is not built."
-    },
-    {
       "venue": "okxeudemo",
       "reason": "Exact EEA simulated-trading private-startup proof is incomplete; cold signed account/instruments refusal needs its own design."
     },

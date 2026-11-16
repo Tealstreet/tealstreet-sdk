@@ -24,12 +24,27 @@ The exact proof-ready venue names are:
 | `blofin` | Native private startup and shared HMAC suite |
 | `kucoin` | Native private startup and shared HMAC suite; mainnet only |
 | `mexc` | Native signed position-mode/account reads and private-stream HMAC; wrong-key, replay and socket/Session controls; mainnet only |
+| `lighter`, `lighter-robinhood` | Local Schnorr challenge against routed venue registration for the captured account/API-key slot; wrong-key, replay, foreign-socket, retirement and registration-rotation controls |
 
 `okxeudemo` remains excluded and does not inherit EEA mainnet proof readiness.
 EEA bootstrap retains the original config authority until catalogue completion;
 config success alone cannot satisfy private readiness. A second consecutive
 `50113` for a bootstrap read refuses permanently after one re-signed retry,
 without extending the captured admission deadline.
+
+Lighter registration uses the existing public `GET /api/v1/apikeys` with the
+captured account index and API-key index. Its exact venue/network chooses the
+existing native origin. The expected public key comes from that response, not
+from init JSON or a proof reply. The [official request](https://github.com/elliottech/lighter-python/blob/main/docs/AccountApi.md#apikeys)
+and [registered-key model](https://github.com/elliottech/lighter-python/blob/main/docs/ApiKey.md)
+match that account/slot/public-key contract.
+
+The pending attempt holds the existing slot queue, pacer and captured
+socket/init/token/lease deadline. Its canonical proof identity includes the
+registered key. An existing actor's incarnation and immutable signer binding
+are captured before lookup and retained through final attachment. A retired
+actor or changed registration refuses instead of rebinding a resident.
+Account sharing, venue policy/metadata, beta gates and signing modes are unchanged.
 
 Only these exact names are admitted; the catalog never matches a family prefix.
 An unsupported proof returns the existing account error envelope with

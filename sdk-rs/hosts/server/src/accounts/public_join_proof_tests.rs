@@ -362,19 +362,8 @@ async fn unpinned_legacy_schnorr_refuses_with_an_explicit_transition_reason() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let f = fixture_with_binding(None);
-            let permit = permit(&f);
-            f.gate.add_permits(1);
-            let Err(refusal) = f
-                .registry
-                .prove_public_join(
-                    &f.init,
-                    &f.candidate,
-                    &RoutingPlan::default(),
-                    None,
-                    &permit,
-                )
-                .await
-            else {
+            // SDK #3576 captures the original pin at permit creation, before any lookup.
+            let Err(refusal) = f.registry.probe_permit("alice", &f.init) else {
                 panic!("current registration cannot invent a legacy signer binding");
             };
             assert_eq!(
@@ -432,6 +421,7 @@ async fn initial_registration_preparation_cannot_outlive_its_init() {
                 admission_expires_at: Some(now_ms() + 60_000),
                 probe_current: None,
                 probe_deadline: None,
+                proved_registration: None,
             };
             let future = f.registry.build(
                 "alice",
