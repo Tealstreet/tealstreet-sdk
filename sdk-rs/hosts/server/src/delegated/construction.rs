@@ -11,6 +11,7 @@ pub struct DelegatedPair {
     secret: Zeroizing<String>,
     passphrase: Option<Zeroizing<String>>,
     signing_key: Option<Zeroizing<String>>,
+    omni_key_seed: Option<Zeroizing<String>>,
 }
 impl DelegatedPair {
     pub fn new(key: String, secret: String, passphrase: Option<String>) -> Self {
@@ -19,11 +20,18 @@ impl DelegatedPair {
             secret: Zeroizing::new(secret),
             passphrase: passphrase.map(Zeroizing::new),
             signing_key: None,
+            omni_key_seed: None,
         }
     }
     /// Private key-only material comes exclusively from the encrypted credentials.
     pub fn with_signing_key(mut self, signing_key: String) -> Self {
         self.signing_key = Some(Zeroizing::new(signing_key));
+        self
+    }
+
+    /// ApeX signing material comes exclusively from the encrypted handover.
+    pub fn with_omni_key_seed(mut self, omni_key_seed: String) -> Self {
+        self.omni_key_seed = Some(Zeroizing::new(omni_key_seed));
         self
     }
 
@@ -42,6 +50,7 @@ impl DelegatedPair {
                 &init.exchange_name,
                 &self.secret,
                 self.signing_key.as_deref().map(String::as_str),
+                self.omni_key_seed.as_deref().map(String::as_str),
             )
             || self.signing_key.as_ref().is_some_and(|material| {
                 material.as_str() == init.key
@@ -177,6 +186,10 @@ pub fn prepare_delegated(
         .passphrase
         .as_mut()
         .map(|value| std::mem::take(&mut **value));
+    native.omni_key_seed = pair
+        .omni_key_seed
+        .as_mut()
+        .map(|value| std::mem::take(&mut **value));
     let (protection, identities) =
         safe_cex_venues::prepare_protected_local_signer_for(&init.exchange_name, &mut native)
             .map_err(|_| "Invalid DELEGATED account setup".to_owned())?;
@@ -256,5 +269,145 @@ mod tests {
             )
             .await;
         }
+    }
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn encrypted_apex_seed_installs_the_protected_extra_role() {
+        use safe_cex_engine::signing::{Algorithm, Capability, ExtraKey};
+        crate::delegated::with_test_declaration(
+            json!({"venues":{"apexomni":{"remoteSigning":{"enabled":true}}}}),
+            async {
+                let init = InitPayload {
+                    account_name: "synthetic-apex".into(),
+                    exchange_name: "apexomni".into(),
+                    key: "synthetic-apex-key".into(),
+                    ..Default::default()
+                };
+                let monitor = prepare_delegated(
+                    &init,
+                    DelegatedPair::new(init.key.clone(), "synthetic-apex-secret".into(), None),
+                )
+                .unwrap();
+                assert!(
+                    !monitor
+                        .resident
+                        .identities()
+                        .primary
+                        .as_ref()
+                        .unwrap()
+                        .extra
+                        .contains_key(&ExtraKey::ZklinkSeed)
+                );
+                let seed = format!("0x{}", "11".repeat(65));
+                let mut owner = crate::delegated::Handovers::default();
+                let offer = owner
+                    .issue(&init.account_name, &init.exchange_name, 100)
+                    .unwrap();
+                let bytes = serde_json::to_vec(&json!({
+                "key":init.key, "secret":"synthetic-apex-secret", "passphrase":"synthetic-phrase",
+                "omniKeySeed":seed
+            })).unwrap();
+                let sealed =
+                    crate::delegated::tests::seal(&offer, &init.exchange_name, &init.key, &bytes);
+                let opened = owner
+                    .take(&init.account_name, &sealed, 101)
+                    .unwrap()
+                    .open(&init.exchange_name, &init.key, &sealed, 102)
+                    .expect("the encrypted ApeX seed must survive the credential schema");
+                let prepared = prepare_delegated(&init, opened.pair()).unwrap();
+                let primary = prepared.resident.identities().primary.as_ref().unwrap();
+                let extra = primary
+                    .extra
+                    .get(&ExtraKey::ZklinkSeed)
+                    .expect("canonical ApeX setup must install the seed role")
+                    .clone();
+                let provider = prepared.resident.provider();
+                assert_eq!(
+                    provider.can_sign(&extra, Algorithm::ZkLinkContract),
+                    Capability::Supported
+                );
+                let options: serde_json::Value = serde_json::from_str(&prepared.options).unwrap();
+                for field in ["key", "secret", "passphrase", "omniKeySeed", "signingKey"] {
+                    assert!(
+                        options.get(field).is_none(),
+                        "private field in public engine options: {field}"
+                    );
+                }
+                assert!(!prepared.options.contains(&seed));
+                let reconfigured = prepared.resident.reconfigure(&init).unwrap();
+                assert_eq!(
+                    reconfigured.resident.identities(),
+                    prepared.resident.identities()
+                );
+                assert!(std::sync::Arc::ptr_eq(
+                    &provider,
+                    &reconfigured.resident.provider()
+                ));
+                assert!(!reconfigured.options.contains(&seed));
+                prepared.resident.erase();
+                assert_eq!(
+                    provider.can_sign(&extra, Algorithm::ZkLinkContract),
+                    Capability::Unsupported
+                );
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn encrypted_apex_seed_rejects_foreign_layouts_and_invalid_material() {
+        for (venue, seed) in [
+            ("bybit", format!("0x{}", "11".repeat(65))),
+            ("hyperliquid", format!("0x{}", "11".repeat(65))),
+            ("paradex", format!("0x{}", "11".repeat(65))),
+            ("apexomni", String::new()),
+            ("apexomni", "0x01".to_owned()),
+            ("apexomni", format!("0x{}", "gg".repeat(65))),
+            ("apexomni", format!("0x{}", "11".repeat(64))),
+        ] {
+            crate::delegated::with_test_declaration(
+                json!({"venues":{venue:{"remoteSigning":{"enabled":true}}}}),
+                async {
+                    let mut owner = crate::delegated::Handovers::default();
+                    let offer = owner.issue("synthetic-apex", venue, 100).unwrap();
+                    let bytes = serde_json::to_vec(&json!({
+                        "key":"synthetic-key", "secret":"synthetic-secret", "omniKeySeed":seed
+                    }))
+                    .unwrap();
+                    let sealed =
+                        crate::delegated::tests::seal(&offer, venue, "synthetic-key", &bytes);
+                    assert!(
+                        owner
+                            .take("synthetic-apex", &sealed, 101)
+                            .unwrap()
+                            .open(venue, "synthetic-key", &sealed, 102)
+                            .is_err()
+                    );
+                },
+            )
+            .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn apex_seed_schema_and_pair_preserve_private_material() {
+        crate::delegated::with_test_declaration(
+        json!({"venues":{"apexomni":{"remoteSigning":{"enabled":true}}}}),
+        async {
+            let seed = format!("0x{}", "11".repeat(65));
+            let raw = serde_json::to_string(&json!({"key":"synthetic-apex-key", "secret":"synthetic-apex-secret", "passphrase":"synthetic-phrase", "omniKeySeed":seed})).unwrap();
+            let candidate: crate::delegated::Credentials = serde_json::from_str(&raw)
+                .expect("ApeX seed must survive the encrypted credential schema");
+            assert!(candidate.omni_key_seed.as_deref().map(String::as_str) == Some(seed.as_str()));
+            let pair = candidate.pair();
+            assert!(pair.omni_key_seed.as_deref().map(String::as_str) == Some(seed.as_str()));
+            let mut init = InitPayload { account_name:"synthetic-apex".into(), exchange_name:"apexomni".into(), key:"synthetic-apex-key".into(), ..Default::default() };
+            assert!(pair.validate(&init).is_ok());
+            let mixed = candidate.pair().with_signing_key("synthetic-wallet-key".into());
+            assert!(mixed.validate(&init).is_err());
+            init.exchange_name = "bybit".into();
+            assert!(pair.validate(&init).is_err());
+        },
+    ).await;
     }
 }

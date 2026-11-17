@@ -38,6 +38,12 @@ the old socket and invalidates older HTTP generations. REST snapshots preserve
 newer WebSocket state, terminal orders and recently opened orders. Failed reads
 never commit empty account state.
 
+A leverage read for a fresh, flat UTA symbol may return JSON `null` when a valid
+settings response omits its product/symbol and neither a prior numeric setting
+nor an open position exists. This means unavailable leverage, never a default.
+Known-setting omissions, malformed settings and venue/HTTP failures still refuse;
+metadata reads never set leverage to discover it.
+
 Classic and UTA normal orders use the legacy TS allocation: round the requested amount,
 repeat the rounded equal lot `ceil(amount / max)` times, then append the rounded
 remainder. Per-lot rounding can change the submitted total. Batch chunks retain

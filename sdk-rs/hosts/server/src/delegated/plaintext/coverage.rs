@@ -12,6 +12,8 @@ struct JsonFields {
     passphrase: Option<String>,
     #[serde(default, rename = "signingKey")]
     signing_key: Option<String>,
+    #[serde(default, rename = "omniKeySeed")]
+    omni_key_seed: Option<String>,
 }
 
 fn compare(bytes: &[u8]) {
@@ -27,6 +29,10 @@ fn compare(bytes: &[u8]) {
     }
     match (actual, expected) {
         (Ok(actual), Ok(expected)) => {
+            assert!(
+                actual.omni_key_seed.as_deref().map(String::as_str)
+                    == expected.omni_key_seed.as_deref()
+            );
             assert!(
                 actual.signing_key.as_deref().map(String::as_str)
                     == expected.signing_key.as_deref()
@@ -99,6 +105,7 @@ fn differential_corpus_matches_serde() {
                     fields.push(format!("{}:{passphrase}", quoted("passphrase", unicode)));
                 }
                 fields.push(format!("{}:{phrase}", quoted("signingKey", unicode)));
+                fields.push(format!("{}:{phrase}", quoted("omniKeySeed", unicode)));
                 for rotation in 0..fields.len() {
                     fields.rotate_left(rotation);
                     for reverse in [false, true] {
@@ -237,7 +244,7 @@ fn malformed_corpus_refuses_and_clears() {
         "[]",
         r#"[null,"synthetic-secret"]"#,
         r#"["synthetic-key"]"#,
-        r#"["synthetic-key","synthetic-secret",null,null,null]"#,
+        r#"["synthetic-key","synthetic-secret",null,null,null,null]"#,
         r#"{"key" "synthetic-key","secret":"synthetic-secret"}"#,
         r#"{"key":"synthetic-key","secret":"synthetic-secret",}"#,
     ] {
@@ -307,12 +314,13 @@ proptest! {
         signing_key in prop::option::of(prop::collection::vec(prop_oneof![Just('"'), Just('\\'), Just('\0'), any::<char>()], 0..48)),
         unicode in any::<bool>(),
     ) {
-        let fields = JsonFields { key:key.into_iter().collect(), secret:secret.into_iter().collect(), passphrase:passphrase.map(|value| value.into_iter().collect()), signing_key:signing_key.map(|value| value.into_iter().collect()) };
+        let fields = JsonFields { key:key.into_iter().collect(), secret:secret.into_iter().collect(), passphrase:passphrase.map(|value| value.into_iter().collect()), signing_key:signing_key.map(|value| value.into_iter().collect()), omni_key_seed:Some("synthetic-seed\\\"".to_owned()) };
         let key = quoted(&fields.key, unicode);
         let secret = quoted(&fields.secret, unicode);
         let passphrase = fields.passphrase.as_deref().map(|value| quoted(value, unicode)).unwrap_or_else(|| "null".to_owned());
         let signing_key = fields.signing_key.as_deref().map(|value| quoted(value, unicode)).unwrap_or_else(|| "null".to_owned());
-        let json = format!(r#"{{"key":{key},"secret":{secret},"passphrase":{passphrase},"signingKey":{signing_key}}}"#);
+        let omni_key_seed = quoted(fields.omni_key_seed.as_deref().unwrap(), unicode);
+        let json = format!(r#"{{"key":{key},"secret":{secret},"passphrase":{passphrase},"signingKey":{signing_key},"omniKeySeed":{omni_key_seed}}}"#);
         compare(json.as_bytes());
     }
 
@@ -329,4 +337,19 @@ proptest! {
         prop_assert!(result.is_ok());
         prop_assert!(input.iter().all(|byte| *byte == 0));
     }
+}
+
+#[test]
+fn omni_seed_input_is_erased_and_duplicate_fields_are_refused() {
+    for json in [
+        r#"{"key":"synthetic-key","secret":"synthetic-secret","omniKeySeed":"synthetic-\u0073eed"}"#,
+        r#"{"key":"synthetic-key","secret":"synthetic-secret","omniKeySeed":null}"#,
+        r#"["synthetic-key","synthetic-secret",null,null,"synthetic-seed"]"#,
+    ] {
+        compare(json.as_bytes());
+        for end in 0..json.len() {
+            refuse(&json.as_bytes()[..end]);
+        }
+    }
+    refuse(br#"{"key":"synthetic-key","secret":"synthetic-secret","omniKeySeed":"synthetic-A","omni\u004beySeed":"synthetic-B"}"#);
 }

@@ -104,13 +104,17 @@ describe('DELEGATED handover seal', () => {
     expect(JSON.stringify(frame)).not.toContain(wallet.input.signingKey);
     expect(aad(wallet.input).toString()).not.toContain(wallet.input.signingKey);
     expect(open(sealed, wallet.input)).toEqual({
-      key: wallet.input.key, secret: '', signingKey: wallet.input.signingKey,
+      key: wallet.input.key,
+      secret: '',
+      signingKey: wallet.input.signingKey,
     });
   });
   it('seals a key-only wallet shape for trusted server-side credential validation', () => {
     const context = wallet.input;
     expect(open(sealDelegatedHandover(context), context)).toEqual({
-      key: context.key, secret: '', signingKey: context.signingKey,
+      key: context.key,
+      secret: '',
+      signingKey: context.signingKey,
     });
   });
   it('refuses an empty private signing field', () => {
@@ -237,4 +241,51 @@ describe('DELEGATED handover seal', () => {
     expect(() => sealDelegatedHandover({ ...input, publicKey: Buffer.alloc(32).toString('base64') })).toThrow();
     expect(ephemeral.every((byte) => byte === 0)).toBe(true);
   });
+});
+
+describe('ApeX Omni encrypted seed handover', () => {
+  // A packed, synthetic 65-byte signature; no venue identity or live seed.
+  const seed = `0x${'11'.repeat(65)}`;
+  it('keeps the Omni seed inside ciphertext with the original HPKE binding', () => {
+    const context = { ...input, exchangeName: 'apexomni', passphrase: 'synthetic-phrase', omniKeySeed: seed };
+    const sealed = sealDelegatedHandover(context);
+    expect(open(sealed, context)).toEqual({
+      key: input.key,
+      secret: input.secret,
+      passphrase: context.passphrase,
+      omniKeySeed: seed,
+    });
+    expect(Object.keys(sealed).sort()).toEqual(['attemptId', 'ciphertext', 'enc']);
+    expect(JSON.stringify(sealed)).not.toContain(seed);
+    expect(aad(context).toString()).not.toContain(seed);
+    expect(() => open(sealed, input)).toThrow();
+  });
+  it.each(['bybit', 'hyperliquid', 'paradex'])(
+    'refuses an Omni seed in the foreign %s credential layout',
+    (exchangeName) => {
+      expect(() => sealDelegatedHandover({ ...input, exchangeName, omniKeySeed: seed })).toThrow('Unable to seal');
+    },
+  );
+  it('retains the monitor-only layout when the Omni seed is absent', () => {
+    const context = { ...input, exchangeName: 'apexomni' };
+    expect(open(sealDelegatedHandover(context), context)).toEqual({ key: input.key, secret: input.secret });
+  });
+  it('refuses mixed wallet and Omni credentials', () => {
+    expect(() =>
+      sealDelegatedHandover({
+        ...input,
+        exchangeName: 'apexomni',
+        signingKey: 'synthetic-wallet-key',
+        omniKeySeed: seed,
+      }),
+    ).toThrow('Unable to seal');
+  });
+  it.each(['', '0x01', `0x${'gg'.repeat(65)}`, `0x${'11'.repeat(64)}`])(
+    'refuses malformed ApeX seed material',
+    (omniKeySeed) => {
+      expect(() => sealDelegatedHandover({ ...input, exchangeName: 'apexomni', omniKeySeed })).toThrow(
+        'Unable to seal',
+      );
+    },
+  );
 });
