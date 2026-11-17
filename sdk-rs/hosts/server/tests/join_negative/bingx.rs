@@ -30,10 +30,27 @@ fn single<'a>(h: &'a HeaderMap, n: &str) -> Option<&'a str> {
     i.next().is_none().then_some(v)
 }
 fn valid(query: &str, headers: &HeaderMap) -> bool {
-    // RED: deliberately unchecked synthetic authentication, not production.
-    let _ = (query, single(headers, "X-BX-APIKEY").and_then(material));
-    true
+    (|| {
+        let secret = material(single(headers, "X-BX-APIKEY")?)?;
+        let (payload, signature) = query.rsplit_once("&signature=")?;
+        let mut names = std::collections::BTreeSet::new();
+        let mut stamp = None;
+        for pair in payload.split('&') {
+            let (key, value) = pair.split_once('=')?;
+            if !names.insert(key) || key == "signature" {
+                return None;
+            }
+            if key == "timestamp" {
+                stamp = Some(value.parse::<u64>().ok()?);
+            }
+        }
+        if stamp?.abs_diff(now_ms()) > 5_000 {
+            return None;
+        }
+        Some(signature == hmac_sha256(secret.as_bytes(), payload.as_bytes(), Encoding::Hex))
+    })() == Some(true)
 }
+
 impl<const TESTNET: bool> Venue for Bingx<TESTNET> {
     const NAME: &'static str = "bingx";
     fn init() -> InitPayload {
