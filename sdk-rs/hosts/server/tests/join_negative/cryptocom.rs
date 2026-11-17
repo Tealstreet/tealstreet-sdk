@@ -18,9 +18,41 @@ const READS: [&str; 4] = [
     "private/advanced/get-open-orders",
 ];
 
-fn valid(_request: &Value) -> bool {
-    // RED checkpoint intentionally leaves the fixture authentication unchecked.
-    true
+fn valid(request: &Value) -> bool {
+    (|| {
+        let method = request["method"].as_str()?;
+        let socket = method == "public/auth";
+        if !socket && !READS.contains(&method) {
+            return None;
+        }
+        let object = request.as_object()?;
+        if socket {
+            if object.len() != 5 || object.contains_key("params") {
+                return None;
+            }
+        } else if object.len() != 6 || request["params"] != json!({}) {
+            return None;
+        }
+        let id = request["id"].as_u64()?;
+        let nonce = request["nonce"].as_u64()?;
+        let key = request["api_key"].as_str()?;
+        let secret = match key {
+            KEY => SECRET,
+            OTHER_KEY => OTHER_SECRET,
+            _ => return None,
+        };
+        if id != nonce || now_ms().abs_diff(nonce) > 60_000 {
+            return None;
+        }
+        Some(
+            request["sig"].as_str()?
+                == hmac_sha256(
+                    secret.as_bytes(),
+                    format!("{method}{id}{key}{nonce}").as_bytes(),
+                    Encoding::Hex,
+                ),
+        )
+    })() == Some(true)
 }
 fn response(request: &Value, code: i64) -> Value {
     json!({"id":request["id"],"method":request["method"],"code":code})
