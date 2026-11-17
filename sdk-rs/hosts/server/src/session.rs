@@ -3254,6 +3254,7 @@ mod tests {
     mod lighter_local_proof;
     mod local_proof;
     mod provider_handover_refusals;
+    mod publish_interval;
     mod token_expiry;
 
     fn synthetic_candidate() -> crate::delegated::Credentials {
