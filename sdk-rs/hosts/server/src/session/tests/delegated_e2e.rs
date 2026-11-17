@@ -134,7 +134,7 @@ async fn sealed_init(
     bytes: &[u8],
     venue: &str,
 ) -> Value {
-    // Existing cross-venue refusal fixtures deliberately retain their Bybit-bound offer.
+    // dfecc8bd2: existing cross-venue refusal fixtures retain their Bybit-bound offer.
     sealed_init_for_offer(session, sent, vector, bytes, venue, "bybit").await
 }
 

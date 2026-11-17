@@ -72,6 +72,7 @@ pub struct ResidentCopy {
     test_provider: Option<Provider>,
     identities: safe_cex_engine::signing::Identities,
     state: Option<safe_cex_venues::TrustedSignerState>,
+    trusted_identities: Option<safe_cex_native::TrustedSignerIdentities>,
 }
 impl ResidentCopy {
     #[cfg(test)]
@@ -81,6 +82,7 @@ impl ResidentCopy {
             test_provider: Some(provider),
             identities: Default::default(),
             state: None,
+            trusted_identities: None,
         }
     }
 
@@ -109,6 +111,7 @@ impl ResidentCopy {
             test_provider: None,
             identities,
             state: None,
+            trusted_identities: None,
         }
     }
 
@@ -133,6 +136,7 @@ impl ResidentCopy {
 
     pub(crate) fn configure(&self, config: &mut safe_cex_native::ServerConfig) {
         config.trusted_signer_state = self.state.clone();
+        config.trusted_signer_identities = self.trusted_identities.clone();
     }
 
     pub(crate) fn reconfigure(&self, init: &InitPayload) -> Result<PreparedDelegated, String> {
@@ -211,15 +215,22 @@ pub fn prepare_delegated(
     fields.insert("publicDataOnly".into(), false.into());
     fields.insert("remoteSigning".into(), false.into());
     fields.insert("payloadSigner".into(), false.into());
+    let protection = std::sync::Arc::new(protection);
+    let trusted_identities = safe_cex_native::TrustedSignerIdentities::capture(
+        &init.exchange_name,
+        protection.provider(),
+        identities.clone(),
+    );
     Ok(PreparedDelegated {
         plan,
         options: options.to_string(),
         resident: ResidentCopy {
-            protection: Some(std::sync::Arc::new(protection)),
+            protection: Some(protection),
             #[cfg(test)]
             test_provider: None,
             identities,
             state: Some(state),
+            trusted_identities: Some(trusted_identities),
         },
     })
 }
