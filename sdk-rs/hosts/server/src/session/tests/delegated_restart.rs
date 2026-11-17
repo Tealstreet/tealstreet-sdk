@@ -308,13 +308,11 @@ async fn twap_row(sent: &mut crate::out::Receiver, status: &str) -> Value {
                 frame["d"]["op"], "error",
                 "unexpected algo refusal: {frame}"
             );
-            if frame["d"]["op"] == "store"
-                && let Some(row) = frame["d"]["data"]["activeTWAPs"]
-                    .as_array()
-                    .and_then(|rows| {
-                        rows.iter()
-                            .find(|row| row["id"] == "client-held-twap" && row["status"] == status)
-                    })
+            if let Some(rows) = crate::accounts::testing::native_frame_data(&frame)
+                && let Some(row) = rows["activeTWAPs"].as_array().and_then(|rows| {
+                    rows.iter()
+                        .find(|row| row["id"] == "client-held-twap" && row["status"] == status)
+                })
             {
                 return row.clone();
             }

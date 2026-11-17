@@ -28,6 +28,7 @@ fn wasm_start_initializes_real_local_provider_before_venue_start_once() {
             #[cfg(feature = "coinbase")]
             coinbase_binding: None,
             construction: "{}".into(),
+            store_frames: Default::default(),
             hosted_identity: None,
             #[cfg(feature = "hosted-join-proof")]
             join_proof_identity: None,

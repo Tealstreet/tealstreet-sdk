@@ -1330,7 +1330,7 @@ mod tests {
             let id = tokio::time::timeout(Duration::from_secs(2),async {
                 loop {
                     let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
-                    if let Some(id) = frame["d"]["data"]["activeTWAPs"][0]["id"].as_str() {break id.to_owned();}
+                    if frame["d"]["op"] == "twap:stateUpdate" && let Some(id) = frame["d"]["data"].as_object().and_then(|rows|rows.keys().next()) {break id.clone();}
                 }
             }).await.unwrap();
             tokio::time::timeout(Duration::from_secs(2),async {

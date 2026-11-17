@@ -50,6 +50,7 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 mod managed_http;
+mod store_frames;
 use managed_http::{HttpPacket, HttpPhaseOut};
 
 trait AnyEngine {
@@ -841,6 +842,7 @@ pub struct WasmEngine {
     #[cfg(feature = "coinbase")]
     coinbase_binding: Option<String>,
     construction: String,
+    store_frames: store_frames::LocalFrames,
     inner: Box<dyn AnyEngine>,
     #[cfg(feature = "hosted-signing")]
     hosted_identity: Option<(String, safe_cex_engine::signing::Identities)>,
@@ -1216,6 +1218,7 @@ impl WasmEngine {
         Ok(Self {
             inner,
             construction,
+            store_frames: store_frames::LocalFrames::new(venue),
             dispatch_signing,
             external_signer,
             #[cfg(feature = "hosted-signing")]
@@ -1437,6 +1440,7 @@ impl WasmEngine {
 
     fn flush(&mut self) -> String {
         let actions = self.inner.drain();
+        self.store_frames.actions(&actions);
         if actions.is_empty() {
             return String::new();
         }
@@ -1490,6 +1494,7 @@ impl WasmEngine {
     pub fn ws_open(&mut self, socket: f64, now: f64) -> Result<String, js_sys::Error> {
         let socket = host_resource_id(socket)?;
         let socket = SocketId(socket);
+        self.store_frames.opened(socket, now);
         self.inner.handle(now, Event::WsOpened { socket });
         Ok(self.flush())
     }
@@ -1503,6 +1508,7 @@ impl WasmEngine {
     ) -> Result<String, js_sys::Error> {
         let socket = host_resource_id(socket)?;
         let socket = SocketId(socket);
+        self.store_frames.received(socket, now);
         self.inner.handle(now, Event::WsMessage { socket, text });
         Ok(self.flush())
     }
@@ -1546,6 +1552,7 @@ impl WasmEngine {
         now: f64,
     ) -> Result<String, js_sys::Error> {
         let socket = host_resource_id(socket)?;
+        self.store_frames.received(SocketId(socket), now);
         self.inner.handle(
             now,
             Event::WsBinary {
@@ -1560,6 +1567,7 @@ impl WasmEngine {
     pub fn ws_close(&mut self, socket: f64, code: u16, now: f64) -> Result<String, js_sys::Error> {
         let socket = host_resource_id(socket)?;
         let socket = SocketId(socket);
+        self.store_frames.closed(socket, Some(code), now);
         self.inner.handle(now, Event::WsClosed { socket, code });
         Ok(self.flush())
     }
@@ -1719,13 +1727,21 @@ impl WasmEngine {
     /// or skipped frames. Frames taken afterwards apply on top of it.
     #[wasm_bindgen(js_name = snapshotFrame)]
     pub fn snapshot_frame(&mut self, now: f64) -> js_sys::Uint8Array {
-        js_sys::Uint8Array::from(self.inner.snapshot(now))
+        let frame = self.inner.snapshot(now).to_vec();
+        let frame = self
+            .store_frames
+            .frame(frame, self.inner.store(), true, now);
+        js_sys::Uint8Array::from(frame.as_slice())
     }
 
     /// Full private sections; leaves pending deltas and public baselines intact.
     #[wasm_bindgen(js_name = accountSnapshotFrame)]
     pub fn account_snapshot_frame(&mut self, now: f64) -> js_sys::Uint8Array {
-        js_sys::Uint8Array::from(self.inner.account_snapshot(now))
+        let frame = self.inner.account_snapshot(now).to_vec();
+        let frame = self
+            .store_frames
+            .frame(frame, self.inner.store(), true, now);
+        js_sys::Uint8Array::from(frame.as_slice())
     }
 
     /// Transfer `frame.buffer` to the consumer: it is copied once, straight
@@ -1738,9 +1754,18 @@ impl WasmEngine {
         if self.algos.is_running() {
             return self.take_frame_with(now, market_only, |frame| js_sys::Uint8Array::from(frame));
         }
-        self.inner
+        let frame = self
+            .inner
             .frame(now, market_only)
-            .map(js_sys::Uint8Array::from)
+            .map(<[u8]>::to_vec)
+            .unwrap_or_else(|| safe_cex_store_frames::empty(now));
+        let frame = if market_only {
+            frame
+        } else {
+            self.store_frames
+                .frame(frame, self.inner.store(), false, now)
+        };
+        (frame.len() > 16).then(|| js_sys::Uint8Array::from(frame.as_slice()))
     }
 }
 
@@ -1756,11 +1781,20 @@ impl WasmEngine {
         market_only: bool,
         copy: impl FnOnce(&[u8]) -> T,
     ) -> Option<T> {
-        let frame = self.inner.frame(now, market_only)?;
-        let fills = safe_cex_engine::wire::fills(frame).unwrap_or_default();
-        let out = copy(frame);
+        let frame = self
+            .inner
+            .frame(now, market_only)
+            .map(<[u8]>::to_vec)
+            .unwrap_or_else(|| safe_cex_store_frames::empty(now));
+        let fills = safe_cex_engine::wire::fills(&frame).unwrap_or_default();
         self.algos.frame(self.inner.store(), fills);
-        Some(out)
+        let frame = if market_only {
+            frame
+        } else {
+            self.store_frames
+                .frame(frame, self.inner.store(), false, now)
+        };
+        (frame.len() > 16).then(|| copy(&frame))
     }
 }
 
@@ -1772,6 +1806,7 @@ impl WasmEngine {
             dispatch_signing: false,
             external_signer: false,
             construction: String::new(),
+            store_frames: Default::default(),
             inner,
             #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
@@ -2932,6 +2967,7 @@ mod tests {
             algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
+            store_frames: Default::default(),
             inner: Box::new(Commands {
                 events: Rc::clone(&events),
                 drains: Rc::clone(&drains),
@@ -3232,6 +3268,7 @@ mod tests {
                 algos: Default::default(),
                 external_signer: false,
                 construction: "{}".into(),
+                store_frames: Default::default(),
                 inner: Box::new(Counted),
             }
             .health(),
@@ -3268,6 +3305,7 @@ mod tests {
                 algos: Default::default(),
                 external_signer: false,
                 construction: "{}".into(),
+                store_frames: Default::default(),
                 inner: Box::<Messages>::default(),
             };
             let text = engine.ws_message(id as f64, "wide", 1.).unwrap();
@@ -3301,6 +3339,7 @@ mod tests {
             algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
+            store_frames: Default::default(),
             inner: Box::<Messages>::default(),
         };
         let mut legacy = engine();
@@ -3339,6 +3378,7 @@ mod tests {
             algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
+            store_frames: Default::default(),
             inner: Box::<Messages>::default(),
         };
         let mut bytes = WasmEngine {
@@ -3357,6 +3397,7 @@ mod tests {
             algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
+            store_frames: Default::default(),
             inner: Box::<Messages>::default(),
         };
         // A rejected byte message must neither handle an event nor drain existing actions.
