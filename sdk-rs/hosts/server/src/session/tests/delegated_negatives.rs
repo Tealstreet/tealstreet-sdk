@@ -229,7 +229,23 @@ async fn delegated_candidates_preserve_the_running_account() {
             } else {
                 envelope::InitRefusalReasonClass::Unknown
             };
-            let expected = envelope::init_unverified("acct", false, reason_class);
+            let expected = envelope::init_unverified(
+                "acct",
+                false,
+                reason_class,
+                match case {
+                    "wrong-secret" => private_read_metadata(10003),
+                    "consumed" => envelope::InitRefusalMetadata {
+                        stage: Some(RefusalStage::HandoverAttempt),
+                        ..Default::default()
+                    },
+                    "new-attempt" => envelope::InitRefusalMetadata {
+                        stage: Some(RefusalStage::HandoverOpen),
+                        ..Default::default()
+                    },
+                    _ => unreachable!(),
+                },
+            );
             let expected = id.filter(|s| !s.is_empty()).map_or_else(
                 || expected.clone(),
                 |id| envelope::with_instance_id(expected.clone(), id),

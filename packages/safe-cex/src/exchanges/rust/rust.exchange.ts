@@ -2457,9 +2457,9 @@ export class RustEngineExchange extends BaseExchange {
         await this.fetchSymbolMaxLeverage(symbol);
         return;
       }
-      const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
+      const rails = await this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol }, { report: false });
       this.host?.flush();
-      this.applier.applyLeverage(symbol, rails);
+      if (rails) this.applier.applyLeverage(symbol, rails);
     } catch (error) {
       this.log(`Error refreshing leverage for ${symbol}: ${error}`, LogSeverity.Warning);
     }
@@ -3706,8 +3706,9 @@ export class RustEngineExchange extends BaseExchange {
         admitted?.('fetchSymbolMaxLeverage', [symbol]);
         return leverage;
       }
-      const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      const rails = await this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol });
       admitted?.('fetchSymbolMaxLeverage', [symbol]);
+      if (!rails) throw new Error(`Leverage is not available for ${symbol}`);
       return Math.max(rails.buyLeverage, rails.sellLeverage);
     }
     const market = this.store.marketsBySymbol[symbol];
@@ -3931,9 +3932,9 @@ export class RustEngineExchange extends BaseExchange {
       // The venue read needs the engine; the worker's frames bring the result back.
       if (this.routesToWorker)
         return (await this.callWorker('fetchLeverageForSymbol', symbol)) as FetchedLeverage | null;
-      const leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
+      const leverage = await this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol }, { report: false });
       this.host?.flush();
-      this.applier.applyLeverage(symbol, leverage);
+      if (leverage) this.applier.applyLeverage(symbol, leverage);
       return leverage;
     } catch (error) {
       this.log(`Error fetching leverage for ${symbol}: ${error}`, LogSeverity.Warning);

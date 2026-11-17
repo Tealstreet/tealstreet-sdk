@@ -1,17 +1,25 @@
-import { requestFailureFields } from './request-failure.mjs';
+import { requestFailureFields, transportFailureMessage } from './request-failure.mjs';
 import { bindGroup } from './managed-http-group.mjs';
 
 /** Closed transport preparation errors; arbitrary provider text never crosses the wire. */
 export class HttpPreparationError extends Error {
-  constructor(reason) {
-    super(reason === 'timedOut' ? 'Relay or network request timed out' : 'HTTP transport preparation failed');
+  constructor(reason, cause) {
+    const admission = reason === 'timedOut' && cause === 'info_admission';
+    super(admission ? 'HTTP admission deadline expired'
+      : reason === 'timedOut' ? 'Relay or network request timed out' : 'HTTP transport preparation failed');
+    if (admission) this.cause = 'info_admission';
     this.code = `HTTP_PREPARATION_${reason.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}`;
   }
 }
 function preparationReason(error, fallback) {
   switch (error?.code) {
     case 'HTTP_PREPARATION_UNSUPPORTED': return 'unsupported';
-    case 'HTTP_PREPARATION_TIMED_OUT': return 'timedOut';
+    case 'HTTP_PREPARATION_TIMED_OUT':
+      // Admission is explicit; phase/readiness alone cannot prove its cause.
+      try {
+        if (Object.getOwnPropertyDescriptor(error, 'cause')?.value === 'info_admission') return 'infoAdmissionTimedOut';
+      } catch { /* Foreign descriptor traps disclose no cause. */ }
+      return 'timedOut';
     case 'HTTP_PREPARATION_STALE': return 'stale';
     case 'HTTP_PREPARATION_INVALID': return 'invalid';
     case 'HTTP_PREPARATION_NETWORK': return 'network';
@@ -79,19 +87,21 @@ export class ManagedHttp {
     return `class=${facts.requestClass} budget=${facts.budgetMs}ms elapsed=${facts.elapsedMs}ms`;
   }
 
-  failure(resource, kind) {
+  failure(resource, kind, cause) {
     if (resource.failureReported || this.host.disposed) return;
     resource.failureReported = true;
     try {
       this.host.handlers.onEvent?.({ level: 'debug', code: 'http.request_failed',
-        message: kind === 'timeout' ? `HTTP request timed out (${this.timeoutMessage(resource)})` : 'HTTP request failed',
-        fields: { ...resource.diagnostic, kind, phase: resource.phase, ...(kind === 'timeout' ? this.timeoutFacts(resource) : {}) } });
+        message: cause === 'info_admission' ? 'HTTP admission deadline expired'
+          : kind === 'timeout' ? `HTTP request timed out (${this.timeoutMessage(resource)})` : 'HTTP request failed',
+        fields: { ...resource.diagnostic, kind, phase: resource.phase, ...(cause ? { cause } : {}), ...(kind === 'timeout' ? this.timeoutFacts(resource) : {}) } });
     } catch { /* Diagnostic consumers cannot change request settlement or cleanup. */ }
   }
 
   fail(token, resource, code) {
     if (!this.live(token, resource)) return;
-    this.failure(resource, code === 'timedOut' ? 'timeout' : code);
+    const admission = code === 'infoAdmissionTimedOut';
+    this.failure(resource, admission || code === 'timedOut' ? 'timeout' : code, admission ? 'info_admission' : undefined);
     this.cancel(token);
     const { host } = this;
     host.run(host.invoke(host.engine.httpPreparationFailed, token, code, host.transport.now()));
@@ -210,8 +220,10 @@ export class ManagedHttp {
       host.stage(host.stageCauses.get(`http:${request}`), 'sent');
     } catch (error) {
       if (resource.phase === 'released' && this.live(token, resource)) {
+        const message = transportFailureMessage(error);
+        if (!this.live(token, resource)) return;
         this.failure(resource, 'network');
-        this.post(() => host.run(host.invoke(host.engine.httpFailed, request, 'HTTP transport request failed', host.transport.now())));
+        this.post(() => host.run(host.invoke(host.engine.httpFailed, request, message, host.transport.now())));
         this.cancel(token);
       } else this.fail(token, resource, preparationReason(error, 'invalid'));
       return;
@@ -238,10 +250,12 @@ export class ManagedHttp {
         this.assertCurrent(resource);
         return this.live(token, resource);
       });
-    } catch {
+    } catch (error) {
       if (this.live(token, resource)) {
+        const message = transportFailureMessage(error);
+        if (!this.live(token, resource)) return;
         this.failure(resource, 'network');
-        this.post(() => host.run(host.invoke(host.engine.httpFailed, request, 'HTTP transport request failed', host.transport.now())));
+        this.post(() => host.run(host.invoke(host.engine.httpFailed, request, message, host.transport.now())));
       }
     } finally {
       if (this.live(token, resource)) this.cancel(token);

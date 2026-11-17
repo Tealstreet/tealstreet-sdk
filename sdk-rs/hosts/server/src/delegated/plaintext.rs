@@ -123,6 +123,7 @@ impl Input<'_> {
             "secret" => Ok(1),
             "passphrase" => Ok(2),
             "signingKey" => Ok(3),
+            "omniKeySeed" => Ok(4),
             _ => Err(Refused),
         }
     }
@@ -140,8 +141,8 @@ pub(super) fn parse(bytes: &mut [u8]) -> Result<Credentials, Refused> {
     let sequence = input.bytes.get(input.position) == Some(&b'[');
     let closing = if sequence { b']' } else { b'}' };
     input.take(if sequence { b'[' } else { b'{' })?;
-    let mut fields: [Option<Zeroizing<String>>; 4] = [None, None, None, None];
-    let mut seen = [false; 4];
+    let mut fields: [Option<Zeroizing<String>>; 5] = [None, None, None, None, None];
+    let mut seen = [false; 5];
     let mut next_field: usize = 0;
     loop {
         input.whitespace()?;
@@ -184,12 +185,13 @@ pub(super) fn parse(bytes: &mut [u8]) -> Result<Credentials, Refused> {
     if input.position != input.bytes.len() {
         return Err(Refused);
     }
-    let [key, secret, passphrase, signing_key] = fields;
+    let [key, secret, passphrase, signing_key, omni_key_seed] = fields;
     Ok(Credentials {
         key: key.ok_or(Refused)?,
         secret: secret.ok_or(Refused)?,
         passphrase,
         signing_key,
+        omni_key_seed,
     })
 }
 
@@ -207,6 +209,8 @@ mod tests {
         passphrase: Option<String>,
         #[serde(default, rename = "signingKey")]
         signing_key: Option<String>,
+        #[serde(default, rename = "omniKeySeed")]
+        omni_key_seed: Option<String>,
     }
 
     #[test]
@@ -252,6 +256,10 @@ mod tests {
             let actual = parse(&mut input);
             assert_eq!(actual.is_ok(), expected.is_ok(), "case {index}");
             if let (Ok(actual), Ok(expected)) = (actual, expected) {
+                assert!(
+                    actual.omni_key_seed.as_deref().map(String::as_str)
+                        == expected.omni_key_seed.as_deref()
+                );
                 assert!(
                     actual.signing_key.as_deref().map(String::as_str)
                         == expected.signing_key.as_deref()

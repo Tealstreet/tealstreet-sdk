@@ -103,6 +103,18 @@ segments plus `:more`. Origins, queries, fragments, bodies and headers are exclu
 The SDK adds the actual venue; consumers may retain a bounded recent breadcrumb.
 These diagnostics neither retry requests nor add a second user-facing error.
 
+Post-release JS HTTP failures retain a closed cause label in the existing engine
+error string (timeout, disconnect, direct-fetch, response-decode, aborted, disposed,
+tunnel or unknown). Raw errors, configs, URLs and nested causes never cross that
+boundary; group failures are classified only after every physical handoff.
+This diagnostic summary does not alter native error kind, retry or owner policy.
+
+Hyperliquid `/info` quota admission tags a proven pre-send deadline refusal with
+closed cause `info_admission` and fixed title `HTTP admission deadline expired`.
+It retains Timeout/NotSent and the original deadline, budget, retry and delivery.
+Generic relay readiness failures and errors after handoff keep their existing paths;
+`phase=preparing` alone does not prove an admission failure.
+
 ## Startup discovery deadlines
 
 Before both markets and tickers load, credential-free Background Reads using the

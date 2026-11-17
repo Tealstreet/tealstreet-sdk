@@ -132,8 +132,12 @@ impl Credentials {
             self.secret.as_str().to_owned(),
             self.passphrase.as_ref().map(|v| v.as_str().to_owned()),
         );
-        match &self.signing_key {
+        let pair = match &self.signing_key {
             Some(material) => pair.with_signing_key(material.as_str().to_owned()),
+            None => pair,
+        };
+        match &self.omni_key_seed {
+            Some(material) => pair.with_omni_key_seed(material.as_str().to_owned()),
             None => pair,
         }
     }
@@ -493,7 +497,7 @@ impl Registry {
                         && crate::delegated::probe::cosigned_ready(init) =>
                 {
                     let prepared = prepare(init, false, Some(link.clone()))
-                        .map_err(|_| ProbeRefusal::INVALID)?;
+                        .map_err(|_| ProbeRefusal::INVALID.at(RefusalStage::Construction))?;
                     let remote = prepared.remote.ok_or(ProbeRefusal::INVALID)?;
                     (
                         prepared.plan,
@@ -505,7 +509,7 @@ impl Registry {
                 }
                 _ => return Err(ProbeRefusal::INVALID),
             };
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             let plan = self
                 .construction_test_plans
                 .get(user)

@@ -1,4 +1,4 @@
-import { requestFailureFields } from './request-failure.mjs';
+import { requestFailureFields, transportFailureMessage } from './request-failure.mjs';
 // Group resources are built and checked before the shared synchronous claim.
 export function bindGroup(manager, action, reason) {
   const { host } = manager;
@@ -93,7 +93,7 @@ function claimGroup(manager, group) {
             const sendBefore = bounds[i];
             if (!Number.isFinite(rawNow) || !Number.isFinite(sendBefore) || rawNow >= sendBefore) entry.failed = true;
             else entry.response = entry.resource.bound.dispatch();
-          } catch { entry.failed = true; }
+          } catch (error) { entry.failed = true; entry.error = error; }
         }
       }
     }
@@ -142,7 +142,11 @@ function claimGroup(manager, group) {
   // All synchronous handoffs precede every engine failure/response callback.
   for (const entry of group.entries) {
     if (entry.failed) {
-      manager.post(() => host.run(host.invoke(host.engine.httpFailed, entry.request, 'HTTP transport request failed', host.transport.now())));
+      // Inspect thrown values only after every synchronous physical handoff.
+      const message = transportFailureMessage(entry.error);
+      entry.error = undefined;
+      if (!manager.live(entry.token, entry.resource)) continue;
+      manager.post(() => host.run(host.invoke(host.engine.httpFailed, entry.request, message, host.transport.now())));
       manager.cancel(entry.token);
     } else void manager.receive(entry.token, entry.resource, entry.request, entry.response);
   }
