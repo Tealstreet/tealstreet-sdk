@@ -208,3 +208,171 @@ impl<const VARIANT: u8, const TESTNET: bool, const BRAZIL: bool> Venue
         json!({"op":op,"success":valid,"ret_msg":"","conn_id":"negative-join-socket"})
     }
 }
+
+#[cfg(test)]
+mod websocket_controls {
+    use super::*;
+    use crate::join_negative::Fixture;
+    use futures_util::{SinkExt, StreamExt};
+    use std::time::Duration;
+    use tokio_tungstenite::tungstenite::Message;
+
+    fn auth<V: Venue>(other: bool, expiry: &str, numeric: bool) -> Value {
+        let credentials = V::credentials(other);
+        let signature = hmac_sha256(
+            credentials["secret"].as_str().unwrap().as_bytes(),
+            format!("GET/realtime{expiry}").as_bytes(),
+            Encoding::Hex,
+        );
+        let mut request = json!({"op":"auth","args":[credentials["key"],expiry,signature]});
+        if numeric {
+            request["args"][1] = expiry.parse::<u64>().unwrap().into();
+        }
+        request
+    }
+
+    async fn exchange(f: &Fixture, request: &Value) -> Value {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            let (mut socket, _) = tokio_tungstenite::connect_async(&f.websocket_url)
+                .await
+                .unwrap();
+            socket
+                .send(Message::text(request.to_string()))
+                .await
+                .unwrap();
+            let reply = socket.next().await.unwrap().unwrap();
+            let reply = serde_json::from_str(reply.to_text().unwrap()).unwrap();
+            socket.close(None).await.unwrap();
+            reply
+        })
+        .await
+        .expect("loopback Bybit auth response")
+    }
+
+    async fn native_strings<V: Venue>() {
+        let f = Fixture::new::<V>().await;
+        let expiry = (now_ms() + 30_000).to_string();
+        for other in [false, true] {
+            let request = auth::<V>(other, &expiry, false);
+            assert!(
+                request["args"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(Value::is_string)
+            );
+            assert_eq!(
+                exchange(&f, &request).await["success"],
+                true,
+                "native string expiry rejected for {} testnet={:?} site={:?} other={other}",
+                V::NAME,
+                V::init().testnet,
+                V::init().bybit_site_id
+            );
+        }
+        let valid = auth::<V>(false, &expiry, false);
+        let other = V::credentials(true);
+        let wrong_mac = hmac_sha256(
+            other["secret"].as_str().unwrap().as_bytes(),
+            format!("GET/realtime{expiry}").as_bytes(),
+            Encoding::Hex,
+        );
+        let mut bad = Vec::new();
+        for (field, value) in [
+            (0, other["key"].clone()),
+            (0, json!("synthetic-unrecognized-key")),
+            (0, Value::Null),
+            (1, json!((expiry.parse::<u64>().unwrap() + 1).to_string())),
+            (1, Value::Null),
+            (1, json!("")),
+            (1, json!(true)),
+            (1, json!({"expiry":expiry})),
+            (2, json!(wrong_mac)),
+            (2, Value::Null),
+            (2, json!("")),
+        ] {
+            let mut request = valid.clone();
+            request["args"][field] = value;
+            bad.push(request);
+        }
+        for args in [
+            Value::Null,
+            json!([]),
+            json!([valid["args"][0], expiry]),
+            json!([valid["args"][0], expiry, valid["args"][2], "extra"]),
+        ] {
+            bad.push(json!({"op":"auth","args":args}));
+        }
+        for request in &bad {
+            assert_eq!(
+                exchange(&f, request).await["success"],
+                false,
+                "invalid authentication accepted for {}",
+                V::NAME
+            );
+        }
+        let seen = f.seen.lock().unwrap();
+        assert_eq!(seen.rejections, bad.len());
+        assert_eq!(seen.writes, 0);
+    }
+
+    async fn numeric_compatibility<V: Venue>() {
+        let f = Fixture::new::<V>().await;
+        let expiry = (now_ms() + 30_000).to_string();
+        for other in [false, true] {
+            assert_eq!(
+                exchange(&f, &auth::<V>(other, &expiry, true)).await["success"],
+                true
+            );
+        }
+        let seen = f.seen.lock().unwrap();
+        assert_eq!(seen.rejections, 0);
+        assert_eq!(seen.writes, 0);
+    }
+
+    async fn quoted_mac_is_not_native<V: Venue>() {
+        let f = Fixture::new::<V>().await;
+        let expiry = (now_ms() + 30_000).to_string();
+        let mut request = auth::<V>(false, &expiry, false);
+        let signature = hmac_sha256(
+            SECRET.as_bytes(),
+            format!("GET/realtime{}", json!(expiry)).as_bytes(),
+            Encoding::Hex,
+        );
+        request["args"][2] = signature.into();
+        assert_eq!(
+            exchange(&f, &request).await["success"],
+            false,
+            "JSON-quoted expiry is not the native signing preimage"
+        );
+        assert_eq!(f.seen.lock().unwrap().rejections, 1);
+        assert_eq!(f.seen.lock().unwrap().writes, 0);
+    }
+
+    macro_rules! all_scopes {
+        ($check:ident) => {{
+            $check::<Bybit>().await;
+            $check::<BybitCase<0, true>>().await;
+            $check::<BybitCase<1>>().await;
+            $check::<BybitCase<1, true>>().await;
+            $check::<BybitCase<2>>().await;
+            $check::<BybitCase<2, true>>().await;
+            $check::<BybitCase<3>>().await;
+            $check::<BybitCase<3, true>>().await;
+            $check::<BybitCase<1, false, true>>().await;
+        }};
+    }
+
+    #[tokio::test]
+    async fn native_string_expiry_and_invalid_auth_controls() {
+        all_scopes!(native_strings);
+    }
+    #[tokio::test]
+    async fn existing_numeric_expiry_uses_the_same_unquoted_preimage() {
+        all_scopes!(numeric_compatibility);
+    }
+    #[tokio::test]
+    async fn signatures_over_json_quotes_are_refused() {
+        all_scopes!(quoted_mac_is_not_native);
+    }
+}
