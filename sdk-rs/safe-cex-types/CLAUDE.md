@@ -70,12 +70,11 @@ oracles in `tests/`, plus strict clippy on the host.
 Rust CI runs these tests in the isolated candle-cache lane with locked root Yarn
 dependencies and `SAFE_CEX_TYPESCRIPT_PATH` pointing at `node_modules/typescript`.
 The native store cutover also links these generated public records through
-`hosts/store-frames` at the host boundary. Engine and venue crates retain their
-small internal models and do not depend directly on this package. Its serde_json
-number/map features consequently unify in hosted/wasm builds; run combined host
-checks as well as these isolated type tests. Coinbase DRB boxes its optional
-RPC error payload to retain bounded Result storage under those features.
-From `sdk-rs`, generate bindings with
+`hosts/store-frames` at the host boundary. Host dependencies disable the default
+`source-json` feature: native retained values preserve their own order/lexemes,
+while the engine/venues retain their existing serde_json profile. Source parity
+and candle-cache builds retain `source-json` by default. Keep the isolated source
+tests separate from combined engine/host checks. From `sdk-rs`, generate bindings with
 `cargo run --locked -p safe-cex-types --example generate`, then
 `node safe-cex-types/generate.cjs`. `tests/generate.test.cjs` checks the generation
 rules; run it as well. The oracles are the reason a field rename here is cheap

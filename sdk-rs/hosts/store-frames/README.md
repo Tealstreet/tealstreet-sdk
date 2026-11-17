@@ -3,7 +3,10 @@
 `safe-cex-store-frames` is the shared host boundary for the hosted account actor
 and LOCAL wasm engine. The venue engine retains its small internal models;
 this crate constructs the public rows from `safe-cex-types`, the same records
-which generate the TypeScript API. There is no mutable TypeScript store or
+which generate the TypeScript API. The host disables their default `source-json`
+feature, preserving the engine's original serde_json configuration; native
+retained fields preserve order and UTF-16 themselves. Source parity/cache builds
+keep their original JSON feature profile by default. There is no mutable TypeScript store or
 `op:'store'` transport in this path.
 
 SCXF sections 26–32 replace socket health, active chasers, active TWAPs, order

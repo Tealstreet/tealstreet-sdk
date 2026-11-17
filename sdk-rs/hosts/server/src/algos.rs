@@ -1273,7 +1273,7 @@ pub(crate) async fn run_with_identity(
                 // Chases and TWAPs run on through a socket drop, until the
                 // resume window expires (Dispose) or the browser is back.
                 Some(AlgoInput::Joined) => {
-                                publish();
+                    publish();
                     // What it stopped for while the browser was gone, once.
                     for frame in port.take_for_join() {
                         crate::state::Log::info(&format!("algo notice replayed {name}: {frame}"));

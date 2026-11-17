@@ -3475,3 +3475,19 @@ pub use prepared_order::PreparedOrderOpts;
 
 /// Native UI sections appended to the SCXF account stream.
 pub mod store_frame_wire;
+
+/// Source JSON removes an own property without reordering other members. The
+/// host profile uses serde_json's sorted map, where remove has that property.
+pub(crate) fn remove_json_member(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Option<serde_json::Value> {
+    #[cfg(feature = "source-json")]
+    {
+        map.shift_remove(key)
+    }
+    #[cfg(not(feature = "source-json"))]
+    {
+        map.remove(key)
+    }
+}
