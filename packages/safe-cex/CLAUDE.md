@@ -169,7 +169,10 @@ The router contract is pinned at NX #9404 `9f52873b76`. Unrecorded cancellations
 coverage uncertainty and ledger failures answer unknown, never prove not sent.
 Receipt kinds are decoded as literal strings; hostile JSON values cannot invoke
 string coercion. Capability discovery still requires completed socket admission.
-Intent UUIDv7 keys become Bybit client order IDs unchanged. Physical handoff marks
+Receipt caller IDs may be null, the original UUIDv7, its lowercase compact hex,
+or `0x` plus that hex (SDK #3630, router companion NX #9945). Every accepted
+encoding compares the exact original intent bits; foreign/numeric IDs and idless
+`placed` remain rejected. Intent UUIDv7 keys become Bybit client order IDs unchanged. Physical handoff marks
 an intent `sending` in memory; sending, acknowledged and unknown intents are never
 submitted again. At ten monotonic seconds from creation (including persistence
 and admission waits), a never-forwarded queued intent becomes `notSent`; an
