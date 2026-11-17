@@ -130,7 +130,7 @@ pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
     }
 }
 
-// ccb596a36: protected Session controls pin Bybit's no-caller-ID protection path.
+// 116aeae12: protected Session controls pin Bybit's no-caller-ID protection path.
 pub(crate) fn bybit_protection(venue: &str, order: &serde_json::Map<String, Value>) -> bool {
     matches!(venue, "bybit" | "bybitdemo" | "bybitinverse" | "bybitspot")
         && (matches!(

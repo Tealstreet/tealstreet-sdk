@@ -2171,7 +2171,7 @@ impl Session {
             )
             .check()
         {
-            // ccb596a36 proves expiry here precedes every native command.
+            // 116aeae12 proves expiry here precedes every native command.
             // Later per-leg guards retain uncertainty after possible effects.
             audit_preflight(&account, self.socket, &method, &args, message);
             crate::order_actions::settle(
@@ -2257,7 +2257,7 @@ impl Session {
             )
             .check()
         {
-            // ccb596a36 proves expiry here precedes every native command.
+            // 116aeae12 proves expiry here precedes every native command.
             // Later per-leg guards retain uncertainty after possible effects.
             audit_preflight(&account, self.socket, &method, &args, message);
             crate::order_actions::settle(

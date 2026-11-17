@@ -87,7 +87,7 @@ impl Session {
             );
             return;
         }
-        // ccb596a36: native Bybit protection refuses caller IDs; omit only
+        // 116aeae12: native Bybit protection refuses caller IDs; omit only
         // that unsupported venue field, retaining the intent/fingerprint ledger.
         let method = if order_contract::bybit_protection(&self.joined[&name].account.venue, params)
         {
