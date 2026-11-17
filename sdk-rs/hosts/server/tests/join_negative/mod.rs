@@ -651,11 +651,13 @@ fn assert_permanent_bound_refusal(frames: &[Value]) {
 
 #[test]
 fn consumed_refusal_requires_permanent_original_binding() {
-    let mut expected: Value = serde_json::from_str(
-        &safe_cex_exchange_server::envelope::init_unverified(ACCOUNT, false),
-    )
-    .unwrap();
-    expected["d"]["instanceId"] = "negative-join-registration".into();
+    let expected = json!({"t":"msg", "d":{
+        "op":"error", "accountName":ACCOUNT, "instanceId":"negative-join-registration",
+        "data":["Could not verify your key; account not attached", {
+            "forceToast":true, "initRefused":true, "kind":"unverified", "transient":false,
+            "reason_class":"unknown"
+        }]
+    }});
     assert_permanent_bound_refusal(std::slice::from_ref(&expected));
     for field in ["transient", "accountName", "instanceId", "missing-instance"] {
         let mut bad = expected.clone();
