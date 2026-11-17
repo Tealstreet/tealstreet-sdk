@@ -86,16 +86,6 @@ fn client_id_bitgetusdc() {
 }
 
 #[test]
-fn client_id_bitrue() {
-    let actual = serde_json::to_value(client_order_id("bitrue", INTENT)).unwrap();
-    assert_eq!(
-        actual,
-        json!("AYvP5WgAcQGBAQEBAQEBAQ"),
-        "bitrue: native base64 contract"
-    );
-}
-
-#[test]
 fn client_id_bitunix() {
     let actual = serde_json::to_value(client_order_id("bitunix", INTENT)).unwrap();
     assert_eq!(actual, json!(INTENT), "bitunix: native uuid contract");
@@ -286,7 +276,6 @@ fn client_id_audit_covers_every_hosted_delegated_venue() {
         "bitget",
         "bitgetinverse",
         "bitgetusdc",
-        "bitrue",
         "bitunix",
         "blofin",
         "bybit",
@@ -323,7 +312,9 @@ fn client_id_audit_covers_every_hosted_delegated_venue() {
             .collect::<std::collections::BTreeSet<_>>(),
         audited
     );
-    for venue in ["bingxspot", "txflow"] {
+    // 058ce5b07 initially counted Bitrue; its missing native origin keeps it
+    // with the unhosted declarations, outside the active derivation census.
+    for venue in ["bingxspot", "txflow", "bitrue"] {
         assert!(!crate::delegated::enabled(venue));
     }
 }
