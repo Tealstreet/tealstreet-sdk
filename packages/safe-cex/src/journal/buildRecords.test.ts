@@ -85,7 +85,7 @@ describe('buildFoldedPositionRecords — a failed income read is not an empty ac
     ['authPermission', '-2015'],
     ['network', undefined],
   ] as const)('keeps native %s classification through the fatal income wrapper', async (kind, venueCode) => {
-    const original = new ExchangeError('apiKey=private-key-canary', { kind, venueCode });
+    const original = new ExchangeError('apiKey=private-key-canary', { message: 'apiKey=private-key-canary', kind, venueCode });
     Object.assign(original, { row: { amount: 'private-amount' }, request: { key: 'private-key-canary' } });
     const fetchHistoricalFills = vi.fn(async () => []);
     const thrown: unknown = await buildFoldedPositionRecords(
