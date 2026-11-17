@@ -169,7 +169,8 @@ impl<const TESTNET: bool> Venue for Mexc<TESTNET> {
             }
             "ping" => json!({"channel":"pong","data":now_ms()}),
             "personal.filter" => json!({"channel":"rs.personal.filter","data":"success"}),
-            "sub.tickers" | "sub.depth" | "sub.kline" | "sub.deal" => {
+            "sub.tickers" | "sub.ticker" | "sub.depth" | "sub.kline" | "sub.deal"
+            | "unsub.ticker" | "unsub.depth" | "unsub.kline" => {
                 json!({"channel":format!("rs.{method}"),"data":"success"})
             }
             _ => {
