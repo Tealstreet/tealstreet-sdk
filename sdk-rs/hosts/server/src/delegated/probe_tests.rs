@@ -334,7 +334,7 @@ impl VenueIo {
         }
         Some(self.valid_private_signature(r))
     }
-    fn valid_private_signature(&self, r: &HttpRequest) -> bool {
+    pub(crate) fn valid_private_signature(&self, r: &HttpRequest) -> bool {
         if self.venue == "okxeudemo" {
             let simulated: Vec<_> = r
                 .headers

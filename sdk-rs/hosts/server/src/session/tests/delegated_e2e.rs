@@ -597,3 +597,79 @@ async fn delegated_hyperliquid_typed_submit_maps_uuid_before_protected_send() {
 async fn delegated_hyperliquid_typed_submit_maps_explicit_intent_id() {
     hyperliquid_protected_placement(true, true).await;
 }
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+async fn protected_text_venue_placement(name: &'static str) {
+    let (venue, seen) = MockVenue::for_placement(name);
+    let registry = crate::accounts::testing::e2e_registry(USER, venue.clone());
+    let (mut session, mut sent) = connection(registry.clone());
+    session.order_frames_enabled = true;
+    let mut results = session.take_verified();
+    let vector = json!({"input":{"key":"synthetic-key"}});
+    let bytes = serde_json::to_vec(&json!({"key":"synthetic-key","secret":"synthetic-material","passphrase":"synthetic-passphrase"})).unwrap();
+    let init = sealed_init_for_offer(&mut session, &mut sent, &vector, &bytes, name, name).await;
+    wire(&mut session, init).await;
+    let result = completed(&mut results).await;
+    assert!(result.candidate.is_ok());
+    assert!(result.probe.as_ref().unwrap().permit.is_ok(), "{name}");
+    session.verification_completed(result).await.unwrap();
+    let account = registry.held(USER, ACCOUNT, session.socket).unwrap();
+    snapshot(&mut session, &mut sent).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while account
+            .handle
+            .read(|s| s.loaded().markets && s.loaded().orders && s.loaded().positions)
+            .await
+            != Some(true)
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(seen.lock().unwrap().signed_reads > 0);
+    let stamp = format!("{:012x}", crate::accounts::now_ms());
+    let intent = format!("{}-{}-7101-8101-010101010101", &stamp[..8], &stamp[8..]);
+    let params =
+        json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":55000});
+    let fingerprint = crate::order_contract::fingerprint(ACCOUNT, &intent, &params, 1).unwrap();
+    wire(
+        &mut session,
+        json!({"t":"order.submit","d":{"accountName":ACCOUNT,"instanceId":INSTANCE,
+        "intentId":intent,"params":params,"seq":1,"ageMs":0,"fingerprint":fingerprint}}),
+    )
+    .await;
+    assert_eq!(
+        hyperliquid_order_frame(&mut sent, "order.ack").await["d"]["received"],
+        true
+    );
+    let outcome = hyperliquid_order_frame(&mut sent, "order.outcome").await;
+    assert_eq!(outcome["d"]["outcome"], "placed", "{name}: {outcome}");
+    assert_eq!(outcome["d"]["venueOrderId"], "77");
+    assert_eq!(outcome["d"]["intentId"], intent);
+    assert_eq!(outcome["d"]["clientOrderId"], intent.replace('-', ""));
+    assert_eq!(outcome["d"]["instanceId"], INSTANCE);
+    assert_eq!(venue.observed.lock().unwrap().writes.len(), 1);
+    session.close();
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_text_bitget_protected_placement() {
+    protected_text_venue_placement("bitget").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_text_okx_protected_placement() {
+    protected_text_venue_placement("okx").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_text_blofin_protected_placement() {
+    protected_text_venue_placement("blofin").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_text_binancepm_protected_placement() {
+    protected_text_venue_placement("binancepm").await;
+}

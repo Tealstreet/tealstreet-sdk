@@ -638,3 +638,65 @@ async fn unsupported_init_preserves_live_delegated_receipts_and_pending_completi
         })
         .await;
 }
+
+#[tokio::test]
+async fn order_frames_without_caller_id_keep_null_receipt_and_original_intent() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for venue in [
+                "lighter",
+                "lighter-robinhood",
+                "binanceinverse",
+                "asterdex",
+                "kraken",
+                "mexc",
+            ] {
+                for unknown in [false, true] {
+                    let registry = crate::accounts::tests::registry();
+                    let tape = Tape {
+                        hold: unknown,
+                        ..Default::default()
+                    };
+                    let account = delegated_account(&registry, "A", venue, tape.clone());
+                    let (mut session, mut sent) =
+                        joined(registry.clone(), "A", account.clone()).await;
+                    let key = submit(&mut session, 0, None).await;
+                    let ack = order_frame(&mut sent, "order.ack").await;
+                    assert_eq!(ack["d"]["received"], true, "{venue}");
+                    assert_eq!(ack["d"]["intentId"], key);
+                    if unknown {
+                        tokio::time::timeout(Duration::from_secs(2), async {
+                            while tape.waiting.lock().unwrap().is_empty() {
+                                tokio::time::sleep(Duration::from_millis(1)).await;
+                            }
+                        })
+                        .await
+                        .unwrap();
+                        tape.finish_unknown();
+                    }
+                    let outcome = order_frame(&mut sent, "order.outcome").await;
+                    assert_eq!(outcome["d"]["intentId"], key);
+                    assert_eq!(
+                        outcome["d"]["outcome"],
+                        if unknown { "unknown" } else { "placed" }
+                    );
+                    assert!(
+                        outcome["d"]["clientOrderId"].is_null(),
+                        "{venue}: {outcome}"
+                    );
+                    assert_eq!(*tape.writes.lock().unwrap(), vec!["create"]);
+                    assert!(
+                        tape.client_order_ids
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .all(|id| id != &key),
+                        "server never passes UUID as a venue ID on {venue}"
+                    );
+                    session.close();
+                    registry.dispose(&account, Disposal::PageDisposed);
+                }
+            }
+        })
+        .await;
+}

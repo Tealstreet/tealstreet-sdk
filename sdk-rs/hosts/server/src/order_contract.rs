@@ -340,3 +340,7 @@ mod activation_tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "client_order_ids_tests.rs"]
+mod client_order_ids_tests;
