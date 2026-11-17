@@ -15,7 +15,6 @@ import type {
 } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeErrorKind } from '../../commandOutcome';
 import type { JoinProofResponse } from '../../joinProof.types';
-import type { Store } from '../../store/store.interface';
 import type {
   AccountGreeks,
   ActiveChaser,
@@ -78,8 +77,8 @@ import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { SECONDARY_READ_KEYS_ENABLED } from '../../secondaryReadKeys';
-import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
-import { DefaultStore } from '../../store/store.base';
+import { FrameApplyError } from '../../store/frameStore';
+import { FrameStore } from '../../store/frameStore';
 import { WorkerFrameRecoveryScopes } from '../../store/workerFrameRecoveryScopes';
 import { bybitPublicRateLimitReport } from '../../transport/bybitPublicRateLimitTelemetry';
 import { assertEngineAccountRouting, createEngineTransport, withSecondaryReadKeyPolicy } from '../../transport/engine';
@@ -446,15 +445,15 @@ const FRAME_FED_WRITES: ReadonlySet<string> = new Set([
 
 /**
  * The hosted server answers `fetchOrders`/`fetchPositions` with its engine's
- * snapshot frame, so the rows come from the same FrameApplier as the worker's,
+ * snapshot frame, so the rows come from the same FrameStore as the worker's,
  * native-unit extras and NaN handling included. A worker's rows pass through.
  */
 const rowsFromAccountFrame = (method: string, result: unknown, symbols: unknown): unknown => {
   const frame = (result as { accountFrame?: unknown } | null | undefined)?.accountFrame;
   if ((method !== 'fetchOrders' && method !== 'fetchPositions') || typeof frame !== 'string') return result;
   const bytes = Uint8Array.from(atob(frame), (char) => char.charCodeAt(0));
-  const store = new DefaultStore();
-  new FrameApplier(store).apply(new Frame(bytes.buffer));
+  const store = new FrameStore();
+  store.apply(new Frame(bytes.buffer));
   const rows: ReadonlyArray<{ symbol: string }> = method === 'fetchOrders' ? store.orders : store.positions;
   return Array.isArray(symbols) ? rows.filter((row) => symbols.includes(row.symbol)) : rows;
 };
@@ -507,7 +506,6 @@ const NUKE_ALGO_STOP_GRACE_MS = 1_000;
 /** Algo ops held while the engine host starts; past this they are refused. */
 const MAX_QUEUED_ALGO_OPS = 100;
 
-type AlgoRows = { activeChasers: ActiveChaser[]; activeTWAPs: ActiveTWAP[] };
 type WorkerAdmission = ((method: string, args: unknown[]) => void) | undefined;
 
 /** Store sections flush at the worker's store cadence. */
@@ -517,7 +515,7 @@ const SOCKET_HEALTH_SYNC_MS = 5_000;
 /**
  * An exchange account run by the Rust engine. Venue I/O, parsing and state
  * live in wasm; each flush frame updates this exchange's store through
- * `FrameApplier`, so the worker shell (chasers, TWAP, CLI, post-processors)
+ * `FrameStore`, so the worker shell (chasers, TWAP, CLI, post-processors)
  * reads the same store it always has. Trading methods are engine commands.
  */
 const VALIDATE_ACCOUNT_TIMEOUT_MS = 45_000;
@@ -665,7 +663,7 @@ export class RustEngineExchange extends BaseExchange {
   private stopInProcessFeed?: () => void;
   private requestSharedSnapshot = false;
   private sharedNativeSymbols = new Set<string>();
-  private sharedValidatedMarkets?: Store['markets'];
+  private sharedValidatedMarkets?: FrameStore['markets'];
   private sharedPublicReady = false;
   private nativeLoaded = 0;
   /** A mirror's credential-free source for chart history; its reads are bounded. */
@@ -692,7 +690,6 @@ export class RustEngineExchange extends BaseExchange {
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private socketHealthTimer?: ReturnType<typeof setTimeout>;
   private socketHealthClock?: () => number;
-  private readonly applier: FrameApplier;
   private readonly bookListeners = new Map<string, Map<number, (book: OrderBook) => void>>();
   private nextBookListenerId = 0;
   private readonly candleListeners = new Map<string, Set<(candle: Candle) => void>>();
@@ -894,7 +891,7 @@ export class RustEngineExchange extends BaseExchange {
       this.changeAccountTier = async (tier: LighterAccountTier) => {
         const change = async () => {
           await this.command<null>({ op: 'setAccountTier', tier });
-          this.writeLighterTier(tier);
+          this.host?.flush();
         };
         if (this.routesToWorker && !this.frameFed) {
           if (this.isWorkerMirror) return this.withPageWriter('changeAccountTier', [tier], change);
@@ -925,7 +922,7 @@ export class RustEngineExchange extends BaseExchange {
     return quantities;
   };
 
-  constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: FrameStore) {
     assertBetaVenue(exchangeName);
     options = snapshotDelegatedSigningOptions(exchangeName, options);
     assertBetaAccount(exchangeName, options);
@@ -1079,7 +1076,6 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.isPublicDataOnly) this.privateWebsocket = socket('private');
     this.isSpot = bridgeConstruction.spot;
     this.isDemo = bridgeConstruction.demo;
-    this.applier = new FrameApplier(store);
     this.helperCapabilities = bridgeConstruction.helpers ?? {};
     if (this.helperCapabilities.resolveLeverageContext === true)
       this.resolveLeverageContext = this.resolvePhemexLeverageContext;
@@ -1319,7 +1315,7 @@ export class RustEngineExchange extends BaseExchange {
     }
     this.sourceBaseline = true;
     try {
-      this.applier.applyMessageHandlerStats(new Frame(frame));
+      this.store.applyMessageHandlerStats(new Frame(frame));
     } catch (error) {
       diagnosticConsole.error(`${this.name} source subscription stats refused`, error);
     }
@@ -1582,10 +1578,7 @@ export class RustEngineExchange extends BaseExchange {
   /** Rust algo replies, under the worker's algo op names. `store` carries the rows
    * frames do not; the worker's TWAP handler persists `twap:stateUpdate`. */
   private receiveAlgoEmit = (op: string, data: unknown) => {
-    if (op === 'store') {
-      if (!this.isDisposed) this.store.update(data as Partial<AlgoRows>);
-      return;
-    }
+    if (op === 'store') throw new Error('Native algorithm state must arrive in SCXF frames');
     // Nobody awaits a running algo, so its error is its only outcome: it must beat the
     // gates that drop an unforced error on a stream that looks down, as a dead key's does.
     if (op === 'error') this.emitter.emit(op, data, { forceToast: true });
@@ -2373,40 +2366,20 @@ export class RustEngineExchange extends BaseExchange {
     }
   };
 
-  private balanceInfoJson?: string;
-
-  /**
-   * The venue's raw account payload as TS stores it in `balance.info` (Bybit: the wallet
-   * account with `accountType` and the `coin` collateral array), read by the web margin UI.
-   */
+  /** Native queries publish their balance metadata in the following SCXF flush. */
   private syncBalanceInfo = async () => {
     try {
-      const info = await this.command<Record<string, unknown> | null>({ op: 'fetchBalanceInfo' }, { report: false });
-      if (!info || this.isDisposed) return;
-      const json = JSON.stringify(info);
-      if (json === this.balanceInfoJson) return;
-      this.balanceInfoJson = json;
-      this.store.update({ balance: { ...this.store.balance, info } });
+      await this.command({ op: 'fetchBalanceInfo' }, { report: false });
+      if (!this.isDisposed) this.host?.flush();
     } catch {
-      // The engine reports wallet-read failures itself; the last payload stays.
+      // Retain the last successfully decoded native section.
     }
-  };
-
-  /** The web tier setting reads TS's `balance.info.lighterAccountLimits`; frames keep `info`. */
-  private writeLighterTier = (tier: LighterAccountTier) => {
-    if (this.isDisposed || this.store.balance.info?.lighterAccountLimits?.user_tier_name === tier) return;
-    this.store.update({
-      balance: {
-        ...this.store.balance,
-        info: { ...this.store.balance.info, lighterAccountLimits: { user_tier_name: tier } },
-      },
-    });
   };
 
   private syncLighterTier = async () => {
     try {
       const tier = await this.fetchAccountTier?.();
-      if (tier) this.writeLighterTier(tier);
+      if (tier && !this.isDisposed) this.host?.flush();
     } catch {
       // The engine reports tier-read failures itself; the last known tier stays.
     }
@@ -2423,17 +2396,14 @@ export class RustEngineExchange extends BaseExchange {
   private captureEngineSnapshot(): EngineSnapshot {
     const frame = this.snapshotFrame();
     if (!frame) throw new Error('Engine has not started');
-    const fetchedLeverage: Record<string, FetchedLeverage> = {};
-    for (const symbol of Object.keys(this.store.fetchedLeverage))
-      fetchedLeverage[symbol] = { ...this.store.fetchedLeverage[symbol] };
-    return { frame, fetchedLeverage };
+    return { frame };
   }
 
   /** A late shared subscriber receives the current native book without waiting for a trade. */
   snapshotOrderBook = (symbol: string): OrderBook | undefined => {
     const snapshot = this.snapshotFrame();
     return snapshot
-      ? this.applier.books(new Frame(snapshot)).find((entry) => entry.symbol === symbol)?.orderbook
+      ? this.store.books(new Frame(snapshot)).find((entry) => entry.symbol === symbol)?.orderbook
       : undefined;
   };
 
@@ -2459,7 +2429,6 @@ export class RustEngineExchange extends BaseExchange {
       }
       const rails = await this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol }, { report: false });
       this.host?.flush();
-      if (rails) this.applier.applyLeverage(symbol, rails);
     } catch (error) {
       this.log(`Error refreshing leverage for ${symbol}: ${error}`, LogSeverity.Warning);
     }
@@ -2482,7 +2451,7 @@ export class RustEngineExchange extends BaseExchange {
       (notified ??= new Set()).add(section);
       let symbols: readonly string[] = [];
       try {
-        if (frame) symbols = this.applier.marketSymbolsFor(frame);
+        if (frame) symbols = this.store.marketSymbolsFor(frame);
       } catch {
         /* Unknown identities fan out. */
       }
@@ -2496,7 +2465,7 @@ export class RustEngineExchange extends BaseExchange {
     try {
       frame = new Frame(buffer);
     } catch (error) {
-      this.applier.invalidateMarketIdentity();
+      this.store.invalidateMarketIdentity();
       rejected('frame', error);
       diagnosticConsole.error('Invalid engine frame', error);
       if (recover) this.recoverEngineFrame();
@@ -2506,7 +2475,7 @@ export class RustEngineExchange extends BaseExchange {
     const previousMarkets = this.store.markets;
     let needsSnapshot = false;
     try {
-      this.applier.apply(frame, !this.frameConsumerDecodesMarketData || this.feedBookListeners.size > 0);
+      this.store.apply(frame, !this.frameConsumerDecodesMarketData || this.feedBookListeners.size > 0);
     } catch (error) {
       needsSnapshot = error instanceof FrameApplyError;
       if (error instanceof FrameApplyError && error.bookRejected) rejected('books', error);
@@ -2552,7 +2521,7 @@ export class RustEngineExchange extends BaseExchange {
     if (
       this.sharedPublicFeed &&
       receivedLoaded & LOADED_FLAG.MARKETS &&
-      this.applier.hasMarketIdentity &&
+      this.store.hasMarketIdentity &&
       (catalogChanged || !this.requestSharedSnapshot)
     ) {
       try {
@@ -2572,12 +2541,12 @@ export class RustEngineExchange extends BaseExchange {
         this.startupFailure = sharedFailure;
       }
     }
-    for (const fill of read(() => this.applier.fills(decoded))) {
+    for (const fill of read(() => this.store.fills(decoded))) {
       this.dispatchFrameEvent(() => this.emitter.emit('fill', fill));
       if (this.isDisposed) return;
     }
     if (!this.frameConsumerDecodesMarketData || this.feedBookListeners.size) {
-      for (const { symbol, orderbook } of read(() => this.applier.books(decoded), 'books')) {
+      for (const { symbol, orderbook } of read(() => this.store.books(decoded), 'books')) {
         const listeners = this.bookListeners.get(symbol);
         if (!this.capabilityRecord?.isolatedBookSubscriptions)
           listeners?.forEach((listener) => {
@@ -2601,7 +2570,7 @@ export class RustEngineExchange extends BaseExchange {
     }
     if (this.isDisposed) return;
     if (!this.frameConsumerDecodesMarketData || this.feedCandleListeners.size) {
-      for (const { symbol, interval, candle } of read(() => this.applier.candles(decoded), 'candles')) {
+      for (const { symbol, interval, candle } of read(() => this.store.candles(decoded), 'candles')) {
         this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => {
           if (this.isDisposed) return;
           if (!this.frameConsumerDecodesMarketData || this.feedCandleListeners.has(listener))
@@ -2644,7 +2613,6 @@ export class RustEngineExchange extends BaseExchange {
     try {
       const snapshot = this.captureEngineSnapshot();
       this.applyEngineFrame(snapshot.frame, false, true);
-      this.dispatchFrameEvent(() => this.applier.applyLeverageSnapshot(snapshot.fetchedLeverage));
     } catch (error) {
       diagnosticConsole.error('Engine frame recovery failed', error);
     } finally {
@@ -2788,7 +2756,7 @@ export class RustEngineExchange extends BaseExchange {
     if (health.privateInitialized && !current?.privateInitialized) this.recordAuthSuccess();
     if (current && (Object.keys(health) as (keyof typeof health)[]).every((key) => current[key] === health[key]))
       return;
-    this.store.updateSocketHealth(health);
+    // Native socket-health sections own the published state.
   };
 
   private receiveLog = (level: 'info' | 'warning' | 'error', message: string) => {
@@ -2803,11 +2771,11 @@ export class RustEngineExchange extends BaseExchange {
         const loaded = (flags: number) => (this.nativeLoaded & flags) === flags;
         const account =
           this.isPublicDataOnly ||
-          (loaded(LOADED_FLAG.BALANCE | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS) && this.applier.hasAccountState);
-        const publicReady = !this.isPublicDataOnly || (loaded(LOADED_FLAG.TICKERS) && this.applier.hasTickerState);
+          (loaded(LOADED_FLAG.BALANCE | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS) && this.store.hasAccountState);
+        const publicReady = !this.isPublicDataOnly || (loaded(LOADED_FLAG.TICKERS) && this.store.hasTickerState);
         const sharedReady =
           !this.sharedPublicFeed || (this.sharedPublicReady && this.sharedValidatedMarkets === this.store.markets);
-        return loaded(LOADED_FLAG.MARKETS) && this.applier.hasMarketIdentity && publicReady && account && sharedReady;
+        return loaded(LOADED_FLAG.MARKETS) && this.store.hasMarketIdentity && publicReady && account && sharedReady;
       };
       const wake = () => {
         if (!this.startupFailure && !this.isDisposed && !ready()) return;
@@ -3792,7 +3760,7 @@ export class RustEngineExchange extends BaseExchange {
           publicFeed: undefined,
           externalPublicData: undefined,
         },
-        new DefaultStore(),
+        new FrameStore(),
       );
       source.pageCandleSource = true;
       this.candleSource = source;
@@ -3934,7 +3902,6 @@ export class RustEngineExchange extends BaseExchange {
         return (await this.callWorker('fetchLeverageForSymbol', symbol)) as FetchedLeverage | null;
       const leverage = await this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol }, { report: false });
       this.host?.flush();
-      if (leverage) this.applier.applyLeverage(symbol, leverage);
       return leverage;
     } catch (error) {
       this.log(`Error fetching leverage for ${symbol}: ${error}`, LogSeverity.Warning);

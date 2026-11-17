@@ -12,20 +12,22 @@ export interface NativeDerivedFrame extends Frame {
   balanceInfo?(): StoreData['balance']['info'];
 }
 
-/** Native sections decode directly to generated types. Absence preserves state. */
-export function readNativeDerivedSections(frame: NativeDerivedFrame): Partial<StoreData> {
-  const socketHealth = frame.socketHealth?.();
-  const activeChasers = frame.activeChasers?.();
-  const activeTWAPs = frame.activeTWAPs?.();
-  const ordersRisk = frame.ordersRisk?.();
-  const displayedPositions = frame.displayedPositions?.();
-  const displayedMargin = frame.displayedMargin?.();
-  return {
-    ...(socketHealth !== undefined && { socketHealth }),
-    ...(activeChasers !== undefined && { activeChasers }),
-    ...(activeTWAPs !== undefined && { activeTWAPs }),
-    ...(ordersRisk !== undefined && { ordersRisk }),
-    ...(displayedPositions !== undefined && { displayedPositions }),
-    ...(displayedMargin !== undefined && { displayedMargin }),
+/** Decode each section independently so one rejected section cannot hide a peer. */
+export function readNativeDerivedSections(
+  frame: NativeDerivedFrame,
+  accept: <K extends keyof StoreData>(key: K, value: StoreData[K]) => void,
+  reject: (error: unknown) => void,
+): void {
+  const read = <K extends keyof StoreData>(key: K, decode: () => StoreData[K] | undefined) => {
+    try {
+      const value = decode();
+      if (value !== undefined) accept(key, value);
+    } catch (error) { reject(error); }
   };
+  read('socketHealth', () => frame.socketHealth?.());
+  read('activeChasers', () => frame.activeChasers?.());
+  read('activeTWAPs', () => frame.activeTWAPs?.());
+  read('ordersRisk', () => frame.ordersRisk?.());
+  read('displayedPositions', () => frame.displayedPositions?.());
+  read('displayedMargin', () => frame.displayedMargin?.());
 }

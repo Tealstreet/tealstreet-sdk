@@ -1,5 +1,5 @@
 import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
-import type { FetchedLeverage, MessageHandlerStatsType, OrderFillEvent, Writable } from '../types';
+import type { FetchedLeverage, MessageHandlerStatsType, OrderFillEvent } from '../types';
 import type { FrameBook } from './bookFrames';
 import type { FrameCandle } from './candleFrames';
 import type { StoreData } from '../generated/StoreData';
@@ -182,8 +182,9 @@ export class FrameStore {
     }
     this.state = next;
     const errors: unknown[] = [];
+    const versions = this.versions;
     for (const listener of this.listeners) {
-      try { listener(next, this.versions); } catch (error) { errors.push(error); }
+      try { listener(next, versions); } catch (error) { errors.push(error); }
     }
     if (errors.length) throw new AggregateError(errors, 'FrameStore subscriber failed');
   }
@@ -294,12 +295,13 @@ export class FrameStore {
         if (rows === undefined) throw new Error('Missing Market output');
         const nextSymbols = rows.map((row) => row.symbol);
         update.markets = rows;
+        accepted |= LOADED_FLAG.MARKETS;
         symbols = nextSymbols;
         ids = rows.map((row) => row.id);
       }
     }, LOADED_FLAG.MARKETS);
 
-    const marketsFailed = errors.length > 0 || (this.marketsNeedSnapshot && !update.markets);
+    const marketsFailed = errors.length > 0 || (this.marketsNeedSnapshot && !(accepted & LOADED_FLAG.MARKETS));
     attempt(() => {
       const stats = this.readMessageHandlerStats(frame);
       if (stats) update.messageHandlerStats = stats;
@@ -317,7 +319,7 @@ export class FrameStore {
       const rows = readTickerFrame(tickers, (index) => update.markets
         ? update.markets[index]
         : this.marketsBySymbol[resolveSymbol(index)]);
-      if (rows) update.tickers = rows;
+      if (rows) { update.tickers = rows; accepted |= LOADED_FLAG.TICKERS; }
     }, LOADED_FLAG.TICKERS);
 
     attempt(() => {
@@ -352,9 +354,13 @@ export class FrameStore {
     attempt(() => {
       const balance = readBalanceFrame(frame);
       if (balance) accepted |= LOADED_FLAG.BALANCE;
-      const info = frame.balanceInfo?.();
-      if (balance || info !== undefined) update.balance = { ...this.balance, ...balance, ...(info !== undefined && { info }) };
+      if (balance) update.balance = { ...(update.balance ?? this.balance), ...balance };
     }, LOADED_FLAG.BALANCE);
+
+    attempt(() => {
+      const info = frame.balanceInfo?.();
+      if (info !== undefined) update.balance = { ...(update.balance ?? this.balance), info };
+    });
 
     attempt(() => {
       const status = frame.status();
@@ -372,12 +378,12 @@ export class FrameStore {
       // `fetchedLeverage` when a market has no position.
       const settings = frame.settings();
       if (settings) {
-        this.writeFetchedLeverage(update, readStoreSettings(settings,
-          (update.options ?? this.options).isHedged, resolveSymbol));
+        update.fetchedLeverage = readStoreSettings(settings,
+          (update.options ?? this.options).isHedged, resolveSymbol);
       }
     });
 
-    attempt(() => Object.assign(update, readNativeDerivedSections(frame)));
+    readNativeDerivedSections(frame, (key, value) => { update[key] = value; }, error => { errors.push(error); });
     this.frameMarkets.set(frame, { symbols, ids });
     if (applyBooks && !marketsFailed) {
       try {
@@ -398,11 +404,8 @@ export class FrameStore {
     this.marketIds = ids;
     // Install proof before notifying startup waiters. Empty validated tables
     // count; rejected sections leave independent accepted peers usable.
-    if (update.markets && !marketsFailed) { this.appliedSections |= LOADED_FLAG.MARKETS; this.recovery.acceptMarketSnapshot(); }
-    
-    
+    if (accepted & LOADED_FLAG.MARKETS) this.recovery.acceptMarketSnapshot();
     this.appliedSections |= accepted;
-    if (tickers && update.tickers) this.appliedSections |= LOADED_FLAG.TICKERS;
 
     let changed = false;
     for (const _key in update) {
@@ -419,32 +422,17 @@ export class FrameStore {
         errors.push(error);
       }
     }
-    if (errors.length)
-      throw new FrameApplyError(errors.map(String).join('; '), bookRejected, errors.length > (bookRejected ? 1 : 0));
+    if (errors.length) {
+      const error = new FrameApplyError(errors.map(String).join('; '), bookRejected, errors.length > (bookRejected ? 1 : 0));
+      if (error.otherRejected) this.recovery.reject('frame', error);
+      throw error;
+    }
   }
 
   invalidateMarketIdentity(): void {
     this.appliedSections &= ~(LOADED_FLAG.MARKETS | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS | LOADED_FLAG.TICKERS);
     this.marketsNeedSnapshot = true;
     this.bookFrames.clear();
-  }
-
-  applyLeverage(symbol: string, leverage: FetchedLeverage): void {
-    this.applyLeverageSnapshot({ ...this.fetchedLeverage, [symbol]: leverage });
-  }
-
-  applyLeverageSnapshot(leverage: Record<string, FetchedLeverage>): void {
-    const update: { -readonly [K in keyof StoreData]?: StoreData[K] } = {};
-    this.writeFetchedLeverage(update, leverage);
-    this.publish(update);
-  }
-
-  private writeFetchedLeverage(update: { -readonly [K in keyof StoreData]?: StoreData[K] }, leverage: Record<string, FetchedLeverage>): void {
-    update.fetchedLeverage = leverage;
-  }
-
-  private symbol(market: number, fallback?: string): string {
-    return this.marketSymbols[market] ?? fallback ?? '';
   }
 
   marketSymbolsFor(frame: Frame): readonly string[] {
@@ -474,13 +462,23 @@ export class FrameStore {
 
   candles(frame: Frame): FrameCandle[] {
     if (this.invalidMarketFrames.has(frame)) throw new FrameApplyError('Candle identity requires a market snapshot');
-    return readCandleFrame(frame, this.frameMarkets.get(frame)?.symbols ?? this.marketSymbols);
+    try {
+      const rows = readCandleFrame(frame, this.frameMarkets.get(frame)?.symbols ?? this.marketSymbols);
+      this.recovery.acceptCandles(rows);
+      return rows;
+    } catch (error) {
+      this.recovery.reject('candles', error, frame, this.marketSymbolsFor(frame));
+      throw error;
+    }
   }
 
   fills(frame: Frame): OrderFillEvent[] {
     try {
-      return readFillFrame(frame);
+      const rows = readFillFrame(frame);
+      this.recovery.acceptFills(rows.length > 0);
+      return rows;
     } catch (error) {
+      this.recovery.reject('fills', error);
       throw new FrameApplyError(error instanceof Error ? error.message : String(error));
     }
   }

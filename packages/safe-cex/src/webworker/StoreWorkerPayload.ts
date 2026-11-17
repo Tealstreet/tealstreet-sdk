@@ -1,8 +1,6 @@
 import type { CommandProgress } from '@tealstreet/safe-cex-wasm/host';
 import type { SerializedCommandError } from '../commandOutcome';
 import type { OHLCVFrameRejection, OrderBookFrameRejection } from '../exchanges/base';
-import type { PackedTickerDelta } from '../store/store.interface';
-import type { StoreData, Writable } from '../types';
 
 /** Ops the worker receives from the main thread */
 export type StoreWorkerIncomingOp =
@@ -14,9 +12,6 @@ export type StoreWorkerIncomingOp =
   | 'sayHi'
   | 'forwardFrames'
   // Store
-  | 'store'
-  | 'merge-loaded'
-  | 'merge-message-handler-stats'
   | 'sendSnapshot'
   | 'settings'
   | 'sync-time'
@@ -58,7 +53,6 @@ export type StoreWorkerIncomingOp =
 /** Ops the worker sends to the main thread */
 export type StoreWorkerOutgoingOp =
   // Store
-  | 'store'
   | 'store:delta'
   // One Rust engine flush frame (an ArrayBuffer), see store/frameApplier
   | 'frame'
@@ -111,10 +105,6 @@ export type StoreWorkerOutgoingOp =
 
 /** All valid worker op codes */
 export type StoreWorkerOp = StoreWorkerIncomingOp | StoreWorkerOutgoingOp;
-
-export type StoreWorkerStorePayload = Partial<Writable<StoreData>> & {
-  tickerDeltas?: PackedTickerDelta[];
-};
 
 export interface StoreWorkerPayload {
   op: StoreWorkerOp;
