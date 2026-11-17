@@ -2,7 +2,18 @@ use super::*;
 
 #[tokio::test]
 async fn refused_candidates_leave_the_running_account_and_its_provider_untouched() {
-    for (code, transient) in [(10003, false), (10006, true)] {
+    for (code, transient, reason_class) in [
+        (
+            10003,
+            false,
+            envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+        ),
+        (
+            10006,
+            true,
+            envelope::InitRefusalReasonClass::VenueUnavailable,
+        ),
+    ] {
         let f = fixture().await;
         let (mut resident, _resident_sent) = user_session(f.registry.clone(), "alice");
         let mut ready = resident.take_verified();
@@ -19,7 +30,10 @@ async fn refused_candidates_leave_the_running_account_and_its_provider_untouched
         finish(&mut candidate, &mut done).await;
         assert_eq!(
             sent.try_recv().unwrap(),
-            envelope::with_instance_id(envelope::init_unverified("acct", transient), "candidate")
+            envelope::with_instance_id(
+                envelope::init_unverified("acct", transient, reason_class),
+                "candidate"
+            )
         );
         assert!(f.registry.held("alice", "acct", candidate.socket).is_none());
         assert!(Arc::ptr_eq(
@@ -102,7 +116,11 @@ async fn a_refused_different_key_cannot_replace_a_running_delegated_account() {
     finish(&mut candidate, &mut done).await;
     assert_eq!(
         sent.try_recv().unwrap(),
-        envelope::init_unverified("acct", false)
+        envelope::init_unverified(
+            "acct",
+            false,
+            envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions
+        )
     );
     assert!(f.registry.held("alice", "acct", candidate.socket).is_none());
     assert!(Arc::ptr_eq(
@@ -180,7 +198,7 @@ async fn a_lease_generation_changed_during_probe_cannot_be_recaptured() {
     finish(&mut session, &mut done).await;
     assert_eq!(
         sent.try_recv().unwrap(),
-        envelope::init_unverified("acct", true)
+        envelope::init_unverified("acct", true, envelope::InitRefusalReasonClass::Unknown)
     );
     assert!(f.registry.held("alice", "acct", session.socket).is_none());
     session.close();
@@ -206,7 +224,7 @@ async fn native_probe_deadline_refuses_and_releases_its_engine() {
     session.verification_completed(completion).await.unwrap();
     assert_eq!(
         sent.try_recv().unwrap(),
-        envelope::init_unverified("acct", true)
+        envelope::init_unverified("acct", true, envelope::InitRefusalReasonClass::Unknown)
     );
     assert!(f.registry.held("alice", "acct", session.socket).is_none());
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -255,7 +273,7 @@ async fn probe_authority_is_captured_before_the_spawned_task_first_runs() {
     finish(&mut session, &mut done).await;
     assert_eq!(
         sent.try_recv().unwrap(),
-        envelope::init_unverified("acct", true)
+        envelope::init_unverified("acct", true, envelope::InitRefusalReasonClass::Unknown)
     );
     assert_eq!(f.private_reads.load(Ordering::SeqCst), 0);
     assert!(f.registry.held("alice", "acct", session.socket).is_none());
@@ -304,10 +322,25 @@ async fn verified_rebuild_retires_previous_output_generation() {
 
 #[tokio::test]
 async fn bybit_admission_retains_classified_refusal_and_original_attempt_context() {
-    for (code, kind, transient) in [
-        (10003, "authInvalid", false),
-        (10010, "authPermission", false),
-        (10006, "rateLimited", true),
+    for (code, kind, transient, reason_class) in [
+        (
+            10003,
+            "authInvalid",
+            false,
+            envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+        ),
+        (
+            10010,
+            "authPermission",
+            false,
+            envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+        ),
+        (
+            10006,
+            "rateLimited",
+            true,
+            envelope::InitRefusalReasonClass::VenueUnavailable,
+        ),
     ] {
         let f = fixture_with_auth(true).await;
         f.code.store(code, Ordering::SeqCst);
@@ -349,7 +382,10 @@ async fn bybit_admission_retains_classified_refusal_and_original_attempt_context
         assert!(!warning.to_string().contains("synthetic"));
         assert_eq!(
             sent.try_recv().unwrap(),
-            envelope::with_instance_id(envelope::init_unverified("acct", transient), "candidate")
+            envelope::with_instance_id(
+                envelope::init_unverified("acct", transient, reason_class),
+                "candidate"
+            )
         );
         assert!(session.joined.is_empty());
         assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
@@ -410,4 +446,55 @@ async fn signing_mode_refusals_report_a_closed_reason_without_claiming_key_failu
             candidate.close();
         }
     }).await;
+}
+
+async fn assert_refusal_reason_class(code: usize, reason: &str, transient: bool) {
+    let f = fixture_with_auth(true).await;
+    f.code.store(code, Ordering::SeqCst);
+    let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+    let mut results = session.take_verified();
+    let init = payload(&mut session, Some("reason-registration"));
+    session.init(init).await.unwrap();
+    let completed = tokio::time::timeout(Duration::from_secs(10), results.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    session.verification_completed(completed).await.unwrap();
+    let raw = sent.try_recv().unwrap();
+    let frame: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(
+        frame["d"]["data"][1],
+        json!({
+            "forceToast":true, "initRefused":true, "kind":"unverified",
+            "transient":transient, "reason_class":reason
+        })
+    );
+    assert_eq!(frame["d"]["instanceId"], "reason-registration");
+    assert_eq!(frame["d"]["accountName"], "acct");
+    assert_eq!(
+        frame["d"]["data"][0],
+        "Could not verify your key; account not attached"
+    );
+    assert!(
+        !raw.contains(&code.to_string()),
+        "numeric venue code must remain private"
+    );
+    assert!(session.joined.is_empty());
+    assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
+    session.close();
+}
+
+#[tokio::test]
+async fn refusal_reason_class_key_rejected_ip_or_permissions() {
+    assert_refusal_reason_class(10003, "key_rejected_ip_or_permissions", false).await;
+}
+
+#[tokio::test]
+async fn refusal_reason_class_key_invalid() {
+    assert_refusal_reason_class(10004, "key_invalid", false).await;
+}
+
+#[tokio::test]
+async fn refusal_reason_class_venue_unavailable() {
+    assert_refusal_reason_class(10006, "venue_unavailable", true).await;
 }
