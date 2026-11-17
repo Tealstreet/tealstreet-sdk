@@ -522,7 +522,7 @@ fn delegated_hyperliquid_json_cannot_forge_scalar_only_authority() {
     wire["signing"]["primary"]["credential_absent"] = true.into();
     wire["signing"]["primary"]["credentialAbsent"] = true.into();
     let parsed: safe_cex_venues::EngineOptions = serde_json::from_value(wire).unwrap();
-    let identity = parsed.signing.unwrap().primary.unwrap();
+    let identity = parsed.signing.as_ref().unwrap().primary.as_ref().unwrap();
     assert!(!identity.credential_absent());
     assert!(identity.authority_ref().0.is_empty());
 }
