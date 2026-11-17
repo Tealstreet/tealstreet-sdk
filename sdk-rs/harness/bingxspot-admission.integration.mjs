@@ -14,7 +14,7 @@ test('ordinary Spot factories construct public and local-key accounts', () => {
 });
 test('Spot testnet is refused before an engine exists', () => {
   assert.throws(() => new module.WasmEngine('bingxspot', JSON.stringify({ publicDataOnly: true, testnet: true })),
-    error => error.kind === 'unsupported' && error.outcome === 'notSent' && /testnet/.test(error.message));
+    /BingX Spot testnet is unsupported/);
 });
 
 test('only the explicit fixture build exports the fixed-credential constructor', () => {

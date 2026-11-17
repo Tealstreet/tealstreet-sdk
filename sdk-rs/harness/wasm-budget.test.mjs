@@ -4012,3 +4012,18 @@ test('#3579 merged Lighter family retains its current measured 10 KiB reserve', 
   }
   assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
 });
+
+// Production BingX/Spot admission at 1349bbf32b9654487eb75ac79dbdf64265b72913.
+// Rust1.99, bindgen0.2.129, Binaryen132, build.sh --venue bingx (two -Oz passes).
+test('BingX Spot production constructor retains measured family reserve', () => {
+  const measured = 2_386_785; // Equal optimized web and Node maxima.
+  const sha256 = '939ce5f3e86d226e348defea2750e1375673f22fa656bd13fc856283f4daaf8c';
+  assert.match(sha256, /^[0-9a-f]{64}$/);
+  const minimum = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.bingx;
+  assert.ok(cap >= 2_174_976, 'retain every earlier BingX floor');
+  assert.ok(cap >= minimum, `BingX/Spot needs ${minimum} bytes including reserve`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bingx'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
+});
