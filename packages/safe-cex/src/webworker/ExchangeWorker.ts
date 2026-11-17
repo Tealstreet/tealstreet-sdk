@@ -10,7 +10,7 @@ import { captureTwapOwner } from './twap/TwapOwner';
 import throttle from 'lodash/throttle';
 
 import { onTunnelLaneFallback, tunnelLanePort } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
-import { classifiedError, exchangeErrorTags, isErrorReported } from '../commandOutcome';
+import { classifiedError, exchangeErrorTags, historyErrorDiagnostics, isErrorReported } from '../commandOutcome';
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
 import { assertBetaAccount } from '../exchanges/rust/betaVenues';
@@ -258,11 +258,13 @@ export class ExchangeWorker {
             message: error.message,
             name: error.name,
             stack: error.stack,
+            ...historyErrorDiagnostics(error),
           }
         : {
             message: String(error),
             name: 'UnknownError',
             stack: new Error().stack,
+            ...historyErrorDiagnostics(error),
           };
 
     try {
