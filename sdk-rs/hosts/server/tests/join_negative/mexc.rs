@@ -31,10 +31,11 @@ fn single<'a>(h: &'a HeaderMap, n: &str) -> Option<&'a str> {
     i.next().is_none().then_some(v)
 }
 fn valid(key: Option<&str>, stamp: Option<&str>, signature: Option<&str>, query: &str) -> bool {
-    // Committed sensitivity checkpoint: synthetic authentication is unchecked.
-    let _ = (key, stamp, signature, query);
+    // RED: exercise the real wire with synthetic authentication deliberately unchecked.
+    let _ = (key.and_then(material), stamp, signature, query);
     true
 }
+
 fn valid_rest(uri: &Uri, headers: &HeaderMap) -> bool {
     valid(
         single(headers, "ApiKey"),
