@@ -31,6 +31,12 @@ WASM venue caps retain both parents' measured floors. Fresh compositions must
 retain at least 10 KiB above their optimized web/Node measurement, rounded up
 to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
 
+#3599 links `Engine<BingxSpot>` under Sam's 2026-11-17 decision (h). Canonical
+combined web/Node at `657903ad6b2095ed7145c105f847ed179a50210e` measure 17,909,819 B;
+the 17,921,024 B ceiling retains 11,205 B reserve and the historical 17 MiB floor.
+Future combined changes require a fresh optimized measurement plus at least
+10 KiB rounded up to KiB; required coverage and executed combined consumers remain gates.
+
 TxFlow agent refresh #3314 at merge 9bb43250830d measures 2,147,684 bytes;
 refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its
 2,158,592-byte floor retains the required 10 KiB reserve at that source.
