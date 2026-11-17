@@ -16,8 +16,8 @@ const OUT = [
   'polymarket', 'txflow', 'weex',
 ];
 
-test('the beta set is exactly the 45 IN venues in 24 families', () => {
-  assert.equal(betaVenueNames.length, 45);
+test('the beta set is exactly the 46 IN venues in 24 families', () => {
+  assert.equal(betaVenueNames.length, 46);
   assert.deepEqual(betaVenueFamilies, [
     'apexomni', 'asterdex', 'backpack', 'binance', 'bingx', 'bitget', 'bitrue', 'bitunix', 'blofin', 'bybit', 'coinbase',
     'cryptocom', 'grvt', 'hyperliquid', 'kraken', 'kucoin', 'kucoinspot', 'lighter', 'mexc', 'okx', 'orderly',
@@ -79,7 +79,8 @@ test('engine.beta.web.mjs is generated from the table and imports only beta fami
   assert.deepEqual(imported, betaVenueFamilies);
 });
 
-test('BingX Spot belongs to the native family but stays outside beta admission until smoke', () => {
+test('BingX Spot admission uses the existing BingX family', () => {
   assert.equal(venueFamily('bingxspot'), 'bingx');
-  assert.throws(() => betaVenueFamily('bingxspot'), BetaVenueUnavailableError);
+  assert.equal(betaVenueFamily('bingxspot'), 'bingx');
+  assert.equal(betaVenueNames.filter(name => name === 'bingxspot').length, 1);
 });
