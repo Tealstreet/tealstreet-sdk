@@ -297,7 +297,8 @@ fn integer_clock_inspection_and_native_modify_payload_are_unchanged() {
 
 #[test]
 fn ordinary_write_payloads_and_signing_headers_do_not_depend_on_fractional_time() {
-    fn writes(offset: f64) -> Vec<(String, Option<String>, Vec<(&'static str, String)>)> {
+    type CapturedWrite = (String, Option<String>, Vec<(&'static str, String)>);
+    fn writes(offset: f64) -> Vec<CapturedWrite> {
         let (mut e, _) = ready(0., offset);
         let mut captured = Vec::new();
         let commands = [
