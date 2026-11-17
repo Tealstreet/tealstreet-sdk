@@ -137,6 +137,7 @@ impl Fixture {
                     let seen = ws_seen.clone();
                     async move {
                         upgrade.on_upgrade(move |mut socket| async move {
+                            let mut session = V::websocket_session();
                             for text in V::initial_websocket_frames() {
                                 if socket
                                     .send(axum::extract::ws::Message::Text(text.into()))
@@ -146,18 +147,19 @@ impl Fixture {
                                     return;
                                 }
                             }
-                            while let Some(Ok(message)) = socket.recv().await {
+                            'messages: while let Some(Ok(message)) = socket.recv().await {
                                 let axum::extract::ws::Message::Text(text) = message else {
                                     continue;
                                 };
-                                let reply = V::websocket_text(&text, &mut seen.lock().unwrap());
-                                if let Some(reply) = reply
-                                    && socket
+                                let replies = session(&text, &mut seen.lock().unwrap());
+                                for reply in replies {
+                                    if socket
                                         .send(axum::extract::ws::Message::Text(reply.into()))
                                         .await
                                         .is_err()
-                                {
-                                    break;
+                                    {
+                                        break 'messages;
+                                    }
                                 }
                             }
                         })
@@ -175,7 +177,11 @@ impl Fixture {
                         };
                         let reply =
                             V::http(&method, &uri, &headers, &body, &mut seen.lock().unwrap());
-                        (V::http_status(&reply), axum::Json(reply))
+                        (
+                            V::http_status(&reply),
+                            V::http_headers(&method, &uri, &reply),
+                            axum::Json(reply),
+                        )
                     }
                 },
             );
