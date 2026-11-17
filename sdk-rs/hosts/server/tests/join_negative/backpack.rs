@@ -14,10 +14,12 @@ fn key(seed: u8) -> String {
     STANDARD.encode(safe_cex_crypto::ed25519::public_key(&[seed; 32]).unwrap())
 }
 fn verifies(key: &str, text: &str, signature: &str) -> bool {
-    let _ = (key, text, signature);
-    true
+    let (Ok(public), Ok(signature)) = (STANDARD.decode(key), STANDARD.decode(signature)) else {
+        return false;
+    };
+    (key == self::key(7) || key == self::key(8))
+        && safe_cex_crypto::ed25519::verify(text.as_bytes(), &public, &signature).unwrap_or(false)
 }
-
 impl Venue for Backpack {
     const NAME: &'static str = "backpack";
     fn algorithm() -> Algorithm {
@@ -62,7 +64,10 @@ impl Venue for Backpack {
             seen.writes += 1;
             panic!("Backpack admission attempted a venue write");
         }
-        let path = uri.path();
+        let path = uri
+            .path()
+            .strip_prefix("/https://api.backpack.exchange")
+            .unwrap_or(uri.path());
         let instruction = match path {
             "/api/v1/account" => Some("accountQuery"),
             "/api/v1/position" => Some("positionQuery"),
