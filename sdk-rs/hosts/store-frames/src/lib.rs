@@ -251,7 +251,9 @@ impl Emitter {
             if let Some(t) = ticker
                 && t.last != 0.0
                 && (p.entry_price > 0.0 || p.entry_price.is_nan())
-                && (input.calculate_upnl_from_last || p.unrealized_pnl == 0.0 || p.unrealized_pnl.is_nan())
+                && (input.calculate_upnl_from_last
+                    || p.unrealized_pnl == 0.0
+                    || p.unrealized_pnl.is_nan())
             {
                 let move_by = if side == PositionSide::Long {
                     t.last - p.entry_price
@@ -358,7 +360,11 @@ impl Emitter {
                     id: format!("fake-chaser-{}", c.id),
                     symbol: c.symbol.clone(),
                     side: safe_cex_types::ModelField::Value(side),
-                    entry_price: if ticker.last == 0.0 || ticker.last.is_nan() {0.0} else {ticker.last},
+                    entry_price: if ticker.last == 0.0 || ticker.last.is_nan() {
+                        0.0
+                    } else {
+                        ticker.last
+                    },
                     notional: Some(0.0),
                     leverage: 1.0,
                     unrealized_pnl: 0.0,
@@ -394,7 +400,11 @@ impl Emitter {
         }
         let mut active_keys = std::collections::HashSet::new();
         for row in &mut rows {
-            if row.ticker.as_ref().is_none_or(|t| t.last == 0.0 || t.last.is_nan()) {
+            if row
+                .ticker
+                .as_ref()
+                .is_none_or(|t| t.last == 0.0 || t.last.is_nan())
+            {
                 continue;
             }
             let key = format!("{}:{}", input.account, row.position.id);

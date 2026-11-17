@@ -4737,19 +4737,16 @@ pub(crate) mod tests {
                         }),
                     );
                 }
-                account
-                    .algos
-                    .as_ref()
-                    .unwrap()
-                    .send(crate::algos::AlgoInput::Joined)
-                    .unwrap();
+                // A refused algo command is still a reply for every holder;
+                // native state itself now travels on each holder's SCXF pump.
+                testing::algo_op(&account, "chaser:start", "{}");
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 let seen = seen.lock().unwrap();
                 for id in [8, 9] {
                     assert!(
                         seen.iter()
                             .any(|(holder, frame)| *holder == id
-                                && frame.contains(r#""op":"store""#)),
+                                && frame.contains(r#""op":"error""#)),
                         "holder {id}: {seen:?}"
                     );
                 }

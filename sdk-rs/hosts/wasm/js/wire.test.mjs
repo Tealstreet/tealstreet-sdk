@@ -1379,3 +1379,30 @@ test('native store sections reject malformed lengths, tags, counts, padding and 
   const frame = numericFrame([section]); frame.view.setUint32(29, 100, true);
   assert.throws(() => frame.balanceInfo(), /truncated native store value/);
 });
+
+test('native message-handler statistics carry snapshot and topic-update semantics without wasm', () => {
+  const strings = new Uint8Array(stringFrame(['ticker.BTC', 'orders']).buffer).slice(24);
+  const stringSection = { kind: SECTION.STRINGS, length: Math.ceil(strings.length / 8) * 8,
+    write(view, offset) { new Uint8Array(view.buffer, offset, strings.length).set(strings); } };
+  const statsSection = (replace, rows) => ({ kind: SECTION.MESSAGE_HANDLER_STATS, length: 8 + rows.length * 24,
+    write(view, offset) {
+      view.setUint32(offset, rows.length, true); view.setUint32(offset + 4, replace ? 1 : 0, true);
+      rows.forEach(([group, topic, flags, age], i) => {
+        const at = offset + 8 + i * 24;
+        view.setUint32(at, group, true); view.setUint32(at + 4, topic, true);
+        view.setUint32(at + 8, flags, true); view.setFloat64(at + 16, age, true);
+      });
+    } });
+  const table = numericFrame([stringSection, statsSection(true, [[0, 0, 3, 5.5], [3, 1, 1, NaN]])]).messageHandlerStats();
+  assert.equal(table.replace, true); assert.equal(table.count, 2);
+  assert.equal(table.topic(0), 'ticker.BTC'); assert.equal(table.group(0), 0);
+  assert.equal(table.subscribed(0), true); assert.equal(table.active(0), true); assert.equal(table.ageMs(0), 5.5);
+  assert.equal(table.topic(1), 'orders'); assert.equal(table.group(1), 3);
+  assert.equal(table.subscribed(1), true); assert.equal(table.active(1), false); assert.ok(Number.isNaN(table.ageMs(1)));
+  const removal = numericFrame([stringSection, statsSection(false, [[3, 1, 0, NaN]])]).messageHandlerStats();
+  assert.equal(removal.replace, false); assert.equal(removal.subscribed(0), false);
+  assert.equal(numericFrame([]).messageHandlerStats(), undefined);
+  for (const row of [[4, 0, 1, NaN], [0, 0, 2, 1], [0, 0, 3, -1]]) {
+    assert.throws(() => numericFrame([stringSection, statsSection(false, [row])]).messageHandlerStats(), /invalid message handler stats row/);
+  }
+});
