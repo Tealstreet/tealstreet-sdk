@@ -413,7 +413,8 @@ test('synchronous transport errors release their request controller', async () =
   });
   host.execute({ op: 'http', request: 1, method: 'POST', url: 'https://example.test/order', headers: [] });
   await new Promise(setImmediate);
-  assert.deepEqual(failures, ['HTTP transport request failed']);
+  // Unrecognized provider text stays opaque; only the closed unknown label survives.
+  assert.deepEqual(failures, ['HTTP transport request failed (cause: unknown)']);
   assert.equal(host.requests.size, 0);
   host.dispose();
 });
@@ -653,7 +654,8 @@ for (const failure of ['synchronous request', 'asynchronous request', 'response 
         })() });
       },
     }, { onLog: (_level, text) => logs.push(text) });
-    const expected = failure === 'response body' ? 'HTTP response body failed' : 'HTTP transport request failed';
+    // Request diagnostics now name the closed unknown fallback, never provider text.
+    const expected = failure === 'response body' ? 'HTTP response body failed' : 'HTTP transport request failed (cause: unknown)';
     await assert.rejects(host.command({ op: 'placeOrders', orders: [] }), (error) => error.message === expected);
     assert.deepEqual(delivered, [expected]);
     assert.deepEqual(logs, [expected]);

@@ -223,7 +223,11 @@ async fn proof_queue_rechecks_the_captured_expiry_after_waiting() {
     assert_eq!(
         sent.try_recv().unwrap(),
         envelope::with_instance_id(
-            envelope::init_unverified("expired-waiter", false),
+            envelope::init_unverified(
+                "expired-waiter",
+                false,
+                envelope::InitRefusalReasonClass::Unknown
+            ),
             "expired"
         )
     );
@@ -250,7 +254,7 @@ async fn proof_queue_session_capacity_refuses_transiently_in_both_modes() {
         assert_eq!(
             sent.try_recv().unwrap(),
             envelope::with_instance_id(
-                envelope::init_unverified("acct", true),
+                envelope::init_unverified("acct", true, envelope::InitRefusalReasonClass::Unknown),
                 "overflow-registration"
             )
         );
@@ -284,7 +288,7 @@ async fn proof_queue_identity_overflow_keeps_registration_and_refuses_both_modes
         assert_eq!(
             sent.try_recv().unwrap(),
             envelope::with_instance_id(
-                envelope::init_unverified("acct", true),
+                envelope::init_unverified("acct", true, envelope::InitRefusalReasonClass::Unknown),
                 "identity-overflow"
             )
         );

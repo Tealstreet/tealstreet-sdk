@@ -87,6 +87,8 @@ pub enum Discovered {
 }
 
 const DISCOVERY_HEADERS: &[(&str, &str)] = &[("X-CHANNEL-API-CODE", "Tealstreet")];
+// Classic V2 bounds the encoded subscription, not the number of instruments.
+const MAX_PUBLIC_SUBSCRIPTION_BYTES: usize = 4096;
 
 fn discovery_context(pending: &Pending) -> Option<&Context> {
     match pending {
@@ -487,27 +489,47 @@ impl BitgetFutures {
             channel: &'a str,
             inst_id: &'a str,
         }
-        #[derive(Serialize)]
-        struct Subscription<'a> {
-            op: &'a str,
-            args: Vec<Topic<'a>>,
-        }
         let product = self.product().to_uppercase();
-        for chunk in topics.chunks(100) {
-            let args = chunk
-                .iter()
-                .map(|(channel, symbol)| Topic {
-                    inst_type: &product,
-                    channel,
-                    inst_id: symbol,
-                })
-                .collect();
-            cx.send(
-                socket,
-                ControlFrame::subscription(
-                    serde_json::to_string(&Subscription { op, args }).expect("subscription"),
-                ),
-            );
+        let prefix = format!(
+            r#"{{"op":{},"args":["#,
+            serde_json::to_string(op).expect("subscription operation")
+        );
+        let mut payload = prefix.clone();
+        let overhead = (prefix.len() + 2).max(r#"{"op":"unsubscribe","args":[]}"#.len());
+        for (channel, symbol) in topics {
+            let topic = serde_json::to_string(&Topic {
+                inst_type: &product,
+                channel,
+                inst_id: symbol,
+            })
+            .expect("subscription topic");
+            // A topic must also fit its later unsubscribe, whose envelope is
+            // two bytes longer. Never send an unencodable catalogue ID or let
+            // it prevent the remaining valid topics from being subscribed.
+            if overhead + topic.len() > MAX_PUBLIC_SUBSCRIPTION_BYTES {
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
+                    "Bitget public subscription topic exceeds 4096 bytes; not sent",
+                );
+                continue;
+            }
+            let separator = usize::from(payload.len() > prefix.len());
+            if payload.len() + separator + topic.len() + 2 > MAX_PUBLIC_SUBSCRIPTION_BYTES {
+                payload.push_str("]}");
+                cx.send(
+                    socket,
+                    ControlFrame::subscription(std::mem::replace(&mut payload, prefix.clone())),
+                );
+            }
+            if payload.len() > prefix.len() {
+                payload.push(',');
+            }
+            payload.push_str(&topic);
+        }
+        if payload.len() > prefix.len() {
+            payload.push_str("]}");
+            cx.send(socket, ControlFrame::subscription(payload));
         }
     }
 
