@@ -1115,6 +1115,26 @@ fn auth_accepts_live_gateway_extras_and_names_rejected_fields() {
             .accept(result, 1000. + start as f64)
             .unwrap_err();
         assert!(error.contains(reason), "{error}");
+        assert!(error.contains("(fields: "), "{error}");
         assert!(!error.contains("secret"), "{error}");
     }
+}
+
+#[test]
+fn auth_rejection_lists_field_names_only() {
+    let error = Session::new(Channel::Http)
+        .accept(
+            json!({"expires_in":900,"scope":"secret-scope","token_type":"bearer"}),
+            1000.,
+        )
+        .unwrap_err();
+    assert!(
+        error.ends_with("access_token missing (fields: expires_in,scope,token_type)"),
+        "{error}"
+    );
+    assert!(!error.contains("secret"));
+    let error = Session::new(Channel::Http)
+        .accept(json!({}), 1000.)
+        .unwrap_err();
+    assert!(error.ends_with("(fields: none)"), "{error}");
 }

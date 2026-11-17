@@ -79,6 +79,45 @@ fn auth_result_defect(result: &Value) -> Option<&'static str> {
         Some(_) => Some("token_type is not a string"),
     }
 }
+/// Lists a reply's field names (never values) for diagnostics. Names are
+/// reduced to a safe charset and bounded so a hostile reply cannot smuggle data.
+fn field_names(result: &Value) -> String {
+    let Some(fields) = result.as_object() else {
+        return match result {
+            Value::Null => "null",
+            Value::Bool(_) => "bool",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+        }
+        .into();
+    };
+    if fields.is_empty() {
+        return "none".into();
+    }
+    let mut names: Vec<String> = fields
+        .keys()
+        .take(16)
+        .map(|k| {
+            k.chars()
+                .take(32)
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        c
+                    } else {
+                        '?'
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    names.sort();
+    if fields.len() > 16 {
+        names.push("...".into());
+    }
+    names.join(",")
+}
 impl Session {
     pub fn new(channel: Channel) -> Self {
         Self {
@@ -150,7 +189,10 @@ impl Session {
         self.started_ms = started_ms;
         self.clear_token();
         if let Some(reason) = auth_result_defect(&result) {
-            return Err(format!("drb invalid public/auth result: {reason}"));
+            return Err(format!(
+                "drb invalid public/auth result: {reason} (fields: {})",
+                field_names(&result)
+            ));
         }
         let mut result: AuthResult =
             serde_json::from_value(result).map_err(|_| "drb invalid public/auth result")?;
