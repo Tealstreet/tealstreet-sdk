@@ -505,7 +505,7 @@ impl Registry {
                 }
                 _ => return Err(ProbeRefusal::INVALID),
             };
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             let plan = self
                 .construction_test_plans
                 .get(user)
