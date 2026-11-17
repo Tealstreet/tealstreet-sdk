@@ -286,6 +286,7 @@ fn only_documented_correlated_errors_prove_refusal() {
         (13009, ErrorKind::AuthExpired),
         (-32602, ErrorKind::InvalidInput),
         (10020, ErrorKind::InvalidInput),
+        (11054, ErrorKind::Rejected),
     ] {
         let mut t = Transport::default();
         let id = send(&mut t);
