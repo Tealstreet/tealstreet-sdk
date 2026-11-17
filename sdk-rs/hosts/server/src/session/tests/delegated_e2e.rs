@@ -419,3 +419,68 @@ async fn delegated_e2e_bybit_declaration_off_refuses_valid_handover_without_io()
     assert!(venue.observed.lock().unwrap().reads > 0);
     session.close();
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn delegated_hyperliquid_protected_identity_survives_session_construction() {
+    let material = format!("0x{:064x}", 7);
+    let wallet = safe_cex_crypto::ethereum::private_key_address(&format!("0x{:064x}", 8)).unwrap();
+    let signer = safe_cex_crypto::ethereum::private_key_address(&material).unwrap();
+    let vector = json!({"input":{"key":wallet}});
+    let venue = MockVenue::for_hyperliquid(wallet.clone(), material.clone());
+    let registry = crate::accounts::testing::e2e_registry(USER, venue.clone());
+    let (mut session, mut sent) = connection(registry.clone());
+    let mut results = session.take_verified();
+    let bytes = serde_json::to_vec(&json!({"key":wallet,"secret":material})).unwrap();
+    let mut init = sealed_init(&mut session, &mut sent, &vector, &bytes, "hyperliquid").await;
+    init["d"]["hyperliquidSignerAddress"] = signer.into();
+    wire(&mut session, init).await;
+    let result = completed(&mut results).await;
+    assert!(result.candidate.is_ok());
+    assert!(result.probe.as_ref().unwrap().permit.is_ok());
+    session.verification_completed(result).await.unwrap();
+    let account = registry
+        .held(USER, ACCOUNT, session.socket)
+        .expect("proved handover admitted");
+    assert!(account.link.is_none());
+    let resident = account.delegated().unwrap();
+    assert!(
+        resident
+            .identities()
+            .primary
+            .as_ref()
+            .unwrap()
+            .credential_absent()
+    );
+    snapshot(&mut session, &mut sent).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while account
+            .handle
+            .read(|s| s.loaded().markets && s.loaded().orders && s.loaded().positions)
+            .await
+            != Some(true)
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("real native startup completes before placement");
+    assert!(venue.observed.lock().unwrap().reads > 0);
+    assert!(venue.observed.lock().unwrap().writes.is_empty());
+    wire(&mut session, json!({"t":"msg","d":{"op":"callMethod","accountName":ACCOUNT,"data":{"requestId":"hl-manual","method":"placeOrders","args":[[{"symbol":"BTC-PERP","type":"limit","side":"buy","amount":0.001,"price":55000}]]}}})).await;
+    let reply = next(&mut sent, "callMethod:done").await;
+    assert_eq!(
+        reply["d"]["data"],
+        json!({"requestId":"hl-manual","success":true,"result":["77"]})
+    );
+    {
+        let observed = venue.observed.lock().unwrap();
+        assert_eq!(observed.writes.len(), 1, "no fallback or duplicate send");
+        let order = &observed.writes[0]["action"]["orders"][0];
+        assert_eq!(order["a"], 0);
+        assert_eq!(order["b"], true);
+        assert_eq!(order["s"], "0.001");
+        assert_eq!(order["p"], "55000");
+    }
+    session.close();
+}

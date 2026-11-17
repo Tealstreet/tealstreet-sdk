@@ -27,6 +27,7 @@ pub(crate) struct MockVenue {
     admission: Option<crate::delegated::probe::venue_tests::VenueIo>,
     registration: Option<Registration>,
     coinbase: Option<crate::delegated::probe::coinbase_tests::CoinbaseIo>,
+    hyperliquid: bool,
 }
 #[derive(Clone)]
 struct Registration {
@@ -43,6 +44,14 @@ impl MockVenue {
             admission: None,
             registration: None,
             coinbase: None,
+            hyperliquid: false,
+        }
+    }
+
+    pub(crate) fn for_hyperliquid(key: String, material: String) -> Self {
+        Self {
+            hyperliquid: true,
+            ..Self::new(key, material)
         }
     }
 
@@ -199,6 +208,44 @@ impl Transport for MockVenue {
                 request.id,
                 registration.body.lock().unwrap().clone(),
             );
+            return;
+        }
+        if self.hyperliquid {
+            let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+            let reply = if request.url.ends_with("/exchange") {
+                assert_eq!(body["action"]["type"], "order");
+                assert!(body["nonce"].as_u64().is_some());
+                for part in ["r", "s"] {
+                    let text = body["signature"][part].as_str().unwrap();
+                    assert_eq!(text.len(), 66);
+                    assert!(text.starts_with("0x"));
+                    assert!(text[2..].bytes().all(|b| b.is_ascii_hexdigit()));
+                }
+                assert!(matches!(body["signature"]["v"].as_u64(), Some(27 | 28)));
+                self.observed.lock().unwrap().writes.push(body);
+                json!({"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":77}}]}}})
+            } else {
+                assert!(request.url.ends_with("/info"));
+                self.observed.lock().unwrap().reads += 1;
+                match body["type"].as_str().unwrap() {
+                    "metaAndAssetCtxs" => json!([
+                        {"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50}]},
+                        [{"midPx":"55000","markPx":"55000","oraclePx":"55000","prevDayPx":"54000"}]
+                    ]),
+                    "perpDexs" => json!([null]),
+                    "userAbstraction" => json!("disabled"),
+                    "maxBuilderFee" => json!(30),
+                    "userFees" => json!({"userCrossRate":"0.00045","userAddRate":"0.00015"}),
+                    "clearinghouseState" => {
+                        assert_eq!(body["user"], self.key);
+                        json!({"assetPositions":[],"marginSummary":{"accountValue":"1000","totalMarginUsed":"0"},"time":1})
+                    }
+                    "spotClearinghouseState" => json!({"balances":[]}),
+                    "frontendOpenOrders" => json!([]),
+                    other => panic!("unexpected Hyperliquid fixture read {other}"),
+                }
+            };
+            answer(&events, request.id, reply);
             return;
         }
         let path = request.url.split('?').next().unwrap();

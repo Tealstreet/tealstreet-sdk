@@ -488,3 +488,91 @@ async fn delegated_settings_authenticated_switch_keeps_original_attribution() {
 async fn delegated_settings_authenticated_switch_drops_retired_work_and_builds_fresh_b() {
     construction_case(true, true, true).await;
 }
+
+#[cfg(target_os = "linux")]
+fn protected_hl() -> crate::delegated::PreparedDelegated {
+    let secret = format!("0x{:064x}", 7);
+    let key = safe_cex_crypto::ethereum::private_key_address(&format!("0x{:064x}", 8)).unwrap();
+    let init = InitPayload {
+        account_name: "protected-hl".into(),
+        exchange_name: "hyperliquid".into(),
+        key: key.clone(),
+        hyperliquid_signer_address: Some(
+            safe_cex_crypto::ethereum::private_key_address(&secret).unwrap(),
+        ),
+        ..Default::default()
+    };
+    prepare_delegated(&init, DelegatedPair::new(key, secret, None)).unwrap()
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn delegated_hyperliquid_json_cannot_forge_scalar_only_authority() {
+    let prepared = protected_hl();
+    assert!(
+        prepared
+            .resident
+            .identities()
+            .primary
+            .as_ref()
+            .unwrap()
+            .credential_absent()
+    );
+    let mut wire: Value = serde_json::from_str(&prepared.options).unwrap();
+    wire["signing"]["primary"]["credential_absent"] = true.into();
+    wire["signing"]["primary"]["credentialAbsent"] = true.into();
+    let parsed: safe_cex_venues::EngineOptions = serde_json::from_value(wire).unwrap();
+    let identity = parsed.signing.unwrap().primary.unwrap();
+    assert!(!identity.credential_absent());
+    assert!(identity.authority_ref().0.is_empty());
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn delegated_hyperliquid_trusted_build_rejects_substituted_refs_or_provider() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for altered in [
+                "signing",
+                "credential",
+                "provider",
+                "venue",
+                "missing-provider",
+            ] {
+                let prepared = protected_hl();
+                let mut options: Value = serde_json::from_str(&prepared.options).unwrap();
+                let mut config = safe_cex_native::ServerConfig::default();
+                prepared.resident.configure(&mut config);
+                if matches!(altered, "signing" | "credential") {
+                    options["signing"]["primary"][altered] = "synthetic-substituted-ref".into();
+                }
+                let other = protected_hl();
+                let provider = if altered == "missing-provider" {
+                    None
+                } else {
+                    Some(if altered == "provider" {
+                        other.resident.provider()
+                    } else {
+                        prepared.resident.provider()
+                    })
+                };
+                let venue = if altered == "venue" {
+                    "hyperliquidspot"
+                } else {
+                    "hyperliquid"
+                };
+                let result = safe_cex_native::spawn_venue_account(
+                    venue,
+                    &options.to_string(),
+                    crate::delegated_e2e_io::MockVenue::new("synthetic".into(), "synthetic".into()),
+                    provider,
+                    config,
+                );
+                if let Ok((_, task)) = result {
+                    task.abort();
+                    panic!("trusted identity binding accepted substituted {altered}");
+                }
+            }
+        })
+        .await;
+}
