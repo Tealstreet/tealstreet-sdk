@@ -31,7 +31,7 @@ async fn handover_replies_use_current_registration_and_preserve_legacy_bytes() {
             session.init(init).await.unwrap();
             // Missing handover still refuses; proved cross-mode joins enter admission.
             // Attempt routing stays separate from the existing live registration.
-            assert_eq!(sent.try_recv().unwrap(), expected(envelope::init_unverified("acct", false, envelope::InitRefusalReasonClass::Unknown), id));
+            assert_eq!(sent.try_recv().unwrap(), expected(envelope::init_unverified("acct", false, envelope::InitRefusalReasonClass::Unknown, envelope::InitRefusalMetadata { stage: Some(RefusalStage::MissingHandover), ..Default::default() }), id));
             assert!(session.pending_verifications.is_empty());
             assert!(account.delegated().is_none());
             assert!(Arc::ptr_eq(&session.joined["acct"].account, &account));
@@ -65,7 +65,7 @@ async fn handover_replies_use_current_registration_and_preserve_legacy_bytes() {
             }
             release.send(()).unwrap();
             session.verification_completed(completed.recv().await.unwrap()).await.unwrap();
-            assert_eq!(sent.try_recv().unwrap(), expected(envelope::init_unverified("acct", true, envelope::InitRefusalReasonClass::Unknown), id));
+            assert_eq!(sent.try_recv().unwrap(), expected(envelope::init_unverified("acct", true, envelope::InitRefusalReasonClass::Unknown, envelope::InitRefusalMetadata { stage: Some(RefusalStage::HandoverOpen), ..Default::default() }), id));
         }
         session.close();
         account.handle.dispose();

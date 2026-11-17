@@ -82,13 +82,14 @@ impl BitgetFutures {
         }
     }
 
-    /// Writes the setting, unless a settings write since the read owns it.
+    /// False means a fresh, flat UTA symbol has no published leverage yet.
+    /// A newer settings write owns the value instead of this read.
     fn apply_leverage_read(
         &self,
         cx: &mut Cx<'_, Pending>,
         read: &Read,
         response: &Response<'_>,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         if !(200..300).contains(&response.status) {
             return Err(format!("Bitget leverage read HTTP {}", response.status));
         }
@@ -98,17 +99,50 @@ impl BitgetFutures {
             let settings = serde_json::from_str::<Envelope<UtaSettings>>(response.body)
                 .map_err(invalid)?
                 .checked()?;
-            if !settings
-                .symbol_config_list
-                .iter()
-                .any(|row| row.symbol == read.symbol)
-            {
-                return Err(format!("Bitget settings do not list {}", read.symbol));
+            if !matches!(settings.hold_mode.as_ref(), "one_way_mode" | "hedge_mode") {
+                return Err("Bitget returned an invalid UTA hold mode".to_owned());
             }
+            let row = settings.symbol_config_list.iter().find(|row| {
+                row.symbol == read.symbol
+                    && (row.category.is_empty()
+                        || row.category.eq_ignore_ascii_case(self.product()))
+            });
+            let Some(row) = row else {
+                if !current {
+                    return Ok(true);
+                }
+                let known =
+                    cx.store.setting(&read.symbol).is_some_and(|setting| {
+                        setting.leverage.is_finite() && setting.leverage > 0.0
+                    }) || cx.store.positions().iter().any(|position| {
+                        position.symbol == read.symbol && position.contracts != 0.0
+                    });
+                if !known {
+                    return Ok(false);
+                }
+                return Err(format!("Bitget settings do not list {}", read.symbol));
+            };
             if current {
+                let has_leverage = [
+                    row.leverage,
+                    row.long_leverage,
+                    row.short_leverage,
+                    row.crossed_margin_leverage,
+                    row.isolated_long_lever,
+                    row.isolated_short_lever,
+                ]
+                .iter()
+                .any(|number| {
+                    number
+                        .0
+                        .is_some_and(|value| value.is_finite() && value > 0.0)
+                });
+                if !has_leverage {
+                    return Err(format!("Bitget returned no leverage for {}", read.symbol));
+                }
                 self.apply_settings(cx, &settings);
             }
-            return Ok(());
+            return Ok(true);
         }
         let row = serde_json::from_str::<Envelope<SymbolConfig>>(response.body)
             .map_err(invalid)?
@@ -119,7 +153,7 @@ impl BitgetFutures {
         if current {
             self.apply_symbol_config(cx, &read.symbol, &row);
         }
-        Ok(())
+        Ok(true)
     }
 
     pub(crate) fn leverage_response(
@@ -128,9 +162,16 @@ impl BitgetFutures {
         read: Read,
         response: Response<'_>,
     ) {
-        if let Err(error) = self.apply_leverage_read(cx, &read, &response) {
-            let _ = cx.fail_context(&read.root, VenueError::new(error));
-            return;
+        match self.apply_leverage_read(cx, &read, &response) {
+            Ok(true) => {}
+            Ok(false) => {
+                let _ = cx.done_context(&read.root, "null".to_owned());
+                return;
+            }
+            Err(error) => {
+                let _ = cx.fail_context(&read.root, VenueError::new(error));
+                return;
+            }
         }
         let Some(setting) = cx
             .store
