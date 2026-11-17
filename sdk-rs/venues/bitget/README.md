@@ -24,6 +24,11 @@ A single topic that cannot fit both subscription and later unsubscription is
 refused locally with a bounded `subscription.rejected` event, while other topics
 continue. Reconnects and book/candle repair use the same bounded formatter.
 
+A native `30001` ticker refusal naming a known REST market as nonexistent emits
+one fixed-title Warn per topic for the engine lifetime. Other refusals remain
+Errors. The existing 1/2/4-second subscription retries, recovery and reconnect
+subscriptions are unchanged; REST markets are not removed by a WS refusal.
+
 Protocol sources for the scripted tests:
 
 - [Classic changelog: sequence metadata replaces checksums](https://www.bitget.com/zh-CN/legacy-docs/classic/changelog)
