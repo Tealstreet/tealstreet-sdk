@@ -116,3 +116,15 @@ the SDK, and the worker posts `{ op: 'ws-diagnostic', data: [event] }`.
 Account UX, consuming that event in the web Requests Log, and the beta user
 document belong to the NX web workstream. Production promotion requires separate
 approval after reachability and that smoke pass are accepted.
+
+## Order-history terminal retention
+
+The default `/v5/order/history` walk keeps the caller's full range and existing
+seven-day paging for filled orders. The additional `Cancelled`, `Rejected` and
+`Deactivated` passes read only the intersection with the last 24 hours on the
+calibrated protocol clock; an older range skips these passes. This matches the
+[V5 order-history retention rules](https://bybit-exchange.github.io/docs/v5/order/order-list)
+and prevents an unavailable terminal slice from refusing the default history.
+Caller deadlines, read-key selection, pacing, cursors and partial-row markers
+remain shared with the original walk. This does not recover terminal rows the
+venue no longer retains.

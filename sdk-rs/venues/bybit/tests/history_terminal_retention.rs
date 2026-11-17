@@ -122,3 +122,36 @@ fn unbounded_history_keeps_default_query_and_terminal_passes() {
 fn end_only_older_history_omits_terminal_passes() {
     exercise(None, Some(2.0 * DAY), 0);
 }
+
+#[test]
+fn filled_orders_from_before_terminal_retention_are_still_returned() {
+    let mut h = ready();
+    let now = h.engine.signing_clock(h.now).0;
+    h.command(Command::Query {
+        command: 902,
+        query: Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: Some(now - 3.0 * DAY),
+            to_ms: Some(now - 2.0 * DAY),
+            limit: None,
+        },
+    });
+    let request = h.take("/v5/order/history");
+    assert!(!request.url.contains("orderStatus="));
+    let body = serde_json::json!({
+        "retCode": 0,
+        "result": {"list": [{
+            "orderId": "older-filled", "symbol": "BTCUSDT", "side": "Buy",
+            "orderType": "Limit", "orderStatus": "Filled", "qty": "1",
+            "cumExecQty": "1", "price": "100", "createdTime": (now - 2.5 * DAY).to_string()
+        }], "nextPageCursor": ""}
+    })
+    .to_string();
+    h.reply(request.id, 200, &body);
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(h.result(902).unwrap().as_ref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], "older-filled");
+    assert_eq!(rows[0]["filled"], 1.0);
+    assert!(!h.has_request("/v5/order/history"));
+}

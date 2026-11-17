@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Bybit treats both window bounds as inclusive and refuses wider ones.
 const MAX_WINDOW_MS: f64 = 7.0 * 24.0 * 3_600_000.0 - 1.0;
+const TERMINAL_RETENTION_MS: f64 = 24.0 * 3_600_000.0;
 /// Windows a range may span; a larger range keeps one window for Bybit to reject.
 const MAX_WINDOWS: usize = 10_000;
 const FILLS_PAGE_LIMIT: u32 = 100;
@@ -253,6 +254,7 @@ struct Walk {
     categories: VecDeque<Category>,
     order_statuses: VecDeque<&'static str>,
     original_windows: VecDeque<(Option<f64>, Option<f64>)>,
+    terminal_windows: VecDeque<(Option<f64>, Option<f64>)>,
 }
 
 impl Walk {
@@ -301,6 +303,24 @@ pub(crate) fn windows(from: Option<f64>, to: Option<f64>) -> VecDeque<(Option<f6
     })
     // An inverted or too-large range keeps one window for Bybit to reject.
     .unwrap_or_else(|| VecDeque::from([(Some(from), Some(to))]))
+}
+
+fn terminal_windows(
+    from: Option<f64>,
+    to: Option<f64>,
+    now: f64,
+) -> VecDeque<(Option<f64>, Option<f64>)> {
+    // V5 retains Cancelled/Rejected/Deactivated only for the last 24 hours.
+    // Keep the default history range separate, including older filled orders.
+    let from = from
+        .unwrap_or(now - TERMINAL_RETENTION_MS)
+        .max(now - TERMINAL_RETENTION_MS);
+    let to = to.unwrap_or(now).min(now);
+    if from > to {
+        VecDeque::new()
+    } else {
+        VecDeque::from([(Some(from), Some(to))])
+    }
 }
 
 fn nontrade_execution(kind: &str) -> bool {
@@ -484,6 +504,7 @@ impl BybitLinear {
                     categories: VecDeque::new(),
                     order_statuses: VecDeque::new(),
                     original_windows: VecDeque::new(),
+                    terminal_windows: VecDeque::new(),
                     axis_rows_start: 0,
                     path: "/v5/execution/list",
                     signed: true,
@@ -517,6 +538,7 @@ impl BybitLinear {
                     categories: VecDeque::new(),
                     order_statuses: VecDeque::new(),
                     original_windows: VecDeque::new(),
+                    terminal_windows: terminal_windows(from_ms, to_ms, now),
                     axis_rows_start: 0,
                     path: "/v5/order/history",
                     signed: true,
@@ -567,6 +589,7 @@ impl BybitLinear {
                     categories: VecDeque::new(),
                     order_statuses: VecDeque::new(),
                     original_windows: VecDeque::new(),
+                    terminal_windows: VecDeque::new(),
                     axis_rows_start: 0,
                     path: "/v5/account/transaction-log",
                     signed: true,
@@ -589,6 +612,7 @@ impl BybitLinear {
                 categories: VecDeque::new(),
                 order_statuses: VecDeque::new(),
                 original_windows: VecDeque::new(),
+                terminal_windows: VecDeque::new(),
                 axis_rows_start: 0,
                 path: "/v5/market/recent-trade",
                 signed: false,
@@ -612,7 +636,7 @@ impl BybitLinear {
                 history: RowKind::Trades.owner(completion),
             },
         };
-        if matches!(walk.kind, RowKind::Orders) {
+        if matches!(walk.kind, RowKind::Orders) && !walk.terminal_windows.is_empty() {
             walk.order_statuses = TERMINAL_ORDER_STATUSES.into();
         }
         walk.original_windows = walk.windows.clone();
@@ -648,14 +672,16 @@ impl BybitLinear {
                     walk.params.retain(|(key, _)| *key != "orderStatus");
                     walk.params.push(("orderStatus", status.into()));
                     walk.axis_rows_start = walk.history.accepted_len();
-                    walk.windows = walk.original_windows.clone();
+                    walk.windows = walk.terminal_windows.clone();
                     self.next_window(cx, command);
                     return;
                 }
                 if let Some(category) = walk.categories.pop_front() {
                     if matches!(walk.kind, RowKind::Orders) {
                         walk.params.retain(|(key, _)| *key != "orderStatus");
-                        walk.order_statuses = TERMINAL_ORDER_STATUSES.into();
+                        if !walk.terminal_windows.is_empty() {
+                            walk.order_statuses = TERMINAL_ORDER_STATUSES.into();
+                        }
                     }
                     if let Some((_, value)) =
                         walk.params.iter_mut().find(|(key, _)| *key == "category")
