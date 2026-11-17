@@ -27,10 +27,21 @@ fn mac(secret: &str, text: &str) -> String {
     hmac_sha256(secret.as_bytes(), text.as_bytes(), Encoding::Base64)
 }
 fn valid(method: &Method, target: &str, h: &HeaderMap) -> bool {
-    // RED deliberately leaves synthetic authentication unchecked.
-    let _ = (method, target, single(h, "KC-API-KEY").and_then(material));
-    true
+    (|| {
+        let secret = material(single(h, "KC-API-KEY")?)?;
+        let stamp = single(h, "KC-API-TIMESTAMP")?;
+        if single(h, "KC-API-KEY-VERSION")? != "2"
+            || stamp.parse::<u64>().ok()?.abs_diff(now_ms()) > 5_000
+        {
+            return None;
+        }
+        Some(
+            single(h, "KC-API-SIGN")? == mac(secret, &format!("{stamp}{method}{target}"))
+                && single(h, "KC-API-PASSPHRASE")? == mac(secret, PASS),
+        )
+    })() == Some(true)
 }
+
 impl<const TESTNET: bool> Venue for KucoinSpot<TESTNET> {
     const NAME: &'static str = "kucoinspot";
     fn algorithm() -> Algorithm {
