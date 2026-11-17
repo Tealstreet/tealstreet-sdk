@@ -646,7 +646,14 @@ async fn protected_text_venue_placement(name: &'static str) {
     );
     let outcome = hyperliquid_order_frame(&mut sent, "order.outcome").await;
     assert_eq!(outcome["d"]["outcome"], "placed", "{name}: {outcome}");
-    assert_eq!(outcome["d"]["venueOrderId"], "77");
+    // #3630 retains the adapter's existing result: Binance PM returns its
+    // client identity here, rather than inventing a native ID from the fake ACK.
+    let native_result = if name == "binancepm" {
+        intent.replace('-', "")
+    } else {
+        "77".into()
+    };
+    assert_eq!(outcome["d"]["venueOrderId"], native_result);
     assert_eq!(outcome["d"]["intentId"], intent);
     assert_eq!(outcome["d"]["clientOrderId"], intent.replace('-', ""));
     assert_eq!(outcome["d"]["instanceId"], INSTANCE);

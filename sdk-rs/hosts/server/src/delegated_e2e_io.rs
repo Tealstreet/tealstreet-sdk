@@ -211,6 +211,33 @@ impl Transport for MockVenue {
             io.request(request, events);
             return;
         }
+        if self.placement_fixture
+            && request.method == Method::Get
+            && self
+                .admission
+                .as_ref()
+                .is_some_and(|io| io.venue == "bitget")
+            && request
+                .url
+                .split('?')
+                .next()
+                .unwrap()
+                .ends_with("/api/v2/mix/account/account")
+        {
+            assert!(
+                self.admission
+                    .as_ref()
+                    .unwrap()
+                    .valid_private_signature(&request)
+            );
+            answer(
+                &events,
+                request.id,
+                json!({"code":"00000","data":{
+                "symbol":"BTCUSDT","posMode":"one_way_mode","marginMode":"crossed","leverage":"20"}}),
+            );
+            return;
+        }
         if self.placement_fixture && request.method == Method::Post {
             let io = self.admission.as_ref().unwrap();
             let path = request.url.split('?').next().unwrap();
@@ -256,7 +283,7 @@ impl Transport for MockVenue {
                         json!({"code":"0","msg":"","data":[{"ordId":"77","clOrdId":client,"sCode":"0","sMsg":""}]})
                     }
                     "blofin" => {
-                        json!({"code":"0","msg":"","data":[{"orderId":"77","clientOrderId":client,"code":"0","msg":""}]})
+                        json!({"code":"0","msg":"","data":[{"orderId":"77","clientOrderId":client,"code":"0","msg":"success"}]})
                     }
                     "binancepm" => {
                         json!({"orderId":77,"clientOrderId":client,"symbol":"BTCUSDT","status":"NEW"})
