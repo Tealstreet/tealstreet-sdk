@@ -94,7 +94,11 @@ fn normal_public_and_private_registry_factories_construct_only_spot_routes() {
                     .iter()
                     .any(|(k, v)| *k == "X-BX-APIKEY" && v == "spot-fixture-key")
             );
-            assert!(request.url.contains("signature="));
+            // Listen-key requests present the API key; account reads also require HMAC.
+            assert_eq!(
+                request.url.contains("signature="),
+                request.url.contains("/account/balance")
+            );
         }
     }
 }

@@ -38,6 +38,7 @@ export const BETA_VENUES = Object.freeze([
   'bitunix',
   'phemex',
   'bingx',
+  'bingxspot',
   'apexomni',
   'blofin',
   'cryptocom',

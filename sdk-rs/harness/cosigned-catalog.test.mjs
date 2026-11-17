@@ -162,18 +162,18 @@ test('every declared remoteSigning venue has an exact proof or a reason', () => 
   accounted(declared, ready, excluded);
 });
 
-test('production cohort reproduces the 41 / 40 / 33 census without hiding disabled venues', () => {
+test('production cohort reproduces the 41 / 40 / 34 census without hiding disabled venues', () => {
   assert.equal(declared.size, 41);
   // NX #9737 removed the origin gate after SDK #3567/#3570 supplied origins.
-  // Retain all seven disabled metadata entries in the declared accounting.
+  // Retain all six disabled metadata entries in the declared accounting.
   assert.equal(helperEligible.size, 40);
-  assert.equal(productionOffered.size, 33);
+  assert.equal(productionOffered.size, 34);
   for (const venue of ['hyrotrader', 'binanceoptions']) {
     assert(helperEligible.has(venue), `${venue}: live origin must remain in review`);
     assert(!productionOffered.has(venue), `${venue}: disabled metadata must remain disabled`);
   }
   assert.deepEqual([...helperEligible].filter(name => !productionOffered.has(name)).sort(),
-    ['binanceoptions', 'bingxspot', 'bitgetinverse', 'bitrue', 'hyrotrader', 'lighter-robinhood', 'txflow']);
+    ['binanceoptions', 'bitgetinverse', 'bitrue', 'hyrotrader', 'lighter-robinhood', 'txflow']);
   for (const name of ready) assert(declared.has(name), `${name}: catalog has no remoteSigning declaration`);
   accounted(productionOffered, ready, new Map([...excluded].filter(([name]) => productionOffered.has(name))));
 });
@@ -296,4 +296,10 @@ test('partial readiness accepts only the closed AsterDEX V3 shape list', () => {
   delete missing.excludedShapes;
   assert.throws(() => parse(missing));
   assert.throws(() => parse(record, 'bybit'));
+});
+
+test('LOCAL Spot admission does not promote Hosted proof readiness', () => {
+  assert(productionOffered.has('bingxspot'));
+  assert(!ready.has('bingxspot'));
+  assert(excluded.has('bingxspot'));
 });

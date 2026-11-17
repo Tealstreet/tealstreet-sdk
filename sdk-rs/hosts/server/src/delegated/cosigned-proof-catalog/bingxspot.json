@@ -1,4 +1,4 @@
 {
   "status": "excluded",
-  "reason": "Production metadata disables Spot and the native Hosted origin/private proof are missing; fixture-only admission is not live support."
+  "reason": "LOCAL beta admission does not establish Hosted private startup or registered-key ownership proof; COSIGNED remains excluded."
 }

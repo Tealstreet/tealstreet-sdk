@@ -8,20 +8,25 @@ load it.
 
 ## Admission and remaining product work
 
-**Native and fixture-only until live-key smoke passes.** `bingxspot` is absent
-from both SDK `BETA_VENUES` and the WASM beta table. `assertBetaVenue` refuses it
-in every environment before I/O. The native/hosted registry also refuses it
-through the shared unsupported-venue path. Production, dev and preview metadata
-flags are all disabled. Native fixture tests construct the module directly.
-Admission is a separate follow-up after smoke, not part of this change.
+The admission candidate adds `bingxspot` to SDK `BETA_VENUES`, the existing
+BingX WASM family and the normal native registry, and enables its metadata.
+Mainnet REST uses `https://open-api.bingx.com`; testnet construction refuses
+before I/O. Production replay uses the normal constructor, with an independent
+TypeScript Spot oracle. No perpetual route or signing policy changes.
 
-- **NX:** #9111 has merged the account-picker integration for the new public
-  `ExchangeName` member `bingxspot`. `apps/web` is outside this repo.
-- **NEEDS-SMOKE:** the lead must verify the AWS-era transport dependency with
-  live keys, exercise both compressed Spot streams and REST trading, and then
-  explicitly admit the venue. This implementation does not claim that the AWS
-  migration or live trading has been validated.
-- WASM size caps remain owned by the lead and are not edited here.
+**Release hold:** this admission remains a draft until an approved, funded Spot
+key completes transport/permissions, minimum PostOnly placement, immediate
+same-order cancellation with zero fills, compressed public/private streams and
+a 31-minute listen-key renewal. Offline fixtures do not establish those facts.
+Normal SDK release, Copybara import and matching WASM pin are required afterward;
+this source change does not claim a deployed venue.
+
+- **NX:** #9111 merged the account-picker integration for `bingxspot`;
+  `apps/web` is outside this repo.
+- **Hosted:** beta construction is separate from server startup and ownership
+  proof. `PRIVATE_STARTUP_VENUES` is unchanged and COSIGNED remains excluded.
+- Optimized family measurements retain historical size floors and at least
+  10 KiB reserve; smoke-only artifacts cannot establish production size budgets.
 
 ### Opt-in smoke configuration
 
@@ -45,10 +50,11 @@ requires an active matching Spot catalog row, quantity increments/minima/maxima
 and monetary minima/maxima; the native notional ceiling can only lower the
 shared smoke cap.
 
-This configuration does not open the standard CLI, registry or WASM factories.
-A separately approved smoke-only constructor is still required to execute a
-probe. No live-key proof, compressed-stream coverage or renewal-duration result
-is supplied by fixture tests, and trading admission remains a separate change.
+The smoke configuration remains explicitly opt-in even when normal factories
+admit Spot. It never reuses perpetual credentials or broadens the default live
+smoke cohort. The separate scratch-only smoke constructor is not shipped.
+No live-key proof, compressed-stream coverage or renewal-duration result is
+supplied by fixture tests.
 
 ## Official protocol
 

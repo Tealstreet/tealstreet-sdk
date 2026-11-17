@@ -408,7 +408,7 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
         "okx" => pick("https://www.okx.com", "https://openapi.okx.com"),
         "okxdemo" => "https://openapi.okx.com",
         "okxeu" | "okxeudemo" => "https://eea.okx.com",
-        "bingx" if testnet => {
+        "bingx" | "bingxspot" if testnet => {
             return Err(RoutingError::NoBaseUrl(name.into()));
         }
         "bitget" | "bitgetusdc" | "bitgetinverse" => "https://api.bitget.com",
@@ -420,7 +420,7 @@ pub fn rest_base_url(name: &str, testnet: bool) -> Result<&'static str, RoutingE
             "https://openapi.blofin.com",
             "https://demo-trading-openapi.blofin.com",
         ),
-        "bingx" => "https://open-api.bingx.com",
+        "bingx" | "bingxspot" => "https://open-api.bingx.com",
         "lighter" => pick(
             "https://mainnet.zklighter.elliot.ai",
             "https://testnet-api.lighter.xyz",

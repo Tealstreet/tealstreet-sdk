@@ -8,19 +8,19 @@ import { assertBetaVenue, BETA_VENUES } from '../../exchanges/rust/betaVenues';
 import { deriveBridgeConstruction, deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
 
 const name: ExchangeName = 'bingxspot';
-describe('BingX Spot native-only admission', () => {
-  it('declares a separate Spot name with production disabled', () => {
+describe('BingX Spot beta admission', () => {
+  it('declares a separate enabled Spot name with no derivative features', () => {
     expect(exchangeMetadata[name]).toMatchObject({
       exchangeName: 'bingxspot',
-      enabled: false,
-      enabledInDev: false,
-      enableInPreview: false,
+      enabled: true,
+      enabledInDev: true,
+      enableInPreview: true,
       hasEmptyPositions: true,
       prettyName: 'BingX Spot',
     });
     expect(exchangeMetadata[name].features.positions).toBe(false);
   });
-  it('declares the BingX hosted-signing contract without enabling factories', async () => {
+  it('keeps the existing signing contract and resolves the Rust factory', async () => {
     const options: ExchangeOptions = { key: '', secret: '' };
     expect(deriveBridgeConstruction(name, options)).toMatchObject({ spot: true, dispatchSigning: true });
     expect(deriveRemoteSigningPolicy(name)).toMatchObject({
@@ -28,8 +28,8 @@ describe('BingX Spot native-only admission', () => {
       payloadSupported: false,
       protectedHeaders: ['X-BX-APIKEY'],
     });
-    expect(BETA_VENUES).not.toContain(name);
-    expect(() => assertBetaVenue(name)).toThrowError(/unsupported/);
-    await expect(exchangeRegistry[name]()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+    expect(BETA_VENUES).toContain(name);
+    expect(() => assertBetaVenue(name)).not.toThrow();
+    await expect(exchangeRegistry[name]()).resolves.toBeTypeOf('function');
   });
 });
