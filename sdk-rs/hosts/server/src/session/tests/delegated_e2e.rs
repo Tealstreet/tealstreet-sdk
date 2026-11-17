@@ -134,9 +134,21 @@ async fn sealed_init(
     bytes: &[u8],
     venue: &str,
 ) -> Value {
+    // Existing cross-venue refusal fixtures deliberately retain their Bybit-bound offer.
+    sealed_init_for_offer(session, sent, vector, bytes, venue, "bybit").await
+}
+
+async fn sealed_init_for_offer(
+    session: &mut Session,
+    sent: &mut crate::out::Receiver,
+    vector: &Value,
+    bytes: &[u8],
+    venue: &str,
+    offer_venue: &str,
+) -> Value {
     wire(
         session,
-        json!({"t":"msg","d":{"op":"delegated-key-req","accountName":ACCOUNT,"data":{"exchangeName":"bybit"}}}),
+        json!({"t":"msg","d":{"op":"delegated-key-req","accountName":ACCOUNT,"data":{"exchangeName":offer_venue}}}),
     )
     .await;
     let response = next(sent, "delegated-key").await;
@@ -432,7 +444,15 @@ async fn hyperliquid_protected_placement(typed: bool) {
     session.order_frames_enabled = typed;
     let mut results = session.take_verified();
     let bytes = serde_json::to_vec(&json!({"key":wallet,"secret":material})).unwrap();
-    let mut init = sealed_init(&mut session, &mut sent, &vector, &bytes, "hyperliquid").await;
+    let mut init = sealed_init_for_offer(
+        &mut session,
+        &mut sent,
+        &vector,
+        &bytes,
+        "hyperliquid",
+        "hyperliquid",
+    )
+    .await;
     init["d"]["hyperliquidSignerAddress"] = signer.into();
     wire(&mut session, init).await;
     let result = completed(&mut results).await;
