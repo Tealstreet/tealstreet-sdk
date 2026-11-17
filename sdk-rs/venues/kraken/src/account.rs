@@ -266,6 +266,55 @@ struct OrderWire<'a> {
     )]
     last_update_time: Option<Stamp<'a>>,
 }
+
+/// Fixed field order and type alphabet are documented under Futures order-row diagnostics.
+/// Only types leave this function; unknown names and every value are discarded.
+fn order_field_types(item: &str) -> String {
+    const FIELDS: [&str; 29] = [
+        "order_id",
+        "orderId",
+        "uid",
+        "symbol",
+        "instrument",
+        "orderType",
+        "type",
+        "side",
+        "direction",
+        "limitPrice",
+        "limit_price",
+        "price",
+        "stopPrice",
+        "stop_price",
+        "unfilledSize",
+        "filledSize",
+        "filled",
+        "qty",
+        "quantity",
+        "size",
+        "reduceOnly",
+        "reduce_only",
+        "cliOrdId",
+        "cli_ord_id",
+        "trigger_signal",
+        "triggerSignal",
+        "lastUpdateTime",
+        "last_update_time",
+        "lastUpdateTimestamp",
+    ];
+    let row = serde_json::from_str::<serde_json::Value>(item).ok();
+    FIELDS
+        .iter()
+        .map(|field| match row.as_ref().and_then(|row| row.get(field)) {
+            None => '-',
+            Some(serde_json::Value::Null) => 'z',
+            Some(serde_json::Value::Bool(_)) => 'b',
+            Some(serde_json::Value::Number(_)) => 'n',
+            Some(serde_json::Value::String(_)) => 's',
+            Some(serde_json::Value::Array(_)) => 'a',
+            Some(serde_json::Value::Object(_)) => 'o',
+        })
+        .collect()
+}
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Direction<'a> {
@@ -1207,7 +1256,7 @@ impl Kraken {
                     }
                 } else if let Some(raw) = msg.order
                     && let Ok(row) = serde_json::from_str::<OrderWire<'_>>(raw.get())
-                    && let Some(order) = self.map_order(cx, row)
+                    && let Ok(order) = self.map_order(cx, row)
                 {
                     if msg.is_cancel
                         && self.account.records.get(&order.id).is_some_and(|old| {
@@ -1290,9 +1339,12 @@ impl Kraken {
             self.account_order_removed(cx, id);
         }
     }
-    fn map_order(&self, cx: &Cx<'_, Pending>, row: OrderWire<'_>) -> Option<Order> {
-        if row.order_id.is_empty() || cx.store.market(&row.symbol).is_none() {
-            return None;
+    fn map_order(&self, cx: &Cx<'_, Pending>, row: OrderWire<'_>) -> Result<Order, &'static str> {
+        if row.order_id.is_empty() {
+            return Err("missing_order_id");
+        }
+        if cx.store.market(&row.symbol).is_none() {
+            return Err("market");
         }
         let typ = row.order_type.to_ascii_lowercase();
         let kind = match typ.as_str() {
@@ -1301,7 +1353,7 @@ impl Kraken {
             "trailing_stop" => OrderType::TrailingStopLoss,
             "lmt" | "limit" | "post" | "ioc" | "fok" => OrderType::Limit,
             "mkt" | "market" => OrderType::Market,
-            _ => return None,
+            _ => return Err("order_type"),
         };
         let buy = match row.direction {
             Some(Direction::Number(0)) => true,
@@ -1310,13 +1362,13 @@ impl Kraken {
             Some(Direction::Text(t)) if t.eq_ignore_ascii_case("sell") => false,
             None if row.side.eq_ignore_ascii_case("buy") => true,
             None if row.side.eq_ignore_ascii_case("sell") => false,
-            _ => return None,
+            _ => return Err("direction"),
         };
         // The socket's qty is what is left, like REST's unfilledSize.
         let remaining = row.unfilled_size.unwrap_or(row.qty);
         let amount = remaining + row.filled_size;
         if amount <= 0.0 || remaining < 0.0 || row.filled_size < 0.0 || row.filled_size > amount {
-            return None;
+            return Err("quantity");
         }
         let trigger_type = match row.trigger_signal.as_ref() {
             "mark" => Some(StopTriggerType::MarkPrice),
@@ -1324,7 +1376,7 @@ impl Kraken {
             "spot" | "index" => Some(StopTriggerType::IndexPrice),
             _ => None,
         };
-        Some(Order {
+        Ok(Order {
             id: row.order_id.into_owned(),
             parent_id: None,
             status: OrderStatus::Open,
@@ -1505,6 +1557,8 @@ impl Kraken {
         request: &mut Request,
         id: &str,
         symbol: &str,
+        item: &str,
+        reason: &'static str,
     ) {
         let kept = cx
             .store
@@ -1512,16 +1566,22 @@ impl Kraken {
             .iter()
             .any(|o| (id.is_empty() || o.id == id) && !self.account.terminal.contains(&o.id));
         let level = if kept { Level::Warn } else { Level::Error };
-        if id.is_empty() {
-            let message = "Kraken skipped order row without an id".to_owned();
-            self.account.log_skip(cx, "order:".into(), level, message);
-            request.orders.reject_in(None, symbol);
-        } else {
-            let message = format!("Kraken skipped unmappable order {id}");
-            self.account
-                .log_skip(cx, format!("order:{id}"), level, message);
-            request.orders.reject_in(Some(id.to_owned()), symbol);
-        }
+        self.account.skip_logged.report_with_fields(
+            cx,
+            format!("order:{id}"),
+            level,
+            format!("Kraken skipped unmappable order ({reason})"),
+            vec![
+                (
+                    "order_row_reason",
+                    safe_cex_engine::log::Value::StaticStr(reason),
+                ),
+                ("order_row_fields", order_field_types(item).into()),
+            ],
+        );
+        request
+            .orders
+            .reject_in((!id.is_empty()).then(|| id.to_owned()), symbol);
     }
     /// Both legs of `symbol` keep their stored copies; an empty symbol protects all.
     /// A row with no stored copy is reported as an error: it commits as flat.
@@ -1556,14 +1616,22 @@ impl Kraken {
         match serde_json::from_str::<OrderWire<'_>>(item) {
             Ok(row) => {
                 if row.symbol.is_empty() {
-                    self.account_reject_order(cx, request, &row.order_id, "");
+                    self.account_reject_order(
+                        cx,
+                        request,
+                        &row.order_id,
+                        "",
+                        item,
+                        "missing_symbol",
+                    );
                 } else if cx.store.market(&row.symbol).is_some() {
                     let id = row.order_id.to_string();
                     let symbol = row.symbol.to_string();
-                    if let Some(order) = self.map_order(cx, row) {
-                        request.orders.push(order);
-                    } else {
-                        self.account_reject_order(cx, request, &id, &symbol);
+                    match self.map_order(cx, row) {
+                        Ok(order) => request.orders.push(order),
+                        Err(reason) => {
+                            self.account_reject_order(cx, request, &id, &symbol, item, reason)
+                        }
                     }
                 } else if self.skipped_markets.contains(row.symbol.as_ref()) {
                     request.valid = false;
@@ -1582,7 +1650,14 @@ impl Kraken {
                         cx.store,
                         Some(row.symbol.as_ref()),
                     );
-                    self.account_reject_order(cx, request, &row.order_id, &symbol);
+                    self.account_reject_order(
+                        cx,
+                        request,
+                        &row.order_id,
+                        &symbol,
+                        item,
+                        "wire_decode",
+                    );
                 }
             }
         }
