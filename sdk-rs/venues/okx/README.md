@@ -74,9 +74,9 @@ changed to add this venue companion event.
 
 ## Native write refusal diagnostics
 
-Failed, empty-message envelopes first use the existing borrowed ACK decoder.
-If JSON escapes prevent that decode, an owned-message fallback preserves the
-native `sCode`/`sMsg`; successful and nonempty-message envelopes never use it.
+One ACK decoder borrows plain messages and owns escaped messages. Owned text
+is accepted only for the existing failed-empty-envelope recovery; success and
+nonempty-message envelopes retain their original refusal and empty defaults.
 When a failed settings envelope has an empty `msg`, a sole failed ACK supplies
 the native code and message. Mixed settings rows retain Unknown and include the
 failed-row reasons; they never prove the whole call was refused. Nonempty

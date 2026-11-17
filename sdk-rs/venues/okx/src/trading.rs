@@ -408,15 +408,19 @@ const SIMPLE_MODE_HEDGE: &str =
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Ack<'a, Message: Default = &'a str> {
+struct Ack<'a> {
     #[serde(default)]
     ord_id: &'a str,
     #[serde(default)]
     algo_id: &'a str,
     #[serde(default)]
     s_code: &'a str,
-    #[serde(default)]
-    s_msg: Message,
+    #[serde(borrow, default = "empty_ack_message")]
+    s_msg: std::borrow::Cow<'a, str>,
+}
+
+fn empty_ack_message<'a>() -> std::borrow::Cow<'a, str> {
+    std::borrow::Cow::Borrowed("")
 }
 
 impl Okx {
@@ -1675,31 +1679,18 @@ impl Okx {
             Ok(envelope) => envelope,
             Err(e) => return self.unproven(cx, request, &e.to_string()),
         };
-        let borrowed_acks = envelope
+        let acks = envelope
             .data
-            .and_then(|data| serde_json::from_str::<Vec<Ack<'_>>>(data.get()).ok());
-        // Recover escaped rejection text only for a failed, empty-msg envelope.
-        // Successful and nonempty-msg envelopes keep their original decoder.
-        let decoded_acks =
-            if borrowed_acks.is_none() && envelope.code != "0" && envelope.msg.is_empty() {
-                envelope
-                    .data
-                    .and_then(|data| serde_json::from_str::<Vec<Ack<'_, String>>>(data.get()).ok())
-            } else {
-                None
-            };
-        let Some(acks) = borrowed_acks.or_else(|| {
-            decoded_acks.as_ref().map(|acks| {
-                acks.iter()
-                    .map(|ack| Ack {
-                        ord_id: ack.ord_id,
-                        algo_id: ack.algo_id,
-                        s_code: ack.s_code,
-                        s_msg: ack.s_msg.as_str(),
-                    })
-                    .collect()
-            })
-        }) else {
+            .and_then(|data| serde_json::from_str::<Vec<Ack<'_>>>(data.get()).ok())
+            .filter(|acks| {
+                // Owned text is the existing failed-empty-envelope recovery only.
+                // Success and nonempty-msg envelopes still refuse escaped messages.
+                (envelope.code != "0" && envelope.msg.is_empty())
+                    || acks
+                        .iter()
+                        .all(|ack| matches!(&ack.s_msg, std::borrow::Cow::Borrowed(_)))
+            });
+        let Some(acks) = acks else {
             if matches!(envelope.code, "0" | "2") {
                 return self.unproven(cx, request, "Malformed OKX write response");
             }
@@ -1719,7 +1710,7 @@ impl Okx {
         step.unknown_row = acks.iter().position(|ack| {
             (!matches!(ack.s_code, "" | "0")
                 && matches!(
-                    CODES.verdict(&native(ack.s_code, ack.s_msg), Intent::Place),
+                    CODES.verdict(&native(ack.s_code, ack.s_msg.as_ref()), Intent::Place),
                     Verdict::Unknown(_)
                 ))
                 || (matches!(ack.s_code, "" | "0")
@@ -1945,7 +1936,7 @@ impl Okx {
                             requested.get(index).map_or("", Requested::id)
                         })
                     } else {
-                        BatchItem::Native(native(ack.s_code, ack.s_msg))
+                        BatchItem::Native(native(ack.s_code, ack.s_msg.as_ref()))
                     }
                 })
                 .collect();
@@ -2021,7 +2012,7 @@ impl Okx {
                         response.status,
                     )
                     .venue_code(ack.s_code)
-                    .venue_message(ack.s_msg)
+                    .venue_message(ack.s_msg.as_ref())
                 } else {
                     rejection(
                         write_failure_message(&envelope),
@@ -2452,7 +2443,7 @@ fn cancel_outcomes(
                     &CODES,
                     Intent::Cancel,
                     Released::Response(response),
-                    Some(&native(ack.s_code, ack.s_msg)),
+                    Some(&native(ack.s_code, ack.s_msg.as_ref())),
                 );
                 let result = if matches!(ack.s_code, "" | "0")
                     || verdict == Verdict::Satisfied(SatisfiedIntent::Cancel)
@@ -2470,7 +2461,7 @@ fn cancel_outcomes(
                         ack.s_code
                     ))
                     .venue_code(ack.s_code)
-                    .venue_message(ack.s_msg);
+                    .venue_message(ack.s_msg.as_ref());
                     if let Some(kind) = verdict.kind() {
                         error.kind = Some(kind);
                     }
@@ -2559,8 +2550,8 @@ fn native_refusal(
         .classify_write(
             context,
             &CODES,
-            Some(&native(ack.s_code, ack.s_msg)),
-            ack.s_msg,
+            Some(&native(ack.s_code, ack.s_msg.as_ref())),
+            ack.s_msg.as_ref(),
         )
         .map_err(|error| error.venue_error())?;
     let error = fact.error().clone();
