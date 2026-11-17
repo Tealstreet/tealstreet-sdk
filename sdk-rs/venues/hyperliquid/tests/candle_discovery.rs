@@ -327,3 +327,125 @@ fn an_expired_wait_cannot_send_or_complete_a_reused_command_id() {
     reply(&mut e, 1154., &core, "[]");
     assert_eq!(results(&prepared_now(&mut e), 109), vec![Ok("[]".into())]);
 }
+
+#[test]
+fn a_delisted_dex_row_refuses_even_while_another_row_needs_recovery() {
+    let (mut e, dexes) = partial();
+    assert!(results(&ask(&mut e, 1100., 110, "XYZ|GOLD-PERP", None), 110).is_empty());
+    reply(&mut e, 1200., &dexes, r#"[null,{"name":"xyz"}]"#);
+    let dex = request(&prepared_now(&mut e), "metaAndAssetCtxs");
+    reply(
+        &mut e,
+        1300.,
+        &dex,
+        r#"[{"universe":[{"name":"xyz:GOLD","szDecimals":2,"maxLeverage":20,"isDelisted":true},{"name":"xyz:SILVER","szDecimals":2,"maxLeverage":20}]},[{"midPx":"200","markPx":"200"},{"midPx":"bad"}]]"#,
+    );
+    assert_missing(&prepared_now(&mut e), 110);
+    assert_missing(&ask(&mut e, 1301., 111, "XYZ|GOLD-PERP", None), 111);
+}
+
+#[test]
+fn a_settled_missing_row_does_not_wait_for_an_unrelated_dex() {
+    let (mut e, dexes) = partial();
+    assert!(results(&ask(&mut e, 1100., 112, "XYZ|REMOVED-PERP", None), 112).is_empty());
+    reply(
+        &mut e,
+        1200.,
+        &dexes,
+        r#"[null,{"name":"xyz"},{"name":"other"}]"#,
+    );
+    let dex = request(&prepared_now(&mut e), "metaAndAssetCtxs");
+    reply(&mut e, 1300., &dex, DEX);
+    let actions = prepared_now(&mut e);
+    assert_missing(&actions, 112);
+    let other = request(&actions, "metaAndAssetCtxs");
+    assert!(other.body.as_deref().unwrap().contains("other"));
+}
+
+#[test]
+fn discovering_the_row_does_not_renew_its_http_deadline() {
+    let (mut e, dexes) = partial();
+    assert!(results(&ask(&mut e, 1100., 113, "XYZ|GOLD-PERP", Some(1000)), 113).is_empty());
+    reply(&mut e, 1200., &dexes, r#"[null,{"name":"xyz"}]"#);
+    let dex = request(&prepared_now(&mut e), "metaAndAssetCtxs");
+    reply(&mut e, 1300., &dex, DEX);
+    let actions = prepared_now(&mut e);
+    let candles = request(&actions, "candleSnapshot");
+    let timer = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == 2100. => Some(*timer),
+            _ => None,
+        })
+        .expect("HTTP keeps the original deadline after discovery wait");
+    e.handle(2100., Event::TimerFired { timer });
+    let terminal = results(&prepared_now(&mut e), 113);
+    assert_eq!(terminal.len(), 1);
+    assert_eq!(
+        terminal[0].as_ref().unwrap_err().kind,
+        Some(ErrorKind::Timeout)
+    );
+    reply(&mut e, 2101., &candles, "[]");
+    assert!(results(&prepared_now(&mut e), 113).is_empty());
+}
+
+#[test]
+fn a_malformed_dex_list_never_proves_absence() {
+    let (mut e, dexes) = partial();
+    let actions = ask(&mut e, 1100., 114, "XYZ|GOLD-PERP", Some(100));
+    assert!(results(&actions, 114).is_empty());
+    let timer = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1200. => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    reply(&mut e, 1150., &dexes, r#"[null,{"unexpected":"fixture"}]"#);
+    let actions = prepared_now(&mut e);
+    assert!(results(&actions, 114).is_empty());
+    no_candles(&actions);
+    e.handle(1200., Event::TimerFired { timer });
+    assert_eq!(
+        results(&prepared_now(&mut e), 114)[0]
+            .as_ref()
+            .unwrap_err()
+            .kind,
+        Some(ErrorKind::Timeout)
+    );
+}
+
+#[test]
+fn merged_spot_candles_wait_for_the_late_spot_catalogue() {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
+        public_data_only: true,
+        enable_spot_markets: true,
+        ..Default::default()
+    }));
+    e.start(1000.);
+    let actions = prepared_now(&mut e);
+    let meta = request(&actions, "metaAndAssetCtxs");
+    let spot = request(&actions, "spotMetaAndAssetCtxs");
+    reply(&mut e, 1000., &meta, CORE);
+    let dexes = request(&prepared_now(&mut e), "perpDexs");
+    assert!(results(&ask(&mut e, 1100., 115, "UBTC/USDC", None), 115).is_empty());
+    reply(&mut e, 1200., &dexes, "[null]");
+    let actions = prepared_now(&mut e);
+    assert!(results(&actions, 115).is_empty());
+    no_candles(&actions);
+    reply(
+        &mut e,
+        1300.,
+        &spot,
+        r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"UBTC","index":1,"szDecimals":5,"fullName":"Unit Bitcoin"}],"universe":[{"name":"@1","tokens":[1,0],"index":1}]},[{"coin":"@1","midPx":"60000","markPx":"60010","prevDayPx":"59000","dayNtlVlm":"1000"}]]"#,
+    );
+    let candles = request(&prepared_now(&mut e), "candleSnapshot");
+    assert_eq!(
+        candles.body.as_deref(),
+        Some(
+            r#"{"type":"candleSnapshot","req":{"coin":"@1","interval":"1m","startTime":0,"endTime":60000}}"#
+        )
+    );
+    reply(&mut e, 1400., &candles, "[]");
+    assert_eq!(results(&prepared_now(&mut e), 115), vec![Ok("[]".into())]);
+}

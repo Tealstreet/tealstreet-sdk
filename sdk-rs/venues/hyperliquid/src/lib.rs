@@ -1,5 +1,6 @@
 //! Hyperliquid perpetuals: typed, deterministic state machines without I/O.
 mod account;
+mod candle_read;
 mod history;
 pub mod sign;
 mod socket_codec;
@@ -107,6 +108,7 @@ pub enum Pending {
     Dexs {
         dexs: Vec<(String, u32)>,
         index: u32,
+        valid: bool,
     },
     ManagedCandles(Box<ManagedCandleRead>),
     ManagedInfo(Box<ManagedInfoRead>),
@@ -194,6 +196,10 @@ pub struct Hyperliquid {
     connection: Connection,
     books: HashMap<String, Ladder>,
     candles: HashMap<(String, Interval), usize>,
+    waiting_candles: Vec<candle_read::WaitingCandle>,
+    candle_dex_catalog_complete: bool,
+    candle_complete_scopes: HashSet<String>,
+    candle_excluded: HashSet<String>,
     /// Newest trade time per watched symbol whose `last` is now its trade price;
     /// until its first trade, and for every other symbol, `last` is the mid.
     trade_last: HashMap<String, f64>,
@@ -236,6 +242,10 @@ impl Hyperliquid {
             connection: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
+            waiting_candles: Vec::new(),
+            candle_dex_catalog_complete: false,
+            candle_complete_scopes: HashSet::new(),
+            candle_excluded: HashSet::new(),
             trade_last: HashMap::new(),
             assets: HashMap::new(),
             isolated_only: HashSet::new(),
@@ -569,6 +579,7 @@ impl Hyperliquid {
                 Pending::Dexs {
                     dexs: Vec::new(),
                     index: 0,
+                    valid: true,
                 },
             );
         } else {
@@ -1823,8 +1834,11 @@ impl Venue for Hyperliquid {
                     self.core_discovery_incomplete = !complete;
                 }
                 if complete {
+                    self.candle_complete_scopes.insert(dex.to_ascii_lowercase());
                     self.startup.succeeded(cx, &(dex.clone(), offset));
                 } else {
+                    self.candle_complete_scopes
+                        .remove(&dex.to_ascii_lowercase());
                     self.startup.failed(cx, (dex.clone(), offset));
                 }
                 // A changed shared identity/index may affect another scope. Ordinary
@@ -1859,6 +1873,11 @@ impl Venue for Hyperliquid {
                     .iter()
                     .any(|coin| coin.split_once(':').map_or("", |(scope, _)| scope) != dex);
                 if valid {
+                    self.candle_excluded
+                        .extend(excluded.iter().map(|coin| coin.to_ascii_lowercase()));
+                    for market in &markets {
+                        self.candle_excluded.remove(&market.id.to_ascii_lowercase());
+                    }
                     for (index, meta) in instruments.iter().enumerate() {
                         let Some(meta) = meta else {
                             continue;
@@ -1893,7 +1912,8 @@ impl Venue for Hyperliquid {
                     self.advance_scope(cx, &dex);
                 }
             }
-            Pending::Dexs { dexs, .. } => {
+            Pending::Dexs { dexs, valid, .. } => {
+                self.candle_dex_catalog_complete = valid;
                 self.dex_names = dexs.iter().map(|(d, _)| d.clone()).collect();
                 self.dex_queue = dexs.into();
                 self.next_dex(cx);
@@ -1988,10 +2008,12 @@ impl Venue for Hyperliquid {
                 }
                 *stage = stage.saturating_add(1);
             }
-            Pending::Dexs { dexs, index } => {
+            Pending::Dexs { dexs, index, valid } => {
                 let position = *index;
                 *index += 1;
-                if let Ok(Some(dex)) = serde_json::from_str::<Option<Dex>>(item)
+                let parsed = serde_json::from_str::<Option<Dex>>(item);
+                *valid &= parsed.is_ok();
+                if let Ok(Some(dex)) = parsed
                     && position > 0
                     && (!self.options.testnet
                         || ["vntls", "xyz", "VOLMEX", "flx"].contains(&dex.name.as_str()))
@@ -2067,6 +2089,9 @@ impl Venue for Hyperliquid {
         self.discard_history_owner(owner);
         self.account.fresh_positions.retired(owner);
     }
+    fn finish_deferred_commands(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.resume_candle_reads(cx);
+    }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
@@ -2098,6 +2123,7 @@ impl Venue for Hyperliquid {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.candle_discovery_timer(cx, timer);
         self.private_snapshot_timer(cx, timer);
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
@@ -2202,25 +2228,16 @@ impl Venue for Hyperliquid {
                     let _ = cx.fail_context(&context, interval.unsupported("Hyperliquid"));
                     return;
                 }
-                let Some(coin) = self.coin(cx, &symbol) else {
-                    let _ = cx.fail_context(&context, "Market not found");
-                    return;
+                let read = candle_read::CandleQuery {
+                    context,
+                    symbol,
+                    interval,
+                    limit,
+                    from_ms,
+                    to_ms,
+                    now: cx.protocol_now(),
                 };
-                let Some(body) =
-                    candle_body(cx.protocol_now(), coin, interval, limit, from_ms, to_ms)
-                else {
-                    let _ = cx.fail_context(&context, "Invalid candle time range");
-                    return;
-                };
-                self.queue_candles(
-                    cx,
-                    body,
-                    Box::new(ManagedCandleRead {
-                        context,
-                        candles: Vec::new(),
-                        valid: true,
-                    }),
-                );
+                self.start_candle_read(cx, read);
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
             Command::FetchLeverage { symbol, .. } if !self.spot => self.fetch_leverage(cx, symbol),
