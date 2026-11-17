@@ -18,8 +18,10 @@ certification instructions are not current CI requirements.
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
 BingX Spot qualification adds independent Spot public/private cases to the `bingx` suite.
-The nondefault `bingx-spot-replay` WASM feature exports a fixed-credential fixture constructor;
-normal factories still refuse Spot. Shipped family size checks run before the fixture build.
+The admission candidate replays Spot through the normal constructor in the BingX family.
+The nondefault `bingx-spot-replay` feature retains a fixed-credential fixture export,
+but production parity does not select it. Live smoke and release remain separate gates.
+Shipped family size checks run before the optional fixture build.
 The ordinary BingX family includes the existing book and symbol-cancel input
 codecs. Offline production probes run through the shipped/fixture admission
 entry point and require no dispatch of unadvertised commands; perpetual capability
@@ -28,6 +30,24 @@ flags and the Spot admission/smoke gates remain independent.
 WASM venue caps retain both parents' measured floors. Fresh compositions must
 retain at least 10 KiB above their optimized web/Node measurement, rounded up
 to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
+
+#3599 links `Engine<BingxSpot>` under Sam's 2026-11-17 decision (h). Canonical
+combined web/Node at `657903ad6b2095ed7145c105f847ed179a50210e` measure 17,909,819 B;
+its historical 17,921,024 B ceiling retained 11,205 B reserve and the 17 MiB floor.
+Future combined changes require a fresh optimized measurement plus at least
+10 KiB rounded up to KiB; required coverage and executed combined consumers remain gates.
+
+The clean e009 integration has the same tree as CI bdc55d20 in run 44089335343,
+job 134060777063: optimized combined web/Node 17,917,521 B. Its 17,928,192 B
+ceiling retains 10,671 B reserve and both earlier combined floors. Native
+REST-book conformance uses mainnet only for BingX Spot, which has no testnet;
+requests are captured without transport and testnet Unsupported/NotSent remains tested.
+
+Fresh canonical strix builds at `44f9dedd` measure combined web/Node 17,918,873 B,
+1,352 B above that separate CI measurement. The approved 17,929,216 B ceiling
+uses the maximum plus 10 KiB rounded up to KiB, retains 10,343 B reserve and
+all prior floors. The BingX family measures 2,411,142 B; its unchanged
+2,421,760 B cap retains 10,618 B. Neither measurement substitutes for final-head CI.
 
 TxFlow agent refresh #3314 at merge 9bb43250830d measures 2,147,684 bytes;
 refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its

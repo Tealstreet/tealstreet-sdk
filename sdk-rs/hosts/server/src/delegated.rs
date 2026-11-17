@@ -491,10 +491,13 @@ pub(crate) mod tests {
             "okx",
             "kucoin",
             "kucoinspot",
+            "bingxspot",
         ] {
             assert!(enabled(venue), "{venue}");
         }
-        for venue in ["txflow", "bingxspot", "", "BYBIT", "unknown"] {
+        // Spot now has a mainnet origin (#3599); its absent testnet stays refused.
+        assert!(safe_cex_native::resolve::rest_base_url("bingxspot", true).is_err());
+        for venue in ["txflow", "", "BYBIT", "unknown"] {
             assert!(!enabled(venue), "{venue}");
         }
     }

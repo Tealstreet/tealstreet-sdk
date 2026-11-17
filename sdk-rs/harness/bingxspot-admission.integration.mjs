@@ -6,13 +6,16 @@ import './bingx-command-codecs.integration.mjs';
 const module = await loadEngine();
 const fixtureBuild = process.env.BINGX_SPOT_FIXTURE === '1';
 
-test('every normal Spot constructor still refuses before an engine exists', () => {
-  for (const options of [{}, { publicDataOnly: true }, { testnet: true }, { key: 'replay-key', secret: 'replay-secret' }]) {
-    assert.throws(() => new module.WasmEngine('bingxspot', JSON.stringify(options)), error => {
-      assert.match(error.message, /unsupported venue: bingxspot/);
-      return true;
-    });
+test('ordinary Spot factories construct public and local-key accounts', () => {
+  for (const options of [{ publicDataOnly: true }, { key: 'replay-key', secret: 'replay-secret' }]) {
+    const engine = new module.WasmEngine('bingxspot', JSON.stringify(options));
+    assert.equal(typeof engine.start, 'function');
+    engine.free();
   }
+});
+test('Spot testnet is refused before an engine exists', () => {
+  assert.throws(() => new module.WasmEngine('bingxspot', JSON.stringify({ publicDataOnly: true, testnet: true })),
+    /BingX Spot testnet is unsupported/);
 });
 
 test('only the explicit fixture build exports the fixed-credential constructor', () => {

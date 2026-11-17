@@ -24,7 +24,11 @@ checks separately validate signatures, request economics and Spot subscriptions.
 The nondefault WASM feature `bingx-spot-replay` exports
 `bingxSpotReplayFixture(publicDataOnly)`. It constructs the real native Spot
 engine with fixed fixture credentials; it accepts no key, endpoint or venue.
-Normal TS/WASM/native factories and visibility metadata remain closed. CI checks
+The admission candidate uses the ordinary production constructor in replay and
+conformance; no fixture-only refusal exempts Spot. The shipped BingX feature
+includes the existing symbol-cancel and order-book command codecs. Unsupported
+Spot testnet is checked separately. Live-key smoke still blocks this draft.
+CI checks
 the shipped family's size and absence of the fixture export before building and
 archiving a separate fixture module for correctness replay. The measurement job
 also checks shipped size before its fixture rebuild and seals the actual module

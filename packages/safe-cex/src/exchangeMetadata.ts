@@ -1090,7 +1090,7 @@ const BingxMetadata: ExchangeMetadata = {
   },
 };
 
-// Native/fixture-only. SDK admission follows live-key transport smoke validation.
+// LOCAL Spot admission candidate; release is held on the approved live smoke.
 const BingxSpotMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   exchangeName: 'bingxspot',
@@ -1099,9 +1099,9 @@ const BingxSpotMetadata: ExchangeMetadata = {
   lightLogo: BingxMetadata.lightLogo,
   darkLogo: BingxMetadata.darkLogo,
   refLink: BingxMetadata.refLink,
-  enabled: false,
-  enabledInDev: false,
-  enableInPreview: false,
+  enabled: true,
+  enabledInDev: true,
+  enableInPreview: true,
   hasEmptyPositions: true,
   positionModes: [PositionMode.OneWay],
   marginTypes: [MarginType.Isolated],

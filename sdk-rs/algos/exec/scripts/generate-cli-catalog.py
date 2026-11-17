@@ -56,7 +56,7 @@ def property_value(name, field):
     return property_value(parent, field) if parent else None
 mapping = metadata.split("export const exchangeMetadata:",1)[1].split("} = {",1)[1].split("};",1)[0]
 venues = re.findall(r"^\s*['\"]?([a-z0-9-]+)['\"]?: (\w+),", mapping, re.M)
-# Include fixture-only BingX Spot in the full roster; enabled filtering remains below.
+# Include admitted BingX Spot in the full roster; enabled filtering remains below.
 assert len(venues) == 48
 exchanges = []
 for venue, name in venues:

@@ -29,8 +29,8 @@ test('authorized BingX Spot profile has isolated credentials and only Spot trans
   assert.equal(profile.minimal, true);
   assert.equal(profile.postOnly, true);
   assert.equal(profile.options.testnet, false);
-  assert.throws(() => betaVenueFamily('bingxspot'), /not available/);
-  assert.throws(() => venueOf('bingxspot'), /unknown venue/);
+  assert.equal(betaVenueFamily('bingxspot'), 'bingx');
+  assert.equal(venueOf('bingxspot').rust, 'bingxspot');
   for (const [method, path] of [['GET', '/openApi/spot/v1/common/symbols'],
     ['POST', '/openApi/spot/v1/trade/order'], ['POST', '/openApi/spot/v1/trade/cancel'],
     ['POST', '/openApi/spot/v1/trade/cancelOpenOrders'], ['POST', '/openApi/user/auth/userDataStream'],

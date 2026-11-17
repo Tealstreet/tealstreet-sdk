@@ -103,13 +103,15 @@ fn full_metadata_native_fields_unified_mobile_and_domains() {
 }
 
 #[test]
-fn bingx_spot_metadata_and_symbol_conversion_stay_separate_and_disabled() {
+fn bingx_spot_metadata_and_symbol_conversion_stay_separate_and_admitted() {
     let spot: ExchangeName = serde_json::from_str("\"bingxspot\"").unwrap();
     assert_eq!(serde_json::to_value(&spot).unwrap(), "bingxspot");
     let metadata = get_exchange_metadata("bingxspot", false).unwrap();
-    assert!(!metadata.enabled);
-    assert!(!metadata.enabled_in_dev);
-    assert_eq!(metadata.enable_in_preview, Some(false));
+    // #3599 admits the Spot name; network and symbol-conversion guards remain.
+    assert!(metadata.enabled);
+    assert!(metadata.enabled_in_dev);
+    assert_eq!(metadata.enable_in_preview, Some(true));
+    assert!(!metadata.supports_testnet);
     assert_eq!(
         safe_cex_types::symbol_converter::to_binance("BTCUSDT", &spot),
         "BTCUSDT"

@@ -14,7 +14,7 @@ test('Spot uses the independent Spot oracle, with no perpetual adapter fallback'
   const spot = replayVenueOf('bingxspot');
   assert.equal(spot.rust, 'bingxspot');
   assert.equal(spot.ts.className, 'BingxSpotReplayExchange');
-  assert.equal(spot.rustFixture, 'bingxSpotReplayFixture');
+  assert.equal(spot.rustFixture, undefined, 'parity must exercise the admitted production constructor');
   assert(spot.ts.module.endsWith('/bingxspot-reference.mjs'));
   const adapter = readFileSync(new URL('./bingxspot-reference.mjs', import.meta.url), 'utf8');
   assert.match(adapter, /reference\/bingxspot\/bingxspot\.exchange\.ts/);

@@ -10,7 +10,18 @@ validateWasmBudgetSource(readFileSync(new URL(import.meta.url), 'utf8'));
 // Single-venue family bundles: 1.28125 MiB (RUST_WASM_FAMILIES.md), raised from
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
 // total package size; Sam raised the combined ceiling to 17 MiB on 2026-11-06 after #3140 measured 16,778,652 B.
-export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_792 });
+
+// #3599 / 657903ad6b2095ed7145c105f847ed179a50210e: optimized combined web/Node 17,909,819 B.
+// Sam's 2026-11-17 decision (h) approves BingX Spot; linking Engine<BingxSpot> needs this measured reserve.
+// Retain the historical 17 MiB floor; future changes must remeasure and retain >=10 KiB, rounded up to KiB.
+
+// #3599 e009 integration: 17,917,521 B web/Node (CI 44089335343/job134060777063; same tree as 356be2e3).
+// Sam's 2026-11-17 (h) Spot admission retains measured +10 KiB, rounded up; prior 17 MiB/17,921,024 floors stay.
+// Future compositions must remeasure canonical web/Node outputs and retain those floors and >=10 KiB reserve.
+// #3599 fresh 44f9dedd canonical strix web/Node: 17,918,873 B; CI above: 17,917,521 B.
+// Use max(both) +10 KiB rounded to KiB; retain the historical 17,928,192 B floor and all earlier floors.
+// Sam's (h) admission approval applies; future changes must repeat both measurements before raising this guard.
+export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_929_216 });
 // #2219 Base64Url/EvmHex signing on the #2208 tip: CI Bitget 1,482,166 rounded up to KiB (overseer ceiling 1448 KiB);
 // #2224 serial call pacing: CI 1,482,920, +1 KiB under the 2 KiB shared-code rule.
 // AsterDEX: managed sockets (#2212) measured 1,384,485 in CI, within the standing 5% venue
@@ -342,10 +353,16 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3273 third merge 47a277eb4a6b + b86a48664ac8: optimized web/Node 2,164,521 B.
   // Rust1.99, bindgen0.2.129, Binaryen132, two required -Oz passes; build.sh --venue bingx.
   // Measured + 10 KiB rounded up; retain both parent floors and all CI provenance.
+  // Spot admission at 1349bbf32b965: optimized web/Node 2,386,785 B, SHA939ce5f3e86d.
+  // Strix build.sh --venue bingx: Rust1.99, bindgen0.2.129, Binaryen132, two -Oz passes.
+  // Measured maximum + 10 KiB rounded to KiB; retain every historical floor.
   // Shared command codecs: optimized web/Node 2,168,354 B, SHA aeab98147da32f70.
   // Rust1.99/bindgen0.2.129/Binaryen132, canonical family build with two -Oz passes.
   // Maximum + 10 KiB rounded to KiB; retain every historical floor.
-  bingx: 2_179_072,
+  // #3599 merge 55c55027b0bd: optimized web/Node 2,411,014 B, SHA b3154650e22161c8.
+  // Canonical Rust1.99/bindgen0.2.129/Binaryen132 build.sh family, two required -Oz passes.
+  // Round maximum + 10 KiB up to KiB; retain both parent floors and histories.
+  bingx: 2_421_760,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
   // #3426 run 43187677592, job 131079474589, artifact 13930235036, CI source b3c4cf6212e6.

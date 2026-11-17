@@ -6,7 +6,6 @@ const publicPaths = new Set(['/openApi/spot/v1/common/symbols', '/openApi/spot/v
   '/openApi/spot/v2/quote/klines', '/openApi/spot/v1/market/depth']);
 export const bingxspot = {
   rust: 'bingxspot',
-  rustFixture: 'bingxSpotReplayFixture',
   virtualPrivateClock: true,
   ts: { module: './bingxspot-reference.mjs', className: 'BingxSpotReplayExchange', name: 'bingxspot' },
   privateSocket: '?listenKey=',

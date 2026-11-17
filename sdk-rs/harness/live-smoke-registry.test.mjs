@@ -5,21 +5,15 @@ import { LIVE_SMOKE_VENUES, liveSmokeCredentialSets, liveSmokeProfile } from './
 import { betaVenueFamily } from '../hosts/wasm/js/beta-venues.mjs';
 import { expectedGateCases } from './ci-gate-suites.mjs';
 
-test('fixture qualification stays in offline replay and out of ordinary smoke/record lookup', () => {
+test('admitted Spot uses production replay while manual smoke stays separately authorized', () => {
   const fixtures = Object.keys(VENUES).filter(name => VENUES[name].rustFixture);
-  assert.deepEqual(fixtures, ['bingxspot']);
-  const credentialVenues = liveSmokeCredentialSets().flatMap(set => set.venues);
-  for (const name of fixtures) {
-    assert.equal(replayVenueOf(name), VENUES[name], 'qualification consumes the original independent adapter');
-    assert.throws(() => venueOf(name), /unknown venue/);
-    assert.throws(() => betaVenueFamily(name), /not available/);
-    assert.equal(LIVE_SMOKE_VENUES.includes(name), false);
-    assert.equal(credentialVenues.includes(name), false);
-  }
-  for (const name of Object.keys(VENUES).filter(name => !VENUES[name].rustFixture)) {
-    assert.equal(venueOf(name), replayVenueOf(name), name);
-  }
-  assert.equal(replayVenueOf('bingxspot').rustFixture, 'bingxSpotReplayFixture');
+  assert.deepEqual(fixtures, [], 'production replay must not use qualification constructors');
+  assert.equal(venueOf('bingxspot'), replayVenueOf('bingxspot'));
+  assert.equal(betaVenueFamily('bingxspot'), 'bingx');
+  assert.equal(LIVE_SMOKE_VENUES.includes('bingxspot'), false);
+  assert.equal(liveSmokeCredentialSets().some(set => set.venues.includes('bingxspot')), false);
+  for (const name of Object.keys(VENUES)) assert.equal(venueOf(name), replayVenueOf(name), name);
+  assert.equal(replayVenueOf('bingxspot').rustFixture, undefined);
   assert.deepEqual(expectedGateCases('bingx').map(c => c.venue), ['bingx', 'bingx', 'bingxspot', 'bingxspot']);
 });
 
@@ -41,7 +35,7 @@ test('Spot qualification never authorizes an ordinary profile or credential acce
   }
   assert.equal(reads, 0);
   // The existing explicitly authorized smoke-only profile remains available,
-  // with separate Spot credentials and without admission to the ordinary lookup.
+  // with separate Spot credentials; ordinary factory admission is independent of smoke authorization.
   const profile = liveSmokeProfile('bingxspot', 'mainnet', {}, { enableBingxSpot: true, authorized: true,
     credentials: { KEY: 'fixture-spot-key', SECRET: 'fixture-spot-secret' } });
   assert.equal(profile.credentialEnv.key, 'RUST_LIVE_SMOKE_BINGX_SPOT_MAINNET_KEY');

@@ -44,6 +44,9 @@ turn Hosted Server off to use their API key in the browser. Refused `payloadSign
 accounts receive neutral delegated-signing wording. Both use the venue display
 name and retain `unsupported` / `notSent` before I/O.
 Robinhood is admitted through the existing Lighter family and remote-signing policy; its preview/production visibility flags are unchanged.
+BingX Spot admission uses the existing BingX family and HMAC signing policy.
+Its draft release hold requires funded Spot smoke and renewal proof; server
+private startup and COSIGNED ownership readiness are not enabled by admission.
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.
 

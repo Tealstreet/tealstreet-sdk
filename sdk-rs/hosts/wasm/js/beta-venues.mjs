@@ -17,6 +17,7 @@ const betaVenues = Object.freeze({
   binancepm: { family: 'binance' },
   binancespot: { family: 'binance' },
   bingx: { family: 'bingx' },
+  bingxspot: { family: 'bingx' },
   bitget: { family: 'bitget' },
   bitgetinverse: { family: 'bitget' },
   bitgetusdc: { family: 'bitget' },

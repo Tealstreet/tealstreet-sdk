@@ -169,38 +169,35 @@ async fn every_unhosted_venue_refuses_before_mutating_a_running_cosigned_account
             // Options now has a mainnet origin; refusal controls must remain unsupported.
             assert!(crate::delegated::enabled("binanceoptions"));
             for venue in ["hyrotrader", "txflow", "bingxspot", "unknown"] {
-                if venue == "hyrotrader" {
-                    assert_eq!(
-                        safe_cex_native::resolve::rest_base_url(venue, false),
-                        Ok("https://sim-tealstreet.hyro.site")
-                    );
-                    assert_eq!(
-                        refuse_unhosted(venue),
-                        Ok(()),
-                        "mainnet now has the canonical hosted endpoint map"
-                    );
-                    // Hyro mainnet is supported; its missing testnet remains the negative control.
+                // Both mainnets have origins; keep them as missing-testnet controls.
+                let mainnet = match venue {
+                    "hyrotrader" => Some("https://sim-tealstreet.hyro.site"),
+                    "bingxspot" => Some("https://open-api.bingx.com"),
+                    _ => None,
+                };
+                if let Some(origin) = mainnet {
+                    assert_eq!(safe_cex_native::resolve::rest_base_url(venue, false), Ok(origin));
+                    assert_eq!(refuse_unhosted(venue), Ok(()));
+                    assert!(safe_cex_native::resolve::rest_base_url(venue, true).is_err());
                     init.testnet = Some(true);
                 } else {
                     assert!(
                         safe_cex_native::resolve::rest_base_url(venue, false).is_err(),
                         "{venue}: refusal control must lack a hosted origin"
                     );
-                }
-                init.exchange_name = venue.into();
-                if venue != "hyrotrader" {
                     init.testnet = None;
                 }
-                let expected = if venue == "hyrotrader" {
-                    "hyrotrader cannot run on the Hosted server. Turn Hosted off to use this account."
+                init.exchange_name = venue.into();
+                let expected = if mainnet.is_some() {
+                    format!("{venue} cannot run on the Hosted server. Turn Hosted off to use this account.")
                 } else {
-                    "DELEGATED is not enabled for this venue"
+                    "DELEGATED is not enabled for this venue".to_owned()
                 };
                 let result = registry
                     .obtain_delegated("A", &init, 8, None, Arc::new(|_| true), pair())
                     .await;
                 assert!(
-                    matches!(result, Err(ref e) if e == expected)
+                    matches!(result, Err(ref e) if e == &expected)
                 );
                 assert!(account.handle.disposal_cause().is_none());
                 assert!(!registry.holds(&account, 8));

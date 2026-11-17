@@ -267,7 +267,7 @@ it('enumerates every declared venue outside the beta roster', () => {
   // restored by #3502; #3317 dropped a live venue without a product decision.
   expect(venues).toContain('bitrue');
   // restored by #3502; #3317 dropped a live venue without a product decision.
-  expect(outsideBeta.sort()).toEqual(['bingxspot', 'polymarket', 'txflow', 'weex']);
+  expect(outsideBeta.sort()).toEqual(['polymarket', 'txflow', 'weex']);
   expect(rules.venues.hyperliquidspot).toMatchObject({ canSign: [['secret', 'remoteSigner']] });
   expect(rules.venues.hyperliquidspot).not.toHaveProperty('privateEligible');
 });

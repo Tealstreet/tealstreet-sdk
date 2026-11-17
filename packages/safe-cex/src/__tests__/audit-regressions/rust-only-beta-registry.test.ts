@@ -53,6 +53,7 @@ const expected = [
   'bitunix',
   'phemex',
   'bingx',
+  'bingxspot',
   'apexomni',
   'blofin',
   'cryptocom',
@@ -89,9 +90,11 @@ describe('Rust-only beta construction', () => {
     expect(getRegisteredExchangeNames()).toEqual(expected);
     // Robinhood now uses the same beta runtime as Lighter.
     // restored by #3502; #3317 dropped a live venue without a product decision.
-    expect(new Set(BETA_VENUES).size).toBe(44);
+    // #3599 adds the distinct Spot row; genuine OUT names retain their refusal tests.
+    expect(new Set(BETA_VENUES).size).toBe(45);
     // restored by #3502; #3317 dropped a live venue without a product decision.
     expect(out).not.toContain('bitrue');
+    expect(out).not.toContain('bingxspot');
     expect(out).toContain('polymarket');
   });
   it('constructs Rust for every IN name without an engine opt-in', async () => {
@@ -100,7 +103,8 @@ describe('Rust-only beta construction', () => {
       expect(await createExchange(name, { key: '', secret: '', publicDataOnly: true })).toBeInstanceOf(state.Rust);
     }
     // restored by #3502; #3317 dropped a live venue without a product decision.
-    expect(state.calls).toHaveLength(44);
+    // Spot now reaches the ordinary Rust constructor alongside the existing IN names.
+    expect(state.calls).toHaveLength(45);
     expect(state.calls.every(({ options }) => (options as { engine: string }).engine === 'rust')).toBe(true);
   });
   it('refuses OUT web/native loaders before loading a runtime', async () => {

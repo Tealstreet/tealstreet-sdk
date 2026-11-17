@@ -225,7 +225,9 @@ export function checkAdvertisedCommands(create, label) {
 
 // Construction data only; this does not say which capabilities any venue has.
 export function constructionProfiles(venue) {
-  const base = { publicDataOnly: true, testnet: true };
+  // Spot has no testnet: its admitted production constructor must reach conformance.
+  // Testnet refusal is checked separately; no returned request is sent by these probes.
+  const base = { publicDataOnly: true, testnet: venue !== 'bingxspot' };
   // TxFlow classifies public-only trading as Unsupported. Reach private
   // command ingress with a valid testnet setup, never a refusal exemption.
   // A 0x01-prefixed scalar is nonzero and below the secp256k1 order. This key

@@ -12,26 +12,14 @@ const names = readFileSync(new URL('../hosts/wasm/js/venues.mjs', import.meta.ur
   .match(/^\s+'?[a-z-]+'?: '[a-z]+',$/gm)
   .map((line) => line.trim().split(':')[0].replaceAll("'", ''));
 for (const venue of names) {
-  const fixtureOnly = venue === 'bingxspot';
-  test(`combined ${fixtureOnly ? 'fixture-only refusal' : 'capability ingress'}: ${venue}`, () => {
-    // The family map knows Spot for fixtures; live factory admission awaits smoke.
-    if (fixtureOnly) {
-      for (const options of [{}, { publicDataOnly: true }, { testnet: true }]) {
-        const json = JSON.stringify(options);
-        for (const create of [
-          () => new module.WasmEngine(venue, json),
-          () => module.resolveConstruction(venue, json),
-        ]) {
-          assert.throws(create, (error) => {
-            assert.equal(error.message, `unsupported venue: ${venue}`);
-            assert.deepEqual(JSON.parse(error.venueError), {
-              message: `unsupported venue: ${venue}`, kind: 'unsupported', outcome: 'notSent',
-            });
-            return true;
-          });
-        }
-      }
-      return;
+  test(`combined capability ingress: ${venue}`, () => {
+    // Admission (#3599) uses ordinary construction, not a fixture-refusal exemption.
+    if (venue === 'bingxspot') {
+      const construction = JSON.parse(module.resolveConstruction(venue, JSON.stringify({ publicDataOnly: true })));
+      assert.equal(construction.bridge.spot, true);
+      assert.equal(construction.bridge.dispatchSigning, true);
+      assert.throws(() => new module.WasmEngine(venue, JSON.stringify({ publicDataOnly: true, testnet: true })),
+        /BingX Spot testnet is unsupported/);
     }
     for (const [profile, options] of constructionProfiles(venue).entries()) {
       const proofs = checkAdvertisedCommands(() => new module.WasmEngine(venue, JSON.stringify(options)), `combined/${venue}/profile${profile}`);

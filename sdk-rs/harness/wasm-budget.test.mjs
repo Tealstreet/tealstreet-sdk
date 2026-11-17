@@ -463,7 +463,7 @@ test('#3268 restage (run 42563664495 at d83accc10298) retains current measured h
 
 test('combined shipping build and standalone builds retain distinct fixed ceilings', () => {
   assert.equal(WASM_BUDGETS.venue, 1_343_488);
-  assert.equal(WASM_BUDGETS.combined, 17 * 1024 * 1024);
+  assert.equal(WASM_BUDGETS.combined, 17_929_216);
   for (const profile of Object.keys(WASM_BUDGETS)) {
     assert.equal(wasmBudgetError(WASM_BUDGETS[profile], profile), undefined);
     assert.match(wasmBudgetError(WASM_BUDGETS[profile] + 1, profile), /exceeds/);
@@ -475,12 +475,14 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 
 
 
-test('the approved combined ceiling accepts 17 MiB exactly and rejects the next byte', () => {
+test('the combined ceiling retains its approved 17 MiB history and current boundary', () => {
   for (const venue of [undefined, ...Object.keys(WASM_VENUE_OVERRIDES)]) {
     assert.equal(wasmBudgetError(16_778_652, 'combined', venue), undefined, '#3140 measured size');
     assert.equal(wasmBudgetError(17_825_791, 'combined', venue), undefined);
     assert.equal(wasmBudgetError(17_825_792, 'combined', venue), undefined);
-    assert.equal(wasmBudgetError(17_825_793, 'combined', venue), 'combined wasm 17825793 exceeds 17825792 bytes');
+    assert.equal(wasmBudgetError(WASM_BUDGETS.combined, 'combined', venue), undefined);
+    assert.equal(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', venue),
+      `combined wasm ${WASM_BUDGETS.combined + 1} exceeds ${WASM_BUDGETS.combined} bytes`);
   }
 });
 
@@ -4013,6 +4015,21 @@ test('#3579 merged Lighter family retains its current measured 10 KiB reserve', 
   assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
 });
 
+// Production BingX/Spot admission at 1349bbf32b9654487eb75ac79dbdf64265b72913.
+// Rust1.99, bindgen0.2.129, Binaryen132, build.sh --venue bingx (two -Oz passes).
+test('BingX Spot production constructor retains measured family reserve', () => {
+  const measured = 2_386_785; // Equal optimized web and Node maxima.
+  const sha256 = '939ce5f3e86d226e348defea2750e1375673f22fa656bd13fc856283f4daaf8c';
+  assert.match(sha256, /^[0-9a-f]{64}$/);
+  const minimum = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.bingx;
+  assert.ok(cap >= 2_174_976, 'retain every earlier BingX floor');
+  assert.ok(cap >= minimum, `BingX/Spot needs ${minimum} bytes including reserve`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bingx'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
+});
+
 // Fresh master 63f700d2 plus the ordinary BingX command codec gates.
 // Rust1.99/bindgen0.2.129/Binaryen132, canonical build.sh --venue bingx, two -Oz passes.
 test('BingX shared command codecs retain the measured optimized reserve', () => {
@@ -4026,4 +4043,67 @@ test('BingX shared command codecs retain the measured optimized reserve', () => 
   assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bingx'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
+});
+
+// #3599 merge 55c55027b0bd: canonical build.sh --venue bingx, Rust1.99/bindgen0.2.129/Binaryen132 twice-Oz.
+// Optimized web/Node SHA256 b3154650e22161c884c6328f4c705716907617048d7450c247b3964ad877745e.
+test('BingX Spot shared-codec admission retains fresh merged reserve', () => {
+  const measured = 2_411_014;
+  const minimum = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.bingx;
+  assert.equal(minimum, 2_421_760);
+  assert.ok(cap >= Math.max(2_397_184, 2_179_072, minimum), 'retain both parent floors and fresh reserve');
+  assert.ok(cap - measured >= 10 * 1024);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bingx'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
+});
+
+// #3599 exact 657903ad6b2095ed7145c105f847ed179a50210e, canonical default build.sh, twice-Oz.
+// Equal web/Node SHA256 0c6ad31d2407ad0a4c1f0993decd1a7dd6e2d439019e7822da037c4b5de484d3.
+test('BingX Spot combined admission retains the measured 657 reserve', () => {
+  const measured = 17_909_819;
+  const minimum = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_BUDGETS.combined;
+  assert.equal(minimum, 17_921_024);
+  assert.ok(cap >= minimum, 'retain the historical 657 combined maximum plus rounded 10 KiB reserve');
+  assert.ok(cap >= 17_825_792, 'retain the approved historical 17 MiB floor');
+  for (const venue of [undefined, ...Object.keys(WASM_VENUE_OVERRIDES)]) {
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'combined', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'combined', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'combined', venue), /exceeds/);
+  }
+});
+
+// #3599 clean e009 integration tree matches CI bdc55d20 (run 44089335343, job 134060777063).
+// Optimized web/Node SHA256 62122aa8364267ac49b304044ec5169cbc53e87ca29442568dd7b44e2c769dcd.
+test('BingX Spot master composition retains the measured combined reserve', () => {
+  const measured = 17_917_521;
+  const minimum = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_BUDGETS.combined;
+  assert.equal(minimum, 17_928_192);
+  assert.ok(cap >= minimum, 'retain the historical CI composition plus rounded 10 KiB reserve');
+  assert.ok(cap >= 17_921_024, 'retain the previous Spot combined floor');
+  for (const venue of [undefined, ...Object.keys(WASM_VENUE_OVERRIDES)]) {
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'combined', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'combined', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'combined', venue), /exceeds/);
+  }
+});
+
+// #3599 canonical build at 44f9dedd on strix: web/Node 17,918,873 B, twice-Oz.
+// SHA256 6de90cb9c17ef4439c84d2e362a04c4afc7ea6b4834feaf005924898d21133b4; CI remains a separate measurement.
+test('BingX Spot fresh local and CI maxima both retain combined reserve', () => {
+  const measured = Math.max(17_918_873, 17_917_521);
+  const minimum = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_BUDGETS.combined;
+  assert.equal(minimum, 17_929_216);
+  assert.equal(cap, minimum);
+  assert.ok(cap >= 17_928_192, 'retain every previous combined floor');
+  assert.ok(cap - measured >= 10 * 1024);
+  for (const venue of [undefined, ...Object.keys(WASM_VENUE_OVERRIDES)]) {
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'combined', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'combined', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'combined', venue), /exceeds/);
+  }
 });
