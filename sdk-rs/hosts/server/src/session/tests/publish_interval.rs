@@ -39,12 +39,13 @@ impl Venue for Updates {
         };
         match command {
             Command::FetchCandles { limit: Some(1), .. } => {
-                cx.store.update_ticker("BTCUSDT", |t| t.last = id as f64);
+                // Prices are fixture facts, independent of actor-remapped completion IDs.
+                cx.store.update_ticker("BTCUSDT", |t| t.last = 111.);
                 self.book.apply(BookSide::Bids, 99., 0.);
                 cx.book_changed("BTCUSDT");
             }
             Command::FetchCandles { limit: Some(2), .. } => {
-                cx.store.update_ticker("BTCUSDT", |t| t.mark = id as f64);
+                cx.store.update_ticker("BTCUSDT", |t| t.mark = 222.);
                 self.book.apply(BookSide::Bids, 98., 2.);
                 cx.book_changed("BTCUSDT");
             }
