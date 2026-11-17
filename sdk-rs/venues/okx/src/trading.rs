@@ -2429,6 +2429,8 @@ pub(crate) fn trade_reconciliation(
 /// Passive outcomes for an identity-validated native cancellation batch.
 /// Indices match the batch's request rows and its partial.failed_index.
 /// Use the engine's released-write verdict, including rate-limit uncertainty.
+#[cold]
+#[inline(never)]
 fn cancel_outcomes(
     response: &Response<'_>,
     acks: &[Ack<'_>],
@@ -2541,6 +2543,8 @@ fn unknown_outcome(mut error: VenueError) -> VenueError {
     error
 }
 
+#[cold]
+#[inline(never)]
 fn native_refusal(
     cx: &Cx<'_, Pending>,
     context: &Context,
