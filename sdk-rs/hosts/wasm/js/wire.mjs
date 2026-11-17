@@ -27,6 +27,13 @@ export const SECTION = {
   ACCOUNT_READ: 21,
   TICKER_OBSERVATIONS: 24,
   MESSAGE_HANDLER_STATS: 25,
+  SOCKET_HEALTH: 26,
+  ACTIVE_CHASERS: 27,
+  ACTIVE_TWAPS: 28,
+  ORDERS_RISK: 29,
+  DISPLAYED_POSITIONS: 30,
+  DISPLAYED_MARGIN: 31,
+  BALANCE_INFO: 32,
 };
 
 export const NONE = 0xffffffff;
@@ -241,6 +248,84 @@ export class Frame {
     if (!this.strings) throw new Error('missing STRINGS section for string reference');
     return this.strings.get(index);
   }
+
+  /** Decode one native replacement section without a JSON/wasm round trip. */
+  nativeStoreSection(kind) {
+    const section = this.first(kind);
+    if (!section) return undefined;
+    if ([...this.of(kind)].length !== 1) throw new Error('duplicate native store section');
+    const { view } = this;
+    let at = section.offset;
+    requireEnd(section, at + 4);
+    const end = at + 4 + view.getUint32(at, true);
+    at += 4;
+    requireEnd(section, end);
+    if (align8(end) !== section.offset + section.length) throw new Error('invalid native store section length');
+    const take = (n) => {
+      if (n < 0 || at + n > end) throw new Error('truncated native store value');
+      const offset = at;
+      at += n;
+      return offset;
+    };
+    const count = () => view.getUint32(take(4), true);
+    const text = () => {
+      const n = count();
+      const start = take(n * 2);
+      let out = '';
+      // Bounded calls also support large retained venue info on Hermes.
+      for (let i = 0; i < n; i += 4096) {
+        const units = [];
+        for (let j = i; j < Math.min(i + 4096, n); j++) units.push(view.getUint16(start + j * 2, true));
+        out += String.fromCharCode(...units);
+      }
+      return out;
+    };
+    const read = (depth) => {
+      if (depth > 128) throw new Error('native store nesting limit');
+      const tag = view.getUint8(take(1));
+      switch (tag) {
+        case 0: return undefined;
+        case 1: return null;
+        case 2: return false;
+        case 3: return true;
+        case 4: return view.getFloat64(take(8), true);
+        case 5: return text();
+        case 6: {
+          const n = count();
+          if (n > end - at) throw new Error('invalid native store array length');
+          const out = [];
+          for (let i = 0; i < n; i++) out.push(read(depth + 1));
+          return out;
+        }
+        case 7: {
+          const n = count();
+          if (n > (end - at) / 5) throw new Error('invalid native store object length');
+          const out = {};
+          for (let i = 0; i < n; i++) {
+            const key = text();
+            if (Object.prototype.hasOwnProperty.call(out, key)) throw new Error('duplicate native store key');
+            Object.defineProperty(out, key, { value: read(depth + 1), writable: true, enumerable: true, configurable: true });
+          }
+          return out;
+        }
+        default: throw new Error('invalid native store tag');
+      }
+    };
+    const value = read(0);
+    if (at !== end) throw new Error('trailing native store value bytes');
+    for (; at < section.offset + section.length; at++) {
+      if (view.getUint8(at) !== 0) throw new Error('invalid native store padding');
+    }
+    return value;
+  }
+
+  socketHealth() { return this.nativeStoreSection(SECTION.SOCKET_HEALTH); }
+  activeChasers() { return this.nativeStoreSection(SECTION.ACTIVE_CHASERS); }
+  activeTWAPs() { return this.nativeStoreSection(SECTION.ACTIVE_TWAPS); }
+  ordersRisk() { return this.nativeStoreSection(SECTION.ORDERS_RISK); }
+  displayedPositions() { return this.nativeStoreSection(SECTION.DISPLAYED_POSITIONS); }
+  displayedMargin() { return this.nativeStoreSection(SECTION.DISPLAYED_MARGIN); }
+  balanceInfo() { return this.nativeStoreSection(SECTION.BALANCE_INFO); }
 
   /** A synchronous read does not represent a fresh streaming observation. */
   accountRead() {
