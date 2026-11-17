@@ -224,7 +224,12 @@ async fn delegated_candidates_preserve_the_running_account() {
                 f.registry.held("alice", "acct", candidate.socket).is_none(),
                 "candidate refused"
             );
-            let expected = envelope::init_unverified("acct", false);
+            let reason_class = if case == "wrong-secret" {
+                envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions
+            } else {
+                envelope::InitRefusalReasonClass::Unknown
+            };
+            let expected = envelope::init_unverified("acct", false, reason_class);
             let expected = id.filter(|s| !s.is_empty()).map_or_else(
                 || expected.clone(),
                 |id| envelope::with_instance_id(expected.clone(), id),

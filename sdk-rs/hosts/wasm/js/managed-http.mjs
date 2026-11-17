@@ -1,4 +1,4 @@
-import { requestFailureFields } from './request-failure.mjs';
+import { requestFailureFields, transportFailureMessage } from './request-failure.mjs';
 import { bindGroup } from './managed-http-group.mjs';
 
 /** Closed transport preparation errors; arbitrary provider text never crosses the wire. */
@@ -210,8 +210,10 @@ export class ManagedHttp {
       host.stage(host.stageCauses.get(`http:${request}`), 'sent');
     } catch (error) {
       if (resource.phase === 'released' && this.live(token, resource)) {
+        const message = transportFailureMessage(error);
+        if (!this.live(token, resource)) return;
         this.failure(resource, 'network');
-        this.post(() => host.run(host.invoke(host.engine.httpFailed, request, 'HTTP transport request failed', host.transport.now())));
+        this.post(() => host.run(host.invoke(host.engine.httpFailed, request, message, host.transport.now())));
         this.cancel(token);
       } else this.fail(token, resource, preparationReason(error, 'invalid'));
       return;
@@ -238,10 +240,12 @@ export class ManagedHttp {
         this.assertCurrent(resource);
         return this.live(token, resource);
       });
-    } catch {
+    } catch (error) {
       if (this.live(token, resource)) {
+        const message = transportFailureMessage(error);
+        if (!this.live(token, resource)) return;
         this.failure(resource, 'network');
-        this.post(() => host.run(host.invoke(host.engine.httpFailed, request, 'HTTP transport request failed', host.transport.now())));
+        this.post(() => host.run(host.invoke(host.engine.httpFailed, request, message, host.transport.now())));
       }
     } finally {
       if (this.live(token, resource)) this.cancel(token);

@@ -253,7 +253,7 @@ test('BingX fixture workflow archives the measured candidate before CPU-miss col
   const put = (name, bytes) => { const path = resolve(root, name); fs.mkdirSync(resolve(path, '..'), { recursive: true }); fs.writeFileSync(path, bytes); };
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
   const workflow = fs.readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
-  const measurement = workflow.slice(workflow.indexOf('\n  gate:\n'), workflow.indexOf('\n  bitget-paired:\n'));
+  const measurement = workflow.slice(workflow.indexOf('\n  gate:\n'), workflow.indexOf('\n  result:\n'));
   const names = ['Build the venue wasm engine', 'Archive the matching CI replay engine',
     'Check the wasm size budget', 'Build the nondefault BingX Spot measurement engine'];
   const steps = measurement.split(/^      - /m).filter(step => names.some(name => step.startsWith(`name: ${name}\n`)));
