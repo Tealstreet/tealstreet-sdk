@@ -251,7 +251,7 @@ fn klines_headers(options: support::Options) -> Vec<(&'static str, String)> {
 
 #[test]
 fn managed_reads_keep_the_native_public_and_signed_header_vectors() {
-    let content = ("Content-Type", "application/json, charset=utf-8".to_owned());
+    let content = ("Content-Type", "application/json; charset=utf-8".to_owned());
     assert_eq!(
         klines_headers(support::Options::default()),
         [("X-SOURCE-KEY", "Tealstreet".to_owned()), content.clone()]

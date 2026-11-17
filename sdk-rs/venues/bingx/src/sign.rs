@@ -73,7 +73,7 @@ pub fn unsigned_headers(method: Method) -> &'static [(&'static str, &'static str
     } else {
         &[
             ("X-SOURCE-KEY", "Tealstreet"),
-            ("Content-Type", "application/json, charset=utf-8"),
+            ("Content-Type", "application/json; charset=utf-8"),
         ]
     }
 }
