@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../../packages/safe-cex/src/generated/StoreData.js';
 import type { Balance } from '../../../../packages/safe-cex/src/generated/Balance.js';
 export type { Balance } from '../../../../packages/safe-cex/src/generated/Balance.js';
 export type { CoinBalance } from '../../../../packages/safe-cex/src/generated/CoinBalance.js';
@@ -26,6 +27,13 @@ export const SECTION: {
   ACCOUNT_READ: 21;
   TICKER_OBSERVATIONS: 24;
   MESSAGE_HANDLER_STATS: 25;
+  SOCKET_HEALTH: 26;
+  ACTIVE_CHASERS: 27;
+  ACTIVE_TWAPS: 28;
+  ORDERS_RISK: 29;
+  DISPLAYED_POSITIONS: 30;
+  DISPLAYED_MARGIN: 31;
+  BALANCE_INFO: 32;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -306,6 +314,15 @@ export class Frame {
   orders(): OrderTable | undefined;
   positions(): PositionTable | undefined;
   balance(): Balance | undefined;
+  /** Complete replacement of the named section; undefined means absent/unchanged. */
+  socketHealth(): StoreData['socketHealth'] | undefined;
+  activeChasers(): StoreData['activeChasers'] | undefined;
+  activeTWAPs(): StoreData['activeTWAPs'] | undefined;
+  ordersRisk(): StoreData['ordersRisk'] | undefined;
+  displayedPositions(): StoreData['displayedPositions'] | undefined;
+  displayedMargin(): StoreData['displayedMargin'] | undefined;
+  /** null explicitly clears info; undefined means the section is absent. */
+  balanceInfo(): Balance['info'] | undefined;
   status(): Status | undefined;
   capabilities(): EngineCapabilities | undefined;
   settings(): SettingTable | undefined;
