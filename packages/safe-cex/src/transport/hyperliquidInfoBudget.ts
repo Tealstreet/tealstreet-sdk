@@ -354,6 +354,8 @@ export class HyperliquidInfoBudget {
     signal: AbortSignal,
     readClass: InfoReadClass = 'normal',
   ): Promise<InfoBudgetGrant> {
+    // A cancellation predating this stage is not an admission diagnosis.
+    const abortedBeforeAdmission = signal.aborted;
     readClass = readClassFor(body, readClass);
     const weight = hyperliquidInfoWeight(body);
     let waiterId: string | undefined;
@@ -411,7 +413,7 @@ export class HyperliquidInfoBudget {
       }
     } catch (error) {
       cancelWait();
-      throw infoAdmissionFailure(error);
+      throw abortedBeforeAdmission ? error : infoAdmissionFailure(error);
     }
   }
 
@@ -423,6 +425,8 @@ export class HyperliquidInfoBudget {
     send: () => T,
     wasSent: () => boolean = () => true,
   ): Promise<T> {
+    // A cancellation predating this stage is not an admission diagnosis.
+    const abortedBeforeAdmission = signal.aborted;
     const cost = grant.weight * MS_PER_WEIGHT;
     const readClass = grant.readClass ?? 'normal';
     const waiterId = grant.waiterId ?? `${dispatchRealm}:${++dispatchSequence}`;
@@ -504,7 +508,7 @@ export class HyperliquidInfoBudget {
         await waitUntil(decision.at, signal);
       }
     } catch (error) {
-      throw handoffStarted ? error : infoAdmissionFailure(error);
+      throw handoffStarted || abortedBeforeAdmission ? error : infoAdmissionFailure(error);
     } finally {
       grant.cancelWait?.();
       if (!dispatched) {
