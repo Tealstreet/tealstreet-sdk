@@ -255,7 +255,7 @@ mod tests {
                 out,
                 name,
                 &id,
-                id.as_str().unwrap(),
+                Some(id.as_str().unwrap()),
                 1,
                 Err(
                     json!({"message":"𐐀".repeat(20_000),"outcome":"unknown","unused":"large".repeat(20_000)}),
