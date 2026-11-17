@@ -32,6 +32,8 @@ pub const ACCOUNT: &str = "negative-join-fixture";
 pub const USER: &str = "negative-join-owner";
 const WAIT: Duration = Duration::from_secs(15);
 
+pub type WebsocketSession = Box<dyn FnMut(&str, &mut Observed) -> Vec<String> + Send>;
+
 pub trait Venue: Send + Sync + 'static {
     const NAME: &'static str;
     fn init() -> InitPayload;
@@ -54,6 +56,9 @@ pub trait Venue: Send + Sync + 'static {
     fn http_status(_reply: &Value) -> axum::http::StatusCode {
         axum::http::StatusCode::OK
     }
+    fn http_headers(_method: &Method, _uri: &Uri, _reply: &Value) -> HeaderMap {
+        HeaderMap::new()
+    }
     fn websocket(request: &Value, seen: &mut Observed) -> Value;
     fn initial_websocket_frames() -> Vec<String> {
         Vec::new()
@@ -61,6 +66,9 @@ pub trait Venue: Send + Sync + 'static {
     fn websocket_text(text: &str, seen: &mut Observed) -> Option<String> {
         let request = serde_json::from_str(text).expect("JSON venue WebSocket request");
         Some(Self::websocket(&request, seen).to_string())
+    }
+    fn websocket_session() -> WebsocketSession {
+        Box::new(|text, seen| Self::websocket_text(text, seen).into_iter().collect())
     }
 }
 
@@ -129,6 +137,7 @@ impl Fixture {
                     let seen = ws_seen.clone();
                     async move {
                         upgrade.on_upgrade(move |mut socket| async move {
+                            let mut session = V::websocket_session();
                             for text in V::initial_websocket_frames() {
                                 if socket
                                     .send(axum::extract::ws::Message::Text(text.into()))
@@ -138,18 +147,19 @@ impl Fixture {
                                     return;
                                 }
                             }
-                            while let Some(Ok(message)) = socket.recv().await {
+                            'messages: while let Some(Ok(message)) = socket.recv().await {
                                 let axum::extract::ws::Message::Text(text) = message else {
                                     continue;
                                 };
-                                let reply = V::websocket_text(&text, &mut seen.lock().unwrap());
-                                if let Some(reply) = reply
-                                    && socket
+                                let replies = session(&text, &mut seen.lock().unwrap());
+                                for reply in replies {
+                                    if socket
                                         .send(axum::extract::ws::Message::Text(reply.into()))
                                         .await
                                         .is_err()
-                                {
-                                    break;
+                                    {
+                                        break 'messages;
+                                    }
                                 }
                             }
                         })
@@ -167,7 +177,11 @@ impl Fixture {
                         };
                         let reply =
                             V::http(&method, &uri, &headers, &body, &mut seen.lock().unwrap());
-                        (V::http_status(&reply), axum::Json(reply))
+                        (
+                            V::http_status(&reply),
+                            V::http_headers(&method, &uri, &reply),
+                            axum::Json(reply),
+                        )
                     }
                 },
             );
