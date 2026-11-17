@@ -478,11 +478,14 @@ async fn bybit_mobile_receipt(case: &str) {
         .into();
         params["triggerPrice"] = 55000.into();
     }
+    if case == "missing-type" {
+        params.as_object_mut().unwrap().remove("type");
+    }
     session.order_frames_enabled = case != "disabled";
     let expired_token = case.starts_with("expired-token");
     let is_action = !matches!(
         case,
-        "submit" | "stop" | "take-profit" | "expired-token-submit"
+        "submit" | "stop" | "take-profit" | "expired-token-submit" | "missing-type"
     );
     let action = json!({"kind":"place","orders":[params.clone()]});
     let fp = if is_action {
@@ -529,7 +532,7 @@ async fn bybit_mobile_receipt(case: &str) {
     println!("SYNTHETIC_MOBILE_{case}_ACK={ack}");
     println!("SYNTHETIC_MOBILE_{case}_OUTCOME={receipt}");
     assert_eq!(receipt["d"]["intentId"], intent);
-    if expired_token || matches!(case, "deadline" | "disabled" | "binding") {
+    if expired_token || matches!(case, "deadline" | "disabled" | "binding" | "missing-type") {
         assert_eq!(receipt["d"]["outcome"], "refused", "{case}: {receipt}");
         assert_eq!(receipt["d"]["error"]["outcome"], "notSent");
         let reason = receipt["d"]["error"]["message"].as_str().unwrap();
@@ -537,6 +540,8 @@ async fn bybit_mobile_receipt(case: &str) {
             crate::auth::TOKEN_EXPIRED
         } else if case == "deadline" {
             "expired"
+        } else if case == "missing-type" {
+            "type"
         } else {
             "not admitted"
         }));
@@ -611,4 +616,10 @@ async fn delegated_mobile_bybit_expired_token_submit_is_not_sent() {
 #[tokio::test]
 async fn delegated_mobile_bybit_expired_token_action_is_not_sent() {
     bybit_mobile_receipt("expired-token-action").await;
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_mobile_bybit_missing_type_refuses_without_panic_or_write() {
+    bybit_mobile_receipt("missing-type").await;
 }

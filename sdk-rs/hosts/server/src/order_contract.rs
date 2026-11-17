@@ -266,6 +266,15 @@ fn canonical_value(value: &Value, out: &mut String, depth: usize) -> Result<(), 
 #[cfg(test)]
 mod activation_tests {
     #[test]
+    fn bybit_protection_missing_type_is_not_protection() {
+        let order = json!({});
+        assert!(!super::bybit_protection(
+            "bybit",
+            order.as_object().unwrap()
+        ));
+    }
+
+    #[test]
     fn bybit_protection_omission_is_exact_and_keeps_plain_and_other_venues() {
         let plain = json!({"type":"limit","amount":0.01,"price":55000});
         for venue in ["bybit", "bybitdemo", "bybitinverse", "bybitspot"] {
