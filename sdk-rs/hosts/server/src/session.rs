@@ -1082,6 +1082,32 @@ impl Session {
             let name = envelope::account_name(text);
             let out = match serde_json::from_str::<Inbound>(text) {
                 Ok(Inbound::Init(init)) => self.out.with_instance_id(init.instance_id.as_deref()),
+                Ok(Inbound::OrderSubmit(submit))
+                    if self.identity.user.is_some()
+                        && text.len() <= crate::order_contract::SUBMIT_MAX =>
+                {
+                    self.refuse_expired_order(
+                        &submit.account_name,
+                        submit.instance_id.as_deref(),
+                        &submit.intent_id,
+                        submit.seq,
+                        false,
+                    );
+                    return Ok(());
+                }
+                Ok(Inbound::OrderAction(request))
+                    if self.identity.user.is_some()
+                        && text.len() <= crate::order_contract::SUBMIT_MAX =>
+                {
+                    self.refuse_expired_order(
+                        &request.account_name,
+                        request.instance_id.as_deref(),
+                        &request.intent_id,
+                        request.seq,
+                        true,
+                    );
+                    return Ok(());
+                }
                 Ok(Inbound::Msg(AccountMsg {
                     op,
                     account_name: Some(name),
@@ -2173,13 +2199,16 @@ impl Session {
             )
             .check()
         {
+            // 116aeae12 proves expiry here precedes every native command.
+            // Later per-leg guards retain uncertainty after possible effects.
+            audit_preflight(&account, self.socket, &method, &args, message);
             crate::order_actions::settle(
                 &dispatch_out,
                 name,
                 &request_id,
                 seq,
                 kind,
-                Err(json!({"message":message,"outcome":"unknown"})),
+                Err(json!({"message":message,"outcome":"notSent"})),
             );
             return;
         }
@@ -2256,13 +2285,16 @@ impl Session {
             )
             .check()
         {
+            // 116aeae12 proves expiry here precedes every native command.
+            // Later per-leg guards retain uncertainty after possible effects.
+            audit_preflight(&account, self.socket, &method, &args, message);
             crate::order_actions::settle(
                 &dispatch_out,
                 name,
                 &request_id,
                 seq,
                 kind,
-                Err(json!({"message":message,"outcome":"unknown"})),
+                Err(json!({"message":message,"outcome":"notSent"})),
             );
             return;
         }
@@ -2274,7 +2306,11 @@ impl Session {
                 {
                     *reply = match receipt {
                         OrderReceipt::Placement(seq) => methods::Reply::Intent {
-                            client_order_id: request_id.as_str().unwrap_or_default().to_owned(),
+                            client_order_id: command["orders"]
+                                .as_array()
+                                .filter(|orders| orders.len() == 1)
+                                .and_then(|orders| orders[0]["clientOrderId"].as_str())
+                                .map(str::to_owned),
                             seq,
                         },
                         OrderReceipt::Action { seq, kind, .. } => methods::Reply::Action {
@@ -2620,7 +2656,10 @@ impl Session {
                 && let Some(pending) = pending.lock().unwrap().remove(&id)
             {
                 let mut detail = failure_detail("Error", &message, false);
-                if matches!(pending.reply, methods::Reply::Action { .. }) {
+                if matches!(
+                    pending.reply,
+                    methods::Reply::Intent { .. } | methods::Reply::Action { .. }
+                ) {
                     detail["outcome"] = "notSent".into();
                 }
                 settle(&out, &name, pending, Err(detail));
@@ -2774,6 +2813,17 @@ const WRITE_METHODS: [&str; 9] = [
     "setAllLeverage",
 ];
 
+fn audit_preflight(account: &Account, socket: u64, method: &str, args: &[Value], message: &str) {
+    let mut fields = crate::audit::refused_call(method, args);
+    fields.insert("stage".into(), "preflight".into());
+    crate::audit::log(
+        &audit_who(account),
+        &format!("socket:{socket}/preflight"),
+        &fields,
+        crate::audit::result(&Err(json!({"message":message,"outcome":"notSent"}))),
+    );
+}
+
 fn audit_who(account: &Account) -> crate::audit::Who {
     crate::audit::Who {
         user: account.user.clone(),
@@ -2796,10 +2846,21 @@ fn after_load_pool<'a>(
 
 fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>) {
     if let Some(audit) = &pending.audit {
+        let mut fields = audit.fields.clone();
+        if matches!(
+            pending.reply,
+            methods::Reply::Intent { .. } | methods::Reply::Action { .. }
+        ) && let Ok(value) = &outcome
+        {
+            fields.insert(
+                "result_shape".into(),
+                crate::audit::result_shape(value).into(),
+            );
+        }
         crate::audit::log(
             &audit.who,
             &audit.origin,
-            &audit.fields,
+            &fields,
             crate::audit::result(&outcome),
         );
     }
@@ -2866,7 +2927,7 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             out,
             name,
             &pending.request_id,
-            client_order_id,
+            client_order_id.as_deref(),
             *seq,
             outcome,
         );

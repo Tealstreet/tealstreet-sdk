@@ -1278,7 +1278,11 @@ Amend/cancel/cancel-all use the existing method translator, native command
 completion and audit. Internal action dispatch carries the original deadline
 through cancel-all symbol reads and command translation. Each native command
 rechecks both expiry bounds and its captured registration after any startup wait and
-immediately before dispatch. Expiry stays unknown without a notSent proof.
+immediately before dispatch. The whole-action guards before translation/dispatch
+have no-send proof and return the real reason with `notSent`; per-leg expiry
+stays unknown when another leg may already have had effects. Expired-token new
+submits/actions receive correlated `notSent` receipts without extending grace;
+queue cancellation retains ordinary expiry errors, never an earlier-intent proof.
 Nuke uses the account's existing native algo-host nuke,
 awaiting cancellation and closing legs; a partial/interrupted action stays
 unknown. Actor-queued nuke work carries the original registration and rechecks
