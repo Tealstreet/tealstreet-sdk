@@ -155,3 +155,62 @@ fn filled_orders_from_before_terminal_retention_are_still_returned() {
     assert_eq!(rows[0]["filled"], 1.0);
     assert!(!h.has_request("/v5/order/history"));
 }
+
+fn check_terminal_wire_clock(offset: f64, explicit: bool) {
+    let mut h = ready();
+    h.advance(offset);
+    let clock = h.engine.signing_clock(h.now).0;
+    assert_eq!(clock.fract(), offset);
+    let from = explicit.then_some(clock - DAY / 2.0);
+    let to = explicit.then_some(clock - 1000.0);
+    h.command(Command::Query {
+        command: 903,
+        query: Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: from,
+            to_ms: to,
+            limit: None,
+        },
+    });
+    let default = h.take("/v5/order/history");
+    assert_eq!(
+        query_value(&default.url, "startTime").map(str::to_owned),
+        from.map(|value| value.to_string()),
+        "default query keeps its original caller bounds"
+    );
+    assert_eq!(
+        query_value(&default.url, "endTime").map(str::to_owned),
+        to.map(|value| value.to_string())
+    );
+    h.reply(default.id, 200, EMPTY);
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        let request = h.take(&format!("orderStatus={status}"));
+        let start = query_value(&request.url, "startTime")
+            .unwrap()
+            .parse::<u64>()
+            .expect("terminal startTime must be integer milliseconds");
+        let end = query_value(&request.url, "endTime")
+            .unwrap()
+            .parse::<u64>()
+            .expect("terminal endTime must be integer milliseconds");
+        assert_eq!(start, from.unwrap_or(clock - DAY) as u64);
+        assert_eq!(end, to.unwrap_or(clock) as u64);
+        h.reply(request.id, 200, EMPTY);
+    }
+    assert_eq!(h.result(903), Some(&Ok("[]".into())));
+}
+
+#[test]
+fn fractional_protocol_clock_uses_integer_terminal_bounds() {
+    check_terminal_wire_clock(0.5, false);
+}
+
+#[test]
+fn fractional_caller_bounds_are_normalized_only_for_terminal_queries() {
+    check_terminal_wire_clock(0.5, true);
+}
+
+#[test]
+fn integer_protocol_clock_keeps_the_existing_terminal_bounds() {
+    check_terminal_wire_clock(0.0, false);
+}
