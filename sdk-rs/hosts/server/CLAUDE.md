@@ -262,6 +262,21 @@ context follows its original pending verification. Never add credential identity
 account labels, tokens, signatures, handover bytes, raw venue messages or payloads
 to these lines. Diagnostics do not change admission or retry classification.
 
+The v1 `init_unverified` error metadata includes closed `reason_class`:
+`key_rejected_ip_or_permissions`, `key_invalid`, `venue_unavailable` or `unknown`.
+It derives only from the captured venue and typed private error kind/numeric code.
+Permission failures and the Binance -2015/-2014, Bybit 10003/10010 and OKX
+50110/50111 auth refusals use the broad key-rejection class; other invalid/expired
+keys use `key_invalid`. Network, timeout, rate-limit and venue-unavailable errors
+use `venue_unavailable`; missing/unrelated evidence stays `unknown`. Numeric
+namespaces are scoped to exact venue families, not prefixes. HyroTrader's
+ambiguous 10003 stays `unknown`: a disabled challenge can reject an unchanged
+valid key, as its Bybit CLAUDE contract documents. This is coarse
+recovery guidance, never proof of a specific IP or permission defect. Raw venue
+text/codes never enter this frame. The fixed message, transient flag, registration
+binding and existing eight-field private diagnostic remain unchanged.
+
+
 ## TWAP restore binding
 
 Native TWAP restore authority carries both the verified owner and generation.

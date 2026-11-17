@@ -438,8 +438,24 @@ async fn token_expiry_after_successful_probe_keeps_the_resident_registration() {
 }
 
 #[tokio::test]
-async fn classified_probe_refusals_keep_current_registration_and_legacy_bytes() {
-    for (code, transient) in [(10003, false), (10005, false), (10006, true)] {
+async fn classified_probe_refusals_keep_current_registration_and_legacy_fields() {
+    for (code, transient, reason_class) in [
+        (
+            10003,
+            false,
+            envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+        ),
+        (
+            10005,
+            false,
+            envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+        ),
+        (
+            10006,
+            true,
+            envelope::InitRefusalReasonClass::VenueUnavailable,
+        ),
+    ] {
         for id in [Some("probe-registration"), None] {
             let f = fixture().await;
             f.code.store(code, Ordering::SeqCst);
@@ -456,7 +472,7 @@ async fn classified_probe_refusals_keep_current_registration_and_legacy_bytes() 
                 "refused material is dropped before queueing the reply"
             );
             session.verification_completed(completion).await.unwrap();
-            let expected = envelope::init_unverified("acct", transient);
+            let expected = envelope::init_unverified("acct", transient, reason_class);
             let expected = id.map_or_else(
                 || expected.clone(),
                 |id| envelope::with_instance_id(expected.clone(), id),
@@ -506,7 +522,10 @@ async fn handover_binding_negatives_never_start_a_private_probe() {
         }
         assert_eq!(
             sent.try_recv().unwrap(),
-            envelope::with_instance_id(envelope::init_unverified("acct", false), "negative")
+            envelope::with_instance_id(
+                envelope::init_unverified("acct", false, envelope::InitRefusalReasonClass::Unknown),
+                "negative"
+            )
         );
         assert!(f.registry.held("alice", "acct", session.socket).is_none());
         assert_eq!(f.private_reads.load(Ordering::SeqCst), 0);

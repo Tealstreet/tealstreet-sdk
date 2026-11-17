@@ -103,6 +103,12 @@ segments plus `:more`. Origins, queries, fragments, bodies and headers are exclu
 The SDK adds the actual venue; consumers may retain a bounded recent breadcrumb.
 These diagnostics neither retry requests nor add a second user-facing error.
 
+Post-release JS HTTP failures retain a closed cause label in the existing engine
+error string (timeout, disconnect, direct-fetch, response-decode, aborted, disposed,
+tunnel or unknown). Raw errors, configs, URLs and nested causes never cross that
+boundary; group failures are classified only after every physical handoff.
+This diagnostic summary does not alter native error kind, retry or owner policy.
+
 ## Startup discovery deadlines
 
 Before both markets and tickers load, credential-free Background Reads using the

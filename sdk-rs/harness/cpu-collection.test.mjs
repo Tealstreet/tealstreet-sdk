@@ -271,7 +271,7 @@ test('shallow PR checkout refuses absent tested parents and single-parent commit
 // scripted, so this checks invocation rather than CPU acceptance.
 test('actual post-merge workflow invocation enters and completes the real collector with explicit fixed balanced pairs', t => {
   const workflow = fs.readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
-  const measured = /^  gate:\n([\s\S]*?)(?=^  bitget-paired:)/m.exec(workflow)[1];
+  const measured = /^  gate:\n([\s\S]*?)(?=^  result:)/m.exec(workflow)[1];
   const publicCommands = measured.split('\n').filter(line => line.includes('rust:gate:record') && line.includes('-public.jsonl.gz'));
   assert.equal(publicCommands.length, 12);
   for (const command of publicCommands) assert.match(command, / --runs 16$/);
@@ -315,7 +315,7 @@ test('actual post-merge workflow invocation enters and completes the real collec
 
 test('Binance Options public input is generated before CPU measurement inputs are sealed', () => {
   const workflow = fs.readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
-  const measurement = workflow.slice(workflow.indexOf('\n  gate:\n'), workflow.indexOf('\n  bitget-paired:\n'));
+  const measurement = workflow.slice(workflow.indexOf('\n  gate:\n'), workflow.indexOf('\n  result:\n'));
   const generation = measurement.indexOf('corepack yarn rust:private-tape-binanceoptions --public');
   const sealing = measurement.indexOf('node sdk-rs/harness/cpu-ci.mjs --command prepare');
   assert.ok(generation >= 0 && generation < sealing, 'Options public tape must exist before the exact CPU roster is sealed');

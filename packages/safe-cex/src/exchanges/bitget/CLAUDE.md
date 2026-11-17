@@ -24,6 +24,14 @@ native units; only remaining and position display sizes use the TS price-based
 8-decimal conversion. Collateral uses each market's base coin and preserves the
 per-coin balance map through worker frames.
 
+Native public subscription envelopes retain the legacy catalogue IDs, order,
+product type and three-way ticker partition, but split requests by serialized
+UTF-8 bytes to respect the Classic V2 4096-byte limit. JSON escaping and the
+envelope count toward that bound. A topic must fit its later unsubscribe too;
+an individually unencodable topic is refused visibly without dropping the other
+topics or emitting an empty request. Reconnect and book/candle repair share the
+same formatter. There is no stock-symbol blacklist or public V3 migration.
+
 An empty inverse catalogue keeps its terminal `venueUnavailable` startup failure
 and emits the same cause as an error-level `request.failed` event for UI consumers.
 It does not retry discovery or change the selected API product.
