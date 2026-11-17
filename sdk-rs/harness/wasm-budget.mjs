@@ -14,7 +14,11 @@ validateWasmBudgetSource(readFileSync(new URL(import.meta.url), 'utf8'));
 // #3599 / 657903ad6b2095ed7145c105f847ed179a50210e: optimized combined web/Node 17,909,819 B.
 // Sam's 2026-11-17 decision (h) approves BingX Spot; linking Engine<BingxSpot> needs this measured reserve.
 // Retain the historical 17 MiB floor; future changes must remeasure and retain >=10 KiB, rounded up to KiB.
-export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_921_024 });
+
+// #3599 e009 integration: 17,917,521 B web/Node (CI 44089335343/job134060777063; same tree as 356be2e3).
+// Sam's 2026-11-17 (h) Spot admission retains measured +10 KiB, rounded up; prior 17 MiB/17,921,024 floors stay.
+// Future compositions must remeasure canonical web/Node outputs and retain those floors and >=10 KiB reserve.
+export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_928_192 });
 // #2219 Base64Url/EvmHex signing on the #2208 tip: CI Bitget 1,482,166 rounded up to KiB (overseer ceiling 1448 KiB);
 // #2224 serial call pacing: CI 1,482,920, +1 KiB under the 2 KiB shared-code rule.
 // AsterDEX: managed sockets (#2212) measured 1,384,485 in CI, within the standing 5% venue

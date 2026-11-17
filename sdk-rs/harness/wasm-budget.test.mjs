@@ -463,7 +463,7 @@ test('#3268 restage (run 42563664495 at d83accc10298) retains current measured h
 
 test('combined shipping build and standalone builds retain distinct fixed ceilings', () => {
   assert.equal(WASM_BUDGETS.venue, 1_343_488);
-  assert.equal(WASM_BUDGETS.combined, 17_921_024);
+  assert.equal(WASM_BUDGETS.combined, 17_928_192);
   for (const profile of Object.keys(WASM_BUDGETS)) {
     assert.equal(wasmBudgetError(WASM_BUDGETS[profile], profile), undefined);
     assert.match(wasmBudgetError(WASM_BUDGETS[profile] + 1, profile), /exceeds/);
@@ -4066,8 +4066,24 @@ test('BingX Spot combined admission retains the measured 657 reserve', () => {
   const minimum = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
   const cap = WASM_BUDGETS.combined;
   assert.equal(minimum, 17_921_024);
-  assert.equal(cap, minimum, 'retain the measured combined maximum plus rounded 10 KiB reserve');
+  assert.ok(cap >= minimum, 'retain the historical 657 combined maximum plus rounded 10 KiB reserve');
   assert.ok(cap >= 17_825_792, 'retain the approved historical 17 MiB floor');
+  for (const venue of [undefined, ...Object.keys(WASM_VENUE_OVERRIDES)]) {
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'combined', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'combined', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'combined', venue), /exceeds/);
+  }
+});
+
+// #3599 clean e009 integration tree matches CI bdc55d20 (run 44089335343, job 134060777063).
+// Optimized web/Node SHA256 62122aa8364267ac49b304044ec5169cbc53e87ca29442568dd7b44e2c769dcd.
+test('BingX Spot master composition retains the measured combined reserve', () => {
+  const measured = 17_917_521;
+  const minimum = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_BUDGETS.combined;
+  assert.equal(minimum, 17_928_192);
+  assert.equal(cap, minimum, 'master composition must retain the measured maximum plus rounded 10 KiB reserve');
+  assert.ok(cap >= 17_921_024, 'retain the previous Spot combined floor');
   for (const venue of [undefined, ...Object.keys(WASM_VENUE_OVERRIDES)]) {
     assert.equal(wasmBudgetError(measured + 10 * 1024, 'combined', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'combined', venue), undefined);

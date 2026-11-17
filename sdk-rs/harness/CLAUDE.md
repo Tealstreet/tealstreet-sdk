@@ -33,9 +33,15 @@ to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
 
 #3599 links `Engine<BingxSpot>` under Sam's 2026-11-17 decision (h). Canonical
 combined web/Node at `657903ad6b2095ed7145c105f847ed179a50210e` measure 17,909,819 B;
-the 17,921,024 B ceiling retains 11,205 B reserve and the historical 17 MiB floor.
+its historical 17,921,024 B ceiling retained 11,205 B reserve and the 17 MiB floor.
 Future combined changes require a fresh optimized measurement plus at least
 10 KiB rounded up to KiB; required coverage and executed combined consumers remain gates.
+
+The clean e009 integration has the same tree as CI bdc55d20 in run 44089335343,
+job 134060777063: optimized combined web/Node 17,917,521 B. Its 17,928,192 B
+ceiling retains 10,671 B reserve and both earlier combined floors. Native
+REST-book conformance uses mainnet only for BingX Spot, which has no testnet;
+requests are captured without transport and testnet Unsupported/NotSent remains tested.
 
 TxFlow agent refresh #3314 at merge 9bb43250830d measures 2,147,684 bytes;
 refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its
