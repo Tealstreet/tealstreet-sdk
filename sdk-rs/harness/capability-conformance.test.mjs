@@ -212,3 +212,9 @@ test('private-command construction fixtures satisfy authenticated testnet precon
     free() {},
   }), 'authenticated unsupported handler'), /authenticated unsupported handler/);
 });
+
+// Spot has no testnet; production admission must reach the real capability probes.
+test('BingX Spot uses a mainnet public profile without changing other family profiles', () => {
+  assert.deepEqual(constructionProfiles('bingxspot'), [{ publicDataOnly: true, testnet: false }]);
+  assert.deepEqual(constructionProfiles('bingx'), [{ publicDataOnly: true, testnet: true }]);
+});

@@ -62,7 +62,10 @@ const commandAliases: ExchangeName[] = [
 ];
 const coinbaseAliases = ['coinbase', 'coinbasespot'] as const;
 const orderlyAliases = ['kodiakfi', 'mode', 'what', 'woofi'] as const;
+// Spot is admitted (#3599), but its native account lookup remains Unsupported.
+// Keep the zero-command/startup identity refusal case rather than invent an identity.
 const unsupportedAliases: ExchangeName[] = [
+  'bingxspot',
   'binanceoptions',
   'binancespot',
   'binanceinverse',
@@ -204,7 +207,7 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
 it('retains remaining historical identity cases and covers the beta alias subset', () => {
   const inventory = [...commandAliases, ...coinbaseAliases, ...orderlyAliases, ...unsupportedAliases];
   // Retired venues leave the remaining identity and beta coverage intact.
-  expect(new Set(inventory).size).toBe(47);
+  expect(new Set(inventory).size).toBe(48);
   expect(inventory.filter((name) => RUST_VENUES.has(name)).sort()).toEqual([...RUST_VENUES].sort());
   expect(commandAliases.length + coinbaseAliases.length + orderlyAliases.length).toBe(31);
 });

@@ -4042,3 +4042,17 @@ test('BingX shared command codecs retain the measured optimized reserve', () => 
   assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
 });
+
+// #3599 merge 55c55027b0bd: canonical build.sh --venue bingx, Rust1.99/bindgen0.2.129/Binaryen132 twice-Oz.
+// Optimized web/Node SHA256 b3154650e22161c884c6328f4c705716907617048d7450c247b3964ad877745e.
+test('BingX Spot shared-codec admission retains fresh merged reserve', () => {
+  const measured = 2_411_014;
+  const minimum = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.bingx;
+  assert.equal(minimum, 2_421_760);
+  assert.ok(cap >= Math.max(2_397_184, 2_179_072, minimum), 'retain both parent floors and fresh reserve');
+  assert.ok(cap - measured >= 10 * 1024);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bingx'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
+});

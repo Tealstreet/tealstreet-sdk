@@ -1,5 +1,5 @@
 // Every family package built by `yarn rust:build-wasm --families` loads in a
-// fresh web initialization, constructs admitted names, checks fixture-only
+// fresh web initialization, constructs admitted names, checks network
 // refusals, refuses other families and fits the single-venue size budget.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -71,16 +71,16 @@ for (const family of selectedFamilies) {
         }
       }
     }
+    // Spot is admitted on mainnet (#3599); retain its unsupported-network control
+    // separately so a testnet refusal cannot exempt production command conformance.
+    if (family === 'bingx') {
+      assert.throws(() => new engine.WasmEngine('bingxspot', JSON.stringify({ publicDataOnly: true, testnet: true })),
+        /BingX Spot testnet is unsupported/);
+    }
     for (const venue of venues) {
       if (venueFamily(venue) === family) {
         for (const [profile, options] of constructionProfiles(venue).entries()) {
           const label = `${family}/${venue}/profile${profile}`;
-          // Spot stays fixture-only until its live-key transport smoke passes.
-          if (venue === 'bingxspot') {
-            assert.throws(() => new engine.WasmEngine(venue, JSON.stringify(options)),
-              /unsupported venue: bingxspot/, label);
-            continue;
-          }
           const proofs = checkAdvertisedCommands(() => new engine.WasmEngine(venue, JSON.stringify(options)), label);
           // Descriptive coverage only: preconditions/deferred responses are not
           // positive valid-state handler proof (covered separately by native fixtures).
