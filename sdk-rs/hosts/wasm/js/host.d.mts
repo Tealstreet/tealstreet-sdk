@@ -28,7 +28,8 @@ export interface HttpResponse {
 
 export class HttpPreparationError extends Error {
   readonly code: string;
-  constructor(reason: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network');
+  readonly cause?: 'info_admission';
+  constructor(reason: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', cause?: 'info_admission');
 }
 
 export interface HttpPacket {
@@ -533,7 +534,7 @@ export interface WasmEngineLike {
   httpCommandOwner?(request: number): number | undefined;
   httpPreparationPending?(preparation: string): boolean;
   httpPrepared?(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
-  httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;
+  httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'infoAdmissionTimedOut' | 'stale' | 'invalid' | 'network', now: number): string;
   /** Scalar status only: never drain work before the synchronous handoff. */
   httpClaim?(permit: string, now: number): string;
   httpGroupPending?(permit: string): boolean;

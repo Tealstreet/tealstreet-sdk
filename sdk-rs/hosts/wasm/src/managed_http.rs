@@ -206,19 +206,9 @@ impl WasmEngine {
     ) -> Result<String, JsError> {
         let token = Preparation::from_wire(preparation)
             .map_err(|_| JsError::new("Invalid HTTP preparation"))?;
-        let (reason, kind) = match code {
-            "unsupported" => (Error::Invalid, safe_cex_engine::ErrorKind::Unsupported),
-            "timedOut" => (Error::TimedOut, safe_cex_engine::ErrorKind::Timeout),
-            "stale" => (Error::Stale, safe_cex_engine::ErrorKind::InvalidInput),
-            "invalid" => (Error::Invalid, safe_cex_engine::ErrorKind::InvalidInput),
-            _ => (Error::State, safe_cex_engine::ErrorKind::Network),
-        };
-        self.inner.http_preparation_failed(
-            now,
-            token,
-            reason,
-            safe_cex_engine::VenueError::new(preparation_failure_text(code)).kind(kind),
-        );
+        let (reason, error) = preparation_failure(code);
+        self.inner
+            .http_preparation_failed(now, token, reason, error);
         Ok(self.flush())
     }
 
@@ -272,9 +262,27 @@ impl WasmEngine {
     }
 }
 
+// The admission label changes diagnostics only; native timeout settlement stays shared.
+fn preparation_failure(code: &str) -> (Error, safe_cex_engine::VenueError) {
+    let (reason, kind) = match code {
+        "unsupported" => (Error::Invalid, safe_cex_engine::ErrorKind::Unsupported),
+        "timedOut" | "infoAdmissionTimedOut" => {
+            (Error::TimedOut, safe_cex_engine::ErrorKind::Timeout)
+        }
+        "stale" => (Error::Stale, safe_cex_engine::ErrorKind::InvalidInput),
+        "invalid" => (Error::Invalid, safe_cex_engine::ErrorKind::InvalidInput),
+        _ => (Error::State, safe_cex_engine::ErrorKind::Network),
+    };
+    (
+        reason,
+        safe_cex_engine::VenueError::new(preparation_failure_text(code)).kind(kind),
+    )
+}
+
 /// A request that got no answer must not read as a preparation fault or a refusal.
 fn preparation_failure_text(code: &str) -> &'static str {
     match code {
+        "infoAdmissionTimedOut" => "HTTP admission deadline expired",
         "timedOut" => "Relay or network request timed out",
         _ => "HTTP transport preparation failed",
     }
@@ -285,6 +293,11 @@ mod tests {
     use super::*;
     #[test]
     fn info_admission_expiry_has_a_distinct_closed_title() {
+        for code in ["timedOut", "infoAdmissionTimedOut"] {
+            let (reason, error) = preparation_failure(code);
+            assert_eq!(reason, Error::TimedOut);
+            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+        }
         assert_eq!(
             preparation_failure_text("infoAdmissionTimedOut"),
             "HTTP admission deadline expired"
