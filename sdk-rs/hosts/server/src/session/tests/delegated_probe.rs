@@ -585,8 +585,8 @@ async fn init_unverified_propagates_classified_private_read_metadata() {
 fn private_read_metadata(code: i64) -> envelope::InitRefusalMetadata {
     envelope::InitRefusalMetadata {
         error_kind: Some(match code {
-            10003 => safe_cex_engine::ErrorKind::AuthInvalid,
-            10005 => safe_cex_engine::ErrorKind::AuthPermission,
+            10003 | 10004 => safe_cex_engine::ErrorKind::AuthInvalid,
+            10005 | 10010 => safe_cex_engine::ErrorKind::AuthPermission,
             10006 => safe_cex_engine::ErrorKind::RateLimited,
             _ => panic!("unexpected synthetic refusal code"),
         }),

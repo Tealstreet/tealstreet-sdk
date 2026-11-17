@@ -208,7 +208,10 @@ async fn a_lease_generation_changed_during_probe_cannot_be_recaptured() {
             "acct",
             true,
             envelope::InitRefusalReasonClass::Unknown,
-            Default::default()
+            envelope::InitRefusalMetadata {
+                stage: Some(RefusalStage::Authority),
+                ..Default::default()
+            }
         )
     );
     assert!(f.registry.held("alice", "acct", session.socket).is_none());
@@ -495,7 +498,9 @@ async fn assert_refusal_reason_class(code: usize, reason: &str, transient: bool)
         frame["d"]["data"][1],
         json!({
             "forceToast":true, "initRefused":true, "kind":"unverified",
-            "transient":transient, "reason_class":reason
+            "transient":transient, "reason_class":reason,
+            "error_kind":private_read_metadata(code as i64).error_kind,
+            "venue_code":code, "stage":"private_read"
         })
     );
     assert_eq!(frame["d"]["instanceId"], "reason-registration");
@@ -505,8 +510,8 @@ async fn assert_refusal_reason_class(code: usize, reason: &str, transient: bool)
         "Could not verify your key; account not attached"
     );
     assert!(
-        !raw.contains(&code.to_string()),
-        "numeric venue code must remain private"
+        !raw.contains("synthetic"),
+        "raw venue messages and credential material must remain private"
     );
     assert!(session.joined.is_empty());
     assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);

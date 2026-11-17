@@ -819,7 +819,12 @@ mod mode_transitions;
 
 #[tokio::test]
 async fn init_unverified_native_cosigned_classification_reaches_registration() {
-    for (code, transient) in [(10003, false), (10006, true)] {
+    for (code, transient) in [
+        (10003, false),
+        (10004, false),
+        (10010, false),
+        (10006, true),
+    ] {
         let f = fixture_with_auth(true).await;
         f.code.store(code, Ordering::SeqCst);
         let (mut session, mut sent) = candidate(&f, "alice");
