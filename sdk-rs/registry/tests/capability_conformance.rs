@@ -124,7 +124,10 @@ fn every_compiled_advertised_rest_book_handler_dispatches_with_valid_fixture_sta
             assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
         }
-        let mut options = serde_json::json!({ "publicDataOnly": true, "testnet": true });
+        // Spot has no testnet. Capture its mainnet request instead of skipping conformance;
+        // no transport sends these requests, and the testnet NotSent guard stays covered separately.
+        let mut options =
+            serde_json::json!({ "publicDataOnly": true, "testnet": name != "bingxspot" });
         if name == "hyrotrader" {
             options["endpoints"] = serde_json::json!({
                 "rest": "https://hyro.test", "publicWs": "wss://hyro.test/public", "privateWs": "wss://hyro.test/private",
