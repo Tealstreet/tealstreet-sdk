@@ -387,3 +387,13 @@ See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
 Probe/session completion and early handover refusal paths preserve those fields
 through the initiating account and registration output. Unknown classification
 and absent venue codes stay absent; no raw venue text enters the new fields.
+
+## ApeX encrypted seed
+
+ApeX handover accepts optional `omniKeySeed` exclusively inside the sealed
+credential schema. The in-place parser erases input and owns the field in a
+zeroizing string. Admission copies and construction transfer it to canonical
+ApeX protected setup, which installs `primary.extra.zklinkSeed` with hex encoding.
+The field is never public init/engine JSON, a fingerprint or wallet signingKey.
+Other venues, mixed wallet layouts and non-65-byte hex seeds refuse. Monitoring
+without a seed remains unchanged and supplies no placement-signing capability.

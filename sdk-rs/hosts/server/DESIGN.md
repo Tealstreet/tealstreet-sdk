@@ -696,7 +696,12 @@ HKDF-SHA256 and ChaCha20-Poly1305. The application info is
 `tealstreet/delegated-handover/v1`; associated data joins the attempt ID, process
 boot ID, exchange name and init key with `|`. `enc` and `ciphertext` are padded
 standard base64. Decrypted JSON contains `key`, `secret` and optional
-`passphrase` and optional `signingKey`; its public key must match the nonsecret
+`passphrase`, optional `signingKey` and optional ApeX-only `omniKeySeed`; the
+last is a packed 65-byte hex Ethereum signature, never an L2 private scalar.
+The zeroizing credential/pair path transfers that seed directly to canonical
+protected setup as the primary's `zklinkSeed` extra role, never into public JSON.
+Omission preserves monitoring without granting placement-signing capability.
+Other venues and mixed wallet/Omni layouts refuse it. Its public key must match the nonsecret
 init key. The registry's key-only setup takes its private scalar exclusively
 from sealed `signingKey`, with the public init identity equal to `subkeyAddress`.
 Other credential mappings refuse that field and still require their signing

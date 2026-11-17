@@ -85,6 +85,11 @@ the private scalar. The optional private field is not copied into the result or
 HPKE context. The receiver rejects scalar-in-init layouts, foreign credential
 layouts and empty CEX secrets; existing trusted setup validates actual material.
 HMAC callers omit `signingKey` and retain byte-identical envelopes.
+ApeX additionally seals optional `omniKeySeed`, a packed 65-byte Ethereum
+signature encoded as hex. It never enters public init settings or HPKE context,
+and cannot be used as wallet `signingKey` or supplied to another venue. The
+receiver transfers it through zeroizing credentials into the canonical protected
+`primary.extra.zklinkSeed` role; native reconfiguration retains that provider.
 The sender uses RFC 9180 base mode with X25519/HKDF-SHA256/ChaCha20-Poly1305 and
 one fresh encapsulation per call. Deterministic RFC and shared synthetic handover
 fixtures exercise the same production sender. The shared fixture lives with

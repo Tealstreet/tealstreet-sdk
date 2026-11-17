@@ -132,8 +132,12 @@ impl Credentials {
             self.secret.as_str().to_owned(),
             self.passphrase.as_ref().map(|v| v.as_str().to_owned()),
         );
-        match &self.signing_key {
+        let pair = match &self.signing_key {
             Some(material) => pair.with_signing_key(material.as_str().to_owned()),
+            None => pair,
+        };
+        match &self.omni_key_seed {
+            Some(material) => pair.with_omni_key_seed(material.as_str().to_owned()),
             None => pair,
         }
     }
