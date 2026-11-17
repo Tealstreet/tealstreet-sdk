@@ -138,7 +138,7 @@ pub(crate) fn bybit_protection(venue: &str, order: &serde_json::Map<String, Valu
             Some("stop_market" | "take_profit_market" | "trailing_stop_market" | "conditional")
         ) || ["triggerPrice", "stopLoss", "takeProfit"]
             .iter()
-            .any(|field| order.get(field).is_some_and(|value| !value.is_null())))
+            .any(|field| order.get(*field).is_some_and(|value| !value.is_null())))
 }
 
 /// SHA256 of domain + canonical JSON. Keys are ASCII, numbers use ECMAScript's
