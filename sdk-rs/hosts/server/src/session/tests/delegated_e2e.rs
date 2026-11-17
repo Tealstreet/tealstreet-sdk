@@ -630,8 +630,7 @@ async fn protected_text_venue_placement(name: &'static str) {
     assert!(seen.lock().unwrap().signed_reads > 0);
     let stamp = format!("{:012x}", crate::accounts::now_ms());
     let intent = format!("{}-{}-7101-8101-010101010101", &stamp[..8], &stamp[8..]);
-    let params =
-        json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":55000});
+    let params = json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":if name == "blofin" {1.0} else {0.001},"price":55000});
     let fingerprint = crate::order_contract::fingerprint(ACCOUNT, &intent, &params, 1).unwrap();
     wire(
         &mut session,
