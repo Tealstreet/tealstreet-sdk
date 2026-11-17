@@ -136,6 +136,50 @@ async fn order_frames_use_the_existing_native_call_and_registration() {
 }
 
 #[tokio::test]
+async fn order_frames_translation_refusals_keep_venue_client_id_without_dispatch() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for venue in ["hyperliquid", "hyperliquidspot", "bybit"] {
+                let registry = crate::accounts::tests::registry();
+                let tape = Tape::default();
+                let account = delegated_account(&registry, "A", venue, tape.clone());
+                let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+                let key = intent(0);
+                let mut params = placement();
+                params["amount"] = "invalid amount".into();
+                let fingerprint =
+                    crate::order_contract::fingerprint("synthetic-main", &key, &params, 1).unwrap();
+                session
+                    .handle(
+                        &json!({"t":"order.submit","d":{"accountName":"synthetic-main",
+                "intentId":key,"params":params,"seq":1,"ageMs":0,"fingerprint":fingerprint}})
+                        .to_string(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    order_frame(&mut sent, "order.ack").await["d"]["received"],
+                    true
+                );
+                let outcome = order_frame(&mut sent, "order.outcome").await;
+                assert_eq!(outcome["d"]["intentId"], key);
+                assert_eq!(outcome["d"]["outcome"], "refused");
+                assert_eq!(outcome["d"]["error"]["outcome"], "notSent");
+                let expected = if venue == "bybit" {
+                    key
+                } else {
+                    format!("0x{}", key.replace('-', ""))
+                };
+                assert_eq!(outcome["d"]["clientOrderId"], expected);
+                assert!(tape.writes.lock().unwrap().is_empty());
+                session.close();
+                registry.dispose(&account, Disposal::PageDisposed);
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn order_frames_refuse_expired_or_unjoined_submits_without_a_write() {
     tokio::task::LocalSet::new()
         .run_until(async {

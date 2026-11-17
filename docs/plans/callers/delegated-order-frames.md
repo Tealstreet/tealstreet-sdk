@@ -164,7 +164,13 @@ routing fields receive a visible ordinary error rather than an oversized receipt
 version nibble 7 and RFC variant 8/9/a/b. Its first 48 bits encode immutable Unix
 creation time in milliseconds. Keys are bounded to 128 bytes. Bybit receives
 that exact UUIDv7 as `orderLinkId` (36 characters, lowercase hex and hyphens);
-`requestId` is the same intent ID. A conflicting caller clientOrderId refuses.
+`requestId` is the same intent ID. Hyperliquid and Hyperliquid Spot instead receive
+`0x` followed by the UUID's 32 lowercase hex digits (hyphens removed). This is a
+lossless, deterministic encoding of the same 128 intent bits, not a new intent,
+nonce or fingerprint. SDK receipts retain the derived `clientOrderId`, including
+unknown outcomes; the router does not derive it. Caller `params.clientOrderId`,
+when present, must still equal the original UUID intent before SDK derivation;
+a conflicting value refuses. Other venues retain the existing UUID mapping.
 Existing validation still requires one native order.
 
 The box checks the key's own timestamp against its current time: future

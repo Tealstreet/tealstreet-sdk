@@ -130,6 +130,16 @@ pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
     }
 }
 
+/// #3623 exposed HL's UUID refusal: losslessly encode the validated intent's
+/// 128 bits for HL/Spot; request IDs, fingerprints and other venues stay UUIDs.
+pub(crate) fn client_order_id(venue: &str, intent: &str) -> String {
+    if matches!(venue, "hyperliquid" | "hyperliquidspot") {
+        format!("0x{}", intent.replace('-', ""))
+    } else {
+        intent.to_owned()
+    }
+}
+
 /// SHA256 of domain + canonical JSON. Keys are ASCII, numbers use ECMAScript's
 /// finite binary64 serialization, and negative zero is normalized to zero.
 pub fn fingerprint(
@@ -276,6 +286,31 @@ mod activation_tests {
             },
         )
         .await;
+    }
+
+    #[test]
+    fn client_ids_preserve_the_same_intent_bits_and_other_venues() {
+        for (intent, expected) in [
+            (
+                "018bcfe5-6800-7101-8101-010101010101",
+                "0x018bcfe5680071018101010101010101",
+            ),
+            (
+                "018bcfe5-6801-7abc-bdef-fedcba987654",
+                "0x018bcfe568017abcbdeffedcba987654",
+            ),
+        ] {
+            assert!(key_time(intent).is_some());
+            for venue in ["hyperliquid", "hyperliquidspot"] {
+                let first = client_order_id(venue, intent);
+                assert_eq!(first, expected);
+                assert_eq!(client_order_id(venue, intent), first);
+                assert_eq!(&first[2..], intent.replace('-', ""));
+            }
+            for venue in ["bybit", "bybitinverse", "binance", "okx"] {
+                assert_eq!(client_order_id(venue, intent), intent);
+            }
+        }
     }
 
     #[test]

@@ -313,8 +313,10 @@ same named refusal. Paused TWAP restoration and existing stop/cleanup controls
 remain available; this does not resume or replay an interrupted intent.
 
 DELEGATED `order.submit` messages use the existing method translation,
-native command completion and order audit, with the intent UUIDv7 as both request
-ID and client order ID. Other modes keep `callMethod` unchanged. Pending joins
+native command completion and order audit. The request ID stays the intent UUIDv7;
+Hyperliquid/Spot client order IDs are `0x` plus its 32 lowercase hex digits,
+while other venues retain the UUID. Receipts retain that venue ID even for unknown
+outcomes. Other modes keep `callMethod` unchanged. Pending joins
 and elapsed ages of ten seconds or more refuse without a write. New replies
 use the existing instanceId registration helper. The NX router must durably
 record submits before forwarding and expose acknowledgements only after commit;

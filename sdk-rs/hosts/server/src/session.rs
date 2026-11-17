@@ -2274,7 +2274,10 @@ impl Session {
                 {
                     *reply = match receipt {
                         OrderReceipt::Placement(seq) => methods::Reply::Intent {
-                            client_order_id: request_id.as_str().unwrap_or_default().to_owned(),
+                            client_order_id: crate::order_contract::client_order_id(
+                                &account.venue,
+                                request_id.as_str().unwrap_or_default(),
+                            ),
                             seq,
                         },
                         OrderReceipt::Action { seq, kind, .. } => methods::Reply::Action {

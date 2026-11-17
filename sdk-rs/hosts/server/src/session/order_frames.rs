@@ -87,7 +87,9 @@ impl Session {
             );
             return;
         }
-        params.insert("clientOrderId".into(), submit.intent_id.clone().into());
+        let client_id =
+            order_contract::client_order_id(&self.joined[&name].account.venue, &submit.intent_id);
+        params.insert("clientOrderId".into(), client_id.into());
         out.send(envelope::order_frame(
             "order.ack",
             &name,
@@ -165,8 +167,15 @@ impl Session {
             crate::order_actions::refuse(&self.account_out(name), name, request_id, seq, message);
         } else if let Some(OrderReceipt::Placement(seq)) = order_frame {
             let message: String = message.chars().take(512).collect();
+            let venue = self
+                .joined
+                .get(name)
+                .map_or("", |joined| joined.account.venue.as_str());
+            let client_id = request_id
+                .as_str()
+                .map(|id| order_contract::client_order_id(venue, id));
             self.account_out(name).order_outcome(name, json!({"intentId":request_id,"seq":seq,"outcome":"refused",
-                "venueOrderId":null,"clientOrderId":request_id,"error":{"message":message,"outcome":"notSent"}}));
+                "venueOrderId":null,"clientOrderId":client_id,"error":{"message":message,"outcome":"notSent"}}));
         } else {
             self.reply_failure(name, request_id, kind, message, outcome);
         }
