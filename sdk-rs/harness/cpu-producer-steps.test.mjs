@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { setImmediate } from 'node:timers/promises';
 import { crc32 } from 'node:zlib';
 import { test } from 'node:test';
@@ -407,17 +406,7 @@ for (const [shape, mutate] of [
   assert.equal(value.context.producerStepRefreshes, 1);
 });
 
-test('ruled workflow budget: every producer-binding job retains twelve extra minutes', () => {
-  const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
-  for (const [job, minimum] of [['cpu-plan', 32], ['cpu-certify', 42], ['cpu-final', 5]]) {
-    const block = workflow.split(`\n  ${job}:\n`)[1]?.split(/\n  [a-z][\w-]*:\n/)[0];
-    assert.ok(block, `missing job ${job}`);
-    const timeout = /^    timeout-minutes: (\d+)$/m.exec(block);
-    assert.ok(timeout, `missing bounded timeout ${job}`);
-    assert.ok(Number(timeout[1]) >= minimum, `${job} needs at least ${minimum} minutes`);
-    if (job === 'cpu-final') assert.equal(Number(timeout[1]), 5, 'status-only job timeout stays unchanged');
-  }
-});
+// Sam 2026-11-17 removed the CPU coordinator/status jobs and their timeout contract.
 
 // Runs 43273706928 / 43281701341 completed the CPU comparison and uploaded a
 // REJECTED result. They are not oracle refusals: the planner must retain the

@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { GATE_SUITES } from './ci-gate-suites.mjs';
 
 const source = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
 const job = (text, name) => {
@@ -13,32 +12,27 @@ const job = (text, name) => {
   return match[1];
 };
 
-test('Bitget bounded collection leaves time to publish original-attempt evidence', () => {
-  // #3317: master 93ce5a61df moved collection into bitget-paired-run.mjs.
-  // Master 589038b822 adds two measured witnesses within an 80/90-minute bound;
-  // retain its exact deadline and ten-minute evidence-publication reserve.
-  const runner = readFileSync(new URL('./bitget-paired-run.mjs', import.meta.url), 'utf8');
-  const deadline = /timeoutMs = (\d+) \* 60_000/.exec(runner);
-  assert.ok(deadline, 'the collector needs an explicit bounded deadline');
-  const collectionMinutes = Number(deadline[1]);
-  assert.equal(collectionMinutes, 80);
-  const verify = text => {
-    const paired = job(text, 'bitget-paired');
-    const timeout = /^    timeout-minutes: (\d+)$/m.exec(paired);
-    assert.ok(timeout, 'the physical producer needs a bounded job window');
-    assert.equal(Number(timeout[1]), 90);
-    assert.ok(Number(timeout[1]) - collectionMinutes >= 10,
-      'the collector must leave an evidence-publication reserve');
-    assert.match(paired, /run: node sdk-rs\/harness\/bitget-paired-run\.mjs --out/);
-    assert.doesNotMatch(paired, /continue-on-error|gh run rerun|retries|retry:/);
-  };
-  verify(source);
-  const deadlineRegression = source.replace(job(source, 'bitget-paired'),
-    job(source, 'bitget-paired').replace(/timeout-minutes: \d+/, 'timeout-minutes: 80'));
-  assert.throws(() => verify(deadlineRegression));
+function verifyNoCpuGates(text) {
+  assert.doesNotMatch(text, /^  (?:bitget-paired|cpu-(?:plan|certify|final)):|^    name: Rust \/ (?:CPU gate|shared CPU certification|CPU remeasurement plan|Bitget counterbalanced steady CPU)/m);
+  assert.doesNotMatch(text, /^    needs:.*\bcpu-|needs\.["']?cpu-(?:plan|certify|final)|--command (?:plan|certify|status)\b|CPU_CERT_RESULTS?/m);
+}
+
+test('Sam 2026-11-17: CPU gate jobs and their nightly monitor are removed', () => {
+  verifyNoCpuGates(source);
+  for (const path of ['../../.github/workflows/rust-cpu-nightly.yml', './cpu-nightly.mjs', './cpu-nightly.test.mjs',
+    './bitget-paired-run.mjs', './bitget-paired-run.test.mjs'])
+    assert.equal(existsSync(new URL(path, import.meta.url)), false, path);
 });
+
+test('Sam 2026-11-17: reintroduced CPU gate jobs or certification calls are refused', () => {
+  for (const addition of ['  cpu-final:\n', '    name: Rust / CPU gate (binance)\n',
+    '    name: Rust / shared CPU certification\n', '    run: node cpu-ci.mjs --command certify\n',
+    '    env: CPU_CERT_RESULTS\n', '    needs: [selection, cpu-final]\n', '  bitget-paired:\n']) assert.throws(() => verifyNoCpuGates(source + addition));
+});
+
 function verifyWorkflow(text) {
-  const first = job(text, 'gate'), plan = job(text, 'cpu-plan'), certify = job(text, 'cpu-certify'), final = job(text, 'cpu-final');
+  const first = job(text, 'gate');
+  verifyNoCpuGates(text);
   // One in-job re-measure (Sam, 2026-11-07): no separate remeasurement runner or runtime handoff.
   assert.doesNotMatch(text, /^  cpu-second:$|Retain the eligible original runtime bytes|--command second|cpu-runtime-\$/m);
   assert.match(first, /^    name: Rust \/ replay measurement \(\$\{\{ matrix\.venue \}\}\)$/m);
@@ -49,82 +43,17 @@ function verifyWorkflow(text) {
   assert.match(collect, /if: always\(\)/);
   assert.match(collect, /--command collect --suite '\$\{\{ matrix\.venue \}\}'/);
   assert.doesNotMatch(collect, /^          (?:if|else)\b|rust:gate:verify/m, 'no suite bypass of shared collection');
-  assert.match(plan, /needs: \[selection, gate, bitget-paired\]\n    if: always\(\)/);
-  assert.doesNotMatch(plan, /has_eligible|outputs\.matrix/);
-  assert.match(plan, /--command plan --out /);
-  assert.doesNotMatch(plan, /--suite /, 'planner covers the entire registered suite set');
-  assert.match(final, /name: Rust \/ CPU gate \(\$\{\{ matrix\.suite \}\}\)/);
-  assert.match(certify, /needs: \[selection, gate, bitget-paired, cpu-plan\]\n    if: always\(\)/);
-  assert.match(final, /needs: \[selection, cpu-certify\]\n    if: always\(\)/);
-  const suites = /suite: \[([^\]]+)\]/.exec(final);
-  assert(suites);
-  assert.deepEqual(suites[1].split(',').map(suite => suite.trim()).sort(), [...GATE_SUITES].sort());
-  assert.match(certify, /--command certify --out/);
-  assert.match(final, /--command status --suite '\$\{\{ matrix\.suite \}\}'/);
-  assert.match(final, /CPU_CERT_RESULT: \$\{\{ needs\.cpu-certify\.result \}\}/);
-  assert.match(final, /CPU_CERT_RESULTS: \$\{\{ needs\.cpu-certify\.outputs\.results \}\}/);
-  assert.doesNotMatch(final, /GITHUB_TOKEN|--command certify|upload-artifact/);
-  for (const supplemental of [plan, certify, final]) {
-    assert.match(supplemental, /defaults:\n      run:\n        working-directory: \.\n/);
-    assert.doesNotMatch(supplemental, /(?:yarn|npm|cargo|rustup) (?:install|build|add)|rust:build|--command prepare/);
-    assert.doesNotMatch(supplemental, /continue-on-error|gh run rerun|retries|retry:/);
-  }
-  for (const coordinator of [plan, certify]) {
-    const prepare = coordinator.indexOf('uses: ./.github/actions/prepare-yarn');
-    const install = coordinator.indexOf('uses: ./.github/actions/install-yarn');
-    const execute = coordinator.indexOf('run: node sdk-rs/harness/cpu-ci.mjs');
-    assert(prepare >= 0 && install > prepare && execute > install, 'coordinator needs locked dependencies before verifier imports');
-    assert.match(coordinator, /cache-dir: \$\{\{ steps\.yarn\.outputs\.cache-dir \}\}/);
-    assert.match(coordinator, /cache-key: \$\{\{ steps\.yarn\.outputs\.cache-key \}\}/);
-    assert.match(coordinator, /cache-hit: \$\{\{ steps\.yarn\.outputs\.cache-hit \}\}/);
-  }
-  for (const authorityConsumer of [first, job(text, 'bitget-paired'), plan, certify])
+  for (const authorityConsumer of [first])
     assert.match(authorityConsumer, /uses: actions\/checkout@v7\n        with:\n          ref: \$\{\{ github\.sha \}\}\n          fetch-depth: 1\n          fetch-tags: false\n      - uses: \.\/\.github\/actions\/fetch-rust-history\n(?=      - )/,
       'independent composition proof needs exact source and unconditional complete targeted history');
-  assert.doesNotMatch(final, /uses: \.\/\.github\/actions\/(?:prepare-yarn|install-yarn)/);
   assert.doesNotMatch(first, /continue-on-error/);
 }
 
-test('all required suite names certify unconditionally, with no separate remeasurement runner', () => verifyWorkflow(source));
+test('replay measurement retains sealed collection without CPU certification jobs', () => verifyWorkflow(source));
 
-function verifyBitgetProducer(text) {
-  const paired = job(text, 'bitget-paired');
-  assert.match(paired, /name: Rust \/ Bitget counterbalanced steady CPU/);
-  verifyWorkflow(text);
-  // Two measured witnesses now include identical master builds; retain a hard
-  // deadline with ten minutes beyond the collector's eighty-minute budget.
-  assert.match(paired, /^    timeout-minutes: 90$/m);
-  assert.match(paired, /CARGO_BUILD_JOBS: 4/);
-  assert.match(paired, /node-version: 22/);
-  assert.match(paired, /Public counterbalanced Bitget steady CPU/);
-  assert.match(paired, /run: node sdk-rs\/harness\/bitget-paired-run\.mjs --out/);
-  assert.match(paired, /name: bitget-paired-steady/);
-  assert.match(paired, /name: Retain counterbalanced Bitget steady evidence\n        if: success\(\) \|\| failure\(\)/);
-  assert.doesNotMatch(paired, /--baseline|--candidate|--tolerance|--threshold|continue-on-error|workflow_dispatch:/);
-  assert.match(job(text, 'cpu-plan'), /needs: \[selection, gate, bitget-paired\]/);
-  assert.match(job(text, 'cpu-certify'), /needs: \[selection, gate, bitget-paired, cpu-plan\]/);
-}
-
-test('Bitget paired producer is mandatory, bounded, source-selected and independently certified', () => verifyBitgetProducer(source));
-
-test('Bitget workflow guard rejects a bypassed deadline or canceled/missing failure evidence', () => {
-  verifyBitgetProducer(source);
-  for (const [before, after] of [
-    ['bitget-paired-run.mjs --out', 'bitget-paired-ci.mjs --out'],
-    ['if: success() || failure()', 'if: always()'],
-    ['if: success() || failure()', 'if: success()'],
-    ['timeout-minutes: 90', 'timeout-minutes: 120'],
-    ['run: node sdk-rs/harness/bitget-paired-run.mjs', 'continue-on-error: true\n        run: node sdk-rs/harness/bitget-paired-run.mjs'],
-  ]) {
-    const paired = job(source, 'bitget-paired'), changed = paired.replace(before, after);
-    assert.notEqual(changed, paired, `mutation must apply: ${before}`);
-    assert.throws(() => verifyBitgetProducer(source.replace(paired, changed)), before);
-  }
-});
-
-test('workflow controls reject skipped final checks, a revived second runner and suite/local bypasses', () => {
+test('workflow controls reject skipped collection, a revived second runner and local bypasses', () => {
   const changes = [
-    ...['gate', 'bitget-paired', 'cpu-plan', 'cpu-certify'].flatMap(name => [
+    ...['gate'].flatMap(name => [
       ['fetch-depth: 1', 'fetch-depth: 0'],
       ['ref: ${{ github.sha }}', 'ref: master'],
       ['fetch-tags: false', 'fetch-tags: true'],
@@ -132,16 +61,7 @@ test('workflow controls reject skipped final checks, a revived second runner and
       ['      - uses: ./.github/actions/fetch-rust-history\n',
         '      - uses: ./.github/actions/fetch-rust-history\n        if: false\n'],
     ].map(([before, after]) => text => text.replace(job(text, name), job(text, name).replace(before, after)))),
-    text => text.replace(job(text, 'cpu-plan'), job(text, 'cpu-plan').replace('uses: ./.github/actions/install-yarn', 'uses: actions/checkout@v7')),
-    text => text.replace(job(text, 'cpu-certify'), job(text, 'cpu-certify').replace('uses: ./.github/actions/prepare-yarn', 'uses: actions/checkout@v7')),
-    text => text.replace(job(text, 'cpu-plan'), job(text, 'cpu-plan').replace('cache-key: ${{ steps.yarn.outputs.cache-key }}', 'cache-key: unbound')),
-    text => text.replace('\n  cpu-certify:\n', '\n  cpu-second:\n    name: Rust / CPU remeasurement (bitget)\n\n  cpu-certify:\n'),
-    text => text.replace(job(text, 'cpu-final'), job(text, 'cpu-final') + '      - uses: ./.github/actions/prepare-yarn\n'),
-    text => text.replace('needs: [selection, gate, bitget-paired, cpu-plan]\n    if: always()', 'needs: [selection, gate, bitget-paired, cpu-plan]\n    if: success()'),
-    text => text.replace('needs: [selection, cpu-certify]\n    if: always()', 'needs: cpu-certify\n    if: success()'),
-    text => text.replace('timeout-minutes: 5\n    defaults:\n      run:\n        working-directory: .', 'timeout-minutes: 5'),
-    text => text.replace('suite: [apexomni,', 'suite: ['),
-    text => text.replace('--command plan --out', '--command plan --suite bitget --out'),
+    text => text.replace('\n  result:\n', '\n  cpu-second:\n    name: Rust / CPU remeasurement (bitget)\n\n  result:\n'),
     text => text.replace("--command collect --suite '${{ matrix.venue }}'", "rust:gate:verify --suite '${{ matrix.venue }}'"),
   ];
   for (const change of changes) { const changed = change(source); assert.notEqual(changed, source); assert.throws(() => verifyWorkflow(changed)); }
