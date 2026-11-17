@@ -93,7 +93,7 @@ fn expired_login_reads_one_unsigned_clock_and_holds_the_next_login_until_correct
         assert_eq!(request.url, format!("https://api.bitget.com{TIME}"));
         assert_eq!(
             request.headers,
-            [("X-CHANNEL-API-CODE".into(), "Tealstreet".into())]
+            [("X-CHANNEL-API-CODE", "Tealstreet".into())]
         );
         let socket = reconnect(&mut h);
         assert!(
@@ -196,8 +196,23 @@ fn a_clock_sample_expires_within_five_seconds_and_ignores_its_late_reply() {
     h.private_message(EXPIRED);
     let request = h.take(TIME);
     let socket = reconnect(&mut h);
-    h.timer_after(5_000. - (h.now - start));
-    assert_stamp(&h, socket, h.now);
+    let deadline = start + 5_000.;
+    let mut fired = 0;
+    while let Some((timer, at)) = h
+        .timers
+        .iter()
+        .copied()
+        .filter(|(_, at)| *at <= deadline)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+    {
+        h.timers.retain(|(id, _)| *id != timer);
+        h.now = h.now.max(at);
+        h.event(Event::TimerFired { timer });
+        fired += 1;
+    }
+    assert!(fired > 1, "heartbeat and HTTP deadlines may coincide");
+    assert_eq!(h.now, deadline);
+    assert_stamp(&h, socket, deadline);
     h.reply(request.id, 200, &time_reply(9_000_000.));
     assert_eq!(h.engine.signing_clock(h.now).0, h.now);
 }
