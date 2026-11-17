@@ -500,3 +500,90 @@ fn publication_metadata_is_not_an_engine_option_or_account_identity() {
         );
     }
 }
+
+async fn saturated_pump(change_interval: bool) {
+    let backlog = safe_cex_native::ServerConfig::default().client_queue_capacity;
+    let (session, _unused, account, snapshot) = setup(None).await;
+    let handle = account.handle.clone();
+    let (input, outgoing) = tokio::sync::mpsc::channel(backlog);
+    let (_cancel, canceled) = tokio::sync::watch::channel(false);
+    let (out, mut sent, _) = Out::channel(backlog + 32);
+    let (dropped, _dropped_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (rate, rate_rx) = tokio::sync::watch::channel(if change_interval { 5000 } else { 50 });
+    let task = tokio::task::spawn_local(pump(
+        safe_cex_native::ClientLink { outgoing, canceled },
+        1,
+        dropped,
+        handle,
+        "acct".into(),
+        out,
+        Arc::default(),
+        Arc::default(),
+        None,
+        rate_rx,
+    ));
+    input
+        .send(Outgoing::Frame(bytes(&snapshot).into()))
+        .await
+        .unwrap();
+    first(&mut sent).await;
+    drain(&mut sent);
+    let mut update = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 10.);
+    update.begin(section::TICKER_DELTAS);
+    update.f64s([0., 4., 123.]);
+    update.end();
+    input
+        .send(Outgoing::Frame(update.finish().into()))
+        .await
+        .unwrap();
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+    assert!(public_frames(&drain(&mut sent)).is_empty());
+    let mut control = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 20.);
+    control.begin(65000);
+    control.u32s([1, 0]);
+    control.end();
+    let control: Arc<[u8]> = control.finish().into();
+    for _ in 0..backlog {
+        input.try_send(Outgoing::Frame(control.clone())).unwrap();
+    }
+    if change_interval {
+        rate.send_replace(50);
+    }
+    tokio::time::advance(Duration::from_millis(60)).await;
+    let mut before_public = 0;
+    loop {
+        let message: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+        if message["d"]["op"] != "frame" {
+            continue;
+        }
+        let data = bytes(&message);
+        if safe_cex_engine::wire::sections(&data).any(|(kind, _)| kind == section::TICKER_DELTAS) {
+            break;
+        }
+        assert!(safe_cex_engine::wire::sections(&data).any(|(kind, _)| kind == 65000));
+        before_public += 1;
+    }
+    assert!(
+        before_public <= 1,
+        "due publication/live rate waited behind {before_public} ready frames"
+    );
+    task.abort();
+    session.close();
+    account.handle.dispose();
+}
+
+#[tokio::test(start_paused = true)]
+async fn publication_deadline_progresses_while_the_native_inbox_is_ready() {
+    tokio::task::LocalSet::new()
+        .run_until(saturated_pump(false))
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn live_interval_progresses_while_the_native_inbox_is_ready() {
+    tokio::task::LocalSet::new()
+        .run_until(saturated_pump(true))
+        .await;
+}
