@@ -599,7 +599,7 @@ impl Account {
                     pending => (pending, None),
                 };
                 if let Pending::Account(request) = pending {
-                    self.on_sign_failed(cx, request, error, credentials);
+                    self.on_sign_failed(cx, request, *error, credentials);
                 }
                 crate::managed::finish(cx, context);
             }

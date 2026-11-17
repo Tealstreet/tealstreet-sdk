@@ -19,6 +19,7 @@ use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+mod diagnostics;
 
 // BingX-API/api-ai-skills references/error-codes.md: preserve native codes,
 // but never make diagnostics depend on a free-form venue message.
@@ -69,6 +70,7 @@ pub struct Request {
     leg: Leg,
     rows: Vec<Row>,
     error: Option<String>,
+    row_diagnostic: Option<diagnostics::Detail>,
 }
 
 struct Page {
@@ -704,6 +706,7 @@ impl History {
                             leg: Leg::Signed(leg),
                             rows: Vec::new(),
                             error: None,
+                            row_diagnostic: None,
                         })
                     },
                 )
@@ -731,6 +734,7 @@ impl History {
                     leg: Leg::Public(context.clone()),
                     rows: Vec::new(),
                     error: None,
+                    row_diagnostic: None,
                 });
                 let queued = cx.request_managed_with_headers(
                     context,
@@ -858,6 +862,7 @@ impl History {
                     )
                 }),
             );
+            let error = self.decode_diagnostic(&request, Some(response.body), error);
             self.on_http_failed(cx, request, error);
         }
     }
@@ -906,7 +911,10 @@ impl History {
         };
         match row {
             Ok(row) => request.rows.push(row),
-            Err(error) => request.error = Some(error),
+            Err(error) => {
+                request.row_diagnostic = diagnostics::row(read.native.kind, item, &error);
+                request.error = Some(error);
+            }
         }
     }
 
@@ -989,10 +997,15 @@ impl History {
                 });
             if let Err(error) = result {
                 request.error = Some(error);
+                request.row_diagnostic = None;
             }
         }
         if let Some(error) = request.error.take() {
-            self.on_failed(cx, request, &error);
+            let error = VenueError::new(error)
+                .kind(ErrorKind::Internal)
+                .cause_code(ErrorCause::HistoryDecode);
+            let error = self.decode_diagnostic(&request, Some(response.body), error);
+            self.on_http_failed(cx, request, error);
             return;
         }
         let command = request.page.command;
@@ -1128,14 +1141,68 @@ impl History {
         self.on_http_failed(cx, request, error);
     }
 
+    pub fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        status: u16,
+        headers: &str,
+        error: &str,
+    ) {
+        let diagnostic = self
+            .reads
+            .get(&request.page.command)
+            .is_some_and(|read| matches!(read.native.kind, Kind::Income | Kind::Orders));
+        if !diagnostic {
+            self.on_http_failed(
+                cx,
+                request,
+                VenueError::new(error).kind(ErrorKind::Internal),
+            );
+        } else if (200..300).contains(&status) {
+            self.on_failed(cx, request, error);
+        } else {
+            self.on_stream_error(
+                cx,
+                request,
+                Response {
+                    status,
+                    headers,
+                    body: "",
+                },
+            );
+        }
+    }
+
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        self.on_http_failed(
-            cx,
-            request,
-            VenueError::new(error)
-                .kind(ErrorKind::Internal)
-                .cause_code(ErrorCause::HistoryDecode),
-        );
+        let error = VenueError::new(error)
+            .kind(ErrorKind::Internal)
+            .cause_code(ErrorCause::HistoryDecode);
+        let error = self.decode_diagnostic(&request, None, error);
+        self.on_http_failed(cx, request, error);
+    }
+
+    fn decode_diagnostic(
+        &self,
+        request: &Request,
+        body: Option<&str>,
+        error: VenueError,
+    ) -> VenueError {
+        if error.cause_code != Some(ErrorCause::HistoryDecode) {
+            return error;
+        }
+        let Some(read) = self.reads.get(&request.page.command) else {
+            return error;
+        };
+        let Some(detail) = diagnostics::failure(read.native.kind, request.row_diagnostic, body)
+        else {
+            return error;
+        };
+        let mut safe = VenueError::new("BingX history response could not be decoded")
+            .kind(ErrorKind::Internal)
+            .cause_code(ErrorCause::HistoryDecode);
+        safe.history_decode = Some(detail);
+        safe
     }
 
     pub fn on_http_failed(
@@ -1182,8 +1249,8 @@ fn map_fill(row: FillRow, fallback_symbol: &str) -> Result<Row, String> {
     }))
 }
 
-fn map_order(row: OrderRow) -> Result<Row, String> {
-    let kind = match row.kind.as_str() {
+fn order_type(value: &str) -> Option<OrderType> {
+    Some(match value {
         "MARKET" => OrderType::Market,
         "LIMIT" => OrderType::Limit,
         "STOP" | "TRIGGER_LIMIT" | "STOP_LIMIT" | "TAKE_PROFIT" | "TAKE_PROFIT_LIMIT" => {
@@ -1192,14 +1259,25 @@ fn map_order(row: OrderRow) -> Result<Row, String> {
         "STOP_MARKET" | "TRIGGER_MARKET" => OrderType::StopLoss,
         "TAKE_PROFIT_MARKET" => OrderType::TakeProfit,
         "TRAILING_STOP_MARKET" | "TRAILING_TP_SL" => OrderType::TrailingStopLoss,
-        _ => return Err(format!("unknown order type {}", row.kind)),
-    };
-    let status = match row.status.as_str() {
-        "NEW" | "OPEN" | "WORKING" | "PENDING" | "PARTIALLY_FILLED" => OrderStatus::Open,
+        _ => return None,
+    })
+}
+
+fn order_status(value: &str) -> Option<OrderStatus> {
+    Some(match value {
+        "NEW" | "OPEN" | "WORKING" | "PENDING" | "PARTIALLY_FILLED" | "PARTIALLYFILLED" => {
+            OrderStatus::Open
+        }
         "FILLED" => OrderStatus::Closed,
-        "CANCELED" | "CANCELLED" | "EXPIRED" | "REJECTED" => OrderStatus::Canceled,
-        _ => return Err(format!("unknown order status {}", row.status)),
-    };
+        "CANCELED" | "CANCELLED" | "EXPIRED" | "REJECTED" | "FAILED" => OrderStatus::Canceled,
+        _ => return None,
+    })
+}
+
+fn map_order(row: OrderRow) -> Result<Row, String> {
+    let kind = order_type(&row.kind).ok_or_else(|| format!("unknown order type {}", row.kind))?;
+    let status =
+        order_status(&row.status).ok_or_else(|| format!("unknown order status {}", row.status))?;
     Ok(Row::Order(HistoricalOrder {
         id: row.order_id,
         symbol: symbol(&row.symbol),

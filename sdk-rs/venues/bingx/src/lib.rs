@@ -346,7 +346,7 @@ impl Bingx {
                 safe_cex_engine::request_context::Scope::Background,
                 ReadRole::Read { scope: None },
             ) {
-                self.on_sign_error(cx, *pending, error);
+                self.on_sign_error(cx, *pending, *error);
             }
         } else if let Err((pending, error)) = managed::public(
             cx,
@@ -359,7 +359,7 @@ impl Bingx {
             pending,
             safe_cex_engine::request_context::Scope::Background,
         ) {
-            self.on_sign_error(cx, *pending, error);
+            self.on_sign_error(cx, *pending, *error);
         }
     }
 
@@ -377,7 +377,7 @@ impl Bingx {
         }
         // The retry keeps its Selection, so account evidence is tagged again.
         if let Err((pending, error)) = managed::retry(cx, signed) {
-            self.on_sign_error(cx, *pending, error);
+            self.on_sign_error(cx, *pending, *error);
         }
     }
 
@@ -1547,6 +1547,26 @@ impl Venue for Bingx {
             }
         }
     }
+    fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        status: u16,
+        headers: &str,
+        error: &str,
+    ) {
+        match pending {
+            Pending::History(request) => self
+                .history
+                .on_stream_malformed(cx, request, status, headers, error),
+            pending => self.on_http_failed(
+                cx,
+                pending,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Internal),
+            ),
+        }
+    }
+
     fn on_http_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1801,7 +1821,7 @@ impl Venue for Bingx {
                         safe_cex_engine::request_context::Scope::Command(command),
                         ReadRole::Read { scope: None },
                     ) {
-                        self.on_sign_error(cx, *pending, error);
+                        self.on_sign_error(cx, *pending, *error);
                     }
                 } else if let Err((pending, error)) = managed::public(
                     cx,
@@ -1814,7 +1834,7 @@ impl Venue for Bingx {
                     pending,
                     safe_cex_engine::request_context::Scope::Command(command),
                 ) {
-                    self.on_sign_error(cx, *pending, error);
+                    self.on_sign_error(cx, *pending, *error);
                 }
             }
             other => {

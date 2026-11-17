@@ -116,6 +116,8 @@ pub enum HistorySchema {
     KrakenFills,
     KrakenOrders,
     KrakenIncome,
+    BingxIncome,
+    BingxOrders,
 }
 
 #[cfg(feature = "history-row-diagnostics")]
@@ -144,6 +146,113 @@ pub enum HistoryDecodeReason {
     TimestampDecimal,
     LastUpdateTimestampDecimal,
     LimitPriceDecimal,
+    FieldType,
+    FieldValue,
+    EnvelopeShape,
+    EnvelopeCode,
+    DataShape,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum HistoryDecodeField {
+    #[serde(rename = "root")]
+    Root,
+    #[serde(rename = "code")]
+    Code,
+    #[serde(rename = "msg")]
+    Message,
+    #[serde(rename = "data")]
+    Data,
+    #[serde(rename = "data.orders")]
+    DataOrders,
+    #[serde(rename = "row")]
+    Row,
+    #[serde(rename = "row.symbol")]
+    Symbol,
+    #[serde(rename = "row.incomeType")]
+    IncomeType,
+    #[serde(rename = "row.income")]
+    Income,
+    #[serde(rename = "row.asset")]
+    Asset,
+    #[serde(rename = "row.time")]
+    Time,
+    #[serde(rename = "row.tranId")]
+    TranId,
+    #[serde(rename = "row.tradeId")]
+    TradeId,
+    #[serde(rename = "row.orderId")]
+    OrderId,
+    #[serde(rename = "row.side")]
+    Side,
+    #[serde(rename = "row.type")]
+    OrderType,
+    #[serde(rename = "row.status")]
+    Status,
+    #[serde(rename = "row.price")]
+    Price,
+    #[serde(rename = "row.avgPrice")]
+    AveragePrice,
+    #[serde(rename = "row.origQty")]
+    Quantity,
+    #[serde(rename = "row.executedQty")]
+    FilledQuantity,
+    #[serde(rename = "row.reduceOnly")]
+    ReduceOnly,
+    #[serde(rename = "row.positionSide")]
+    PositionSide,
+    #[serde(rename = "row.updateTime")]
+    UpdateTime,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryExpectedType {
+    Object,
+    Array,
+    Integer,
+    String,
+    NumberOrNumericString,
+    StringOrInteger,
+    BooleanOrStringOrNull,
+    StringOrNull,
+    StringOrIntegerOrNull,
+    ArrayOrObject,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryJsonType {
+    Missing,
+    InvalidJson,
+    Null,
+    Boolean,
+    Number,
+    String,
+    Array,
+    Object,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryEnvelopeCode {
+    Present,
+    Absent,
+    Unavailable,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryDecodeShape {
+    pub field: HistoryDecodeField,
+    pub expected: HistoryExpectedType,
+    pub actual: HistoryJsonType,
+    pub envelope_code: HistoryEnvelopeCode,
 }
 
 #[cfg(feature = "history-row-diagnostics")]
@@ -152,6 +261,8 @@ pub enum HistoryDecodeReason {
 pub struct HistoryDecode {
     pub schema: HistorySchema,
     pub reason: HistoryDecodeReason,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shape: Option<HistoryDecodeShape>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -244,7 +355,11 @@ impl VenueError {
     pub fn history_decode(mut self, schema: HistorySchema, reason: HistoryDecodeReason) -> Self {
         self.kind = Some(ErrorKind::Internal);
         self.cause_code = Some(ErrorCause::HistoryDecode);
-        self.history_decode = Some(HistoryDecode { schema, reason });
+        self.history_decode = Some(HistoryDecode {
+            schema,
+            reason,
+            shape: None,
+        });
         self
     }
 
