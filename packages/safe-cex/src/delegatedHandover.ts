@@ -13,6 +13,8 @@ export type DelegatedHandoverInput = Readonly<{
   passphrase?: string;
   /** Private key-only material; never copy into unsealed account settings. */
   signingKey?: string;
+  /** ApeX packed 65-byte OmniKey seed; encrypted credentials only. */
+  omniKeySeed?: string;
 }>;
 
 export type SealedDelegatedHandover = Readonly<{
@@ -71,7 +73,7 @@ function validContext(value: unknown): value is string {
 export function sealDelegatedHandover(input: DelegatedHandoverInput): SealedDelegatedHandover {
   let plaintext: Uint8Array | undefined;
   try {
-    const { publicKey, attemptId, bootId, exchangeName, key, secret, passphrase, signingKey } = input;
+    const { publicKey, attemptId, bootId, exchangeName, key, secret, passphrase, signingKey, omniKeySeed } = input;
     if (
       !validContext(exchangeName) ||
       !validContext(attemptId) ||
@@ -80,13 +82,18 @@ export function sealDelegatedHandover(input: DelegatedHandoverInput): SealedDele
       typeof publicKey !== 'string' ||
       typeof secret !== 'string' ||
       (passphrase !== undefined && typeof passphrase !== 'string') ||
-      (signingKey !== undefined && (typeof signingKey !== 'string' || signingKey.length === 0))
+      (signingKey !== undefined && (typeof signingKey !== 'string' || signingKey.length === 0)) ||
+      (omniKeySeed !== undefined &&
+        (exchangeName !== 'apexomni' ||
+          signingKey !== undefined ||
+          typeof omniKeySeed !== 'string' ||
+          !/^(?:0x)?[0-9a-fA-F]{130}$/.test(omniKeySeed)))
     ) {
       throw new Error('Invalid DELEGATED handover');
     }
     const recipient = recipientBytes(publicKey);
     const aad = utf8ToBytes([attemptId, bootId, exchangeName, key].join('|'));
-    plaintext = utf8ToBytes(JSON.stringify({ key, secret, passphrase, signingKey }));
+    plaintext = utf8ToBytes(JSON.stringify({ key, secret, passphrase, signingKey, omniKeySeed }));
     const sealed = sealHandoverHpke(recipient, INFO, aad, plaintext);
     return { attemptId, enc: base64(sealed.enc), ciphertext: base64(sealed.ciphertext) };
   } catch {
