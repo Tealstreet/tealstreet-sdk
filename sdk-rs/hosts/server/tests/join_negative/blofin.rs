@@ -27,13 +27,45 @@ fn single<'a>(h: &'a HeaderMap, n: &str) -> Option<&'a str> {
     let v = i.next()?.to_str().ok()?;
     i.next().is_none().then_some(v)
 }
-fn valid_rest(_path: &str, _query: Option<&str>, _h: &HeaderMap) -> bool {
-    let _ = single(&HeaderMap::new(), "access-key");
-    true
+fn valid_rest(path: &str, query: Option<&str>, h: &HeaderMap) -> bool {
+    (|| {
+        let material = secret(single(h, "access-key")?)?;
+        if single(h, "access-passphrase")? != PASS {
+            return None;
+        }
+        let stamp = single(h, "access-timestamp")?;
+        let time = stamp.parse::<u64>().ok()?;
+        if time.abs_diff(now_ms()) > 30_000 {
+            return None;
+        }
+        let nonce = single(h, "access-nonce")?;
+        if nonce.is_empty() || !nonce.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return None;
+        }
+        let target = match query {
+            Some(q) => format!("{path}?{q}"),
+            None => path.to_owned(),
+        };
+        Some(single(h, "access-sign")? == mac(material, &format!("{target}GET{stamp}{nonce}")))
+    })() == Some(true)
 }
-fn valid_login(_v: &Value) -> bool {
-    let _ = secret(KEY);
-    true
+fn valid_login(v: &Value) -> bool {
+    (|| {
+        if v["op"] != "login" || v["args"].as_array()?.len() != 1 {
+            return None;
+        }
+        let a = &v["args"][0];
+        let material = secret(a["apiKey"].as_str()?)?;
+        if a["passphrase"] != PASS {
+            return None;
+        }
+        let stamp = a["timestamp"].as_u64()?;
+        let nonce = a["nonce"].as_str()?;
+        if nonce.is_empty() || !nonce.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return None;
+        }
+        Some(a["sign"] == mac(material, &format!("/users/self/verifyGET{stamp}{nonce}")))
+    })() == Some(true)
 }
 impl<const TESTNET: bool> Venue for Blofin<TESTNET> {
     const NAME: &'static str = "blofin";
