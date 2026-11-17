@@ -27,6 +27,8 @@ impl std::fmt::Debug for Session {
 }
 #[derive(Deserialize)]
 struct AuthResult {
+    /// Absent from a connection-scoped WebSocket session (see `connection_session`).
+    #[serde(default)]
     access_token: String,
     expires_in: u32,
 }
@@ -37,16 +39,17 @@ impl Drop for AuthResult {
 }
 /// Names the first rejected public/auth field without echoing any value, so an
 /// operator can diagnose a live refusal without exposing the bearer token.
-fn auth_result_defect(result: &Value) -> Option<&'static str> {
+fn auth_result_defect(result: &Value, connection_session: bool) -> Option<&'static str> {
     let Some(fields) = result.as_object() else {
         return Some("result is not an object");
     };
     let token = match fields.get("access_token") {
+        None if connection_session => "",
         None => return Some("access_token missing"),
         Some(Value::String(token)) => token,
         Some(_) => return Some("access_token is not a string"),
     };
-    if token.is_empty() {
+    if token.is_empty() && !connection_session {
         return Some("access_token empty");
     }
     if token.len() > 16_384 {
@@ -188,7 +191,15 @@ impl Session {
         }
         self.started_ms = started_ms;
         self.clear_token();
-        if let Some(reason) = auth_result_defect(&result) {
+        // The Coinbase gateway authenticates a WebSocket connection itself: its
+        // public/auth reply carries a session id (`sid`) and no bearer token.
+        // WS sessions never emit Authorization, so only their lifetime matters.
+        let connection_session = matches!(self.channel, Channel::WebSocket(_))
+            && result.get("access_token").is_none()
+            && result
+                .get("sid")
+                .is_some_and(|sid| sid.as_str().is_some_and(|s| !s.is_empty()) || sid.is_u64());
+        if let Some(reason) = auth_result_defect(&result, connection_session) {
             return Err(format!(
                 "drb invalid public/auth result: {reason} (fields: {})",
                 field_names(&result)
@@ -206,7 +217,9 @@ impl Session {
         if !refresh_ms.is_finite() || refresh_ms <= started_ms {
             return Err("drb invalid authentication expiry".into());
         }
-        self.token = Some(Zeroizing::new(std::mem::take(&mut result.access_token)));
+        if !connection_session {
+            self.token = Some(Zeroizing::new(std::mem::take(&mut result.access_token)));
+        }
         self.refresh_ms = Some(refresh_ms);
         Ok(())
     }

@@ -1138,3 +1138,46 @@ fn auth_rejection_lists_field_names_only() {
         .unwrap_err();
     assert!(error.ends_with("(fields: none)"), "{error}");
 }
+
+#[test]
+fn websocket_auth_accepts_connection_scoped_session_without_token() {
+    // Live drb WebSocket public/auth reply: a session id, no bearer token.
+    let session_reply = || {
+        json!({
+            "expires_in": 899,
+            "scope": "rat#trade rat#view",
+            "token_type": "bearer",
+            "portfolio_uuid": "00000000-0000-0000-0000-000000000000",
+            "gateway_id": 0,
+            "sid": "synthetic-session"
+        })
+    };
+    let mut ws = Session::new(Channel::WebSocket(SocketId(9)));
+    ws.accept(session_reply(), 1000.).unwrap();
+    assert!(ws.refresh_at().is_some());
+    assert!(!ws.needs_refresh(1001.));
+    assert!(ws.authorization(1001.).is_none());
+
+    // HTTP still requires a bearer token.
+    let error = Session::new(Channel::Http)
+        .accept(session_reply(), 1000.)
+        .unwrap_err();
+    assert!(error.contains("access_token missing"), "{error}");
+
+    // Without a session id, a token-less WS reply is still refused.
+    let mut no_sid = session_reply();
+    no_sid.as_object_mut().unwrap().remove("sid");
+    let error = Session::new(Channel::WebSocket(SocketId(9)))
+        .accept(no_sid, 1000.)
+        .unwrap_err();
+    assert!(error.contains("access_token missing"), "{error}");
+
+    // Other fields keep their checks on the session path.
+    let mut bad = session_reply();
+    bad["token_type"] = json!("mac");
+    assert!(
+        Session::new(Channel::WebSocket(SocketId(9)))
+            .accept(bad, 1000.)
+            .is_err()
+    );
+}
