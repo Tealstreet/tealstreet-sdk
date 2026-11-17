@@ -10,7 +10,7 @@ mod hyperliquid_fixture;
 #[path = "join_negative/transport.rs"]
 mod transport_tests;
 
-use bybit_fixture::Bybit;
+use bybit_fixture::{Bybit, BybitCase};
 use hyperliquid_fixture::Hyperliquid;
 use join_negative::*;
 
@@ -51,3 +51,12 @@ macro_rules! suite {
 }
 suite!(bybit, Bybit);
 suite!(hyperliquid, Hyperliquid);
+
+suite!(bybit_testnet, BybitCase<0, true>);
+suite!(bybitinverse, BybitCase<1>);
+suite!(bybitinverse_testnet, BybitCase<1, true>);
+suite!(bybitdemo, BybitCase<2>);
+suite!(bybitdemo_testnet, BybitCase<2, true>);
+suite!(bybitspot, BybitCase<3>);
+suite!(bybitspot_testnet, BybitCase<3, true>);
+suite!(bybitinverse_brazil, BybitCase<1, false, true>);
