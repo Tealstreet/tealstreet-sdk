@@ -156,6 +156,14 @@
     ]
   },
   {
+    "name": "bingxspot",
+    "displayName": "BingX Spot",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
     "name": "blofin",
     "displayName": "BloFin",
     "requiredFields": [
