@@ -1278,3 +1278,58 @@ it('financial reconciliation cannot bypass the shared 429 pause', async () => {
   });
   expect(send).not.toHaveBeenCalled();
 });
+
+describe('closed info admission timeout diagnosis', () => {
+  it('labels a refused quota reservation without changing its deadline or shared pause', async () => {
+    const a = client();
+    await a.response(ORIGIN, 429, 'retry-after: 30');
+    await expect(admit(client(), ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT', cause: 'info_admission', message: 'HTTP admission deadline expired',
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    // The pause still owns the same empty-bucket refill; no earlier send is granted.
+    await expect(admit(client(), ORIGIN, ORDERS, Date.now() + 1, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT', cause: 'info_admission',
+    });
+  });
+
+  it('labels a final admission refusal and never calls physical handoff', async () => {
+    const a = client();
+    const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
+    await client().response(ORIGIN, 429, 'retry-after: 30');
+    const send = vi.fn();
+    await expect(a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, signal(), send)).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT', cause: 'info_admission', message: 'HTTP admission deadline expired',
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('labels the original deadline timer only while the budget wait is pending', async () => {
+    const { HttpPreparationError } = await import('@tealstreet/safe-cex-wasm/host');
+    const a = client();
+    await spend(a);
+    const abort = new AbortController();
+    const waiting = a.wait(ORIGIN, ORDERS, Date.now() + 20_000, abort.signal, 'critical');
+    const checked = expect(waiting).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT', cause: 'info_admission', message: 'HTTP admission deadline expired',
+    });
+    await flushDatabase();
+    abort.abort(new HttpPreparationError('timedOut'));
+    await checked;
+  });
+
+  it('preserves cancellation and errors after handoff instead of labelling them admission', async () => {
+    const { HttpPreparationError } = await import('@tealstreet/safe-cex-wasm/host');
+    const a = client();
+    const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
+    const error = new HttpPreparationError('timedOut');
+    const send = vi.fn(() => { throw error; });
+    await expect(a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, signal(), send)).rejects.toBe(error);
+    expect(send).toHaveBeenCalledOnce();
+    expect(error.cause).toBeUndefined();
+    const abort = new AbortController();
+    const cancelled = new Error('disposed');
+    abort.abort(cancelled);
+    await expect(a.wait(ORIGIN, ORDERS, Date.now() + 20_000, abort.signal)).rejects.toBe(cancelled);
+  });
+});

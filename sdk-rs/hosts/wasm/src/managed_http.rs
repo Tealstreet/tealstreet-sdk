@@ -284,6 +284,22 @@ fn preparation_failure_text(code: &str) -> &'static str {
 mod tests {
     use super::*;
     #[test]
+    fn info_admission_expiry_has_a_distinct_closed_title() {
+        assert_eq!(
+            preparation_failure_text("infoAdmissionTimedOut"),
+            "HTTP admission deadline expired"
+        );
+        assert_eq!(
+            preparation_failure_text("timedOut"),
+            "Relay or network request timed out"
+        );
+        assert_eq!(
+            preparation_failure_text("info_admission:PRIVATE"),
+            "HTTP transport preparation failed"
+        );
+    }
+
+    #[test]
     fn managed_wire_keeps_wide_tokens_and_legacy_http_bytes() {
         let request = safe_cex_engine::HttpRequest {
             id: RequestId(7),
