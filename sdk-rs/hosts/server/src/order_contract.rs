@@ -130,13 +130,17 @@ pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
     }
 }
 
-/// #3623 exposed HL's UUID refusal: losslessly encode the validated intent's
-/// 128 bits for HL/Spot; request IDs, fingerprints and other venues stay UUIDs.
-pub(crate) fn client_order_id(venue: &str, intent: &str) -> String {
-    if matches!(venue, "hyperliquid" | "hyperliquidspot") {
-        format!("0x{}", intent.replace('-', ""))
-    } else {
-        intent.to_owned()
+/// #3630 audits native formats: keep all validated UUID bits in supported text
+/// IDs. Adapters without caller-ID support omit it; the router ledger still
+/// owns dedupe. Numeric-ID adapters retain their refusal pending a follow-up.
+pub(crate) fn client_order_id(venue: &str, intent: &str) -> Option<String> {
+    let hex = || intent.replace('-', "");
+    match venue {
+        "hyperliquid" | "hyperliquidspot" => Some(format!("0x{}", hex())),
+        "bitget" | "bitgetusdc" | "bitgetinverse" | "okx" | "okxdemo" | "okxeu" | "okxeudemo"
+        | "blofin" | "binancepm" => Some(hex()),
+        "lighter" | "lighter-robinhood" | "binanceinverse" | "asterdex" | "kraken" | "mexc" => None,
+        _ => Some(intent.to_owned()),
     }
 }
 
@@ -303,12 +307,12 @@ mod activation_tests {
             assert!(key_time(intent).is_some());
             for venue in ["hyperliquid", "hyperliquidspot"] {
                 let first = client_order_id(venue, intent);
-                assert_eq!(first, expected);
+                assert_eq!(first.as_deref(), Some(expected));
                 assert_eq!(client_order_id(venue, intent), first);
-                assert_eq!(&first[2..], intent.replace('-', ""));
+                assert_eq!(&first.unwrap()[2..], intent.replace('-', ""));
             }
             for venue in ["bybit", "bybitinverse", "binance", "okx"] {
-                assert_eq!(client_order_id(venue, intent), intent);
+                assert_eq!(client_order_id(venue, intent).as_deref(), Some(intent));
             }
         }
     }

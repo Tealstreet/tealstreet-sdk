@@ -660,7 +660,22 @@ async fn order_frames_without_caller_id_keep_null_receipt_and_original_intent() 
                     let account = delegated_account(&registry, "A", venue, tape.clone());
                     let (mut session, mut sent) =
                         joined(registry.clone(), "A", account.clone()).await;
-                    let key = submit(&mut session, 0, None).await;
+                    let key = intent(0);
+                    let mut params = placement();
+                    if unknown {
+                        params["clientOrderId"] = key.clone().into();
+                    }
+                    let fingerprint =
+                        crate::order_contract::fingerprint("synthetic-main", &key, &params, 1)
+                            .unwrap();
+                    session
+                        .handle(
+                            &json!({"t":"order.submit","d":{"accountName":"synthetic-main",
+                    "intentId":key,"params":params,"seq":1,"ageMs":0,"fingerprint":fingerprint}})
+                            .to_string(),
+                        )
+                        .await
+                        .unwrap();
                     let ack = order_frame(&mut sent, "order.ack").await;
                     assert_eq!(ack["d"]["received"], true, "{venue}");
                     assert_eq!(ack["d"]["intentId"], key);

@@ -2869,7 +2869,7 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             out,
             name,
             &pending.request_id,
-            client_order_id,
+            client_order_id.as_deref(),
             *seq,
             outcome,
         );

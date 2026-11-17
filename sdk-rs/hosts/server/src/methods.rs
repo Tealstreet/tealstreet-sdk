@@ -57,7 +57,10 @@ pub enum Reply {
     /// `placeOrderWithClientOrderId`: `{orderIds, clientOrderId}`, as base.ts.
     Placed { client_order_id: String },
     /// An order frame using the same single-order command and audit path.
-    Intent { client_order_id: String, seq: u64 },
+    Intent {
+        client_order_id: Option<String>,
+        seq: u64,
+    },
     Action {
         kind: &'static str,
         seq: u64,

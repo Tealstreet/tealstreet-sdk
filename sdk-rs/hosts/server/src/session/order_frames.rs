@@ -89,7 +89,13 @@ impl Session {
         }
         let client_id =
             order_contract::client_order_id(&self.joined[&name].account.venue, &submit.intent_id);
-        params.insert("clientOrderId".into(), client_id.into());
+        let method = if let Some(id) = client_id {
+            params.insert("clientOrderId".into(), id.into());
+            "placeOrderWithClientOrderId"
+        } else {
+            params.remove("clientOrderId");
+            "placeOrder"
+        };
         out.send(envelope::order_frame(
             "order.ack",
             &name,
@@ -98,7 +104,7 @@ impl Session {
         self.call_inner(
             &name,
             json!({"requestId":submit.intent_id,
-            "method":"placeOrderWithClientOrderId","args":[submit.params],"intentSeq":submit.seq}),
+            "method":method,"args":[submit.params],"intentSeq":submit.seq}),
             Some(OrderReceipt::Placement(submit.seq)),
         )
         .await;
@@ -173,7 +179,7 @@ impl Session {
                 .map_or("", |joined| joined.account.venue.as_str());
             let client_id = request_id
                 .as_str()
-                .map(|id| order_contract::client_order_id(venue, id));
+                .and_then(|id| order_contract::client_order_id(venue, id));
             self.account_out(name).order_outcome(name, json!({"intentId":request_id,"seq":seq,"outcome":"refused",
                 "venueOrderId":null,"clientOrderId":client_id,"error":{"message":message,"outcome":"notSent"}}));
         } else {
@@ -199,7 +205,7 @@ pub(super) fn settle_intent(
     out: &Out,
     name: &str,
     id: &Value,
-    client_id: &str,
+    client_id: Option<&str>,
     seq: u64,
     answer: Result<Value, Value>,
 ) {
@@ -255,7 +261,7 @@ mod tests {
                 out,
                 name,
                 &id,
-                id.as_str().unwrap(),
+                Some(id.as_str().unwrap()),
                 1,
                 Err(
                     json!({"message":"𐐀".repeat(20_000),"outcome":"unknown","unused":"large".repeat(20_000)}),
