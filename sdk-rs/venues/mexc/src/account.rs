@@ -235,12 +235,13 @@ impl MexcFutures {
             ]);
         }
         if matches!(snapshot.scope, Scope::Plan | Scope::Stop) {
+            let end = cx.protocol_stamp_ms();
             params.extend([
                 (
                     "start_time",
-                    safe_cex_engine::num::format(cx.protocol_now() - 89.0 * 86400000.0),
+                    safe_cex_engine::num::format(end - 89.0 * 86400000.0),
                 ),
-                ("end_time", safe_cex_engine::num::format(cx.protocol_now())),
+                ("end_time", safe_cex_engine::num::format(end)),
             ]);
             params.push(if snapshot.scope == Scope::Plan {
                 ("states", "1".into())

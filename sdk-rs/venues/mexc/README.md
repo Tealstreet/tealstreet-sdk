@@ -65,6 +65,14 @@ not calibrate or replay. A second 513 ends that attempt. Writes and 602 never
 enter clock recovery. Signing already takes fresh protocol-clock milliseconds
 at dispatch; calibration changes outbound timestamps, not engine deadlines.
 
+Plan/stop snapshots and protective inspection reads serialize `start_time` and
+`end_time` as integer milliseconds, as required by MEXC's `long` query fields.
+They use the shared protocol wire-stamp helpers after clock calibration, keeping
+fractional scheduling time and backward UTC corrections intact. The 89-day
+lookback, signing timestamp and mutation payloads are unchanged; invalid clock
+observations preserve the last known calibration rather than inventing zero.
+Full-engine fake-transport controls live in `tests/query_timestamps.rs`.
+
 ## Protective edits
 
 Known-class price edits use MEXC's native plan/TP-SL modify endpoints without a
