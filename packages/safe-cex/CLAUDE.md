@@ -2384,6 +2384,10 @@ Cancellation or Claim without dispatch refunds only that token generation; a
 request handed to fetch is never refunded. Once IDB has worked in a realm,
 storage failure waits within the original read deadline rather than sending from
 an unshared memory budget. Never-opened IDB keeps the memory-only behavior.
+A proven pre-send `/info` admission deadline keeps `HTTP_PREPARATION_TIMED_OUT`
+and carries only closed cause `info_admission` / `HTTP admission deadline expired`.
+After handoff begins, errors retain their original classification and identity;
+this diagnostic distinction cannot extend budgets, change retries or suppress reports.
 Role/mode startup reads
 stay single-flight until their managed completion or deadline, including quota wait.
 Each Hyperliquid engine issues at most three routine account reads at once, with
