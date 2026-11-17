@@ -54,24 +54,33 @@ async fn options_testnet_refuses_without_private_io() {
     type V = Binance<4, true>;
     let f = Fixture::new::<V>().await;
     assert!(f.websocket_url.starts_with("ws://127.0.0.1:"));
-    let mut client = Client::new(&f);
-    client.init(V::init()).await;
-    client
-        .finish::<V>(&mut Device::default(), Answer::Correct)
-        .await;
-    assert!(f.registry.held(USER, ACCOUNT, client.socket()).is_none());
-    assert!(
+    for delegated in [false, true] {
+        let mut client = Client::new(&f);
+        let mut init = V::init();
+        if delegated {
+            let offer = client.offer::<V>().await;
+            init.signing_mode = Some("delegated".into());
+            init.sealed =
+                Some(serde_json::from_value(seal(&offer, &init, V::credentials(false))).unwrap());
+        }
+        client.init(init).await;
         client
-            .frames
-            .iter()
-            .any(|v| v["d"]["data"][1]["initRefused"] == true)
-    );
-    assert!(
-        !client
-            .frames
-            .iter()
-            .any(|v| v["d"]["op"] == "account-signing-mode")
-    );
+            .finish::<V>(&mut Device::default(), Answer::Correct)
+            .await;
+        assert!(f.registry.held(USER, ACCOUNT, client.socket()).is_none());
+        assert!(
+            client
+                .frames
+                .iter()
+                .any(|v| v["d"]["data"][1]["initRefused"] == true)
+        );
+        assert!(
+            !client
+                .frames
+                .iter()
+                .any(|v| v["d"]["op"] == "account-signing-mode" || v["t"] == "sign-req")
+        );
+    }
     let seen = f.seen.lock().unwrap();
     assert_eq!((seen.signed_reads, seen.rejections, seen.writes), (0, 0, 0));
 }

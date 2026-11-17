@@ -19,9 +19,34 @@ fn secret(key: &str) -> Option<&'static str> {
         _ => None,
     }
 }
-fn valid_query(_uri: &Uri, _headers: &HeaderMap) -> bool {
-    // RED checkpoint: controls below must reject an unsigned or forged private read.
-    true
+fn valid_query(uri: &Uri, headers: &HeaderMap) -> bool {
+    (|| {
+        let mut keys = headers.get_all("x-mbx-apikey").iter();
+        let key = keys.next()?.to_str().ok()?;
+        if keys.next().is_some() {
+            return None;
+        }
+        let material = secret(key)?;
+        let (payload, signature) = uri.query()?.rsplit_once("&signature=")?;
+        let mut parameters = std::collections::BTreeMap::new();
+        for part in payload.split('&') {
+            let (name, value) = part.split_once('=')?;
+            if name == "signature" || parameters.insert(name, value).is_some() {
+                return None;
+            }
+        }
+        let stamp = parameters.get("timestamp")?.parse::<u64>().ok()?;
+        let window = parameters.get("recvWindow")?.parse::<u64>().ok()?;
+        let now = now_ms();
+        if window == 0
+            || window > 20_000
+            || stamp > now + 1000
+            || now.saturating_sub(stamp) > window
+        {
+            return None;
+        }
+        Some(signature == hmac_sha256(material.as_bytes(), payload.as_bytes(), Encoding::Hex))
+    })() == Some(true)
 }
 fn refusal(seen: &mut Observed) -> Value {
     seen.rejections += 1;
@@ -89,7 +114,14 @@ impl<const KIND: u8, const TESTNET: bool> Venue for Binance<KIND, TESTNET> {
             "Options testnet must refuse before transport"
         );
         assert!(body.is_null(), "Binance startup has no JSON body");
-        let path = uri.path();
+        // Proxy-style native routes retain the upstream URL in the loopback path.
+        // Decode only this envelope; the raw query still supplies the signed bytes.
+        let (forwarded_host, path) = if let Some(target) = uri.path().strip_prefix("/https://") {
+            let slash = target.find('/').expect("forwarded native path");
+            (Some(&target[..slash]), &target[slash..])
+        } else {
+            (None, uri.path())
+        };
         let public = [
             "/time",
             "/exchangeInfo",
@@ -101,6 +133,33 @@ impl<const KIND: u8, const TESTNET: bool> Venue for Binance<KIND, TESTNET> {
         ]
         .iter()
         .any(|suffix| path.ends_with(suffix));
+        // Product selection is independent of the captured response corpus.
+        let prefix = match (KIND, public) {
+            (0, _) | (1, true) => "/fapi/",
+            (1, false) => "/papi/",
+            (2, _) => "/dapi/",
+            (3, _) => "/api/",
+            (4, _) => "/eapi/",
+            _ => unreachable!(),
+        };
+        assert!(
+            path.starts_with(prefix),
+            "wrong Binance product path: {path}"
+        );
+        if let Some(host) = forwarded_host {
+            let expected = match (KIND, TESTNET, public) {
+                (0, false, _) | (1, false, true) => "fapi.binance.com",
+                (0 | 1, true, _) => "demo-fapi.binance.com",
+                (1, false, false) => "papi.binance.com",
+                (2, false, _) => "dapi.binance.com",
+                (2, true, _) => "demo-dapi.binance.com",
+                (3, false, _) => "api.binance.com",
+                (3, true, _) => "testnet.binance.vision",
+                (4, false, _) => "eapi.binance.com",
+                _ => unreachable!(),
+            };
+            assert_eq!(host, expected, "wrong forwarded Binance origin");
+        }
         let feed_token = path.ends_with("/listenKey");
         if feed_token {
             assert!(
@@ -180,7 +239,9 @@ impl<const KIND: u8, const TESTNET: bool> Venue for Binance<KIND, TESTNET> {
             let p = &request["params"];
             let valid = (|| {
                 let material = secret(p["apiKey"].as_str()?)?;
-                let stamp = p["timestamp"].as_u64()?;
+                // The native wire serializes its f64 millisecond clock; both 123
+                // and 123.0 are JSON numbers representing that same integer.
+                let stamp = p["timestamp"].as_f64()?.to_string().parse::<u64>().ok()?;
                 let window = p["recvWindow"].as_u64()?;
                 if window == 0
                     || window > 20_000
@@ -204,6 +265,9 @@ impl<const KIND: u8, const TESTNET: bool> Venue for Binance<KIND, TESTNET> {
                 seen.rejections += 1;
                 json!({"id":request["id"],"status":401,"error":{"code":-2015,"msg":"synthetic WS signature refusal"}})
             }
+        } else if request["method"] == "session.subscriptions" {
+            assert_eq!(KIND, 3, "session heartbeat is Spot only");
+            json!({"id":request["id"],"status":200,"result":[{"subscriptionId":1}]})
         } else {
             assert!(
                 matches!(
@@ -272,6 +336,43 @@ mod controls {
                 &format!("/fapi/v3/account?{query}").parse().unwrap(),
                 &h
             ));
+        }
+    }
+    #[test]
+    fn rest_verifier_rejects_stale_or_future_bytes_even_with_a_valid_mac() {
+        let (_, h) = request(KEY, SECRET);
+        for stamp in [now_ms() - 30_000, now_ms() + 30_000] {
+            let payload = format!("recvWindow=20000&timestamp={stamp}");
+            let signature = hmac_sha256(SECRET.as_bytes(), payload.as_bytes(), Encoding::Hex);
+            let u = format!("/fapi/v3/account?{payload}&signature={signature}")
+                .parse()
+                .unwrap();
+            assert!(!valid_query(&u, &h));
+        }
+    }
+    #[test]
+    fn spot_ws_verifier_accepts_both_pairs_and_rejects_tampered_auth() {
+        for (key, material) in [(KEY, SECRET), (OTHER_KEY, OTHER_SECRET)] {
+            let stamp = now_ms();
+            let payload = format!("apiKey={key}&recvWindow=5000&timestamp={stamp}");
+            let signature = hmac_sha256(material.as_bytes(), payload.as_bytes(), Encoding::Hex);
+            let mut request = json!({"id":"synthetic-read-subscription","method":"userDataStream.subscribe.signature","params":{"apiKey":key,"recvWindow":5000,"timestamp":stamp,"signature":signature}});
+            // Exercise the actual floating-number syntax used by the native socket serializer.
+            request["params"]["timestamp"] = serde_json::from_str(&format!("{stamp}.0")).unwrap();
+            assert_eq!(
+                Binance::<3, false>::websocket(&request, &mut Observed::default())["status"],
+                200
+            );
+            for field in ["apiKey", "signature", "timestamp"] {
+                let mut bad = request.clone();
+                bad["params"][field] = "invalid".into();
+                let mut seen = Observed::default();
+                assert_eq!(
+                    Binance::<3, false>::websocket(&bad, &mut seen)["status"],
+                    401
+                );
+                assert_eq!((seen.rejections, seen.writes), (1, 0));
+            }
         }
     }
 }
