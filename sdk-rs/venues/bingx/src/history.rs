@@ -370,14 +370,14 @@ mod fill_metadata_tests {
     #[test]
     fn malformed_fill_metadata_does_not_echo_private_values() {
         for raw in [
-            r#""private-secret-canary""#,
-            r#"{"fill_orders":"private-secret-canary"}"#,
+            r#""private-value-canary""#,
+            r#"{"fill_orders":"private-value-canary"}"#,
         ] {
             let error = match serde_json::from_str::<FillData>(raw) {
                 Ok(_) => panic!("malformed metadata accepted"),
                 Err(error) => error.to_string(),
             };
-            assert!(!error.contains("private-secret-canary"), "{error}");
+            assert!(!error.contains("private-value-canary"), "{error}");
         }
     }
 
