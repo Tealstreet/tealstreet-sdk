@@ -12,12 +12,69 @@ const OTHER_KEY: &str = "synthetic-secondary-api-key";
 const SECRET: &str = "synthetic-primary-material";
 const OTHER_SECRET: &str = "synthetic-secondary-material";
 
-fn valid_read(_headers: &HeaderMap, _query: &str) -> bool {
-    // Committed RED intentionally leaves fixture authentication unchecked.
-    true
+fn material(key: &str) -> Option<&'static str> {
+    match key {
+        KEY => Some(SECRET),
+        OTHER_KEY => Some(OTHER_SECRET),
+        _ => None,
+    }
 }
-fn valid_auth(_request: &Value) -> bool {
-    true
+fn single<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    let mut values = headers.get_all(name).iter();
+    let value = values.next()?.to_str().ok()?;
+    values.next().is_none().then_some(value)
+}
+fn valid_read(headers: &HeaderMap, query: &str) -> bool {
+    (|| {
+        let key = single(headers, "x-bapi-api-key")?;
+        let secret = material(key)?;
+        let stamp = single(headers, "x-bapi-timestamp")?;
+        let window = single(headers, "x-bapi-recv-window")?;
+        let millis = stamp.parse::<u64>().ok()?;
+        let budget = window.parse::<u64>().ok()?;
+        if stamp != millis.to_string()
+            || window != budget.to_string()
+            || budget == 0
+            || budget > 60_000
+            || now_ms().abs_diff(millis) > budget
+        {
+            return None;
+        }
+        Some(
+            single(headers, "x-bapi-sign")?
+                == hmac_sha256(
+                    secret.as_bytes(),
+                    format!("{stamp}{key}{window}{query}").as_bytes(),
+                    Encoding::Hex,
+                ),
+        )
+    })() == Some(true)
+}
+fn valid_auth(request: &Value) -> bool {
+    (|| {
+        if request["op"] != "auth" {
+            return None;
+        }
+        let args = request["args"].as_array()?;
+        if args.len() != 3 {
+            return None;
+        }
+        let secret = material(args[0].as_str()?)?;
+        let expiry = args[1].as_str()?;
+        let millis = expiry.parse::<u64>().ok()?;
+        let now = now_ms();
+        if expiry != millis.to_string() || millis <= now || millis > now + 60_000 {
+            return None;
+        }
+        Some(
+            args[2].as_str()?
+                == hmac_sha256(
+                    secret.as_bytes(),
+                    format!("GET/realtime{expiry}").as_bytes(),
+                    Encoding::Hex,
+                ),
+        )
+    })() == Some(true)
 }
 fn socket_reply(request: &Value, accepted: bool, seen: &mut Observed) -> Value {
     if !accepted {
