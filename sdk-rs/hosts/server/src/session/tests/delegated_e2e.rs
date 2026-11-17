@@ -292,7 +292,15 @@ async fn delegated_refusal_case(case: &str) {
         complete(&mut session, &mut results).await;
     }
     let refusal = next_text(&mut sent, "error").await;
-    let expected = envelope::with_instance_id(envelope::init_unverified(ACCOUNT, false), INSTANCE);
+    let reason_class = if case == "wrong-pair" {
+        envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions
+    } else {
+        envelope::InitRefusalReasonClass::Unknown
+    };
+    let expected = envelope::with_instance_id(
+        envelope::init_unverified(ACCOUNT, false, reason_class),
+        INSTANCE,
+    );
     assert_eq!(refusal, expected);
     assert_empty(&session, &registry).await;
     assert!(
@@ -349,8 +357,10 @@ async fn delegated_e2e_bybit_declaration_off_refuses_valid_handover_without_io()
     crate::delegated::with_test_declaration(declaration, async {
         wire(&mut session, init).await;
         assert_empty(&session, &registry).await;
-        let expected =
-            envelope::with_instance_id(envelope::init_unverified(ACCOUNT, false), INSTANCE);
+        let expected = envelope::with_instance_id(
+            envelope::init_unverified(ACCOUNT, false, envelope::InitRefusalReasonClass::Unknown),
+            INSTANCE,
+        );
         assert_eq!(next_text(&mut sent, "error").await, expected);
         assert!(
             session
