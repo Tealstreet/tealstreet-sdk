@@ -1,5 +1,5 @@
 import type { Axios } from 'axios';
-import type { Store } from '../../../store/store.interface';
+import type { ClientOrderIdRule } from '../../../exchanges/clientOrderId';
 
 import rateLimit from 'axios-rate-limit';
 import sumBy from 'lodash/sumBy';
@@ -7,6 +7,8 @@ import uniqBy from 'lodash/uniqBy';
 import { forEachSeries } from 'p-iteration';
 
 import { getExchangeMetadata } from '../../../exchangeMetadata';
+import { BaseExchange } from '../../../exchanges/base';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -36,8 +38,7 @@ import {
 import { createPositionId } from '../../../utils/createPositionId';
 import { loop } from '../../../utils/loop';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import type { ClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { createAPI } from './backpack.api';
 import {
   BackpackAccount,
@@ -84,7 +85,7 @@ export class BackpackExchange extends BaseExchange {
     return Math.floor(Math.random() * 0x1_0000_0000);
   };
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     // Rate limit to a conservative 10 RPS
@@ -132,29 +133,44 @@ export class BackpackExchange extends BaseExchange {
     const markets = await this.fetchMarkets();
     if (this.isDisposed) return;
 
-    this.store.update({
-      markets,
-      loaded: { ...this.store.loaded, markets: true },
-    });
+    this.store.apply(
+      nativeFixture(
+        {
+          markets,
+          loaded: { ...this.store.loaded, markets: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const tickers = await this.fetchTickers();
     if (this.isDisposed) return;
 
     this.log(`Loaded ${Math.min(tickers.length, markets.length)} Backpack markets`);
 
-    this.store.update({
-      tickers,
-      loaded: { ...this.store.loaded, tickers: true },
-    });
+    this.store.apply(
+      nativeFixture(
+        {
+          tickers,
+          loaded: { ...this.store.loaded, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     // Connect public WebSocket for real-time market data
     this.publicWebsocket.connectAndSubscribe();
     this.subscribeToAllMarkets(markets);
 
     if (this.isPublicDataOnly) {
-      this.store.update({
-        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
       return;
     }
 
@@ -167,10 +183,15 @@ export class BackpackExchange extends BaseExchange {
 
     this.log(`Loaded Backpack orders`);
 
-    this.store.update({
-      orders,
-      loaded: { ...this.store.loaded, orders: true },
-    });
+    this.store.apply(
+      nativeFixture(
+        {
+          orders,
+          loaded: { ...this.store.loaded, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     this.log(`Ready to trade on Backpack`);
 
@@ -208,7 +229,12 @@ export class BackpackExchange extends BaseExchange {
 
         const positions = await this.fetchPositions();
         if (this.isDisposed) return;
-        this.store.update({ positions, loaded: { ...this.store.loaded, positions: true } });
+        this.store.apply(
+          nativeFixture(
+            { positions, loaded: { ...this.store.loaded, positions: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
 
         const balance = await this.fetchBalance();
         if (this.isDisposed) return;
@@ -216,14 +242,24 @@ export class BackpackExchange extends BaseExchange {
         const upnl = positions.length > 0 ? sumBy(positions, 'unrealizedPnl') : 0;
         (balance as Writable<Balance>).upnl = upnl;
 
-        this.store.update({
-          balance,
-          loaded: { ...this.store.loaded, balance: true },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              balance,
+              loaded: { ...this.store.loaded, balance: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
 
         const orders = await this.fetchOrders();
         if (this.isDisposed) return;
-        this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+        this.store.apply(
+          nativeFixture(
+            { orders, loaded: { ...this.store.loaded, orders: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       } catch (err: any) {
         this.log(`Error in tick: ${err?.message}`, LogSeverity.Error);
       }
@@ -1157,7 +1193,12 @@ export class BackpackExchange extends BaseExchange {
 
       // Refetch positions to update all positions with the new leverage
       const positions = await this.fetchPositions();
-      this.store.update({ positions });
+      this.store.apply(
+        nativeFixture(
+          { positions },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     } catch (err) {
       const errorMessage = `Failed to set leverage: ${err}`;
       this.emitter.emit('error', new Error(errorMessage));

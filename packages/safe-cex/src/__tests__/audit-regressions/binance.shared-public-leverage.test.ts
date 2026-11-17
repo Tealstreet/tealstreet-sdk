@@ -2,10 +2,11 @@ import type { PublicDataSource } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { InProcessPublicDataProvider } from '../../exchanges/in-process-public-data';
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
-import { InProcessPublicDataProvider } from '../../exchanges/in-process-public-data';
-import { DefaultStore } from '../../store/store.base';
 
 // The shared public exchange has no keys, so fetchMarkets builds every market
 // with leverage.max = 1. An account reading those markets must overlay its own
@@ -21,12 +22,17 @@ const sharedMarket = () => ({
 });
 
 const sharedSourceWith = (markets: unknown[]) => {
-  const sourceStore = new DefaultStore();
-  sourceStore.update({ markets: markets as any, loaded: { ...sourceStore.loaded, markets: true } });
+  const sourceStore = new FrameStore();
+  sourceStore.apply(
+    nativeFixture(
+      { markets: markets as any, loaded: { ...sourceStore.loaded, markets: true } },
+      sourceStore.markets.map((row) => row.symbol),
+    ),
+  );
   return sourceStore;
 };
 
-const connectToSharedSource = (exchange: BinanceExchange | BinancePMExchange, sourceStore: DefaultStore) => {
+const connectToSharedSource = (exchange: BinanceExchange | BinancePMExchange, sourceStore: FrameStore) => {
   const source = {
     store: sourceStore,
     listenOrderBook: () => () => {},
@@ -40,12 +46,12 @@ const connectToSharedSource = (exchange: BinanceExchange | BinancePMExchange, so
 const variants = [
   {
     name: 'binance',
-    create: () => new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, new DefaultStore()),
+    create: () => new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, new FrameStore()),
     bracketClient: (ex: any) => ex.xhr,
   },
   {
     name: 'binancepm',
-    create: () => new BinancePMExchange('binancepm', { key: 'test-key', secret: 'test-secret' }, new DefaultStore()),
+    create: () => new BinancePMExchange('binancepm', { key: 'test-key', secret: 'test-secret' }, new FrameStore()),
     bracketClient: (ex: any) => ex.papiXhr,
   },
 ] as const;
@@ -72,7 +78,12 @@ describe.each(variants)('$name account on a shared public exchange', ({ create, 
     expect(exchange.store.markets[0].limits.leverage.max).toBe(20);
     expect(shared.limits.leverage.max).toBe(1);
 
-    sourceStore.update({ markets: [sharedMarket()] as any });
+    sourceStore.apply(
+      nativeFixture(
+        { markets: [sharedMarket()] as any },
+        sourceStore.markets.map((row) => row.symbol),
+      ),
+    );
 
     expect(exchange.store.markets[0].limits.leverage.max).toBe(20);
   });

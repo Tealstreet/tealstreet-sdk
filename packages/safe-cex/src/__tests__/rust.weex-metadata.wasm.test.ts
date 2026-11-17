@@ -1,17 +1,17 @@
-vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
-});
-
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { LogSeverity } from '../types';
 import { prepareRecordedHttp } from './support/managedHttp';
+
+vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
+});
 
 const running: RustEngineExchange[] = [];
 afterEach(() => {
@@ -107,7 +107,7 @@ const setup = async (publicDataOnly = false) => {
       passphrase: publicDataOnly ? '' : 'fixture-passphrase',
       publicDataOnly,
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   running.push(exchange);
   await exchange.start();

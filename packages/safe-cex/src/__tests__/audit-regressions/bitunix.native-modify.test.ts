@@ -2,9 +2,7 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
-import { ENDPOINTS } from '../reference/bitunix/bitunix.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import {
   ExchangeOptions,
   Market,
@@ -15,6 +13,9 @@ import {
   OrderTimeInForce,
   OrderType,
 } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
+import { ENDPOINTS } from '../reference/bitunix/bitunix.types';
 
 const MARKET: Market = {
   id: 'BTC/USDT',
@@ -76,8 +77,13 @@ const createVirtualOrder = (parent: Order, leg: 'tp' | 'sl'): Order => ({
 });
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BitunixExchange(
     'bitunix',
     {
@@ -217,7 +223,12 @@ describe('Bitunix native modify-order safety boundary', () => {
     const parent = createParentOrder();
     const takeProfit = createVirtualOrder(parent, 'tp');
     const stopLoss = createVirtualOrder(parent, 'sl');
-    exchange.store.update({ orders: [parent, takeProfit, stopLoss] });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: [parent, takeProfit, stopLoss] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await expect(exchange.updateOrder({ order: takeProfit, update: { price: 51_250.08 } })).resolves.toEqual([
       takeProfit.id,
@@ -244,7 +255,12 @@ describe('Bitunix native modify-order safety boundary', () => {
     const { exchange, post } = createExchange();
     const parent = createParentOrder();
     const takeProfit = createVirtualOrder(parent, 'tp');
-    exchange.store.update({ orders: [parent, takeProfit] });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: [parent, takeProfit] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     post.mockResolvedValue({
       data: { code: 0, data: { orderId: 'replacement-parent' }, msg: 'Success' },
     });
@@ -267,7 +283,12 @@ describe('Bitunix native modify-order safety boundary', () => {
     const stopLoss = createVirtualOrder(parent, 'sl');
     const cancelPost = vi.fn().mockResolvedValue({ data: { code: 0, msg: 'Success' } });
     exchange.xhr = { post: cancelPost } as unknown as Axios;
-    exchange.store.update({ orders: [parent, takeProfit, stopLoss] });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: [parent, takeProfit, stopLoss] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     post
       .mockResolvedValueOnce({
         data: { code: 10005, data: null, msg: 'The order does not support this operation' },
@@ -330,7 +351,12 @@ describe('Bitunix native modify-order safety boundary', () => {
     const { exchange, post } = createExchange();
     const parent = createParentOrder();
     const takeProfit = createVirtualOrder(parent, 'tp');
-    exchange.store.update({ orders: [parent, takeProfit] });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: [parent, takeProfit] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await expect(
       exchange.updateOrder({ order: takeProfit, update: { price: 51_250, amount: 0.5 } } as any),
@@ -415,7 +441,12 @@ describe('Bitunix native modify-order safety boundary', () => {
       slTriggerType: OrderStopTriggerType.MarkPrice,
       tpTriggerType: undefined,
     };
-    exchange.store.update({ orders: [takeProfit, stopLoss] });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: [takeProfit, stopLoss] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await expect(exchange.updateOrder({ order: takeProfit, update: { price: 52_250.04 } })).resolves.toEqual([
       takeProfit.id,
@@ -465,7 +496,12 @@ describe('Bitunix native modify-order safety boundary', () => {
       slTriggerType: OrderStopTriggerType.MarkPrice,
       tpTriggerType: undefined,
     };
-    exchange.store.update({ orders: [takeProfit, stopLoss] });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: [takeProfit, stopLoss] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await expect(exchange.updateOrder({ order: stopLoss, update: { price: 48_750.04 } })).resolves.toEqual([
       stopLoss.id,
@@ -559,7 +595,12 @@ describe('Bitunix native modify-order safety boundary', () => {
   it('preserves amend provenance when a private-WebSocket UPDATE omits immutable fields', () => {
     const { exchange } = createExchange();
     const order = createParentOrder();
-    exchange.store.update({ orders: [order] });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: [order] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     exchange.privateWebsocket.onMessage({
       data: JSON.stringify({

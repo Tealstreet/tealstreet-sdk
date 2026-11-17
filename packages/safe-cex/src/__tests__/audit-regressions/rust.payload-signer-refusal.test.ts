@@ -1,14 +1,10 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import { isKeylessRemoteSigned } from '../../exchanges/hostedSigningVenues';
 import * as betaPolicy from '../../exchanges/rust/betaVenues';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import {
@@ -17,11 +13,15 @@ import {
   setRustEngineTransport,
   setWasmEngineLoader,
 } from '../../exchanges/rust/rust.exchange';
-import { isKeylessRemoteSigned } from '../../exchanges/hostedSigningVenues';
 import { createExchange } from '../../index';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { virtualClock } from '../../utils/virtualClock';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 const running: RustEngineExchange[] = [];
 afterEach(() => {
@@ -39,7 +39,9 @@ const recordEngine = (name: string, nativeFailure = false) => {
       construct(venue, JSON.parse(options));
       if (nativeFailure) {
         const message = `Rust ${venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials.`;
-        throw Object.assign(new Error(message), { venueError: JSON.stringify({ message, kind: 'unsupported', outcome: 'notSent' }) });
+        throw Object.assign(new Error(message), {
+          venueError: JSON.stringify({ message, kind: 'unsupported', outcome: 'notSent' }),
+        });
       }
     }
     capabilities() {
@@ -48,9 +50,13 @@ const recordEngine = (name: string, nativeFailure = false) => {
     free() {}
   }
   setWasmEngineLoader(async () => ({ WasmEngine: Engine }) as unknown as WasmEngineModule);
-  const io = vi.fn(() => { throw new Error('I/O must not start'); });
+  const io = vi.fn(() => {
+    throw new Error('I/O must not start');
+  });
   const transport = vi.fn(() => ({
-    now: () => Date.now(), connect: io, request: io,
+    now: () => Date.now(),
+    connect: io,
+    request: io,
     setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
     clearTimeout: (handle: ReturnType<typeof setTimeout>) => clearTimeout(handle),
   }));
@@ -62,7 +68,7 @@ const start = (name: ExchangeName, options: Partial<ExchangeOptions>) => {
   const exchange = new RustEngineExchange(
     name,
     { key: 'k', secret: '', apiKeyIndex: 2, ...options } as ExchangeOptions,
-    new DefaultStore(),
+    new FrameStore(),
   );
   running.push(exchange);
   return (exchange as unknown as { ensureHost(): Promise<void> }).ensureHost();
@@ -70,33 +76,29 @@ const start = (name: ExchangeName, options: Partial<ExchangeOptions>) => {
 
 // MCP signer mode supplies a payloadSigner and no secret. These venues skip the
 // generic local-credential guard, so before this refusal they started unsigned.
-it.each([
-  'txflow',
-  'polymarket',
-  'binance',
-  'bybit',
-] as const)('keeps native payloadSigner refusal classification on private %s before I/O', async (name) => {
-  for (const secret of ['', 'local-secret']) {
-    const { construct, transport, io } = recordEngine(name, true);
-    const failure = await start(name, { secret, payloadSigner }).catch((error: unknown) => error);
-    expect(failure).toMatchObject({
-      kind: 'unsupported',
-      outcome: 'notSent',
-      message: expect.stringContaining(`Rust ${name} delegated signing is unsupported in this build`),
-    });
-    expect((failure as Error).message).toContain('delegated signing is unsupported in this build');
-    expect((failure as Error).message).toContain('Remove payloadSigner and configure local signing credentials');
-    expect(construct).toHaveBeenCalledOnce();
-    expect(transport).toHaveBeenCalledOnce();
-    expect(io).not.toHaveBeenCalled();
-  }
-  expect(payloadSigner).not.toHaveBeenCalled();
-});
+it.each(['txflow', 'polymarket', 'binance', 'bybit'] as const)(
+  'keeps native payloadSigner refusal classification on private %s before I/O',
+  async (name) => {
+    for (const secret of ['', 'local-secret']) {
+      const { construct, transport, io } = recordEngine(name, true);
+      const failure = await start(name, { secret, payloadSigner }).catch((error: unknown) => error);
+      expect(failure).toMatchObject({
+        kind: 'unsupported',
+        outcome: 'notSent',
+        message: expect.stringContaining(`Rust ${name} delegated signing is unsupported in this build`),
+      });
+      expect((failure as Error).message).toContain('delegated signing is unsupported in this build');
+      expect((failure as Error).message).toContain('Remove payloadSigner and configure local signing credentials');
+      expect(construct).toHaveBeenCalledOnce();
+      expect(transport).toHaveBeenCalledOnce();
+      expect(io).not.toHaveBeenCalled();
+    }
+    expect(payloadSigner).not.toHaveBeenCalled();
+  },
+);
 
 it('leaves explicitly public-only payload signers to native construction policy', async () => {
-  for (const [name, options] of [
-    ['bybit', { payloadSigner, publicDataOnly: true }],
-  ] as const) {
+  for (const [name, options] of [['bybit', { payloadSigner, publicDataOnly: true }]] as const) {
     const { transport } = recordEngine(name);
     // Host creation reaches the constructor; only native policy can refuse it.
     const failure = await start(name, options as Partial<ExchangeOptions>).catch((error: unknown) => error);
@@ -110,10 +112,18 @@ it('leaves explicitly public-only payload signers to native construction policy'
 it('refuses a private hyperliquid or paradex payloadSigner at construction before any engine', () => {
   const { construct, transport, io } = recordEngine('hyperliquid');
   for (const [name, options] of [
-    ['hyperliquid', {}], ['hyperliquidspot', {}], ['paradex', { paradexAddress: '0x1', subkeyAddress: '0x2' }],
+    ['hyperliquid', {}],
+    ['hyperliquidspot', {}],
+    ['paradex', { paradexAddress: '0x1', subkeyAddress: '0x2' }],
   ] as const) {
-    expect(() => new RustEngineExchange(name, { key: 'k', secret: '', payloadSigner, ...options } as ExchangeOptions, new DefaultStore()))
-      .toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
+    expect(
+      () =>
+        new RustEngineExchange(
+          name,
+          { key: 'k', secret: '', payloadSigner, ...options } as ExchangeOptions,
+          new FrameStore(),
+        ),
+    ).toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
   }
   expect(construct).not.toHaveBeenCalled();
   expect(transport).not.toHaveBeenCalled();
@@ -126,8 +136,14 @@ it('refuses a private lighter payloadSigner at construction before any engine', 
   const { construct, transport, io } = recordEngine('lighter');
   for (const name of ['lighter', 'lighter-robinhood'] as const) {
     for (const secret of ['', 'local-secret']) {
-      expect(() => new RustEngineExchange(name, { key: 'k', secret, apiKeyIndex: '2', payloadSigner } as ExchangeOptions, new DefaultStore()))
-        .toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
+      expect(
+        () =>
+          new RustEngineExchange(
+            name,
+            { key: 'k', secret, apiKeyIndex: '2', payloadSigner } as ExchangeOptions,
+            new FrameStore(),
+          ),
+      ).toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
     }
   }
   expect(construct).not.toHaveBeenCalled();
@@ -141,7 +157,7 @@ it('reports the structured refusal through start and validateAccount', async () 
   const txflow = new RustEngineExchange(
     'txflow',
     { key: 'k', secret: '', payloadSigner } as ExchangeOptions,
-    new DefaultStore(),
+    new FrameStore(),
   );
   running.push(txflow);
   await expect(txflow.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
@@ -185,7 +201,9 @@ describe('factory and worker loaders', () => {
 
   it('OUT names refuse without constructing a hosted TS class', async () => {
     // This case exercises admission itself; the other cases exercise native codecs below it.
-    const actual = await vi.importActual<typeof import('../../exchanges/rust/betaVenues')>('../../exchanges/rust/betaVenues');
+    const actual = await vi.importActual<typeof import('../../exchanges/rust/betaVenues')>(
+      '../../exchanges/rust/betaVenues',
+    );
     vi.spyOn(betaPolicy, 'assertBetaVenue').mockImplementation(actual.assertBetaVenue);
     vi.spyOn(betaPolicy, 'assertBetaAccount').mockImplementation(actual.assertBetaAccount);
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);

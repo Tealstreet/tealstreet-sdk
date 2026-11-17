@@ -4,8 +4,7 @@ import assert from 'node:assert/strict';
 
 import { expect, it } from 'vitest';
 
-import { FrameApplier } from '../../store/frameApplier';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { inverseUnitsFrame } from '../fixtures/scxfFrame';
 
 const cols = (fields: Record<string, number | null>) =>
@@ -79,8 +78,8 @@ const frame = (position: Record<string, number | null>) =>
   }) as unknown as Frame;
 
 it('preserves native normalized fields and sizing guards without repairing them', () => {
-  const store = new DefaultStore();
-  new FrameApplier(store).apply(frame({ leverage: 0, liquidationPrice: null, unrealizedPnl: 0, contracts: NaN }));
+  const store = new FrameStore();
+  store.apply(frame({ leverage: 0, liquidationPrice: null, unrealizedPnl: 0, contracts: NaN }));
   const [position] = store.positions;
   expect(position).toMatchObject({ leverage: 0, liquidationPrice: null, unrealizedPnl: 0, notional: 1000 });
   expect(position.contracts).toBeNaN();
@@ -98,12 +97,12 @@ it('refuses non-finite Order fields rather than repairing them in the frame read
   if (orders === undefined) throw new Error('Expected Order fixture');
   orders.takeProfit[0] = Infinity;
   input.orders = () => orders;
-  expect(() => new FrameApplier(new DefaultStore()).apply(input)).toThrow('invalid Order optional number');
+  expect(() => new FrameStore().apply(input)).toThrow('invalid Order optional number');
 });
 
 it('keeps positive liquidation prices and other finite values', () => {
-  const store = new DefaultStore();
-  new FrameApplier(store).apply(frame({ leverage: 12.5, liquidationPrice: 67.8, unrealizedPnl: -3.25 }));
+  const store = new FrameStore();
+  store.apply(frame({ leverage: 12.5, liquidationPrice: 67.8, unrealizedPnl: -3.25 }));
   expect(store.positions[0]).toMatchObject({
     leverage: 12.5,
     liquidationPrice: 67.8,
@@ -129,18 +128,18 @@ const withSettings = (leverage: number, buy?: number, sell?: number) => {
 };
 
 it('refuses absent or non-finite native rails without replacing confirmed leverage', () => {
-  const store = new DefaultStore();
-  const applier = new FrameApplier(store);
+  const store = new FrameStore();
+  const applier = store;
   applier.apply(withSettings(5, 3, 4));
   const previous = store.fetchedLeverage;
-  expect(() => applier.apply(withSettings(NaN))).toThrow('Native Store leverage rails are required');
-  expect(() => applier.apply(withSettings(Infinity, 3, Infinity))).toThrow('Invalid native Store leverage rails');
+  expect(() => applier.apply(withSettings(NaN))).toThrow('Native FrameStore leverage rails are required');
+  expect(() => applier.apply(withSettings(Infinity, 3, Infinity))).toThrow('Invalid native FrameStore leverage rails');
   expect(store.fetchedLeverage).toBe(previous);
 });
 
 it('preserves finite native rails independently of the legacy scalar, including zero', () => {
-  const store = new DefaultStore();
-  const applier = new FrameApplier(store);
+  const store = new FrameStore();
+  const applier = store;
   applier.apply(withSettings(NaN, 3, 4));
   expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 3, sellLeverage: 4 });
   applier.apply(withSettings(10, 10, 10));
@@ -152,8 +151,8 @@ it('preserves finite native rails independently of the legacy scalar, including 
 it.each([NaN, Infinity, -Infinity, 0, -0, -1])(
   'exposes an unusable native liquidation price as null (%s)',
   (liquidationPrice) => {
-    const store = new DefaultStore();
-    const applier = new FrameApplier(store);
+    const store = new FrameStore();
+    const applier = store;
     applier.apply(frame({ leverage: 5, liquidationPrice: 67.8, unrealizedPnl: 0 }));
     expect(store.positions[0].liquidationPrice).toBe(67.8);
     applier.apply(frame({ leverage: 5, liquidationPrice: null, unrealizedPnl: 0 }));
@@ -169,9 +168,9 @@ it.each([NaN, Infinity, -Infinity, 0, -0, -1])(
     const positions = packed.positions();
     assert.ok(positions, 'Packed frame must contain a positions section');
     expect(positions.liquidationPrice[0]).toBeNull();
-    const store = new DefaultStore();
-    new FrameApplier(store).apply(packed);
+    const store = new FrameStore();
+    store.apply(packed);
     expect(store.positions[0].liquidationPrice).toBeNull();
-    expect(JSON.parse(JSON.stringify(store.serialize())).positions[0].liquidationPrice).toBeNull();
+    expect(JSON.parse(JSON.stringify(store.data)).positions[0].liquidationPrice).toBeNull();
   },
 );

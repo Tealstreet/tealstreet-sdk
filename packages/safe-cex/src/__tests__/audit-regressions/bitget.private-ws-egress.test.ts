@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { buildRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
-import { BitgetExchange } from '../reference/bitget/bitget.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { BROWSER_WS_HOSTS, setRoutingWsHosts } from '../../transport/tealstreet/routing/routingTable';
+import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 
 import '../../transport/registerTealstreetTransport';
 
@@ -39,7 +39,7 @@ const setup = ({ proxy = true, uta = false } = {}) => {
   const exchange = new BitgetExchange(
     'bitget',
     { key: 'k', secret: 's', passphrase: 'p', tealstreetProxy: proxy, tuning: { consoleLogging: false } },
-    new DefaultStore(),
+    new FrameStore(),
   );
   live.push(exchange);
   (exchange as any).isUta = uta;

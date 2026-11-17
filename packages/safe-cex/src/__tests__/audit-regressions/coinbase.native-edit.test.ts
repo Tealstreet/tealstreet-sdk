@@ -2,10 +2,11 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { ExchangeOptions, Market, Order, OrderSide, OrderStatus, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 import { ENDPOINTS, LIST_ORDERS_RESPONSE, ORDER_EVENT } from '../reference/coinbase/coinbase.types';
-import { DefaultStore } from '../../store/store.base';
-import { ExchangeOptions, Market, Order, OrderSide, OrderStatus, OrderType } from '../../types';
 
 const SPOT_MARKET: Market = {
   id: 'BTC-USD',
@@ -90,8 +91,13 @@ const makeOrder = (overrides: Partial<Order> = {}): Order => ({
 });
 
 const createExchange = (market: Market | Market[] = SPOT_MARKET, order: Order = makeOrder()) => {
-  const store = new DefaultStore();
-  store.update({ markets: Array.isArray(market) ? market : [market], orders: [order] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: Array.isArray(market) ? market : [market], orders: [order] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new CoinbaseExchange(
     'coinbase',
     { key: 'test-key', secret: 'test-secret', tealstreetTunnel: false } as ExchangeOptions,
@@ -263,9 +269,7 @@ describe('Coinbase Advanced stable-ID native edit', () => {
     placeOrder.mockResolvedValue(['replacement-order-id']);
     const order = makeOrder();
 
-    await expect(exchange.updateOrder({ order, update: { price: 51_000 } })).resolves.toEqual([
-      'replacement-order-id',
-    ]);
+    await expect(exchange.updateOrder({ order, update: { price: 51_000 } })).resolves.toEqual(['replacement-order-id']);
 
     expect(cancelOrders).toHaveBeenCalledWith([order]);
     expect(placeOrder).toHaveBeenCalledWith({

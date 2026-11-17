@@ -4,8 +4,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { WORKER_WRITE_METHODS } from '../../exchanges/base';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, PositionMode, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 
@@ -17,7 +18,7 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
 const exchanges: RustEngineExchange[] = [];
 afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 const build = (workerMirror = false) => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new RustEngineExchange('phemex', { key: '', secret: '', workerMirror }, store);
   exchanges.push(exchange);
   adoptEngineCapabilities(exchange);
@@ -44,7 +45,12 @@ const resolve = (exchange: RustEngineExchange, symbol = 'ADAUSDT') => (exchange 
 describe('Rust Phemex leverage context contract', () => {
   it('exposes the flat-symbol helper and reads fresh native context rather than cached rails', async () => {
     const { exchange, store, command } = build();
-    store.update({ fetchedLeverage: { ADAUSDT: { buyLeverage: 99, sellLeverage: 99 } } });
+    store.apply(
+      nativeFixture(
+        { fetchedLeverage: { ADAUSDT: { buyLeverage: 99, sellLeverage: 99 } } },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     expect(store.loaded.positions).toBe(false);
     expect(store.positions).toEqual([]);
     await expect(resolve(exchange)).resolves.toEqual({
@@ -58,7 +64,12 @@ describe('Rust Phemex leverage context contract', () => {
 
   it('prefers the current raw read over stale stored positions', async () => {
     const { exchange, store } = build();
-    store.update({ positions: [stored()] });
+    store.apply(
+      nativeFixture(
+        { positions: [stored()] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     await expect(resolve(exchange)).resolves.toMatchObject({ marginType: MarginType.Cross, longLeverage: 10 });
   });
 
@@ -67,7 +78,12 @@ describe('Rust Phemex leverage context contract', () => {
     if (kind === 'empty') command.mockResolvedValue(null);
     else command.mockRejectedValue(new Error('fixture read failed'));
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
-    store.update({ positions: [stored(PositionSide.Short), stored()] });
+    store.apply(
+      nativeFixture(
+        { positions: [stored(PositionSide.Short), stored()] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     await expect(resolve(exchange)).resolves.toEqual({
       longLeverage: 3,
       shortLeverage: 5,
@@ -82,14 +98,24 @@ describe('Rust Phemex leverage context contract', () => {
     const position = stored();
     if (missing === 'margin') Reflect.deleteProperty(position, 'marginType');
     if (missing === 'mode') Reflect.deleteProperty(position, 'positionMode');
-    store.update({ positions: missing === 'none' ? [] : [position] });
+    store.apply(
+      nativeFixture(
+        { positions: missing === 'none' ? [] : [position] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     await expect(resolve(exchange)).resolves.toBeUndefined();
   });
 
   it('uses the first symbol leg for a missing side, as the TS helper does', async () => {
     const { exchange, store, command } = build();
     command.mockResolvedValue(null);
-    store.update({ positions: [stored(PositionSide.Short)] });
+    store.apply(
+      nativeFixture(
+        { positions: [stored(PositionSide.Short)] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     await expect(resolve(exchange)).resolves.toMatchObject({ longLeverage: 5, shortLeverage: 5 });
   });
 
@@ -136,7 +162,12 @@ describe('Rust Phemex leverage context contract', () => {
   it('lets the worker fresh-read path bypass Phemex cached settings without mutating them', async () => {
     const { exchange, store, command } = build();
     const cached = { buyLeverage: 99, sellLeverage: 99 };
-    store.update({ fetchedLeverage: { ADAUSDT: cached } });
+    store.apply(
+      nativeFixture(
+        { fetchedLeverage: { ADAUSDT: cached } },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     await expect((exchange.fetchLeverageForSymbol as any)('ADAUSDT', true)).resolves.toMatchObject({
       buyLeverage: 10,
       sellLeverage: 7,
@@ -155,7 +186,12 @@ describe('Rust Phemex leverage context contract', () => {
     const rejected = expect(pending).rejects.toMatchObject({ code: 'WORKER_STOPPED' });
     const requestId = await dispatched.promise;
     owner = { ownerId: 'owner-b', generation: 2 };
-    store.update({ positions: [stored()] });
+    store.apply(
+      nativeFixture(
+        { positions: [stored()] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.emitter.emit('callMethod:done', {
       requestId,
       success: true,
@@ -172,7 +208,7 @@ describe('Rust Phemex leverage context contract', () => {
     'matches the actual TS helper for %s raw legs %s/%s',
     async (mode, long, short, cross, marginType, positionMode) => {
       const { exchange, command } = build();
-      const reference = new PhemexExchange('phemex', { key: '', secret: '' }, new DefaultStore());
+      const reference = new PhemexExchange('phemex', { key: '', secret: '' }, new FrameStore());
       reference.xhr = {
         get: vi.fn().mockResolvedValue({
           data: {
@@ -215,7 +251,7 @@ describe('Rust Phemex leverage context contract', () => {
   );
 
   it('keeps the helper absent on other Rust venues', () => {
-    const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+    const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new FrameStore());
     exchanges.push(exchange);
     expect((exchange as any).resolveLeverageContext).toBeUndefined();
   });

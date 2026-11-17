@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { POLYMARKET_CONFIG } from '../reference/polymarket/polymarket.constants';
 import { PolymarketExchange } from '../reference/polymarket/polymarket.exchange';
 import { PolymarketPrivateWebSocket } from '../reference/polymarket/polymarket.ws-private';
-import { POLYMARKET_CONFIG } from '../reference/polymarket/polymarket.constants';
 
 const credentials = {
   apiKey: 'api-key',
@@ -16,11 +17,7 @@ describe('Polymarket WebSocket wire contract', () => {
 
   it('uses the official channel URLs, lowercase subscription, and raw heartbeat', () => {
     vi.useFakeTimers();
-    const exchange = new PolymarketExchange(
-      'polymarket',
-      { publicDataOnly: true } as any,
-      new DefaultStore(),
-    );
+    const exchange = new PolymarketExchange('polymarket', { publicDataOnly: true } as any, new FrameStore());
     const sent: string[] = [];
     const socket = exchange.publicWebsocket;
     (socket as any).ws = {
@@ -45,13 +42,14 @@ describe('Polymarket WebSocket wire contract', () => {
   });
 
   it('applies price_change arrays and last_trade_price to the token ticker', () => {
-    const store = new DefaultStore();
-    store.update({ tickers: [{ id: '111', symbol: 'v2-adapter-Yes', last: 0 } as any] });
-    const exchange = new PolymarketExchange(
-      'polymarket',
-      { publicDataOnly: true } as any,
-      store,
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { tickers: [{ id: '111', symbol: 'v2-adapter-Yes', last: 0 } as any] },
+        store.markets.map((row) => row.symbol),
+      ),
     );
+    const exchange = new PolymarketExchange('polymarket', { publicDataOnly: true } as any, store);
     (exchange as any).tokenToSymbol.set('111', 'v2-adapter-Yes');
 
     (exchange.publicWebsocket as any).handlePriceChange({
@@ -84,11 +82,7 @@ describe('Polymarket WebSocket wire contract', () => {
   });
 
   it('authenticates the user channel with the official lowercase payload', () => {
-    const exchange = new PolymarketExchange(
-      'polymarket',
-      { publicDataOnly: true } as any,
-      new DefaultStore(),
-    );
+    const exchange = new PolymarketExchange('polymarket', { publicDataOnly: true } as any, new FrameStore());
     const sent: string[] = [];
     const socket = new PolymarketPrivateWebSocket(exchange, () => credentials);
     (socket as any).ws = {

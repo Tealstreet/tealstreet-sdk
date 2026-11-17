@@ -7,7 +7,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { WORKER_FORWARDED_METHODS, WORKER_WRITE_METHODS } from '../../exchanges/base';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
@@ -36,7 +37,8 @@ async function fixture(marketRefresh = true) {
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noop,
     wsMessage: noop,
-    wsClose: noop, wsRouteExhausted: noop,
+    wsClose: noop,
+    wsRouteExhausted: noop,
     httpStart: noop,
     httpChunk: noop,
     httpEnd: noop,
@@ -48,12 +50,17 @@ async function fixture(marketRefresh = true) {
       return engine;
     } as unknown as WasmEngineModule['WasmEngine'],
   }));
-  const store = new DefaultStore();
-  store.update({
-    markets: [market('BTCUSDT'), market('OLDUSDT')],
-    tickers: [],
-    loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
-  });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      {
+        markets: [market('BTCUSDT'), market('OLDUSDT')],
+        tickers: [],
+        loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   let markets = store.markets;
   installNativeStartupFrames(engine, store, () => ({ markets }));
   const exchange = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, store);
@@ -138,7 +145,7 @@ it('keeps unsupported engines cached and shared consumers on their provider cata
 it('forwards worker refresh to the authoritative engine without starting a mirror host', async () => {
   const construct = vi.fn();
   setWasmEngineLoader(construct);
-  const exchange = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+  const exchange = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
   running.push(exchange);
   const delta = { added: [market('NEWUSDT')], removed: [] };
   const calls: string[] = [];

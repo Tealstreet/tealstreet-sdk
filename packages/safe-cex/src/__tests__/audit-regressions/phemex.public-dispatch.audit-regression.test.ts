@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BinancePublicWebsocket } from '../reference/phemex/phemex.ws-public';
-import { DefaultStore } from '../../store/store.base';
 
 const createWebsocket = () => {
   const parent = {
@@ -17,19 +18,24 @@ const createWebsocket = () => {
 };
 
 const createWebsocketWithStore = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'ADA/USDT:USDT',
-        symbol: 'ADAUSDT',
-        base: 'ADA',
-        quote: 'USDT',
-        active: true,
-        info: { symbol: 'ADAUSDT' },
+        markets: [
+          {
+            id: 'ADA/USDT:USDT',
+            symbol: 'ADAUSDT',
+            base: 'ADA',
+            quote: 'USDT',
+            active: true,
+            info: { symbol: 'ADAUSDT' },
+          },
+        ] as any,
       },
-    ] as any,
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
 
   const parent = {
     emitter: { emit: vi.fn() },

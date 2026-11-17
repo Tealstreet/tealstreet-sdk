@@ -2,10 +2,10 @@ import type { ExchangeOptions } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { MarginType, PositionMode, PositionSide } from '../../types';
 import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
 import { ENDPOINTS } from '../reference/bitunix/bitunix.types';
-import { DefaultStore } from '../../store/store.base';
-import { MarginType, PositionMode, PositionSide } from '../../types';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -14,7 +14,7 @@ const options: ExchangeOptions = {
   tuning: { consoleLogging: false },
 };
 
-const createExchange = () => new BitunixExchange('bitunix', options, new DefaultStore());
+const createExchange = () => new BitunixExchange('bitunix', options, new FrameStore());
 
 describe('Bitunix account validation regression', () => {
   it.each([

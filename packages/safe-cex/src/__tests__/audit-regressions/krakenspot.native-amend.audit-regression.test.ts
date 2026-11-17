@@ -2,18 +2,11 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { ExchangeOptions, Market, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { KrakenSpotExchange } from '../reference/kraken/krakenspot.exchange';
 import { ENDPOINTS } from '../reference/kraken/krakenspot.types';
-import { DefaultStore } from '../../store/store.base';
-import {
-  ExchangeOptions,
-  Market,
-  Order,
-  OrderSide,
-  OrderStatus,
-  OrderTimeInForce,
-  OrderType,
-} from '../../types';
 
 const MARKET: Market = {
   id: 'BTC/USD',
@@ -51,8 +44,13 @@ const createOrder = (overrides: Partial<Order> = {}): Order => ({
 });
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
 
   const exchange = new KrakenSpotExchange(
     'krakenspot',
@@ -75,9 +73,7 @@ describe('Kraken Spot native AmendOrder', () => {
     post.mockResolvedValue({ data: { error: [], result: { amend_id: 'KRAKEN-AMEND-ID' } } });
     const order = createOrder({ timeInForce: OrderTimeInForce.PostOnly });
 
-    await expect(exchange.updateOrder({ order, update: { price: 50_100.04 } })).resolves.toEqual([
-      'KRAKEN-ORDER-TXID',
-    ]);
+    await expect(exchange.updateOrder({ order, update: { price: 50_100.04 } })).resolves.toEqual(['KRAKEN-ORDER-TXID']);
 
     expect(post).toHaveBeenCalledOnce();
     expect(post).toHaveBeenCalledWith(ENDPOINTS.AMEND_ORDER, {
@@ -112,9 +108,7 @@ describe('Kraken Spot native AmendOrder', () => {
       info: { descr: { ordertype: rawOrderType } },
     });
 
-    await expect(exchange.updateOrder({ order, update: { price: 48_500.08 } })).resolves.toEqual([
-      'KRAKEN-ORDER-TXID',
-    ]);
+    await expect(exchange.updateOrder({ order, update: { price: 48_500.08 } })).resolves.toEqual(['KRAKEN-ORDER-TXID']);
 
     expect(post).toHaveBeenCalledOnce();
     expect(post).toHaveBeenCalledWith(ENDPOINTS.AMEND_ORDER, {

@@ -1,4 +1,7 @@
+import type { StoreData } from '../../../generated/StoreData';
+
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { resolveTransportRouting } from '../../../transport/registry';
 import {
   LogSeverity,
@@ -12,7 +15,7 @@ import {
 } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { GrvtExchange } from './grvt.exchange';
 import { getGrvtOrderTimeInForce, getGrvtTriggerMetadata } from './grvt.order-semantics';
 
@@ -205,7 +208,9 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
     }
   };
 
-  private refreshSessionAndReconnect = (reason: 'proxy authentication rejected' | 'GRVT error 1000' | 'session refresh failed') => {
+  private refreshSessionAndReconnect = (
+    reason: 'proxy authentication rejected' | 'GRVT error 1000' | 'session refresh failed',
+  ) => {
     if (this.sessionRefreshInFlight || this.isDisposed || this.authenticationFailed) {
       return;
     }
@@ -239,7 +244,9 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
     })();
   };
 
-  private failClosedForAuthentication = (reason: 'proxy authentication rejected' | 'GRVT error 1000' | 'session refresh failed') => {
+  private failClosedForAuthentication = (
+    reason: 'proxy authentication rejected' | 'GRVT error 1000' | 'session refresh failed',
+  ) => {
     this.authenticated = false;
     this.authenticationFailed = true;
     // Do not include proxy/GRVT payloads or caught errors here: those can
@@ -425,20 +432,78 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         // Order is FILLED - update status and remove from store.
         // Fill notifications are emitted exclusively by handleFillUpdate (v1.fill stream)
         // to avoid duplicate toasters (GRVT sends both v1.order and v1.fill for the same trade).
-        this.parent.store.updateOrderStatus({ id: order.id }, OrderStatus.Closed);
-        this.parent.store.removeOrder({ id: order.id });
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return this.parent.store.apply(
+            nativeFixture(
+              {
+                orders: this.parent.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
+        (() => {
+          const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+          return this.parent.store.apply(
+            nativeFixture(
+              { orders: this.parent.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
 
         this.throttledFetchOrders();
       } else if (order.status === OrderStatus.Canceled) {
         // Order is CANCELLED/REJECTED - update status and remove from store
-        this.parent.store.updateOrderStatus({ id: order.id }, OrderStatus.Canceled);
-        this.parent.store.removeOrder({ id: order.id });
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return this.parent.store.apply(
+            nativeFixture(
+              {
+                orders: this.parent.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
+        (() => {
+          const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+          return this.parent.store.apply(
+            nativeFixture(
+              { orders: this.parent.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
 
         // Throttled fetch to sync state
         this.throttledFetchOrders();
       } else {
         // Order is OPEN/PENDING - add or update in store
-        this.parent.store.addOrUpdateOrder(order);
+        (() => {
+          const incoming: StoreData['orders'] = [order];
+          return this.parent.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.parent.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
 
         // Throttled fetch to ensure consistency with REST API
         this.throttledFetchOrders();
@@ -474,13 +539,26 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
           );
 
           openPositionsForSymbol.forEach((position) => {
-            this.parent.store.updatePosition(position, {
-              contracts: 0,
-              notional: 0,
-              unrealizedPnl: 0,
-              liquidationPrice: 0,
-              lastUpdate: virtualClock.getCurrentTimeMs(),
-            });
+            (() => {
+              const target = position;
+              const changes: Partial<StoreData['positions'][number]> = {
+                contracts: 0,
+                notional: 0,
+                unrealizedPnl: 0,
+                liquidationPrice: 0,
+                lastUpdate: virtualClock.getCurrentTimeMs(),
+              };
+              return this.parent.store.apply(
+                nativeFixture(
+                  {
+                    positions: this.parent.store.positions.map((row) =>
+                      row.id === target.id ? { ...row, ...changes } : row,
+                    ),
+                  },
+                  this.parent.store.markets.map((row) => row.symbol),
+                ),
+              );
+            })();
           });
         }
 
@@ -513,13 +591,31 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
       if (existingPosition) {
         // Update existing position
         this.parent.log(`Updating existing position for ${position.symbol}`, LogSeverity.Debug);
-        this.parent.store.updatePosition(existingPosition, position);
+        (() => {
+          const target = existingPosition;
+          const changes: Partial<StoreData['positions'][number]> = position;
+          return this.parent.store.apply(
+            nativeFixture(
+              {
+                positions: this.parent.store.positions.map((row) =>
+                  row.id === target.id ? { ...row, ...changes } : row,
+                ),
+              },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       } else {
         // Add new position
         this.parent.log(`Adding new position for ${position.symbol}`, LogSeverity.Debug);
-        this.parent.store.update({
-          positions: [...this.parent.store.positions, position],
-        });
+        this.parent.store.apply(
+          nativeFixture(
+            {
+              positions: [...this.parent.store.positions, position],
+            },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
       }
 
       this.parent.syncBalanceUpnlFromPositions();
@@ -851,13 +947,18 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
           return;
         }
 
-        this.parent.store.update({
-          orders,
-          loaded: {
-            ...this.parent.store.loaded,
-            orders: true,
-          },
-        });
+        this.parent.store.apply(
+          nativeFixture(
+            {
+              orders,
+              loaded: {
+                ...this.parent.store.loaded,
+                orders: true,
+              },
+            },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
       } catch (error) {
         this.parent.log(`Throttled fetch error: ${error}`, LogSeverity.Warning);
         // Silent failure, will retry on next event
@@ -911,13 +1012,18 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         return;
       }
 
-      this.parent.store.update({
-        positions,
-        loaded: {
-          ...this.parent.store.loaded,
-          positions: true,
-        },
-      });
+      this.parent.store.apply(
+        nativeFixture(
+          {
+            positions,
+            loaded: {
+              ...this.parent.store.loaded,
+              positions: true,
+            },
+          },
+          this.parent.store.markets.map((row) => row.symbol),
+        ),
+      );
       this.parent.syncBalanceUpnlFromPositions(positions);
     } catch {
       // Silent failure, will retry on next event

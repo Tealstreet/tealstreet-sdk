@@ -1,14 +1,16 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook, Ticker } from '../../../types';
 import type { PhemexExchange } from './phemex.exchange';
 
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { BASE_WS_URL, ENDPOINTS } from '../../../exchanges/phemex/phemex.types';
 import { LogSeverity } from '../../../types';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../../utils/updateOrderBook';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { BASE_WS_URL, ENDPOINTS } from '../../../exchanges/phemex/phemex.types';
+import { nativeFixture } from '../../cutover/nativeFixture';
 
 type Data = Array<Record<string, any>>;
 type MessageHandlers = {
@@ -64,7 +66,12 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
         JSON.stringify({
           method: method,
           // kline requires second arg to be a number
-          params: method === 'kline_p.subscribe' ? [params[0], +params[1]] : method === 'orderbook_p.subscribe' ? [params[0], false, 0] : params,
+          params:
+            method === 'kline_p.subscribe'
+              ? [params[0], +params[1]]
+              : method === 'orderbook_p.subscribe'
+                ? [params[0], false, 0]
+                : params,
           id: id++,
         }),
       );
@@ -72,8 +79,7 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
   };
 
   private updateSubscriptionLimitWarning = () => {
-    const activeSubscriptions =
-      1 + Object.values(this.topics).filter((referenceCount) => referenceCount > 0).length;
+    const activeSubscriptions = 1 + Object.values(this.topics).filter((referenceCount) => referenceCount > 0).length;
     if (
       activeSubscriptions >= BinancePublicWebsocket.SUBSCRIPTION_WARNING_THRESHOLD &&
       !this.hasWarnedSubscriptionLimit
@@ -149,7 +155,12 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
       }
 
       if (json?.orderbook_p && typeof jsonSymbol === 'string') {
-        this.dispatchTopic(`orderbook_p.${jsonSymbol}`, { ...json.orderbook_p, sequence: json.sequence, type: json.type, depth: json.depth });
+        this.dispatchTopic(`orderbook_p.${jsonSymbol}`, {
+          ...json.orderbook_p,
+          sequence: json.sequence,
+          type: json.type,
+          depth: json.depth,
+        });
         return;
       }
 
@@ -198,31 +209,45 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
             volumeRq,
           });
           if (ticker) {
-            this.store.updateTicker(ticker, tickerChanges);
+            (() => {
+              const target = ticker;
+              const changes: Partial<StoreData['tickers'][number]> = tickerChanges;
+              return this.store.apply(
+                nativeFixture(
+                  { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                  this.store.markets.map((row) => row.symbol),
+                ),
+              );
+            })();
           } else {
             const market = this.parent.store.marketsBySymbol[symbol];
             if (!market) continue;
 
-            this.store.update({
-              tickers: [
-                ...this.store.tickers.filter((existingTicker) => existingTicker.symbol !== symbol),
+            this.store.apply(
+              nativeFixture(
                 {
-                  id: market.id,
-                  symbol,
-                  bid: tickerChanges.bid ?? tickerChanges.last,
-                  ask: tickerChanges.ask ?? tickerChanges.last,
-                  last: tickerChanges.last,
-                  mark: tickerChanges.mark,
-                  index: tickerChanges.index,
-                  percentage: tickerChanges.percentage,
-                  openInterest: tickerChanges.openInterest,
-                  fundingRate: tickerChanges.fundingRate,
-                  fundingTime: 0,
-                  volume: tickerChanges.volume,
-                  quoteVolume: tickerChanges.quoteVolume,
-                } as Ticker,
-              ],
-            });
+                  tickers: [
+                    ...this.store.tickers.filter((existingTicker) => existingTicker.symbol !== symbol),
+                    {
+                      id: market.id,
+                      symbol,
+                      bid: tickerChanges.bid ?? tickerChanges.last,
+                      ask: tickerChanges.ask ?? tickerChanges.last,
+                      last: tickerChanges.last,
+                      mark: tickerChanges.mark,
+                      index: tickerChanges.index,
+                      percentage: tickerChanges.percentage,
+                      openInterest: tickerChanges.openInterest,
+                      fundingRate: tickerChanges.fundingRate,
+                      fundingTime: 0,
+                      volume: tickerChanges.volume,
+                      quoteVolume: tickerChanges.quoteVolume,
+                    } as Ticker,
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
           }
         }
       }
@@ -249,7 +274,11 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
     openInterestRv: string;
     openRp: string;
     volumeRq: string;
-  }): Partial<Ticker> & Pick<Ticker, 'fundingRate' | 'index' | 'last' | 'mark' | 'openInterest' | 'percentage' | 'quoteVolume' | 'volume'> => {
+  }): Partial<Ticker> &
+    Pick<
+      Ticker,
+      'fundingRate' | 'index' | 'last' | 'mark' | 'openInterest' | 'percentage' | 'quoteVolume' | 'volume'
+    > => {
     const last = parseFloat(lastRp);
     const volume = parseFloat(volumeRq);
     const open = parseFloat(openRp);

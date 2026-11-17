@@ -1,9 +1,9 @@
+import { FrameStore } from '../../../../safe-cex/src/store/frameStore';
+import { nativeFixture } from '../../../../safe-cex/src/__tests__/cutover/nativeFixture';
 import { describe, expect, it, vi } from 'vitest';
 
 import { inverseUnitsFrame } from '@tealstreet/safe-cex/src/__tests__/fixtures/scxfFrame';
 import { BaseExchange } from '@tealstreet/safe-cex/src/exchanges/base';
-import { FrameApplier } from '@tealstreet/safe-cex/src/store/frameApplier';
-import { DefaultStore } from '@tealstreet/safe-cex/src/store/store.base';
 import { OrderSide, OrderType, type Ticker } from '@tealstreet/safe-cex/src/types';
 import { ChaserOrderInstance } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderInstance';
 import type { CLIPlatformAdapter, ExchangeLike } from '../../types';
@@ -51,7 +51,7 @@ describe.each([
   { name: 'OKX inverse', units: 3, contractSize: 100, remaining: 0.01, native: 5 },
   { name: 'Bybit inverse', units: 2, contractSize: 1, remaining: 0.01, native: 500 },
 ])('$name order display', (profile) => {
-  function fixture(): ExchangeLike & { store: DefaultStore } {
+  function fixture(): ExchangeLike & { store: FrameStore } {
     const frame = inverseUnitsFrame({
       units: profile.units,
       contractSize: profile.contractSize,
@@ -70,8 +70,8 @@ describe.each([
     const orders = frame.orders();
     if (orders === undefined) throw new Error('Inverse display fixture requires an orders frame');
     orders.price[0] = 50_000;
-    const store = new DefaultStore();
-    new FrameApplier(store).apply(frame);
+    const store = new FrameStore();
+    store.apply(frame);
     expect(store.orders[0].remaining).toBe(profile.remaining);
     expect(store.orders[0].extra?.remainingNotional).toBe(500);
     return { name: profile.name, store, emitter: { on: vi.fn(), off: vi.fn(), emit: vi.fn() } };
@@ -126,7 +126,12 @@ describe.each([
       volume: 0,
       quoteVolume: 0,
     };
-    exchange.store.update({ tickers: [ticker] });
+    exchange.store.apply(
+      nativeFixture(
+        { tickers: [ticker] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.fetchOHLCV = vi
       .fn()
       .mockResolvedValue([

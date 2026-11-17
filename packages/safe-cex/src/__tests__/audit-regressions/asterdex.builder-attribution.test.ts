@@ -3,6 +3,9 @@ import type { AxiosAdapter, InternalAxiosRequestConfig } from 'axios';
 import { ethers } from 'ethers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
+
 import '../../transport/registerTealstreetTransport';
 
 import { setProxyToken } from '../../accessToken';
@@ -22,11 +25,10 @@ import {
   getAsterBuilderApprovalFeeRate,
   resolveAsterBuilderFeeConfig,
 } from '../../exchanges/asterdex/asterdex.builder-fee';
-import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 import { asterDEXVirtualClock } from '../../exchanges/asterdex/asterdex.virtualClock';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderTimeInForce, OrderType } from '../../types';
 import { PRIVATE_PROXY_JP } from '../../transport/tealstreet/transportResolution';
+import { OrderSide, OrderTimeInForce, OrderType } from '../../types';
+import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 
 const builderAddress = '0xc2af13e1B1de3A015252A115309A0F9DEEDCFa0A';
 const userAddress = '0x1111111111111111111111111111111111111111';
@@ -40,17 +42,22 @@ const createExchange = (opts?: {
   includeBuilderConfig?: boolean;
   marketMaxAmount?: number;
 }) => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        symbol: 'BTCUSDT',
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { max: opts?.marketMaxAmount ?? 100 } },
-        info: { filters: [{ filterType: 'PRICE_FILTER', tickSize: '0.1' }] },
-      } as any,
-    ],
-  });
+        markets: [
+          {
+            symbol: 'BTCUSDT',
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { max: opts?.marketMaxAmount ?? 100 } },
+            info: { filters: [{ filterType: 'PRICE_FILTER', tickSize: '0.1' }] },
+          } as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
 
   const exchange = new AsterDEXExchange(
     'asterdex',
@@ -434,11 +441,10 @@ describe('audit regression: Aster builder attribution', () => {
 
   it('surfaces Aster missing-builder-config errors with actionable API-key guidance', async () => {
     const emitAndLogError = vi.fn();
-    const api = createAPI(
-      { options: { remoteSigner: false }, emitAndLogError, log: vi.fn() } as any,
-      {},
-      { key: '', secret: '' } as any,
-    );
+    const api = createAPI({ options: { remoteSigner: false }, emitAndLogError, log: vi.fn() } as any, {}, {
+      key: '',
+      secret: '',
+    } as any);
     api.defaults.adapter = vi.fn<AxiosAdapter>(async (config: InternalAxiosRequestConfig) => ({
       config,
       data: { code: -5025, msg: 'Cannot found builder config.' },
@@ -447,19 +453,16 @@ describe('audit regression: Aster builder attribution', () => {
       statusText: 'OK',
     }));
 
-    await expect(api.get('/fapi/v3/ping')).rejects.toThrow(
-      'Aster builder attribution is not synced for this API key',
-    );
+    await expect(api.get('/fapi/v3/ping')).rejects.toThrow('Aster builder attribution is not synced for this API key');
     expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('Open your Aster API key settings'));
   });
 
   it('surfaces HTTP Aster missing-builder-config errors with actionable API-key guidance', async () => {
     const emitAndLogError = vi.fn();
-    const api = createAPI(
-      { options: { remoteSigner: false }, emitAndLogError, log: vi.fn() } as any,
-      {},
-      { key: '', secret: '' } as any,
-    );
+    const api = createAPI({ options: { remoteSigner: false }, emitAndLogError, log: vi.fn() } as any, {}, {
+      key: '',
+      secret: '',
+    } as any);
     api.defaults.adapter = vi.fn<AxiosAdapter>(async (config: InternalAxiosRequestConfig) =>
       Promise.reject(
         Object.assign(new Error('Request failed'), {
@@ -475,9 +478,7 @@ describe('audit regression: Aster builder attribution', () => {
       ),
     );
 
-    await expect(api.get('/fapi/v3/ping')).rejects.toThrow(
-      'Aster builder attribution is not synced for this API key',
-    );
+    await expect(api.get('/fapi/v3/ping')).rejects.toThrow('Aster builder attribution is not synced for this API key');
     expect(emitAndLogError).toHaveBeenCalledWith(expect.stringContaining('reconnect the account and try again'));
   });
 

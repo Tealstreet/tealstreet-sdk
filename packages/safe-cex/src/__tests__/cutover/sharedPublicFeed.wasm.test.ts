@@ -1,8 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 // @vitest-environment node
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { Candle, ExchangeOptions, Market, OrderBook, PublicDataSource, StoreData } from '../../types';
@@ -22,13 +17,17 @@ import { venueOf } from '../../../../../sdk-rs/harness/venues.mjs';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustPublicFeedProvider } from '../../exchanges/rust/publicFeed';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { FrameApplier } from '../../store/frameApplier';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { directTransport } from '../../transport/direct';
 import { virtualClock } from '../../utils/virtualClock';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { setMainAcceptsFrames } from '../../webworker/frameForwarding';
 import { consumerFrame } from './consumerFrame';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 vi.mock('../../utils/virtualClock', async (original) => {
   const actual = await original<typeof import('../../utils/virtualClock')>();
@@ -179,7 +178,7 @@ describe('native public-feed ownership through real private workers', () => {
         ...options,
         transport: { ...directTransport, rest: ({ config }) => ({ baseURL: config?.baseURL, proxied: false }) },
       },
-      new DefaultStore(),
+      new FrameStore(),
     );
     account.on('error', (message: unknown) => input.failures.push(String(message)));
     cleanups.push(() => account.dispose());
@@ -253,11 +252,11 @@ describe('native public-feed ownership through real private workers', () => {
         publicFeed: { mode: 'shared', port: channel.port2 as unknown as MessagePort },
         transport: { ...directTransport, rest: ({ config }) => ({ baseURL: config?.baseURL, proxied: false }) },
       },
-      new DefaultStore(),
+      new FrameStore(),
     );
     cleanups.push(() => account.dispose());
-    const mainStore = new DefaultStore();
-    const mainApplier = new FrameApplier(mainStore);
+    const mainStore = new FrameStore();
+    const mainApplier = mainStore;
     account.onFrame = (buffer) => mainApplier.apply(new Frame(buffer));
     account.on('error', (message: unknown) => input.failures.push(String(message)));
     await account.start();
@@ -269,8 +268,8 @@ describe('native public-feed ownership through real private workers', () => {
           expect(ticker.midPrice).toBe(midPrice);
         }
       });
-      const snapshot = new DefaultStore();
-      new FrameApplier(snapshot).apply(new Frame(account.snapshotFrame()!));
+      const snapshot = new FrameStore();
+      snapshot.apply(new Frame(account.snapshotFrame()!));
       const ticker = snapshot.tickers.find((ticker) => ticker.symbol === symbol)!;
       expect(ticker.last).toBe(last);
       expect(ticker.midPrice).toBe(midPrice);
@@ -367,13 +366,13 @@ describe('native public-feed ownership through real private workers', () => {
         orders: worker.store.orders,
         settings: worker.store.fetchedLeverage,
       }).toEqual(before[index]);
-      const mirrored = new DefaultStore();
-      const applier = new FrameApplier(mirrored);
+      const mirrored = new FrameStore();
+      const applier = mirrored;
       for (const frame of frames) applier.apply(new Frame(frame));
       expect(mirrored.tickersBySymbol['BTC-USD'].last).toBe(777);
       const snapshot = (worker.exchange as RustEngineExchange).snapshotFrame()!;
-      const late = new DefaultStore();
-      new FrameApplier(late).apply(new Frame(snapshot));
+      const late = new FrameStore();
+      late.apply(new Frame(snapshot));
       expect(late.tickersBySymbol['BTC-USD'].last).toBe(777);
       expect(late.balance).toEqual(worker.store.balance);
       expect(worker.store.tickersBySymbol['BTC-USD']).not.toBe(publicSide.account.store.tickersBySymbol['BTC-USD']);
@@ -385,9 +384,7 @@ describe('native public-feed ownership through real private workers', () => {
     const sourceCandleSubscription = vi.spyOn(publicSide.account, 'listenOHLCV');
     const ordinarySourceCallback = vi.fn();
     cleanups.push(publicSide.account.listenOrderBook('BTC-USD', ordinarySourceCallback));
-    cleanups.push(
-      publicSide.account.listenOHLCV({ symbol: 'BTC-USD', interval: '5m' }, ordinarySourceCallback),
-    );
+    cleanups.push(publicSide.account.listenOHLCV({ symbol: 'BTC-USD', interval: '5m' }, ordinarySourceCallback));
     const stopBook = firstAccount.listenOrderBook('BTC-USD', (book) => books.push(book));
     const stopCandle = firstAccount.listenOHLCV({ symbol: 'BTC-USD', interval: '5m' }, (candle) =>
       candles.push(candle),
@@ -437,14 +434,14 @@ describe('native public-feed ownership through real private workers', () => {
     });
     // Frame-forwarding workers route callbacks on main; inspect the native frames too.
     await waitFor(() => {
-      const late = new DefaultStore();
-      const applier = new FrameApplier(late);
+      const late = new FrameStore();
+      const applier = late;
       const frame = new Frame(firstAccount.snapshotFrame()!);
       applier.apply(frame);
       expect(applier.books(frame)[0]?.orderbook.bids[0]).toMatchObject({ price: 776, amount: 2 });
     });
     await waitFor(() => {
-      const applier = new FrameApplier(new DefaultStore());
+      const applier = new FrameStore();
       const found = workers[0].frames.some((buffer) => {
         const frame = new Frame(buffer);
         applier.apply(frame);
@@ -457,7 +454,7 @@ describe('native public-feed ownership through real private workers', () => {
     const sibling = workers[1].worker.exchange as RustEngineExchange;
     const stopSiblingBook = sibling.listenOrderBook('BTC-USD', () => {});
     await waitFor(() => {
-      const applier = new FrameApplier(new DefaultStore());
+      const applier = new FrameStore();
       const frame = new Frame(sibling.snapshotFrame()!);
       applier.apply(frame);
       expect(applier.books(frame)[0]?.orderbook.bids[0]).toMatchObject({ price: 776, amount: 2 });
@@ -587,70 +584,85 @@ describe('native public-feed ownership through real private workers', () => {
 
   it.each([
     ['contract size', (market: Market): Market => ({ ...market, contractSize: (market.contractSize ?? 1) * 2 })],
-    ['classification', (market: Market): Market => ({
-      ...market,
-      info: { ...market.info, symbolType: '', marketRegion: 'US', underlyingTicker: 'AAPL' },
-    })],
-    ['future terms', (market: Market): Market => ({
-      ...market,
-      info: { ...market.info, instrumentKind: 'FUTURE', underlying: 'BTC', expiry: 1_800_000_000_000 },
-    })],
-    ['option terms', (market: Market): Market => ({
-      ...market,
-      option: {
-        underlying: 'BTC',
-        expiry: 1_800_000_000_000,
-        strike: 60_000,
-        right: 'call',
-        style: 'european',
-        settlement: 'cash',
-        settleAsset: 'USDC',
-        premiumAsset: 'USDC',
-      },
-    })],
-  ] as const)('fails closed when changed %s cross the SDK frame boundary after readiness', async (_label, change) => {
-    const source = await exchange({ key: '', secret: '', publicDataOnly: true });
-    await source.startup;
-    const provider = new RustPublicFeedProvider(source.account);
-    cleanups.push(() => provider.dispose());
-    const channel = new MessageChannel();
-    provider.attach(channel.port1 as unknown as MessagePort);
-    const privateSide = await exchange({
-      ...COINBASE_REPLAY,
-      privateOnly: true,
-      publicFeed: { mode: 'shared', port: channel.port2 as unknown as MessagePort },
-    });
-    await waitFor(() => expect(privateSide.input.sockets.some((socket) => socket.channel === 'private')).toBe(true));
-    privateSide.input.deliver('user');
-    await privateSide.startup;
-    // Coinbase polling changes quotes, not its catalog. This separate SDK
-    // control-boundary case injects an independently encoded MARKETS frame;
-    // startup and the account remain real WASM, with no claimed venue refresh.
-    const boundary = source.account as unknown as { receiveFrame(buffer: ArrayBuffer): void };
-    const before = source.account.store.markets;
-    boundary.receiveFrame(
-      consumerFrame({
-        markets: before.map(change),
+    [
+      'classification',
+      (market: Market): Market => ({
+        ...market,
+        info: { ...market.info, symbolType: '', marketRegion: 'US', underlyingTicker: 'AAPL' },
       }),
-    );
-    await waitFor(() => expect(privateSide.account.isDisposed).toBe(true));
-    expect(privateSide.input.failures.some((failure) => failure.includes('catalog changed'))).toBe(true);
-    expect(privateSide.input.sockets.every((socket) => socket.closed)).toBe(true);
-    expect(source.account.isDisposed).toBe(false);
-    expect(source.account.store.markets).not.toEqual(before);
-    expect(new Frame(source.account.snapshotFrame()!).markets()!.contractSize[0]).toBe(1);
-  }, 15_000);
+    ],
+    [
+      'future terms',
+      (market: Market): Market => ({
+        ...market,
+        info: { ...market.info, instrumentKind: 'FUTURE', underlying: 'BTC', expiry: 1_800_000_000_000 },
+      }),
+    ],
+    [
+      'option terms',
+      (market: Market): Market => ({
+        ...market,
+        option: {
+          underlying: 'BTC',
+          expiry: 1_800_000_000_000,
+          strike: 60_000,
+          right: 'call',
+          style: 'european',
+          settlement: 'cash',
+          settleAsset: 'USDC',
+          premiumAsset: 'USDC',
+        },
+      }),
+    ],
+  ] as const)(
+    'fails closed when changed %s cross the SDK frame boundary after readiness',
+    async (_label, change) => {
+      const source = await exchange({ key: '', secret: '', publicDataOnly: true });
+      await source.startup;
+      const provider = new RustPublicFeedProvider(source.account);
+      cleanups.push(() => provider.dispose());
+      const channel = new MessageChannel();
+      provider.attach(channel.port1 as unknown as MessagePort);
+      const privateSide = await exchange({
+        ...COINBASE_REPLAY,
+        privateOnly: true,
+        publicFeed: { mode: 'shared', port: channel.port2 as unknown as MessagePort },
+      });
+      await waitFor(() => expect(privateSide.input.sockets.some((socket) => socket.channel === 'private')).toBe(true));
+      privateSide.input.deliver('user');
+      await privateSide.startup;
+      // Coinbase polling changes quotes, not its catalog. This separate SDK
+      // control-boundary case injects an independently encoded MARKETS frame;
+      // startup and the account remain real WASM, with no claimed venue refresh.
+      const boundary = source.account as unknown as { receiveFrame(buffer: ArrayBuffer): void };
+      const before = source.account.store.markets;
+      boundary.receiveFrame(
+        consumerFrame({
+          markets: before.map(change),
+        }),
+      );
+      await waitFor(() => expect(privateSide.account.isDisposed).toBe(true));
+      expect(privateSide.input.failures.some((failure) => failure.includes('catalog changed'))).toBe(true);
+      expect(privateSide.input.sockets.every((socket) => socket.closed)).toBe(true);
+      expect(source.account.isDisposed).toBe(false);
+      expect(source.account.store.markets).not.toEqual(before);
+      expect(new Frame(source.account.snapshotFrame()!).markets()!.contractSize[0]).toBe(1);
+    },
+    15_000,
+  );
 
   it('rejects same-ID semantic catalog mismatches before shared account readiness', async () => {
     const source = await exchange({ key: '', secret: '', publicDataOnly: true });
     await source.startup;
     const boundary = source.account as unknown as { receiveFrame(buffer: ArrayBuffer): void };
-    boundary.receiveFrame(consumerFrame({
-      markets: source.account.store.markets.map((market) => ({
-        ...market,
-        info: { ...market.info, symbolType: '', marketRegion: 'US', underlyingTicker: 'AAPL' },
-      })),
-    }));
+    boundary.receiveFrame(
+      consumerFrame({
+        markets: source.account.store.markets.map((market) => ({
+          ...market,
+          info: { ...market.info, symbolType: '', marketRegion: 'US', underlyingTicker: 'AAPL' },
+        })),
+      }),
+    );
     const provider = new RustPublicFeedProvider(source.account);
     cleanups.push(() => provider.dispose());
     const channel = new MessageChannel();
@@ -669,7 +681,7 @@ describe('native public-feed ownership through real private workers', () => {
     const unloaded = new RustEngineExchange(
       'coinbasespot',
       { key: '', secret: '', publicDataOnly: true },
-      new DefaultStore(),
+      new FrameStore(),
     );
     cleanups.push(() => unloaded.dispose());
     expect(() => new RustPublicFeedProvider(unloaded)).toThrow('started, loaded');
@@ -711,7 +723,7 @@ describe('native public-feed ownership through real private workers', () => {
       publicDataOnly: true,
       transport: { ...directTransport, rest: ({ config }) => ({ baseURL: config?.baseURL, proxied: false }) },
     };
-    const source = new RustEngineExchange('coinbasespot', options, new DefaultStore());
+    const source = new RustEngineExchange('coinbasespot', options, new FrameStore());
     cleanups.push(() => source.dispose());
     await source.start();
     const provider = new RustPublicFeedProvider(source);
@@ -721,7 +733,7 @@ describe('native public-feed ownership through real private workers', () => {
     const receiver = new RustEngineExchange(
       'coinbasespot',
       { ...options, publicFeed: { mode: 'shared', port: channel.port2 as unknown as MessagePort } },
-      new DefaultStore(),
+      new FrameStore(),
     );
     cleanups.push(() => receiver.dispose());
     let ready = false;

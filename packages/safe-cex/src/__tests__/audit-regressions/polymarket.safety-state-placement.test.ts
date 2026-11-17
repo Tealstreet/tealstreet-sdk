@@ -1,14 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { PolymarketExchange } from '../reference/polymarket/polymarket.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { PolymarketExchange } from '../reference/polymarket/polymarket.exchange';
 
 const PRIVATE_KEY = `0x${'11'.repeat(32)}`;
 const SYMBOL = 'safe-market-Yes';
 const TOKEN_ID = '111';
 
-function createExchange(store = new DefaultStore()) {
+function createExchange(store = new FrameStore()) {
   const exchange = new PolymarketExchange(
     'polymarket',
     {
@@ -22,21 +23,26 @@ function createExchange(store = new DefaultStore()) {
     } as any,
     store,
   );
-  store.update({
-    markets: [
+  store.apply(
+    nativeFixture(
       {
-        id: TOKEN_ID,
-        symbol: SYMBOL,
-        base: 'safe-market',
-        quote: 'pUSD',
-        active: true,
-        precision: { amount: 2, price: 2 },
-        limits: { amount: { min: 5, max: 1_000_000 }, leverage: { min: 1, max: 1 } },
-        contractSize: 1,
-        info: { tickSize: 0.01, negRisk: false },
+        markets: [
+          {
+            id: TOKEN_ID,
+            symbol: SYMBOL,
+            base: 'safe-market',
+            quote: 'pUSD',
+            active: true,
+            precision: { amount: 2, price: 2 },
+            limits: { amount: { min: 5, max: 1_000_000 }, leverage: { min: 1, max: 1 } },
+            contractSize: 1,
+            info: { tickSize: 0.01, negRisk: false },
+          },
+        ],
       },
-    ],
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   (exchange as any).symbolToToken.set(SYMBOL, TOKEN_ID);
   (exchange as any).tokenToSymbol.set(TOKEN_ID, SYMBOL);
   return exchange;
@@ -67,7 +73,7 @@ describe('Polymarket private-state safety', () => {
   });
 
   it('persists the authoritative position refresh triggered by a user-channel trade', async () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = createExchange(store);
     const refreshedPosition = {
       id: `${SYMBOL}-long-oneway`,
@@ -108,16 +114,12 @@ describe('Polymarket placement safety', () => {
   ])('rejects unsupported %s orders before signing or posting', async (type) => {
     const exchange = createExchange();
     const postOrder = vi.fn();
-    const emitAndLogError = vi
-      .spyOn(exchange, 'emitAndLogError')
-      .mockImplementation(() => undefined);
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
     const signTypedData = vi.spyOn((exchange as any).wallet, 'signTypedData');
     (exchange as any).api = { postOrder };
 
     const message = `Polymarket does not support ${type} orders in safe-cex`;
-    await expect(exchange.placeOrder({ ...limitOrder, type })).rejects.toThrow(
-      message,
-    );
+    await expect(exchange.placeOrder({ ...limitOrder, type })).rejects.toThrow(message);
     expect(emitAndLogError).toHaveBeenCalledOnce();
     expect(emitAndLogError).toHaveBeenCalledWith(message);
     expect(signTypedData).not.toHaveBeenCalled();
@@ -172,9 +174,7 @@ describe('Polymarket placement safety', () => {
 
   it('emits the API rejection before throwing it', async () => {
     const exchange = createExchange();
-    const emitAndLogError = vi
-      .spyOn(exchange, 'emitAndLogError')
-      .mockImplementation(() => undefined);
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
     (exchange as any).api = {
       postOrder: vi.fn().mockResolvedValue({ success: false, errorMsg: 'order rejected' }),
     };

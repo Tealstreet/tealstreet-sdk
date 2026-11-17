@@ -4,6 +4,7 @@ import type { ExchangeName, ExchangeOptions, Market, StoreData } from '../types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { consumerFrame } from '../__tests__/cutover/consumerFrame';
+import { nativeFixture } from '../__tests__/cutover/nativeFixture';
 import { engineCapabilities } from '../__tests__/fixtures/engineCapabilities';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { OrderSide, OrderType } from '../types';
@@ -32,7 +33,9 @@ let algosBuild = false;
 class ControlledEngine implements WasmEngineLike {
   pending = true;
   freed = false;
-  free = () => { this.freed = true; };
+  free = () => {
+    this.freed = true;
+  };
   started = false;
   trap = false;
   trapWrites = false;
@@ -63,8 +66,12 @@ class ControlledEngine implements WasmEngineLike {
     sources.push(this);
     if (!algosBuild) return;
     this.algoStart = () => {};
-    this.algoStartOwned = (_account, ownerJson) => { this.algoOwner = JSON.parse(ownerJson); };
-    this.algoStartUnowned = () => { this.algoUnowned = true; };
+    this.algoStartOwned = (_account, ownerJson) => {
+      this.algoOwner = JSON.parse(ownerJson);
+    };
+    this.algoStartUnowned = () => {
+      this.algoUnowned = true;
+    };
     this.algoOp = (op, dataJson) => {
       this.algoOps.push([op, JSON.parse(dataJson)]);
       return '[]';
@@ -74,7 +81,10 @@ class ControlledEngine implements WasmEngineLike {
   algoDeadline = () => undefined;
   algoEmits = () => '[]';
   algoDisposals = 0;
-  algoDispose = () => { this.algoDisposals++; return '[]'; };
+  algoDispose = () => {
+    this.algoDisposals++;
+    return '[]';
+  };
   capabilities = () => engineCapabilities(this.venue);
   start = () => {
     if (trapStartup) throw new WebAssembly.RuntimeError('startup panic');
@@ -170,10 +180,18 @@ const transport: Transport = {
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 const workers: ExchangeWorker[] = [];
-const createWorker = (options: Partial<ExchangeOptions> = {}, account = 'same-name', getTwapOwner?: () => { ownerId: string; generation: number } | null, venue: ExchangeName = 'binance') => {
+const createWorker = (
+  options: Partial<ExchangeOptions> = {},
+  account = 'same-name',
+  getTwapOwner?: () => { ownerId: string; generation: number } | null,
+  venue: ExchangeName = 'binance',
+) => {
   const messages: Array<{ op: string; data?: any }> = [];
   const worker = new ExchangeWorker(
-    { postMessage: (message: any) => messages.push(message), ...(getTwapOwner && { getTwapOwner }) } as unknown as Worker,
+    {
+      postMessage: (message: any) => messages.push(message),
+      ...(getTwapOwner && { getTwapOwner }),
+    } as unknown as Worker,
     account,
     venue,
     { key: '', secret: '', engine: 'rust', publicDataOnly: true, ...options },
@@ -246,17 +264,26 @@ describe('Rust worker engine ownership', () => {
       algosBuild = true;
       let owner: { ownerId: string; generation: number } | null = { ownerId: 'synthetic-A', generation: 7 };
       let unavailable = false;
-      const { worker, messages } = createWorker({}, 'same-name', () => {
-        if (unavailable) throw new Error('owner context retired');
-        return owner;
-      }, 'hyperliquid');
+      const { worker, messages } = createWorker(
+        {},
+        'same-name',
+        () => {
+          if (unavailable) throw new Error('owner context retired');
+          return owner;
+        },
+        'hyperliquid',
+      );
       expect(await start(worker)).toBe(true);
       const exchange = worker.exchange;
       if (!(exchange instanceof RustEngineExchange)) throw new Error('Fixture must construct the real Rust adapter');
       const source = sources[0];
       let running = true;
       source.algoRunning = () => running;
-      source.algoDispose = () => { source.algoDisposals++; running = false; return '[]'; };
+      source.algoDispose = () => {
+        source.algoDisposals++;
+        running = false;
+        return '[]';
+      };
       const dead = vi.fn();
       exchange.on('engine-dead', dead);
       if (transition === 'owner' || transition === 'returning') owner = { ownerId: 'synthetic-B', generation: 8 };
@@ -275,10 +302,16 @@ describe('Rust worker engine ownership', () => {
         nativeCleanup: source.algoDisposals,
         constructed: sources.length,
       }).toEqual({
-        disposed: true, engineDead: false, terminalEvents: 0, freed: true,
-        nativeCleanup: transition === 'unchanged' ? 1 : 0, constructed: 1,
+        disposed: true,
+        engineDead: false,
+        terminalEvents: 0,
+        freed: true,
+        nativeCleanup: transition === 'unchanged' ? 1 : 0,
+        constructed: 1,
       });
-      expect(messages.slice(boundary).filter((message) => message.op === 'warning' || message.op === 'error')).toEqual([]);
+      expect(messages.slice(boundary).filter((message) => message.op === 'warning' || message.op === 'error')).toEqual(
+        [],
+      );
     },
   );
 
@@ -294,7 +327,12 @@ describe('Rust worker engine ownership', () => {
     worker.handlePayload({ op: 'subscribeOHLCV', data: { symbol: 'BTCUSDT', interval: '1m', subId: 'remove' } });
     await panic(sources[0]);
     const boundary = messages.length;
-    oldStore.update({ balance: { total: 999, free: 999, used: 0, upnl: 0 } });
+    oldStore.apply(
+      nativeFixture(
+        { balance: { total: 999, free: 999, used: 0, upnl: 0 } },
+        oldStore.markets.map((row) => row.symbol),
+      ),
+    );
     oldFrameCallback(new ArrayBuffer(1));
     original.emitter.emit('warning', 'stale generation');
     worker.handlePayload({ op: 'unsubscribeOHLCV', data: { symbol: 'BTCUSDT', interval: '1m', subId: 'remove' } });
@@ -328,13 +366,8 @@ describe('Rust worker engine ownership', () => {
     expect(
       sources[1].commands.some((c) => c.op === 'subscribeCandles' || c.op === 'setLeverage' || c.op === 'placeOrder'),
     ).toBe(false);
-    const reset = messages
-      .slice(boundary)
-      .find((m) => m.op === 'store' && m.data.loaded?.markets === false && Array.isArray(m.data.markets));
-    expect(reset?.data).toMatchObject({ markets: [], tickers: [], orders: [], positions: [] });
-    expect(reset?.data.updateIds.orders).toBeGreaterThan(previousUpdateIds.orders);
-    expect(reset?.data.updateIds.positions).toBeGreaterThan(previousUpdateIds.positions);
-    expect(messages.slice(boundary).some((m) => m.op === 'frame')).toBe(true);
+    expect(messages.slice(boundary).some((m) => m.op === 'frame' && 'snapshot' in m && m.snapshot === true)).toBe(true);
+    expect(messages.slice(boundary).some((m) => m.op === 'store')).toBe(false);
     await panic(sources[1]);
     await vi.advanceTimersByTimeAsync(5000);
     expect(sources).toHaveLength(2);
@@ -420,12 +453,7 @@ describe('Rust worker engine ownership', () => {
       orders: false,
       positions: false,
     });
-    const invalidation = messages.filter((message) => message.op === 'store' && message.data.loaded).at(-1);
-    expect(invalidation?.data).toEqual({
-      loaded: { markets: false, tickers: false, balance: false, orders: false, positions: false },
-      activeChasers: [],
-      activeTWAPs: [],
-    });
+    expect(messages.slice(boundary).some((message) => message.op === 'store')).toBe(false);
     expect(messages.some((m) => m.op === 'warning' && m.data[0].includes('fresh provider attachment'))).toBe(true);
     worker.handlePayload({ op: 'callMethod', data: { requestId: 'closed', method: 'setLeverage', args: [] } });
     expect(messages).toContainEqual(
@@ -601,8 +629,9 @@ describe('Rust worker engine ownership', () => {
           }),
         );
         expect(
-          messages.some((message) => message.op === 'error' &&
-            message.data[1]?.sentryData?.extra?.payloadOp === 'twap:start'),
+          messages.some(
+            (message) => message.op === 'error' && message.data[1]?.sentryData?.extra?.payloadOp === 'twap:start',
+          ),
         ).toBe(true);
       }
     },
@@ -680,8 +709,9 @@ describe('Rust worker engine ownership', () => {
       worker.handlePayload(placeOrder('later-order'));
       await vi.advanceTimersByTimeAsync(1000);
       expect(sources).toHaveLength(1);
-      expect(sources[0].algoOps).toEqual(allowed
-        ? [['exec', { reqId: 'later-exec', symbol: market.symbol, command: 'buy 1' }]] : []);
+      expect(sources[0].algoOps).toEqual(
+        allowed ? [['exec', { reqId: 'later-exec', symbol: market.symbol, command: 'buy 1' }]] : [],
+      );
       expect(sources[0].commands.filter((command) => command.op === 'placeOrders')).toHaveLength(allowed ? 1 : 0);
       expect(sources[0].freed).toBe(!allowed);
       expect((worker.exchange as RustEngineExchange).isDisposed).toBe(!allowed);
@@ -689,9 +719,12 @@ describe('Rust worker engine ownership', () => {
       expect(replies(messages, 'later-order')[0].data.success).toBe(allowed);
       if (!allowed) {
         expect(replies(messages, 'later-order')[0].data.result.outcome).toBe('notSent');
-        expect(messages).toContainEqual(expect.objectContaining({
-          op: 'exec-result', data: [expect.objectContaining({ reqId: 'later-exec', success: false })],
-        }));
+        expect(messages).toContainEqual(
+          expect.objectContaining({
+            op: 'exec-result',
+            data: [expect.objectContaining({ reqId: 'later-exec', success: false })],
+          }),
+        );
       }
     },
   );
@@ -731,7 +764,8 @@ describe('Rust worker engine ownership', () => {
   });
 
   it.each(['unchanged', 'generation', 'returning', 'logout'] as const)(
-    'keeps an already-started worker on its initiating algo binding: %s', async (change) => {
+    'keeps an already-started worker on its initiating algo binding: %s',
+    async (change) => {
       algosBuild = true;
       let owner: { ownerId: string; generation: number } | null = { ownerId: 'A', generation: 7 };
       const { worker } = createWorker({}, 'same-name', () => owner);
@@ -797,7 +831,12 @@ describe('Rust worker engine ownership', () => {
     worker.dispose();
     const boundary = messages.length;
     oldFrame(new ArrayBuffer(1));
-    oldStore.update({ balance: { total: 999, free: 999, used: 0, upnl: 0 } });
+    oldStore.apply(
+      nativeFixture(
+        { balance: { total: 999, free: 999, used: 0, upnl: 0 } },
+        oldStore.markets.map((row) => row.symbol),
+      ),
+    );
     await vi.advanceTimersByTimeAsync(0);
     const write = replies(messages, 'write-dispose');
     expect(write).toHaveLength(1);
@@ -1104,12 +1143,16 @@ describe('Rust worker engine ownership', () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(sources).toHaveLength(1);
     const log = messages.find(
-      (m) => m.op === 'log' && Array.isArray(m.data)
-        && m.data[1] === 'warning' && m.data[0].includes('"worker_error_phase":"startup"'),
+      (m) =>
+        m.op === 'log' &&
+        Array.isArray(m.data) &&
+        m.data[1] === 'warning' &&
+        m.data[0].includes('"worker_error_phase":"startup"'),
     );
     expect(log?.data[1]).toBe('warning');
     expect(JSON.parse(log!.data[0])).toMatchObject({
-      level: 'warn', context: { worker_error_phase: 'startup' },
+      level: 'warn',
+      context: { worker_error_phase: 'startup' },
     });
   });
 

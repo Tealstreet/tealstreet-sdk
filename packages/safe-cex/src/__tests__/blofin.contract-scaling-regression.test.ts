@@ -1,12 +1,14 @@
+import type { StoreData } from '../generated/StoreData';
 import type { Market } from '../types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BlofinExchange } from './reference/blofin/blofin.exchange';
-import { DefaultStore } from '../store/store.base';
 import { ENDPOINTS } from '../exchanges/blofin/blofin.types';
-import { createPositionId } from '../utils/createPositionId';
+import { FrameStore } from '../store/frameStore';
 import { MarginType, OrderSide, OrderType, PositionMode, PositionSide } from '../types';
+import { createPositionId } from '../utils/createPositionId';
+import { nativeFixture } from './cutover/nativeFixture';
+import { BlofinExchange } from './reference/blofin/blofin.exchange';
 
 const createAPIMock = vi.fn();
 
@@ -15,7 +17,7 @@ vi.mock('./reference/blofin/blofin.api', () => ({
 }));
 
 const makeExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new BlofinExchange(
     'blofin' as any,
     {
@@ -28,11 +30,16 @@ const makeExchange = () => {
   return { exchange, store };
 };
 
-const seedMarkets = (store: DefaultStore, markets: Market[]) => {
-  store.update({
-    markets,
-    loaded: { ...store.loaded, markets: true },
-  });
+const seedMarkets = (store: FrameStore, markets: Market[]) => {
+  store.apply(
+    nativeFixture(
+      {
+        markets,
+        loaded: { ...store.loaded, markets: true },
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
 };
 
 const RAW_BTC_INSTRUMENT = {
@@ -309,32 +316,37 @@ describe('Blofin contract scaling regression', () => {
 
   it('commits successful position mode changes without waiting for slow refetches', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      fetchedLeverage: {
-        ARBUSDT: {
-          buyLeverage: 75,
-          sellLeverage: 75,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.OneWay,
-        },
-      },
-      positions: [
+    store.apply(
+      nativeFixture(
         {
-          id: createPositionId('ARBUSDT', PositionSide.Long, PositionMode.OneWay),
-          symbol: 'ARBUSDT',
-          side: PositionSide.Long,
-          entryPrice: 0,
-          notional: 0,
-          leverage: 75,
-          liquidationPrice: 0,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.OneWay,
-          unrealizedPnl: 0,
-          contracts: 0,
-          info: {},
+          fetchedLeverage: {
+            ARBUSDT: {
+              buyLeverage: 75,
+              sellLeverage: 75,
+              marginType: MarginType.Cross,
+              positionMode: PositionMode.OneWay,
+            },
+          },
+          positions: [
+            {
+              id: createPositionId('ARBUSDT', PositionSide.Long, PositionMode.OneWay),
+              symbol: 'ARBUSDT',
+              side: PositionSide.Long,
+              entryPrice: 0,
+              notional: 0,
+              leverage: 75,
+              liquidationPrice: 0,
+              marginType: MarginType.Cross,
+              positionMode: PositionMode.OneWay,
+              unrealizedPnl: 0,
+              contracts: 0,
+              info: {},
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const post = vi.fn().mockResolvedValue({
       data: {
         code: '0',
@@ -391,23 +403,28 @@ describe('Blofin contract scaling regression', () => {
       symbol: 'SOLUSDT',
       contracts: 1,
     };
-    store.update({
-      fetchedLeverage: {
-        ARBUSDT: {
-          buyLeverage: 75,
-          sellLeverage: 75,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.OneWay,
+    store.apply(
+      nativeFixture(
+        {
+          fetchedLeverage: {
+            ARBUSDT: {
+              buyLeverage: 75,
+              sellLeverage: 75,
+              marginType: MarginType.Cross,
+              positionMode: PositionMode.OneWay,
+            },
+            SOLUSDT: {
+              buyLeverage: 20,
+              sellLeverage: 20,
+              marginType: MarginType.Cross,
+              positionMode: PositionMode.OneWay,
+            },
+          },
+          positions: [flatArbPosition, openSolPosition],
         },
-        SOLUSDT: {
-          buyLeverage: 20,
-          sellLeverage: 20,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.OneWay,
-        },
-      },
-      positions: [flatArbPosition, openSolPosition],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const post = vi.fn().mockResolvedValue({
       data: {
         code: '0',
@@ -557,14 +574,12 @@ describe('Blofin contract scaling regression', () => {
 
   it('returns an actionable error for unsupported multi-trade TP/SL placement', async () => {
     const { exchange } = makeExchange();
-    const post = vi
-      .fn()
-      .mockResolvedValue({
-        data: {
-          code: '102143',
-          msg: 'Please select a position when Reduce Only is enabled in Multi-Trade mode.',
-        },
-      });
+    const post = vi.fn().mockResolvedValue({
+      data: {
+        code: '102143',
+        msg: 'Please select a position when Reduce Only is enabled in Multi-Trade mode.',
+      },
+    });
     const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError');
     exchange.xhr = { post } as any;
 
@@ -650,13 +665,37 @@ describe('Blofin contract scaling regression', () => {
       marginMode: 'cross',
       liquidationPrice: '30000',
     };
-    store.addOrUpdatePositionsFull(exchange.mapPositions([raw] as any));
-    store.addOrUpdatePositionsFull([]);
+    (() => {
+      const incoming: StoreData['positions'] = exchange.mapPositions([raw] as any);
+      return store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
+    (() => {
+      const incoming: StoreData['positions'] = [];
+      return store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     expect(store.positions).toEqual([]);
     expect(Object.values(store.positionSettings)[0]).toMatchObject({ leverage: 50, marginType: MarginType.Cross });
     const reopened = exchange.mapPositions([{ ...raw, leverage: '' }] as any);
     expect(reopened[0].leverage).toBe(50);
-    store.addOrUpdatePositionsFull(reopened);
+    (() => {
+      const incoming: StoreData['positions'] = reopened;
+      return store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     expect(store.positions).toHaveLength(1);
     expect(store.positions[0].contracts).toBeCloseTo(0.2);
   });
@@ -675,24 +714,29 @@ describe('Blofin contract scaling regression', () => {
       info: { contractValue: 0.001, lotSize: 0.1, minSize: 0.1 },
     } satisfies Market;
     seedMarkets(store, [btcMarket]);
-    store.update({
-      positions: [
+    store.apply(
+      nativeFixture(
         {
-          id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.OneWay),
-          symbol: 'BTCUSDT',
-          side: PositionSide.Long,
-          entryPrice: 49000,
-          notional: 10000,
-          leverage: 50,
-          unrealizedPnl: 0,
-          contracts: 0.2,
-          liquidationPrice: 30000,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.OneWay,
-          info: {},
+          positions: [
+            {
+              id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.OneWay),
+              symbol: 'BTCUSDT',
+              side: PositionSide.Long,
+              entryPrice: 49000,
+              notional: 10000,
+              leverage: 50,
+              unrealizedPnl: 0,
+              contracts: 0.2,
+              liquidationPrice: 30000,
+              marginType: MarginType.Cross,
+              positionMode: PositionMode.OneWay,
+              info: {},
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const positions = exchange.mapPositions([
       {
@@ -847,7 +891,12 @@ describe('Blofin contract scaling regression', () => {
     expect(orders[0].amount).toBeCloseTo(1.011, 10);
     expect(orders[0].extra?.remainingNative).toBeCloseTo(101.1, 10);
 
-    store.update({ orders });
+    store.apply(
+      nativeFixture(
+        { orders },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     vi.spyOn(exchange, 'cancelOrders').mockResolvedValue(undefined);
     const placeOrderSpy = vi.spyOn(exchange, 'placeOrder').mockResolvedValue(['o-2']);

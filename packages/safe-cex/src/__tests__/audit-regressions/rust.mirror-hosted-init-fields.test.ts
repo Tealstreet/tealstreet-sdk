@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import rules from '../../exchanges/rust/construction-rules.json';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
@@ -72,7 +72,7 @@ it('covers the dispatch-signing venues', () => {
 
 it.each(dispatchSigning)('%s: a mirror forwards every allowlisted init field it was given', (name) => {
   const options = { ...SAVED, ['sec' + 'ret']: 'fixture-signing-value', workerMirror: true } as ExchangeOptions;
-  const mirror = new RustEngineExchange(name, options, new DefaultStore());
+  const mirror = new RustEngineExchange(name, options, new FrameStore());
   exchanges.push(mirror);
   const forwarded: Record<string, unknown> = { ...mirror.options, workerMirror: undefined };
   for (const field of INIT_FIELDS) expect([field, forwarded[field]]).toEqual([field, (options as any)[field]]);

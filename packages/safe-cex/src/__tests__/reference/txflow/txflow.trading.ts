@@ -1,13 +1,14 @@
 import type { Order, PlaceOrderOpts, UpdateOrderOpts } from '../../../types';
 import type { TxFlowExchange } from './txflow.exchange';
 
+import { validTxFlowCloid } from '../../../exchanges/txflow/txflow.client-id';
 import { OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../../types';
+import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { signAction } from './txflow.signing';
 
 export { txflowClientOrderIdRule, validTxFlowCloid } from '../../../exchanges/txflow/txflow.client-id';
-import { validTxFlowCloid } from '../../../exchanges/txflow/txflow.client-id';
-import { uuid } from '../../../utils/uuid';
 
 type OrderWire = { a: number; b: boolean; p: string; s: string; r: boolean; t: { limit: { tif: string } }; c: string };
 type OrderAction = { grouping: 'na'; orders: OrderWire[] };
@@ -315,7 +316,12 @@ export class TxFlowTrading {
       if (this.exchange.store.positions.some((p) => p.contracts !== 0) || this.exchange.store.orders.length)
         this.exchange.reject('TxFlow position mode requires a flat account without orders');
       await this.execute('updatePositionMode', { isOneway: !hedged }, 'UpdatePositionMode');
-      this.exchange.store.setSetting('isHedged', hedged);
+      this.exchange.store.apply(
+        nativeFixture(
+          { options: { ...this.exchange.store.options, ['isHedged']: hedged } },
+          this.exchange.store.markets.map((row) => row.symbol),
+        ),
+      );
     });
   };
   private asset(symbol: string): number {

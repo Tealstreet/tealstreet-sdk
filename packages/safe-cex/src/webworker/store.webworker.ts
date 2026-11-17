@@ -590,7 +590,6 @@ const start = (ctx: Worker, shared = false) => {
         }
         break;
       default:
-        // case 'store':
         // case 'dispose':
         // case 'subscribeOHLCV':
         // case 'subscribeOrderBook':

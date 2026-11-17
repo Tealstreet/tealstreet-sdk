@@ -1,8 +1,8 @@
 import type { Axios } from 'axios';
-import type { Store } from '../../../store/store.interface';
 import type { ClientOrderLookup, ReplacementOrderIds } from '../../../exchanges/clientOrderId';
 import type { HyperliquidPlacementRecord } from '../../../exchanges/hyperliquid/hyperliquid.cloid';
 import type { BuilderFeeCheckResult, BuilderInfo } from '../../../exchanges/hyperliquid/hyperliquid.types';
+import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs, { ManipulateType } from 'dayjs';
@@ -19,6 +19,44 @@ import {
   SIGNIFICANT_DIGITS,
 } from '@tealstreet/ccxt-compat/src/functions/number';
 import { safeString } from '@tealstreet/ccxt-compat/src/functions/type';
+import { BaseExchange } from '../../../exchanges/base';
+import { orderCarriesClientOrderId, withReplacementClientOrderId } from '../../../exchanges/clientOrderId';
+import { checkBuilderFeeApproved } from '../../../exchanges/hyperliquid/hyperliquid.builderFee';
+import {
+  HYPERLIQUID_CLOID_PATTERN,
+  hyperliquidClientOrderIdRule,
+  mintHyperliquidCloid,
+  placementRecordFromWire,
+  readHyperliquidCloid,
+} from '../../../exchanges/hyperliquid/hyperliquid.cloid';
+import {
+  PERP_MAX_PRICE_DECIMALS,
+  resolveHyperliquidBuilder,
+  SPOT_ASSET_INDEX_OFFSET,
+  SPOT_MAX_PRICE_DECIMALS,
+} from '../../../exchanges/hyperliquid/hyperliquid.constants';
+import {
+  inferHyperliquidOrderTypeAndPrice,
+  parseHyperliquidOrderTimeInForce,
+} from '../../../exchanges/hyperliquid/hyperliquid.order-inference';
+import {
+  AssetCtx,
+  ENDPOINTS,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  HyperliquidUserAbstractionMode,
+  INFO_TYPES,
+  Meta,
+  OrderWire,
+  PerpDex,
+  PerpDexs,
+  ScheduleCancelAction,
+  SpotAssetCtx,
+  SpotClearinghouseState,
+  SpotMeta,
+  SpotToken,
+} from '../../../exchanges/hyperliquid/hyperliquid.types';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Candle,
   ClosedPnlEntry,
@@ -57,23 +95,8 @@ import { v } from '../../../utils/get-key';
 import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import { orderCarriesClientOrderId, withReplacementClientOrderId } from '../../../exchanges/clientOrderId';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { createExchangeAPI, createInfoAPI } from './hyperliquid.api';
-import { checkBuilderFeeApproved } from '../../../exchanges/hyperliquid/hyperliquid.builderFee';
-import {
-  HYPERLIQUID_CLOID_PATTERN,
-  hyperliquidClientOrderIdRule,
-  mintHyperliquidCloid,
-  placementRecordFromWire,
-  readHyperliquidCloid,
-} from '../../../exchanges/hyperliquid/hyperliquid.cloid';
-import {
-  PERP_MAX_PRICE_DECIMALS,
-  SPOT_ASSET_INDEX_OFFSET,
-  SPOT_MAX_PRICE_DECIMALS,
-  resolveHyperliquidBuilder,
-} from '../../../exchanges/hyperliquid/hyperliquid.constants';
 import { getCrossCache, hasSeenFill, markFillSeen } from './hyperliquid.cross-cache';
 import {
   deriveHyperliquidClosedPositions,
@@ -86,7 +109,6 @@ import {
   fetchHip3MetaAndAssetCtxsWithRetry,
 } from './hyperliquid.market-startup-helpers';
 import { collapseHyperliquidOrderHistory, mapHyperliquidHistoricalOrder } from './hyperliquid.order-history';
-import { inferHyperliquidOrderTypeAndPrice, parseHyperliquidOrderTimeInForce } from '../../../exchanges/hyperliquid/hyperliquid.order-inference';
 import {
   hyperliquidOrderResponseHasDeferredOrderStatus,
   HyperliquidUnreadableOrderResponseError,
@@ -100,23 +122,6 @@ import {
   orderWiresToPositionalTPSLAction,
   signL1Action,
 } from './hyperliquid.signing';
-import {
-  AssetCtx,
-  ENDPOINTS,
-  GRAFANA_ENDPOINTS_EVERY,
-  GRAFANA_ENDPOINTS_PERIODIC,
-  HyperliquidUserAbstractionMode,
-  INFO_TYPES,
-  Meta,
-  OrderWire,
-  PerpDex,
-  PerpDexs,
-  ScheduleCancelAction,
-  SpotAssetCtx,
-  SpotClearinghouseState,
-  SpotMeta,
-  SpotToken,
-} from '../../../exchanges/hyperliquid/hyperliquid.types';
 import { calculatePricePrecision, symbolToCoin } from './hyperliquid.utils';
 import { HyperliquidPrivateWebSocket } from './hyperliquid.ws-private';
 import { HyperliquidPublicWebSocket } from './hyperliquid.ws-public';
@@ -387,7 +392,11 @@ export class HyperliquidExchange extends BaseExchange {
   }
 
   // Strict trigger-only match for core-perp stop entries (see cross-cache)
-  public matchPrePlacementTrigger(coin: string, side: OrderSide, wsAmount: number): { type: OrderType; price: number } | undefined {
+  public matchPrePlacementTrigger(
+    coin: string,
+    side: OrderSide,
+    wsAmount: number,
+  ): { type: OrderType; price: number } | undefined {
     return getCrossCache().matchPrePlacementTrigger(coin, side, wsAmount);
   }
 
@@ -485,7 +494,7 @@ export class HyperliquidExchange extends BaseExchange {
   // Debug instance ID to track if multiple instances exist
   public readonly _instanceId = Math.random().toString(36).substr(2, 9);
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = rateLimit(createExchangeAPI(opts, this), { maxRPS: 3 });
@@ -701,21 +710,26 @@ export class HyperliquidExchange extends BaseExchange {
         },
       };
 
-      this.store.update({
-        balance: {
-          total,
-          used,
-          free,
-          upnl,
-          currencies: currencies as any,
-          coins: spotSnapshot.coins,
-          info: {
-            userAbstractionMode: this.userAbstractionMode,
-            source: 'spotClearinghouseState+clearinghouseState',
-            spotCollateralCurrencies: spotSnapshot.spotCurrencies,
+      this.store.apply(
+        nativeFixture(
+          {
+            balance: {
+              total,
+              used,
+              free,
+              upnl,
+              currencies: currencies as any,
+              coins: spotSnapshot.coins,
+              info: {
+                userAbstractionMode: this.userAbstractionMode,
+                source: 'spotClearinghouseState+clearinghouseState',
+                spotCollateralCurrencies: spotSnapshot.spotCurrencies,
+              },
+            },
           },
-        },
-      });
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
       return;
     }
 
@@ -732,20 +746,25 @@ export class HyperliquidExchange extends BaseExchange {
         ? this.buildUnifiedSpotCollateralSnapshot(this.cachedSpotCollateralState.balances)
         : null;
 
-    this.store.update({
-      balance: {
-        total: accountValue - upnl,
-        used,
-        free: accountValue - used,
-        upnl,
-        ...(spotSnapshot ? { coins: spotSnapshot.coins } : {}),
-        info: {
-          userAbstractionMode: this.userAbstractionMode,
-          source: spotSnapshot ? 'clearinghouseState+spotHoldings' : 'clearinghouseState',
-          ...(spotSnapshot ? { spotCollateralCurrencies: spotSnapshot.spotCurrencies } : {}),
+    this.store.apply(
+      nativeFixture(
+        {
+          balance: {
+            total: accountValue - upnl,
+            used,
+            free: accountValue - used,
+            upnl,
+            ...(spotSnapshot ? { coins: spotSnapshot.coins } : {}),
+            info: {
+              userAbstractionMode: this.userAbstractionMode,
+              source: spotSnapshot ? 'clearinghouseState+spotHoldings' : 'clearinghouseState',
+              ...(spotSnapshot ? { spotCollateralCurrencies: spotSnapshot.spotCurrencies } : {}),
+            },
+          },
         },
-      },
-    });
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
   };
 
   public applyCorePerpsBalanceSnapshot = (snapshot: {
@@ -1282,7 +1301,12 @@ export class HyperliquidExchange extends BaseExchange {
       storeUpdate.loaded.tickers = true;
     }
 
-    this.store.update(storeUpdate);
+    this.store.apply(
+      nativeFixture(
+        storeUpdate,
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     if (shouldStartPrivateData) {
       await userAbstractionModePromise;
@@ -1335,10 +1359,15 @@ export class HyperliquidExchange extends BaseExchange {
     const [orders, coreState] = await Promise.all([this.fetchOrders(), this.fetchCorePerpsState()]);
     if (this.isDisposed) return;
 
-    this.store.update({
-      orders,
-      loaded: { ...this.store.loaded, orders: true },
-    });
+    this.store.apply(
+      nativeFixture(
+        {
+          orders,
+          loaded: { ...this.store.loaded, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
     if (coreState) this.privateWebsocket.applyCoreClearinghouseState(coreState, true);
   };
 
@@ -2230,13 +2259,18 @@ export class HyperliquidExchange extends BaseExchange {
       return;
     }
 
-    this.store.update({
-      balance: {
-        ...balance,
-        upnl: nextUpnl,
-        free: nextFree,
-      },
-    });
+    this.store.apply(
+      nativeFixture(
+        {
+          balance: {
+            ...balance,
+            upnl: nextUpnl,
+            free: nextFree,
+          },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
   };
 
   /**
@@ -2409,7 +2443,20 @@ export class HyperliquidExchange extends BaseExchange {
         });
 
         const allPositions = uniqBy([...currentPositions, ...this.getFakePositions()], 'id');
-        this.store.addOrUpdatePositionsFull(allPositions);
+        (() => {
+          const incoming: StoreData['positions'] = allPositions;
+          return this.store.apply(
+            nativeFixture(
+              {
+                positions: incoming.map((row) => ({
+                  ...this.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
         this.log(`Cleared HIP-3 positions for dex: ${dexName} (empty response)`, LogSeverity.Info);
 
         // If we had positions before and now have none, the position was closed
@@ -2503,7 +2550,17 @@ export class HyperliquidExchange extends BaseExchange {
       // Deduplicate before updating store - real positions take precedence over fake ones
       // Use uniqBy to keep first occurrence (real positions come before fakes)
       const allPositions = uniqBy([...currentPositions, ...newPositions, ...this.getFakePositions()], 'id');
-      this.store.addOrUpdatePositionsFull(allPositions);
+      (() => {
+        const incoming: StoreData['positions'] = allPositions;
+        return this.store.apply(
+          nativeFixture(
+            {
+              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
 
       if (newPositions.length > 0) {
         this.log(`Successfully updated ${newPositions.length} HIP-3 positions for dex: ${dexName}`, LogSeverity.Info);
@@ -2693,7 +2750,12 @@ export class HyperliquidExchange extends BaseExchange {
         const existing = currentOrdersById.get(newOrder.id);
         if (!existing) {
           // New order - add it
-          this.store.addOrder(newOrder);
+          this.store.apply(
+            nativeFixture(
+              { orders: [...this.store.orders, newOrder] },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
         } else if (
           existing.status !== newOrder.status ||
           existing.price !== newOrder.price ||
@@ -2704,7 +2766,16 @@ export class HyperliquidExchange extends BaseExchange {
           existing.clientOrderId !== newOrder.clientOrderId
         ) {
           // Order changed - update only this order
-          this.store.updateOrder({ id: newOrder.id }, newOrder);
+          (() => {
+            const target = { id: newOrder.id };
+            const changes: Partial<StoreData['orders'][number]> = newOrder;
+            return this.store.apply(
+              nativeFixture(
+                { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
         // Unchanged orders are left alone (preserves object reference)
       }
@@ -2724,7 +2795,15 @@ export class HyperliquidExchange extends BaseExchange {
           const orderDex = market?.info?.hip3Dex?.toLowerCase();
           if (orderDex && !fetchedDexes.has(orderDex)) continue;
 
-          this.store.removeOrder({ id: currentOrder.id });
+          (() => {
+            const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: currentOrder.id }];
+            return this.store.apply(
+              nativeFixture(
+                { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
       }
 
@@ -3793,7 +3872,23 @@ export class HyperliquidExchange extends BaseExchange {
               : OrderTimeInForce.GoodTillCancel,
           lastUpdate: virtualClock.getCurrentTimeMs(),
         };
-        this.store.addOrUpdateOrder(optimisticOrder);
+        (() => {
+          const incoming: StoreData['orders'] = [optimisticOrder];
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
       this.refreshHip3OrdersWithRetry(orderIds);
     }
@@ -4140,7 +4235,23 @@ export class HyperliquidExchange extends BaseExchange {
             reduceOnly: Boolean(opts.reduceOnly),
             lastUpdate: virtualClock.getCurrentTimeMs(),
           };
-          this.store.addOrUpdateOrder(optimisticOrder);
+          (() => {
+            const incoming: StoreData['orders'] = [optimisticOrder];
+            return this.store.apply(
+              nativeFixture(
+                {
+                  orders: [
+                    ...this.store.orders.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
 
         // Still refresh to get any additional fields from REST when available
@@ -4257,7 +4368,15 @@ export class HyperliquidExchange extends BaseExchange {
       }
     }
 
-    this.store.removeOrders(orders.map((o) => ({ id: o.id })));
+    (() => {
+      const removed: Array<Pick<StoreData['orders'][number], 'id'>> = orders.map((o) => ({ id: o.id }));
+      return this.store.apply(
+        nativeFixture(
+          { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   /**
@@ -4405,7 +4524,23 @@ export class HyperliquidExchange extends BaseExchange {
         reduceOnly: Boolean(newOrder.reduceOnly),
         lastUpdate: virtualClock.getCurrentTimeMs(),
       };
-      this.store.addOrUpdateOrder(updatingOrder);
+      (() => {
+        const incoming: StoreData['orders'] = [updatingOrder];
+        return this.store.apply(
+          nativeFixture(
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
 
     await this.cancelOrders([order]);

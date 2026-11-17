@@ -2,9 +2,9 @@ import type { Axios } from 'axios';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { ENDPOINTS } from '../reference/paradex/paradex.types';
-import { DefaultStore } from '../../store/store.base';
 
 const authOptions = {
   key: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -14,7 +14,7 @@ const authOptions = {
 } as any;
 
 const createExchange = () => {
-  const exchange = new ParadexExchange('paradex', authOptions, new DefaultStore());
+  const exchange = new ParadexExchange('paradex', authOptions, new FrameStore());
   vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
   return exchange;
 };

@@ -1,13 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { BASE_WS_PRIVATE_UTA_URL, ENDPOINTS } from '../../exchanges/bitget/bitget.types';
+import { FrameStore } from '../../store/frameStore';
+import {
+  MarginType,
+  OrderSide,
+  OrderStatus,
+  OrderStopTriggerType,
+  OrderType,
+  PositionMode,
+  PositionSide,
+} from '../../types';
+import { createPositionId } from '../../utils/createPositionId';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { createAPI } from '../reference/bitget/bitget.api';
 import { BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE, BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { BitgetInverseExchange } from '../reference/bitget/bitgetinverse.exchange';
 import { BitgetUSDCExchange } from '../reference/bitget/bitgetusdc.exchange';
-import { BASE_WS_PRIVATE_UTA_URL, ENDPOINTS } from '../../exchanges/bitget/bitget.types';
-import { DefaultStore } from '../../store/store.base';
-import { MarginType, OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionMode, PositionSide } from '../../types';
-import { createPositionId } from '../../utils/createPositionId';
 
 const market = {
   id: 'BTCUSDT',
@@ -27,8 +36,13 @@ const usdcMarket = {
 };
 
 const createExchange = (opts: { isUta?: boolean; accountTypeDetected?: boolean } = {}) => {
-  const store = new DefaultStore();
-  store.update({ markets: [market] as any });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [market] as any },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BitgetExchange(
     'bitget',
     { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
@@ -42,8 +56,13 @@ const createExchange = (opts: { isUta?: boolean; accountTypeDetected?: boolean }
 };
 
 const createUsdcExchange = (opts: { isUta?: boolean; accountTypeDetected?: boolean } = {}) => {
-  const store = new DefaultStore();
-  store.update({ markets: [usdcMarket] as any });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [usdcMarket] as any },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BitgetUSDCExchange(
     'bitgetusdc',
     { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
@@ -229,20 +248,18 @@ describe('audit regression: Bitget UTA routing', () => {
 
   it('validates UTA accounts through v3 account assets after detection', async () => {
     const exchange = createExchange({ accountTypeDetected: false });
-    (exchange.xhr.get as any)
-      .mockResolvedValueOnce(accountSettingsResponse)
-      .mockResolvedValueOnce({
+    (exchange.xhr.get as any).mockResolvedValueOnce(accountSettingsResponse).mockResolvedValueOnce({
+      data: {
+        code: '00000',
+        msg: 'success',
         data: {
-          code: '00000',
-          msg: 'success',
-          data: {
-            accountEquity: '105',
-            effEquity: '98',
-            unrealisedPnl: '5',
-            assets: [{ coin: 'USDT', available: '98', equity: '105', usdValue: '105' }],
-          },
+          accountEquity: '105',
+          effEquity: '98',
+          unrealisedPnl: '5',
+          assets: [{ coin: 'USDT', available: '98', equity: '105', usdValue: '105' }],
         },
-      });
+      },
+    });
 
     await expect(exchange.validateAccount()).resolves.toEqual({
       error: '',
@@ -254,20 +271,18 @@ describe('audit regression: Bitget UTA routing', () => {
 
   it('validates UTA USDC accounts through v3 account assets', async () => {
     const exchange = createUsdcExchange({ isUta: false, accountTypeDetected: false });
-    (exchange.xhr.get as any)
-      .mockResolvedValueOnce(usdcAccountSettingsResponse)
-      .mockResolvedValueOnce({
+    (exchange.xhr.get as any).mockResolvedValueOnce(usdcAccountSettingsResponse).mockResolvedValueOnce({
+      data: {
+        code: '00000',
+        msg: 'success',
         data: {
-          code: '00000',
-          msg: 'success',
-          data: {
-            accountEquity: '205',
-            effEquity: '198',
-            unrealisedPnl: '5',
-            assets: [{ coin: 'USDC', available: '198', equity: '205', usdValue: '205' }],
-          },
+          accountEquity: '205',
+          effEquity: '198',
+          unrealisedPnl: '5',
+          assets: [{ coin: 'USDC', available: '198', equity: '205', usdValue: '205' }],
         },
-      });
+      },
+    });
 
     await expect(exchange.validateAccount()).resolves.toEqual({
       error: '',
@@ -279,20 +294,18 @@ describe('audit regression: Bitget UTA routing', () => {
 
   it('lazily detects UTA before routing private reads on an unstarted instance', async () => {
     const exchange = createExchange({ isUta: false, accountTypeDetected: false });
-    (exchange.xhr.get as any)
-      .mockResolvedValueOnce(accountSettingsResponse)
-      .mockResolvedValueOnce({
+    (exchange.xhr.get as any).mockResolvedValueOnce(accountSettingsResponse).mockResolvedValueOnce({
+      data: {
+        code: '00000',
+        msg: 'success',
         data: {
-          code: '00000',
-          msg: 'success',
-          data: {
-            accountEquity: '105',
-            effEquity: '98',
-            unrealisedPnl: '5',
-            assets: [{ coin: 'USDT', available: '98', equity: '105', usdValue: '105' }],
-          },
+          accountEquity: '105',
+          effEquity: '98',
+          unrealisedPnl: '5',
+          assets: [{ coin: 'USDT', available: '98', equity: '105', usdValue: '105' }],
         },
-      });
+      },
+    });
 
     await expect(exchange.fetchBalance()).resolves.toEqual(
       expect.objectContaining({ total: 100, free: 98, used: 7, upnl: 5 }),
@@ -335,25 +348,30 @@ describe('audit regression: Bitget UTA routing', () => {
 
   it('maps UTA positions including hold mode, side, margin mode, and blank liquidation fallback', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      positions: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: createPositionId('BTCUSDT', PositionSide.Short, PositionMode.Hedged),
-          symbol: 'BTCUSDT',
-          side: PositionSide.Short,
-          entryPrice: 50000,
-          notional: 50000,
-          leverage: 7,
-          unrealizedPnl: 0,
-          realizedPnl: 0,
-          contracts: 1,
-          liquidationPrice: 62000,
-          positionMode: PositionMode.Hedged,
-          marginType: MarginType.Cross,
-          info: {},
+          positions: [
+            {
+              id: createPositionId('BTCUSDT', PositionSide.Short, PositionMode.Hedged),
+              symbol: 'BTCUSDT',
+              side: PositionSide.Short,
+              entryPrice: 50000,
+              notional: 50000,
+              leverage: 7,
+              unrealizedPnl: 0,
+              realizedPnl: 0,
+              contracts: 1,
+              liquidationPrice: 62000,
+              positionMode: PositionMode.Hedged,
+              marginType: MarginType.Cross,
+              info: {},
+            },
+          ] as any,
         },
-      ] as any,
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange.xhr.get as any).mockResolvedValue({
       data: {
         code: '00000',
@@ -592,10 +610,7 @@ describe('audit regression: Bitget UTA routing', () => {
         slOrderType: 'market',
       }),
     );
-    expect(exchange.unlimitedXHR.post).not.toHaveBeenCalledWith(
-      ENDPOINTS.UTA_PLACE_STRATEGY_ORDER,
-      expect.anything(),
-    );
+    expect(exchange.unlimitedXHR.post).not.toHaveBeenCalledWith(ENDPOINTS.UTA_PLACE_STRATEGY_ORDER, expect.anything());
   });
 
   it('places UTA USDC linear orders with the USDC-FUTURES category', async () => {
@@ -755,7 +770,12 @@ describe('audit regression: Bitget UTA routing', () => {
       marginType: MarginType.Cross,
       info: {},
     };
-    exchange.store.update({ positions: [longPosition] as any });
+    exchange.store.apply(
+      nativeFixture(
+        { positions: [longPosition] as any },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange, 'getOrFetchPositionsForSymbol').mockResolvedValue([longPosition] as any);
     (exchange.xhr.get as any).mockResolvedValue(accountSettingsResponse);
     (exchange.unlimitedXHR.post as any).mockResolvedValue({
@@ -809,7 +829,12 @@ describe('audit regression: Bitget UTA routing', () => {
       marginType: MarginType.Cross,
       info: {},
     };
-    exchange.store.update({ positions: [longPosition] as any });
+    exchange.store.apply(
+      nativeFixture(
+        { positions: [longPosition] as any },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange, 'getOrFetchPositionsForSymbol').mockResolvedValue([longPosition] as any);
     (exchange.unlimitedXHR.post as any).mockResolvedValue({
       data: { code: '00000', msg: 'success', data: { orderId: 'tp-1', clientOid: 'client-1' } },
@@ -957,25 +982,30 @@ describe('audit regression: Bitget UTA routing', () => {
 
   it('does not place a UTA strategy replacement when update cancel finds the original already gone', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      positions: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
-          symbol: 'BTCUSDT',
-          side: PositionSide.Long,
-          entryPrice: 50_000,
-          notional: 50_000,
-          leverage: 10,
-          unrealizedPnl: 0,
-          realizedPnl: 0,
-          contracts: 1,
-          liquidationPrice: 40_000,
-          positionMode: PositionMode.Hedged,
-          marginType: MarginType.Cross,
-          info: {},
+          positions: [
+            {
+              id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
+              symbol: 'BTCUSDT',
+              side: PositionSide.Long,
+              entryPrice: 50_000,
+              notional: 50_000,
+              leverage: 10,
+              unrealizedPnl: 0,
+              realizedPnl: 0,
+              contracts: 1,
+              liquidationPrice: 40_000,
+              positionMode: PositionMode.Hedged,
+              marginType: MarginType.Cross,
+              info: {},
+            },
+          ] as any,
         },
-      ] as any,
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange.unlimitedXHR.post as any).mockImplementation((endpoint: string) => {
       if (endpoint === ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER) {
         return Promise.resolve({
@@ -1010,25 +1040,30 @@ describe('audit regression: Bitget UTA routing', () => {
 
   it('updates UTA TP/SL orders by canceling and replacing through v3 strategy endpoints', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      positions: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
-          symbol: 'BTCUSDT',
-          side: PositionSide.Long,
-          entryPrice: 50_000,
-          notional: 50_000,
-          leverage: 10,
-          unrealizedPnl: 0,
-          realizedPnl: 0,
-          contracts: 1,
-          liquidationPrice: 40_000,
-          positionMode: PositionMode.Hedged,
-          marginType: MarginType.Cross,
-          info: {},
+          positions: [
+            {
+              id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
+              symbol: 'BTCUSDT',
+              side: PositionSide.Long,
+              entryPrice: 50_000,
+              notional: 50_000,
+              leverage: 10,
+              unrealizedPnl: 0,
+              realizedPnl: 0,
+              contracts: 1,
+              liquidationPrice: 40_000,
+              positionMode: PositionMode.Hedged,
+              marginType: MarginType.Cross,
+              info: {},
+            },
+          ] as any,
         },
-      ] as any,
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange.unlimitedXHR.post as any).mockImplementation((endpoint: string) => {
       if (endpoint === ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER) {
         return Promise.resolve({ data: { code: '00000', msg: 'success', data: null } });
@@ -1087,25 +1122,30 @@ describe('audit regression: Bitget UTA routing', () => {
     // Mirror of the price-update path: the amount branch must reach the
     // replacement payload as `qty`, not silently regress to the position size.
     const exchange = createExchange();
-    exchange.store.update({
-      positions: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
-          symbol: 'BTCUSDT',
-          side: PositionSide.Long,
-          entryPrice: 50_000,
-          notional: 50_000,
-          leverage: 10,
-          unrealizedPnl: 0,
-          realizedPnl: 0,
-          contracts: 1,
-          liquidationPrice: 40_000,
-          positionMode: PositionMode.Hedged,
-          marginType: MarginType.Cross,
-          info: {},
+          positions: [
+            {
+              id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
+              symbol: 'BTCUSDT',
+              side: PositionSide.Long,
+              entryPrice: 50_000,
+              notional: 50_000,
+              leverage: 10,
+              unrealizedPnl: 0,
+              realizedPnl: 0,
+              contracts: 1,
+              liquidationPrice: 40_000,
+              positionMode: PositionMode.Hedged,
+              marginType: MarginType.Cross,
+              info: {},
+            },
+          ] as any,
         },
-      ] as any,
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange.unlimitedXHR.post as any).mockImplementation((endpoint: string) => {
       if (endpoint === ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER) {
         return Promise.resolve({ data: { code: '00000', msg: 'success', data: null } });
@@ -1159,25 +1199,30 @@ describe('audit regression: Bitget UTA routing', () => {
     // original stop so the user is not left unprotected. The place error is
     // still re-thrown so the caller knows the update did not land.
     const exchange = createExchange();
-    exchange.store.update({
-      positions: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
-          symbol: 'BTCUSDT',
-          side: PositionSide.Long,
-          entryPrice: 50_000,
-          notional: 50_000,
-          leverage: 10,
-          unrealizedPnl: 0,
-          realizedPnl: 0,
-          contracts: 1,
-          liquidationPrice: 40_000,
-          positionMode: PositionMode.Hedged,
-          marginType: MarginType.Cross,
-          info: {},
+          positions: [
+            {
+              id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
+              symbol: 'BTCUSDT',
+              side: PositionSide.Long,
+              entryPrice: 50_000,
+              notional: 50_000,
+              leverage: 10,
+              unrealizedPnl: 0,
+              realizedPnl: 0,
+              contracts: 1,
+              liquidationPrice: 40_000,
+              positionMode: PositionMode.Hedged,
+              marginType: MarginType.Cross,
+              info: {},
+            },
+          ] as any,
         },
-      ] as any,
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const placePayloads: Array<Record<string, any>> = [];
     (exchange.unlimitedXHR.post as any).mockImplementation((endpoint: string, payload: Record<string, any>) => {
@@ -1229,25 +1274,30 @@ describe('audit regression: Bitget UTA routing', () => {
     // If cancel succeeds, replacement fails, AND rollback fails, the user
     // truly has no stop on the book. Silence is unacceptable here.
     const exchange = createExchange();
-    exchange.store.update({
-      positions: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
-          symbol: 'BTCUSDT',
-          side: PositionSide.Long,
-          entryPrice: 50_000,
-          notional: 50_000,
-          leverage: 10,
-          unrealizedPnl: 0,
-          realizedPnl: 0,
-          contracts: 1,
-          liquidationPrice: 40_000,
-          positionMode: PositionMode.Hedged,
-          marginType: MarginType.Cross,
-          info: {},
+          positions: [
+            {
+              id: createPositionId('BTCUSDT', PositionSide.Long, PositionMode.Hedged),
+              symbol: 'BTCUSDT',
+              side: PositionSide.Long,
+              entryPrice: 50_000,
+              notional: 50_000,
+              leverage: 10,
+              unrealizedPnl: 0,
+              realizedPnl: 0,
+              contracts: 1,
+              liquidationPrice: 40_000,
+              positionMode: PositionMode.Hedged,
+              marginType: MarginType.Cross,
+              info: {},
+            },
+          ] as any,
         },
-      ] as any,
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     (exchange.unlimitedXHR.post as any).mockImplementation((endpoint: string) => {
       if (endpoint === ENDPOINTS.UTA_CANCEL_STRATEGY_ORDER) {
@@ -1340,7 +1390,7 @@ describe('audit regression: Bitget UTA routing', () => {
     const inverse = new BitgetInverseExchange(
       'bitgetinverse',
       { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
-      new DefaultStore(),
+      new FrameStore(),
     );
     (inverse as any).isUta = true;
     inverse.xhr = {

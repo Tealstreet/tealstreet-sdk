@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook } from '../../../types';
 import type { WOOXExchange } from './woo.exchange';
 
@@ -6,11 +7,12 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { getCandleStartTime } from '../../../utils/getCandleStartTime';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { add } from '../../../utils/safe-math';
 import { updateOrderBookByPrice } from '../../../utils/updateOrderBook';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { BASE_WS_URL, ENDPOINTS } from './woo.types';
 import { normalizeSymbol, reverseSymbol } from './woo.utils';
 
@@ -112,11 +114,20 @@ export class WooPublicWebsocket extends BaseWebSocket<WOOXExchange> {
         const ticker = this.parent.store.tickersBySymbol[symbol];
 
         if (ticker) {
-          this.store.updateTicker(ticker, {
-            last: row.close,
-            quoteVolume: row.amount,
-            volume: row.volume,
-          });
+          (() => {
+            const target = ticker;
+            const changes: Partial<StoreData['tickers'][number]> = {
+              last: row.close,
+              quoteVolume: row.amount,
+              volume: row.volume,
+            };
+            return this.store.apply(
+              nativeFixture(
+                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
       }
     });
@@ -129,10 +140,19 @@ export class WooPublicWebsocket extends BaseWebSocket<WOOXExchange> {
         const ticker = this.parent.store.tickersBySymbol[symbol];
 
         if (ticker) {
-          this.store.updateTicker(ticker, {
-            bid: row.bid,
-            ask: row.ask,
-          });
+          (() => {
+            const target = ticker;
+            const changes: Partial<StoreData['tickers'][number]> = {
+              bid: row.bid,
+              ask: row.ask,
+            };
+            return this.store.apply(
+              nativeFixture(
+                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
       }
     });
@@ -145,9 +165,18 @@ export class WooPublicWebsocket extends BaseWebSocket<WOOXExchange> {
         const ticker = this.parent.store.tickersBySymbol[symbol];
 
         if (ticker) {
-          this.store.updateTicker(ticker, {
-            mark: row.price,
-          });
+          (() => {
+            const target = ticker;
+            const changes: Partial<StoreData['tickers'][number]> = {
+              mark: row.price,
+            };
+            return this.store.apply(
+              nativeFixture(
+                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
       }
     });

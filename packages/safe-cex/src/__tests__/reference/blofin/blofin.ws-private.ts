@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { BlofinExchange } from './blofin.exchange';
 
 import createHmac from 'create-hmac';
@@ -8,13 +9,14 @@ import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { OrderStatus } from '@tealstreet/safe-cex/src/types';
 import { uuid } from '@tealstreet/safe-cex/src/utils/uuid';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { BASE_WS_URL, FETCH_POSITION_RESPONSE } from '../../../exchanges/blofin/blofin.types';
 import { resolveTransportRouting } from '../../../transport/registry';
 import { cleanFloat, createIncrementalFills } from '../../../utils/incrementalFills';
 import { roundUSD } from '../../../utils/roundUSD';
 import { multiply, subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { BASE_WS_URL, FETCH_POSITION_RESPONSE } from '../../../exchanges/blofin/blofin.types';
+import { nativeFixture } from '../../cutover/nativeFixture';
 
 export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
   // BloFin's private stream goes long idle stretches between user events and
@@ -205,27 +207,93 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
 
       if (orders.length) {
         if (o.state === 'filled') {
-          this.store.markOrdersTerminal(orders, OrderStatus.Closed);
+          (() => {
+            const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders;
+            const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+            return this.store.apply(
+              nativeFixture(
+                {
+                  orders: this.store.orders.map((row) =>
+                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                  ),
+                },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
         if (o.state === 'canceled') {
-          this.store.markOrdersTerminal(orders, OrderStatus.Canceled);
+          (() => {
+            const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders;
+            const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+            return this.store.apply(
+              nativeFixture(
+                {
+                  orders: this.store.orders.map((row) =>
+                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                  ),
+                },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
         if (o.state === 'effective') {
-          this.store.markOrdersTerminal(orders, OrderStatus.Closed);
+          (() => {
+            const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders;
+            const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+            return this.store.apply(
+              nativeFixture(
+                {
+                  orders: this.store.orders.map((row) =>
+                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                  ),
+                },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
         if (o.state === 'order_failed') {
-          this.store.markOrdersTerminal(orders, OrderStatus.Canceled);
+          (() => {
+            const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders;
+            const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+            return this.store.apply(
+              nativeFixture(
+                {
+                  orders: this.store.orders.map((row) =>
+                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                  ),
+                },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
 
         if (o.state === 'live' || o.state === 'partially_filled') {
-          this.store.addOrUpdateOrders(
-            orders.filter((order) => {
+          (() => {
+            const incoming: StoreData['orders'] = orders.filter((order) => {
               const existing = latest.get(order.id);
               if (existing && order.filled < existing.filled) return false;
               latest.set(order.id, order);
               return true;
-            }),
-          );
+            });
+            return this.store.apply(
+              nativeFixture(
+                {
+                  orders: [
+                    ...this.store.orders.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
 
         if (o.state === 'filled' || o.state === 'partially_filled') {
@@ -280,13 +348,18 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
     if (!this.isDisposed) {
       try {
         const orders = await this.parent.fetchOrders();
-        this.store.update({
-          orders,
-          loaded: {
-            ...this.store.loaded,
-            orders: true,
-          },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              orders,
+              loaded: {
+                ...this.store.loaded,
+                orders: true,
+              },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       } catch {
         // Silent failure, will retry on next event or tick
       }
@@ -296,28 +369,46 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
   handlePositionTopic = ({ data: blofinPositions }: { data: FETCH_POSITION_RESPONSE['data'] }) => {
     // open positions
     const positions = this.parent.mapPositions(blofinPositions);
-    this.store.addOrUpdatePositionsFull(positions);
+    (() => {
+      const incoming: StoreData['positions'] = positions;
+      return this.store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
 
     if (positions.length) {
       const used = roundUSD(sumBy(blofinPositions, (p) => parseFloat(p.maintenanceMargin)));
       const upnl = roundUSD(sumBy(blofinPositions, (p) => parseFloat(p.unrealizedPnl)));
 
-      this.store.update({
-        balance: { ...this.store.balance, used: used || 0, upnl: upnl || 0 },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            balance: { ...this.store.balance, used: used || 0, upnl: upnl || 0 },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     }
   };
 
   handleAccountTopic = ({ data }: { data: Record<string, any> }) => {
     const totalCollateral = roundUSD(parseFloat(data.totalEquity));
 
-    this.store.update({
-      balance: {
-        ...this.store.balance,
-        free: subtract(totalCollateral, this.store.balance.used),
-        total: subtract(totalCollateral, this.store.balance.upnl),
-        info: data,
-      },
-    });
+    this.store.apply(
+      nativeFixture(
+        {
+          balance: {
+            ...this.store.balance,
+            free: subtract(totalCollateral, this.store.balance.used),
+            total: subtract(totalCollateral, this.store.balance.upnl),
+            info: data,
+          },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
   };
 }

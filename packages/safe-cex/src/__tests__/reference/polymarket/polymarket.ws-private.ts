@@ -1,3 +1,15 @@
+import type { StoreData } from '../../../generated/StoreData';
+import type { PolymarketExchange } from './polymarket.exchange';
+import type {
+  PolymarketAPIOrder,
+  PolymarketCredentials,
+  PolymarketWSOrderUpdate,
+  PolymarketWSSubscription,
+  PolymarketWSTrade,
+} from './polymarket.types';
+
+import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 /**
  * Polymarket Private WebSocket Handler
  *
@@ -12,10 +24,8 @@
  */
 
 import { LogSeverity, Order, OrderSide, OrderStatus, OrderType } from '../../../types';
-import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import type { PolymarketExchange } from './polymarket.exchange';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import {
   ORDER_SIDE_MAP,
   ORDER_STATUS_MAP,
@@ -24,13 +34,6 @@ import {
   WS_CONFIG,
   WS_MESSAGE_TYPES,
 } from './polymarket.constants';
-import type {
-  PolymarketAPIOrder,
-  PolymarketCredentials,
-  PolymarketWSOrderUpdate,
-  PolymarketWSSubscription,
-  PolymarketWSTrade,
-} from './polymarket.types';
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -92,10 +95,7 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
       this.ws.addEventListener('message', this.onMessage);
       this.ws.addEventListener('close', this.onClose);
       this.ws.addEventListener('error', ((event: Event) => {
-        this.parent.log(
-          `Private WebSocket error: ${(event as any)?.message || 'Unknown error'}`,
-          LogSeverity.Error,
-        );
+        this.parent.log(`Private WebSocket error: ${(event as any)?.message || 'Unknown error'}`, LogSeverity.Error);
       }) as any);
     }
   };
@@ -227,8 +227,29 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
       const status = wire.status?.toUpperCase();
       if (wire.type === 'CANCELLATION' || status === 'CANCELED' || status === 'CANCELLED') {
         this.orderTimes.set(wire.id, timestamp);
-        this.store.markOrdersTerminal([{ id: wire.id }], OrderStatus.Canceled);
-        this.store.removeOrders([{ id: wire.id }]);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: wire.id }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
+        (() => {
+          const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: wire.id }];
+          return this.store.apply(
+            nativeFixture(
+              { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
         return;
       }
       const existing = this.store.orders.find((order) => order.id === wire.id);
@@ -236,19 +257,70 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
       const merged = { ...existing?.info, ...wire } as PolymarketAPIOrder;
       if (!ORDER_SIDE_MAP[merged.side]) return;
       const mapped = this.mapOrder(merged);
-      if (!Number.isFinite(mapped.price) || mapped.price <= 0 || mapped.price >= 1
-        || !Number.isFinite(mapped.amount) || mapped.amount <= 0
-        || !Number.isFinite(mapped.filled) || mapped.filled < 0 || mapped.filled > mapped.amount) return;
+      if (
+        !Number.isFinite(mapped.price) ||
+        mapped.price <= 0 ||
+        mapped.price >= 1 ||
+        !Number.isFinite(mapped.amount) ||
+        mapped.amount <= 0 ||
+        !Number.isFinite(mapped.filled) ||
+        mapped.filled < 0 ||
+        mapped.filled > mapped.amount
+      )
+        return;
       this.orderTimes.set(wire.id, timestamp);
       const filled = Math.max(mapped.filled, existing?.filled ?? 0, this.matchedSizes.get(mapped.id) ?? 0);
-      const order: Order = { ...mapped, filled, remaining: Math.max(0, mapped.amount - filled), lastUpdate: timestamp, status: OrderStatus.Open };
+      const order: Order = {
+        ...mapped,
+        filled,
+        remaining: Math.max(0, mapped.amount - filled),
+        lastUpdate: timestamp,
+        status: OrderStatus.Open,
+      };
       this.matchedSizes.set(order.id, order.filled);
       if (order.remaining === 0) {
-        this.store.markOrdersTerminal([{ id: order.id }], OrderStatus.Closed);
-        this.store.removeOrders([{ id: order.id }]);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
+        (() => {
+          const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+          return this.store.apply(
+            nativeFixture(
+              { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       } else {
         // MATCHED notifications contain cumulative size, including partials.
-        this.store.addOrUpdateOrders([order]);
+        (() => {
+          const incoming: StoreData['orders'] = [order];
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
 
       this.parent.log(`Order update: ${order.id} - ${order.status}`, LogSeverity.Debug);
@@ -269,18 +341,31 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
       if (!credentials) return;
       const funder = ((this.parent as any).funderAddress || (this.parent as any).wallet?.address || '').toLowerCase();
       const makers = trade.maker_orders ?? [];
-      const ownsMaker = (maker: MakerExecution) => maker.owner === credentials.apiKey
-        || (!!funder && maker.maker_address?.toLowerCase() === funder)
-        || this.store.orders.some((order) => order.id === maker.order_id);
-      const taker = trade.trader_side === 'TAKER' || (trade.trader_side !== 'MAKER'
-        && (this.store.orders.some((order) => order.id === trade.taker_order_id)
-          || (!makers.some(ownsMaker) && (trade.owner === credentials.apiKey || trade.trade_owner === credentials.apiKey))));
-      if (taker) this.emitExecution(trade.id, trade.taker_order_id, trade.asset_id, trade.side, trade.price, trade.size);
+      const ownsMaker = (maker: MakerExecution) =>
+        maker.owner === credentials.apiKey ||
+        (!!funder && maker.maker_address?.toLowerCase() === funder) ||
+        this.store.orders.some((order) => order.id === maker.order_id);
+      const taker =
+        trade.trader_side === 'TAKER' ||
+        (trade.trader_side !== 'MAKER' &&
+          (this.store.orders.some((order) => order.id === trade.taker_order_id) ||
+            (!makers.some(ownsMaker) &&
+              (trade.owner === credentials.apiKey || trade.trade_owner === credentials.apiKey))));
+      if (taker)
+        this.emitExecution(trade.id, trade.taker_order_id, trade.asset_id, trade.side, trade.price, trade.size);
       makers.filter(ownsMaker).forEach((maker) => {
         const asset = maker.asset_id || trade.asset_id;
         const existing = this.store.orders.find((order) => order.id === maker.order_id);
-        const side = maker.side || (existing?.side === OrderSide.Buy ? 'BUY' : existing?.side === OrderSide.Sell ? 'SELL' : undefined)
-          || (asset === trade.asset_id ? trade.side === 'BUY' ? 'SELL' : trade.side === 'SELL' ? 'BUY' : undefined : undefined);
+        const side =
+          maker.side ||
+          (existing?.side === OrderSide.Buy ? 'BUY' : existing?.side === OrderSide.Sell ? 'SELL' : undefined) ||
+          (asset === trade.asset_id
+            ? trade.side === 'BUY'
+              ? 'SELL'
+              : trade.side === 'SELL'
+                ? 'BUY'
+                : undefined
+            : undefined);
         if (side) this.emitExecution(trade.id, maker.order_id, asset, side, maker.price, maker.matched_amount);
       });
     } catch (err) {
@@ -291,14 +376,31 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
     }
   };
 
-  private emitExecution = (tradeId: string, orderId: string, asset: string, side: string, priceText: string, amountText: string) => {
+  private emitExecution = (
+    tradeId: string,
+    orderId: string,
+    asset: string,
+    side: string,
+    priceText: string,
+    amountText: string,
+  ) => {
     if (priceText == null || String(priceText).trim() === '') return;
     const price = Number(priceText);
     const amount = Number(amountText);
     const mappedSide = ORDER_SIDE_MAP[side];
     const key = `${tradeId}:${orderId}`;
-    if (!orderId || !asset || !mappedSide || !Number.isFinite(price) || price < 0 || price > 1
-      || !Number.isFinite(amount) || amount <= 0 || this.executionIds.has(key)) return;
+    if (
+      !orderId ||
+      !asset ||
+      !mappedSide ||
+      !Number.isFinite(price) ||
+      price < 0 ||
+      price > 1 ||
+      !Number.isFinite(amount) ||
+      amount <= 0 ||
+      this.executionIds.has(key)
+    )
+      return;
     this.executionIds.add(key);
     this.emitter.emit('fill', {
       id: orderId,
@@ -336,5 +438,4 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
       lastUpdate: virtualClock.getCurrentTimeMs(),
     };
   }
-
 }

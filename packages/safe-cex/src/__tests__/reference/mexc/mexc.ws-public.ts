@@ -1,11 +1,13 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook } from '../../../types';
 import type { MexcExchange } from './mexc.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { LogSeverity } from '../../../types';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../../utils/updateOrderBook';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { BASE_WS_URL, INTERVAL, isMexcControlChannel, MEXC_WS_HEARTBEAT_INTERVAL_MS } from './mexc.types';
 import { fromMexcSymbol, normalizeCandle, normalizeTicker, toMexcSymbol } from './mexc.utils';
 
@@ -34,7 +36,10 @@ const depthVersion = (value: unknown): bigint | undefined => {
 };
 
 const depthNumber = (value: unknown): number =>
-  typeof value === 'number' || (typeof value === 'string' && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(value.trim())) ? Number(value) : NaN;
+  typeof value === 'number' ||
+  (typeof value === 'string' && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(value.trim()))
+    ? Number(value)
+    : NaN;
 
 export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
   protected override treatAnyMessageAsPong = true;
@@ -322,19 +327,28 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
     if (!market || !current) return;
 
     const next = normalizeTicker({ ...json.data, symbol: market.id }, market);
-    this.store.updateTicker(current, {
-      bid: next.bid,
-      ask: next.ask,
-      last: next.last,
-      mark: next.mark,
-      index: next.index,
-      percentage: next.percentage,
-      openInterest: next.openInterest,
-      fundingRate: next.fundingRate,
-      fundingTime: next.fundingTime,
-      volume: next.volume,
-      quoteVolume: next.quoteVolume,
-    });
+    (() => {
+      const target = current;
+      const changes: Partial<StoreData['tickers'][number]> = {
+        bid: next.bid,
+        ask: next.ask,
+        last: next.last,
+        mark: next.mark,
+        index: next.index,
+        percentage: next.percentage,
+        openInterest: next.openInterest,
+        fundingRate: next.fundingRate,
+        fundingTime: next.fundingTime,
+        volume: next.volume,
+        quoteVolume: next.quoteVolume,
+      };
+      return this.store.apply(
+        nativeFixture(
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   private handleDepth = (json: Record<string, any>) => {

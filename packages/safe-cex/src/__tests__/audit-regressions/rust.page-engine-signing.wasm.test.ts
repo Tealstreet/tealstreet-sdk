@@ -2,15 +2,16 @@ import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { createHmac } from 'node:crypto';
+
 import { ethers } from 'ethers';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-import { BETA_VENUES } from '../../exchanges/rust/betaVenues';
 import vectors from '../../../../../sdk-rs/venues/paradex/tests/sign-vectors.json';
+import { BETA_VENUES } from '../../exchanges/rust/betaVenues';
 import rules from '../../exchanges/rust/construction-rules.json';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 // The COSIGNED gate for page signing (NX `pageSigns`): every frame-fed family's
 // page engine, built as the web controller builds it, answers the sign-reqs its
@@ -23,7 +24,12 @@ const WALLET = '0x1111111111111111111111111111111111111111';
 const AGENT_KEY = '0x0123456789012345678901234567890123456789012345678901234567890123';
 const live: RustEngineExchange[] = [];
 
-type Rules = { venues: Record<string, { remoteSigning?: { signatureEncoding?: string }; signerSetup?: { primary?: { passphrase?: string } } }> };
+type Rules = {
+  venues: Record<
+    string,
+    { remoteSigning?: { signatureEncoding?: string }; signerSetup?: { primary?: { passphrase?: string } } }
+  >;
+};
 const venueRules = (name: string) => (rules as Rules).venues[name] ?? {};
 
 interface SigningCase {
@@ -56,7 +62,11 @@ const hmac = (name: string): SigningCase => {
 const wallet = (): SigningCase => ({
   options: { key: WALLET, secret: AGENT_KEY },
   requests: [
-    { outputFormat: 'hyperliquid-address', toSign: WALLET, expected: new ethers.Wallet(AGENT_KEY).address.toLowerCase() },
+    {
+      outputFormat: 'hyperliquid-address',
+      toSign: WALLET,
+      expected: new ethers.Wallet(AGENT_KEY).address.toLowerCase(),
+    },
   ],
 });
 
@@ -64,15 +74,27 @@ const wallet = (): SigningCase => ({
 const paradex = (): SigningCase => {
   const vector = vectors.cases.find((item) => item.environment === 'prod')!;
   const nowS = Math.floor(vector.now / 1000);
-  const statement = JSON.stringify({ family: 'paradex', op: 'auth', revision: 'paradex/1', timestampS: nowS, expirationS: nowS + 300 });
+  const statement = JSON.stringify({
+    family: 'paradex',
+    op: 'auth',
+    revision: 'paradex/1',
+    timestampS: nowS,
+    expirationS: nowS + 300,
+  });
   // starknet.js `["r","s"]` felts as the device's `0x` r || s.
-  const rs = (JSON.parse(vector.shortAuth.signature) as string[]).map((felt) => BigInt(felt).toString(16).padStart(64, '0')).join('');
+  const rs = (JSON.parse(vector.shortAuth.signature) as string[])
+    .map((felt) => BigInt(felt).toString(16).padStart(64, '0'))
+    .join('');
   return {
     now: vector.now,
     options: { key: vector.key, secret: '', paradexAddress: vector.address, subkeyAddress: vector.subkey },
     requests: [
       // The Stark generator's x: the public key of the vector's scalar 1.
-      { outputFormat: 'paradex-public', toSign: vector.address, expected: '0x01ef15c18599971b7beced415a40f0c7deacfd9b0d1819e03d723d8bc943cfca' },
+      {
+        outputFormat: 'paradex-public',
+        toSign: vector.address,
+        expected: '0x01ef15c18599971b7beced415a40f0c7deacfd9b0d1819e03d723d8bc943cfca',
+      },
       { outputFormat: 'paradex-stark', toSign: statement, expected: `0x${rs}` },
     ],
   };
@@ -83,10 +105,17 @@ const lighter = (robinhood = false): SigningCase => {
   const chainId = robinhood ? 466_324 : 300;
   // The device checks Lighter deadlines against its own wall clock.
   const deadline = Math.floor(Date.now() / 1000) + 60;
-  const auth = (account: number) => `{"kind":"auth","chainId":${chainId},"accountIndex":${account},"apiKeyIndex":0,"deadline":${deadline}}`;
+  const auth = (account: number) =>
+    `{"kind":"auth","chainId":${chainId},"accountIndex":${account},"apiKeyIndex":0,"deadline":${deadline}}`;
   return {
     now: Date.now(),
-    options: { key: '', secret: `01${'00'.repeat(39)}`, apiKeyIndex: '0', applicationId: '718895', testnet: !robinhood },
+    options: {
+      key: '',
+      secret: `01${'00'.repeat(39)}`,
+      apiKeyIndex: '0',
+      applicationId: '718895',
+      testnet: !robinhood,
+    },
     requests: [{ outputFormat: 'lighter-tx', toSign: auth(718895), expected: /^0x[0-9a-f]{160}$/ }],
   };
 };
@@ -144,7 +173,11 @@ const pageEngine = async (name: ExchangeName, options: Partial<ExchangeOptions>,
     clearTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
   };
   setRustEngineTransport(() => transport);
-  const exchange = new RustEngineExchange(name, { ...options, ...(mirror ? { workerMirror: true } : {}) } as ExchangeOptions, new DefaultStore());
+  const exchange = new RustEngineExchange(
+    name,
+    { ...options, ...(mirror ? { workerMirror: true } : {}) } as ExchangeOptions,
+    new FrameStore(),
+  );
   live.push(exchange);
   return { exchange, sockets };
 };
@@ -175,16 +208,17 @@ describe('every frame-fed family signs its COSIGNED sign-reqs on the page engine
 });
 
 const answers = async (exchange: RustEngineExchange, name: ExchangeName, requests: SigningCase['requests']) => {
-    for (const { outputFormat, toSign, expected } of requests) {
-      const answer = await exchange.signWsAuth({
-        id: `${name}-${outputFormat}`,
-        type: 'ws-auth',
-        exchangeName: name,
-        wsAuth: { toSign, outputFormat: outputFormat as never },
-      });
-      expect(answer.error, `${name} ${outputFormat}`).toBeUndefined();
-      const signature = outputFormat === 'hyperliquid-address' ? answer.wsAuthSignature?.toLowerCase() : answer.wsAuthSignature;
-      if (expected instanceof RegExp) expect(signature, `${name} ${outputFormat}`).toMatch(expected);
-      else expect(signature, `${name} ${outputFormat}`).toBe(expected);
-    }
+  for (const { outputFormat, toSign, expected } of requests) {
+    const answer = await exchange.signWsAuth({
+      id: `${name}-${outputFormat}`,
+      type: 'ws-auth',
+      exchangeName: name,
+      wsAuth: { toSign, outputFormat: outputFormat as never },
+    });
+    expect(answer.error, `${name} ${outputFormat}`).toBeUndefined();
+    const signature =
+      outputFormat === 'hyperliquid-address' ? answer.wsAuthSignature?.toLowerCase() : answer.wsAuthSignature;
+    if (expected instanceof RegExp) expect(signature, `${name} ${outputFormat}`).toMatch(expected);
+    else expect(signature, `${name} ${outputFormat}`).toBe(expected);
+  }
 };

@@ -1,4 +1,5 @@
 import type { Order } from '../generated/Order';
+import type { StoreData } from '../generated/StoreData';
 import type { Market } from '../types';
 
 import { execFileSync } from 'node:child_process';
@@ -8,12 +9,13 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
+import { nativeFixture } from '../__tests__/cutover/nativeFixture';
 import { formatOrderBaseSize } from '../../../cli-core/src/utils/formatBaseSize';
 import { OrderRejectReason } from '../generated/OrderRejectReason';
 import { OrderStatus } from '../generated/OrderStatus';
 import { OrderStopTriggerType } from '../generated/OrderStopTriggerType';
+import { FrameStore } from './frameStore';
 import { readOrderFrame } from './orderFrames';
-import { DefaultStore } from './store.base';
 
 const sdk = resolve(__dirname, '../../../../sdk-rs');
 const frames: number[][] = JSON.parse(
@@ -45,10 +47,10 @@ function required<T>(value: T | undefined | null, label: string): T {
 }
 
 const orders = (input: Frame) => required(input.orders(), 'native order table');
-const decodedOrders = (input: Frame, store: DefaultStore) => required(readOrderFrame(input, store), 'decoded orders');
+const decodedOrders = (input: Frame, store: FrameStore) => required(readOrderFrame(input, store), 'decoded orders');
 const profiles: [number, number[]][] = frames.slice(0, 7).map((bytes, index) => [index, bytes]);
 
-describe('Rust Order output through the packed frame and Store consumer', () => {
+describe('Rust Order output through the packed frame and FrameStore consumer', () => {
   it('materializes placement units in Rust before the JS decoder sees them', () => {
     const nativePlacement = orders(frame(frames[1]));
     expect(required(nativePlacement.remainingNative, 'remainingNative column')[0]).toBe(7);
@@ -64,7 +66,7 @@ describe('Rust Order output through the packed frame and Store consumer', () => 
     const table = orders(input);
     required(table.remainingNative, 'remainingNative column')[0] = NaN;
     required(table.filledInPlacementUnits, 'filledInPlacementUnits column')[0] = NaN;
-    const row = decodedOrders(input, new DefaultStore())[0];
+    const row = decodedOrders(input, new FrameStore())[0];
     expect(row.extra).toBeUndefined();
     expect(row.remaining).toBe(0.7);
     expect(row.filled).toBe(0.3);
@@ -73,75 +75,102 @@ describe('Rust Order output through the packed frame and Store consumer', () => 
   it('refuses missing required enums and malformed optional numbers', () => {
     const missing = frame(frames[0]);
     orders(missing).enums[0] |= 255;
-    expect(() => readOrderFrame(missing, new DefaultStore())).toThrow('missing Order enum');
+    expect(() => readOrderFrame(missing, new FrameStore())).toThrow('missing Order enum');
     const malformed = frame(frames[0]);
     required(orders(malformed).remainingNative, 'remainingNative column')[0] = Infinity;
-    expect(() => readOrderFrame(malformed, new DefaultStore())).toThrow('invalid Order optional number');
+    expect(() => readOrderFrame(malformed, new FrameStore())).toThrow('invalid Order optional number');
   });
 
-  it.each(profiles)(
-    'preserves exact extras, absent/zero triggers and terminal identity for profile %i',
-    (_, bytes) => {
-      const store = new DefaultStore();
-      const rows = decodedOrders(frame(bytes), store);
-      const [ordinary, exact, terminal] = rows;
-      const ordinaryExtras = [
-        undefined,
-        { remainingNative: 7, filledInPlacementUnits: 3 },
-        { remainingNative: 7 },
-        { remainingNative: 9.7 },
-        { remainingNative: 7, filledInPlacementUnits: 3 },
-        undefined,
-        undefined,
-      ];
-      expect(ordinary.extra).toEqual(ordinaryExtras[_]);
-      expect(ordinary).not.toHaveProperty('takeProfit');
-      expect(ordinary).not.toHaveProperty('stopLoss');
-      expect(ordinary).not.toHaveProperty('close');
-      expect(exact).toMatchObject({
-        id: 'exact',
-        parentId: 'parent',
-        clientOrderId: 'client',
-        close: false,
-        takeProfit: 0,
-        stopLoss: 0,
-        triggerType: OrderStopTriggerType.MarkPrice,
-        slTriggerType: OrderStopTriggerType.MarkPrice,
-        extra: {
-          remainingNative: 7,
-          filledInPlacementUnits: 3,
-          remainingNotional: 700,
-          conditionalOrderPrice: 0,
-          rejectReason: OrderRejectReason.PostOnly,
-        },
-      });
-      expect(terminal.status).toBe(OrderStatus.Canceled);
-      expect(rows.map((order) => [order.amount, order.filled, order.remaining])).toEqual([
-        [10, 0.3, 0.7],
-        [10, 0.3, 0.7],
-        [10, 0.3, 0.7],
-      ]);
-      store.update({ orders: rows });
-      expect(JSON.parse(JSON.stringify(store.serialize())).orders).toEqual(rows);
-      const buffer = Uint8Array.from(bytes).buffer;
-      const transferred = structuredClone(buffer, { transfer: [buffer] });
-      expect(buffer.byteLength).toBe(0);
-      expect(readOrderFrame(new Frame(transferred), new DefaultStore())).toEqual(rows);
-    },
-  );
+  it.each(profiles)('preserves exact extras, absent/zero triggers and terminal identity for profile %i', (_, bytes) => {
+    const store = new FrameStore();
+    const rows = decodedOrders(frame(bytes), store);
+    const [ordinary, exact, terminal] = rows;
+    const ordinaryExtras = [
+      undefined,
+      { remainingNative: 7, filledInPlacementUnits: 3 },
+      { remainingNative: 7 },
+      { remainingNative: 9.7 },
+      { remainingNative: 7, filledInPlacementUnits: 3 },
+      undefined,
+      undefined,
+    ];
+    expect(ordinary.extra).toEqual(ordinaryExtras[_]);
+    expect(ordinary).not.toHaveProperty('takeProfit');
+    expect(ordinary).not.toHaveProperty('stopLoss');
+    expect(ordinary).not.toHaveProperty('close');
+    expect(exact).toMatchObject({
+      id: 'exact',
+      parentId: 'parent',
+      clientOrderId: 'client',
+      close: false,
+      takeProfit: 0,
+      stopLoss: 0,
+      triggerType: OrderStopTriggerType.MarkPrice,
+      slTriggerType: OrderStopTriggerType.MarkPrice,
+      extra: {
+        remainingNative: 7,
+        filledInPlacementUnits: 3,
+        remainingNotional: 700,
+        conditionalOrderPrice: 0,
+        rejectReason: OrderRejectReason.PostOnly,
+      },
+    });
+    expect(terminal.status).toBe(OrderStatus.Canceled);
+    expect(rows.map((order) => [order.amount, order.filled, order.remaining])).toEqual([
+      [10, 0.3, 0.7],
+      [10, 0.3, 0.7],
+      [10, 0.3, 0.7],
+    ]);
+    store.apply(
+      nativeFixture(
+        { orders: rows },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
+    expect(JSON.parse(JSON.stringify(store.data)).orders).toEqual(rows);
+    const buffer = Uint8Array.from(bytes).buffer;
+    const transferred = structuredClone(buffer, { transfer: [buffer] });
+    expect(buffer.byteLength).toBe(0);
+    expect(readOrderFrame(new Frame(transferred), new FrameStore())).toEqual(rows);
+  });
 
   it('preserves explicit inverse-native remaining without market metadata', () => {
-    const rows = readOrderFrame(frame(frames[7]), new DefaultStore());
+    const rows = readOrderFrame(frame(frames[7]), new FrameStore());
     if (!rows) throw new Error('Expected native order rows');
     expect(rows[1].extra?.remainingNative).toBe(7);
     expect(rows[0].extra?.remainingNative).toBe(9.7);
   });
 
   it('feeds generated orders into real mutation consumers without losing exact leaves or zero stops', () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const rows = decodedOrders(frame(frames[4]), store);
-    store.addOrUpdateOrders(rows);
-    store.updateOrder(rows[1], { stopLoss: 0 });
+    (() => {
+      const incoming: StoreData['orders'] = rows;
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
+    (() => {
+      const target = rows[1];
+      const changes: Partial<StoreData['orders'][number]> = { stopLoss: 0 };
+      return store.apply(
+        nativeFixture(
+          { orders: store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     const result: Order | undefined = store.orders.find((order) => order.id === 'exact');
     expect(result?.extra?.remainingNative).toBe(7);
     expect(result?.stopLoss).toBe(0);

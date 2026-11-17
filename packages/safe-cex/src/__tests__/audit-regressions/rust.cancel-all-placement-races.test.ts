@@ -1,31 +1,62 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { ExchangeName, Market, Order, PlaceOrderOpts } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
-const names = ['phemex', 'okx', 'okxeu', 'okxdemo', 'okxeudemo', 'asterdex', 'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue'] as const;
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
+const names = [
+  'phemex',
+  'okx',
+  'okxeu',
+  'okxdemo',
+  'okxeudemo',
+  'asterdex',
+  'bitget',
+  'bitgetinverse',
+  'bitgetusdc',
+  'blofin',
+  'bitrue',
+] as const;
 const market: Market = {
-  id: 'BTCUSDT', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', active: true,
+  id: 'BTCUSDT',
+  symbol: 'BTCUSDT',
+  base: 'BTC',
+  quote: 'USDT',
+  active: true,
   precision: { amount: 0.001, price: 0.1 },
   limits: { amount: { min: 0.001, max: 10 }, leverage: { min: 1, max: 100 } },
 };
 const order = (extra: Partial<PlaceOrderOpts> = {}): PlaceOrderOpts => ({
-  symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, price: 100, ...extra,
+  symbol: 'BTCUSDT',
+  side: OrderSide.Buy,
+  type: OrderType.Limit,
+  amount: 1,
+  price: 100,
+  ...extra,
 });
 const running: RustEngineExchange[] = [];
 const setup = (name: ExchangeName) => {
-  const store = new DefaultStore();
-  store.update({ markets: [market] });
-  const exchange = new RustEngineExchange(name, { key: 'fixture', secret: 'fixture', passphrase: 'fixture-presentation' }, store);
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [market] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
+  const exchange = new RustEngineExchange(
+    name,
+    { key: 'fixture', secret: 'fixture', passphrase: 'fixture-presentation' },
+    store,
+  );
   const command = vi.fn<(command: Record<string, unknown>) => Promise<unknown>>().mockResolvedValue(['native-order']);
   Object.assign(exchange, { host: { command: (input: Record<string, unknown>) => command(input), dispose: vi.fn() } });
   adoptEngineCapabilities(exchange);
@@ -50,13 +81,17 @@ describe('Rust cancel-all placement scopes', () => {
   it.each(names)('%s dispatches cancel-all while placement is still in flight', async (name) => {
     const { exchange, command } = setup(name);
     let finish!: (ids: string[]) => void;
-    const pending = new Promise<string[]>((resolve) => { finish = resolve; });
-    command.mockImplementation((call) => call.op === 'placeOrders' ? pending : pending.then(() => []));
+    const pending = new Promise<string[]>((resolve) => {
+      finish = resolve;
+    });
+    command.mockImplementation((call) => (call.op === 'placeOrders' ? pending : pending.then(() => [])));
     const placed = exchange.placeOrder(order());
     const canceled = exchange.cancelAllOrders();
     expect(command.mock.calls.map(([call]) => call.op)).toEqual(['placeOrders', 'cancelSymbolOrders']);
     let completed = false;
-    void canceled.then(() => { completed = true; });
+    void canceled.then(() => {
+      completed = true;
+    });
     await Promise.resolve();
     expect(completed).toBe(false);
     finish(['native-order']);
@@ -92,8 +127,9 @@ describe('Rust cancel-all placement scopes', () => {
     await exchange.placeOrder(order());
     expect(store.orders).toEqual([]);
     await expect(exchange.cancelAllOrders()).rejects.toThrow('INVALID: unknown cancellation symbol');
-    expect(command.mock.calls.filter(([call]) => call.op === 'cancelSymbolOrders').map(([call]) => call.symbol))
-      .toEqual(['INVALID', 'BTCUSDT']);
+    expect(
+      command.mock.calls.filter(([call]) => call.op === 'cancelSymbolOrders').map(([call]) => call.symbol),
+    ).toEqual(['INVALID', 'BTCUSDT']);
     // Failed scopes remain retained; a later call cannot silently forget uncertainty.
     await expect(exchange.cancelAllOrders()).rejects.toThrow('INVALID: unknown cancellation symbol');
     expect(command.mock.calls.filter(([call]) => call.op === 'cancelSymbolOrders')).toHaveLength(4);
@@ -112,10 +148,25 @@ describe('Rust cancel-all placement scopes', () => {
 
   it('unions stored and attempted scopes, deduplicates them, and awaits cancellations in order', async () => {
     const { exchange, command, store } = setup('okx');
-    store.update({ orders: [{ id: 'external', symbol: 'ETHUSDT' }, { id: 'existing', symbol: 'BTCUSDT' }] as Order[] });
+    store.apply(
+      nativeFixture(
+        {
+          orders: [
+            { id: 'external', symbol: 'ETHUSDT' },
+            { id: 'existing', symbol: 'BTCUSDT' },
+          ] as Order[],
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     await exchange.placeOrders([order(), order({ symbol: 'SOLUSDT' })]);
     let finish!: () => void;
-    command.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    command.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
     const canceled = exchange.cancelAllOrders();
     expect(command.mock.calls.slice(1).map(([call]) => call.symbol)).toEqual(['ETHUSDT']);
     finish();
@@ -160,10 +211,16 @@ describe('Rust cancel-all placement scopes', () => {
   });
 
   it.each(['kodiakfi', 'mode', 'what', 'woofi'] as const)(
-    '%s cancels every product through its native global endpoint even with an empty store', async (name) => {
+    '%s cancels every product through its native global endpoint even with an empty store',
+    async (name) => {
       const { exchange, command, store } = setup(name);
       await exchange.cancelAllOrders();
-      store.update({ orders: [{ id: 'unrelated', symbol: 'ETHUSDT' }] as Order[] });
+      store.apply(
+        nativeFixture(
+          { orders: [{ id: 'unrelated', symbol: 'ETHUSDT' }] as Order[] },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
       await exchange.cancelAllOrders();
       expect(command.mock.calls.map(([call]) => call)).toEqual([
         { op: 'cancelSymbolOrders', symbol: '' },
@@ -175,7 +232,9 @@ describe('Rust cancel-all placement scopes', () => {
   it('skips every remaining scope if the account is disposed during cancellation', async () => {
     const { exchange, command } = setup('blofin');
     await exchange.placeOrders([order(), order({ symbol: 'ETHUSDT' })]);
-    command.mockImplementationOnce(async () => { exchange.dispose(); });
+    command.mockImplementationOnce(async () => {
+      exchange.dispose();
+    });
     await exchange.cancelAllOrders();
     expect(command.mock.calls.slice(1).map(([call]) => call.symbol)).toEqual(['BTCUSDT']);
   });

@@ -1,3 +1,5 @@
+import { FrameStore } from '../../../../safe-cex/src/store/frameStore';
+import { nativeFixture } from '../../../../safe-cex/src/__tests__/cutover/nativeFixture';
 import type { Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '@tealstreet/safe-cex/src/exchanges/rust/rust.exchange';
 import type { CommandContext, CommandResult } from '../Command';
@@ -10,7 +12,6 @@ import {
   setWasmEngineLoader,
 } from '@tealstreet/safe-cex/src/exchanges/rust/rust.exchange';
 import { RUST_SOCKET_STALE_MS } from '@tealstreet/safe-cex/src/exchanges/rust/rustSockets';
-import { DefaultStore } from '@tealstreet/safe-cex/src/store/store.base';
 import { engineCapabilities } from '@tealstreet/safe-cex/src/__tests__/fixtures/engineCapabilities';
 
 import { ConnectionMonitor } from '../../utils/ConnectionMonitor';
@@ -71,8 +72,13 @@ const connected = async () => {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   }));
-  const store = new DefaultStore();
-  store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new RustEngineExchange('bybit', { key: 'k', secret: 's' }, store);
   exchanges.push(exchange);
   // Start without waiting for native readiness; the sockets are what matter here.
@@ -130,7 +136,16 @@ describe('CLI connection commands on a Rust engine account', () => {
     const { exchange } = await connected();
     expect((await new GateProbe().execute(context(exchange).ctx)).success).toBe(true);
     vi.useFakeTimers({ now: Date.now() + RUST_SOCKET_STALE_MS + 1 });
-    exchange.syncSocketHealthToStore();
+    exchange.store.ingest(
+      nativeFixture({
+        socketHealth: {
+          publicHealthy: false,
+          privateHealthy: false,
+          publicInitialized: true,
+          privateInitialized: true,
+        },
+      }),
+    );
     expect((await new GateProbe().execute(context(exchange).ctx)).success).toBe(false);
   });
 });

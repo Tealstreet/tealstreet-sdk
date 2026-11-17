@@ -1,9 +1,9 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { Store } from '../../store/store.interface';
 import type { StoreData } from '../../types';
 
 import { vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 /**
@@ -12,7 +12,7 @@ import { consumerFrame } from '../cutover/consumerFrame';
  */
 export function installNativeStartupFrames(
   engine: WasmEngineLike,
-  store: Store,
+  store: FrameStore,
   native: () => Partial<StoreData> = () => ({}),
 ): void {
   // Command fixtures do not sign; the real clock/signature controls live separately.
@@ -30,13 +30,13 @@ export function installNativeStartupFrames(
     const key = JSON.stringify({ loaded: store.loaded, ...overrides });
     if (key === published) return undefined;
     published = key;
-    return new Uint8Array(consumerFrame({ ...store.serialize(), ...overrides }));
+    return new Uint8Array(consumerFrame({ ...store.data, ...overrides }));
   };
-  engine.snapshotFrame = () => new Uint8Array(consumerFrame({ ...store.serialize(), ...structuredClone(native()) }));
+  engine.snapshotFrame = () => new Uint8Array(consumerFrame({ ...store.data, ...structuredClone(native()) }));
   // Current native account state, read without advancing freshness IDs.
   engine.accountSnapshotFrame = () =>
     new Uint8Array(
-      consumerFrame({ ...store.serialize(), ...structuredClone(native()) }, undefined, false, undefined, 0, true),
+      consumerFrame({ ...store.data, ...structuredClone(native()) }, undefined, false, undefined, 0, true),
     );
 }
 
@@ -57,8 +57,18 @@ export const nativeReadyFrame = (): Uint8Array =>
       markets: [readyMarket],
       tickers: [
         {
-          id: 'BTCUSDT', symbol: 'BTCUSDT', bid: 99, ask: 101, last: 100, mark: 100, index: 100,
-          percentage: 0, fundingRate: 0, volume: 0, quoteVolume: 0, openInterest: 0,
+          id: 'BTCUSDT',
+          symbol: 'BTCUSDT',
+          bid: 99,
+          ask: 101,
+          last: 100,
+          mark: 100,
+          index: 100,
+          percentage: 0,
+          fundingRate: 0,
+          volume: 0,
+          quoteVolume: 0,
+          openInterest: 0,
         } as StoreData['tickers'][number],
       ],
       balance: { used: 0, free: 0, total: 0, upnl: 0 },

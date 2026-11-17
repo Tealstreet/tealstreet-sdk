@@ -1,4 +1,20 @@
+import type { StoreData } from '../../../generated/StoreData';
+
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { readHyperliquidCloid } from '../../../exchanges/hyperliquid/hyperliquid.cloid';
+import { systemSubscriptionTypes } from '../../../exchanges/hyperliquid/hyperliquid.constants';
+import {
+  inferHyperliquidOrderTypeAndPrice,
+  parseHyperliquidOrderTimeInForce,
+} from '../../../exchanges/hyperliquid/hyperliquid.order-inference';
+import {
+  UserFills,
+  UserFundingEntry,
+  UserNonFundingLedgerEntry,
+  WSS_URLS,
+} from '../../../exchanges/hyperliquid/hyperliquid.types';
+import { FrameStore } from '../../../store/frameStore';
 import {
   LogSeverity,
   MarginType,
@@ -13,13 +29,9 @@ import {
 } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { readHyperliquidCloid } from '../../../exchanges/hyperliquid/hyperliquid.cloid';
-import { systemSubscriptionTypes } from '../../../exchanges/hyperliquid/hyperliquid.constants';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { hasSeenFill, markFillSeen } from './hyperliquid.cross-cache';
 import { HyperliquidExchange } from './hyperliquid.exchange';
-import { inferHyperliquidOrderTypeAndPrice, parseHyperliquidOrderTimeInForce } from '../../../exchanges/hyperliquid/hyperliquid.order-inference';
-import { UserFills, UserFundingEntry, UserNonFundingLedgerEntry, WSS_URLS } from '../../../exchanges/hyperliquid/hyperliquid.types';
 import {
   formatHyperliquidWsDiagnostic,
   shouldEmitHyperliquidWsReceiveDiagnostic,
@@ -352,7 +364,12 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
           // Just record latency, don't schedule next ping (handled by interval)
           if (this.pingAt) {
             const diff = performance.now() - this.pingAt;
-            this.store.update({ latency: Math.round(diff / 2) });
+            this.store.apply(
+              nativeFixture(
+                { latency: Math.round(diff / 2) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
           }
           return;
         }
@@ -426,11 +443,24 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
               // position field into a fresh object just to write it back
               // unchanged onto the same live position.
               const isOpenPosition = position.contracts > 0;
-              this.parent.store.updatePosition(position, {
-                positionMode: symbolConfiguration.positionMode,
-                marginType: isOpenPosition ? position.marginType : symbolConfiguration.marginType,
-                leverage: isOpenPosition ? position.leverage : symbolConfiguration.leverage,
-              });
+              (() => {
+                const target = position;
+                const changes: Partial<StoreData['positions'][number]> = {
+                  positionMode: symbolConfiguration.positionMode,
+                  marginType: isOpenPosition ? position.marginType : symbolConfiguration.marginType,
+                  leverage: isOpenPosition ? position.leverage : symbolConfiguration.leverage,
+                };
+                return this.parent.store.apply(
+                  nativeFixture(
+                    {
+                      positions: this.parent.store.positions.map((row) =>
+                        row.id === target.id ? { ...row, ...changes } : row,
+                      ),
+                    },
+                    this.parent.store.markets.map((row) => row.symbol),
+                  ),
+                );
+              })();
             }
           }
         }
@@ -509,7 +539,16 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
       // published mid, not the impact-derived `(bid+ask)/2`.
       updateBuf.last = last;
       updateBuf.midPrice = last;
-      this.parent.store.updateTicker(ticker, updateBuf);
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = updateBuf;
+        return this.parent.store.apply(
+          nativeFixture(
+            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
       if (updatedSymbols) updatedSymbols.add(ticker.symbol);
     }
 
@@ -637,12 +676,41 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         for (let i = 0; i < corePositions.length; i++) {
           merged.set(corePositions[i].id, corePositions[i]);
         }
-        this.parent.store.addOrUpdatePositionsFull(Array.from(merged.values()));
+        (() => {
+          const incoming: StoreData['positions'] = Array.from(merged.values());
+          return this.parent.store.apply(
+            nativeFixture(
+              {
+                positions: incoming.map((row) => ({
+                  ...this.parent.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
+              },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       } else {
         // Core clearinghouseState updates can arrive more frequently and may be
         // partial/scoped. Merge incrementally to avoid wiping symbol leverage
         // to fake/default values between updates.
-        this.parent.store.addOrUpdatePositions(corePositions);
+        (() => {
+          const incoming: StoreData['positions'] = corePositions;
+          return this.parent.store.apply(
+            nativeFixture(
+              {
+                positions: [
+                  ...this.parent.store.positions.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.parent.store.positions.some((old) => old.id === row.id)),
+                ],
+              },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     }
 
@@ -722,7 +790,20 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     for (let i = 0; i < incomingPositions.length; i++) {
       merged.set(incomingPositions[i].id, incomingPositions[i]);
     }
-    this.parent.store.addOrUpdatePositionsFull(Array.from(merged.values()));
+    (() => {
+      const incoming: StoreData['positions'] = Array.from(merged.values());
+      return this.parent.store.apply(
+        nativeFixture(
+          {
+            positions: incoming.map((row) => ({
+              ...this.parent.store.positions.find((old) => old.id === row.id),
+              ...row,
+            })),
+          },
+          this.parent.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   handleFills = (data: { fills: UserFills[]; isSnapshot: boolean; user: string }) => {
@@ -923,7 +1004,23 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
       liquidationPrice: nextContracts === 0 ? 0 : existingPosition?.liquidationPrice || 0,
     };
 
-    this.parent.store.addOrUpdatePosition(optimisticPosition);
+    (() => {
+      const incoming: StoreData['positions'] = [optimisticPosition];
+      return this.parent.store.apply(
+        nativeFixture(
+          {
+            positions: [
+              ...this.parent.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.parent.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.parent.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   }
 
   handleFundings = (_data: { fundings: UserFundingEntry[]; isSnapshot: boolean; user: string }) => {};
@@ -1008,7 +1105,15 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         status === 'reduceOnlyRejected'
       ) {
         this.parent.suppressCancelledOrder(orderId);
-        this.parent.store.removeOrder({ id: orderId });
+        (() => {
+          const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
+          return this.parent.store.apply(
+            nativeFixture(
+              { orders: this.parent.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
         this.parent.forgetLimitOrderTimeInForce(orderId);
         if (cloid) this.parent.forgetPlacementRecord(cloid);
         continue;
@@ -1220,7 +1325,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         // without this fallback each update wipes the value REST/placement set.
         let inferredTimeInForce = record ? record.timeInForce : parseHyperliquidOrderTimeInForce(orderData.tif);
         if (!inferredTimeInForce && !record) {
-          // Store first (O(1) via the pre-built map), then the placement-time
+          // FrameStore first (O(1) via the pre-built map), then the placement-time
           // record — core perps are never REST-reconciled after startup, so for
           // them the placement record is the only source.
           inferredTimeInForce =
@@ -1253,7 +1358,23 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
           info: orderData,
         };
 
-        this.parent.store.addOrUpdateOrder(order);
+        (() => {
+          const incoming: StoreData['orders'] = [order];
+          return this.parent.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.parent.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     }
   };
@@ -1328,7 +1449,18 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     );
     if (!currentPosition) return;
 
-    this.parent.store.updatePosition(currentPosition, { realizedPnl });
+    (() => {
+      const target = currentPosition;
+      const changes: Partial<StoreData['positions'][number]> = { realizedPnl };
+      return this.parent.store.apply(
+        nativeFixture(
+          {
+            positions: this.parent.store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+          },
+          this.parent.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   }
 
   private getRealizedPnlForPosition(symbol: string, side: PositionSide): number | undefined {

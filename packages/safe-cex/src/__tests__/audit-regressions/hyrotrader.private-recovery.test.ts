@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { Order, OrderSide, OrderType, Position, PositionMode, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
 
 class TestHyroExchange extends HyrotraderExchange {
   getBybitRestBaseUrl() {
@@ -14,7 +15,7 @@ class TestHyroExchange extends HyrotraderExchange {
 }
 const exchanges: TestHyroExchange[] = [];
 const setup = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new TestHyroExchange('hyrotrader', { key: 'key', secret: 'secret' }, store);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
   exchanges.push(exchange);
@@ -30,27 +31,25 @@ describe('HyroTrader authoritative private snapshots', () => {
   it.each([undefined, ''])('rejects a position with unusable leverage %s', async (leverage) => {
     const { exchange } = setup();
     exchange.xhr = {
-      get: vi
-        .fn()
-        .mockResolvedValue({
-          data: {
-            retCode: 0,
-            retMsg: 'OK',
-            result: {
-              list: [
-                {
-                  symbol: 'BTCUSDT',
-                  size: '1',
-                  side: 'Buy',
-                  avgPrice: '50000',
-                  markPrice: '51000',
-                  unrealisedPnl: '1000',
-                  leverage,
-                },
-              ],
-            },
+      get: vi.fn().mockResolvedValue({
+        data: {
+          retCode: 0,
+          retMsg: 'OK',
+          result: {
+            list: [
+              {
+                symbol: 'BTCUSDT',
+                size: '1',
+                side: 'Buy',
+                avgPrice: '50000',
+                markPrice: '51000',
+                unrealisedPnl: '1000',
+                leverage,
+              },
+            ],
           },
-        }),
+        },
+      }),
     } as any;
     await expect(exchange.fetchPositions()).rejects.toThrow('leverage');
   });
@@ -109,7 +108,11 @@ describe('HyroTrader authoritative private snapshots', () => {
         data: { retCode: 0, retMsg: 'OK', result: { list: [{ orderId: 'bad', symbol: 'BTCUSDT' }] } },
       }),
     } as any;
-    const update = vi.spyOn(store, 'update');
+    const update = (() => {
+      const observed = vi.fn<(value: typeof store.data) => void>();
+      store.subscribe((value) => observed(value));
+      return observed;
+    })();
     await expect(exchange.fetchOrders()).rejects.toThrow('invalid order fields');
     expect(update).not.toHaveBeenCalled();
   });
@@ -125,7 +128,12 @@ describe('HyroTrader authoritative private snapshots', () => {
   it('rejects failed recovery without publishing any sibling snapshot', async () => {
     const { exchange, store } = setup();
     const old = { id: 'old' } as Order;
-    store.update({ orders: [old] });
+    store.apply(
+      nativeFixture(
+        { orders: [old] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([{ id: 'new' } as Order]);
     vi.spyOn(exchange, 'fetchPositions').mockRejectedValue(new Error('positions unavailable'));
     vi.spyOn(exchange, 'fetchRawBalance').mockResolvedValue([
@@ -136,13 +144,22 @@ describe('HyroTrader authoritative private snapshots', () => {
   });
   it('publishes one complete snapshot using the new positions for wallet upnl', async () => {
     const { exchange, store } = setup();
-    store.update({ positions: [{ id: 'old', unrealizedPnl: 10 } as Position] });
+    store.apply(
+      nativeFixture(
+        { positions: [{ id: 'old', unrealizedPnl: 10 } as Position] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
     vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([{ id: 'new', unrealizedPnl: 20 } as Position]);
     vi.spyOn(exchange, 'fetchRawBalance').mockResolvedValue([
       { accountType: 'UNIFIED', totalEquity: '1000', coin: [] },
     ]);
-    const update = vi.spyOn(store, 'update');
+    const update = (() => {
+      const observed = vi.fn<(value: typeof store.data) => void>();
+      store.subscribe((value) => observed(value));
+      return observed;
+    })();
     await exchange.fetchAndSetPrivateSnapshot();
     expect(update).toHaveBeenCalledTimes(1);
     expect(store.balance).toMatchObject({ total: 980, upnl: 20 });
@@ -162,7 +179,12 @@ describe('HyroTrader authoritative private snapshots', () => {
     ]);
     const pending = exchange.reconcilePrivateState();
     exchange.privateWebsocket.stateRevision++;
-    store.update({ orders: [{ id: 'newer' } as Order] });
+    store.apply(
+      nativeFixture(
+        { orders: [{ id: 'newer' } as Order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     resolve([{ id: 'stale' } as Order]);
     expect(await pending).toBe(false);
     expect(store.orders.map(({ id }) => id)).toEqual(['newer']);
@@ -183,23 +205,28 @@ const attach = (exchange: TestHyroExchange) => {
 describe('HyroTrader private stream recovery ordering', () => {
   it('accepts zero-size flat position updates without leverage after a close', () => {
     const { exchange, store } = setup();
-    store.update({
-      positions: [
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTCUSDT',
-          symbol: 'BTCUSDT',
-          side: PositionSide.Short,
-          entryPrice: 83000,
-          notional: 165.75,
-          leverage: 3,
-          unrealizedPnl: 0,
-          realizedPnl: 0,
-          contracts: 0.002,
-          liquidationPrice: 0,
-          positionMode: PositionMode.OneWay,
-        } as Position,
-      ],
-    });
+          positions: [
+            {
+              id: 'BTCUSDT',
+              symbol: 'BTCUSDT',
+              side: PositionSide.Short,
+              entryPrice: 83000,
+              notional: 165.75,
+              leverage: 3,
+              unrealizedPnl: 0,
+              realizedPnl: 0,
+              contracts: 0.002,
+              liquidationPrice: 0,
+              positionMode: PositionMode.OneWay,
+            } as Position,
+          ],
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const { socket } = attach(exchange);
     socket.ready = true;
     socket.onMessage(

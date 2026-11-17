@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
-import { ENDPOINTS } from '../reference/bitrue/bitrue.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import {
   MarginType,
   Market,
@@ -15,6 +13,9 @@ import {
   PositionMode,
   PositionSide,
 } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
+import { ENDPOINTS } from '../reference/bitrue/bitrue.types';
 
 const market: Market = {
   id: 'E-BTC-USDT',
@@ -28,26 +29,31 @@ const market: Market = {
 };
 
 const setup = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [market],
-    positions: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'long',
-        symbol: market.symbol,
-        side: PositionSide.Long,
-        entryPrice: 60_000,
-        notional: 600,
-        leverage: 7,
-        marginType: MarginType.Isolated,
-        positionMode: PositionMode.OneWay,
-        unrealizedPnl: 0,
-        contracts: 0.01,
-        liquidationPrice: 0,
-      } as Position,
-    ],
-    tickers: [{ symbol: market.symbol, mark: 60_000, last: 60_000, bid: 59_999, ask: 60_001 } as any],
-  });
+        markets: [market],
+        positions: [
+          {
+            id: 'long',
+            symbol: market.symbol,
+            side: PositionSide.Long,
+            entryPrice: 60_000,
+            notional: 600,
+            leverage: 7,
+            marginType: MarginType.Isolated,
+            positionMode: PositionMode.OneWay,
+            unrealizedPnl: 0,
+            contracts: 0.01,
+            liquidationPrice: 0,
+          } as Position,
+        ],
+        tickers: [{ symbol: market.symbol, mark: 60_000, last: 60_000, bid: 59_999, ask: 60_001 } as any],
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BitrueExchange('bitrue', { key: 'test-key', secret: 'test-secret' }, store);
   const post = vi.fn().mockResolvedValue({ data: { code: '0', data: { orderId: '2334151155877155281' } } });
   exchange.unlimitedXHR = { post } as any;

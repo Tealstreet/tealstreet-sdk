@@ -7,8 +7,9 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { isBetaVenue } from '../../exchanges/rust/betaVenues';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { SECONDARY_READ_KEYS_ENABLED } from '../../secondaryReadKeys';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
@@ -78,9 +79,14 @@ const construct = async (name: ExchangeName, options: Partial<ExchangeOptions>) 
     return engine;
   });
   setWasmEngineLoader(async () => ({ WasmEngine: constructed as unknown as WasmEngineModule['WasmEngine'] }));
-  const store = new DefaultStore();
+  const store = new FrameStore();
   installNativeStartupFrames(engine, store);
-  store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+  store.apply(
+    nativeFixture(
+      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new RustEngineExchange(
     name,
     { key: 'primary-key', secret: 'primary-secret', passphrase: 'primary-pass', ...options } as ExchangeOptions,

@@ -1,11 +1,14 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook } from '../../../types';
 import type { BinanceSpotExchange } from './binancespot.exchange';
 
 import { nanoid } from 'nanoid';
 
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { BASE_WS_URL, ENDPOINTS } from '../../../exchanges/binance/binancespot.types';
 import { v } from '../../../utils/get-key';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import {
   applyBinanceDepthUpdate,
   getBufferedBinanceDepthUpdates,
@@ -13,7 +16,6 @@ import {
   resetBinanceOrderBookSyncState,
 } from './binance.orderbook';
 import { dispatchBinanceMessage } from './binance.ws-public';
-import { BASE_WS_URL, ENDPOINTS } from '../../../exchanges/binance/binancespot.types';
 
 type Data = Array<Record<string, any>>;
 type MessageHandlers = {
@@ -75,14 +77,23 @@ export class BinancePublicWebsocket extends BaseWebSocket<BinanceSpotExchange> {
       const event = events[i];
       const ticker = tickersBySymbol[event.s];
       if (!ticker) continue;
-      this.store.updateTicker(ticker, {
-        last: parseFloat(v(event, 'c')),
-        mark: parseFloat(v(event, 'c')),
-        index: parseFloat(v(event, 'c')),
-        percentage: parseFloat(v(event, 'P')),
-        volume: parseFloat(v(event, 'v')),
-        quoteVolume: parseFloat(v(event, 'q')),
-      });
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = {
+          last: parseFloat(v(event, 'c')),
+          mark: parseFloat(v(event, 'c')),
+          index: parseFloat(v(event, 'c')),
+          percentage: parseFloat(v(event, 'P')),
+          volume: parseFloat(v(event, 'v')),
+          quoteVolume: parseFloat(v(event, 'q')),
+        };
+        return this.store.apply(
+          nativeFixture(
+            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
   };
 
@@ -92,10 +103,19 @@ export class BinancePublicWebsocket extends BaseWebSocket<BinanceSpotExchange> {
       const event = events[i];
       const ticker = tickersBySymbol[event.s];
       if (!ticker) continue;
-      this.store.updateTicker(ticker, {
-        bid: parseFloat(v(event, 'b')),
-        ask: parseFloat(v(event, 'a')),
-      });
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = {
+          bid: parseFloat(v(event, 'b')),
+          ask: parseFloat(v(event, 'a')),
+        };
+        return this.store.apply(
+          nativeFixture(
+            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
   };
 

@@ -1,21 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTC/USDC:USDC',
-        symbol: 'BTCUSDC',
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 1_000 } },
+        markets: [
+          {
+            id: 'BTC/USDC:USDC',
+            symbol: 'BTCUSDC',
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 1_000 } },
+          },
+        ] as any,
       },
-    ] as any,
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
 
   return {
     store,

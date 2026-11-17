@@ -1,3 +1,13 @@
+import type { StoreData } from '../../../generated/StoreData';
+import type { PolymarketExchange } from './polymarket.exchange';
+import type {
+  PolymarketWSOrderBookUpdate,
+  PolymarketWSPriceChange,
+  PolymarketWSSubscription,
+} from './polymarket.types';
+
+import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 /**
  * Polymarket Public WebSocket Handler
  *
@@ -10,19 +20,13 @@
  */
 
 import { LogSeverity, OrderBook, Ticker } from '../../../types';
-import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import type { PolymarketExchange } from './polymarket.exchange';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { POLYMARKET_CONFIG, WS_CONFIG, WS_MESSAGE_TYPES } from './polymarket.constants';
-import type {
-  PolymarketWSOrderBookUpdate,
-  PolymarketWSPriceChange,
-  PolymarketWSSubscription,
-} from './polymarket.types';
 
 type Data = Record<string, any>;
 type LiveBook = { bids: Map<number, number>; asks: Map<number, number>; timestamp: number };
-const number = (value: unknown): number => typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+const number = (value: unknown): number =>
+  typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
 const validPrice = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1;
 const validSize = (value: number) => Number.isFinite(value) && value >= 0;
 type MessageHandlers = {
@@ -69,10 +73,7 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
       this.ws.addEventListener('message', this.onMessage);
       this.ws.addEventListener('close', this.onClose);
       this.ws.addEventListener('error', ((event: Event) => {
-        this.parent.log(
-          `Public WebSocket error: ${(event as any)?.message || 'Unknown error'}`,
-          LogSeverity.Error,
-        );
+        this.parent.log(`Public WebSocket error: ${(event as any)?.message || 'Unknown error'}`, LogSeverity.Error);
       }) as any);
     }
   };
@@ -258,10 +259,12 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
   private emitBook = (tokenId: string, book: LiveBook) => {
     const levels = (side: Map<number, number>, descending: boolean) => {
       let total = 0;
-      return [...side].sort(([a], [b]) => descending ? b - a : a - b).map(([price, amount]) => {
-        total += amount;
-        return { price, amount, total };
-      });
+      return [...side]
+        .sort(([a], [b]) => (descending ? b - a : a - b))
+        .map(([price, amount]) => {
+          total += amount;
+          return { price, amount, total };
+        });
     };
     const orderbook: OrderBook = { bids: levels(book.bids, true), asks: levels(book.asks, false) };
     this.orderbookCallbacks.get(tokenId)?.forEach((callback) => callback(orderbook));
@@ -290,12 +293,22 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
       const bid = number(change.best_bid);
       const ask = number(change.best_ask);
       const update: Partial<Ticker> = {
-        id: tokenId, symbol,
+        id: tokenId,
+        symbol,
         ...(validPrice(bid) ? { bid } : {}),
         ...(validPrice(ask) ? { ask } : {}),
         ...(validPrice(bid) && validPrice(ask) ? { mark: (bid + ask) / 2, index: (bid + ask) / 2 } : {}),
       };
-      this.store.updateTicker({ id: tokenId }, update);
+      (() => {
+        const target = { id: tokenId };
+        const changes: Partial<StoreData['tickers'][number]> = update;
+        return this.store.apply(
+          nativeFixture(
+            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
   };
 
@@ -304,9 +317,19 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
     const symbol = this.symbol(tokenId);
     const last = number(data.price);
     const timestamp = this.timestamp(data);
-    if (!symbol || !validPrice(last) || timestamp === undefined || timestamp < (this.tradeTimes.get(tokenId) ?? 0)) return;
+    if (!symbol || !validPrice(last) || timestamp === undefined || timestamp < (this.tradeTimes.get(tokenId) ?? 0))
+      return;
     this.tradeTimes.set(tokenId, timestamp);
-    this.store.updateTicker({ id: tokenId }, { id: tokenId, symbol, last });
+    (() => {
+      const target = { id: tokenId };
+      const changes: Partial<StoreData['tickers'][number]> = { id: tokenId, symbol, last };
+      return this.store.apply(
+        nativeFixture(
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   private handleOrderBookUpdate = (data: PolymarketWSOrderBookUpdate) => {
@@ -318,7 +341,10 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
     const asks = new Map<number, number>();
     // Validate both sides before replacing the authoritative book: malformed
     // snapshots must not clear a previously healthy side or install a prefix.
-    for (const [side, levels] of [[bids, data.bids], [asks, data.asks]] as const) {
+    for (const [side, levels] of [
+      [bids, data.bids],
+      [asks, data.asks],
+    ] as const) {
       for (const level of levels) {
         if (!level) return;
         const price = number(level.price);
@@ -339,18 +365,43 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
     const tickSize = number(data.new_tick_size);
     const market = this.store.marketsById[tokenId];
     const timestamp = this.timestamp(data);
-    if (!market || ![0.1, 0.01, 0.005, 0.0025, 0.001, 0.0001].includes(tickSize) || timestamp === undefined || timestamp < (this.tickTimes.get(tokenId) ?? 0)) return;
+    if (
+      !market ||
+      ![0.1, 0.01, 0.005, 0.0025, 0.001, 0.0001].includes(tickSize) ||
+      timestamp === undefined ||
+      timestamp < (this.tickTimes.get(tokenId) ?? 0)
+    )
+      return;
     this.tickTimes.set(tokenId, timestamp);
-    this.store.updateMarket({ id: tokenId }, {
-      info: { ...market.info, tickSize },
-      precision: { ...market.precision, price: (String(tickSize).split('.')[1] ?? '').length },
-    });
+    (() => {
+      const target = { id: tokenId };
+      const changes: Partial<StoreData['markets'][number]> = {
+        info: { ...market.info, tickSize },
+        precision: { ...market.precision, price: (String(tickSize).split('.')[1] ?? '').length },
+      };
+      return this.store.apply(
+        nativeFixture(
+          { markets: this.store.markets.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   private handleMarketResolved = (data: Data) => {
     if (!Array.isArray(data.assets_ids)) return;
     for (const tokenId of data.assets_ids) {
-      if (typeof tokenId === 'string' && this.store.marketsById[tokenId]) this.store.updateMarket({ id: tokenId }, { active: false });
+      if (typeof tokenId === 'string' && this.store.marketsById[tokenId])
+        (() => {
+          const target = { id: tokenId };
+          const changes: Partial<StoreData['markets'][number]> = { active: false };
+          return this.store.apply(
+            nativeFixture(
+              { markets: this.store.markets.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
     }
   };
 }

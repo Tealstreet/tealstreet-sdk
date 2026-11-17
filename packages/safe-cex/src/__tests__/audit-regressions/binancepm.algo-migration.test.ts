@@ -2,8 +2,9 @@ import type { Order } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 import { BinancePMPrivateWebsocket } from '../reference/binance/binancepm.ws-private';
 
@@ -36,22 +37,27 @@ const algo = {
   workingType: 'MARK_PRICE',
 };
 const subject = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTCUSDT',
-        symbol: 'BTCUSDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+        markets: [
+          {
+            id: 'BTCUSDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+          },
+        ] as any,
+        tickers: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', last: 60000 }] as any,
+        positions: [{ symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0.01 }] as any,
       },
-    ] as any,
-    tickers: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', last: 60000 }] as any,
-    positions: [{ symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0.01 }] as any,
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BinancePMExchange('binancepm', { key: 'fixture', secret: 'fixture' }, store);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
   return { exchange, store };
@@ -207,7 +213,12 @@ describe('Binance PM Algo Service migration', () => {
     async (data) => {
       const { exchange, store } = subject();
       const original = protection();
-      store.update({ orders: [original] });
+      store.apply(
+        nativeFixture(
+          { orders: [original] },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
       const remove = vi.spyOn(exchange.papiXhr, 'delete').mockResolvedValue({ data } as any);
 
       await expect(exchange.cancelOrders([original])).rejects.toMatchObject({ outcome: 'unknown' });
@@ -220,7 +231,12 @@ describe('Binance PM Algo Service migration', () => {
   it.each([{ complete: false }, {}])('never replaces protection after an unconfirmed cancel %j', async (data) => {
     const { exchange, store } = subject();
     const original = protection();
-    store.update({ orders: [original] });
+    store.apply(
+      nativeFixture(
+        { orders: [original] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const remove = vi.spyOn(exchange.papiXhr, 'delete').mockResolvedValue({ data } as any);
     const post = vi.spyOn(exchange.unlimitedXHR, 'post').mockResolvedValue({ data: { algoId: 456 } } as any);
 
@@ -237,7 +253,12 @@ describe('Binance PM Algo Service migration', () => {
     const prefix = { ...protection(), id: 'prefix', type: OrderType.Limit };
     const original = protection();
     const suffix = { ...prefix, id: 'suffix' };
-    store.update({ orders: [prefix, original, suffix] });
+    store.apply(
+      nativeFixture(
+        { orders: [prefix, original, suffix] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const remove = vi
       .spyOn(exchange.papiXhr, 'delete')
       .mockResolvedValueOnce({ data: {} } as any)
@@ -256,7 +277,12 @@ describe('Binance PM Algo Service migration', () => {
   it('allows replacement only after the algo cancellation proves complete', async () => {
     const { exchange, store } = subject();
     const original = protection();
-    store.update({ orders: [original] });
+    store.apply(
+      nativeFixture(
+        { orders: [original] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const remove = vi.spyOn(exchange.papiXhr, 'delete').mockResolvedValue({ data: { complete: true } } as any);
     const post = vi.spyOn(exchange.unlimitedXHR, 'post').mockResolvedValue({ data: { algoId: 456 } } as any);
 
@@ -285,12 +311,17 @@ describe('Binance PM Algo Service migration', () => {
       reduceOnly: true,
       lastUpdate: 0,
     };
-    store.update({
-      orders: [
-        { ...base, id: 'regular', type: OrderType.Limit },
-        { ...base, id: 'protection', type: OrderType.StopLoss },
-      ],
-    });
+    store.apply(
+      nativeFixture(
+        {
+          orders: [
+            { ...base, id: 'regular', type: OrderType.Limit },
+            { ...base, id: 'protection', type: OrderType.StopLoss },
+          ],
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const remove = vi.spyOn(exchange.papiXhr, 'delete').mockImplementation(async (url) => {
       if (url === '/papi/v1/um/algo/allOpenOrders') throw new Error('algo cancel failed');
       return { data: { code: 200 } } as any;

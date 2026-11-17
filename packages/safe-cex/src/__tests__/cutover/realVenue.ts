@@ -11,8 +11,8 @@ import { canonicalUrl, Tape } from '../../../../../sdk-rs/harness/tape.mjs';
 import { venueOf } from '../../../../../sdk-rs/harness/venues.mjs';
 import { HYROTRADER_SIMULATOR_URL, HYROTRADER_SIMULATOR_WS_URL } from '../../exchanges/bybit/bybit.types';
 import { directTransport } from '../../transport/direct';
-import { prepareRecordedHttp } from '../support/managedHttp';
 import { coinbaseDrbPublicRecords, coinbaseDrbPublicResponse } from '../support/coinbaseDrb';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 type RecordRow = {
   type: string;
@@ -190,28 +190,51 @@ export const realVenue = (name: ExchangeName) => {
       : [];
   const spotMarkets: SpotMarketIdentity[] = [];
   if (name === 'hyperliquidspot') {
-    const row = records.find((record) => record.type === 'http' && record.method === 'POST' &&
-      (record.requestBody as string | undefined)?.includes('spotMetaAndAssetCtxs'));
+    const row = records.find(
+      (record) =>
+        record.type === 'http' &&
+        record.method === 'POST' &&
+        (record.requestBody as string | undefined)?.includes('spotMetaAndAssetCtxs'),
+    );
     if (!row) throw new Error('Hyperliquid spot fixture lacks native spot metadata');
     const [meta, contexts] = JSON.parse(row.body!) as [HyperSpotMetaInput, { coin?: string; midPx?: string }[]];
     const positional = contexts.length === meta.universe.length && contexts.every((context) => !context.coin);
     for (const [index, instrument] of meta.universe.entries()) {
       const base = meta.tokens.find((token) => token.index === instrument.tokens[0])?.name;
       const quote = meta.tokens.find((token) => token.index === instrument.tokens[1])?.name;
-      const context = contexts.find((context) => context.coin === instrument.name) ??
-        (positional ? contexts[index] : undefined);
+      const context =
+        contexts.find((context) => context.coin === instrument.name) ?? (positional ? contexts[index] : undefined);
       if (base && quote && context?.midPx)
         spotMarkets.push({ id: instrument.name, symbol: `${base}/${quote}`, base, quote });
     }
   }
   if (name === 'krakenspot') {
-    const row = records.find((record) => record.type === 'http' && new URL(record.url!).pathname === '/0/public/AssetPairs');
+    const row = records.find(
+      (record) => record.type === 'http' && new URL(record.url!).pathname === '/0/public/AssetPairs',
+    );
     if (!row) throw new Error('Kraken spot fixture lacks native AssetPairs');
     const pairs = (JSON.parse(row.body!) as { result: Record<string, KrakenSpotPairInput> }).result;
     const aliases: Record<string, string> = {
-      XBT: 'BTC', XXBT: 'BTC', XDG: 'DOGE', XXDG: 'DOGE', XETH: 'ETH', XXRP: 'XRP', XLTC: 'LTC', XXLM: 'XLM',
-      XXMR: 'XMR', XZEC: 'ZEC', XREP: 'REP', XETC: 'ETC', XDAO: 'DAO', XMLN: 'MLN',
-      ZUSD: 'USD', ZEUR: 'EUR', ZGBP: 'GBP', ZJPY: 'JPY', ZCAD: 'CAD', ZAUD: 'AUD',
+      XBT: 'BTC',
+      XXBT: 'BTC',
+      XDG: 'DOGE',
+      XXDG: 'DOGE',
+      XETH: 'ETH',
+      XXRP: 'XRP',
+      XLTC: 'LTC',
+      XXLM: 'XLM',
+      XXMR: 'XMR',
+      XZEC: 'ZEC',
+      XREP: 'REP',
+      XETC: 'ETC',
+      XDAO: 'DAO',
+      XMLN: 'MLN',
+      ZUSD: 'USD',
+      ZEUR: 'EUR',
+      ZGBP: 'GBP',
+      ZJPY: 'JPY',
+      ZCAD: 'CAD',
+      ZAUD: 'AUD',
     };
     const asset = (code: string) => aliases[code] ?? code;
     for (const [native, pair] of Object.entries(pairs)) {
@@ -242,7 +265,7 @@ export const realVenue = (name: ExchangeName) => {
           )
       : [];
   // Derive the prediction oracle from raw recorded Gamma fields, independently
-  // of the Rust model, frame writer and SDK FrameApplier.
+  // of the Rust model, frame writer and SDK FrameStore.
   const predictionMarkets =
     name === 'polymarket'
       ? records
@@ -324,9 +347,10 @@ export const realVenue = (name: ExchangeName) => {
       }
       // Exercise the native public-CORS route, then serve its real venue URL
       // from the captured tape without contacting the test-only proxy.
-      const venueUrl = name === 'txflow' && url.startsWith(`${txflowPublicCorsProxy}/`)
-        ? url.slice(txflowPublicCorsProxy.length + 1)
-        : url;
+      const venueUrl =
+        name === 'txflow' && url.startsWith(`${txflowPublicCorsProxy}/`)
+          ? url.slice(txflowPublicCorsProxy.length + 1)
+          : url;
       const response = tape.respond(method, venueUrl, body, headers);
       if (response.status === 599) errors.push(`Untaped ${method} ${url}${body ? ` ${body}` : ''}`);
       return { status: response.status, headers: response.headers, body: new TextEncoder().encode(response.body) };

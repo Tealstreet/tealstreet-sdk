@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
 import { BROKER_ID, ENDPOINTS } from '../reference/apexomni/apexomni.types';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderType } from '../../types';
 
 const { createApiMock, initSdkMock, signContractMock, signer } = vi.hoisted(() => {
   const signer = {
@@ -55,47 +56,59 @@ vi.mock('../reference/apexomni/apexomni.ws-private', () => ({
 }));
 
 const createBracketExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTC-USDT',
-        symbol: 'BTC-USDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 1, price: 1 },
-        limits: {
-          amount: { min: 1, max: 9 },
-          leverage: { min: 1, max: 50 },
-        },
-        isExpiring: false,
-        info: {},
+        markets: [
+          {
+            id: 'BTC-USDT',
+            symbol: 'BTC-USDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 1 },
+            limits: {
+              amount: { min: 1, max: 9 },
+              leverage: { min: 1, max: 50 },
+            },
+            isExpiring: false,
+            info: {},
+          },
+        ] as any,
+        tickers: [
+          {
+            id: 'BTC-USDT',
+            symbol: 'BTC-USDT',
+            bid: 100,
+            ask: 100,
+            last: 100,
+            mark: 100,
+            index: 100,
+            percentage: 0,
+            openInterest: 0,
+            fundingRate: 0,
+            fundingTime: 0,
+            volume: 0,
+            quoteVolume: 0,
+          },
+        ],
       },
-    ] as any,
-    tickers: [
+      store.markets.map((row) => row.symbol),
+    ),
+  );
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTC-USDT',
-        symbol: 'BTC-USDT',
-        bid: 100,
-        ask: 100,
-        last: 100,
-        mark: 100,
-        index: 100,
-        percentage: 0,
-        openInterest: 0,
-        fundingRate: 0,
-        fundingTime: 0,
-        volume: 0,
-        quoteVolume: 0,
+        zkLinkConfig: {
+          id: '1',
+          contractAccount: { makerFeeRate: '0.001', takerFeeRate: '0.001' },
+          contractConfig: { perpetualContract: [{ symbol: 'BTC-USDT', l2PairId: '1' }] },
+        } as any,
       },
-    ],
-  });
-  store.updateZkLinkConfig({
-    id: '1',
-    contractAccount: { makerFeeRate: '0.001', takerFeeRate: '0.001' },
-    contractConfig: { perpetualContract: [{ symbol: 'BTC-USDT', l2PairId: '1' }] },
-  } as any);
+      store.markets.map((row) => row.symbol),
+    ),
+  );
 
   let postCount = 0;
   const post = vi.fn(async (_path: string, _body: string) => ({ data: { data: { id: `order-${++postCount}` } } }));

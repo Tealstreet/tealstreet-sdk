@@ -12,8 +12,7 @@ import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { reconstructPositionIntervals } from '../journal/position-intervals';
 import { OrderSide, PositionSide } from '../types';
 import { readFillFrame } from './fillFrames';
-import { FrameApplier } from './frameApplier';
-import { DefaultStore } from './store.base';
+import { FrameStore } from './frameStore';
 
 let native: { frame: number[]; events: OrderFillEvent[] };
 const frame = () => new Frame(Uint8Array.from(native.frame).buffer);
@@ -58,15 +57,15 @@ describe('native Fill output through the real packed decoder', () => {
     expect(fills.reduce((amount, fill) => amount + fill.amount, 0)).toBe(1);
   });
 
-  it('keeps native identity without market-cache repair and survives Store plus JSON serialization', () => {
-    const store = new DefaultStore();
-    const applier = new FrameApplier(store);
+  it('keeps native identity without market-cache repair and survives FrameStore plus JSON serialization', () => {
+    const store = new FrameStore();
+    const applier = store;
     const decoded = frame();
     applier.apply(decoded);
     const fills = readFillFrame(decoded);
     expect(applier.fills(decoded)).toEqual(fills);
     expect(store.markets).toEqual([]);
-    expect(JSON.parse(JSON.stringify({ store: store.serialize(), fills })).fills).toEqual(native.events);
+    expect(JSON.parse(JSON.stringify({ store: store.data, fills })).fills).toEqual(native.events);
     expect(fills.map((fill) => fill.symbol)).toEqual(['BTC-PERP', 'BTC-PERP', 'BTC-PERP']);
   });
 

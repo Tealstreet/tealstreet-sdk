@@ -2,8 +2,8 @@ import type { OrderBook } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { WOOXExchange } from '../reference/woo/woo.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 const cloneBook = (book: OrderBook): OrderBook => ({
   bids: book.bids.map((level) => ({ ...level })),
@@ -28,7 +28,7 @@ describe('WOO legacy orderbook delta updates', () => {
         applicationId: 'application-id',
         tuning: { consoleLogging: false },
       } as any,
-      new DefaultStore(),
+      new FrameStore(),
     );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({

@@ -2,11 +2,12 @@ import type { ExchangeOptions, Market, Position } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
 import { ENDPOINTS } from '../reference/bitunix/bitunix.types';
 import { BITUNIX_MAX_SUBSCRIPTIONS_PER_CONNECTION } from '../reference/bitunix/bitunix.ws-public';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionSide } from '../../types';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -30,7 +31,7 @@ const market: Market = {
   limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 125 } },
 };
 
-const createExchange = () => new BitunixExchange('bitunix', options, new DefaultStore());
+const createExchange = () => new BitunixExchange('bitunix', options, new FrameStore());
 
 describe('Bitunix remaining July audit regressions', () => {
   it('keeps only open API-tradable USDT markets and marks them active', async () => {
@@ -89,7 +90,12 @@ describe('Bitunix remaining July audit regressions', () => {
 
   it('derives REST percentage from the documented open and last fields', async () => {
     const exchange = createExchange();
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({
         data: {
@@ -118,18 +124,23 @@ describe('Bitunix remaining July audit regressions', () => {
   ])('sends the documented $positionMode position-mode payload', async ({ hedged, positionMode }) => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ data: { code: 0 } });
-    const setSetting = vi.spyOn(exchange.store, 'setSetting');
+
     exchange.xhr = { post } as any;
 
     await exchange.changePositionMode(hedged);
 
     expect(post).toHaveBeenCalledWith(ENDPOINTS.HEDGE_MODE, { positionMode });
-    expect(setSetting).toHaveBeenCalledWith('isHedged', hedged);
+    expect(exchange.store.options.isHedged).toBe(hedged);
   });
 
   it('uses only the documented history-trades endpoint for executions', async () => {
     const exchange = createExchange();
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const get = vi.fn().mockResolvedValue({ data: { data: { tradeList: [] } } });
     exchange.xhr = { get } as any;
 
@@ -141,24 +152,29 @@ describe('Bitunix remaining July audit regressions', () => {
 
   it('splits a combined pending TP/SL row into distinct display orders with the raw Bitunix id retained', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [market],
-      positions: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'BTCUSDT:long',
-          symbol: 'BTCUSDT',
-          side: PositionSide.Long,
-          contracts: 0.01,
-          entryPrice: 50_000,
-          notional: 500,
-          leverage: 10,
-          unrealizedPnl: 0,
-          realizedPnl: 0,
-          liquidationPrice: 45_000,
-          info: { positionId: 'position-1' },
-        } as Position,
-      ],
-    });
+          markets: [market],
+          positions: [
+            {
+              id: 'BTCUSDT:long',
+              symbol: 'BTCUSDT',
+              side: PositionSide.Long,
+              contracts: 0.01,
+              entryPrice: 50_000,
+              notional: 500,
+              leverage: 10,
+              unrealizedPnl: 0,
+              realizedPnl: 0,
+              liquidationPrice: 45_000,
+              info: { positionId: 'position-1' },
+            } as Position,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({
         data: {
@@ -182,10 +198,7 @@ describe('Bitunix remaining July audit regressions', () => {
     const orders = await exchange.fetchTpslOrders();
 
     expect(orders).toHaveLength(2);
-    expect(orders.map((order) => order.id).sort()).toEqual([
-      'tpsl-1__position-1__sl',
-      'tpsl-1__position-1__tp',
-    ]);
+    expect(orders.map((order) => order.id).sort()).toEqual(['tpsl-1__position-1__sl', 'tpsl-1__position-1__tp']);
     expect(new Set(orders.map((order) => order.id)).size).toBe(2);
     expect(orders).toEqual(
       expect.arrayContaining([
@@ -226,7 +239,12 @@ describe('Bitunix remaining July audit regressions', () => {
       ...stalePosition,
       info: { positionId: 'position-1' },
     };
-    exchange.store.update({ markets: [market], positions: [stalePosition] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market], positions: [stalePosition] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const fetchPositions = vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([freshPosition]);
     const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError');
     const post = vi.fn().mockResolvedValue({
@@ -294,7 +312,12 @@ describe('Bitunix remaining July audit regressions', () => {
       },
       slTriggerType: OrderStopTriggerType.MarkPrice,
     };
-    exchange.store.update({ markets: [market], positions: [position], orders: [] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market], positions: [position], orders: [] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const fetchOrders = vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([existingStopLoss as any]);
     const post = vi.fn().mockResolvedValue({
       data: { code: 0, data: { orderId: 'position-tpsl-1' }, msg: 'Success' },
@@ -335,7 +358,12 @@ describe('Bitunix remaining July audit regressions', () => {
       symbol: `COIN${index}USDT`,
       base: `COIN${index}`,
     }));
-    exchange.store.update({ markets });
+    exchange.store.apply(
+      nativeFixture(
+        { markets },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const websockets = (exchange as any).configurePublicWebsocketShards(markets);
     expect(websockets).toHaveLength(6);
@@ -354,9 +382,7 @@ describe('Bitunix remaining July audit regressions', () => {
 
     vi.advanceTimersByTime(4_000);
 
-    expect(
-      sentByConnection.flatMap((frames) => frames.flatMap((frame) => frame.payload.args)),
-    ).toHaveLength(601 * 2);
+    expect(sentByConnection.flatMap((frames) => frames.flatMap((frame) => frame.payload.args))).toHaveLength(601 * 2);
     for (const frames of sentByConnection) {
       const args = frames.flatMap((frame) => frame.payload.args);
       expect(args.length).toBeLessThanOrEqual(BITUNIX_MAX_SUBSCRIPTIONS_PER_CONNECTION);
@@ -372,7 +398,12 @@ describe('Bitunix remaining July audit regressions', () => {
 
   it('preserves the sorted depthop snapshot order while calculating cumulative totals', () => {
     const exchange = createExchange();
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const websocket = exchange.futuresWebsocket;
     websocket.ws = { readyState: WebSocket.OPEN, send: vi.fn() } as any;
     const callback = vi.fn();
@@ -413,16 +444,21 @@ describe('Bitunix remaining July audit regressions', () => {
     {
       name: 'missing position id',
       configure: (exchange: BitunixExchange) => {
-        exchange.store.update({
-          positions: [
+        exchange.store.apply(
+          nativeFixture(
             {
-              symbol: 'BTCUSDT',
-              side: PositionSide.Long,
-              contracts: 1,
-              info: {},
-            } as Position,
-          ],
-        });
+              positions: [
+                {
+                  symbol: 'BTCUSDT',
+                  side: PositionSide.Long,
+                  contracts: 1,
+                  info: {},
+                } as Position,
+              ],
+            },
+            exchange.store.markets.map((row) => row.symbol),
+          ),
+        );
       },
       opts: { symbol: 'BTCUSDT', type: OrderType.StopLoss, side: OrderSide.Sell, amount: 0, price: 49000 },
       error: 'Missing positionId for BTCUSDT TP/SL order',
@@ -430,16 +466,21 @@ describe('Bitunix remaining July audit regressions', () => {
     {
       name: 'missing full-position price',
       configure: (exchange: BitunixExchange) => {
-        exchange.store.update({
-          positions: [
+        exchange.store.apply(
+          nativeFixture(
             {
-              symbol: 'BTCUSDT',
-              side: PositionSide.Long,
-              contracts: 1,
-              info: { positionId: 'position-1' },
-            } as Position,
-          ],
-        });
+              positions: [
+                {
+                  symbol: 'BTCUSDT',
+                  side: PositionSide.Long,
+                  contracts: 1,
+                  info: { positionId: 'position-1' },
+                } as Position,
+              ],
+            },
+            exchange.store.markets.map((row) => row.symbol),
+          ),
+        );
       },
       opts: { symbol: 'BTCUSDT', type: OrderType.StopLoss, side: OrderSide.Sell, amount: 0 },
       error: 'Price is required for Position TP/SL orders',
@@ -447,16 +488,21 @@ describe('Bitunix remaining July audit regressions', () => {
     {
       name: 'missing partial price',
       configure: (exchange: BitunixExchange) => {
-        exchange.store.update({
-          positions: [
+        exchange.store.apply(
+          nativeFixture(
             {
-              symbol: 'BTCUSDT',
-              side: PositionSide.Long,
-              contracts: 1,
-              info: { positionId: 'position-1' },
-            } as Position,
-          ],
-        });
+              positions: [
+                {
+                  symbol: 'BTCUSDT',
+                  side: PositionSide.Long,
+                  contracts: 1,
+                  info: { positionId: 'position-1' },
+                } as Position,
+              ],
+            },
+            exchange.store.markets.map((row) => row.symbol),
+          ),
+        );
       },
       opts: {
         symbol: 'BTCUSDT',
@@ -469,7 +515,12 @@ describe('Bitunix remaining July audit regressions', () => {
     },
   ])('emits the $name TP/SL preflight error before throwing', ({ configure, opts, error }) => {
     const exchange = createExchange();
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     configure(exchange);
     const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError');
 

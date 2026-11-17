@@ -1,6 +1,6 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import BigNumber from 'bignumber.js';
@@ -8,6 +8,9 @@ import dayjs from 'dayjs';
 import chunk from 'lodash/chunk';
 import { forEachSeries } from 'p-iteration';
 
+import { BaseExchange } from '../../../exchanges/base';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -37,8 +40,7 @@ import { createPositionId } from '../../../utils/createPositionId';
 import { loop } from '../../../utils/loop';
 import { adjust, multiply, round } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { createAPI } from './coinbase.api';
 import { mapCoinbaseRestOrder } from './coinbase.orders';
 import {
@@ -115,7 +117,7 @@ export class CoinbaseExchange extends BaseExchange {
 
   supportSpot = true;
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 3 }) });
@@ -186,10 +188,15 @@ export class CoinbaseExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      await this.store.update({
-        markets,
-        loaded: { ...this.store.loaded, markets: true },
-      });
+      await this.store.apply(
+        nativeFixture(
+          {
+            markets,
+            loaded: { ...this.store.loaded, markets: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
 
       this.publicWebsocket.connectAndSubscribe();
     }
@@ -244,18 +251,23 @@ export class CoinbaseExchange extends BaseExchange {
     const tickers = this.replayPublicSpot
       ? this.formatSpotCfmTicker(await this.fetchReplayPublicSpotProducts())
       : await this.fetchTickersIntx();
-    this.store.update({
-      tickers,
-      orders: [],
-      balance: {
-        used: 0,
-        free: 0,
-        total: 0,
-        upnl: 0,
-      },
-      positions: [],
-      loaded: { ...this.store.loaded, tickers: true, orders: true, balance: true, positions: true },
-    });
+    this.store.apply(
+      nativeFixture(
+        {
+          tickers,
+          orders: [],
+          balance: {
+            used: 0,
+            free: 0,
+            total: 0,
+            upnl: 0,
+          },
+          positions: [],
+          loaded: { ...this.store.loaded, tickers: true, orders: true, balance: true, positions: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
     if (this.replayPublicSpot) loop(() => this.tickReplayPublicSpot(), this.getTickInterval());
   };
 
@@ -264,13 +276,18 @@ export class CoinbaseExchange extends BaseExchange {
       try {
         const tickers = await this.fetchTickers();
         if (this.isDisposed) return;
-        this.store.update({
-          tickers,
-          loaded: {
-            ...this.store.loaded,
-            tickers: true,
-          },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              tickers,
+              loaded: {
+                ...this.store.loaded,
+                tickers: true,
+              },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
 
         // iterate over tickers and update OB and kline callbacks
         const messageHandlers = this.publicWebsocket.messageHandlers;
@@ -285,26 +302,41 @@ export class CoinbaseExchange extends BaseExchange {
 
         const balance = await this.fetchBalance();
         if (this.isDisposed) return;
-        this.store.update({
-          balance,
-          loaded: { ...this.store.loaded, balance: true },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              balance,
+              loaded: { ...this.store.loaded, balance: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
 
         const positions = await this.fetchPositions();
         if (this.isDisposed) return;
-        this.store.update({
-          positions,
-          loaded: { ...this.store.loaded, positions: true },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              positions,
+              loaded: { ...this.store.loaded, positions: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
 
         if (this.shouldPollOrders()) {
           try {
             const orders = await this.fetchOpenOrdersSnapshot();
             if (this.isDisposed) return;
-            this.store.update({
-              orders: this.mergeRestOrdersWithFreshWsState(orders),
-              loaded: { ...this.store.loaded, orders: true },
-            });
+            this.store.apply(
+              nativeFixture(
+                {
+                  orders: this.mergeRestOrdersWithFreshWsState(orders),
+                  loaded: { ...this.store.loaded, orders: true },
+                },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
           } catch (err: any) {
             this.emitOrdersFetchError(err);
           }
@@ -335,11 +367,39 @@ export class CoinbaseExchange extends BaseExchange {
   markPrivateUserStreamMessageReceived = () => {
     this.lastPrivateUserStreamMessageAt = Date.now();
     this.hasWarnedPrivateUserStreamDegraded = false;
-    this.store.updateSocketHealth({ privateDegradedReason: undefined });
+    this.store.apply(
+      nativeFixture(
+        {
+          socketHealth: {
+            publicHealthy: false,
+            privateHealthy: false,
+            publicInitialized: false,
+            privateInitialized: false,
+            ...this.store.socketHealth,
+            ...{ privateDegradedReason: undefined },
+          },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
   };
 
   markPrivateUserStreamDegraded = (reason = COINBASE_PRIVATE_USER_STREAM_DEGRADED_MESSAGE, forceToast = false) => {
-    this.store.updateSocketHealth({ privateDegradedReason: reason });
+    this.store.apply(
+      nativeFixture(
+        {
+          socketHealth: {
+            publicHealthy: false,
+            privateHealthy: false,
+            publicInitialized: false,
+            privateInitialized: false,
+            ...this.store.socketHealth,
+            ...{ privateDegradedReason: reason },
+          },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
     this.log(reason, LogSeverity.Warning);
     if (forceToast && !this.hasWarnedPrivateUserStreamDegraded) {
       this.hasWarnedPrivateUserStreamDegraded = true;
@@ -371,10 +431,15 @@ export class CoinbaseExchange extends BaseExchange {
     try {
       const orders = await this.fetchOpenOrdersSnapshot();
       if (this.isDisposed) return;
-      this.store.update({
-        orders: this.mergeRestOrdersWithFreshWsState(orders),
-        loaded: { ...this.store.loaded, orders: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            orders: this.mergeRestOrdersWithFreshWsState(orders),
+            loaded: { ...this.store.loaded, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     } catch (err: any) {
       this.log(`Coinbase ${reason} REST order reconciliation failed`, LogSeverity.Warning);
       this.emitOrdersFetchError(err);
@@ -771,12 +836,16 @@ export class CoinbaseExchange extends BaseExchange {
     const cursors = new Set<string>();
     let cursor: string | undefined;
     for (let page = 0; page < 50; page++) {
-      const { data } = await this.xhr.get<MARKET_RESPONSE & {
-        pagination?: { has_next?: boolean; next_cursor?: string };
-      }>('/api/v3/brokerage/market/products', {
+      const { data } = await this.xhr.get<
+        MARKET_RESPONSE & {
+          pagination?: { has_next?: boolean; next_cursor?: string };
+        }
+      >('/api/v3/brokerage/market/products', {
         params: { limit: 1000, ...(cursor ? { cursor } : {}) },
       });
-      products.push(...data.products.filter((product) => product.product_type === 'SPOT' && !product.future_product_details));
+      products.push(
+        ...data.products.filter((product) => product.product_type === 'SPOT' && !product.future_product_details),
+      );
       if (!data.pagination?.has_next) return { products, num_products: products.length };
       cursor = data.pagination.next_cursor;
       if (!cursor || cursors.has(cursor)) throw new Error('Coinbase invalid product cursor');
@@ -789,7 +858,13 @@ export class CoinbaseExchange extends BaseExchange {
     if (this.isDisposed) return;
     try {
       const tickers = this.formatSpotCfmTicker(await this.fetchReplayPublicSpotProducts());
-      if (!this.isDisposed) this.store.update({ tickers, loaded: { ...this.store.loaded, tickers: true } });
+      if (!this.isDisposed)
+        this.store.apply(
+          nativeFixture(
+            { tickers, loaded: { ...this.store.loaded, tickers: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
     } finally {
       if (!this.isDisposed) loop(() => this.tickReplayPublicSpot(), this.getTickInterval());
     }
@@ -827,7 +902,9 @@ export class CoinbaseExchange extends BaseExchange {
         const amt = m.base_increment;
         const isSpot = m.future_product_details === undefined;
         const isExpiring = m.future_product_details?.contract_expiry_type === 'EXPIRING';
-        const cfmContractSize = isExpiring ? normalizeCfmContractSize(m.future_product_details?.contract_size) : undefined;
+        const cfmContractSize = isExpiring
+          ? normalizeCfmContractSize(m.future_product_details?.contract_size)
+          : undefined;
         if (isExpiring && cfmContractSize === undefined) {
           this.emitAndLogError(`Coinbase CFM market skipped: invalid contract size for ${m.product_id}`);
           continue;
@@ -1194,7 +1271,9 @@ export class CoinbaseExchange extends BaseExchange {
         const market = this.store.marketsById[position.product_id];
         const contractSize = market?.isExpiring ? normalizeCfmContractSize(market.contractSize) : undefined;
         if (contractSize === undefined) {
-          this.emitAndLogError(`Coinbase CFM position skipped: missing or invalid contract size for ${position.product_id}`);
+          this.emitAndLogError(
+            `Coinbase CFM position skipped: missing or invalid contract size for ${position.product_id}`,
+          );
           continue;
         }
 
@@ -1432,10 +1511,20 @@ export class CoinbaseExchange extends BaseExchange {
           order_ids: lot,
         });
 
-        this.store.updateOrdersStatus(
-          lot.map((id) => ({ id })),
-          OrderStatus.Canceled,
-        );
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = lot.map((id) => ({ id }));
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       });
       this.scheduleOpenOrdersRestReconciliation('cancel-order');
       this.schedulePrivateUserStreamWriteCheck();
@@ -1475,7 +1564,9 @@ export class CoinbaseExchange extends BaseExchange {
 
     const market = this.store.marketsBySymbol[canonicalOrder.symbol];
     if (!market) {
-      return rejectPreflight(`Coinbase cannot safely edit ${order.id}: market ${canonicalOrder.symbol} is not reconciled`);
+      return rejectPreflight(
+        `Coinbase cannot safely edit ${order.id}: market ${canonicalOrder.symbol} is not reconciled`,
+      );
     }
     const marketInfo = market.info as Partial<MARKET_RESPONSE['products'][number]> | undefined;
     const isProvenSpot =
@@ -1629,7 +1720,23 @@ export class CoinbaseExchange extends BaseExchange {
       }
       const optimisticOrder = this.buildOptimisticOrderFromCreate(payload, orderId, data);
       if (optimisticOrder) {
-        this.store.addOrUpdateOrder(optimisticOrder);
+        (() => {
+          const incoming: StoreData['orders'] = [optimisticOrder];
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
       this.scheduleOpenOrdersRestReconciliation('place-order');
       this.schedulePrivateUserStreamWriteCheck();

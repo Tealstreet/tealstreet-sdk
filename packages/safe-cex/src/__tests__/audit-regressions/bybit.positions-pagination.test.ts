@@ -1,25 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
+import { FrameStore } from '../../store/frameStore';
+import { MarginType, PositionMode, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
-import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
-import { DefaultStore } from '../../store/store.base';
-import { MarginType, PositionMode, PositionSide } from '../../types';
 
 describe('Bybit position pagination', () => {
   it('follows nextPageCursor for linear and inverse account snapshots', async () => {
     const variants = [
       {
-        exchange: new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new DefaultStore()),
+        exchange: new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new FrameStore()),
         category: 'linear',
         settleCoin: 'USDT',
       },
       {
-        exchange: new BybitInverseExchange(
-          'bybitinverse',
-          { key: 'key', secret: 'secret' },
-          new DefaultStore(),
-        ),
+        exchange: new BybitInverseExchange('bybitinverse', { key: 'key', secret: 'secret' }, new FrameStore()),
         category: 'inverse',
         settleCoin: undefined,
       },
@@ -54,7 +51,7 @@ describe('Bybit position pagination', () => {
   });
 
   it('keeps updated leverage when a later page returns a duplicate placeholder row', async () => {
-    const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new DefaultStore());
+    const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new FrameStore());
     const get = vi
       .fn()
       .mockResolvedValueOnce({
@@ -133,7 +130,7 @@ describe('Bybit position pagination', () => {
   });
 
   it('treats Bybit leverage-not-modified as a successful no-op', async () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, store);
     const refreshedPosition = {
       id: 'BTCUSDT',
@@ -151,21 +148,26 @@ describe('Bybit position pagination', () => {
       info: {},
       lastUpdate: 1,
     };
-    store.update({
-      markets: [
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTCUSDT',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
-          info: {},
+          markets: [
+            {
+              id: 'BTCUSDT',
+              symbol: 'BTCUSDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+              info: {},
+            },
+          ],
+          positions: [{ ...refreshedPosition, leverage: 5 }],
         },
-      ],
-      positions: [{ ...refreshedPosition, leverage: 5 }],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = {
       post: vi.fn().mockResolvedValue({
         data: { retCode: 110043, retMsg: 'leverage not modified', result: {}, retExtInfo: {} },

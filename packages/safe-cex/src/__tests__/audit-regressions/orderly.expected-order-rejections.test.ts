@@ -2,9 +2,10 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { Market, OrderSide, OrderTimeInForce, OrderType, PositionMode } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
 
 const MARKET: Market = {
   id: 'BTC/USDC:USDC',
@@ -17,8 +18,13 @@ const MARKET: Market = {
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
 
   const exchange = new OrderlyExchange(
     'kodiakfi',

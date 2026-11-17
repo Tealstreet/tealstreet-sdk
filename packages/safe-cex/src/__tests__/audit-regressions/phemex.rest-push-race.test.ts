@@ -1,19 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PhemexExchange } from '../reference/phemex/phemex.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { PositionMode, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 
-const deferred = <T,>() => {
+const deferred = <T>() => {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
   return { promise, resolve };
 };
 
 const position = (contracts: number) => ({
-  id: `BTCUSDT:${PositionSide.Long}`, symbol: 'BTCUSDT', side: PositionSide.Long,
-  contracts, entryPrice: 69000, notional: contracts * 69000,
-  leverage: 10, unrealizedPnl: contracts * 1000, liquidationPrice: 0,
+  id: `BTCUSDT:${PositionSide.Long}`,
+  symbol: 'BTCUSDT',
+  side: PositionSide.Long,
+  contracts,
+  entryPrice: 69000,
+  notional: contracts * 69000,
+  leverage: 10,
+  unrealizedPnl: contracts * 1000,
+  liquidationPrice: 0,
   positionMode: PositionMode.Hedged,
 });
 const stale = () => ({
@@ -22,39 +31,79 @@ const stale = () => ({
 });
 const exchanges: PhemexExchange[] = [];
 const setup = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', quote: 'USDT' }],
-    tickers: [{ symbol: 'BTCUSDT', last: 70000 }],
-    positions: [position(0.01)],
-    balance: {
-      total: 1200, free: 1131, used: 69, upnl: 10,
-      currencies: {
-        USDT: { total: 1000, free: 931, used: 69, upnl: 10 },
-        USDC: { total: 200, free: 200, used: 0, upnl: 0 },
-      },
-    },
-  } as any);
-  const exchange = new PhemexExchange('phemex', {
-    key: 'test', secret: 'test', extra: { tickInterval: Infinity },
-  } as any, store);
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      {
+        markets: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', quote: 'USDT' }],
+        tickers: [{ symbol: 'BTCUSDT', last: 70000 }],
+        positions: [position(0.01)],
+        balance: {
+          total: 1200,
+          free: 1131,
+          used: 69,
+          upnl: 10,
+          currencies: {
+            USDT: { total: 1000, free: 931, used: 69, upnl: 10 },
+            USDC: { total: 200, free: 200, used: 0, upnl: 0 },
+          },
+        },
+      } as any,
+      store.markets.map((row) => row.symbol),
+    ),
+  );
+  const exchange = new PhemexExchange(
+    'phemex',
+    {
+      key: 'test',
+      secret: 'test',
+      extra: { tickInterval: Infinity },
+    } as any,
+    store,
+  );
   exchanges.push(exchange);
   const ws = exchange.privateWebsocket;
   ws.lastReceived = Date.now();
   vi.spyOn(exchange, 'mapOrderUpdate').mockReturnValue([]);
-  const terminal = () => ws.onMessage({ data: JSON.stringify({
-    orders_p: [{ orderID: 'terminal', symbol: 'BTCUSDT', ordStatus: 'Canceled', posSide: 'Long' }],
-  }) } as MessageEvent);
-  const push = (kind: 'both' | 'accounts' | 'positions' = 'both') => ws.onMessage({ data: JSON.stringify({
-    ...(kind !== 'accounts' ? { positions_p: [{
-      symbol: 'BTCUSDT', side: 'Buy', posSide: 'Long', posMode: 'Hedged',
-      size: '0.02', avgEntryPriceRp: '69000', markPriceRp: '70000',
-      leverageRr: '10', liquidationPriceRp: '0',
-    }] } : {}),
-    ...(kind !== 'positions' ? { accounts_p: [{
-      currency: 'USDT', accountBalanceRv: '1100', totalUsedBalanceRv: '138',
-    }] } : {}),
-  }) } as MessageEvent);
+  const terminal = () =>
+    ws.onMessage({
+      data: JSON.stringify({
+        orders_p: [{ orderID: 'terminal', symbol: 'BTCUSDT', ordStatus: 'Canceled', posSide: 'Long' }],
+      }),
+    } as MessageEvent);
+  const push = (kind: 'both' | 'accounts' | 'positions' = 'both') =>
+    ws.onMessage({
+      data: JSON.stringify({
+        ...(kind !== 'accounts'
+          ? {
+              positions_p: [
+                {
+                  symbol: 'BTCUSDT',
+                  side: 'Buy',
+                  posSide: 'Long',
+                  posMode: 'Hedged',
+                  size: '0.02',
+                  avgEntryPriceRp: '69000',
+                  markPriceRp: '70000',
+                  leverageRr: '10',
+                  liquidationPriceRp: '0',
+                },
+              ],
+            }
+          : {}),
+        ...(kind !== 'positions'
+          ? {
+              accounts_p: [
+                {
+                  currency: 'USDT',
+                  accountBalanceRv: '1100',
+                  totalUsedBalanceRv: '138',
+                },
+              ],
+            }
+          : {}),
+      }),
+    } as MessageEvent);
   return { exchange, store, ws, terminal, push };
 };
 
@@ -169,25 +218,28 @@ describe('Phemex REST account snapshots cannot overwrite newer private pushes', 
     expect(store.positions[0].contracts).toBe(0.02);
   });
 
-  it.each(['periodic', 'terminal'] as const)('disconnect invalidates a pending %s read and preserves base recovery', async (source) => {
-    const { exchange, store, ws, terminal } = setup();
-    const older = deferred<ReturnType<typeof stale>>();
-    vi.spyOn(exchange, 'fetchPositionsAndBalance').mockReturnValue(older.promise);
-    const running = source === 'periodic' ? exchange.tick() : undefined;
-    if (source === 'terminal') {
-      terminal();
-      await vi.advanceTimersByTimeAsync(1000);
-    }
-    const balance = structuredClone(store.balance);
-    const positions = structuredClone(store.positions);
-    (ws as any).onClose({ code: 1000 });
-    expect((ws as any).reconnecting).toBe(true);
-    older.resolve({ ...stale(), positions: [] });
-    await running;
-    await Promise.resolve();
-    expect(store.balance).toEqual(balance);
-    expect(store.positions).toEqual(positions);
-  });
+  it.each(['periodic', 'terminal'] as const)(
+    'disconnect invalidates a pending %s read and preserves base recovery',
+    async (source) => {
+      const { exchange, store, ws, terminal } = setup();
+      const older = deferred<ReturnType<typeof stale>>();
+      vi.spyOn(exchange, 'fetchPositionsAndBalance').mockReturnValue(older.promise);
+      const running = source === 'periodic' ? exchange.tick() : undefined;
+      if (source === 'terminal') {
+        terminal();
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      const balance = structuredClone(store.balance);
+      const positions = structuredClone(store.positions);
+      (ws as any).onClose({ code: 1000 });
+      expect((ws as any).reconnecting).toBe(true);
+      older.resolve({ ...stale(), positions: [] });
+      await running;
+      await Promise.resolve();
+      expect(store.balance).toEqual(balance);
+      expect(store.positions).toEqual(positions);
+    },
+  );
 
   it('socket reopen invalidates reads issued before its new generation', async () => {
     const { exchange, store, ws } = setup();

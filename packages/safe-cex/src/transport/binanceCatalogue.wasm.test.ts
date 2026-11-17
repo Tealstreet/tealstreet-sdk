@@ -10,8 +10,7 @@ import { EngineHost } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { prepareRecordedHttp } from '../__tests__/support/managedHttp';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
-import { FrameApplier } from '../store/frameApplier';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 
 // fake-indexeddb declares a constructor parameter, but its runtime takes a database instance.
 const closeDatabase = forceCloseDatabase as unknown as (database: IDBDatabase) => void;
@@ -95,16 +94,16 @@ async function sixEngines(
   });
   const { WasmEngine } = await loadNodeEngine();
   const started = Date.now();
-  const stores: DefaultStore[] = [];
+  const stores: FrameStore[] = [];
   const sends: Array<{ account: number; at: number }> = [];
   const preparations: Array<{ account: number; at: number }> = [];
   for (let account = 0; account < 6; account++) {
     // Separate module instances model account-worker realms sharing only IDB.
     vi.resetModules();
     const { createEngineTransport } = await import('./engine');
-    const store = new DefaultStore();
+    const store = new FrameStore();
     stores.push(store);
-    const applier = new FrameApplier(store);
+    const applier = store;
     const raw: Transport = {
       now: Date.now,
       setTimeout,

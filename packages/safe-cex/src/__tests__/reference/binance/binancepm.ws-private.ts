@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { BinancePMExchange } from './binancepm.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
@@ -12,6 +13,7 @@ import {
 import { LogSeverity, OrderStatus, OrderType, PositionSide } from '../../../types';
 import { v } from '../../../utils/get-key';
 import { virtualClock } from '../../../utils/virtualClock';
+import { nativeFixture } from '../../cutover/nativeFixture';
 
 // {
 //   "e": "ORDER_TRADE_UPDATE",
@@ -275,41 +277,91 @@ export class BinancePMPrivateWebsocket extends BaseWebSocket<BinancePMExchange> 
         // `binance.ws-private.ts` for the futures-variant rationale.
         const filled = parseFloat(data.z);
         const amount = parseFloat(data.q);
-        this.store.updateOrder(
-          { id: data.c },
-          {
+        (() => {
+          const target = { id: data.c };
+          const changes: Partial<StoreData['orders'][number]> = {
             filled,
             remaining: amount - filled,
             lastUpdate: virtualClock.getCurrentTimeMs(),
-          },
-        );
+          };
+          return this.store.apply(
+            nativeFixture(
+              { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
 
       if (data.X === 'NEW') {
-        this.store.addOrUpdateOrder({
-          id: data.c,
-          status: OrderStatus.Open,
-          symbol: data.s,
-          type: ORDER_TYPE[data.o],
-          side: ORDER_SIDE[data.S],
-          price: parseFloat(data.p) || parseFloat(data.sp),
-          amount: parseFloat(data.q),
-          filled: parseFloat(data.z),
-          lastUpdate: virtualClock.getCurrentTimeMs(),
-          remaining: parseFloat(data.q) - parseFloat(data.z),
-          reduceOnly: data.R || false,
-          info: data,
-          ...(ORDER_TYPE[data.o] === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
-          ...(ORDER_TYPE[data.o] === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
-        });
+        (() => {
+          const incoming: StoreData['orders'] = [
+            {
+              id: data.c,
+              status: OrderStatus.Open,
+              symbol: data.s,
+              type: ORDER_TYPE[data.o],
+              side: ORDER_SIDE[data.S],
+              price: parseFloat(data.p) || parseFloat(data.sp),
+              amount: parseFloat(data.q),
+              filled: parseFloat(data.z),
+              lastUpdate: virtualClock.getCurrentTimeMs(),
+              remaining: parseFloat(data.q) - parseFloat(data.z),
+              reduceOnly: data.R || false,
+              info: data,
+              ...(ORDER_TYPE[data.o] === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
+              ...(ORDER_TYPE[data.o] === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
+            },
+          ];
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
 
       if (data.X === 'CANCELED' || data.X === 'EXPIRED' || data.X === 'CANCELLED') {
-        this.store.updateOrderStatus({ id: data.c }, OrderStatus.Canceled);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: data.c }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
 
       if (data.X === 'FILLED') {
-        this.store.updateOrderStatus({ id: data.c }, OrderStatus.Closed);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: data.c }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     });
 
@@ -387,28 +439,72 @@ export class BinancePMPrivateWebsocket extends BaseWebSocket<BinancePMExchange> 
       const type = ORDER_TYPE[data.o];
       if (data.X === 'NEW' && type) {
         const amount = parseFloat(data.q) || 0;
-        this.store.addOrUpdateOrder({
-          id,
-          status: OrderStatus.Open,
-          symbol: data.s,
-          type,
-          side: ORDER_SIDE[data.S],
-          price: parseFloat(data.tp) || parseFloat(data.p) || 0,
-          amount,
-          filled: 0,
-          remaining: amount,
-          lastUpdate: virtualClock.getCurrentTimeMs(),
-          reduceOnly: data.R || false,
-          close: data.cp || false,
-          info: data,
-          ...(type === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[data.wt] }),
-          ...(type === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[data.wt] }),
-        });
+        (() => {
+          const incoming: StoreData['orders'] = [
+            {
+              id,
+              status: OrderStatus.Open,
+              symbol: data.s,
+              type,
+              side: ORDER_SIDE[data.S],
+              price: parseFloat(data.tp) || parseFloat(data.p) || 0,
+              amount,
+              filled: 0,
+              remaining: amount,
+              lastUpdate: virtualClock.getCurrentTimeMs(),
+              reduceOnly: data.R || false,
+              close: data.cp || false,
+              info: data,
+              ...(type === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[data.wt] }),
+              ...(type === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[data.wt] }),
+            },
+          ];
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       } else if (['CANCELED', 'CANCELLED', 'EXPIRED', 'REJECTED'].includes(data.X)) {
-        this.store.markOrdersTerminal([{ id }], OrderStatus.Canceled);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       } else if (['TRIGGERING', 'TRIGGERED', 'FINISHED'].includes(data.X)) {
         // Algo completion is not a trade. ORDER_TRADE_UPDATE owns actual fills.
-        this.store.updateOrderStatus({ id }, OrderStatus.Closed);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     }
     this.throttledFetchOrders();
@@ -427,30 +523,74 @@ export class BinancePMPrivateWebsocket extends BaseWebSocket<BinancePMExchange> 
       }
 
       if (data.os === 'NEW') {
-        this.store.addOrUpdateOrder({
-          id: data.c,
-          status: OrderStatus.Open,
-          symbol: data.s,
-          type: ORDER_TYPE[data.st],
-          side: ORDER_SIDE[data.S],
-          price: parseFloat(data.p) || parseFloat(data.sp),
-          amount: parseFloat(data.q),
-          filled: parseFloat(data.z) || 0,
-          lastUpdate: virtualClock.getCurrentTimeMs(),
-          remaining: parseFloat(data.q) - parseFloat(data.z) || 0,
-          reduceOnly: data.R || false,
-          info: data,
-          ...(ORDER_TYPE[data.st] === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
-          ...(ORDER_TYPE[data.st] === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
-        });
+        (() => {
+          const incoming: StoreData['orders'] = [
+            {
+              id: data.c,
+              status: OrderStatus.Open,
+              symbol: data.s,
+              type: ORDER_TYPE[data.st],
+              side: ORDER_SIDE[data.S],
+              price: parseFloat(data.p) || parseFloat(data.sp),
+              amount: parseFloat(data.q),
+              filled: parseFloat(data.z) || 0,
+              lastUpdate: virtualClock.getCurrentTimeMs(),
+              remaining: parseFloat(data.q) - parseFloat(data.z) || 0,
+              reduceOnly: data.R || false,
+              info: data,
+              ...(ORDER_TYPE[data.st] === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
+              ...(ORDER_TYPE[data.st] === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
+            },
+          ];
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
 
       if (data.os === 'CANCELED' || data.os === 'EXPIRED' || data.os === 'CANCELLED') {
-        this.store.updateOrderStatus({ id: data.c }, OrderStatus.Canceled);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: data.c }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
 
       if (data.os === 'FILLED') {
-        this.store.updateOrderStatus({ id: data.c }, OrderStatus.Closed);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: data.c }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     });
 
@@ -506,14 +646,23 @@ export class BinancePMPrivateWebsocket extends BaseWebSocket<BinancePMExchange> 
           const contracts = Math.abs(parseFloat(p.pa));
           const upnl = parseFloat(p.up);
 
-          this.store.updatePosition(position, {
-            entryPrice,
-            contracts,
-            notional: contracts * entryPrice,
-            unrealizedPnl: upnl,
-            info: position,
-            ...(isOneWay && { side }),
-          });
+          (() => {
+            const target = position;
+            const changes: Partial<StoreData['positions'][number]> = {
+              entryPrice,
+              contracts,
+              notional: contracts * entryPrice,
+              unrealizedPnl: upnl,
+              info: position,
+              ...(isOneWay && { side }),
+            };
+            return this.store.apply(
+              nativeFixture(
+                { positions: this.store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
       });
 
@@ -579,7 +728,20 @@ export class BinancePMPrivateWebsocket extends BaseWebSocket<BinancePMExchange> 
       this.hasPendingPositionEvents = false;
       const positions = await this.parent.fetchPositions();
       if (!this.isDisposed) {
-        this.store.addOrUpdatePositionsFull(positions);
+        (() => {
+          const incoming: StoreData['positions'] = positions;
+          return this.store.apply(
+            nativeFixture(
+              {
+                positions: incoming.map((row) => ({
+                  ...this.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     } catch {
       // Silent failure, will retry on next event
@@ -628,13 +790,18 @@ export class BinancePMPrivateWebsocket extends BaseWebSocket<BinancePMExchange> 
         const orders = await this.parent.fetchOrders();
         // A failed fetch returns the current store; do not mark it freshly loaded.
         if (this.isDisposed || this.parent.ordersSnapshotStale) return;
-        this.parent.store.update({
-          orders,
-          loaded: {
-            ...this.parent.store.loaded,
-            orders: true,
-          },
-        });
+        this.parent.store.apply(
+          nativeFixture(
+            {
+              orders,
+              loaded: {
+                ...this.parent.store.loaded,
+                orders: true,
+              },
+            },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
       } catch {
         // Silent failure, will retry on next event
       }

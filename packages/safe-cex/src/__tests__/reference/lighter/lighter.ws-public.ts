@@ -1,8 +1,13 @@
+import type { StoreData } from '../../../generated/StoreData';
+
 import flatten from 'lodash/flatten';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { WS_MIN_RECONNECTION_DELAY } from '../../../config/config';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { ENDPOINTS, resolveLighterInterval } from '../../../exchanges/lighter/lighter.types';
+import { FrameStore } from '../../../store/frameStore';
 import { resolveTransportRouting } from '../../../transport/registry';
 import { Candle, LogSeverity, OHLCVOptions, OrderBook, PositionSide, Ticker, Writable } from '../../../types';
 import { getCandleStartTime } from '../../../utils/getCandleStartTime';
@@ -10,9 +15,8 @@ import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { add } from '../../../utils/safe-math';
 import { updateOrderBook } from '../../../utils/updateOrderBook';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { LighterExchange } from './lighter.exchange';
-import { ENDPOINTS, resolveLighterInterval } from '../../../exchanges/lighter/lighter.types';
 import { calculateLighterPublicReconnectDelay, classifyLighterPublicClose } from './lighter.ws-policy';
 import {
   buildLighterCandleTopic,
@@ -1138,7 +1142,16 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
       if (bid !== undefined) update.bid = bid;
       if (ask !== undefined) update.ask = ask;
 
-      this.parent.store.updateTicker(ticker, update);
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = update;
+        return this.parent.store.apply(
+          nativeFixture(
+            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
 
       // Update position unrealized PnL
       const resolvedSymbol = symbol || ticker.symbol;
@@ -1152,7 +1165,16 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
           const currentValue = position.contracts * referencePrice;
           const directionMult = position.side === PositionSide.Long ? 1 : -1;
           const unrealizedPnl = directionMult * (currentValue - entryValue);
-          this.store.updatePosition(position, { unrealizedPnl });
+          (() => {
+            const target = position;
+            const changes: Partial<StoreData['positions'][number]> = { unrealizedPnl };
+            return this.store.apply(
+              nativeFixture(
+                { positions: this.store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
       }
     }
@@ -1192,18 +1214,27 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
       const bid = parseLighterWsNumber(stats.best_bid_price, stats.bid_price, stats.bid);
       const ask = parseLighterWsNumber(stats.best_ask_price, stats.ask_price, stats.ask);
 
-      this.parent.store.updateTicker(ticker, {
-        ...(mark !== undefined ? { mark } : {}),
-        ...(index !== undefined ? { index } : {}),
-        ...(last !== undefined ? { last } : {}),
-        ...(dailyBaseVolume !== undefined ? { volume: dailyBaseVolume } : {}),
-        ...(dailyQuoteVolume !== undefined ? { quoteVolume: dailyQuoteVolume } : {}),
-        ...(openInterest !== undefined ? { openInterest } : {}),
-        ...(fundingRate !== undefined ? { fundingRate: normalizeLighterFundingRate(fundingRate) } : {}),
-        ...(percentage !== undefined ? { percentage } : {}),
-        ...(bid !== undefined ? { bid } : {}),
-        ...(ask !== undefined ? { ask } : {}),
-      });
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = {
+          ...(mark !== undefined ? { mark } : {}),
+          ...(index !== undefined ? { index } : {}),
+          ...(last !== undefined ? { last } : {}),
+          ...(dailyBaseVolume !== undefined ? { volume: dailyBaseVolume } : {}),
+          ...(dailyQuoteVolume !== undefined ? { quoteVolume: dailyQuoteVolume } : {}),
+          ...(openInterest !== undefined ? { openInterest } : {}),
+          ...(fundingRate !== undefined ? { fundingRate: normalizeLighterFundingRate(fundingRate) } : {}),
+          ...(percentage !== undefined ? { percentage } : {}),
+          ...(bid !== undefined ? { bid } : {}),
+          ...(ask !== undefined ? { ask } : {}),
+        };
+        return this.parent.store.apply(
+          nativeFixture(
+            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
   };
 
@@ -1307,7 +1338,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
             this.sendPayload({ type: 'subscribe', channel: secondaryTopic });
           }
 
-          // Store subscribed topic to re-subscribe on reconnect
+          // FrameStore subscribed topic to re-subscribe on reconnect
           this.topics[topic] = topic;
           if (usesTrades) {
             this.topics[secondaryTopic] = secondaryTopic;
@@ -1429,7 +1460,7 @@ export class LighterPublicWebsocket extends BaseWebSocket<LighterExchange> {
             );
           }, LighterPublicWebsocket.ORDER_BOOK_INITIAL_DATA_TIMEOUT_MS);
 
-          // Store subscribed topic to re-subscribe on reconnect
+          // FrameStore subscribed topic to re-subscribe on reconnect
           this.topics[incomingChannel] = subscribeChannel;
         }
       } else {

@@ -1,7 +1,9 @@
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 import type { HistoricalTrade, HistoricalTradeOptions, Order } from '../../../types';
 
+import { FrameStore } from '../../../store/frameStore';
 import { OrderStatus } from '../../../types';
+import { nativeFixture } from '../../cutover/nativeFixture';
 
 export const USER_TRADES_MAX_LIMIT = 1000;
 
@@ -64,12 +66,22 @@ export const mapBinanceUserTrade = (entry: Record<string, any>): HistoricalTrade
 });
 
 /** A fill arriving before the cancellation acknowledgement keeps its terminal status. */
-export const markBinanceOrdersCanceled = (store: Store, requested: Array<Pick<Order, 'id'>>) => {
+export const markBinanceOrdersCanceled = (store: FrameStore, requested: Array<Pick<Order, 'id'>>) => {
   const ids = new Set(requested.map((order) => order.id));
-  store.updateOrdersStatus(
-    store.orders.filter(
+  (() => {
+    const targets: Array<Pick<StoreData['orders'][number], 'id'>> = store.orders.filter(
       (order) => ids.has(order.id) && order.status !== OrderStatus.Closed && order.status !== OrderStatus.Canceled,
-    ),
-    OrderStatus.Canceled,
-  );
+    );
+    const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+    return store.apply(
+      nativeFixture(
+        {
+          orders: store.orders.map((row) =>
+            targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+          ),
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
+  })();
 };

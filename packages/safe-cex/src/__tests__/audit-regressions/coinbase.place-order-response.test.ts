@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { Market, Order, OrderSide, OrderStatus, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 import { ENDPOINTS } from '../reference/coinbase/coinbase.types';
-import { DefaultStore } from '../../store/store.base';
-import { Market, Order, OrderSide, OrderStatus, OrderType } from '../../types';
 
 const SPOT_MARKET: Market = {
   id: 'ARB-USDC',
@@ -23,8 +24,13 @@ const SPOT_MARKET: Market = {
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [SPOT_MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [SPOT_MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new CoinbaseExchange(
     'coinbase' as any,
     { key: 'test', secret: 'test', tealstreetTunnel: false } as any,
@@ -156,7 +162,9 @@ describe('Coinbase create-order response audit regression', () => {
       await expect(exchange.placeOrder({} as any)).resolves.toEqual(['documented-order-id']);
       await vi.advanceTimersByTimeAsync(8_000);
 
-      expect(store.socketHealth?.privateDegradedReason).toContain('Coinbase private WS is not receiving live order updates');
+      expect(store.socketHealth?.privateDegradedReason).toContain(
+        'Coinbase private WS is not receiving live order updates',
+      );
       expect(warning).toHaveBeenCalledWith(
         'warning',
         expect.stringContaining('Coinbase private WS is not receiving live order updates'),

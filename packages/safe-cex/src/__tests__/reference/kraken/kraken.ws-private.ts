@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { KrakenExchange } from './kraken.exchange';
 
 import createHash from 'create-hash';
@@ -5,6 +6,8 @@ import createHmac from 'create-hmac';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { FrameStore } from '../../../store/frameStore';
 import {
   LogSeverity,
   MarginType,
@@ -19,7 +22,7 @@ import {
 } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
 import { v } from '../../../utils/get-key';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeFixture } from '../../cutover/nativeFixture';
 
 export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
   authenticated = false;
@@ -167,7 +170,7 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
       // Step 3: HMAC-SHA512 sign the hash with the secret
       const signature = createHmac('sha512', secret).update(challengeHash).digest('base64');
 
-      // Store the challenge and signature for use in subscriptions
+      // FrameStore the challenge and signature for use in subscriptions
       this.originalChallenge = this.pendingChallenge;
       this.signedChallenge = signature;
 
@@ -225,9 +228,31 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
         if (existing) {
           const newFilled = Math.min(existing.amount, existing.filled + qty);
           const remaining = Math.max(0, existing.amount - newFilled);
-          this.store.updateOrder({ id: orderId }, { filled: newFilled, remaining });
+          (() => {
+            const target = { id: orderId };
+            const changes: Partial<StoreData['orders'][number]> = { filled: newFilled, remaining };
+            return this.store.apply(
+              nativeFixture(
+                { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
           if (remaining === 0) {
-            this.store.updateOrderStatus({ id: orderId }, OrderStatus.Closed);
+            (() => {
+              const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
+              const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+              return this.store.apply(
+                nativeFixture(
+                  {
+                    orders: this.store.orders.map((row) =>
+                      targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                    ),
+                  },
+                  this.store.markets.map((row) => row.symbol),
+                ),
+              );
+            })();
           }
         }
       }
@@ -241,7 +266,20 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
     // Handle direct order cancellation (just order_id at root level)
     if (msg?.is_cancel && msg?.order_id && !msg?.order) {
       // Cancel order by ID
-      this.store.updateOrderStatus({ id: msg.order_id }, OrderStatus.Canceled);
+      (() => {
+        const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: msg.order_id }];
+        const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+        return this.store.apply(
+          nativeFixture(
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
       // Throttled fetch to sync after cancellation
       this.throttledFetchOrders();
       return;
@@ -321,17 +359,54 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
     // Handle order cancellation
     if (msg?.is_cancel) {
       orders.forEach((order) => {
-        this.store.updateOrderStatus({ id: order.id }, OrderStatus.Canceled);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       });
       // Throttled fetch to sync after cancellation
       this.throttledFetchOrders();
     } else if (isSnapshot || msg?.feed === 'open_orders_snapshot') {
       // For snapshots, replace all orders
-      this.store.addOrUpdateOrdersFull(orders);
+      (() => {
+        const incoming: StoreData['orders'] = orders;
+        return this.store.apply(
+          nativeFixture(
+            { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     } else {
       // For single order updates, update individually to preserve other orders
       orders.forEach((order) => {
-        this.store.addOrUpdateOrder(order);
+        (() => {
+          const incoming: StoreData['orders'] = [order];
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       });
       // Throttled fetch to ensure synchronization after order events
       this.throttledFetchOrders();
@@ -412,7 +487,15 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
 
     // Only include positions with non-zero contracts
     const activePositions = positions.filter((p) => p.contracts > 0);
-    this.store.addOrUpdatePositionsFull(activePositions);
+    (() => {
+      const incoming: StoreData['positions'] = activePositions;
+      return this.store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   private handleBalances = (msg: any) => {
@@ -568,7 +651,12 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
       info: accounts,
     };
 
-    this.store.update({ balance });
+    this.store.apply(
+      nativeFixture(
+        { balance },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
   };
 
   private throttledFetchOrders = () => {
@@ -583,13 +671,18 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
     if (!this.isDisposed) {
       try {
         const orders = await this.parent.fetchOrders();
-        this.parent.store.update({
-          orders,
-          loaded: {
-            ...this.parent.store.loaded,
-            orders: true,
-          },
-        });
+        this.parent.store.apply(
+          nativeFixture(
+            {
+              orders,
+              loaded: {
+                ...this.parent.store.loaded,
+                orders: true,
+              },
+            },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
       } catch {
         // Silent failure, will retry on next event
       }
