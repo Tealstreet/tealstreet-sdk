@@ -167,7 +167,7 @@ impl Fixture {
                         };
                         let reply =
                             V::http(&method, &uri, &headers, &body, &mut seen.lock().unwrap());
-                        axum::Json(reply)
+                        (V::http_status(&reply), axum::Json(reply))
                     }
                 },
             );

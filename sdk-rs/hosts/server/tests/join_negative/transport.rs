@@ -133,7 +133,11 @@ async fn http_hook_preserves_success_and_returns_actual_refusal_status() {
         .unwrap()
         .replacen("ws:", "http:", 1);
     assert!(base.starts_with("http://127.0.0.1:"));
-    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
     let success = client.get(format!("{base}/ok")).send().await.unwrap();
     assert_eq!(success.status(), axum::http::StatusCode::OK);
     assert_eq!(success.json::<Value>().await.unwrap()["retCode"], 0);
