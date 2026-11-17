@@ -130,6 +130,17 @@ pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
     }
 }
 
+// ccb596a36: protected Session controls pin Bybit's no-caller-ID protection path.
+pub(crate) fn bybit_protection(venue: &str, order: &serde_json::Map<String, Value>) -> bool {
+    matches!(venue, "bybit" | "bybitdemo" | "bybitinverse" | "bybitspot")
+        && (matches!(
+            order["type"].as_str(),
+            Some("stop_market" | "take_profit_market" | "trailing_stop_market" | "conditional")
+        ) || ["triggerPrice", "stopLoss", "takeProfit"]
+            .iter()
+            .any(|field| order.get(field).is_some_and(|value| !value.is_null())))
+}
+
 /// SHA256 of domain + canonical JSON. Keys are ASCII, numbers use ECMAScript's
 /// finite binary64 serialization, and negative zero is normalized to zero.
 pub fn fingerprint(
@@ -254,6 +265,34 @@ fn canonical_value(value: &Value, out: &mut String, depth: usize) -> Result<(), 
 
 #[cfg(test)]
 mod activation_tests {
+    #[test]
+    fn bybit_protection_omission_is_exact_and_keeps_plain_and_other_venues() {
+        let plain = json!({"type":"limit","amount":0.01,"price":55000});
+        for venue in ["bybit", "bybitdemo", "bybitinverse", "bybitspot"] {
+            assert!(!super::bybit_protection(venue, plain.as_object().unwrap()));
+            for field in ["triggerPrice", "stopLoss", "takeProfit"] {
+                let mut order = plain.clone();
+                order[field] = 55000.into();
+                assert!(super::bybit_protection(venue, order.as_object().unwrap()));
+                order[field] = Value::Null;
+                assert!(!super::bybit_protection(venue, order.as_object().unwrap()));
+            }
+            for kind in [
+                "stop_market",
+                "take_profit_market",
+                "trailing_stop_market",
+                "conditional",
+            ] {
+                let mut order = plain.clone();
+                order["type"] = kind.into();
+                assert!(super::bybit_protection(venue, order.as_object().unwrap()));
+                for other in ["okx", "binance", "hyperliquid", "not-bybit"] {
+                    assert!(!super::bybit_protection(other, order.as_object().unwrap()));
+                }
+            }
+        }
+    }
+
     use super::*;
 
     #[tokio::test]

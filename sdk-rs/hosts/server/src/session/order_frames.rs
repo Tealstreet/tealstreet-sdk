@@ -87,7 +87,16 @@ impl Session {
             );
             return;
         }
-        params.insert("clientOrderId".into(), submit.intent_id.clone().into());
+        // ccb596a36: native Bybit protection refuses caller IDs; omit only
+        // that unsupported venue field, retaining the intent/fingerprint ledger.
+        let method = if order_contract::bybit_protection(&self.joined[&name].account.venue, params)
+        {
+            params.remove("clientOrderId");
+            "placeOrder"
+        } else {
+            params.insert("clientOrderId".into(), submit.intent_id.clone().into());
+            "placeOrderWithClientOrderId"
+        };
         out.send(envelope::order_frame(
             "order.ack",
             &name,
@@ -96,7 +105,7 @@ impl Session {
         self.call_inner(
             &name,
             json!({"requestId":submit.intent_id,
-            "method":"placeOrderWithClientOrderId","args":[submit.params],"intentSeq":submit.seq}),
+            "method":method,"args":[submit.params],"intentSeq":submit.seq}),
             Some(OrderReceipt::Placement(submit.seq)),
         )
         .await;
@@ -190,7 +199,7 @@ pub(super) fn settle_intent(
     out: &Out,
     name: &str,
     id: &Value,
-    client_id: &str,
+    client_id: Option<&str>,
     seq: u64,
     answer: Result<Value, Value>,
 ) {
