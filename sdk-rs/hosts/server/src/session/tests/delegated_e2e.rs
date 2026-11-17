@@ -541,7 +541,7 @@ async fn bybit_mobile_receipt(case: &str) {
         } else if case == "deadline" {
             "expired"
         } else if case == "missing-type" {
-            "type"
+            "invalid command"
         } else {
             "not admitted"
         }));
