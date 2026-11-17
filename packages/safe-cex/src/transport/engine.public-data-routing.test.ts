@@ -54,16 +54,16 @@ afterEach(() => {
 });
 
 describe('a keyless public-data engine reads through the public CORS proxy, off the trading fleet', () => {
-  it('sends Coinbase catalogue POST and history GET reads through the public proxy without a token', async () => {
+  it.each([false, true])('sends Coinbase public reads off the trading fleet (tunnel=%s)', async (tealstreetTunnel) => {
     for (const method of ['POST', 'GET']) {
       const url = `https://drb.coinbase.com/api/v2/public/${method === 'POST' ? 'get_instruments' : 'get_tradingview_chart_data?instrument_name=BTC_USDC-PERPETUAL'}`;
       const body =
         method === 'POST'
-          ? new TextEncoder().encode('{"method":"public/get_instruments","params":{"currency":"USDC"}}')
+          ? '{"method":"public/get_instruments","params":{"currency":"USDC"}}'
           : undefined;
       const packet = { method, url, headers: { 'Content-Type': 'application/json' }, ...(body ? { body } : {}) };
       const raw = makeRaw();
-      const routed = createEngineTransport('coinbase', chartSource({ tealstreetTunnel: false }), raw);
+      const routed = createEngineTransport('coinbase', chartSource({ tealstreetTunnel }), raw);
       try {
         await routed.request(packet);
         expect(raw.request).toHaveBeenCalledOnce();
@@ -75,34 +75,44 @@ describe('a keyless public-data engine reads through the public CORS proxy, off 
     }
   });
 
-  it('prepares the native managed Coinbase catalogue POST on the public route', async () => {
-    const dispatch = vi.fn(async () => ({ status: 200, body: new Uint8Array() }));
-    const bind = vi.fn((_packet: Parameters<Transport['request']>[0]) => ({ ready: () => true, dispatch }));
-    const raw = { ...makeRaw(), prepareHttp: async () => ({ bind }) };
-    const routed = createEngineTransport('coinbase', chartSource({ tealstreetTunnel: false }), raw);
-    const packet = {
-      request: 1,
-      method: 'POST',
-      url: 'https://drb.coinbase.com/api/v2/public/get_instruments',
-      headers: { 'Content-Type': 'application/json' },
-      body: new TextEncoder().encode('{"method":"public/get_instruments","params":{"currency":"USDC"}}'),
-    };
-    try {
-      const prepared = await routed.prepareHttp!({ ...packet, intent: 'public' });
-      await prepared.bind(packet).dispatch();
-      expect(bind.mock.calls[0]?.[0]).toMatchObject({ ...packet, url: `${getPublicCorsProxy()}/${packet.url}` });
-      expect(dispatch).toHaveBeenCalledOnce();
-      expect(mocks.token).not.toHaveBeenCalled();
-    } finally {
-      routed.dispose?.();
-    }
-  });
+  it.each([false, true])(
+    'prepares the native managed Coinbase catalogue POST publicly (tunnel=%s)',
+    async (tealstreetTunnel) => {
+      const dispatch = vi.fn(async () => ({ status: 200, body: new Uint8Array() }));
+      const bind = vi.fn((_packet: Parameters<Transport['request']>[0]) => ({ ready: () => true, dispatch }));
+      const raw = { ...makeRaw(), prepareHttp: async () => ({ bind }) };
+      const routed = createEngineTransport('coinbase', chartSource({ tealstreetTunnel }), raw);
+      const packet = {
+        request: 1,
+        method: 'POST',
+        url: 'https://drb.coinbase.com/api/v2/public/get_instruments',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{"method":"public/get_instruments","params":{"currency":"USDC"}}',
+      };
+      try {
+        const prepared = await routed.prepareHttp!({ ...packet, intent: 'public' });
+        await prepared.bind(packet).dispatch();
+        expect(bind.mock.calls[0]?.[0]).toMatchObject({ ...packet, url: `${getPublicCorsProxy()}/${packet.url}` });
+        expect(dispatch).toHaveBeenCalledOnce();
+        expect(mocks.token).not.toHaveBeenCalled();
+      } finally {
+        routed.dispose?.();
+      }
+    },
+  );
 
   it('keeps direct Coinbase reads direct and refuses credentials on the explicit public route', async () => {
     const url = 'https://drb.coinbase.com/api/v2/public/get_instruments';
     expect(
       (await sent('coinbase', chartSource({ tealstreetProxy: false, tealstreetTunnel: false }), 'POST', url)).url,
     ).toBe(url);
+    const fullAccount = chartSource({
+      publicDataOnly: false,
+      key: 'synthetic-key',
+      secret: 'synthetic-secret',
+      tealstreetTunnel: false,
+    });
+    expect((await sent('coinbase', fullAccount, 'POST', url)).url).toBe(`${getPrivateProxyHost('asia')}/${url}`);
     const raw = makeRaw();
     const routed = createEngineTransport('coinbase', chartSource(), raw);
     try {
