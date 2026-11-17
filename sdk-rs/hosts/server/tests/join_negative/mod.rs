@@ -622,19 +622,44 @@ pub async fn delegated_consumed<V: Venue>() {
         .client
         .finish::<V>(&mut Device::default(), Answer::Correct)
         .await;
+    assert_permanent_bound_refusal(&resident.client.frames);
+    resident.untouched(&f).await;
+}
+
+fn assert_permanent_bound_refusal(frames: &[Value]) {
     assert!(
-        resident
-            .client
-            .frames
+        frames
             .iter()
             .any(|x| x["d"]["data"][1]["kind"] == "unverified")
     );
     assert!(
-        !resident
-            .client
-            .frames
+        !frames
             .iter()
             .any(|x| x["d"]["op"] == "account-signing-mode")
     );
-    resident.untouched(&f).await;
+}
+
+#[test]
+fn consumed_refusal_requires_permanent_original_binding() {
+    let mut expected: Value = serde_json::from_str(
+        &safe_cex_exchange_server::envelope::init_unverified(ACCOUNT, false),
+    )
+    .unwrap();
+    expected["d"]["instanceId"] = "negative-join-registration".into();
+    assert_permanent_bound_refusal(std::slice::from_ref(&expected));
+    for field in ["transient", "accountName", "instanceId", "missing-instance"] {
+        let mut bad = expected.clone();
+        match field {
+            "transient" => bad["d"]["data"][1]["transient"] = true.into(),
+            "accountName" => bad["d"]["accountName"] = "foreign-account".into(),
+            "instanceId" => bad["d"]["instanceId"] = "foreign-registration".into(),
+            _ => {
+                bad["d"].as_object_mut().unwrap().remove("instanceId");
+            }
+        }
+        assert!(
+            std::panic::catch_unwind(|| assert_permanent_bound_refusal(&[bad])).is_err(),
+            "consumed handover accepted invalid refusal field {field}"
+        );
+    }
 }
