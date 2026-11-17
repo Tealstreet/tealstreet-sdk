@@ -124,6 +124,17 @@ impl Venue for Backpack {
         match request["method"].as_str().unwrap() {
             "PING" => json!({"method":"PONG"}),
             "SUBSCRIBE" | "UNSUBSCRIBE" => {
+                let private = request["params"].as_array().is_some_and(|streams| {
+                    streams.iter().any(|stream| {
+                        stream
+                            .as_str()
+                            .is_some_and(|name| name.starts_with("account."))
+                    })
+                });
+                if private && request.get("signature").is_none() {
+                    seen.rejections += 1;
+                    return json!({"error":{"code":"UNAUTHORIZED","message":"synthetic socket refusal"}});
+                }
                 if let Some(auth) = request.get("signature") {
                     let text = format!(
                         "instruction=subscribe&timestamp={}&window={}",
