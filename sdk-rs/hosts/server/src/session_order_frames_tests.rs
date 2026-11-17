@@ -83,15 +83,24 @@ async fn order_frame(sent: &mut crate::out::Receiver, op: &str) -> Value {
 async fn order_frames_use_the_existing_native_call_and_registration() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            for id in [Some("current-registration"), None] {
+            for (venue, id) in [
+                ("bybit", Some("current-registration")),
+                ("hyperliquid", None),
+                ("hyperliquidspot", Some("spot-registration")),
+            ] {
                 let registry = crate::accounts::tests::registry();
                 let tape = Tape::default();
-                let account = delegated_account(&registry, "A", "bybit", tape.clone());
+                let account = delegated_account(&registry, "A", venue, tape.clone());
                 let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
                 session.joined.get_mut("synthetic-main").unwrap().out =
                     session.out.with_instance_id(id);
                 assert!(session.resnapshot("synthetic-main").await);
                 let key = submit(&mut session, 0, id).await;
+                let client_id = if venue == "bybit" {
+                    key.clone()
+                } else {
+                    format!("0x{}", key.replace('-', ""))
+                };
                 {
                     let pending = session.joined["synthetic-main"]
                         .client
@@ -113,12 +122,12 @@ async fn order_frames_use_the_existing_native_call_and_registration() {
                 assert_eq!(outcome["d"]["intentId"], key);
                 assert_eq!(outcome["d"]["outcome"], "placed");
                 assert_eq!(outcome["d"]["venueOrderId"], "native-one");
-                assert_eq!(outcome["d"]["clientOrderId"], key);
+                assert_eq!(outcome["d"]["clientOrderId"], client_id);
                 for frame in [ack, outcome] {
                     assert_eq!(frame["d"]["instanceId"].as_str(), id);
                 }
                 assert_eq!(*tape.writes.lock().unwrap(), vec!["create"]);
-                assert_eq!(*tape.client_order_ids.lock().unwrap(), vec![key]);
+                assert_eq!(*tape.client_order_ids.lock().unwrap(), vec![client_id]);
                 session.close();
                 registry.dispose(&account, Disposal::PageDisposed);
             }
@@ -200,12 +209,12 @@ async fn order_frames_delayed_unknown_remains_on_its_original_users_socket() {
                 hold: true,
                 ..Default::default()
             };
-            let a = delegated_account(&registry, "A", "bybit", a_tape.clone());
+            let a = delegated_account(&registry, "A", "hyperliquid", a_tape.clone());
             let (mut alice, mut a_sent) = joined(registry.clone(), "A", a.clone()).await;
             alice.joined.get_mut("synthetic-main").unwrap().out =
                 alice.out.with_instance_id(Some("alice"));
             assert!(alice.resnapshot("synthetic-main").await);
-            submit(&mut alice, 0, Some("alice")).await;
+            let intent = submit(&mut alice, 0, Some("alice")).await;
             let _ = order_frame(&mut a_sent, "order.ack").await;
             tokio::time::timeout(Duration::from_secs(2), async {
                 while a_tape.waiting.lock().unwrap().is_empty() {
@@ -223,6 +232,11 @@ async fn order_frames_delayed_unknown_remains_on_its_original_users_socket() {
             a_tape.finish_unknown();
             let unknown = order_frame(&mut a_sent, "order.outcome").await;
             assert_eq!(unknown["d"]["outcome"], "unknown");
+            assert_eq!(unknown["d"]["intentId"], intent);
+            assert_eq!(
+                unknown["d"]["clientOrderId"],
+                format!("0x{}", intent.replace('-', ""))
+            );
             assert_eq!(unknown["d"]["instanceId"], "alice");
             submit(&mut bob, 0, Some("bob")).await;
             assert_eq!(

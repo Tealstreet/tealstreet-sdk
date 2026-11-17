@@ -433,7 +433,7 @@ async fn delegated_e2e_bybit_declaration_off_refuses_valid_handover_without_io()
 }
 
 #[cfg(target_os = "linux")]
-async fn hyperliquid_protected_placement(typed: bool) {
+async fn hyperliquid_protected_placement(typed: bool, explicit_id: bool) {
     let material = format!("0x{:064x}", 7);
     let wallet = safe_cex_crypto::ethereum::private_key_address(&format!("0x{:064x}", 8)).unwrap();
     let signer = safe_cex_crypto::ethereum::private_key_address(&material).unwrap();
@@ -491,8 +491,38 @@ async fn hyperliquid_protected_placement(typed: bool) {
     if typed {
         let epoch = format!("{:012x}", crate::accounts::now_ms());
         let intent = format!("{}-{}-7101-8101-010101010101", &epoch[..8], &epoch[8..]);
-        let params =
+        let mut params =
             json!({"symbol":"BTC-PERP","type":"limit","side":"buy","amount":0.001,"price":55000});
+        let cloid = format!("0x{}", intent.replace('-', ""));
+        for (case, message) in [
+            ("conflict", "not sent: client order id differs"),
+            ("venue-id", "not sent: client order id differs"),
+            ("age", "not sent: expired"),
+            ("fingerprint", "not sent: intent fingerprint differs"),
+        ] {
+            let mut refused_params = params.clone();
+            if case == "conflict" {
+                refused_params["clientOrderId"] = "unrelated-id".into();
+            } else if case == "venue-id" {
+                refused_params["clientOrderId"] = cloid.clone().into();
+            }
+            let fingerprint =
+                crate::order_contract::fingerprint(ACCOUNT, &intent, &refused_params, 1).unwrap();
+            if case == "fingerprint" {
+                refused_params["amount"] = json!(0.002);
+            }
+            wire(&mut session, json!({"t":"order.submit","d":{"accountName":ACCOUNT,"instanceId":INSTANCE,
+                "intentId":intent,"params":refused_params,"seq":1,"ageMs":if case == "age" {10000} else {0},"fingerprint":fingerprint}})).await;
+            let ack = hyperliquid_order_frame(&mut sent, "order.ack").await;
+            assert_eq!(ack["d"]["received"], false, "{case}");
+            let refused = hyperliquid_order_frame(&mut sent, "order.outcome").await;
+            assert_eq!(refused["d"]["error"]["outcome"], "notSent", "{case}");
+            assert_eq!(refused["d"]["error"]["message"], message, "{case}");
+            assert!(venue.observed.lock().unwrap().writes.is_empty(), "{case}");
+        }
+        if explicit_id {
+            params["clientOrderId"] = intent.clone().into();
+        }
         let fingerprint = crate::order_contract::fingerprint(ACCOUNT, &intent, &params, 1).unwrap();
         wire(
             &mut session,
@@ -502,20 +532,18 @@ async fn hyperliquid_protected_placement(typed: bool) {
         .await;
         let ack = hyperliquid_order_frame(&mut sent, "order.ack").await;
         assert_eq!(ack["d"]["received"], true);
+        assert_eq!(ack["d"]["intentId"], intent);
         let outcome = hyperliquid_order_frame(&mut sent, "order.outcome").await;
-        // fa4b80b08 exposed the separate UUID/cloid mismatch: keep its no-send refusal.
-        assert_eq!(outcome["d"]["outcome"], "refused", "{outcome}");
-        assert_eq!(outcome["d"]["error"]["outcome"], "notSent");
-        assert_eq!(
-            outcome["d"]["error"]["message"],
-            "Hyperliquid client order ID must be 0x followed by 32 lowercase hex characters"
-        );
-        assert!(outcome["d"]["venueOrderId"].is_null());
-        assert_eq!(outcome["d"]["clientOrderId"], intent);
+        // #3623 pinned UUID refusal; the follow-up must map only the venue cloid.
+        assert_eq!(outcome["d"]["outcome"], "placed", "{outcome}");
+        assert_eq!(outcome["d"]["venueOrderId"], "77");
+        assert_eq!(outcome["d"]["intentId"], intent);
+        assert_eq!(outcome["d"]["clientOrderId"], cloid);
         assert_eq!(outcome["d"]["instanceId"], INSTANCE);
-        assert!(venue.observed.lock().unwrap().writes.is_empty());
-        session.close();
-        return;
+        assert_eq!(
+            venue.observed.lock().unwrap().writes[0]["action"]["orders"][0]["c"],
+            cloid
+        );
     } else {
         wire(&mut session, json!({"t":"msg","d":{"op":"callMethod","accountName":ACCOUNT,"data":{"requestId":"hl-manual","method":"placeOrders","args":[[{"symbol":"BTC-PERP","type":"limit","side":"buy","amount":0.001,"price":55000}]]}}})).await;
         let reply = next(&mut sent, "callMethod:done").await;
@@ -555,11 +583,17 @@ async fn hyperliquid_order_frame(sent: &mut crate::out::Receiver, kind: &str) ->
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn delegated_hyperliquid_protected_identity_survives_session_construction() {
-    hyperliquid_protected_placement(false).await;
+    hyperliquid_protected_placement(false, false).await;
 }
 
 #[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
 #[tokio::test]
-async fn delegated_hyperliquid_typed_submit_refuses_incompatible_uuid_before_send() {
-    hyperliquid_protected_placement(true).await;
+async fn delegated_hyperliquid_typed_submit_maps_uuid_before_protected_send() {
+    hyperliquid_protected_placement(true, false).await;
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_hyperliquid_typed_submit_maps_explicit_intent_id() {
+    hyperliquid_protected_placement(true, true).await;
 }
