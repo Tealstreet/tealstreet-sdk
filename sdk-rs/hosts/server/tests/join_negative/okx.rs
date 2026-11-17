@@ -19,13 +19,68 @@ fn secret(key: &str) -> Option<&'static str> {
         _ => None,
     }
 }
-fn valid_rest<const KIND: u8>(_path: &str, _query: Option<&str>, _headers: &HeaderMap) -> bool {
-    // RED: an unchecked fake venue must not make the refusal tests pass.
-    true
+fn single<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    let mut values = headers.get_all(name).iter();
+    let value = values.next()?.to_str().ok()?;
+    values.next().is_none().then_some(value)
 }
-fn valid_login(_request: &Value) -> bool {
-    let _ = secret(KEY);
-    true
+fn valid_rest<const KIND: u8>(path: &str, query: Option<&str>, headers: &HeaderMap) -> bool {
+    (|| {
+        let material = secret(single(headers, "ok-access-key")?)?;
+        if single(headers, "ok-access-passphrase")? != PASS {
+            return None;
+        }
+        let valid_demo = if matches!(KIND, 1 | 3) {
+            single(headers, "x-simulated-trading") == Some("1")
+        } else {
+            headers
+                .get_all("x-simulated-trading")
+                .iter()
+                .next()
+                .is_none()
+        };
+        if !valid_demo {
+            return None;
+        }
+        let stamp = single(headers, "ok-access-timestamp")?;
+        if stamp.is_empty() {
+            return None;
+        }
+        let target = match query {
+            Some(q) => format!("{path}?{q}"),
+            None => path.to_owned(),
+        };
+        let preimage = format!("{stamp}GET{target}");
+        Some(
+            single(headers, "ok-access-sign")?
+                == hmac_sha256(material.as_bytes(), preimage.as_bytes(), Encoding::Base64),
+        )
+    })() == Some(true)
+}
+fn valid_login(request: &Value) -> bool {
+    (|| {
+        if request["op"] != "login" || request["args"].as_array()?.len() != 1 {
+            return None;
+        }
+        let a = &request["args"][0];
+        let material = secret(a["apiKey"].as_str()?)?;
+        if a["passphrase"] != PASS {
+            return None;
+        }
+        let stamp = a["timestamp"].as_str()?;
+        let parsed = stamp.parse::<u64>().ok()?;
+        if stamp != parsed.to_string() {
+            return None;
+        }
+        Some(
+            a["sign"]
+                == hmac_sha256(
+                    material.as_bytes(),
+                    format!("{stamp}GET/users/self/verify").as_bytes(),
+                    Encoding::Base64,
+                ),
+        )
+    })() == Some(true)
 }
 impl<const KIND: u8> Venue for Okx<KIND> {
     const NAME: &'static str = match KIND {
