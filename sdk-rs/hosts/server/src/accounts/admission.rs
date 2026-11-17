@@ -497,7 +497,7 @@ impl Registry {
                         && crate::delegated::probe::cosigned_ready(init) =>
                 {
                     let prepared = prepare(init, false, Some(link.clone()))
-                        .map_err(|_| ProbeRefusal::INVALID)?;
+                        .map_err(|_| ProbeRefusal::INVALID.at(RefusalStage::Construction))?;
                     let remote = prepared.remote.ok_or(ProbeRefusal::INVALID)?;
                     (
                         prepared.plan,
