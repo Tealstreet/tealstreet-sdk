@@ -34,10 +34,22 @@ fn single<'a>(h: &'a HeaderMap, n: &str) -> Option<&'a str> {
     it.next().is_none().then_some(v)
 }
 fn valid(key: &str, nonce: &str, stamp: &str, query: &str, sig: &str) -> bool {
-    // RED: intentionally unchecked fake authentication, not production.
-    let _ = (material(key), nonce, stamp, query, sig);
-    true
+    let Some(secret) = material(key) else {
+        return false;
+    };
+    if nonce.is_empty()
+        || !nonce
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        || !stamp
+            .parse::<u64>()
+            .is_ok_and(|t| t.abs_diff(now_ms()) <= 10_000)
+    {
+        return false;
+    }
+    sig == signature(&format!("{nonce}{stamp}{key}{query}"), secret)
 }
+
 fn valid_rest<const SIMULATED: bool>(uri: &Uri, h: &HeaderMap) -> bool {
     (|| {
         let simulation = single(h, "x-simulated-trading");
