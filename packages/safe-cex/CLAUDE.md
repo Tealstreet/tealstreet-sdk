@@ -1907,7 +1907,8 @@ edge Worker `/api/public_proxy` host `getPublicCorsProxy()` returns (the tunnel 
 
 **Nothing credentialed goes to the public proxy (`transport/publicProxyGuard.ts`).**
 Engine `prepare` refuses, before I/O, any request bound for `publicCorsProxy()`
-with primary/secondary intent, an `Authorization`/venue key header or a
+with primary/secondary intent, an `Authorization`/venue key header (including
+the case-insensitive `Coinbase-Authorization` proxy alias) or a
 `signature`/`sign` query param (`SignedPublicProxyRefusal`, code
 `HTTP_PREPARATION_INVALID`). Secondary read keys are deprecated, so their default
 public-proxy reads fail closed, and the native plan omits a public-proxy
