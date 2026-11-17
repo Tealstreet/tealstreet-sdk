@@ -437,13 +437,13 @@ async fn hyperliquid_protected_placement(typed: bool) {
     let material = format!("0x{:064x}", 7);
     let wallet = safe_cex_crypto::ethereum::private_key_address(&format!("0x{:064x}", 8)).unwrap();
     let signer = safe_cex_crypto::ethereum::private_key_address(&material).unwrap();
-    let vector = json!({"input":{"key":wallet}});
+    let vector = json!({"input":{"key":signer}});
     let venue = MockVenue::for_hyperliquid(wallet.clone(), material.clone());
     let registry = crate::accounts::testing::e2e_registry(USER, venue.clone());
     let (mut session, mut sent) = connection(registry.clone());
     session.order_frames_enabled = typed;
     let mut results = session.take_verified();
-    let bytes = serde_json::to_vec(&json!({"key":wallet,"secret":material})).unwrap();
+    let bytes = serde_json::to_vec(&json!({"key":signer,"secret":material})).unwrap();
     let mut init = sealed_init_for_offer(
         &mut session,
         &mut sent,
@@ -503,10 +503,19 @@ async fn hyperliquid_protected_placement(typed: bool) {
         let ack = hyperliquid_order_frame(&mut sent, "order.ack").await;
         assert_eq!(ack["d"]["received"], true);
         let outcome = hyperliquid_order_frame(&mut sent, "order.outcome").await;
-        assert_eq!(outcome["d"]["outcome"], "placed", "{outcome}");
-        assert_eq!(outcome["d"]["venueOrderId"], "77");
+        // fa4b80b08 exposed the separate UUID/cloid mismatch: keep its no-send refusal.
+        assert_eq!(outcome["d"]["outcome"], "refused", "{outcome}");
+        assert_eq!(outcome["d"]["error"]["outcome"], "notSent");
+        assert_eq!(
+            outcome["d"]["error"]["message"],
+            "Hyperliquid client order ID must be 0x followed by 32 lowercase hex characters"
+        );
+        assert!(outcome["d"]["venueOrderId"].is_null());
         assert_eq!(outcome["d"]["clientOrderId"], intent);
         assert_eq!(outcome["d"]["instanceId"], INSTANCE);
+        assert!(venue.observed.lock().unwrap().writes.is_empty());
+        session.close();
+        return;
     } else {
         wire(&mut session, json!({"t":"msg","d":{"op":"callMethod","accountName":ACCOUNT,"data":{"requestId":"hl-manual","method":"placeOrders","args":[[{"symbol":"BTC-PERP","type":"limit","side":"buy","amount":0.001,"price":55000}]]}}})).await;
         let reply = next(&mut sent, "callMethod:done").await;
@@ -551,6 +560,6 @@ async fn delegated_hyperliquid_protected_identity_survives_session_construction(
 
 #[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
 #[tokio::test]
-async fn delegated_hyperliquid_protected_identity_survives_typed_placement() {
+async fn delegated_hyperliquid_typed_submit_refuses_incompatible_uuid_before_send() {
     hyperliquid_protected_placement(true).await;
 }

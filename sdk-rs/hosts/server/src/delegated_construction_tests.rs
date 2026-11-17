@@ -492,7 +492,7 @@ async fn delegated_settings_authenticated_switch_drops_retired_work_and_builds_f
 #[cfg(target_os = "linux")]
 fn protected_hl() -> crate::delegated::PreparedDelegated {
     let secret = format!("0x{:064x}", 7);
-    let key = safe_cex_crypto::ethereum::private_key_address(&format!("0x{:064x}", 8)).unwrap();
+    let key = safe_cex_crypto::ethereum::private_key_address(&secret).unwrap();
     let init = InitPayload {
         account_name: "protected-hl".into(),
         exchange_name: "hyperliquid".into(),
@@ -564,7 +564,11 @@ async fn delegated_hyperliquid_trusted_build_rejects_substituted_refs_or_provide
                 let result = safe_cex_native::spawn_venue_account(
                     venue,
                     &options.to_string(),
-                    crate::delegated_e2e_io::MockVenue::new("synthetic".into(), "synthetic".into()),
+                    // Reuse the actor's transport type instead of duplicating every venue.
+                    crate::delegated_e2e_io::Io::Mock(crate::delegated_e2e_io::MockVenue::new(
+                        "synthetic".into(),
+                        "synthetic".into(),
+                    )),
                     provider,
                     config,
                 );
