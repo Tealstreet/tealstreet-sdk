@@ -70,32 +70,7 @@ impl ProbeOutcome {
     }
 }
 
-/// Closed host-owned labels; no error text or client data can become a stage.
-#[derive(Clone, Copy, Debug, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum RefusalStage {
-    Unverified,
-    PrivateRead,
-    PrivateStartup,
-    Options,
-    Authority,
-    Construction,
-    ProbeJoin,
-    ProbeClosed,
-    SignerSetup,
-    ProbeTimeout,
-    AccountAttach,
-    Authentication,
-    VenuePolicy,
-    PublicAccount,
-    SigningMode,
-    Capacity,
-    Permit,
-    MissingHandover,
-    HandoverAttempt,
-    HandoverOpen,
-    KeyOffer,
-}
+pub(crate) use crate::envelope::InitRefusalStage as RefusalStage;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProbeRefusal {
@@ -145,6 +120,16 @@ impl ProbeRefusal {
             stage: RefusalStage::PrivateRead,
             error_kind: Some(kind),
             venue_code: None,
+        }
+    }
+}
+
+impl From<ProbeRefusal> for crate::envelope::InitRefusalMetadata {
+    fn from(refusal: ProbeRefusal) -> Self {
+        Self {
+            error_kind: refusal.error_kind,
+            venue_code: refusal.venue_code,
+            stage: (!matches!(refusal.stage, RefusalStage::Unverified)).then_some(refusal.stage),
         }
     }
 }

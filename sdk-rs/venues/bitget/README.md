@@ -16,6 +16,14 @@ retires the socket immediately. Repeated login failures retain their backoff;
 only stable authenticated traffic resets it. A delayed post-write recovery
 retains its recovery hint and waits for any pending authentication retry.
 
+Public subscribe and unsubscribe envelopes are packed by their actual serialized
+UTF-8 size, including JSON escaping and envelope overhead, within Classic V2's
+4096-byte limit. Catalogue order and the legacy three-socket ticker partition
+remain unchanged; stock-style instrument names are not excluded by spelling.
+A single topic that cannot fit both subscription and later unsubscription is
+refused locally with a bounded `subscription.rejected` event, while other topics
+continue. Reconnects and book/candle repair use the same bounded formatter.
+
 Protocol sources for the scripted tests:
 
 - [Classic changelog: sequence metadata replaces checksums](https://www.bitget.com/zh-CN/legacy-docs/classic/changelog)
@@ -29,6 +37,12 @@ account settings; a later Classic `40085` response promotes the account, closes
 the old socket and invalidates older HTTP generations. REST snapshots preserve
 newer WebSocket state, terminal orders and recently opened orders. Failed reads
 never commit empty account state.
+
+A leverage read for a fresh, flat UTA symbol may return JSON `null` when a valid
+settings response omits its product/symbol and neither a prior numeric setting
+nor an open position exists. This means unavailable leverage, never a default.
+Known-setting omissions, malformed settings and venue/HTTP failures still refuse;
+metadata reads never set leverage to discover it.
 
 Classic and UTA normal orders use the legacy TS allocation: round the requested amount,
 repeat the rounded equal lot `ceil(amount / max)` times, then append the rounded
