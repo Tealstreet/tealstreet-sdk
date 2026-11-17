@@ -92,7 +92,7 @@ fn normal_public_and_private_registry_factories_construct_only_spot_routes() {
                 request
                     .headers
                     .iter()
-                    .any(|(k, v)| k == "X-BX-APIKEY" && v == "spot-fixture-key")
+                    .any(|(k, v)| *k == "X-BX-APIKEY" && v == "spot-fixture-key")
             );
             assert!(request.url.contains("signature="));
         }
