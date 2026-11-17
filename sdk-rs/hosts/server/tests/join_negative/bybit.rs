@@ -19,6 +19,32 @@ fn dated(mut reply: Value) -> Value {
     reply
 }
 
+fn websocket_auth_valid(args: &Value) -> bool {
+    let Some([key, expiry, signature]) = args.as_array().map(Vec::as_slice) else {
+        return false;
+    };
+    let secret = match key.as_str() {
+        Some(KEY) => SECRET,
+        Some(OTHER_KEY) => OTHER_SECRET,
+        _ => return false,
+    };
+    let expiry = expiry
+        .as_str()
+        .map(str::to_owned)
+        .or_else(|| expiry.as_u64().map(|value| value.to_string()));
+    let Some(expiry) =
+        expiry.filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+    else {
+        return false;
+    };
+    let expected = hmac_sha256(
+        secret.as_bytes(),
+        format!("GET/realtime{expiry}").as_bytes(),
+        Encoding::Hex,
+    );
+    signature.as_str() == Some(expected.as_str())
+}
+
 impl<const VARIANT: u8, const TESTNET: bool, const BRAZIL: bool> Venue
     for BybitCase<VARIANT, TESTNET, BRAZIL>
 {
@@ -33,7 +59,7 @@ impl<const VARIANT: u8, const TESTNET: bool, const BRAZIL: bool> Venue
         Algorithm::HmacSha256
     }
     fn replayable(frame: &Value) -> bool {
-        // REST private reads are the proof; socket authentication is a separate startup prerequisite.
+        // REST private reads are the proof; socket authentication always uses fresh signing work.
         !frame["d"]["wsAuth"]["toSign"]
             .as_str()
             .unwrap()
@@ -186,19 +212,7 @@ impl<const VARIANT: u8, const TESTNET: bool, const BRAZIL: bool> Venue
             "write socket op"
         );
         let valid = if op == "auth" {
-            let key = request["args"][0].as_str().unwrap();
-            let secret = match key {
-                KEY => SECRET,
-                OTHER_KEY => OTHER_SECRET,
-                _ => "",
-            };
-            let stamp = &request["args"][1];
-            let expected = hmac_sha256(
-                secret.as_bytes(),
-                format!("GET/realtime{stamp}").as_bytes(),
-                Encoding::Hex,
-            );
-            !secret.is_empty() && request["args"][2] == expected
+            websocket_auth_valid(&request["args"])
         } else {
             true
         };
