@@ -40,3 +40,11 @@ cargo test --locked -j2 -p safe-cex-exchange-server --test negative_join_binance
 
 All traffic stays on loopback. No catalog, eligibility, origin, signing codec or
 WASM input changes are part of this leaf.
+
+Synthetic authentication refusals carry HTTP 401 with the negative venue code;
+ordinary replies remain 200. A bounded direct loopback regression first observed
+200 instead of 401 and fails before that family mapping is installed. This
+corrects the fake wire protocol while retaining the permanent original-binding
+refusal assertion. The earlier independent intermittent refusal-classification
+failure remains recorded for the corrected-head review; no native error or
+admission outcome is injected or changed here.

@@ -1,6 +1,6 @@
 //! Independent synthetic Binance query-HMAC/Spot WS verifier; no live I/O.
 use super::join_negative::{ACCOUNT, Observed, Venue};
-use axum::http::{HeaderMap, Method, Uri};
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::signing::Algorithm;
 use safe_cex_exchange_server::{accounts::now_ms, envelope::InitPayload};
@@ -230,6 +230,13 @@ impl<const KIND: u8, const TESTNET: bool> Venue for Binance<KIND, TESTNET> {
                 assert!(!public, "missing public fixture: {path}");
                 json!([])
             })
+    }
+    fn http_status(reply: &Value) -> StatusCode {
+        if reply["code"] == -2015 {
+            StatusCode::UNAUTHORIZED
+        } else {
+            StatusCode::OK
+        }
     }
     fn websocket(request: &Value, seen: &mut Observed) -> Value {
         assert!(KIND != 4, "Options startup is REST only");
