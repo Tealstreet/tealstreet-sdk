@@ -1342,3 +1342,23 @@ describe('closed info admission timeout diagnosis', () => {
     await expect(a.wait(ORIGIN, ORDERS, Date.now() + 20_000, abort.signal)).rejects.toBe(cancelled);
   });
 });
+
+it.each(['wait', 'dispatch'] as const)(
+  'does not relabel a timeout already aborted before %s admission starts',
+  async (stage) => {
+    const { HttpPreparationError } = await import('@tealstreet/safe-cex-wasm/host');
+    const a = client();
+    const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
+    const abort = new AbortController();
+    const error = new HttpPreparationError('timedOut');
+    abort.abort(error);
+    const send = vi.fn();
+    const work =
+      stage === 'wait'
+        ? a.wait(ORIGIN, ORDERS, Date.now() + 20_000, abort.signal)
+        : a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, abort.signal, send);
+    await expect(work).rejects.toBe(error);
+    expect(error.cause).toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
+  },
+);
