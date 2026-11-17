@@ -12,12 +12,66 @@ const OTHER_KEY: &str = "synthetic-secondary-api-key";
 const SECRET: &str = "synthetic-primary-material";
 const OTHER_SECRET: &str = "synthetic-secondary-material";
 
-fn valid_read(_path: &str, _query: Option<&str>, _headers: &HeaderMap) -> bool {
-    // RED checkpoint: actual verifier controls must expose unchecked fixture auth.
-    true
+fn material(key: &str) -> Option<&'static str> {
+    match key {
+        KEY => Some(SECRET),
+        OTHER_KEY => Some(OTHER_SECRET),
+        _ => None,
+    }
 }
-fn valid_auth(_request: &Value) -> bool {
-    true
+fn single<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    let mut values = headers.get_all(name).iter();
+    let value = values.next()?.to_str().ok()?;
+    values.next().is_none().then_some(value)
+}
+fn fresh(stamp: &str) -> bool {
+    stamp
+        .parse::<u64>()
+        .is_ok_and(|value| stamp == value.to_string() && now_ms().abs_diff(value) < 5_000)
+}
+fn valid_read(path: &str, query: Option<&str>, headers: &HeaderMap) -> bool {
+    (|| {
+        let secret = material(single(headers, "x-api-key")?)?;
+        let stamp = single(headers, "x-api-timestamp")?;
+        if !fresh(stamp) {
+            return None;
+        }
+        let target = query.map_or_else(|| path.into(), |query| format!("{path}?{query}"));
+        let bytes = if path.starts_with("/v1/") {
+            format!("{}|{stamp}", query.unwrap_or_default())
+        } else {
+            format!("{stamp}GET{target}")
+        };
+        Some(
+            single(headers, "x-api-signature")?
+                == hmac_sha256(secret.as_bytes(), bytes.as_bytes(), Encoding::Hex),
+        )
+    })() == Some(true)
+}
+fn valid_auth(request: &Value) -> bool {
+    (|| {
+        let params = request["params"].as_object()?;
+        if request["event"] != "auth" || params.len() != 3 {
+            return None;
+        }
+        let secret = material(params.get("apikey")?.as_str()?)?;
+        let number = params.get("timestamp")?.as_f64()?;
+        if !number.is_finite() || number.fract() != 0.0 {
+            return None;
+        }
+        let stamp = format!("{number:.0}");
+        if !fresh(&stamp) {
+            return None;
+        }
+        Some(
+            params.get("sign")?.as_str()?
+                == hmac_sha256(
+                    secret.as_bytes(),
+                    format!("|{stamp}").as_bytes(),
+                    Encoding::Hex,
+                ),
+        )
+    })() == Some(true)
 }
 fn refusal(request: &Value, seen: &mut Observed) -> Value {
     seen.rejections += 1;
