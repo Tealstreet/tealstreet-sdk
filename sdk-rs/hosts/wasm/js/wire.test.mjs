@@ -1373,7 +1373,7 @@ test('native store sections reject malformed lengths, tags, counts, padding and 
   invalid((v) => v.setUint32(24, 1, true), /invalid native store section length/);
   invalid((v) => v.setUint8(39, 1), /padding/);
   assert.throws(() => numericFrame([nativeSection(kind, []), nativeSection(kind, [])]).activeChasers(), /duplicate native store section/);
-  const badRevision = nativeSection(kind, []); badRevision.revision = 1;
+  const badRevision = nativeSection(kind, []); badRevision.revision = 2;
   assert.throws(() => numericFrame([badRevision]), /unsupported section/);
   const section = nativeSection(SECTION.BALANCE_INFO, 'x');
   const frame = numericFrame([section]); frame.view.setUint32(29, 100, true);
@@ -1405,4 +1405,17 @@ test('native message-handler statistics carry snapshot and topic-update semantic
   for (const row of [[4, 0, 1, NaN], [0, 0, 2, 1], [0, 0, 3, -1]]) {
     assert.throws(() => numericFrame([stringSection, statsSection(false, [row])]).messageHandlerStats(), /invalid message handler stats row/);
   }
+});
+
+test('native UTF-8 revision decodes scalar text and rejects invalid bytes', () => {
+  const bytes = new TextEncoder().encode('账户🌊');
+  const section = { kind: SECTION.BALANCE_INFO, revision: 1, length: Math.ceil((9 + bytes.length) / 8) * 8,
+    write(view, at) {
+      view.setUint32(at, 5 + bytes.length, true); view.setUint8(at + 4, 5);
+      view.setUint32(at + 5, bytes.length, true); new Uint8Array(view.buffer, at + 9, bytes.length).set(bytes);
+    } };
+  const frame = numericFrame([section]);
+  assert.equal(frame.balanceInfo(), '账户🌊');
+  frame.view.setUint8(33, 0xff);
+  assert.throws(() => frame.balanceInfo(), /encoded data|encoding|UTF-8/);
 });

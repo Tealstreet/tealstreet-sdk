@@ -44,7 +44,7 @@ export const TICKER_FIELDS = [
 ];
 
 const LEGACY_TICKER_FIELDS = TICKER_FIELDS.slice(0, 11);
-const REVISED_SECTIONS = new Set([SECTION.MARKETS, SECTION.TICKERS, SECTION.TICKER_DELTAS, SECTION.ORDERS, SECTION.POSITIONS, SECTION.FILLS, SECTION.SETTINGS]);
+const REVISED_SECTIONS = new Set([SECTION.MARKETS, SECTION.TICKERS, SECTION.TICKER_DELTAS, SECTION.ORDERS, SECTION.POSITIONS, SECTION.FILLS, SECTION.SETTINGS, SECTION.SOCKET_HEALTH, SECTION.ACTIVE_CHASERS, SECTION.ACTIVE_TWAPS, SECTION.ORDERS_RISK, SECTION.DISPLAYED_POSITIONS, SECTION.DISPLAYED_MARGIN, SECTION.BALANCE_INFO]);
 const KNOWN_SECTIONS = new Set(Object.values(SECTION));
 
 export const MARKET_COLUMNS = [
@@ -128,6 +128,7 @@ export const positionEnums = (word) => ({
 
 // Native registries may import before their host supplies text codecs.
 let utf8 = typeof TextDecoder === 'function' ? new TextDecoder() : undefined;
+let nativeText;
 const align8 = (n) => Math.ceil(n / 8) * 8;
 const requireEnd = (section, end) => {
   if (!Number.isSafeInteger(end) || end > section.offset + section.length) throw new Error(`truncated section ${section.kind}`);
@@ -270,6 +271,10 @@ export class Frame {
     const count = () => view.getUint32(take(4), true);
     const text = () => {
       const n = count();
+      if (section.revision === 1) {
+        const start = take(n);
+        return (nativeText ??= new TextDecoder('utf-8', { fatal: true })).decode(new Uint8Array(this.buffer, start, n));
+      }
       const start = take(n * 2);
       let out = '';
       // Bounded calls also support large retained venue info on Hermes.

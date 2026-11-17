@@ -190,7 +190,7 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
         restored["status"], "paused",
         "key admission never auto-replays a job"
     );
-    assert_eq!(restored["ordersExecuted"], 7);
+    assert_eq!(restored["ordersExecuted"].as_f64(), Some(7.0));
     assert_eq!(restored["id"], "client-held-twap");
     session
         .msg(AccountMsg {

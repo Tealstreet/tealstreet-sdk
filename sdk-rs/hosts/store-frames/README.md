@@ -1,46 +1,39 @@
 # Native UI frame production
 
-`safe-cex-store-frames` is the shared host boundary for the hosted account actor
-and LOCAL wasm engine. The venue engine retains its small internal models;
-this crate constructs the public rows from `safe-cex-types`, the same records
-which generate the TypeScript API. The host disables their default `source-json`
-feature, preserving the engine's original serde_json configuration; native
-retained fields preserve order and UTF-16 themselves. Source parity/cache builds
-keep their original JSON feature profile by default. There is no mutable TypeScript store or
-`op:'store'` transport in this path.
+This host boundary composes engine models and native chaser rows into UI records.
+It does not depend on the restored port crates. Financial calculations use native
+floating-point arithmetic and display labels use Rust fixed precision formatting.
+Public TypeScript declarations and accessor signatures remain unchanged.
 
 SCXF sections 26–32 replace socket health, active chasers, active TWAPs, order
-risk, displayed positions, displayed margin and balance info, respectively.
-The codec is `safe-cex-types/src/store_frame_wire.rs`; `hosts/wasm/js/wire.mjs`
-is the independent, pure-JS reader used by web and Hermes. Each section has a
-little-endian u32 payload length, tagged native values, then zero padding to an
-eight-byte boundary. Tags 0–7 mean undefined, null, false, true, binary64,
-UTF-16 text, array and object. Text/array/object counts are u32. Object keys are
-UTF-16 text without a tag. Sections are revision zero. An absent section leaves
-the consumer's current value intact; present empty collections clear it.
-`balanceInfo()` returns null to clear previously published info.
+risk, displayed positions, displayed margin and balance info. Section 25 remains
+the engine's subscription diagnostics table. Absent sections preserve consumer
+identities; empty collections clear them, and balance info null clears that field.
 
-The existing section 25 carries native subscription diagnostics. Its reader
-returns `replace` plus the public/business/futures/private topic rows and their
-monotonic ages. It requires no derived store message.
+The typed Serde encoder lives in `engine/src/store_frame_wire.rs`. Revision one
+uses length-prefixed UTF-8 strings and binary64 numbers, written directly from
+native records, with no intermediate JSON conversion. A payload starts with a
+u32 byte length and ends with zero padding to eight bytes. Tags 1–7 are null,
+false, true, number, string, array and record; collection counts are u32. Record
+keys are length-prefixed strings. The pure-JS reader also accepts the previous
+revision zero during client upgrades. Generated TypeScript types are unchanged.
 
-Derived projections cache their generated rows and encoded sections. Only
-changed sections are appended. Position PnL windows sample at most once per
-second and retain one/five minutes of history; closed position keys are evicted.
-Socket flags and close diagnostics publish immediately, timestamp-only changes
-at most once per five seconds. Snapshots carry every section without consuming
-the streaming publication baseline. Router fencing flushes its final paused
-rows before retiring the actor. Holder-specific account labels are rewritten
-inside the native TWAP/position sections while all other sections keep their
-original bytes.
+Only opaque balance info and existing algorithm metadata use host JSON values;
+position, market, ticker, balance and risk calculations use engine records.
+Holder-label projection copies unrelated bytes, preserving floating-point bits.
+Snapshots do not consume the streaming publication baseline. Router fencing
+flushes the final paused rows before retiring the actor. PnL history is bounded
+and sampled at most once per second. Delisted TWAPs retain their admitted market.
 
-The TypeScript risk policy and real safe-math helper are executed independently
-against the native result in the scoped tests. As in the existing shared-type
-oracles, install root Yarn dependencies and set `SAFE_CEX_TYPESCRIPT_PATH` when
-TypeScript is outside this checkout's module resolution:
+Run scoped validation from `sdk-rs/`:
 
 ```sh
-SAFE_CEX_TYPESCRIPT_PATH=/path/to/node_modules/typescript cargo test --locked -p safe-cex-store-frames
+cargo test --locked -p safe-cex-store-frames
 cargo clippy --locked -p safe-cex-store-frames --all-targets
 node --test hosts/wasm/js/wire.test.mjs
+PATH=/tmp/pybin:$PATH ./scripts/check-bans.sh
 ```
+
+The risk differential test needs the root Yarn TypeScript dependency; set
+`SAFE_CEX_TYPESCRIPT_PATH` if it is outside normal Node resolution. Its numeric
+comparison permits floating-point roundoff from native arithmetic.

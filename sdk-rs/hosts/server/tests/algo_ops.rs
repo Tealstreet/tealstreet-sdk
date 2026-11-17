@@ -787,7 +787,7 @@ async fn twap_state_restores_a_row_the_ts_worker_persisted() {
                 .await;
             let twap = &active_twaps(&store["data"])[0];
             assert_eq!(twap["id"], "ts-twap-1");
-            assert_eq!(twap["ordersExecuted"], 3);
+            assert_eq!(twap["ordersExecuted"].as_f64(), Some(3.0));
             assert_twap_row(twap);
         })
         .await;

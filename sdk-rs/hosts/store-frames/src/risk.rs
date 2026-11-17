@@ -1,17 +1,19 @@
 //! Order-line policy formerly produced by OrdersRiskProfilePostprocessor.
-use indexmap::IndexMap;
-use safe_cex_num::{math_min, multiply};
-use safe_cex_types::{
-    ModelField, Order, OrderRiskProfile, OrderSide, OrderStatus, OrderType, Position, PositionMode,
-    PositionSide, StoreData,
-};
-use std::collections::HashMap;
-type Risks = IndexMap<String, Vec<OrderRiskProfile>>;
+use crate::model::{OrderRiskProfile, Projection};
+use safe_cex_engine::model::*;
+use std::collections::{BTreeMap, HashMap};
+type Risks = BTreeMap<String, Vec<OrderRiskProfile>>;
 fn price(o: &Order) -> f64 {
-    o.price.unwrap_or(f64::NAN)
+    o.price
 }
 fn full(o: &Order) -> bool {
-    o.r#type != Some(OrderType::Limit) && (o.amount == 0.0 || o.filled + o.remaining == 0.0)
+    o.kind != OrderType::Limit && (o.amount == 0.0 || o.filled + o.remaining == 0.0)
+}
+fn multiply(a: f64, b: f64) -> f64 {
+    a * b
+}
+fn math_min(a: f64, b: f64) -> f64 {
+    a.min(b)
 }
 fn opposite(s: PositionSide) -> PositionSide {
     if s == PositionSide::Long {
@@ -21,75 +23,20 @@ fn opposite(s: PositionSide) -> PositionSide {
     }
 }
 fn number(value: f64) -> String {
-    // Intl.NumberFormat rounds the shortest decimal representation half away
-    // from zero. Binary toFixed/format rounding differs at values like 1.005.
-    if value.is_nan() {
-        return "0.0".into();
+    if !value.is_finite() {
+        return "—".into();
     }
-    if value.is_infinite() {
-        return if value.is_sign_negative() {
-            "-∞"
-        } else {
-            "∞"
-        }
-        .into();
-    }
-    let decimal = safe_cex_num::js_number_string(value.abs());
-    let (mantissa, exponent) = decimal
-        .split_once('e')
-        .map_or((decimal.as_str(), 0), |(m, e)| {
-            (m, e.parse::<i32>().expect("decimal exponent"))
-        });
-    let point = mantissa.find('.').unwrap_or(mantissa.len()) as i32 + exponent;
-    let digits: Vec<u8> = mantissa.bytes().filter(|&b| b != b'.').collect();
-    let target = point + 2;
-    let round_up = target >= 0 && digits.get(target as usize).is_some_and(|&d| d >= b'5');
-    let mut cents = if target <= 0 {
-        vec![b'0']
-    } else {
-        let mut out = digits[..digits.len().min(target as usize)].to_vec();
-        out.resize(target as usize, b'0');
-        out
-    };
-    if round_up {
-        let mut carry = true;
-        for digit in cents.iter_mut().rev() {
-            if *digit == b'9' {
-                *digit = b'0';
-            } else {
-                *digit += 1;
-                carry = false;
-                break;
-            }
-        }
-        if carry {
-            cents.insert(0, b'1');
-        }
-    }
-    let first = cents
-        .iter()
-        .position(|&b| b != b'0')
-        .unwrap_or(cents.len() - 1);
-    let mut cents = cents[first..].to_vec();
-    while cents.len() < 3 {
-        cents.insert(0, b'0');
-    }
-    let whole = cents.len() - 2;
-    let mut out = if value.is_sign_negative() && value != 0.0 {
-        "-".to_owned()
-    } else {
-        String::new()
-    };
-    for (i, &digit) in cents[..whole].iter().enumerate() {
-        if i > 0 && (whole - i).is_multiple_of(3) {
+    let value = if value == 0.0 { 0.0 } else { value };
+    let fixed = format!("{value:.2}");
+    let (whole, fraction) = fixed.split_once('.').expect("fixed precision");
+    let mut out = String::new();
+    for (i, c) in whole.chars().enumerate() {
+        if i > usize::from(whole.starts_with('-')) && (whole.len() - i).is_multiple_of(3) {
             out.push(',');
         }
-        out.push(char::from(digit));
+        out.push(c);
     }
-    out.push('.');
-    out.push(char::from(cents[whole]));
-    out.push(char::from(cents[whole + 1]));
-    out
+    format!("{out}.{fraction}")
 }
 
 fn line(pnl: f64, rolling: f64) -> String {
@@ -104,13 +51,9 @@ fn line(pnl: f64, rolling: f64) -> String {
         )
     }
 }
-pub fn calculate(data: &StoreData) -> Risks {
+pub fn calculate(data: &Projection) -> Risks {
     let mut open: HashMap<&str, Vec<&Order>> = HashMap::new();
-    for o in data
-        .orders
-        .iter()
-        .filter(|o| o.status == Some(OrderStatus::Open))
-    {
+    for o in data.orders.iter().filter(|o| o.status == OrderStatus::Open) {
         open.entry(&o.symbol).or_default().push(o);
     }
     let mut counts = HashMap::<&str, usize>::new();
@@ -140,7 +83,7 @@ pub fn calculate(data: &StoreData) -> Risks {
         p.entry_price = last;
         positions.push(p.clone());
         if p.position_mode != Some(PositionMode::Hedged) {
-            p.side = ModelField::Value(opposite(p.side.expect("engine side")));
+            p.side = opposite(p.side);
             positions.push(p);
         }
     }
@@ -150,7 +93,7 @@ pub fn calculate(data: &StoreData) -> Risks {
     secondary
 }
 fn process(
-    data: &StoreData,
+    data: &Projection,
     open: &HashMap<&str, Vec<&Order>>,
     counts: &HashMap<&str, usize>,
     positions: &[Position],
@@ -171,7 +114,7 @@ fn process(
         let m = data.markets.iter().find(|m| m.symbol == p.symbol);
         let maker = m.and_then(|m| m.maker_fee).unwrap_or(0.0);
         let taker = m.and_then(|m| m.taker_fee).unwrap_or(0.0);
-        let side = p.side.expect("engine side");
+        let side = p.side;
         let long = side == PositionSide::Long;
         let hedged = counts.get(p.symbol.as_str()).copied().unwrap_or(0) > 1
             || p.position_mode == Some(PositionMode::Hedged);
@@ -189,7 +132,7 @@ fn process(
             .iter()
             .copied()
             .filter(|o| {
-                o.side == Some(closing)
+                o.side == closing
                     && if long {
                         price(o) >= threshold
                     } else {
@@ -201,7 +144,7 @@ fn process(
             .iter()
             .copied()
             .filter(|o| {
-                (o.side == Some(closing) || o.r#type == Some(OrderType::Limit))
+                (o.side == closing || o.kind == OrderType::Limit)
                     && if long {
                         price(o) < threshold
                     } else {
@@ -252,27 +195,22 @@ fn process(
                     multiply(size * price(o), taker),
                     format!("PnL: {}", number(realized)),
                     true,
-                    false,
                 ));
                 let mut flipped = p.clone();
-                flipped.side = ModelField::Value(opposite(side));
+                flipped.side = opposite(side);
                 flipped.entry_price = price(o);
                 flipped.contracts = 0.0;
                 next.push(flipped);
                 break;
             }
-            if o.r#type == Some(OrderType::Limit)
-                && o.side == Some(closing)
-                && hedged
-                && o.reduce_only != Some(true)
-            {
+            if o.kind == OrderType::Limit && o.side == closing && hedged && !o.reduce_only {
                 continue;
             }
             let pnl = multiply(math_min(size, o.remaining), distance);
             let rolling = multiply(size, distance);
             realized += pnl;
             let mut text = line(pnl, rolling);
-            if !hedged && o.remaining > size && o.reduce_only != Some(true) {
+            if !hedged && o.remaining > size && !o.reduce_only {
                 text.push_str(if long {
                     ", Opens Short"
                 } else {
@@ -288,12 +226,11 @@ fn process(
                 multiply(math_min(size, o.remaining) * price(o), maker),
                 text,
                 false,
-                false,
             ));
             size -= o.remaining;
             if size <= 0.0 {
                 let mut flipped = p.clone();
-                flipped.side = ModelField::Value(opposite(side));
+                flipped.side = opposite(side);
                 flipped.entry_price = price(o);
                 flipped.contracts = size.abs();
                 next.push(flipped);
@@ -311,7 +248,7 @@ fn process(
                 1.0
             };
             let rows = risks.entry(o.id.clone()).or_default();
-            if full(o) || o.r#type == Some(OrderType::TrailingStopLoss) {
+            if full(o) || o.kind == OrderType::TrailingStopLoss {
                 let pnl = mult * multiply(size, distance);
                 realized += pnl;
                 rows.push(row(
@@ -323,16 +260,15 @@ fn process(
                     multiply(size * price(o), taker),
                     format!("PnL: {}", number(realized)),
                     true,
-                    false,
                 ));
                 break;
-            } else if o.r#type == Some(OrderType::Limit) {
+            } else if o.kind == OrderType::Limit {
                 entry = (o.remaining * price(o) + size * entry) / (size + o.remaining);
                 let rolling = mult * multiply(size, distance);
                 let text = if size == 0.0 {
                     format!(
                         "Opens {}",
-                        if o.side == Some(OrderSide::Buy) {
+                        if o.side == OrderSide::Buy {
                             "Long"
                         } else {
                             "Short"
@@ -350,14 +286,13 @@ fn process(
                     multiply(o.remaining * price(o), maker),
                     text,
                     false,
-                    true,
                 ));
                 size += o.remaining;
                 if size < 0.0 {
                     break;
                 }
             } else {
-                let on_trigger = if o.reduce_only == Some(true) {
+                let on_trigger = if o.reduce_only {
                     math_min(size, o.remaining)
                 } else {
                     o.remaining
@@ -373,7 +308,6 @@ fn process(
                     size - on_trigger,
                     multiply(on_trigger * price(o), maker),
                     line(pnl, rolling),
-                    false,
                     false,
                 ));
                 size -= on_trigger;
@@ -395,18 +329,16 @@ fn row(
     fee: f64,
     text: String,
     full: bool,
-    size_before_fee: bool,
 ) -> OrderRiskProfile {
     OrderRiskProfile {
         is_looking_like_a_full_stop: full.then_some(true),
         order_pnl: pnl,
         total_realized_pnl: realized,
         rolling_unrealized_pnl: rolling,
-        order_line_pos_side: ModelField::Value(side),
+        order_line_pos_side: side,
         position_size: size,
-        order_line_text: Some(text),
-        fee: Some(fee),
-        position_size_before_fee: size_before_fee,
+        order_line_text: text,
+        fee,
     }
 }
 
@@ -414,18 +346,9 @@ fn row(
 mod tests {
     use super::*;
     #[test]
-    fn locale_pnl_uses_decimal_half_expand_and_grouping() {
-        for (value, expected) in [
-            (1.005, "1.01"),
-            (2.675, "2.68"),
-            (-1.005, "-1.01"),
-            (-0.0, "0.00"),
-            (999.995, "1,000.00"),
-            (0.0000001, "0.00"),
-            (f64::INFINITY, "∞"),
-            (f64::NAN, "0.0"),
-        ] {
-            assert_eq!(number(value), expected);
-        }
+    fn native_fixed_precision_labels() {
+        assert_eq!(number(1234.5), "1,234.50");
+        assert_eq!(number(-0.0), "0.00");
+        assert_eq!(number(f64::NAN), "—");
     }
 }

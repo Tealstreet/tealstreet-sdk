@@ -67,12 +67,12 @@ async fn restored_state(reason: Option<interruption::Reason>) {
     let state=json!({"accountName":"acct","activeMarket":market,"size":0.1,"ordersSizes":[0.01,0.01,0.01],"side":"buy","status":"running","ordersCount":10,"ordersExecuted":7,"nextOrderAt":now+60000,"origin":"web","createdAt":now-180000,"startedAt":now-180000});
     page.op("acct","twap:state",json!([bound_row(&_account,"transferred-twap",&options,&state)])).await;
     let store=page.until("native-frame",|d|d["data"]["activeTWAPs"].as_array().is_some_and(|r|!r.is_empty())).await;
-    assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"],7,"progress preserved");
+    assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"].as_f64(), Some(7.0),"progress preserved");
     assert_eq!(store["data"]["activeTWAPs"][0]["status"], if reason.is_some() { "paused" } else { "running" }, "interrupted cross-box restore must not auto-resume merely because the destination never fenced");
     if reason.is_some() {
       page.op("acct", "twap:resume", json!("transferred-twap")).await;
       let resumed = page.until("native-frame", |d| d["data"]["activeTWAPs"].as_array().is_some_and(|rows| rows.first().is_some_and(|row| row["status"] == "running"))).await;
-      assert!(resumed["data"]["activeTWAPs"][0]["ordersExecuted"].as_u64().unwrap() >= 7);
+      assert!(resumed["data"]["activeTWAPs"][0]["ordersExecuted"].as_f64().unwrap() >= 7.0);
     } else {
       assert!(!page.ops("error").iter().any(|d| d["data"][1]["forceToast"] == true));
     }
@@ -138,7 +138,7 @@ async fn resume_survives_rebuild(same_box: bool) {
     let original_row=bound_row(&_account,"transferred-twap",&options,&state);
     page.op("acct","twap:state",json!([original_row])).await;
     let store=page.until("native-frame",|d|d["data"]["activeTWAPs"].as_array().is_some_and(|r|!r.is_empty())).await;
-    assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"],7,"progress preserved");
+    assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"].as_f64(), Some(7.0),"progress preserved");
     assert_eq!(store["data"]["activeTWAPs"][0]["status"],"paused","interrupted cross-box restore must not auto-resume merely because the destination never fenced");
     page.op("acct","twap:resume",json!("transferred-twap")).await;
     page.until("native-frame",|d|d["data"]["activeTWAPs"].as_array().is_some_and(|r|r.first().is_some_and(|r|r["status"]=="running"))).await;
