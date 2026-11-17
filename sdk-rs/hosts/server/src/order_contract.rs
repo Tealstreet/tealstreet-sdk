@@ -134,7 +134,7 @@ pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
 pub(crate) fn bybit_protection(venue: &str, order: &serde_json::Map<String, Value>) -> bool {
     matches!(venue, "bybit" | "bybitdemo" | "bybitinverse" | "bybitspot")
         && (matches!(
-            order["type"].as_str(),
+            order.get("type").and_then(Value::as_str),
             Some("stop_market" | "take_profit_market" | "trailing_stop_market" | "conditional")
         ) || ["triggerPrice", "stopLoss", "takeProfit"]
             .iter()
