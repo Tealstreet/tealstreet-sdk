@@ -144,3 +144,52 @@ async fn hosted_testnet_refuses_both_modes_when_hosted_origin_is_unavailable() {
     assert_eq!(seen.signed_reads, 0);
     assert_eq!(seen.writes, 0);
 }
+
+#[test]
+fn private_socket_fixture_requires_authentication_and_keeps_public_subscriptions_unsigned() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use serde_json::json;
+    let mut seen = Observed::default();
+    for seed in [7u8, 8] {
+        let key = STANDARD.encode(safe_cex_crypto::ed25519::public_key(&[seed; 32]).unwrap());
+        let signature = STANDARD.encode(
+            safe_cex_crypto::ed25519::sign(
+                b"instruction=subscribe&timestamp=10000&window=5000",
+                &[seed; 32],
+            )
+            .unwrap(),
+        );
+        let reply = Backpack::websocket(
+            &json!({"method":"SUBSCRIBE","params":["account.orderUpdate"],"signature":[key,signature,"10000","5000"]}),
+            &mut seen,
+        );
+        assert!(reply.get("error").is_none());
+    }
+    let no_auth = Backpack::websocket(
+        &json!({"method":"SUBSCRIBE","params":["account.orderUpdate"]}),
+        &mut seen,
+    );
+    assert_eq!(no_auth["error"]["code"], "UNAUTHORIZED");
+    let key = STANDARD.encode(safe_cex_crypto::ed25519::public_key(&[7; 32]).unwrap());
+    for (seed, wire_stamp) in [(8u8, "10000"), (7, "10001")] {
+        let signature = STANDARD.encode(
+            safe_cex_crypto::ed25519::sign(
+                b"instruction=subscribe&timestamp=10000&window=5000",
+                &[seed; 32],
+            )
+            .unwrap(),
+        );
+        let reply = Backpack::websocket(
+            &json!({"method":"SUBSCRIBE","params":["account.positionUpdate"],"signature":[key,signature,wire_stamp,"5000"]}),
+            &mut seen,
+        );
+        assert_eq!(reply["error"]["code"], "UNAUTHORIZED");
+    }
+    let public = Backpack::websocket(
+        &json!({"method":"SUBSCRIBE","params":["ticker.SOL_USDC_PERP"]}),
+        &mut seen,
+    );
+    assert!(public.get("error").is_none());
+    assert_eq!(seen.rejections, 3);
+    assert_eq!(seen.writes, 0);
+}
