@@ -43,6 +43,12 @@ ceiling retains 10,671 B reserve and both earlier combined floors. Native
 REST-book conformance uses mainnet only for BingX Spot, which has no testnet;
 requests are captured without transport and testnet Unsupported/NotSent remains tested.
 
+Fresh canonical strix builds at `44f9dedd` measure combined web/Node 17,918,873 B,
+1,352 B above that separate CI measurement. The approved 17,929,216 B ceiling
+uses the maximum plus 10 KiB rounded up to KiB, retains 10,343 B reserve and
+all prior floors. The BingX family measures 2,411,142 B; its unchanged
+2,421,760 B cap retains 10,618 B. Neither measurement substitutes for final-head CI.
+
 TxFlow agent refresh #3314 at merge 9bb43250830d measures 2,147,684 bytes;
 refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its
 2,158,592-byte floor retains the required 10 KiB reserve at that source.
