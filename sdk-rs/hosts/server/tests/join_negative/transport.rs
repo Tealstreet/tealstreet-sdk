@@ -29,7 +29,17 @@ impl Venue for WelcomeAndRaw {
         body: &Value,
         seen: &mut Observed,
     ) -> Value {
+        if uri.path() == "/refused" {
+            return json!({"code":-2015,"msg":"synthetic key refusal"});
+        }
         Bybit::http(method, uri, headers, body, seen)
+    }
+    fn http_status(reply: &Value) -> axum::http::StatusCode {
+        if reply["code"] == -2015 {
+            axum::http::StatusCode::UNAUTHORIZED
+        } else {
+            axum::http::StatusCode::OK
+        }
     }
     fn websocket(request: &Value, seen: &mut Observed) -> Value {
         Bybit::websocket(request, seen)
@@ -106,5 +116,32 @@ async fn websocket_hook_accepts_raw_ping_and_retains_json_messages() {
     assert_eq!(value["op"], "ping");
     assert_eq!(value["success"], true);
     socket.close(None).await.unwrap();
+    assert_eq!(f.seen.lock().unwrap().writes, 0);
+}
+
+#[tokio::test]
+async fn http_hook_preserves_success_and_returns_actual_refusal_status() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    assert_eq!(
+        Bybit::http_status(&json!({"code":-2015})),
+        axum::http::StatusCode::OK
+    );
+    let f = Fixture::new::<WelcomeAndRaw>().await;
+    let base = f
+        .websocket_url
+        .strip_suffix("/ws")
+        .unwrap()
+        .replacen("ws:", "http:", 1);
+    assert!(base.starts_with("http://127.0.0.1:"));
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let success = client.get(format!("{base}/ok")).send().await.unwrap();
+    assert_eq!(success.status(), axum::http::StatusCode::OK);
+    assert_eq!(success.json::<Value>().await.unwrap()["retCode"], 0);
+    let refusal = client.get(format!("{base}/refused")).send().await.unwrap();
+    assert_eq!(refusal.status(), axum::http::StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        refusal.json::<Value>().await.unwrap(),
+        json!({"code":-2015,"msg":"synthetic key refusal"})
+    );
     assert_eq!(f.seen.lock().unwrap().writes, 0);
 }

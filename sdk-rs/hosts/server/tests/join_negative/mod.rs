@@ -51,6 +51,9 @@ pub trait Venue: Send + Sync + 'static {
         body: &Value,
         seen: &mut Observed,
     ) -> Value;
+    fn http_status(_reply: &Value) -> axum::http::StatusCode {
+        axum::http::StatusCode::OK
+    }
     fn websocket(request: &Value, seen: &mut Observed) -> Value;
     fn initial_websocket_frames() -> Vec<String> {
         Vec::new()
