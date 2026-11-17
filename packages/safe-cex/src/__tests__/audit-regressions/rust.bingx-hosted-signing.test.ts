@@ -46,6 +46,21 @@ it('captures the exact BingX preimage with the presented key and no TS venue', a
   expect(input).toEqual(before);
 });
 
+it.each(['GET', 'PUT', 'DELETE', 'POST'])('uses a valid BingX JSON Content-Type for %s', async (method) => {
+  const { hostedSigning, host } = owned(() => 'owned-hex-mac');
+  const input: RemoteSignerRequest = { id: 'headers', type: 'http', exchangeName: 'bingx',
+    config: { method, baseURL: 'https://fixture.invalid', url: '/private',
+      params: { symbol: 'BTC-USDT' }, headers: {} } };
+  const out = await signHostedHttp('bingx', { key: '', secret: '' }, true, host, input);
+  expect(out.config?.headers['Content-Type']).toBe(method === 'POST' ? 'application/json' : 'application/json; charset=utf-8');
+  expect(out.config?.headers['X-SOURCE-KEY']).toBe('Tealstreet');
+  expect(out.config?.headers['X-BX-APIKEY']).toBe('owned-public');
+  expect(hostedSigning).toHaveBeenLastCalledWith({ kind: 'http', stampMs: stamp, revision: '3',
+    payload: `symbol=BTC-USDT&timestamp=${stamp}` });
+  const wire = method === 'POST' ? JSON.parse(String(out.config?.data)) : out.config?.params;
+  expect(wire).toEqual({ symbol: 'BTC-USDT', timestamp: stamp, signature: 'owned-hex-mac' });
+});
+
 it('leaves the livenet listen key unsigned and refuses a changed provider identity', async () => {
   const { hostedSigning, host } = owned(() => 'mac', 'rotated-public');
   const listenKey: RemoteSignerRequest = { id: 'listen', type: 'http', exchangeName: 'bingx',
@@ -57,14 +72,15 @@ it('leaves the livenet listen key unsigned and refuses a changed provider identi
   await expect(signHostedHttp('bingx', { key: '', secret: '' }, true, host, place())).rejects.toThrow('Signing identity changed');
 });
 
-it.each([place, cancel, amend])('hosted capture and the legacy TS interceptor share one wire (%#)', async (request) => {
+it.each([place, cancel, amend])('hosted capture preserves legacy signing with corrected Content-Type (%#)', async (request) => {
   vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(stamp);
   const legacy = await signHttpCapture(createAPI({ key: 'owned-public', secret: 'fixture-material', tealstreetTunnel: false } as ExchangeOptions,
     { name: 'bingx', grafanaEndpointsEvery: [], grafanaEndpointsPeriodic: [], emitter: { emit: () => undefined } } as never), request());
   const { host } = owned(hmac);
   const hosted = await signHostedHttp('bingx', { key: '', secret: '' }, true, host, request());
   expect(hosted.config?.headers['X-BX-APIKEY']).toBe(legacy.config?.headers['X-BX-APIKEY']);
-  expect(hosted.config?.headers['Content-Type']).toBe(legacy.config?.headers['Content-Type']);
+  expect(hosted.config?.headers['Content-Type']).toBe(request().config?.method === 'POST'
+    ? legacy.config?.headers['Content-Type'] : 'application/json; charset=utf-8');
   expect(hosted.config?.params).toEqual(legacy.config?.params);
   expect(hosted.config?.data).toBe(legacy.config?.data);
   expect(hosted.config?.url).toBe(legacy.config?.url);

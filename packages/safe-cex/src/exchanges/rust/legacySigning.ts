@@ -326,7 +326,7 @@ export const signHostedHttp = async (
     } : bingx ? {
       'X-BX-APIKEY': credential,
       'X-SOURCE-KEY': 'Tealstreet',
-      'Content-Type': 'application/json, charset=utf-8',
+      'Content-Type': 'application/json; charset=utf-8',
     } : mexc || cryptocom ? { 'Content-Type': 'application/json' } : woo ? { 'cache-control': 'no-cache' } : phemex ? {} : blofin ? {
       'Content-Type': 'application/json',
     } : binance ? {

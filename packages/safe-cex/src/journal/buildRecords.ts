@@ -2,6 +2,7 @@ import type { Execution } from '../types';
 import type { PositionInterval } from './position-intervals';
 import type { PositionRecord } from './position.types';
 
+import { classifiedError } from '../commandOutcome';
 import { mapFoldedInterval } from './fold.position-adapter';
 import { attributeFunding, reconstructPositionIntervals } from './position-intervals';
 
@@ -110,9 +111,14 @@ export const buildFoldedPositionRecords = async (
         'drives the fills fetch is unknown — continuing would report an empty account',
       { cause: incomeFailure.error },
     );
-    // Keep the venue's error NAME: the caller records only that, and a bare `Error` erases
-    // the difference between a rate limit and a rejected key.
+    // Native ExchangeError keeps the name Error; its typed classification must survive
+    // this wrapper so a rate limit does not become an unknown history failure.
     if (incomeFailure.error instanceof Error) failure.name = incomeFailure.error.name;
+    try {
+      Object.assign(failure, classifiedError(incomeFailure.error));
+    } catch {
+      // Unreadable diagnostic fields must not replace the original income failure.
+    }
     throw failure;
   }
 

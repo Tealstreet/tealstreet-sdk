@@ -1071,6 +1071,10 @@ and leave historical coverage uncompleted. Raw native/DO clients correlate the
 translated event command themselves; this SDK transport does not change their
 wire protocol. See B11 in `docs/plans/RUST_CUTOVER_CALLERS.md`.
 
+The fatal symbol-scoped income wrapper retains shared engine classification
+(`kind`, `outcome`, `venueCode`) alongside its existing name and cause. Failed
+income still stops the fold before any fill reads; no empty account is invented.
+
 ## Rust socket health
 
 Engine venues own their sockets and reconnect policy; the wasm host only
