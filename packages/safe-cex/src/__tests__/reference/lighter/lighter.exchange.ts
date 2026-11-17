@@ -1381,7 +1381,7 @@ export class LighterExchange extends BaseExchange {
         unrealizedPnl: 0,
         contracts: 0,
         leverage: leverageBySymbol[m.symbol] || m.limits.leverage.max || 10,
-        liquidationPrice: 0,
+        liquidationPrice: null,
         positionMode: PositionMode.OneWay,
         marginType: positionMarginType,
       });
@@ -3212,7 +3212,7 @@ export class LighterExchange extends BaseExchange {
     contracts: number,
     leverage: number,
     marginMode: 0 | 1 | undefined,
-  ): number => {
+  ): number | null => {
     const rawLiquidationPrice = Number.parseFloat(String(v(p, 'liquidationPrice') ?? v(p, 'liquidation_price') ?? 0));
     const rawIsFinite = Number.isFinite(rawLiquidationPrice) && rawLiquidationPrice > 0;
     const rawIsProfitSide =
@@ -3233,7 +3233,7 @@ export class LighterExchange extends BaseExchange {
       !Number.isFinite(contracts) ||
       contracts <= 0
     ) {
-      return rawIsFinite ? rawLiquidationPrice : 0;
+      return rawIsFinite ? rawLiquidationPrice : null;
     }
 
     const rawAllocatedMargin = Number.parseFloat(
@@ -3258,7 +3258,7 @@ export class LighterExchange extends BaseExchange {
       maintenanceMarginFraction < 0 ||
       maintenanceMarginFraction >= 1
     ) {
-      return rawIsFinite ? rawLiquidationPrice : 0;
+      return rawIsFinite ? rawLiquidationPrice : null;
     }
 
     const derivedLiquidationPrice =
@@ -3270,7 +3270,7 @@ export class LighterExchange extends BaseExchange {
       return derivedLiquidationPrice;
     }
 
-    return rawIsFinite ? rawLiquidationPrice : 0;
+    return rawIsFinite ? rawLiquidationPrice : null;
   };
 
   mapPosition(p: Record<string, any>) {
