@@ -86,3 +86,61 @@ async fn fixture_validates_both_pairs_and_rejects_wrong_material_and_stale_bytes
     assert_eq!(seen.rejections, 2);
     assert_eq!(seen.writes, 0);
 }
+
+#[tokio::test]
+async fn hosted_testnet_refuses_both_modes_when_hosted_origin_is_unavailable() {
+    use backpack_fixture::BackpackTestnet;
+    assert!(
+        matches!(safe_cex_native::resolve::rest_base_url("backpack", true),
+        Err(safe_cex_native::resolve::RoutingError::NoBaseUrl(venue)) if venue == "backpack")
+    );
+    let f = Fixture::new::<BackpackTestnet>().await;
+    for mode in ["cosigned", "delegated"] {
+        let mut client = Client::new(&f);
+        let mut init = BackpackTestnet::init();
+        init.signing_mode = Some(mode.into());
+        if mode == "delegated" {
+            let offer = client.offer::<BackpackTestnet>().await;
+            init.sealed = Some(
+                serde_json::from_value(seal(&offer, &init, BackpackTestnet::credentials(false)))
+                    .unwrap(),
+            );
+        }
+        client.init(init).await;
+        client
+            .finish::<BackpackTestnet>(&mut Device::default(), Answer::Correct)
+            .await;
+        assert!(f.registry.held(USER, ACCOUNT, client.socket()).is_none());
+        assert_eq!(f.registry.account_count(), 0);
+        let refusal = client
+            .frames
+            .iter()
+            .find(|frame| frame["d"]["op"] == "error")
+            .expect("typed unsupported-network refusal");
+        assert_eq!(refusal["d"]["accountName"], ACCOUNT);
+        assert_eq!(refusal["d"]["instanceId"], "negative-join-registration");
+        assert_eq!(refusal["d"]["data"][1]["kind"], "unverified");
+        // COSIGNED final construction and DELEGATED signer setup classify route refusal separately.
+        assert_eq!(refusal["d"]["data"][1]["transient"], mode == "cosigned");
+        assert!(
+            !client
+                .frames
+                .iter()
+                .any(|frame| frame["d"]["op"] == "account-signing-mode")
+        );
+        let requests: Vec<_> = client
+            .frames
+            .iter()
+            .filter(|frame| frame["t"] == "sign-req")
+            .collect();
+        assert_eq!(requests.len(), usize::from(mode == "cosigned"));
+        assert!(
+            requests
+                .iter()
+                .all(|frame| frame["d"]["type"] == "join-proof")
+        );
+    }
+    let seen = f.seen.lock().unwrap();
+    assert_eq!(seen.signed_reads, 0);
+    assert_eq!(seen.writes, 0);
+}

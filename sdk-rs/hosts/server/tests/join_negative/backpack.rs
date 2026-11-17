@@ -144,3 +144,30 @@ impl Venue for Backpack {
         }
     }
 }
+
+pub struct BackpackTestnet;
+impl Venue for BackpackTestnet {
+    const NAME: &'static str = Backpack::NAME;
+    fn init() -> InitPayload {
+        let mut init = Backpack::init();
+        init.testnet = Some(true);
+        init
+    }
+    fn algorithm() -> Algorithm {
+        Backpack::algorithm()
+    }
+    fn credentials(other: bool) -> Value {
+        Backpack::credentials(other)
+    }
+    fn signature(frame: &Value, other: bool) -> (String, Vec<u8>, Value) {
+        Backpack::signature(frame, other)
+    }
+    fn http(_: &Method, _: &Uri, _: &HeaderMap, _: &Value, seen: &mut Observed) -> Value {
+        seen.signed_reads += 1;
+        panic!("unsupported Backpack testnet attempted HTTP");
+    }
+    fn websocket(_: &Value, seen: &mut Observed) -> Value {
+        seen.signed_reads += 1;
+        panic!("unsupported Backpack testnet attempted WebSocket IO");
+    }
+}
