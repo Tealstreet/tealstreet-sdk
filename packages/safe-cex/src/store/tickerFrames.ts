@@ -1,7 +1,8 @@
 import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import type { Ticker } from '../generated/Ticker';
 import type { Market } from '../types';
-import type { PackedTickerDelta, StoreUpdate } from './store.interface';
+export type PackedTickerDelta = [index: number, mask: number, ...values: number[]];
+export type TickerObservations = Array<[number, NonNullable<Ticker['observedAt']>]>;
 
 import { TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 
@@ -56,10 +57,10 @@ export function readTickerDeltaFrame(frame: Frame, count: number, hasSnapshot = 
   return packed;
 }
 
-export function readTickerObservationFrame(frame: Frame, rows: readonly Ticker[]): StoreUpdate['tickerObservations'] {
+export function readTickerObservationFrame(frame: Frame, rows: readonly Ticker[]): TickerObservations | undefined {
   const observations = frame.tickerObservations();
   if (!observations) return undefined;
-  const times: NonNullable<StoreUpdate['tickerObservations']> = [];
+  const times: TickerObservations = [];
   for (let i = 0; i < observations.length; i += 4) {
     const row = observations[i];
     if (!rows[row]) throw new Error('Invalid ticker observation row');

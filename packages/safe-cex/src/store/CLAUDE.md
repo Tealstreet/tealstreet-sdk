@@ -1,8 +1,22 @@
 # CLAUDE.md — safe-cex/src/store
 
-The Tealstreet exchange store. One `DefaultStore` per exchange
-account; mirrored across worker → main thread via the worker's
-throttled postMessage.
+The native exchange state lives in `FrameStore`, one instance per account.
+It reads the pure-JS SCXF wire format directly into generated `StoreData`.
+`data` is the current snapshot; `subscribe(listener)` observes snapshots and
+`subscribe(section, listener)` observes a typed section and its version.
+`version(section)` advances only when that section changes. Equal native
+sections keep their identity; ticker deltas copy only changed rows and their array.
+No frame takes a deep clone or JSON round trip.
+
+`ingest(frame, { snapshot, seq })` accepts transport metadata. A sequence gap
+refuses deltas until a fresh snapshot establishes a baseline. Book baselines,
+decoded readiness and scoped recovery evidence live with the frame store.
+Protocol failures preserve independent valid sections; subscriber failures are
+reported separately after all listeners run. Native-unit extras come directly
+from the order/position readers below.
+
+The historical mutable-store notes below describe consumers being removed by
+the native cutover; they do not authorize a second mutation or payload path.
 
 Rust frames keep the venue adapter's published SDK quantity units. COIN-M
 orders carry native contract counts while positions carry base quantity; the

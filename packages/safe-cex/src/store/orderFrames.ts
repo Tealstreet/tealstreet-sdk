@@ -1,7 +1,7 @@
 import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import type { Order } from '../generated/Order';
 import type { Market } from '../types';
-import type { Store } from './store.interface';
+import type { StoreData } from '../generated/StoreData';
 
 import { orderEnums } from '@tealstreet/safe-cex-wasm/wire';
 import { OrderRejectReason } from '../generated/OrderRejectReason';
@@ -53,7 +53,7 @@ const optional = (value: number | undefined): number | undefined => {
 };
 
 /** Decode native Order output without deriving quantities or trigger aliases. */
-export function readOrderFrame(frame: Frame, store: Store, markets?: readonly Market[]): Order[] | undefined {
+export function readOrderFrame(frame: Frame, store: Pick<StoreData, 'markets'>, markets?: readonly Market[]): Order[] | undefined {
   const table = frame.orders();
   if (!table) return undefined;
   const rows: Order[] = [];
