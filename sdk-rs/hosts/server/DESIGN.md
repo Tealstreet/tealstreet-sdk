@@ -752,9 +752,13 @@ account keeps its generation. Pending handover replies retain their separate
 registration lifecycle.
 
 Probe refusals use `initRefused`, `kind:"unverified"` and the existing fixed
-message. Auth kinds are permanent refusals; rate, network, timeout and venue
-availability failures are transient. Replies retain the init's registration ID;
-clients without one retain the original envelope bytes. Verified admission does
+message. Optional `error_kind`, `venue_code` and `stage` preserve the probe's
+classified error, exact JS-safe integer venue code and closed actual failure
+stage; unknown kinds/codes stay absent. The same fields survive transient
+refusals and early handover failures without copying venue text or credentials.
+Auth kinds are permanent refusals; rate, network, timeout and venue availability
+failures are transient. Replies retain the initiating init's registration ID;
+clients without one receive the same metadata without an instance ID. Verified admission does
 not replace a running account with different settings. A supported private
 COSIGNED venue without proof readiness returns the permanent `proof-unavailable` init
 refusal before probe I/O or attachment; unsupported names retain `unsupported`.

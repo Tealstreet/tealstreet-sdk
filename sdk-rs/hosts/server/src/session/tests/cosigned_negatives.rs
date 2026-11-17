@@ -173,7 +173,15 @@ async fn cosigned_probe_deadline_refuses_and_releases_its_engine() {
     assert_eq!(
         sent.try_recv().unwrap(),
         envelope::with_instance_id(
-            envelope::init_unverified("acct", true, envelope::InitRefusalReasonClass::Unknown),
+            envelope::init_unverified(
+                "acct",
+                true,
+                envelope::InitRefusalReasonClass::Unknown,
+                envelope::InitRefusalMetadata {
+                    stage: Some(RefusalStage::ProbeTimeout),
+                    ..Default::default()
+                }
+            ),
             "timed-proof"
         )
     );
@@ -295,6 +303,7 @@ fn refused(f: &Fixture, session: &Session, sent: &mut crate::out::Receiver, id: 
         "acct",
         false,
         envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+        private_read_metadata(10003),
     );
     let expected = id.filter(|s| !s.is_empty()).map_or_else(
         || raw.clone(),
@@ -807,3 +816,48 @@ async fn shared_admission_uses_a_probe_after_the_resume_window() {
 
 #[path = "cosigned_mode_transitions.rs"]
 mod mode_transitions;
+
+#[tokio::test]
+async fn init_unverified_native_cosigned_classification_reaches_registration() {
+    for (code, transient) in [(10003, false), (10006, true)] {
+        let f = fixture_with_auth(true).await;
+        f.code.store(code, Ordering::SeqCst);
+        let (mut session, mut sent) = candidate(&f, "alice");
+        let mut done = session.take_verified();
+        session
+            .init(init(Some("metadata-registration")))
+            .await
+            .unwrap();
+        let mut device = Device::default();
+        let result = complete(
+            &mut session,
+            &mut sent,
+            &mut done,
+            &mut device,
+            Answer::Correct,
+            Some("metadata-registration"),
+        )
+        .await;
+        session.verification_completed(result).await.unwrap();
+        let frame: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        let expected: Value = serde_json::from_str(&envelope::with_instance_id(
+            envelope::init_unverified(
+                "acct",
+                transient,
+                envelope::InitRefusalReasonClass::from_error(
+                    "bybit",
+                    private_read_metadata(code as i64).error_kind,
+                    Some(code as i64),
+                ),
+                private_read_metadata(code as i64),
+            ),
+            "metadata-registration",
+        ))
+        .unwrap();
+        assert_eq!(frame, expected);
+        assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
+        assert!(f.private_reads.load(Ordering::SeqCst) > 0);
+        assert!(session.joined.is_empty());
+        session.close();
+    }
+}

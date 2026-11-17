@@ -273,7 +273,7 @@ namespaces are scoped to exact venue families, not prefixes. HyroTrader's
 ambiguous 10003 stays `unknown`: a disabled challenge can reject an unchanged
 valid key, as its Bybit CLAUDE contract documents. This is coarse
 recovery guidance, never proof of a specific IP or permission defect. Raw venue
-text/codes never enter this frame. The fixed message, transient flag, registration
+text never enters this frame; typed JS-safe venue codes may accompany the class. The fixed message, transient flag, registration
 binding and existing eight-field private diagnostic remain unchanged.
 
 
@@ -379,3 +379,11 @@ Rejecting that frame uses the ordinary error envelope: it supplies no proof
 about an earlier action and cannot fabricate an action refusal or negative ACK.
 See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
 `tests/data/delegated-actions-v1.json` contract.
+
+## Classified admission refusals
+
+`init_unverified` carries optional typed `error_kind`, JS-safe integer
+`venue_code`, and a closed host-owned `stage` from the actual ProbeRefusal.
+Probe/session completion and early handover refusal paths preserve those fields
+through the initiating account and registration output. Unknown classification
+and absent venue codes stay absent; no raw venue text enters the new fields.
