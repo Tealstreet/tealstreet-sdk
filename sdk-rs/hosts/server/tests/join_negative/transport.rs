@@ -242,3 +242,177 @@ async fn bybit_private_reads_require_an_api_key_and_public_discovery_stays_unsig
     assert_eq!(seen.rejections, 8);
     assert_eq!(seen.writes, 0);
 }
+
+struct StatefulTransport;
+impl Venue for StatefulTransport {
+    const NAME: &'static str = Bybit::NAME;
+    fn algorithm() -> Algorithm {
+        Bybit::algorithm()
+    }
+    fn init() -> InitPayload {
+        Bybit::init()
+    }
+    fn credentials(other: bool) -> Value {
+        Bybit::credentials(other)
+    }
+    fn signature(frame: &Value, other: bool) -> (String, Vec<u8>, Value) {
+        Bybit::signature(frame, other)
+    }
+    fn http(
+        method: &Method,
+        uri: &Uri,
+        headers: &HeaderMap,
+        body: &Value,
+        seen: &mut Observed,
+    ) -> Value {
+        Bybit::http(method, uri, headers, body, seen)
+    }
+    fn http_headers(method: &Method, uri: &Uri, reply: &Value) -> HeaderMap {
+        assert_eq!(method, Method::GET);
+        assert_eq!(uri.path(), "/v5/market/tickers");
+        assert_eq!(reply["retCode"], 0);
+        HeaderMap::from_iter([
+            (
+                axum::http::header::SET_COOKIE,
+                "gravity=synthetic-session; HttpOnly".parse().unwrap(),
+            ),
+            (
+                axum::http::HeaderName::from_static("x-ts-grvt-session"),
+                "synthetic-session".parse().unwrap(),
+            ),
+            (
+                axum::http::HeaderName::from_static("x-grvt-account-id"),
+                "synthetic-account".parse().unwrap(),
+            ),
+        ])
+    }
+    fn websocket(request: &Value, seen: &mut Observed) -> Value {
+        Bybit::websocket(request, seen)
+    }
+    fn websocket_text(_text: &str, _seen: &mut Observed) -> Option<String> {
+        Some(json!({"type":"stateless"}).to_string())
+    }
+    fn websocket_session() -> WebsocketSession {
+        let mut authenticated = false;
+        Box::new(move |text, seen| match text {
+            "auth" => {
+                authenticated = true;
+                seen.signed_reads += 1;
+                vec![
+                    json!({"type":"ack"}).to_string(),
+                    json!({"type":"snapshot"}).to_string(),
+                ]
+            }
+            "read" if authenticated => vec![json!({"type":"snapshot"}).to_string()],
+            "read" => {
+                seen.rejections += 1;
+                vec![json!({"type":"unauthenticated"}).to_string()]
+            }
+            _ => panic!("unexpected synthetic transport request"),
+        })
+    }
+}
+
+#[tokio::test]
+async fn http_hook_preserves_actual_response_headers_and_json() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    assert!(Bybit::http_headers(&Method::GET, &"/".parse().unwrap(), &Value::Null).is_empty());
+    assert_eq!(
+        StatefulTransport::http_headers(
+            &Method::GET,
+            &"/v5/market/tickers".parse().unwrap(),
+            &json!({"retCode":0})
+        )
+        .len(),
+        3
+    );
+    let f = Fixture::new::<StatefulTransport>().await;
+    let base = f
+        .websocket_url
+        .strip_suffix("/ws")
+        .unwrap()
+        .replacen("ws:", "http:", 1);
+    assert!(base.starts_with("http://127.0.0.1:"));
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
+    let response = client
+        .get(format!("{base}/v5/market/tickers"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("x-ts-grvt-session")
+            .and_then(|v| v.to_str().ok()),
+        Some("synthetic-session")
+    );
+    assert_eq!(
+        response.headers()["set-cookie"],
+        "gravity=synthetic-session; HttpOnly"
+    );
+    assert_eq!(response.headers()["x-grvt-account-id"], "synthetic-account");
+    assert_eq!(response.headers()["content-type"], "application/json");
+    assert_eq!(response.json::<Value>().await.unwrap()["retCode"], 0);
+    assert_eq!(f.seen.lock().unwrap().writes, 0);
+}
+
+#[tokio::test]
+async fn websocket_sessions_keep_state_per_connection_and_send_ordered_frames() {
+    let mut default = WelcomeAndRaw::websocket_session();
+    assert_eq!(default("Ping", &mut Observed::default()), vec!["Pong"]);
+    assert!(default("Pong", &mut Observed::default()).is_empty());
+    let f = Fixture::new::<StatefulTransport>().await;
+    let (mut first, _) = tokio_tungstenite::connect_async(&f.websocket_url)
+        .await
+        .unwrap();
+    let (mut second, _) = tokio_tungstenite::connect_async(&f.websocket_url)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        first.send(Message::text("auth")).await.unwrap();
+        let frame = first.next().await.unwrap().unwrap();
+        let ack: Value = serde_json::from_str(frame.to_text().unwrap()).unwrap();
+        assert_eq!(ack["type"], "ack");
+        let frame = first.next().await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(frame.to_text().unwrap()).unwrap(),
+            json!({"type":"snapshot"})
+        );
+        second.send(Message::text("read")).await.unwrap();
+        let frame = second.next().await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(frame.to_text().unwrap()).unwrap(),
+            json!({"type":"unauthenticated"})
+        );
+        first.send(Message::text("read")).await.unwrap();
+        let frame = first.next().await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(frame.to_text().unwrap()).unwrap(),
+            json!({"type":"snapshot"})
+        );
+        second.send(Message::text("auth")).await.unwrap();
+        let frame = second.next().await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(frame.to_text().unwrap()).unwrap()["type"],
+            "ack"
+        );
+        let frame = second.next().await.unwrap().unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(frame.to_text().unwrap()).unwrap(),
+            json!({"type":"snapshot"})
+        );
+    })
+    .await
+    .expect("per-connection transport frames missing");
+    first.close(None).await.unwrap();
+    second.close(None).await.unwrap();
+    let seen = f.seen.lock().unwrap();
+    assert_eq!(seen.signed_reads, 2);
+    assert_eq!(seen.rejections, 1);
+    assert_eq!(seen.writes, 0);
+}

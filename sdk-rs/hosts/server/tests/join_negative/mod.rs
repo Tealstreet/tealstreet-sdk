@@ -32,6 +32,8 @@ pub const ACCOUNT: &str = "negative-join-fixture";
 pub const USER: &str = "negative-join-owner";
 const WAIT: Duration = Duration::from_secs(15);
 
+pub type WebsocketSession = Box<dyn FnMut(&str, &mut Observed) -> Vec<String> + Send>;
+
 pub trait Venue: Send + Sync + 'static {
     const NAME: &'static str;
     fn init() -> InitPayload;
@@ -54,6 +56,9 @@ pub trait Venue: Send + Sync + 'static {
     fn http_status(_reply: &Value) -> axum::http::StatusCode {
         axum::http::StatusCode::OK
     }
+    fn http_headers(_method: &Method, _uri: &Uri, _reply: &Value) -> HeaderMap {
+        HeaderMap::new()
+    }
     fn websocket(request: &Value, seen: &mut Observed) -> Value;
     fn initial_websocket_frames() -> Vec<String> {
         Vec::new()
@@ -61,6 +66,9 @@ pub trait Venue: Send + Sync + 'static {
     fn websocket_text(text: &str, seen: &mut Observed) -> Option<String> {
         let request = serde_json::from_str(text).expect("JSON venue WebSocket request");
         Some(Self::websocket(&request, seen).to_string())
+    }
+    fn websocket_session() -> WebsocketSession {
+        Box::new(|text, seen| Self::websocket_text(text, seen).into_iter().collect())
     }
 }
 
