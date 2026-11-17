@@ -51,3 +51,7 @@ macro_rules! suite {
 }
 suite!(bybit, Bybit);
 suite!(hyperliquid, Hyperliquid);
+
+suite!(hyperliquidspot, Hyperliquid<true>);
+suite!(hyperliquid_testnet, Hyperliquid<false, true>);
+suite!(hyperliquidspot_testnet, Hyperliquid<true, true>);
