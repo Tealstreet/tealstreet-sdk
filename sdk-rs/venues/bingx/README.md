@@ -22,6 +22,10 @@ permitted CORS egress or a transport on a server/Worker; API allowlists must
 include that host's direct egress IP. The internal public host is not BingX's
 documented public protocol and remains a deployment dependency for TS parity.
 
+REST non-POST requests use `application/json; charset=utf-8`; POST retains
+`application/json`. The same valid media type applies to Spot and API-key-only
+listen-key renewal; header normalization does not change signing or query/body bytes.
+
 Writes are sequenced and never retried after transport failures. A refusal
 BingX makes before processing, a bad signature (100001) or a stale timestamp
 (109400 naming it), is re-signed and resent once on the initial write; later

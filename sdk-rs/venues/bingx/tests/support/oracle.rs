@@ -1,4 +1,4 @@
-//! Sorted HMAC query signing; POST parameters retain their native JSON types.
+//! Legacy query/body signing oracle with the corrected JSON media type.
 use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{Method, num};
@@ -124,7 +124,7 @@ impl Params {
             });
             (url, headers, body)
         } else {
-            headers.push(("Content-Type", "application/json, charset=utf-8".into()));
+            headers.push(("Content-Type", "application/json; charset=utf-8".into()));
             let mut query = self.query();
             if let Some(signature) = &signed {
                 query = format!("{query}&signature={signature}");
