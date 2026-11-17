@@ -4,7 +4,7 @@ import { EngineHost } from './host.mjs';
 import { ManagedHttp } from './managed-http.mjs';
 
 const tick = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
-const modes = ['legacy', 'managed-sync', 'managed-async', 'group'];
+const modes = ['legacy-sync', 'legacy-async', 'managed-sync', 'managed-async', 'group'];
 const packet = { request: 1, method: 'GET', url: 'https://venue.test/info?token=PRIVATE', headers: [] };
 const response = () => ({ status: 200, body: new Uint8Array() });
 const named = (name, extra = {}) => Object.assign(new Error('PRIVATE'), { name, ...extra });
@@ -24,12 +24,12 @@ async function probe(mode, error, { healthy = false, disposed = false, onSend = 
     order.push(`send:${id}`);
     onSend(id);
     if (id === 1 && !healthy) {
-      if (mode === 'managed-async') return Promise.reject(error);
+      if (mode === 'managed-async' || mode === 'legacy-async') return Promise.reject(error);
       throw error;
     }
     return Promise.resolve(response());
   };
-  if (mode === 'legacy') {
+  if (mode.startsWith('legacy')) {
     const host = new EngineHost(engine, { now: () => 100, request: () => send(1) });
     host.disposed = disposed;
     await host.request(packet);
@@ -69,7 +69,12 @@ const samples = [
   ['timeout', () => named('TradeTunnelReadinessError')],
   ['disconnect', () => named('TradeTunnelError', { originalError: 'TradeTunnel connection lost, reconnecting...' })],
   ['direct-fetch', () => new TypeError('Failed to fetch')],
+  ['direct-fetch', () => new TypeError('fetch failed')],
+  ['direct-fetch', () => new TypeError('Load failed')],
+  ['direct-fetch', () => new TypeError('NetworkError when attempting to fetch resource.')],
   ['response-decode', () => named('TradeTunnelResponseDecodeError')],
+  ['aborted', () => named('TradeTunnelCanceledError')],
+  ['disposed', () => named('TradeTunnelDisposedError')],
   ['aborted', () => new DOMException('PRIVATE', 'AbortError')],
   ['timeout', () => new DOMException('PRIVATE', 'TimeoutError')],
   ['tunnel', () => named('TradeTunnelError', { originalError: { private: 'PRIVATE' } })],
@@ -91,11 +96,12 @@ for (const mode of modes) {
 
 test('unknown, oversized, cyclic and hostile errors never expose caller text or accessors', async () => {
   const hostile = {};
+  let getterReads = 0;
   for (const key of ['name', 'message', 'cause', 'config', 'url', 'originalError'])
-    Object.defineProperty(hostile, key, { get() { assert.fail(`read hostile ${key} getter`); } });
+    Object.defineProperty(hostile, key, { get() { getterReads++; throw new Error('PRIVATE'); } });
   const cyclic = { message: 'PRIVATE', config: { Authorization: 'PRIVATE' } };
   cyclic.cause = cyclic;
-  const errors = [undefined, null, 'PRIVATE', new Error('PRIVATE'.repeat(10000)), cyclic, hostile,
+  const errors = [undefined, null, 'PRIVATE', new Error('PRIVATE'.repeat(10000)), new TypeError('PRIVATE'), cyclic, hostile,
     new Proxy({}, { getOwnPropertyDescriptor() { throw new Error('PRIVATE'); } })];
   for (const mode of modes) for (const error of errors) {
     const { failures } = await probe(mode, error);
@@ -104,6 +110,7 @@ test('unknown, oversized, cyclic and hostile errors never expose caller text or 
     assert.ok(failures[0][1].length <= 80);
     assert.doesNotMatch(failures[0][1], /PRIVATE|https:|Authorization/);
   }
+  assert.equal(getterReads, 0);
 });
 
 test('group does not inspect the first thrown error between physical handoffs', async () => {
@@ -118,9 +125,43 @@ test('group does not inspect the first thrown error between physical handoffs', 
 });
 
 test('disposed managed and legacy hosts publish no transport failure', async () => {
-  for (const mode of ['legacy', 'managed-async']) {
+  for (const mode of ['legacy-sync', 'legacy-async', 'managed-async']) {
     const { failures } = await probe(mode, named('TradeTunnelTimeoutError'), { disposed: true });
     assert.deepEqual(failures, []);
+  }
+});
+
+test('error descriptor reentry cannot publish after original host retirement', async () => {
+  for (const mode of modes) {
+    const sends = [];
+    const engine = {
+      httpFailed: assert.fail,
+      httpClaim: () => '{"status":"released"}',
+      httpGroupPending: () => true,
+      httpClaimGroup: (_permit, _now, bounds) => { bounds.fill(1000); return 1; },
+      prepareDispatch: () => '',
+    };
+    const host = new EngineHost(engine, { now: () => 100 });
+    const error = new Proxy(named('TradeTunnelTimeoutError'), {
+      getOwnPropertyDescriptor(target, key) { host.dispose(); return Reflect.getOwnPropertyDescriptor(target, key); },
+    });
+    host.transport.request = () => { throw error; };
+    if (mode.startsWith('legacy')) await host.request(packet);
+    else {
+      const manager = host.managedHttp;
+      for (const id of mode === 'group' ? [1, 2] : [1]) manager.resources.set(String(id), {
+        phase: 'bound', groupRequest: id, controller: new AbortController(),
+        bound: { ready: () => true, dispatch() { sends.push(id); if (id === 1) throw error; return Promise.resolve(response()); } },
+      });
+      const resource = manager.resources.get('1');
+      if (mode === 'managed-sync') manager.claim('1', resource, 'permit', 1);
+      else if (mode === 'managed-async') await manager.receive('1', resource, 1, Promise.reject(error));
+      else manager.execute({ phase: 'bindGroup', permit: 'group', members: [{ preparation: '1' }, { preparation: '2' }] });
+      await tick();
+      assert.equal(manager.resources.size, 0);
+      if (mode === 'group') assert.deepEqual(sends, [1, 2]);
+    }
+    assert.equal(host.disposed, true);
   }
 });
 
