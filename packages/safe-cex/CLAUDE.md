@@ -63,6 +63,11 @@ Core exchange integration library. See also exchange-specific `CLAUDE.md` files 
 For exchange migrations that add first-class opening trigger/conditional orders,
 read `CONDITIONAL_ORDERS.md` before changing mapper or order lifecycle code.
 
+Hyperliquid, Hyperliquid Spot and Bitunix metadata explicitly declare
+`supportsTunnel: true` alongside their existing `enforceWsTunnel: true`.
+Enforcement still wins over disabled user preferences; inconsistent declarations
+remain observable through the general account-construction warning.
+
 ## DELEGATED handover
 
 `sealDelegatedHandover` is an additive, synchronous, host-neutral sender for
