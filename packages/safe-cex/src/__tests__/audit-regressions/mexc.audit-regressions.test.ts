@@ -1,11 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
-import { signMexcRequest, signMexcWsLogin, serializeMexcParams } from '../reference/mexc/mexc.api';
-import { MexcExchange } from '../reference/mexc/mexc.exchange';
-import { ENDPOINTS } from '../reference/mexc/mexc.types';
+import { FrameStore } from '../../store/frameStore';
+import {
+  MarginType,
+  Order,
+  OrderSide,
+  OrderStatus,
+  OrderStopTriggerType,
+  OrderTimeInForce,
+  OrderType,
+  PositionMode,
+  PositionSide,
+} from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { setWsDiagnosticsEnabled } from '../../utils/wsDiagnostics';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { serializeMexcParams, signMexcRequest, signMexcWsLogin } from '../reference/mexc/mexc.api';
+import { MexcExchange } from '../reference/mexc/mexc.exchange';
+import { ENDPOINTS } from '../reference/mexc/mexc.types';
 import {
   isTradableMexcMarket,
   nativeVolumeToAmount,
@@ -18,20 +31,8 @@ import {
   normalizeTicker,
   toMexcSymbol,
 } from '../reference/mexc/mexc.utils';
-import { DefaultStore } from '../../store/store.base';
-import {
-  MarginType,
-  Order,
-  OrderSide,
-  OrderStatus,
-  OrderStopTriggerType,
-  OrderTimeInForce,
-  OrderType,
-  PositionMode,
-  PositionSide,
-} from '../../types';
 
-const createExchange = () => new MexcExchange('mexc', { key: 'key', secret: 'secret' }, new DefaultStore());
+const createExchange = () => new MexcExchange('mexc', { key: 'key', secret: 'secret' }, new FrameStore());
 
 const market = normalizeMarket({
   symbol: 'BTC_USDT',
@@ -67,9 +68,9 @@ describe('MEXC futures audit regressions', () => {
     expect(serializeMexcParams({ timestamp: 1700000000000, symbol: 'BTC_USDT' })).toBe(
       'symbol=BTC_USDT&timestamp=1700000000000',
     );
-    expect(
-      signMexcRequest('testSecret', 'testKey', '1700000000000', 'symbol=BTC_USDT&timestamp=1700000000000'),
-    ).toBe('9ca21bd13c47b3866ba4ea2cf168cfad0b69195592c36bc3b6f84b4fa0ee882d');
+    expect(signMexcRequest('testSecret', 'testKey', '1700000000000', 'symbol=BTC_USDT&timestamp=1700000000000')).toBe(
+      '9ca21bd13c47b3866ba4ea2cf168cfad0b69195592c36bc3b6f84b4fa0ee882d',
+    );
     expect(
       signMexcRequest(
         'testSecret',
@@ -88,16 +89,21 @@ describe('MEXC futures audit regressions', () => {
     const exchange = createExchange();
     const send = vi.fn();
     const sendLogs: string[] = [];
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.publicWebsocket.ws = { readyState: 1, send } as any;
     exchange.on('grafana-pws-sub', (message: string) => sendLogs.push(message));
 
     const dispose = exchange.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, vi.fn());
 
-    expect(send).toHaveBeenCalledWith(JSON.stringify({ method: 'sub.kline', param: { symbol: 'BTC_USDT', interval: 'Min1' } }));
-    expect(sendLogs).toEqual([
-      '[mexc public] {"method":"sub.kline","param":{"symbol":"BTC_USDT","interval":"Min1"}}',
-    ]);
+    expect(send).toHaveBeenCalledWith(
+      JSON.stringify({ method: 'sub.kline', param: { symbol: 'BTC_USDT', interval: 'Min1' } }),
+    );
+    expect(sendLogs).toEqual(['[mexc public] {"method":"sub.kline","param":{"symbol":"BTC_USDT","interval":"Min1"}}']);
     dispose();
   });
 
@@ -418,7 +424,12 @@ describe('MEXC futures audit regressions', () => {
   it('preserves side-specific leverage across flat-position metadata refreshes', async () => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0 } });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post, get: vi.fn().mockRejectedValue(new Error('private leverage unavailable')) } as any;
 
     await exchange.setLeverage('BTCUSDT', 50, PositionSide.Long);
@@ -446,7 +457,12 @@ describe('MEXC futures audit regressions', () => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0 } });
     const get = vi.fn().mockResolvedValue({ data: { success: true, code: 0, data: [] } });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post, get } as any;
 
     await exchange.setLeverage('BTCUSDT', 50, PositionSide.Long);
@@ -473,7 +489,12 @@ describe('MEXC futures audit regressions', () => {
       market,
       PositionMode.Hedged,
     );
-    exchange.store.update({ markets: [market], positions: openLong ? [openLong] : [] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market], positions: openLong ? [openLong] : [] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     await exchange.setLeverage('BTCUSDT', 50, PositionSide.Long);
@@ -489,7 +510,12 @@ describe('MEXC futures audit regressions', () => {
     const post = vi.fn().mockResolvedValue({
       data: { success: false, code: 2024, message: 'leverage over the maximum' },
     });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     await expect(exchange.setLeverage('BTCUSDT', 50, PositionSide.Long)).rejects.toThrow(
@@ -522,7 +548,12 @@ describe('MEXC futures audit regressions', () => {
         ],
       },
     });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { get } as any;
 
     await expect(exchange.fetchLeverageForSymbol('BTCUSDT')).resolves.toMatchObject({
@@ -558,7 +589,12 @@ describe('MEXC futures audit regressions', () => {
         ],
       },
     });
-    exchange.store.update({ markets: [market], positions: [] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market], positions: [] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { get } as any;
 
     await exchange.updateSymbolMetadata('BTCUSDT');
@@ -577,7 +613,12 @@ describe('MEXC futures audit regressions', () => {
   it('keeps flat-position metadata in sync after position mode changes', async () => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0 } });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = {
       post,
       get: vi.fn().mockResolvedValue({ data: { success: true, code: 0, data: [] } }),
@@ -601,7 +642,12 @@ describe('MEXC futures audit regressions', () => {
   it('changes margin type via the MEXC leverage endpoint', async () => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0 } });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     await exchange.setLeverage('BTCUSDT', 50);
@@ -646,7 +692,12 @@ describe('MEXC futures audit regressions', () => {
       market,
       PositionMode.Hedged,
     );
-    exchange.store.update({ markets: [market], positions: openLong ? [openLong] : [] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market], positions: openLong ? [openLong] : [] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     await exchange.changeMarginType(true, 'BTCUSDT');
@@ -667,7 +718,12 @@ describe('MEXC futures audit regressions', () => {
   it('places regular orders with native contract volume', async () => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0, data: 'order-1' } });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     await expect(
@@ -718,7 +774,12 @@ describe('MEXC futures audit regressions', () => {
       },
     });
     const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0, data: 'order-1' } });
-    exchange.store.update({ markets: [market], positions: [] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market], positions: [] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { get, post } as any;
 
     await expect(
@@ -751,7 +812,12 @@ describe('MEXC futures audit regressions', () => {
         .fn()
         .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'order-1' } })
         .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'order-2' } });
-      exchange.store.update({ markets: [market] });
+      exchange.store.apply(
+        nativeFixture(
+          { markets: [market] },
+          exchange.store.markets.map((row) => row.symbol),
+        ),
+      );
       exchange.xhr = { post } as any;
 
       const result = Promise.all([
@@ -795,7 +861,12 @@ describe('MEXC futures audit regressions', () => {
         ],
       },
     });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     await expect(
@@ -881,7 +952,12 @@ describe('MEXC futures audit regressions', () => {
         },
       };
     });
-    exchange.store.update({ markets: [market], orders: [planOrder] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market], orders: [planOrder] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { get } as any;
 
     await expect(exchange.fetchAndSetRegularOrders()).resolves.toMatchObject([{ id: 'regular-1' }]);
@@ -903,7 +979,12 @@ describe('MEXC futures audit regressions', () => {
         ],
       },
     });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     await expect(
@@ -955,7 +1036,12 @@ describe('MEXC futures audit regressions', () => {
         .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'fallback-1' } })
         .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'fallback-2' } })
         .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'fallback-3' } });
-      exchange.store.update({ markets: [market] });
+      exchange.store.apply(
+        nativeFixture(
+          { markets: [market] },
+          exchange.store.markets.map((row) => row.symbol),
+        ),
+      );
       exchange.xhr = { post } as any;
 
       const firstResult = exchange.placeOrders([
@@ -1010,7 +1096,12 @@ describe('MEXC futures audit regressions', () => {
       .fn()
       .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'plan-sl' } })
       .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'plan-tp' } });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     await expect(
@@ -1089,31 +1180,36 @@ describe('MEXC futures audit regressions', () => {
   it('places full-position TP/SL through the MEXC position stop endpoint', async () => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ data: { success: true, code: 0, data: 'position-stop-1' } });
-    exchange.store.update({
-      markets: [market],
-      positions: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'BTCUSDT:long',
-          symbol: 'BTCUSDT',
-          side: PositionSide.Long,
-          entryPrice: 50000,
-          notional: 1,
-          leverage: 20,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.Hedged,
-          unrealizedPnl: 0,
-          contracts: 1,
-          liquidationPrice: 0,
-          info: {
-            positionId: 'native-position-1',
-            holdVol: 10000,
-          },
-          extra: {
-            contractsNative: 10000,
-          },
+          markets: [market],
+          positions: [
+            {
+              id: 'BTCUSDT:long',
+              symbol: 'BTCUSDT',
+              side: PositionSide.Long,
+              entryPrice: 50000,
+              notional: 1,
+              leverage: 20,
+              marginType: MarginType.Cross,
+              positionMode: PositionMode.Hedged,
+              unrealizedPnl: 0,
+              contracts: 1,
+              liquidationPrice: 0,
+              info: {
+                positionId: 'native-position-1',
+                holdVol: 10000,
+              },
+              extra: {
+                contractsNative: 10000,
+              },
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     await expect(
@@ -1179,7 +1275,12 @@ describe('MEXC futures audit regressions', () => {
       }
       throw new Error(`unexpected URL ${url}`);
     });
-    exchange.store.update({ markets: [market], orders: [existingStopOrder] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market], orders: [existingStopOrder] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { get } as any;
     vi.spyOn(exchange, 'fetchBalanceAndPositions').mockResolvedValue({ balance: normalizeBalance([]), positions: [] });
     const fetchAndSetRegularOrders = exchange.fetchAndSetRegularOrders;
@@ -1237,7 +1338,12 @@ describe('MEXC futures audit regressions', () => {
       }
       throw new Error(`unexpected URL ${url}`);
     });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { get } as any;
 
     await expect(exchange.fetchOrders()).resolves.toEqual([
@@ -1327,7 +1433,12 @@ describe('MEXC futures audit regressions', () => {
       }
       throw new Error(`unexpected URL ${url}`);
     });
-    exchange.store.update({ markets: [market], orders: [regularCloseOrder, stalePlanOrder] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market], orders: [regularCloseOrder, stalePlanOrder] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { get } as any;
 
     await exchange.fetchAndSetOrders(['BTCUSDT']);
@@ -1368,7 +1479,12 @@ describe('MEXC futures audit regressions', () => {
       }
       throw new Error(`unexpected URL ${url}`);
     });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { get } as any;
 
     await expect(exchange.fetchOrders()).resolves.toEqual([
@@ -1478,7 +1594,12 @@ describe('MEXC futures audit regressions', () => {
       }
       throw new Error(`unexpected URL ${url}`);
     });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { get, post } as any;
 
     await exchange.cancelOrders([stopOrder]);
@@ -1512,25 +1633,30 @@ describe('MEXC futures audit regressions', () => {
       }
       throw new Error(`unexpected URL ${url}`);
     });
-    exchange.store.update({
-      markets: [market],
-      orders: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'plan-1',
-          status: OrderStatus.Canceled,
-          symbol: 'BTCUSDT',
-          type: OrderType.StopLoss,
-          side: OrderSide.Sell,
-          price: 49000,
-          amount: 1,
-          filled: 0,
-          remaining: 1,
-          reduceOnly: true,
-          timeInForce: OrderTimeInForce.GoodTillCancel,
-          info: { __mexcPlanOrder: true },
-        } as Order,
-      ],
-    });
+          markets: [market],
+          orders: [
+            {
+              id: 'plan-1',
+              status: OrderStatus.Canceled,
+              symbol: 'BTCUSDT',
+              type: OrderType.StopLoss,
+              side: OrderSide.Sell,
+              price: 49000,
+              amount: 1,
+              filled: 0,
+              remaining: 1,
+              reduceOnly: true,
+              timeInForce: OrderTimeInForce.GoodTillCancel,
+              info: { __mexcPlanOrder: true },
+            } as Order,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { get } as any;
 
     await exchange.fetchAndSetRegularOrders();
@@ -1598,10 +1724,28 @@ describe('MEXC futures audit regressions', () => {
       .fn()
       .mockResolvedValueOnce({ data: { success: true, code: 0 } })
       .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'replacement-1' } });
-    exchange.store.update({ markets: [market] });
-    const get = vi.fn().mockResolvedValue({ data: { success: true, code: 0, data: {
-      orderId: 'regular-1', symbol: 'BTC_USDT', side: 1, orderType: 1, vol: 8004, dealVol: 0, price: 80000, state: 4,
-    } } });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        success: true,
+        code: 0,
+        data: {
+          orderId: 'regular-1',
+          symbol: 'BTC_USDT',
+          side: 1,
+          orderType: 1,
+          vol: 8004,
+          dealVol: 0,
+          price: 80000,
+          state: 4,
+        },
+      },
+    });
     exchange.xhr = { post, get } as any;
 
     await expect(
@@ -1669,26 +1813,31 @@ describe('MEXC futures audit regressions', () => {
 
     // In-store "fresh" regular order that the WS delivered but MEXC's
     // open_orders REST snapshot has not reflected yet.
-    exchange.store.update({
-      markets: [market],
-      orders: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'regular-fresh',
-          status: OrderStatus.Open,
-          symbol: 'BTCUSDT',
-          type: OrderType.Limit,
-          side: OrderSide.Buy,
-          price: 55000,
-          amount: 0.0001,
-          filled: 0,
-          remaining: 0.0001,
-          reduceOnly: false,
-          timeInForce: OrderTimeInForce.GoodTillCancel,
-          lastUpdate: now - 500,
-          info: {},
-        } as Order,
-      ],
-    });
+          markets: [market],
+          orders: [
+            {
+              id: 'regular-fresh',
+              status: OrderStatus.Open,
+              symbol: 'BTCUSDT',
+              type: OrderType.Limit,
+              side: OrderSide.Buy,
+              price: 55000,
+              amount: 0.0001,
+              filled: 0,
+              remaining: 0.0001,
+              reduceOnly: false,
+              timeInForce: OrderTimeInForce.GoodTillCancel,
+              lastUpdate: now - 500,
+              info: {},
+            } as Order,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await exchange.fetchAndSetRegularOrders();
 
@@ -1704,28 +1853,33 @@ describe('MEXC futures audit regressions', () => {
       data: { success: true, code: 0, data: [] },
     }));
     exchange.xhr = { get } as any;
-    exchange.store.update({
-      markets: [market],
-      orders: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'regular-stale',
-          status: OrderStatus.Open,
-          symbol: 'BTCUSDT',
-          type: OrderType.Limit,
-          side: OrderSide.Buy,
-          price: 55000,
-          amount: 0.0001,
-          filled: 0,
-          remaining: 0.0001,
-          reduceOnly: false,
-          timeInForce: OrderTimeInForce.GoodTillCancel,
-          // Older than the 15s preservation window; without an anchoring
-          // REST row, this is treated as a WS-missed cancellation.
-          lastUpdate: now - 30_000,
-          info: {},
-        } as Order,
-      ],
-    });
+          markets: [market],
+          orders: [
+            {
+              id: 'regular-stale',
+              status: OrderStatus.Open,
+              symbol: 'BTCUSDT',
+              type: OrderType.Limit,
+              side: OrderSide.Buy,
+              price: 55000,
+              amount: 0.0001,
+              filled: 0,
+              remaining: 0.0001,
+              reduceOnly: false,
+              timeInForce: OrderTimeInForce.GoodTillCancel,
+              // Older than the 15s preservation window; without an anchoring
+              // REST row, this is treated as a WS-missed cancellation.
+              lastUpdate: now - 30_000,
+              info: {},
+            } as Order,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await exchange.fetchAndSetRegularOrders();
 
@@ -1741,26 +1895,31 @@ describe('MEXC futures audit regressions', () => {
       data: { success: true, code: 0, data: [] },
     }));
     exchange.xhr = { get } as any;
-    exchange.store.update({
-      markets: [market],
-      orders: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'regular-canceled',
-          status: OrderStatus.Canceled,
-          symbol: 'BTCUSDT',
-          type: OrderType.Limit,
-          side: OrderSide.Buy,
-          price: 55000,
-          amount: 0.0001,
-          filled: 0,
-          remaining: 0.0001,
-          reduceOnly: false,
-          timeInForce: OrderTimeInForce.GoodTillCancel,
-          lastUpdate: now - 500,
-          info: {},
-        } as Order,
-      ],
-    });
+          markets: [market],
+          orders: [
+            {
+              id: 'regular-canceled',
+              status: OrderStatus.Canceled,
+              symbol: 'BTCUSDT',
+              type: OrderType.Limit,
+              side: OrderSide.Buy,
+              price: 55000,
+              amount: 0.0001,
+              filled: 0,
+              remaining: 0.0001,
+              reduceOnly: false,
+              timeInForce: OrderTimeInForce.GoodTillCancel,
+              lastUpdate: now - 500,
+              info: {},
+            } as Order,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await exchange.fetchAndSetRegularOrders();
 
@@ -1775,7 +1934,12 @@ describe('MEXC futures audit regressions', () => {
     const post = vi.fn(async () => ({
       data: { success: true, code: 0, data: { orderId: 'regular-new' } },
     }));
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     await expect(
@@ -1811,7 +1975,12 @@ describe('MEXC futures audit regressions', () => {
     const post = vi.fn(async () => ({
       data: { success: true, code: 0, data: { orderId: 'regular-market' } },
     }));
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     await exchange.placeOrder({
@@ -1859,7 +2028,12 @@ describe('MEXC futures audit regressions', () => {
       makerFeeRate: 0,
       takerFeeRate: 0.0002,
     });
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     const acceptedFrame = {
@@ -1921,26 +2095,31 @@ describe('MEXC futures audit regressions', () => {
 
     const get = vi.fn(async () => ({ data: { success: true, code: 0, data: [] } }));
     exchange.xhr = { get } as any;
-    exchange.store.update({
-      markets: [market],
-      orders: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'rejected-1',
-          status: OrderStatus.Open,
-          symbol: 'BTCUSDT',
-          type: OrderType.Limit,
-          side: OrderSide.Sell,
-          price: 60000,
-          amount: 0.0001,
-          filled: 0,
-          remaining: 0.0001,
-          reduceOnly: true,
-          timeInForce: OrderTimeInForce.PostOnly,
-          lastUpdate: now - 500,
-          info: {},
-        } as Order,
-      ],
-    });
+          markets: [market],
+          orders: [
+            {
+              id: 'rejected-1',
+              status: OrderStatus.Open,
+              symbol: 'BTCUSDT',
+              type: OrderType.Limit,
+              side: OrderSide.Sell,
+              price: 60000,
+              amount: 0.0001,
+              filled: 0,
+              remaining: 0.0001,
+              reduceOnly: true,
+              timeInForce: OrderTimeInForce.PostOnly,
+              lastUpdate: now - 500,
+              info: {},
+            } as Order,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     exchange.on('error', () => {}); // silence traced emitAndLogError
 
@@ -1952,9 +2131,7 @@ describe('MEXC futures audit regressions', () => {
 
     await exchange.fetchAndSetRegularOrders();
 
-    const openIds = exchange.store.orders
-      .filter((order) => order.status === OrderStatus.Open)
-      .map((order) => order.id);
+    const openIds = exchange.store.orders.filter((order) => order.status === OrderStatus.Open).map((order) => order.id);
     expect(openIds).not.toContain('rejected-1');
   });
 
@@ -1963,26 +2140,31 @@ describe('MEXC futures audit regressions', () => {
     const post = vi.fn(async () => ({
       data: { success: true, code: 0, data: 'already-canceled-1' },
     }));
-    exchange.store.update({
-      markets: [market],
-      orders: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'already-canceled-1',
-          status: OrderStatus.Canceled,
-          symbol: 'BTCUSDT',
-          type: OrderType.Limit,
-          side: OrderSide.Buy,
-          price: 60000,
-          amount: 0.0001,
-          filled: 0,
-          remaining: 0.0001,
-          reduceOnly: false,
-          timeInForce: OrderTimeInForce.GoodTillCancel,
-          lastUpdate: 0,
-          info: {},
-        } as Order,
-      ],
-    });
+          markets: [market],
+          orders: [
+            {
+              id: 'already-canceled-1',
+              status: OrderStatus.Canceled,
+              symbol: 'BTCUSDT',
+              type: OrderType.Limit,
+              side: OrderSide.Buy,
+              price: 60000,
+              amount: 0.0001,
+              filled: 0,
+              remaining: 0.0001,
+              reduceOnly: false,
+              timeInForce: OrderTimeInForce.GoodTillCancel,
+              lastUpdate: 0,
+              info: {},
+            } as Order,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     await exchange.placeOrder({
@@ -2012,13 +2194,26 @@ describe('MEXC futures audit regressions', () => {
     expect(payload.method).toBe('personal.filter');
     const filters = (payload.param.filters as Array<{ filter: string }>).map((row) => row.filter);
     expect(filters).toEqual(
-      expect.arrayContaining(['order', 'order.deal', 'position', 'asset', 'plan.order', 'stop.order', 'stop.planorder']),
+      expect.arrayContaining([
+        'order',
+        'order.deal',
+        'position',
+        'asset',
+        'plan.order',
+        'stop.order',
+        'stop.planorder',
+      ]),
     );
   });
 
   it('upserts a plan-order row from push.personal.plan.order and releases its placement shield', () => {
     const exchange = createExchange();
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     // Seed a placement-shield entry the way `addOptimisticStopOrder` would
     // right after the placement HTTP 200.
@@ -2070,25 +2265,30 @@ describe('MEXC futures audit regressions', () => {
   // See mexc/CLAUDE.md "Regular vs trigger order state semantics".
   it('marks a locally-Open plan-order row Canceled when push.personal.plan.order arrives with state=2', () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [market],
-      orders: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'plan-cancel-1',
-          status: OrderStatus.Open,
-          symbol: 'BTCUSDT',
-          type: OrderType.StopLoss,
-          side: OrderSide.Sell,
-          price: 49000,
-          amount: 1,
-          filled: 0,
-          remaining: 1,
-          reduceOnly: true,
-          timeInForce: OrderTimeInForce.GoodTillCancel,
-          info: { __mexcPlanOrder: true },
-        } as Order,
-      ],
-    });
+          markets: [market],
+          orders: [
+            {
+              id: 'plan-cancel-1',
+              status: OrderStatus.Open,
+              symbol: 'BTCUSDT',
+              type: OrderType.StopLoss,
+              side: OrderSide.Sell,
+              price: 49000,
+              amount: 1,
+              filled: 0,
+              remaining: 1,
+              reduceOnly: true,
+              timeInForce: OrderTimeInForce.GoodTillCancel,
+              info: { __mexcPlanOrder: true },
+            } as Order,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     // Live MEXC cancel notification: `push.personal.plan.order` with
     // `state:2`. Must be normalized to Canceled, not Open.
@@ -2111,9 +2311,7 @@ describe('MEXC futures audit regressions', () => {
       }),
     } as MessageEvent);
 
-    expect(exchange.store.orders.find((order) => order.id === 'plan-cancel-1')?.status).toBe(
-      OrderStatus.Canceled,
-    );
+    expect(exchange.store.orders.find((order) => order.id === 'plan-cancel-1')?.status).toBe(OrderStatus.Canceled);
   });
 
   // The reported symptom, distilled: a plan.order state=2 frame that lands
@@ -2124,25 +2322,30 @@ describe('MEXC futures audit regressions', () => {
   // entirely — the frame carries the Canceled state directly.
   it('lets a plan-order state=2 WS frame land the Canceled state even without a cancel-shield entry', () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [market],
-      orders: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'plan-race-1',
-          status: OrderStatus.Open,
-          symbol: 'BTCUSDT',
-          type: OrderType.StopLoss,
-          side: OrderSide.Sell,
-          price: 49000,
-          amount: 1,
-          filled: 0,
-          remaining: 1,
-          reduceOnly: true,
-          timeInForce: OrderTimeInForce.GoodTillCancel,
-          info: { __mexcPlanOrder: true },
-        } as Order,
-      ],
-    });
+          markets: [market],
+          orders: [
+            {
+              id: 'plan-race-1',
+              status: OrderStatus.Open,
+              symbol: 'BTCUSDT',
+              type: OrderType.StopLoss,
+              side: OrderSide.Sell,
+              price: 49000,
+              amount: 1,
+              filled: 0,
+              remaining: 1,
+              reduceOnly: true,
+              timeInForce: OrderTimeInForce.GoodTillCancel,
+              info: { __mexcPlanOrder: true },
+            } as Order,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     // No `noteRecentlyCanceledStopLikeOrders` call yet — mirrors the "WS
     // frame beats HTTP response" race captured in the live trace.
@@ -2166,9 +2369,7 @@ describe('MEXC futures audit regressions', () => {
       }),
     } as MessageEvent);
 
-    expect(exchange.store.orders.find((order) => order.id === 'plan-race-1')?.status).toBe(
-      OrderStatus.Canceled,
-    );
+    expect(exchange.store.orders.find((order) => order.id === 'plan-race-1')?.status).toBe(OrderStatus.Canceled);
   });
 
   // Unit-level guard: pin the trigger-order state -> status mapping so a
@@ -2198,7 +2399,12 @@ describe('MEXC futures audit regressions', () => {
 
   it('upserts a stop-order row from push.personal.stop.order and marks canceled state', () => {
     const exchange = createExchange();
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     exchange.privateWebsocket.onMessage({
       data: JSON.stringify({
@@ -2254,26 +2460,31 @@ describe('MEXC futures audit regressions', () => {
 
     // In-store optimistic plan order added by placeOrder right before the
     // shielded snapshot fires.
-    exchange.store.update({
-      markets: [market],
-      orders: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'shielded-plan-1',
-          status: OrderStatus.Open,
-          symbol: 'BTCUSDT',
-          type: OrderType.StopLoss,
-          side: OrderSide.Sell,
-          price: 49000,
-          amount: 1,
-          filled: 0,
-          remaining: 1,
-          reduceOnly: true,
-          timeInForce: OrderTimeInForce.GoodTillCancel,
-          lastUpdate: now,
-          info: { __mexcPlanOrder: true },
-        } as Order,
-      ],
-    });
+          markets: [market],
+          orders: [
+            {
+              id: 'shielded-plan-1',
+              status: OrderStatus.Open,
+              symbol: 'BTCUSDT',
+              type: OrderType.StopLoss,
+              side: OrderSide.Sell,
+              price: 49000,
+              amount: 1,
+              filled: 0,
+              remaining: 1,
+              reduceOnly: true,
+              timeInForce: OrderTimeInForce.GoodTillCancel,
+              lastUpdate: now,
+              info: { __mexcPlanOrder: true },
+            } as Order,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange as any).notePlacedStopLikeOrder('shielded-plan-1');
 
     const get = vi.fn(async (url: string) => {
@@ -2301,26 +2512,31 @@ describe('MEXC futures audit regressions', () => {
     const now = 1_700_000_000_000;
     vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
 
-    exchange.store.update({
-      markets: [market],
-      orders: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'stale-plan-1',
-          status: OrderStatus.Open,
-          symbol: 'BTCUSDT',
-          type: OrderType.StopLoss,
-          side: OrderSide.Sell,
-          price: 49000,
-          amount: 1,
-          filled: 0,
-          remaining: 1,
-          reduceOnly: true,
-          timeInForce: OrderTimeInForce.GoodTillCancel,
-          lastUpdate: now - 60_000,
-          info: { __mexcPlanOrder: true },
-        } as Order,
-      ],
-    });
+          markets: [market],
+          orders: [
+            {
+              id: 'stale-plan-1',
+              status: OrderStatus.Open,
+              symbol: 'BTCUSDT',
+              type: OrderType.StopLoss,
+              side: OrderSide.Sell,
+              price: 49000,
+              amount: 1,
+              filled: 0,
+              remaining: 1,
+              reduceOnly: true,
+              timeInForce: OrderTimeInForce.GoodTillCancel,
+              lastUpdate: now - 60_000,
+              info: { __mexcPlanOrder: true },
+            } as Order,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     // Placement was long enough ago that the shield entry has expired — no
     // shield lookup should preserve the row anymore.
     (exchange as any).recentlyPlacedStopLikeOrderIds.set('stale-plan-1', now - 60_000);
@@ -2346,10 +2562,13 @@ describe('MEXC futures audit regressions', () => {
     vi.useFakeTimers();
     try {
       const exchange = createExchange();
-      exchange.store.update({ markets: [market] });
-      const fetchAndSetOrders = vi
-        .spyOn(exchange, 'fetchAndSetOrders')
-        .mockResolvedValue([]);
+      exchange.store.apply(
+        nativeFixture(
+          { markets: [market] },
+          exchange.store.markets.map((row) => row.symbol),
+        ),
+      );
+      const fetchAndSetOrders = vi.spyOn(exchange, 'fetchAndSetOrders').mockResolvedValue([]);
 
       // Simulate a chart-drag burst placing five TP/SL rows on the same
       // symbol in ~50 ms. Without coalescing, each placement would fan out
@@ -2376,10 +2595,13 @@ describe('MEXC futures audit regressions', () => {
     vi.useFakeTimers();
     try {
       const exchange = createExchange();
-      exchange.store.update({ markets: [market] });
-      const fetchAndSetOrders = vi
-        .spyOn(exchange, 'fetchAndSetOrders')
-        .mockResolvedValue([]);
+      exchange.store.apply(
+        nativeFixture(
+          { markets: [market] },
+          exchange.store.markets.map((row) => row.symbol),
+        ),
+      );
+      const fetchAndSetOrders = vi.spyOn(exchange, 'fetchAndSetOrders').mockResolvedValue([]);
 
       (exchange as any).scheduleStopOrderSnapshotRefresh('BTCUSDT');
       exchange.dispose();
@@ -2393,25 +2615,30 @@ describe('MEXC futures audit regressions', () => {
 
   it('drops a stale push.personal.plan.order Open frame for a locally-canceled id (no re-open flicker)', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [market],
-      orders: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'plan-flicker-1',
-          status: OrderStatus.Canceled,
-          symbol: 'BTCUSDT',
-          type: OrderType.StopLoss,
-          side: OrderSide.Sell,
-          price: 49000,
-          amount: 1,
-          filled: 0,
-          remaining: 1,
-          reduceOnly: true,
-          timeInForce: OrderTimeInForce.GoodTillCancel,
-          info: { __mexcPlanOrder: true },
-        } as Order,
-      ],
-    });
+          markets: [market],
+          orders: [
+            {
+              id: 'plan-flicker-1',
+              status: OrderStatus.Canceled,
+              symbol: 'BTCUSDT',
+              type: OrderType.StopLoss,
+              side: OrderSide.Sell,
+              price: 49000,
+              amount: 1,
+              filled: 0,
+              remaining: 1,
+              reduceOnly: true,
+              timeInForce: OrderTimeInForce.GoodTillCancel,
+              info: { __mexcPlanOrder: true },
+            } as Order,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     // Simulate the cancel path having just noted the id (post-cancel-HTTP,
     // status already Canceled locally).
     (exchange as any).noteRecentlyCanceledStopLikeOrders([exchange.store.orders[0]]);
@@ -2443,25 +2670,30 @@ describe('MEXC futures audit regressions', () => {
 
   it('honors a real Canceled push.personal.stop.order frame even when the id is in the cancel shield', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [market],
-      orders: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'stop-flicker-1',
-          status: OrderStatus.Open,
-          symbol: 'BTCUSDT',
-          type: OrderType.StopLoss,
-          side: OrderSide.Sell,
-          price: 49000,
-          amount: 0,
-          filled: 0,
-          remaining: 0,
-          reduceOnly: true,
-          timeInForce: OrderTimeInForce.GoodTillCancel,
-          info: { __mexcStopOrder: true },
-        } as Order,
-      ],
-    });
+          markets: [market],
+          orders: [
+            {
+              id: 'stop-flicker-1',
+              status: OrderStatus.Open,
+              symbol: 'BTCUSDT',
+              type: OrderType.StopLoss,
+              side: OrderSide.Sell,
+              price: 49000,
+              amount: 0,
+              filled: 0,
+              remaining: 0,
+              reduceOnly: true,
+              timeInForce: OrderTimeInForce.GoodTillCancel,
+              info: { __mexcStopOrder: true },
+            } as Order,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange as any).noteRecentlyCanceledStopLikeOrders([exchange.store.orders[0]]);
 
     // The authoritative Canceled frame from MEXC. The cancel-shield lookup
@@ -2520,7 +2752,12 @@ describe('MEXC futures audit regressions', () => {
     const post = vi.fn(async () => ({
       data: { success: true, code: 0, data: { orderId: 'regular-new' } },
     }));
-    exchange.store.update({ markets: [market] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post } as any;
 
     await exchange.placeOrder({

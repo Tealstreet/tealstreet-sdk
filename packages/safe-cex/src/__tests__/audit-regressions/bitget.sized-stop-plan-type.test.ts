@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, OrderSide, OrderType, PositionMode, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 
 const market = {
   id: 'TRXUSDT',
@@ -31,8 +32,13 @@ const openPosition = {
 } as any;
 
 const buildExchange = () => {
-  const exchange = new BitgetExchange('bitget', { key: 'k', secret: 's', passphrase: 'p' }, new DefaultStore());
-  exchange.store.update({ markets: [market] as any });
+  const exchange = new BitgetExchange('bitget', { key: 'k', secret: 's', passphrase: 'p' }, new FrameStore());
+  exchange.store.apply(
+    nativeFixture(
+      { markets: [market] as any },
+      exchange.store.markets.map((row) => row.symbol),
+    ),
+  );
   // Real batch placement lazily detects the account type. Keep these Classic
   // fixtures off the network while exercising that detection path.
   vi.spyOn(exchange.xhr, 'get').mockResolvedValue({ data: { code: '40084', msg: 'Classic Account mode' } });
@@ -82,9 +88,14 @@ describe('audit regression: Bitget sized stop plan type', () => {
     // The worker streams positions into the mirror, so a store carrying an
     // unrelated symbol looks loaded while the one being stopped is absent.
     const exchange = buildExchange();
-    exchange.store.update({
-      positions: [{ ...openPosition, id: 'BTCUSDT:long', symbol: 'BTCUSDT' }] as any,
-    });
+    exchange.store.apply(
+      nativeFixture(
+        {
+          positions: [{ ...openPosition, id: 'BTCUSDT:long', symbol: 'BTCUSDT' }] as any,
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const fetchOpenPositions = vi.fn().mockResolvedValue([openPosition]);
     exchange.fetchOpenPositions = fetchOpenPositions;
 
@@ -101,7 +112,12 @@ describe('audit regression: Bitget sized stop plan type', () => {
     // satisfied by the leftover long row, so the short that would justify the
     // sized stop was never fetched.
     const exchange = buildExchange();
-    exchange.store.update({ positions: [{ ...openPosition, contracts: 0 }] as any });
+    exchange.store.apply(
+      nativeFixture(
+        { positions: [{ ...openPosition, contracts: 0 }] as any },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const shortPosition = {
       ...openPosition,
       id: 'TRXUSDT:short',
@@ -121,7 +137,12 @@ describe('audit regression: Bitget sized stop plan type', () => {
 
   it('skips the fetch when the store already answers for that exact side', async () => {
     const exchange = buildExchange();
-    exchange.store.update({ positions: [openPosition] as any });
+    exchange.store.apply(
+      nativeFixture(
+        { positions: [openPosition] as any },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const fetchOpenPositions = vi.fn().mockResolvedValue([]);
     exchange.fetchOpenPositions = fetchOpenPositions;
 
@@ -194,7 +215,12 @@ describe('audit regression: Bitget sized stop plan type', () => {
       // 28.999999999999996, which floors to 0.28 and leaves a lot of the
       // position unstopped. Real bitget lots are fractional (ETH 0.01, XRP 0.1).
       const exchange = buildExchange();
-      exchange.store.update({ markets: [{ ...market, precision: { amount: step, price: 0.00001 } }] as any });
+      exchange.store.apply(
+        nativeFixture(
+          { markets: [{ ...market, precision: { amount: step, price: 0.00001 } }] as any },
+          exchange.store.markets.map((row) => row.symbol),
+        ),
+      );
       exchange.fetchOpenPositions = vi.fn().mockResolvedValue([{ ...openPosition, contracts }]);
 
       const payload = await exchange.formatAlgoOrder({ ...sizedStop, amount: requested } as any);
@@ -309,7 +335,12 @@ describe('audit regression: Bitget cancel plan type after a partial close', () =
     // Requiring contracts >= amount computed pos_loss for an order that was
     // placed as loss_plan, and bitget rejected the cancel.
     const exchange = buildExchange();
-    exchange.store.update({ positions: [{ ...openPosition, contracts: 10 }] as any });
+    exchange.store.apply(
+      nativeFixture(
+        { positions: [{ ...openPosition, contracts: 10 }] as any },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const [planType] = (exchange as any).selectPlanTypeAndAmount(
       { ...sizedStop, amount: 30 },

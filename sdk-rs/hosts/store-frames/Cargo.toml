@@ -6,11 +6,9 @@ publish.workspace = true
 
 [dependencies]
 safe-cex-engine.workspace = true
-safe-cex-types = { workspace = true, default-features = false }
-safe-cex-num = { workspace = true, default-features = false }
+safe-cex-chaser = { path = "../../algos/chaser" }
 serde.workspace = true
 serde_json.workspace = true
-indexmap = { version = "2.14.2", features = ["serde"] }
 
 [lints]
 workspace = true

@@ -1,22 +1,16 @@
 //! Host-owned native UI projections, shared by hosted accounts and LOCAL wasm.
 //! The engine keeps its small venue records; generated public rows are built at
 //! this boundary, without a legacy Store or a JSON stringify/parse round trip.
-use safe_cex_num::numeric_ingress::js_capture_output;
-use safe_cex_types::retained_json::RetainedJsonInput as Input;
-use safe_cex_types::store_frame_wire::{self as wire, Section};
-use safe_cex_types::{ActiveChaser, ActiveTWAP, DisplayedMargin, DisplayedPosition, StoreData};
-use serde::{Serialize, de::DeserializeOwned};
+use safe_cex_engine::model::*;
+use safe_cex_engine::store_frame_wire::{self as wire, Section};
+use serde::Serialize;
+use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, VecDeque};
-
+mod codec;
+mod model;
+use model::*;
 pub mod risk;
-pub use safe_cex_types::store_frame_wire::decode as decode_section;
-
-fn native<T: Serialize + ?Sized, U: DeserializeOwned>(value: &T) -> U {
-    js_capture_output(value)
-        .expect("native capture")
-        .decode_native(false)
-        .expect("native model projection")
-}
+pub use codec::decode as decode_section;
 
 #[derive(Clone)]
 pub struct Inputs {
@@ -24,9 +18,9 @@ pub struct Inputs {
     pub venue: String,
     pub calculate_upnl_from_last: bool,
     pub active_chasers: Vec<ActiveChaser>,
-    active_twaps: Input,
-    pub balance_info: Input,
-    pub socket_health: Input,
+    active_twaps: Value,
+    pub balance_info: Value,
+    pub socket_health: Value,
 }
 impl Default for Inputs {
     fn default() -> Self {
@@ -35,11 +29,9 @@ impl Default for Inputs {
             venue: String::new(),
             calculate_upnl_from_last: false,
             active_chasers: Vec::new(),
-            active_twaps: Input::Array(Vec::new()),
-            balance_info: Input::Null,
-            socket_health: safe_cex_types::store_model::initial_store_data()
-                .socket_health
-                .expect("initial health"),
+            active_twaps: Value::Array(Vec::new()),
+            balance_info: Value::Null,
+            socket_health: serde_json::json!({"publicHealthy":false,"privateHealthy":false,"publicInitialized":false,"privateInitialized":false}),
         }
     }
 }
@@ -47,18 +39,15 @@ impl Inputs {
     pub fn configure(&mut self, account: &str, venue: &str) {
         self.account = account.into();
         self.venue = venue.into();
-        self.calculate_upnl_from_last =
-            safe_cex_types::exchange_metadata::get_exchange_metadata(venue, false)
-                .ok()
-                .and_then(|metadata| metadata.always_calculate_unrealized_pnl_from_last_price)
-                .unwrap_or(false);
     }
     pub fn algos<C: Serialize + ?Sized, T: Serialize + ?Sized>(&mut self, chasers: &C, twaps: &T) {
-        self.active_chasers = native(chasers);
-        self.active_twaps = js_capture_output(twaps).expect("native TWAP options");
+        self.active_chasers =
+            serde_json::from_value(serde_json::to_value(chasers).expect("algo rows"))
+                .expect("native chasers");
+        self.active_twaps = serde_json::to_value(twaps).expect("native TWAP options");
     }
     pub fn balance_info(&mut self, info: &serde_json::Value) {
-        self.balance_info = Input::from(info.clone());
+        self.balance_info = info.clone();
     }
     pub fn socket_health(&mut self, health: &serde_json::Value) {
         let mut health = health.clone();
@@ -74,7 +63,7 @@ impl Inputs {
                 }
             }
         }
-        self.socket_health = Input::from(health);
+        self.socket_health = health;
     }
 }
 
@@ -84,11 +73,11 @@ impl Inputs {
 pub struct Emitter {
     sent: BTreeMap<Section, Vec<u8>>,
     pnl: HashMap<String, VecDeque<(f64, f64)>>,
-    data: Option<StoreData>,
+    data: Option<Projection>,
     current: BTreeMap<Section, Vec<u8>>,
     last_inputs: Option<Inputs>,
     last_pnl_sample: f64,
-    socket_health: Option<Input>,
+    socket_health: Option<Value>,
     socket_health_at: f64,
 }
 impl Emitter {
@@ -116,59 +105,39 @@ impl Emitter {
         let refresh = inputs_changed || [2, 3, 4, 7, 8, 9].iter().any(|&kind| has(kind));
         let sample_due = !self.pnl.is_empty() && now - self.last_pnl_sample >= 1_000.0;
         if refresh || sample_due {
-            let mut data = self
-                .data
-                .take()
-                .unwrap_or_else(safe_cex_types::store_model::initial_store_data);
+            let mut data = self.data.take().unwrap_or_default();
             if has(9) || inputs_changed {
-                data.balance = native(store.balance());
+                data.balance.balance = store.balance().clone();
                 data.balance.info = match &input.balance_info {
-                    Input::Null => None,
+                    Value::Null => None,
                     info => Some(info.clone()),
                 };
                 data.balance.coins = store.coin_balances().map(|rows| {
                     rows.iter()
-                        .map(|row| (row.base.clone(), native(row)))
+                        .map(|row| (row.base.clone(), row.clone()))
                         .collect()
                 });
                 data.balance.currencies = store.currency_balances().map(|rows| {
                     rows.iter()
-                        .map(|row| {
-                            (
-                                row.currency.clone(),
-                                safe_cex_types::CurrencyBalance::Declared(native(&row.balance)),
-                            )
-                        })
+                        .map(|row| (row.currency.clone(), row.balance.clone()))
                         .collect()
                 });
             }
             if has(2) {
-                data.markets = native(store.markets());
+                data.markets = store.markets().to_vec();
             }
             if has(3) || has(4) {
-                data.tickers = native(store.tickers());
+                data.tickers = store.tickers().to_vec();
             }
             if has(8) || has(2) {
-                data.positions = native(store.positions());
-                for (i, position) in data.positions.iter_mut().enumerate() {
-                    position.notional = position.notional.filter(|n| n.is_finite());
-                    let [contracts_native, unrealized_pnl_native] =
-                        store.position_output_extras(i).expect("position index");
-                    if contracts_native.is_some() || unrealized_pnl_native.is_some() {
-                        position.extra =
-                            safe_cex_types::ModelField::Value(safe_cex_types::PositionExtra {
-                                contracts_native,
-                                unrealized_pnl_native,
-                            });
-                    }
-                }
+                data.positions = store.positions().to_vec();
             }
             if has(7) {
-                data.orders = native(store.orders());
+                data.orders = store.orders().to_vec();
             }
             data.active_chasers.clone_from(&input.active_chasers);
             data.active_twaps = twap_rows(&input.active_twaps, &data.markets, &data.active_twaps);
-            self.display(&mut data, input, now);
+            self.display(&mut data, store, input, now);
             if refresh {
                 data.orders_risk = risk::calculate(&data);
             }
@@ -185,15 +154,15 @@ impl Emitter {
             self.data = Some(data);
         }
         let health_due = self.socket_health.as_ref().is_none_or(|old| {
-            let state = |value: &Input| {
+            let state = |value: &Value| {
                 value.as_object().map(|fields| {
                     fields
                         .iter()
                         .filter(|(key, _)| {
-                            !key.iter().copied().eq("publicLastMessage".encode_utf16())
-                                && !key.iter().copied().eq("privateLastMessage".encode_utf16())
+                            key.as_str() != "publicLastMessage"
+                                && key.as_str() != "privateLastMessage"
                         })
-                        .cloned()
+                        .map(|(k, v)| (k.clone(), v.clone()))
                         .collect::<Vec<_>>()
                 })
             };
@@ -224,9 +193,13 @@ impl Emitter {
         frame
     }
 
-    fn display(&mut self, data: &mut StoreData, input: &Inputs, now: f64) {
-        use safe_cex_types::store_model::TwapStatus;
-        use safe_cex_types::{OrderSide, OrderStatus, OrderType, PositionSide};
+    fn display(
+        &mut self,
+        data: &mut Projection,
+        store: &safe_cex_engine::Store,
+        input: &Inputs,
+        now: f64,
+    ) {
         let markets: HashMap<_, _> = data
             .markets
             .iter()
@@ -237,7 +210,7 @@ impl Emitter {
             .iter()
             .map(|t| (t.symbol.as_str(), t))
             .collect();
-        let chaser_side = |c: &ActiveChaser| match (c.side, c.reduce_only == Some(true)) {
+        let chaser_side = |c: &ActiveChaser| match (c.side, c.reduce_only) {
             (OrderSide::Buy, false) | (OrderSide::Sell, true) => PositionSide::Long,
             _ => PositionSide::Short,
         };
@@ -245,7 +218,7 @@ impl Emitter {
         for position in data.positions.iter().filter(|p| p.contracts != 0.0) {
             let mut p = position.clone();
             p.contracts = p.contracts.abs();
-            let side = p.side.expect("engine position side");
+            let side = p.side;
             let ticker = tickers.get(p.symbol.as_str()).copied();
             let market = markets.get(p.symbol.as_str()).copied();
             if let Some(t) = ticker
@@ -260,10 +233,12 @@ impl Emitter {
                 } else {
                     p.entry_price - t.last
                 };
-                let native_contracts = match &p.extra {
-                    safe_cex_types::ModelField::Value(extra) => extra.contracts_native,
-                    _ => None,
-                };
+                let native_contracts = store
+                    .positions()
+                    .iter()
+                    .position(|row| row.id == p.id)
+                    .and_then(|i| store.position_output_extras(i))
+                    .and_then(|v| v[0]);
                 p.unrealized_pnl = if let (Some(m), Some(size)) = (market, native_contracts)
                     && m.is_inverse == Some(true)
                     && size != 0.0
@@ -279,26 +254,20 @@ impl Emitter {
             let mut full_stop = false;
             let mut full_tp = false;
             for o in data.orders.iter().filter(|o| {
-                o.status == Some(OrderStatus::Open)
+                o.status == OrderStatus::Open
                     && o.symbol == p.symbol
                     && o.side
-                        == Some(if side == PositionSide::Long {
+                        == if side == PositionSide::Long {
                             OrderSide::Sell
                         } else {
                             OrderSide::Buy
-                        })
+                        }
             }) {
-                if matches!(
-                    o.r#type.value(),
-                    Some(OrderType::StopLoss | OrderType::TrailingStopLoss)
-                ) {
+                if matches!(o.kind, OrderType::StopLoss | OrderType::TrailingStopLoss) {
                     full_stop |= o.amount == 0.0;
                     stop += o.amount;
                 }
-                if matches!(
-                    o.r#type.value(),
-                    Some(OrderType::TakeProfit | OrderType::Limit)
-                ) {
+                if matches!(o.kind, OrderType::TakeProfit | OrderType::Limit) {
                     full_tp |= o.amount == 0.0;
                     tp += o.amount;
                 }
@@ -313,42 +282,52 @@ impl Emitter {
                 account: input.account.clone(),
                 ticker: ticker.cloned(),
                 market: market.cloned(),
-                balance: Some(data.balance.clone()),
-                exchange_name: Some(input.venue.clone()),
+                balance: data.balance.clone(),
+                exchange_name: input.venue.clone(),
                 one_min_upnl: None,
                 five_min_upnl: None,
-                has_active_chaser: Some(
-                    input
-                        .active_chasers
-                        .iter()
-                        .any(|c| !c.is_stopped && c.symbol == p.symbol && chaser_side(c) == side),
-                ),
-                has_active_twap: Some(data.active_twaps.iter().any(|t| {
-                    t.status == TwapStatus::Running
+                has_active_chaser: input
+                    .active_chasers
+                    .iter()
+                    .any(|c| !c.is_stopped && c.symbol == p.symbol && chaser_side(c) == side),
+                has_active_twap: data.active_twaps.iter().any(|t| {
+                    t.status == "running"
                         && t.active_market.symbol == p.symbol
                         && (if t.side == OrderSide::Buy {
                             PositionSide::Long
                         } else {
                             PositionSide::Short
                         }) == side
-                })),
-                has_full_stop: Some(full_stop || stop >= p.contracts),
-                has_full_tp: Some(full_tp || tp >= p.contracts),
+                }),
+                has_full_stop: full_stop || stop >= p.contracts,
+                has_full_tp: full_tp || tp >= p.contracts,
                 is_fake_position: None,
                 chaser_size: None,
-                position: p,
+                position: PositionView {
+                    extra: store
+                        .positions()
+                        .iter()
+                        .position(|row| row.id == p.id)
+                        .and_then(|i| store.position_output_extras(i))
+                        .filter(|v| v.iter().any(Option::is_some))
+                        .map(|v| PositionExtra {
+                            contracts_native: v[0],
+                            unrealized_pnl_native: v[1],
+                        }),
+                    native: p,
+                },
             });
         }
         for c in input
             .active_chasers
             .iter()
-            .filter(|c| !c.is_stopped && c.reduce_only != Some(true))
+            .filter(|c| !c.is_stopped && !c.reduce_only)
         {
             let side = chaser_side(c);
             if data
                 .positions
                 .iter()
-                .any(|p| p.contracts != 0.0 && p.symbol == c.symbol && p.side == Some(side))
+                .any(|p| p.contracts != 0.0 && p.symbol == c.symbol && p.side == side)
             {
                 continue;
             }
@@ -356,45 +335,54 @@ impl Emitter {
                 tickers.get(c.symbol.as_str()),
                 markets.get(c.symbol.as_str()),
             ) {
-                let p = safe_cex_types::Position {
+                let p = Position {
                     id: format!("fake-chaser-{}", c.id),
                     symbol: c.symbol.clone(),
-                    side: safe_cex_types::ModelField::Value(side),
-                    entry_price: if ticker.last == 0.0 || ticker.last.is_nan() {
-                        0.0
-                    } else {
+                    side,
+                    entry_price: if ticker.last.is_finite() {
                         ticker.last
+                    } else {
+                        0.0
                     },
-                    notional: Some(0.0),
+                    notional: 0.0,
                     leverage: 1.0,
                     unrealized_pnl: 0.0,
                     contracts: 0.0,
-                    liquidation_price: None,
-                    realized_pnl: safe_cex_types::ModelField::Value(0.0),
-                    margin_type: safe_cex_types::ModelField::Absent,
-                    position_mode: safe_cex_types::ModelField::Absent,
-                    margin_size: safe_cex_types::ModelField::Absent,
-                    info: safe_cex_types::ModelField::Absent,
-                    extra: safe_cex_types::ModelField::Absent,
-                    last_update: safe_cex_types::ModelField::Absent,
-                    option: safe_cex_types::ModelField::Absent,
+                    liquidation_price: 0.0,
+                    realized_pnl: Some(0.0),
+                    margin_type: None,
+                    position_mode: None,
+                    margin_size: None,
+                    last_update: None,
                 };
                 rows.push(DisplayedPosition {
                     key: None,
-                    position: p,
+                    position: PositionView {
+                        extra: store
+                            .positions()
+                            .iter()
+                            .position(|row| row.id == p.id)
+                            .and_then(|i| store.position_output_extras(i))
+                            .filter(|v| v.iter().any(Option::is_some))
+                            .map(|v| PositionExtra {
+                                contracts_native: v[0],
+                                unrealized_pnl_native: v[1],
+                            }),
+                        native: p,
+                    },
                     account: input.account.clone(),
                     ticker: Some((*ticker).clone()),
                     market: Some((*market).clone()),
-                    balance: Some(data.balance.clone()),
-                    exchange_name: Some(input.venue.clone()),
+                    balance: data.balance.clone(),
+                    exchange_name: input.venue.clone(),
                     one_min_upnl: Some(0.0),
                     five_min_upnl: Some(0.0),
-                    has_active_chaser: Some(true),
-                    has_active_twap: Some(false),
+                    has_active_chaser: true,
+                    has_active_twap: false,
                     is_fake_position: Some(true),
                     chaser_size: Some(c.size),
-                    has_full_stop: Some(false),
-                    has_full_tp: Some(false),
+                    has_full_stop: false,
+                    has_full_tp: false,
                 });
             }
         }
@@ -428,28 +416,24 @@ impl Emitter {
         self.pnl.retain(|key, _| active_keys.contains(key));
         let (mut long, mut short, mut total) = (0.0, 0.0, 0.0);
         for row in &rows {
-            let n = row.position.notional.unwrap_or(f64::NAN).abs();
+            let n = row.position.notional.abs();
             total += n;
-            if row.position.side == Some(PositionSide::Long) {
+            if row.position.side == PositionSide::Long {
                 long += n;
             } else {
                 short += n;
             }
         }
-        data.displayed_margin = Some(DisplayedMargin {
+        data.displayed_margin = DisplayedMargin {
             long_exposure: long.is_finite().then_some(long),
             short_exposure: short.is_finite().then_some(short),
             total_notional: total.is_finite().then_some(total),
-        });
+        };
         data.displayed_positions = rows;
     }
 }
-fn twap_rows(
-    input: &Input,
-    markets: &[safe_cex_types::Market],
-    previous: &[ActiveTWAP],
-) -> Vec<ActiveTWAP> {
-    let Input::Array(rows) = input else {
+fn twap_rows(input: &Value, markets: &[Market], previous: &[ActiveTwap]) -> Vec<ActiveTwap> {
+    let Value::Array(rows) = input else {
         return Vec::new();
     };
     rows.iter()
@@ -460,8 +444,8 @@ fn twap_rows(
             if let Some(active) = row.get_mut("activeMarket") {
                 let symbol = active
                     .get("symbol")
-                    .and_then(Input::as_text)
-                    .map(String::from_utf16_lossy);
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
                 if let Some(market) = markets
                     .iter()
                     .find(|m| Some(&m.symbol) == symbol.as_ref())
@@ -472,21 +456,21 @@ fn twap_rows(
                             .map(|t| &t.active_market)
                     })
                 {
-                    *active = js_capture_output(market).expect("native active market");
+                    *active = serde_json::to_value(market).expect("native active market");
                 }
             }
-            row.decode_native(false).expect("native active TWAP")
+            serde_json::from_value(row).expect("native active TWAP")
         })
         .collect()
 }
-fn side_name(side: safe_cex_types::PositionSide) -> &'static str {
+fn side_name(side: PositionSide) -> &'static str {
     match side {
-        safe_cex_types::PositionSide::Long => "long",
-        safe_cex_types::PositionSide::Short => "short",
+        PositionSide::Long => "long",
+        PositionSide::Short => "short",
     }
 }
 fn encoded(value: &(impl Serialize + ?Sized)) -> Vec<u8> {
-    wire::encode(&js_capture_output(value).expect("native UI capture"))
+    wire::encode(value)
 }
 
 pub fn empty(time: f64) -> Vec<u8> {
@@ -510,29 +494,13 @@ pub fn with_account_label(frame: &[u8], label: &str) -> Vec<u8> {
             _ => None,
         };
         if let Some(section) = section {
-            let mut value = wire::decode(&frame[offset + 8..end]).expect("native host section");
-            if let Input::Array(rows) = &mut value {
-                for row in rows {
-                    let field = if kind == 28 { "accountName" } else { "account" };
-                    if kind == 30 {
-                        let old = row
-                            .get("account")
-                            .and_then(Input::as_text)
-                            .map(String::from_utf16_lossy)
-                            .unwrap_or_default();
-                        if let Some(Input::Text(key)) = row.get_mut("key") {
-                            let key_text = String::from_utf16_lossy(key);
-                            if let Some(suffix) = key_text.strip_prefix(&format!("{old}:")) {
-                                *key = format!("{label}:{suffix}").encode_utf16().collect();
-                            }
-                        }
-                    }
-                    if let Some(account) = row.get_mut(field) {
-                        *account = Input::Text(label.encode_utf16().collect());
-                    }
-                }
-            }
-            wire::append(&mut out, section, &wire::encode(&value));
+            let payload = codec::relabel(
+                &frame[offset + 8..end],
+                label,
+                if kind == 28 { "accountName" } else { "account" },
+            )
+            .expect("native account record");
+            wire::append(&mut out, section, &payload);
         } else {
             let count = u16::from_le_bytes([out[6], out[7]]) + 1;
             out[6..8].copy_from_slice(&count.to_le_bytes());
@@ -546,7 +514,6 @@ pub fn with_account_label(frame: &[u8], label: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use safe_cex_engine::model::*;
     fn store() -> safe_cex_engine::Store {
         let mut store = safe_cex_engine::Store::default();
         store.set_markets(vec![Market {
@@ -632,11 +599,11 @@ mod tests {
         input.configure("account-1", "bybit");
         input
     }
-    fn payload(frame: &[u8], kind: Section) -> Input {
+    fn payload(frame: &[u8], kind: Section) -> Value {
         let (_, bytes) = safe_cex_engine::wire::sections(frame)
             .find(|(k, _)| *k == kind as u16)
             .expect("section");
-        wire::decode(bytes).unwrap()
+        decode_section(bytes).unwrap()
     }
     #[test]
     fn native_host_retains_the_engine_json_map_profile() {
@@ -661,17 +628,14 @@ mod tests {
         assert_eq!(row.key.as_deref(), Some("account-1:BTCUSDT:long"));
         assert_eq!(row.position.contracts, 2.0);
         assert_eq!(row.position.unrealized_pnl, 20.0);
-        assert_eq!(row.position.liquidation_price, None);
-        assert_eq!(row.has_full_stop, Some(true));
-        assert_eq!(row.has_full_tp, Some(false));
-        assert_eq!(
-            data.displayed_margin.as_ref().unwrap().total_notional,
-            Some(220.0)
-        );
+        assert_eq!(row.position.liquidation_price, 0.0);
+        assert!(row.has_full_stop);
+        assert!(!row.has_full_tp);
+        assert_eq!(data.displayed_margin.total_notional, Some(220.0));
         let profit = &data.orders_risk["profit"][0];
         assert_eq!(profit.order_pnl, 20.0);
         assert_eq!(profit.position_size, 1.0);
-        assert_eq!(profit.fee, Some(0.024));
+        assert_eq!(profit.fee, 0.024);
         let stop = &data.orders_risk["stop"][0];
         assert_eq!(stop.order_pnl, -20.0);
         assert_eq!(stop.is_looking_like_a_full_stop, Some(true));
@@ -680,8 +644,8 @@ mod tests {
             payload(&frame, Section::BalanceInfo)
                 .get("tier")
                 .unwrap()
-                .as_text(),
-            Some(&"pro".encode_utf16().collect::<Vec<_>>()[..])
+                .as_str(),
+            Some("pro")
         );
     }
     #[test]
@@ -700,7 +664,7 @@ mod tests {
         let snapshot = emitter.frame(empty(2000.0), &store, &input, true);
         assert_eq!(
             payload(&snapshot, Section::DisplayedPositions),
-            Input::Array(vec![])
+            Value::Array(vec![])
         );
         // The actual stream's POSITIONS/ORDERS flags arrive after that snapshot.
         let mut changed = safe_cex_engine::wire::FrameWriter::new(vec![], 2000.0);
@@ -711,9 +675,9 @@ mod tests {
         let next = emitter.frame(changed.finish(), &store, &input, false);
         assert_eq!(
             payload(&next, Section::DisplayedPositions),
-            Input::Array(vec![])
+            Value::Array(vec![])
         );
-        assert_eq!(payload(&next, Section::OrdersRisk), Input::Object(vec![]));
+        assert_eq!(payload(&next, Section::OrdersRisk), serde_json::json!({}));
         assert_eq!(
             emitter.frame(empty(2000.0), &store, &input, false).len(),
             16
@@ -750,21 +714,18 @@ mod tests {
         let row = &emitter.data.as_ref().unwrap().displayed_positions[0];
         assert_eq!(row.position.unrealized_pnl, 22.0);
         assert_eq!(
-            row.position.extra.value().unwrap().contracts_native,
+            row.position.extra.as_ref().unwrap().contracts_native,
             Some(22.0)
         );
         let relabeled = with_account_label(&frame, "alias");
         let rows = payload(&relabeled, Section::DisplayedPositions);
         assert_eq!(
-            rows.as_array().unwrap()[0]
-                .get("account")
-                .unwrap()
-                .as_text(),
-            Some(&"alias".encode_utf16().collect::<Vec<_>>()[..])
+            rows.as_array().unwrap()[0].get("account").unwrap().as_str(),
+            Some("alias")
         );
         assert_eq!(
-            rows.as_array().unwrap()[0].get("key").unwrap().as_text(),
-            Some(&"alias:BTCUSDT:long".encode_utf16().collect::<Vec<_>>()[..])
+            rows.as_array().unwrap()[0].get("key").unwrap().as_str(),
+            Some("alias:BTCUSDT:long")
         );
     }
     #[test]
@@ -853,11 +814,13 @@ mod tests {
                         }
                     }
                     store.set_orders(orders);
-                    let mut data = safe_cex_types::store_model::initial_store_data();
-                    data.markets = native(store.markets());
-                    data.tickers = native(store.tickers());
-                    data.positions = native(store.positions());
-                    data.orders = native(store.orders());
+                    let data = Projection {
+                        markets: store.markets().to_vec(),
+                        tickers: store.tickers().to_vec(),
+                        positions: store.positions().to_vec(),
+                        orders: store.orders().to_vec(),
+                        ..Projection::default()
+                    };
                     expected.push(serde_json::to_value(risk::calculate(&data)).unwrap());
                     fixtures.push(serde_json::to_value(data).unwrap());
                 }
@@ -887,7 +850,10 @@ mod tests {
                 use serde_json::Value;
                 match (actual, expected) {
                     (Value::Number(a), Value::Number(b)) => {
-                        assert_eq!(a.as_f64(), b.as_f64(), "{path}")
+                        assert!(
+                            (a.as_f64().unwrap() - b.as_f64().unwrap()).abs() < 1e-10,
+                            "{path}: {a} != {b}"
+                        )
                     }
                     (Value::Array(a), Value::Array(b)) => {
                         assert_eq!(a.len(), b.len(), "{path}");
@@ -913,13 +879,15 @@ mod tests {
         use std::io::Write;
         use std::process::{Command, Stdio};
         let mut emitter = Emitter::default();
-        let frame = emitter.frame(empty(1000.0), &store(), &input(), true);
+        let mut input = input();
+        input.account = "账户🌊".into();
+        let frame = emitter.frame(empty(1000.0), &store(), &input, true);
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../wasm/js/wire.mjs")
             .canonicalize()
             .unwrap();
         let script = format!(
-            r#"import {{Frame}} from {};import assert from 'node:assert/strict';import {{readFileSync}} from 'node:fs';const b=readFileSync(0);const f=new Frame(b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength));assert.equal(f.time,1000);assert.deepEqual(f.activeChasers(),[]);assert.deepEqual(f.activeTWAPs(),[]);assert.equal(f.balanceInfo(),null);assert.equal(f.displayedPositions()[0].unrealizedPnl,20);assert.equal(f.displayedPositions()[0].account,'account-1');assert.equal(f.displayedMargin().longExposure,220);assert.equal(f.ordersRisk().stop[0].orderPnl,-20);assert.equal(f.socketHealth().privateInitialized,false);"#,
+            r#"import {{Frame}} from {};import assert from 'node:assert/strict';import {{readFileSync}} from 'node:fs';const b=readFileSync(0);const f=new Frame(b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength));assert.equal(f.time,1000);assert.deepEqual(f.activeChasers(),[]);assert.deepEqual(f.activeTWAPs(),[]);assert.equal(f.balanceInfo(),null);assert.equal(f.displayedPositions()[0].unrealizedPnl,20);assert.equal(f.displayedPositions()[0].account,'账户🌊');assert.equal(f.displayedMargin().longExposure,220);assert.equal(f.ordersRisk().stop[0].orderPnl,-20);assert.equal(f.socketHealth().privateInitialized,false);"#,
             serde_json::to_string(path.to_str().unwrap()).unwrap()
         );
         let mut child = Command::new("node")

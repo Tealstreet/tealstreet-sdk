@@ -5,7 +5,7 @@ import type { ExchangeName } from '../../types';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { BaseExchange } from '../../exchanges/base';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { LogSeverity } from '../../types';
 import { CallMethodHandler } from '../../webworker/handlers/CallMethodHandler';
 import { claimWriteTiming, emitWriteTiming, runWithWriteTiming, WriteTiming } from '../../writeTiming';
@@ -72,7 +72,7 @@ it('carries one timing across the worker RPC: caller stamps, worker and engine s
   const main = new BaseExchange(
     'bybit',
     { key: '', secret: '', publicDataOnly: true, tuning: { consoleLogging: false } },
-    new DefaultStore(),
+    new FrameStore(),
   );
   const workerExchange = {
     name: 'bybit',

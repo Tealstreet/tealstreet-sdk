@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { RUST_SOCKET_STALE_MS, RustSocketHandle } from '../../exchanges/rust/rustSockets';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
@@ -105,12 +106,19 @@ const setup = async (
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   }));
-  const store = new DefaultStore();
+  const store = new FrameStore();
   installNativeStartupFrames(engine, store);
-  store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+  store.apply(
+    nativeFixture(
+      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new RustEngineExchange(
     venue,
-    singleSocket === 'public' ? { key: '', secret: '', publicDataOnly: true } : { key: 'k', secret: 's', passphrase: 'fixture' },
+    singleSocket === 'public'
+      ? { key: '', secret: '', publicDataOnly: true }
+      : { key: 'k', secret: 's', passphrase: 'fixture' },
     store,
   );
   exchanges.push(exchange);
@@ -218,7 +226,10 @@ describe('Rust engine socket health (cutover B5)', () => {
       // No socket close callback or native supervisor deadline runs while the laptop sleeps.
       vi.setSystemTime(Date.now() + 101_012);
       await vi.advanceTimersByTimeAsync(5_000);
-      expect(engineCloses.sort()).toEqual([[1, 1006], [2, 1006]]);
+      expect(engineCloses.sort()).toEqual([
+        [1, 1006],
+        [2, 1006],
+      ]);
       expect(sockets.slice(0, 2).every((socket) => socket.closed)).toBe(true);
       expect(sockets).toHaveLength(4);
       // Aggregate health defaults true without initialized sockets; readiness remains false.
@@ -250,7 +261,9 @@ describe('Rust engine socket health (cutover B5)', () => {
       vi.useFakeTimers({ now: 1_800_000_000_000 });
       let sleepOffset = 0;
       const { exchange, engineCloses, deliver, live, store } = await setup(
-        undefined, 'blofin', () => Date.now() - sleepOffset,
+        undefined,
+        'blofin',
+        () => Date.now() - sleepOffset,
       );
       deliver('private');
       const original = live('private');
@@ -278,7 +291,9 @@ describe('Rust engine socket health (cutover B5)', () => {
       vi.useFakeTimers({ now: 1_800_000_000_000 });
       let sleepOffset = 0;
       const { exchange, engineCloses, deliver, live } = await setup(
-        undefined, 'cryptocom', () => Date.now() - sleepOffset,
+        undefined,
+        'cryptocom',
+        () => Date.now() - sleepOffset,
       );
       deliver('private');
       sleepOffset = 50_000;

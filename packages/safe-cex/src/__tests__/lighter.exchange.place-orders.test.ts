@@ -6,9 +6,10 @@ import {
   LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
   LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
 } from '../exchanges/lighter/lighter.builder-fee';
-import { LighterExchange } from './reference/lighter/lighter.exchange';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { MarginType, OrderSide, OrderStatus, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../types';
+import { nativeFixture } from './cutover/nativeFixture';
+import { LighterExchange } from './reference/lighter/lighter.exchange';
 
 const { cancelOrderMock, createGroupedOrdersMock, createOrderMock, createOrdersMock } = vi.hoisted(() => ({
   cancelOrderMock: vi.fn(),
@@ -64,47 +65,52 @@ describe('LighterExchange batched placeOrders', () => {
       testnet: false,
     } as ExchangeOptions;
 
-    const exchange = new LighterExchange('lighter', options, new DefaultStore());
-    exchange.store.update({
-      markets: [
+    const exchange = new LighterExchange('lighter', options, new FrameStore());
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: '1',
-          symbol: 'BTC/USDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: {
-            amount: { min: 0.001, max: 100 },
-            leverage: { min: 1, max: 50 },
-          },
-          isExpiring: false,
-          info: {
-            amountDecimals: 3,
-            priceDecimals: 1,
-            min_quote_amount: '1',
-          },
+          markets: [
+            {
+              id: '1',
+              symbol: 'BTC/USDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: {
+                amount: { min: 0.001, max: 100 },
+                leverage: { min: 1, max: 50 },
+              },
+              isExpiring: false,
+              info: {
+                amountDecimals: 3,
+                priceDecimals: 1,
+                min_quote_amount: '1',
+              },
+            },
+            {
+              id: '2',
+              symbol: 'ETH/USDT',
+              base: 'ETH',
+              quote: 'USDT',
+              active: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: {
+                amount: { min: 0.001, max: 100 },
+                leverage: { min: 1, max: 50 },
+              },
+              isExpiring: false,
+              info: {
+                amountDecimals: 3,
+                priceDecimals: 1,
+                min_quote_amount: '1',
+              },
+            },
+          ],
         },
-        {
-          id: '2',
-          symbol: 'ETH/USDT',
-          base: 'ETH',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: {
-            amount: { min: 0.001, max: 100 },
-            leverage: { min: 1, max: 50 },
-          },
-          isExpiring: false,
-          info: {
-            amountDecimals: 3,
-            priceDecimals: 1,
-            min_quote_amount: '1',
-          },
-        },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     (exchange as any).ensureSignerAdapter = vi.fn().mockResolvedValue({
       cancelOrder: cancelOrderMock,
@@ -159,25 +165,30 @@ describe('LighterExchange batched placeOrders', () => {
 
   it('uses live bid/ask as market-order fallback before mark price is loaded', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      tickers: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: '1',
-          symbol: 'BTC/USDT',
-          bid: 99,
-          ask: 101,
-          last: 100,
-          mark: 0,
-          index: 0,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
+          tickers: [
+            {
+              id: '1',
+              symbol: 'BTC/USDT',
+              bid: 99,
+              ask: 101,
+              last: 100,
+              mark: 0,
+              index: 0,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await exchange.placeOrder({
       symbol: 'BTC/USDT',
@@ -212,46 +223,51 @@ describe('LighterExchange batched placeOrders', () => {
 
   it('refreshes stale Lighter margin state after invalid margin mode order rejection', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: '182',
-          symbol: 'H100',
-          base: 'H100',
-          quote: 'USDC',
-          active: true,
-          precision: { amount: 0.01, price: 0.0001 },
-          limits: {
-            amount: { min: 2, max: 5000000 },
-            leverage: { min: 1, max: 10 },
-          },
-          isExpiring: false,
-          info: {
-            amountDecimals: 2,
-            priceDecimals: 4,
-            min_quote_amount: '10',
-            market_config: { market_margin_mode: 1 },
-          },
+          markets: [
+            {
+              id: '182',
+              symbol: 'H100',
+              base: 'H100',
+              quote: 'USDC',
+              active: true,
+              precision: { amount: 0.01, price: 0.0001 },
+              limits: {
+                amount: { min: 2, max: 5000000 },
+                leverage: { min: 1, max: 10 },
+              },
+              isExpiring: false,
+              info: {
+                amountDecimals: 2,
+                priceDecimals: 4,
+                min_quote_amount: '10',
+                market_config: { market_margin_mode: 1 },
+              },
+            },
+          ],
+          tickers: [
+            {
+              id: '182',
+              symbol: 'H100',
+              bid: 2.62,
+              ask: 2.63,
+              last: 2.625,
+              mark: 2.624,
+              index: 2.637,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+            },
+          ],
         },
-      ],
-      tickers: [
-        {
-          id: '182',
-          symbol: 'H100',
-          bid: 2.62,
-          ask: 2.63,
-          last: 2.625,
-          mark: 2.624,
-          index: 2.637,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-        },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const refreshedPositions = [
       {
         id: 'H100:long:one-way',
@@ -541,7 +557,12 @@ describe('LighterExchange batched placeOrders', () => {
       reduceOnly: false,
       lastUpdate: Date.now(),
     };
-    exchange.store.update({ orders: [optimisticOrder] });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: [optimisticOrder] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await expect(exchange.cancelOrders([optimisticOrder])).rejects.toThrow('expected a numeric client order id');
 
@@ -551,25 +572,30 @@ describe('LighterExchange batched placeOrders', () => {
 
   it('keeps ambiguous reduce-only sell orders as stop-loss when updating below market', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      tickers: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: '1',
-          symbol: 'BTC/USDT',
-          bid: 99,
-          ask: 101,
-          last: 100,
-          mark: 100,
-          index: 100,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
+          tickers: [
+            {
+              id: '1',
+              symbol: 'BTC/USDT',
+              bid: 99,
+              ask: 101,
+              last: 100,
+              mark: 100,
+              index: 100,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await exchange.updateOrder({
       order: {
@@ -600,25 +626,30 @@ describe('LighterExchange batched placeOrders', () => {
 
   it('maps ambiguous reduce-only sell orders below market as stop-loss', () => {
     const exchange = createExchange();
-    exchange.store.update({
-      tickers: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: '1',
-          symbol: 'BTC/USDT',
-          bid: 99,
-          ask: 101,
-          last: 100,
-          mark: 100,
-          index: 100,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
+          tickers: [
+            {
+              id: '1',
+              symbol: 'BTC/USDT',
+              bid: 99,
+              ask: 101,
+              last: 100,
+              mark: 100,
+              index: 100,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const orders = exchange.mapOrder({
       order: {
@@ -679,39 +710,44 @@ describe('LighterExchange batched placeOrders', () => {
 
   it('keeps profit-side reduce-only sell limits as limits', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      positions: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'BTC/USDT:long:oneway',
-          symbol: 'BTC/USDT',
-          side: PositionSide.Long,
-          entryPrice: 100,
-          notional: 10,
-          leverage: 1,
-          unrealizedPnl: 0,
-          contracts: 0.1,
-          liquidationPrice: 0,
-          positionMode: PositionMode.OneWay,
+          positions: [
+            {
+              id: 'BTC/USDT:long:oneway',
+              symbol: 'BTC/USDT',
+              side: PositionSide.Long,
+              entryPrice: 100,
+              notional: 10,
+              leverage: 1,
+              unrealizedPnl: 0,
+              contracts: 0.1,
+              liquidationPrice: 0,
+              positionMode: PositionMode.OneWay,
+            },
+          ],
+          tickers: [
+            {
+              id: '1',
+              symbol: 'BTC/USDT',
+              bid: 99,
+              ask: 101,
+              last: 100,
+              mark: 100,
+              index: 100,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+            },
+          ],
         },
-      ],
-      tickers: [
-        {
-          id: '1',
-          symbol: 'BTC/USDT',
-          bid: 99,
-          ask: 101,
-          last: 100,
-          mark: 100,
-          index: 100,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-        },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await exchange.updateOrder({
       order: {
@@ -742,25 +778,30 @@ describe('LighterExchange batched placeOrders', () => {
 
   it('uses the updated loss-side price when inferring an ambiguous stop-loss', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      tickers: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: '1',
-          symbol: 'BTC/USDT',
-          bid: 99,
-          ask: 101,
-          last: 100,
-          mark: 100,
-          index: 100,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
+          tickers: [
+            {
+              id: '1',
+              symbol: 'BTC/USDT',
+              bid: 99,
+              ask: 101,
+              last: 100,
+              mark: 100,
+              index: 100,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await exchange.updateOrder({
       order: {

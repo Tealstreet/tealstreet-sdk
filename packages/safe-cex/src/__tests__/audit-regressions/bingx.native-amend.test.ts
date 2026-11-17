@@ -1,10 +1,9 @@
 import type { Axios } from 'axios';
+import type { StoreData } from '../../generated/StoreData';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BingxExchange } from '../reference/bingx/bingx.exchange';
-import { ENDPOINTS } from '../reference/bingx/bingx.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import {
   MarginType,
   Market,
@@ -16,6 +15,9 @@ import {
   PositionMode,
   PositionSide,
 } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BingxExchange } from '../reference/bingx/bingx.exchange';
+import { ENDPOINTS } from '../reference/bingx/bingx.types';
 
 const MARKET: Market = {
   id: 'BTC-USDT',
@@ -58,8 +60,13 @@ const createOrder = (overrides: Partial<Order> = {}): Order => ({
 });
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BingxExchange('bingx', { key: 'key', secret: 'secret' }, store);
   const amendPost = vi.fn().mockImplementation(async (_endpoint, payload) => ({
     data: {
@@ -142,7 +149,23 @@ describe('BingX native amend safety boundary', () => {
       },
     });
     vi.spyOn(exchange as any, 'createClientOrderId').mockReturnValue('tsreplacement1');
-    exchange.store.addOrUpdateOrder(createOrder());
+    (() => {
+      const incoming: StoreData['orders'] = [createOrder()];
+      return exchange.store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...exchange.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          exchange.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
 
     await expect(exchange.updateOrder({ order: createOrder(), update: { price: 50_100 } })).resolves.toEqual([
       '1989246372640980994',
@@ -195,23 +218,28 @@ describe('BingX native amend safety boundary', () => {
       },
     });
     exchange.xhr = { post: amendPost, delete: deleteOrder } as unknown as Axios;
-    exchange.store.update({
-      positions: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'BTCUSDT-long',
-          symbol: MARKET.symbol,
-          side: PositionSide.Long,
-          entryPrice: 50_000,
-          notional: 1_350_000,
-          leverage: 20,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.Hedged,
-          unrealizedPnl: 0,
-          contracts: 27,
-          liquidationPrice: 0,
+          positions: [
+            {
+              id: 'BTCUSDT-long',
+              symbol: MARKET.symbol,
+              side: PositionSide.Long,
+              entryPrice: 50_000,
+              notional: 1_350_000,
+              leverage: 20,
+              marginType: MarginType.Cross,
+              positionMode: PositionMode.Hedged,
+              unrealizedPnl: 0,
+              contracts: 27,
+              liquidationPrice: 0,
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange as any)._accountPositionMode = PositionMode.Hedged;
     const stopLoss = createOrder({
       id: '2086644409474576384',
@@ -240,7 +268,23 @@ describe('BingX native amend safety boundary', () => {
         closePosition: 'false',
       },
     });
-    exchange.store.addOrUpdateOrder(stopLoss);
+    (() => {
+      const incoming: StoreData['orders'] = [stopLoss];
+      return exchange.store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...exchange.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          exchange.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
 
     await expect(exchange.updateOrder({ order: stopLoss, update: { price: 49_000 } })).resolves.toEqual([
       '2086644409474576385',
@@ -296,23 +340,28 @@ describe('BingX native amend safety boundary', () => {
       },
     });
     exchange.xhr = { post: amendPost, delete: deleteOrder } as unknown as Axios;
-    exchange.store.update({
-      positions: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'BTCUSDT-long',
-          symbol: MARKET.symbol,
-          side: PositionSide.Long,
-          entryPrice: 50_000,
-          notional: 1_350_000,
-          leverage: 20,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.Hedged,
-          unrealizedPnl: 0,
-          contracts: 27,
-          liquidationPrice: 0,
+          positions: [
+            {
+              id: 'BTCUSDT-long',
+              symbol: MARKET.symbol,
+              side: PositionSide.Long,
+              entryPrice: 50_000,
+              notional: 1_350_000,
+              leverage: 20,
+              marginType: MarginType.Cross,
+              positionMode: PositionMode.Hedged,
+              unrealizedPnl: 0,
+              contracts: 27,
+              liquidationPrice: 0,
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange as any)._accountPositionMode = PositionMode.Hedged;
     const misclassifiedStopLoss = createOrder({
       id: '2086644409474576384',
@@ -663,9 +712,9 @@ describe('BingX native amend safety boundary', () => {
     const { exchange, amendPost, replacementPost } = createExchange();
     const assertNoReplacementWrites = expectNoReplacementWrites(exchange, replacementPost);
 
-    await expect(
-      exchange.updateOrder({ order: createOrder({ info }), update: { amount: 0.75 } }),
-    ).rejects.toThrow(error);
+    await expect(exchange.updateOrder({ order: createOrder({ info }), update: { amount: 0.75 } })).rejects.toThrow(
+      error,
+    );
 
     expect(amendPost).not.toHaveBeenCalled();
     assertNoReplacementWrites();

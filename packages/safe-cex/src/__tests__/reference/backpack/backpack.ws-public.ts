@@ -1,10 +1,14 @@
+import type { StoreData } from '../../../generated/StoreData';
+
 import throttle from 'lodash/throttle';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { FrameStore } from '../../../store/frameStore';
 import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker } from '../../../types';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBook } from '../../../utils/updateOrderBook';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { BackpackExchange } from './backpack.exchange';
 import {
   BackpackWsBookTickerUpdate,
@@ -36,7 +40,7 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
   private subscriptions: Set<string> = new Set();
   private topics: Record<string, number> = {};
   private orderBookState: Record<string, OrderBookState> = {};
-  // Store snapshot fetch functions to refetch on reconnect
+  // FrameStore snapshot fetch functions to refetch on reconnect
   private orderBookSnapshotFetchers: Record<string, () => Promise<void>> = {};
   private depthTickerUpdateThrottles: Record<string, ReturnType<typeof throttle>> = {};
 
@@ -289,7 +293,16 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
         };
 
         if (Object.keys(update).length > 0) {
-          this.store.updateTicker(ticker, update);
+          (() => {
+            const target = ticker;
+            const changes: Partial<StoreData['tickers'][number]> = update;
+            return this.store.apply(
+              nativeFixture(
+                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
       }
     } catch (error) {
@@ -317,7 +330,16 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
         };
 
         if (Object.keys(update).length > 0) {
-          this.store.updateTicker(ticker, update);
+          (() => {
+            const target = ticker;
+            const changes: Partial<StoreData['tickers'][number]> = update;
+            return this.store.apply(
+              nativeFixture(
+                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
       } catch (error) {
         this.parent.emitAndLogError(`Error handling ticker update: ${error}`);
@@ -335,7 +357,16 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
       // Update last price from trade, only if valid
       const last = parseFloat(data.p);
       if (!Number.isNaN(last)) {
-        this.store.updateTicker(ticker, { last });
+        (() => {
+          const target = ticker;
+          const changes: Partial<StoreData['tickers'][number]> = { last };
+          return this.store.apply(
+            nativeFixture(
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     } catch (error) {
       this.parent.emitAndLogError(`Error handling trade update: ${error}`);
@@ -356,7 +387,16 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
       };
 
       if (Object.keys(update).length > 0) {
-        this.store.updateTicker(existingTicker, update);
+        (() => {
+          const target = existingTicker;
+          const changes: Partial<StoreData['tickers'][number]> = update;
+          return this.store.apply(
+            nativeFixture(
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     } catch (error) {
       this.parent.emitAndLogError(`Error handling book ticker update: ${error}`);
@@ -599,7 +639,7 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
         this.topics[topic] = (this.topics[topic] || 0) + 1;
         this.subscribeToOrderBook(marketId);
 
-        // Store the fetch function for reconnection handling
+        // FrameStore the fetch function for reconnection handling
         this.orderBookSnapshotFetchers[marketId] = fetchSnapshot;
 
         // Fetch snapshot after subscribing to avoid missing updates
@@ -687,7 +727,8 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
   private recoverOrderBook = (marketId: string, reason: string) => {
     const state = this.orderBookState[marketId];
     const fetchSnapshot = this.orderBookSnapshotFetchers[marketId];
-    if (!state || !fetchSnapshot || state.isTerminal || state.isSnapshotFetchInFlight || state.isRecoveryScheduled) return;
+    if (!state || !fetchSnapshot || state.isTerminal || state.isSnapshotFetchInFlight || state.isRecoveryScheduled)
+      return;
 
     if (state.recoveryAttempts >= MAX_ORDERBOOK_RESNAPSHOT_ATTEMPTS) {
       // Do not keep a stale snapshot marked usable or emit once per later
@@ -716,11 +757,7 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
     });
   };
 
-  private terminateOrderBook = (
-    marketId: string,
-    state: OrderBookState,
-    reason: string,
-  ) => {
+  private terminateOrderBook = (marketId: string, state: OrderBookState, reason: string) => {
     if (state.isTerminal) return;
 
     state.isTerminal = true;

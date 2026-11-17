@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import vectors from '../../../../../sdk-rs/venues/cryptocom/tests/fixtures/hosted-signing.json';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { generateSignature } from '../reference/cryptocom/cryptocom.signing';
 import { prepareRecordedHttp } from '../support/managedHttp';
@@ -37,7 +37,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
   const exchange = new RustEngineExchange(
     'cryptocom',
     { engine: 'rust', key: 'replay-key', secret: 'replay-secret', ...options },
-    new DefaultStore(),
+    new FrameStore(),
   );
   live.push(exchange);
   return { exchange, io };
@@ -236,7 +236,7 @@ it.each(['remote', 'payload'] as const)(
     const exchange = new RustEngineExchange(
       'cryptocom',
       { engine: 'rust', key: 'replay-key', secret: '', ...(mode === 'remote' ? { remoteSigner } : { payloadSigner }) },
-      new DefaultStore(),
+      new FrameStore(),
     );
     live.push(exchange);
     const errors: unknown[] = [];

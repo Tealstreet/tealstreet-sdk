@@ -1,5 +1,5 @@
-import type { Exchange } from '../../exchanges/base';
 import type { CrossTradeConfig, CrossTradeCopier } from '../../crossTrade/types';
+import type { Exchange } from '../../exchanges/base';
 import type { Ticker } from '../../generated/Ticker';
 import type { ExchangeName } from '../../types';
 
@@ -8,8 +8,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { CrossTradeManager } from '../../crossTrade/runtime/CrossTradeManager';
 import { BaseExchange } from '../../exchanges/base';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { FrameApplier } from '../../store/frameApplier';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { inverseUnitsFrame as fixture } from '../fixtures/scxfFrame';
 
 describe('Rust frames preserve inverse native units', () => {
@@ -20,18 +20,31 @@ describe('Rust frames preserve inverse native units', () => {
       native: true,
       positions: true,
       positionPnl: 100,
-      orders: [{ id: 'inverse-okx', amount: 7, filled: 0.004321, remaining: 0.008765, native: 5, filledNative: 2, remainingNotional: 500 }],
+      orders: [
+        {
+          id: 'inverse-okx',
+          amount: 7,
+          filled: 0.004321,
+          remaining: 0.008765,
+          native: 5,
+          filledNative: 2,
+          remainingNotional: 500,
+        },
+      ],
     });
     const orderTable = value.orders();
     if (!orderTable?.filledInPlacementUnits) throw new Error('Native fixture is missing its placement fills');
     expect(orderTable.filledInPlacementUnits[0]).toBe(2);
-    const worker = new DefaultStore();
-    new FrameApplier(worker).apply(value);
-    const main = new DefaultStore();
+    const worker = new FrameStore();
+    worker.apply(value);
+    const main = new FrameStore();
     const exchange = new BaseExchange('okx', { key: '', secret: '' }, main);
     exchange.applyWorkerFrame(value.buffer);
     for (const store of [worker, main]) {
-      expect(store.orders[0]).toMatchObject({ amount: 7, extra: { remainingNative: 5, remainingNotional: 500, filledInPlacementUnits: 2 } });
+      expect(store.orders[0]).toMatchObject({
+        amount: 7,
+        extra: { remainingNative: 5, remainingNotional: 500, filledInPlacementUnits: 2 },
+      });
       expect(store.positions[0].extra).toEqual({ contractsNative: 10 });
       expect(store.positions[0].unrealizedPnl).toBe(100);
     }
@@ -46,8 +59,8 @@ describe('Rust frames preserve inverse native units', () => {
       positions: true,
       orders: [{ id: 'coin-m', amount: 7, filled: 2, remaining: 5, native: 5, remainingNotional: 500 }],
     });
-    const workerStore = new DefaultStore();
-    const applier = new FrameApplier(workerStore);
+    const workerStore = new FrameStore();
+    const applier = workerStore;
     applier.apply(value);
     applier.apply(
       fixture({
@@ -59,7 +72,7 @@ describe('Rust frames preserve inverse native units', () => {
         orders: [{ id: 'coin-m', amount: 7, filled: 2, remaining: 5, native: 5, remainingNotional: 500 }],
       }),
     );
-    const mainStore = new DefaultStore();
+    const mainStore = new FrameStore();
     const exchange = new BaseExchange('binanceinverse', { key: '', secret: '' }, mainStore);
     exchange.applyWorkerFrame(value.buffer);
     for (const store of [workerStore, mainStore]) {
@@ -77,54 +90,101 @@ describe('Rust frames preserve inverse native units', () => {
     exchange.dispose();
   });
 
-
   it('decodes legacy seven-column frames and leaves unknown native quantities absent', () => {
     const frame = fixture({ orders: [{ id: 'full-stop', amount: 0, filled: 0, remaining: 0.00013 }] });
     const orderTable = frame.orders();
     if (!orderTable) throw new Error('Legacy fixture is missing its orders table');
     expect(orderTable.remainingNative).toBeUndefined();
-    const store = new DefaultStore();
-    new FrameApplier(store).apply(frame);
+    const store = new FrameStore();
+    store.apply(frame);
     expect(store.orders[0]).toMatchObject({ id: 'full-stop', amount: 0, remaining: 0.00013 });
     expect(store.orders[0].extra).toBeUndefined();
   });
 
   it('keeps exact leaves quantities for parents, brackets and amount-zero Full stops with rejection metadata', () => {
     const postOnly = (1 << 20) | (4 << 24) | 256;
-    const frame = fixture({ native: true, orders: [
-      { id: 'entry', amount: 10, filled: 2, remaining: 0.00013, native: 7, remainingNotional: 7, enums: postOnly },
-      { id: 'entry__stop_loss', parentId: 'entry', amount: 10, filled: 0, remaining: 0.00013, native: 7, remainingNotional: 7, brackets: 1 << 8, enums: (1 << 28) | (3 << 8) },
-      { id: 'full-stop', amount: 0, filled: 0, remaining: 0.0002, native: 11, remainingNotional: 11, enums: 3 << 8 },
-      { id: 'unknown', amount: 0, filled: 0, remaining: 0.0002 },
-    ] });
+    const frame = fixture({
+      native: true,
+      orders: [
+        { id: 'entry', amount: 10, filled: 2, remaining: 0.00013, native: 7, remainingNotional: 7, enums: postOnly },
+        {
+          id: 'entry__stop_loss',
+          parentId: 'entry',
+          amount: 10,
+          filled: 0,
+          remaining: 0.00013,
+          native: 7,
+          remainingNotional: 7,
+          brackets: 1 << 8,
+          enums: (1 << 28) | (3 << 8),
+        },
+        { id: 'full-stop', amount: 0, filled: 0, remaining: 0.0002, native: 11, remainingNotional: 11, enums: 3 << 8 },
+        { id: 'unknown', amount: 0, filled: 0, remaining: 0.0002 },
+      ],
+    });
     const orderTable = frame.orders();
     if (!orderTable?.remainingNative) throw new Error('Native fixture is missing its remaining quantities');
     expect(Array.from(orderTable.remainingNative)).toEqual([7, 7, 11, NaN]);
-    const store = new DefaultStore();
-    new FrameApplier(store).apply(frame);
+    const store = new FrameStore();
+    store.apply(frame);
     expect(store.orders[0].extra).toEqual({ remainingNative: 7, remainingNotional: 7, rejectReason: 'PostOnly' });
     expect(store.orders[0].timeInForce).toBe('PostOnly');
-    expect(store.orders[1]).toMatchObject({ parentId: 'entry', slTriggerType: 'mark_price', extra: { remainingNative: 7, remainingNotional: 7 } });
+    expect(store.orders[1]).toMatchObject({
+      parentId: 'entry',
+      slTriggerType: 'mark_price',
+      extra: { remainingNative: 7, remainingNotional: 7 },
+    });
     expect(store.orders[2]).toMatchObject({ amount: 0, extra: { remainingNative: 11, remainingNotional: 11 } });
     expect(store.orders[3].extra).toBeUndefined();
   });
 
   it('retains inverse position extras on later position-only frames and closes a copier in native contracts', async () => {
-    const store = new DefaultStore();
-    const applier = new FrameApplier(store);
+    const store = new FrameStore();
+    const applier = store;
     applier.apply(fixture());
     applier.apply(fixture({ markets: false, positions: true }));
-    expect(store.positions[0]).toMatchObject({ contracts: 0.02, extra: { contractsNative: 1000, unrealizedPnlNative: 0.002 } });
+    expect(store.positions[0]).toMatchObject({
+      contracts: 0.02,
+      extra: { contractsNative: 1000, unrealizedPnlNative: 0.002 },
+    });
     const ticker: Ticker = {
-      id: 'BTCUSD', symbol: 'BTCUSD', last: 50000, bid: 0, ask: 0, mark: 0, index: 0,
-      percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0,
+      id: 'BTCUSD',
+      symbol: 'BTCUSD',
+      last: 50000,
+      bid: 0,
+      ask: 0,
+      mark: 0,
+      index: 0,
+      percentage: 0,
+      openInterest: 0,
+      fundingRate: 0,
+      fundingTime: 0,
+      volume: 0,
+      quoteVolume: 0,
     };
-    store.update({ tickers: [ticker] });
-    const masterStore = new DefaultStore();
-    masterStore.update({ markets: store.markets, tickers: [ticker], positions: [] });
+    store.apply(
+      nativeFixture(
+        { tickers: [ticker] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
+    const masterStore = new FrameStore();
+    masterStore.apply(
+      nativeFixture(
+        { markets: store.markets, tickers: [ticker], positions: [] },
+        masterStore.markets.map((row) => row.symbol),
+      ),
+    );
     const placeOrder = vi.fn().mockResolvedValue([]);
     const manager = new CrossTradeManager({ getExchange: () => undefined, placeOrder });
-    const audit = manager as unknown as { _auditCopierPositions(config: CrossTradeConfig, copier: CrossTradeCopier, master: Exchange, copierExchange: Exchange): Promise<void> };
+    const audit = manager as unknown as {
+      _auditCopierPositions(
+        config: CrossTradeConfig,
+        copier: CrossTradeCopier,
+        master: Exchange,
+        copierExchange: Exchange,
+      ): Promise<void>;
+    };
     await audit._auditCopierPositions(
       { enabled: true, masterAccount: 'master', masterSymbol: 'BTCUSD', masterWeight: 1, copiers: [] },
       { enabled: true, account: 'copier', weight: 1, execution: 'Market', weightMode: 'Absolute', symbolMappings: {} },
@@ -137,10 +197,15 @@ describe('Rust frames preserve inverse native units', () => {
   });
 
   it('preserves explicit native order quantities without inventing inverse extras on linear positions', () => {
-    const store = new DefaultStore();
-    new FrameApplier(store).apply(fixture({ inverse: false, native: true, positions: true, orders: [
-      { id: 'linear', amount: 1, filled: 0, remaining: 1, native: 1 },
-    ] }));
+    const store = new FrameStore();
+    store.apply(
+      fixture({
+        inverse: false,
+        native: true,
+        positions: true,
+        orders: [{ id: 'linear', amount: 1, filled: 0, remaining: 1, native: 1 }],
+      }),
+    );
     expect(store.positions[0].extra).toBeUndefined();
     expect(store.orders[0].extra).toEqual({ remainingNative: 1 });
   });
@@ -149,11 +214,25 @@ describe('Rust frames preserve inverse native units', () => {
     const venues: ExchangeName[] = ['bybitinverse', 'bitgetinverse'];
     for (const venue of venues) {
       for (const native of [false, true]) {
-        const store = new DefaultStore();
+        const store = new FrameStore();
         const exchange = new BaseExchange(venue, { key: '', secret: '' }, store);
-        exchange.applyWorkerFrame(fixture({ native, positions: true, units: venue === 'bitgetinverse' ? 2 : 0, orders: [
-          { id: 'inverse', amount: 1000, filled: 100, remaining: 0.018, native: 777, ...(native && { remainingNotional: 777 }) },
-        ] }).buffer);
+        exchange.applyWorkerFrame(
+          fixture({
+            native,
+            positions: true,
+            units: venue === 'bitgetinverse' ? 2 : 0,
+            orders: [
+              {
+                id: 'inverse',
+                amount: 1000,
+                filled: 100,
+                remaining: 0.018,
+                native: 777,
+                ...(native && { remainingNotional: 777 }),
+              },
+            ],
+          }).buffer,
+        );
         expect(store.positions[0].extra).toMatchObject({ contractsNative: 1000, unrealizedPnlNative: 0.002 });
         if (native) expect(store.orders[0].extra).toEqual({ remainingNative: 777, remainingNotional: 777 });
         else expect(store.orders[0].extra).toBeUndefined();
@@ -166,22 +245,55 @@ describe('Rust frames preserve inverse native units', () => {
 describe('OKX native contract count bridge', () => {
   const venues: ExchangeName[] = ['okx', 'okxeu', 'okxdemo', 'okxeudemo'];
   it.each(venues)('%s preserves native copier and chaser counts through worker frames', (name) => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = new BaseExchange(name, { key: '', secret: '' }, store);
-    const workerStore = new DefaultStore();
+    const workerStore = new FrameStore();
     const worker = new RustEngineExchange(name, { key: '', secret: '', publicDataOnly: true }, workerStore);
-    const frame = fixture({ units: 3, contractSize: 100, native: true, positions: true, positionPnl: 100, orders: [
-      { id: 'entry', amount: 10, filled: 0.004, remaining: 0.016, native: 8, filledNative: 2, remainingNotional: 800 },
-      { id: 'full-stop', amount: 0, filled: 0, remaining: 0.02, native: 10, filledNative: 2, remainingNotional: 1000, enums: 3 << 8 },
-    ] });
+    const frame = fixture({
+      units: 3,
+      contractSize: 100,
+      native: true,
+      positions: true,
+      positionPnl: 100,
+      orders: [
+        {
+          id: 'entry',
+          amount: 10,
+          filled: 0.004,
+          remaining: 0.016,
+          native: 8,
+          filledNative: 2,
+          remainingNotional: 800,
+        },
+        {
+          id: 'full-stop',
+          amount: 0,
+          filled: 0,
+          remaining: 0.02,
+          native: 10,
+          filledNative: 2,
+          remainingNotional: 1000,
+          enums: 3 << 8,
+        },
+      ],
+    });
     exchange.applyWorkerFrame(frame.buffer);
     const workerApplier: unknown = Reflect.get(worker, 'applier');
-    if (!(workerApplier instanceof FrameApplier)) throw new Error('Expected the worker frame applier');
+    if (!(workerApplier instanceof FrameStore)) throw new Error('Expected the worker frame applier');
     workerApplier.apply(frame);
     for (const receiver of [store, workerStore]) {
-      expect(receiver.orders[0]).toMatchObject({ amount: 10, filled: 0.004, remaining: 0.016, extra: { remainingNative: 8, filledInPlacementUnits: 2 } });
+      expect(receiver.orders[0]).toMatchObject({
+        amount: 10,
+        filled: 0.004,
+        remaining: 0.016,
+        extra: { remainingNative: 8, filledInPlacementUnits: 2 },
+      });
       expect(receiver.orders[0].extra?.remainingNotional).toBe(800);
-      expect(receiver.orders[1].extra).toEqual({ remainingNative: 10, remainingNotional: 1000, filledInPlacementUnits: 2 });
+      expect(receiver.orders[1].extra).toEqual({
+        remainingNative: 10,
+        remainingNotional: 1000,
+        filledInPlacementUnits: 2,
+      });
       expect(receiver.positions[0].extra).toEqual({ contractsNative: 10 });
       expect(receiver.positions[0].unrealizedPnl).toBe(100);
     }
@@ -189,18 +301,24 @@ describe('OKX native contract count bridge', () => {
     exchange.dispose();
   });
   it('retains linear native placement counts separately from displayed base size', () => {
-    const store = new DefaultStore();
-    new FrameApplier(store).apply(fixture({ units: 3, inverse: false, contractSize: 0.001, positions: true, orders: [
-      { id: 'linear', amount: 10, filled: 0.002, remaining: 0.008, native: 8, filledNative: 2 },
-    ] }));
+    const store = new FrameStore();
+    store.apply(
+      fixture({
+        units: 3,
+        inverse: false,
+        contractSize: 0.001,
+        positions: true,
+        orders: [{ id: 'linear', amount: 10, filled: 0.002, remaining: 0.008, native: 8, filledNative: 2 }],
+      }),
+    );
     expect(store.orders[0].extra).toEqual({ remainingNative: 8, filledInPlacementUnits: 2 });
     expect(store.positions[0].extra).toEqual({ contractsNative: 20 });
   });
   it('cannot infer exact inverse order leaves from a legacy base-sized remainder', () => {
-    const store = new DefaultStore();
-    new FrameApplier(store).apply(fixture({ units: 3, contractSize: 100, orders: [
-      { id: 'legacy', amount: 10, filled: 0.004, remaining: 0.016 },
-    ] }));
+    const store = new FrameStore();
+    store.apply(
+      fixture({ units: 3, contractSize: 100, orders: [{ id: 'legacy', amount: 10, filled: 0.004, remaining: 0.016 }] }),
+    );
     expect(store.orders[0].extra).toBeUndefined();
   });
 });
@@ -215,11 +333,19 @@ describe('per-market quantity units from MARKETS flags', () => {
     { units: 3, notional: 500, filledNative: 2, position: { contractsNative: 10 } },
     { units: 4, notional: 500, filledNative: undefined, position: { contractsNative: 10, unrealizedPnlNative: 0.002 } },
   ])('units $units preserves native output and legacy absence', ({ units, notional, filledNative, position }) => {
-    const store = new DefaultStore();
-    new FrameApplier(store).apply(fixture({ units, contractSize: 100, native: true, positions: true, orders: [
-      { id: 'exact', amount: 7, filled: 2, remaining: 0.004, native: 5, remainingNotional: notional, filledNative },
-      { id: 'legacy', amount: 7, filled: 2, remaining: 0.5 },
-    ] }));
+    const store = new FrameStore();
+    store.apply(
+      fixture({
+        units,
+        contractSize: 100,
+        native: true,
+        positions: true,
+        orders: [
+          { id: 'exact', amount: 7, filled: 2, remaining: 0.004, native: 5, remainingNotional: notional, filledNative },
+          { id: 'legacy', amount: 7, filled: 2, remaining: 0.5 },
+        ],
+      }),
+    );
     expect(store.orders[0].extra).toEqual({
       remainingNative: 5,
       remainingNotional: notional,
@@ -231,10 +357,26 @@ describe('per-market quantity units from MARKETS flags', () => {
 
   it('preserves native quantities when the referenced market is missing', () => {
     const orphan = (units: number) => {
-      const store = new DefaultStore();
-      new FrameApplier(store).apply(fixture({ units, contractSize: 100, native: true, orderMarket: 7, orderRevision1: true, orders: [
-        { id: 'orphan', amount: 7, filled: 2, remaining: 0.004, native: 5, ...(units === 3 && { filledNative: 2 }) },
-      ] }));
+      const store = new FrameStore();
+      store.apply(
+        fixture({
+          units,
+          contractSize: 100,
+          native: true,
+          orderMarket: 7,
+          orderRevision1: true,
+          orders: [
+            {
+              id: 'orphan',
+              amount: 7,
+              filled: 2,
+              remaining: 0.004,
+              native: 5,
+              ...(units === 3 && { filledNative: 2 }),
+            },
+          ],
+        }),
+      );
       return store.orders[0].extra;
     };
     expect(orphan(3)).toEqual({ remainingNative: 5, filledInPlacementUnits: 2 });

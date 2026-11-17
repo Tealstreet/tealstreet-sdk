@@ -1,12 +1,13 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Ticker, Writable } from '../../../types';
-import { resolveTransportRouting } from '../../../transport/registry';
 import type { BitgetExchange } from './bitget.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { BASE_WS_URL } from '../../../exchanges/bitget/bitget.types';
-
+import { resolveTransportRouting } from '../../../transport/registry';
+import { nativeFixture } from '../../cutover/nativeFixture';
 
 type Data = Record<string, unknown>;
 type MessageHandlers = {
@@ -207,7 +208,16 @@ export class BitgetSecondaryPublicWebsocket extends BaseWebSocket<BitgetExchange
       const update = this.buildTickerUpdate(data);
       if (Object.keys(update).length === 0) continue;
 
-      this.parent.store.updateTicker(ticker, update);
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = update;
+        return this.parent.store.apply(
+          nativeFixture(
+            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
   };
 }

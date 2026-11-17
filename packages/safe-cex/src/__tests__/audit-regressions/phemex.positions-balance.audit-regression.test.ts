@@ -1,9 +1,12 @@
+import type { StoreData } from '../../generated/StoreData';
+
 import { describe, expect, it, vi } from 'vitest';
 
-import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 import { ENDPOINTS } from '../../exchanges/phemex/phemex.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType, PositionMode, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 
 const createAccountResponse = (currency: 'USDT' | 'USDC', balance: string, used: string, positions: any[]) => ({
   data: {
@@ -26,17 +29,22 @@ describe('Phemex positions and balance audit regression', () => {
     [20, -30],
     [-20, 30],
   ])('keeps REST and WS balances equivalent with USDT/USDC UPnL %s/%s', async (usdtPnl, usdcPnl) => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [
-        { id: 'BTCUSDT', symbol: 'BTCUSDT', quote: 'USDT', info: { settleCurrency: 'USDT' } },
-        { id: 'ETHUSDC', symbol: 'ETHUSDC', quote: 'USDC', info: { settleCurrency: 'USDC' } },
-      ],
-      tickers: [
-        { symbol: 'BTCUSDT', last: 100 },
-        { symbol: 'ETHUSDC', last: 200 },
-      ],
-    } as any);
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        {
+          markets: [
+            { id: 'BTCUSDT', symbol: 'BTCUSDT', quote: 'USDT', info: { settleCurrency: 'USDT' } },
+            { id: 'ETHUSDC', symbol: 'ETHUSDC', quote: 'USDC', info: { settleCurrency: 'USDC' } },
+          ],
+          tickers: [
+            { symbol: 'BTCUSDT', last: 100 },
+            { symbol: 'ETHUSDC', last: 200 },
+          ],
+        } as any,
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new PhemexExchange(
       'phemex',
       {
@@ -125,11 +133,16 @@ describe('Phemex positions and balance audit regression', () => {
   });
 
   it('maps one-way Buy positions from lowercase side and ignores zero-size rows', () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [{ id: 'ADA/USDT:USDT', symbol: 'ADAUSDT', info: { symbol: 'ADAUSDT' } }] as any,
-      tickers: [{ id: 'ADA/USDT:USDT', symbol: 'ADAUSDT', last: 0.189 }] as any,
-    });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        {
+          markets: [{ id: 'ADA/USDT:USDT', symbol: 'ADAUSDT', info: { symbol: 'ADAUSDT' } }] as any,
+          tickers: [{ id: 'ADA/USDT:USDT', symbol: 'ADAUSDT', last: 0.189 }] as any,
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
 
     const position = exchange.mapPosition({
@@ -164,11 +177,16 @@ describe('Phemex positions and balance audit regression', () => {
   });
 
   it('maps nonzero positions from raw mark price when the ticker cache is missing', () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [{ id: 'ADA/USDT:USDT', symbol: 'ADAUSDT', info: { symbol: 'ADAUSDT' } }] as any,
-      tickers: [],
-    });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        {
+          markets: [{ id: 'ADA/USDT:USDT', symbol: 'ADAUSDT', info: { symbol: 'ADAUSDT' } }] as any,
+          tickers: [],
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
 
     const position = exchange.mapPosition({
@@ -193,8 +211,13 @@ describe('Phemex positions and balance audit regression', () => {
   });
 
   it('maps one-way Sell positions from symbol-scoped recovery even when market indexes lag', () => {
-    const store = new DefaultStore();
-    store.update({ markets: [], tickers: [] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [], tickers: [] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
 
     const position = exchange.mapPosition({
@@ -223,7 +246,7 @@ describe('Phemex positions and balance audit regression', () => {
   });
 
   it('uses zero-size raw one-way position rows to choose merged order position side', async () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
     const get = vi.fn().mockResolvedValue(
       createAccountResponse('USDT', '88', '0', [
@@ -256,17 +279,22 @@ describe('Phemex positions and balance audit regression', () => {
   });
 
   it('merges USDT and USDC account snapshots before the full position-store replacement', async () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [
-        { id: 'BTC/USDT:USDT', symbol: 'BTCUSDT', info: { symbol: 'BTCUSDT' } },
-        { id: 'BTC/USDC:USDC', symbol: 'BTCUSDC', info: { symbol: 'BTCUSDC' } },
-      ] as any,
-      tickers: [
-        { id: 'BTC/USDT:USDT', symbol: 'BTCUSDT', last: 110 },
-        { id: 'BTC/USDC:USDC', symbol: 'BTCUSDC', last: 190 },
-      ] as any,
-    });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        {
+          markets: [
+            { id: 'BTC/USDT:USDT', symbol: 'BTCUSDT', info: { symbol: 'BTCUSDT' } },
+            { id: 'BTC/USDC:USDC', symbol: 'BTCUSDC', info: { symbol: 'BTCUSDC' } },
+          ] as any,
+          tickers: [
+            { id: 'BTC/USDT:USDT', symbol: 'BTCUSDT', last: 110 },
+            { id: 'BTC/USDC:USDC', symbol: 'BTCUSDC', last: 190 },
+          ] as any,
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
     const get = vi.fn((_endpoint: string, config: { params: { currency: 'USDT' | 'USDC' } }) => {
       if (config.params.currency === 'USDT') {
@@ -301,9 +329,11 @@ describe('Phemex positions and balance audit regression', () => {
     });
     exchange.xhr = { get } as any;
 
-    const originalAddOrUpdatePositionsFull = store.addOrUpdatePositionsFull;
-    const addOrUpdatePositionsFull = vi.spyOn(store, 'addOrUpdatePositionsFull').mockImplementation((positions) => {
-      originalAddOrUpdatePositionsFull(positions);
+    const addOrUpdatePositionsFull = (() => {
+      const observed = vi.fn<(value: typeof store.positions) => void>();
+      store.subscribe('positions', (value) => observed(value));
+      return observed;
+    })().mockImplementation((positions) => {
       exchange.isDisposed = true;
     });
 
@@ -337,24 +367,39 @@ describe('Phemex positions and balance audit regression', () => {
   });
 
   it('applies a successful USDT snapshot without clearing the last USDC state when USDC polling fails', async () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [
-        { id: 'BTC/USDT:USDT', symbol: 'BTCUSDT', quote: 'USDT', info: { symbol: 'BTCUSDT', settleCurrency: 'USDT' } },
-        { id: 'BTC/USDC:USDC', symbol: 'BTCUSDC', quote: 'USDC', info: { symbol: 'BTCUSDC', settleCurrency: 'USDC' } },
-      ] as any,
-      tickers: [
-        { id: 'BTC/USDT:USDT', symbol: 'BTCUSDT', last: 110 },
-        { id: 'BTC/USDC:USDC', symbol: 'BTCUSDC', last: 190 },
-      ] as any,
-      balance: {
-        total: 50,
-        used: 5,
-        free: 45,
-        upnl: 0,
-        currencies: { USDC: { total: 50, used: 5, free: 45, upnl: 0 } },
-      },
-    });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        {
+          markets: [
+            {
+              id: 'BTC/USDT:USDT',
+              symbol: 'BTCUSDT',
+              quote: 'USDT',
+              info: { symbol: 'BTCUSDT', settleCurrency: 'USDT' },
+            },
+            {
+              id: 'BTC/USDC:USDC',
+              symbol: 'BTCUSDC',
+              quote: 'USDC',
+              info: { symbol: 'BTCUSDC', settleCurrency: 'USDC' },
+            },
+          ] as any,
+          tickers: [
+            { id: 'BTC/USDT:USDT', symbol: 'BTCUSDT', last: 110 },
+            { id: 'BTC/USDC:USDC', symbol: 'BTCUSDC', last: 190 },
+          ] as any,
+          balance: {
+            total: 50,
+            used: 5,
+            free: 45,
+            upnl: 0,
+            currencies: { USDC: { total: 50, used: 5, free: 45, upnl: 0 } },
+          },
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
     const previousUsdcPosition = exchange.mapPosition({
       symbol: 'BTCUSDC',
@@ -366,7 +411,15 @@ describe('Phemex positions and balance audit regression', () => {
       liquidationPriceRp: '250',
       currency: 'USDC',
     } as any)!;
-    store.addOrUpdatePositionsFull([previousUsdcPosition]);
+    (() => {
+      const incoming: StoreData['positions'] = [previousUsdcPosition];
+      return store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
 
     const get = vi.fn((_endpoint: string, config: { params: { currency: 'USDT' | 'USDC' } }) => {
       if (config.params.currency === 'USDT') {
@@ -389,9 +442,11 @@ describe('Phemex positions and balance audit regression', () => {
     exchange.xhr = { get } as any;
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
 
-    const originalAddOrUpdatePositionsFull = store.addOrUpdatePositionsFull;
-    vi.spyOn(store, 'addOrUpdatePositionsFull').mockImplementation((positions) => {
-      originalAddOrUpdatePositionsFull(positions);
+    (() => {
+      const observed = vi.fn<(value: typeof store.positions) => void>();
+      store.subscribe('positions', (value) => observed(value));
+      return observed;
+    })().mockImplementation((positions) => {
       exchange.isDisposed = true;
     });
 
@@ -417,19 +472,24 @@ describe('Phemex positions and balance audit regression', () => {
   });
 
   it('keeps the sibling settlement balance when a private account update arrives', () => {
-    const store = new DefaultStore();
-    store.update({
-      balance: {
-        total: 150,
-        used: 15,
-        free: 135,
-        upnl: 0,
-        currencies: {
-          USDT: { total: 100, used: 10, free: 90, upnl: 0, info: { currency: 'USDT' } },
-          USDC: { total: 50, used: 5, free: 45, upnl: 0, info: { currency: 'USDC' } },
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        {
+          balance: {
+            total: 150,
+            used: 15,
+            free: 135,
+            upnl: 0,
+            currencies: {
+              USDT: { total: 100, used: 10, free: 90, upnl: 0, info: { currency: 'USDT' } },
+              USDC: { total: 50, used: 5, free: 45, upnl: 0, info: { currency: 'USDC' } },
+            },
+          },
         },
-      },
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
 
     exchange.privateWebsocket.onMessage({
@@ -456,7 +516,7 @@ describe('Phemex positions and balance audit regression', () => {
   });
 
   it('fails closed for an unavailable settlement account with no prior balance slice', async () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
     exchange.xhr = {
       get: vi.fn((_endpoint: string, config: { params: { currency: 'USDT' | 'USDC' } }) =>

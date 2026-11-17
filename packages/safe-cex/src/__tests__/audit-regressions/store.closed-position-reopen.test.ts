@@ -1,10 +1,12 @@
+import type { StoreData } from '../../generated/StoreData';
 import type { Market, Position } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BinancePrivateWebsocket } from '../reference/binance/binance.ws-private';
 import { BlofinExchange } from '../reference/blofin/blofin.exchange';
 
@@ -31,13 +33,18 @@ const rawBlofin = {
   marginMode: 'cross',
   liquidationPrice: '30000',
 };
-const blofin = (store = new DefaultStore()) => {
-  store.update({ markets: [market] });
+const blofin = (store = new FrameStore()) => {
+  store.apply(
+    nativeFixture(
+      { markets: [market] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BlofinExchange('blofin', { key: '', secret: '', passphrase: '' }, store);
   return { store, exchange };
 };
 const binance = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const ws = new BinancePrivateWebsocket({ store, markPositionStateUpdatedByWebsocket: vi.fn() } as any);
   const repair = vi.spyOn(ws as any, 'throttledFetchPositions').mockImplementation(() => undefined);
   const reopen = (ps = 'BOTH', pa = '0.2') =>
@@ -72,11 +79,9 @@ describe('retained adapters reopen without fabricated settings', () => {
       vi.spyOn(Date, 'now').mockReturnValue(12345);
       vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
       vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
-      const get = vi
-        .fn()
-        .mockResolvedValue({
-          data: { code: '0', data: [{ positionSide: 'net', leverage: '9', marginMode: 'cross' }] },
-        });
+      const get = vi.fn().mockResolvedValue({
+        data: { code: '0', data: [{ positionSide: 'net', leverage: '9', marginMode: 'cross' }] },
+      });
       const post = vi.fn().mockResolvedValue({ data: { code: '0', msg: '' } });
       exchange.xhr = { get, post } as any;
       const confirm = async () => {
@@ -160,9 +165,30 @@ describe('retained adapters reopen without fabricated settings', () => {
   ])('BloFin keeps untracked conflicting settings unavailable (%s)', (retained, expected) => {
     const { store, exchange } = blofin();
     try {
-      store.addOrUpdatePositionsFull([position({ leverage: retained })]);
-      store.addOrUpdatePositionsFull([]);
-      store.update({ fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } });
+      (() => {
+        const incoming: StoreData['positions'] = [position({ leverage: retained })];
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      (() => {
+        const incoming: StoreData['positions'] = [];
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      store.apply(
+        nativeFixture(
+          { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
       expect(exchange.mapPositions([{ ...rawBlofin, leverage: '' }] as any)[0].leverage).toBe(expected);
     } finally {
       exchange.dispose();
@@ -172,9 +198,30 @@ describe('retained adapters reopen without fabricated settings', () => {
   it('BloFin keeps a loaded conflict unknown across three real blank handler events', () => {
     const { store, exchange } = blofin();
     try {
-      store.addOrUpdatePositionsFull([position({ leverage: 50 })]);
-      store.addOrUpdatePositionsFull([]);
-      store.update({ fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } });
+      (() => {
+        const incoming: StoreData['positions'] = [position({ leverage: 50 })];
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      (() => {
+        const incoming: StoreData['positions'] = [];
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      store.apply(
+        nativeFixture(
+          { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
       for (let event = 1; event <= 3; event++) {
         exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
         expect(store.positions[0].leverage, `blank event ${event}`).toBeNaN();
@@ -199,9 +246,30 @@ describe('retained adapters reopen without fabricated settings', () => {
   it('BloFin resolves a loaded conflict with a fresh wire report and preserves it on another blank event', () => {
     const { store, exchange } = blofin();
     try {
-      store.addOrUpdatePositionsFull([position({ leverage: 50 })]);
-      store.addOrUpdatePositionsFull([]);
-      store.update({ fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } });
+      (() => {
+        const incoming: StoreData['positions'] = [position({ leverage: 50 })];
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      (() => {
+        const incoming: StoreData['positions'] = [];
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      store.apply(
+        nativeFixture(
+          { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
       exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
       expect(store.positions[0].leverage).toBeNaN();
       exchange.privateWebsocket.handlePositionTopic({ data: [rawBlofin] as any });
@@ -218,11 +286,9 @@ describe('retained adapters reopen without fabricated settings', () => {
     try {
       vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
       vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
-      const get = vi
-        .fn()
-        .mockResolvedValue({
-          data: { code: '0', data: [{ positionSide: 'net', leverage: '9', marginMode: 'cross' }] },
-        });
+      const get = vi.fn().mockResolvedValue({
+        data: { code: '0', data: [{ positionSide: 'net', leverage: '9', marginMode: 'cross' }] },
+      });
       const post = vi.fn().mockResolvedValue({ data: { code: '0', msg: '' } });
       exchange.xhr = { get, post } as any;
       await exchange.fetchLeverageForSymbol('BTCUSDT');
@@ -240,9 +306,30 @@ describe('retained adapters reopen without fabricated settings', () => {
   it.each(['fetch', 'write'] as const)('BloFin resolves repeated loaded ambiguity with a fresh %s', async (source) => {
     const { store, exchange } = blofin();
     try {
-      store.addOrUpdatePositionsFull([position({ leverage: 50 })]);
-      store.addOrUpdatePositionsFull([]);
-      store.update({ fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } });
+      (() => {
+        const incoming: StoreData['positions'] = [position({ leverage: 50 })];
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      (() => {
+        const incoming: StoreData['positions'] = [];
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      store.apply(
+        nativeFixture(
+          { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
       vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
       vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
       const get = vi.fn().mockResolvedValue({
@@ -271,9 +358,30 @@ describe('retained adapters reopen without fabricated settings', () => {
   it('BloFin keeps a loaded conflict unknown when an earlier in-flight read completes', async () => {
     const { store, exchange } = blofin();
     try {
-      store.addOrUpdatePositionsFull([position({ leverage: 50 })]);
-      store.addOrUpdatePositionsFull([]);
-      store.update({ fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } });
+      (() => {
+        const incoming: StoreData['positions'] = [position({ leverage: 50 })];
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      (() => {
+        const incoming: StoreData['positions'] = [];
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      store.apply(
+        nativeFixture(
+          { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
       vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
       let release!: (value: any) => void;
       const get = vi.fn().mockReturnValue(
@@ -401,8 +509,24 @@ describe('retained adapters reopen without fabricated settings', () => {
   it('BloFin prefers acknowledged flat-account leverage to closed settings', async () => {
     const { store, exchange } = blofin();
     try {
-      store.addOrUpdatePositionsFull(exchange.mapPositions([rawBlofin] as any));
-      store.addOrUpdatePositionsFull([]);
+      (() => {
+        const incoming: StoreData['positions'] = exchange.mapPositions([rawBlofin] as any);
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      (() => {
+        const incoming: StoreData['positions'] = [];
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
       vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
       vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
       const post = vi.fn().mockResolvedValue({ data: { code: '0', msg: '' } });
@@ -431,9 +555,30 @@ describe('retained adapters reopen without fabricated settings', () => {
   it('BloFin ignores an in-flight fetched setting and keeps the matching closed setting', () => {
     const { store, exchange } = blofin();
     try {
-      store.addOrUpdatePositionsFull(exchange.mapPositions([rawBlofin] as any));
-      store.addOrUpdatePositionsFull([]);
-      store.update({ fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9, isFetching: true } } });
+      (() => {
+        const incoming: StoreData['positions'] = exchange.mapPositions([rawBlofin] as any);
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      (() => {
+        const incoming: StoreData['positions'] = [];
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      store.apply(
+        nativeFixture(
+          { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9, isFetching: true } } },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
       expect(exchange.mapPositions([{ ...rawBlofin, leverage: '' }] as any)[0].leverage).toBe(50);
     } finally {
       exchange.dispose();
@@ -443,8 +588,24 @@ describe('retained adapters reopen without fabricated settings', () => {
   it('BloFin does not promote a rejected leverage change into confirmed settings', async () => {
     const { store, exchange } = blofin();
     try {
-      store.addOrUpdatePositionsFull(exchange.mapPositions([rawBlofin] as any));
-      store.addOrUpdatePositionsFull([]);
+      (() => {
+        const incoming: StoreData['positions'] = exchange.mapPositions([rawBlofin] as any);
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      (() => {
+        const incoming: StoreData['positions'] = [];
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
       vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
       vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
       vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
@@ -464,8 +625,24 @@ describe('retained adapters reopen without fabricated settings', () => {
   ] as const)('Binance restores exact-ID settings on %s stream reopen', (ps, pa, side, mode) => {
     const { store, reopen, repair } = binance();
     const id = createPositionId('BTCUSDT', side, mode);
-    store.addOrUpdatePositionsFull([position({ id, side, positionMode: mode })]);
-    store.addOrUpdatePositionsFull([]);
+    (() => {
+      const incoming: StoreData['positions'] = [position({ id, side, positionMode: mode })];
+      return store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
+    (() => {
+      const incoming: StoreData['positions'] = [];
+      return store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     expect(store.positions).toEqual([]);
     reopen(ps, pa);
     expect(store.positions).toHaveLength(1);
@@ -483,13 +660,34 @@ describe('retained adapters reopen without fabricated settings', () => {
 
   it('Binance prefers confirmed side-specific settings to the closed cache', () => {
     const { store, reopen } = binance();
-    store.addOrUpdatePositionsFull([position({ side: PositionSide.Short })]);
-    store.addOrUpdatePositionsFull([]);
-    store.update({
-      fetchedLeverage: {
-        BTCUSDT: { buyLeverage: 9, sellLeverage: 13, marginType: MarginType.Cross },
-      },
-    });
+    (() => {
+      const incoming: StoreData['positions'] = [position({ side: PositionSide.Short })];
+      return store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
+    (() => {
+      const incoming: StoreData['positions'] = [];
+      return store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
+    store.apply(
+      nativeFixture(
+        {
+          fetchedLeverage: {
+            BTCUSDT: { buyLeverage: 9, sellLeverage: 13, marginType: MarginType.Cross },
+          },
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     reopen('BOTH', '-0.2');
     expect(store.positions[0]).toMatchObject({ side: PositionSide.Short, leverage: 13, marginType: MarginType.Cross });
   });
@@ -505,13 +703,29 @@ describe('retained adapters reopen without fabricated settings', () => {
 
   it('Binance does not borrow settings from the opposite hedge leg', () => {
     const { store, reopen } = binance();
-    store.addOrUpdatePositionsFull([
-      position({
-        id: 'BTCUSDT:long',
-        positionMode: PositionMode.Hedged,
-      }),
-    ]);
-    store.addOrUpdatePositionsFull([]);
+    (() => {
+      const incoming: StoreData['positions'] = [
+        position({
+          id: 'BTCUSDT:long',
+          positionMode: PositionMode.Hedged,
+        }),
+      ];
+      return store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
+    (() => {
+      const incoming: StoreData['positions'] = [];
+      return store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     reopen('SHORT', '-0.2');
     expect(store.positions[0].id).toBe('BTCUSDT:short');
     expect(store.positions[0].leverage).toBeNaN();
@@ -521,8 +735,25 @@ describe('retained adapters reopen without fabricated settings', () => {
   it('BloFin does not revive a closed leverage over an explicitly unknown live value', () => {
     const { store, exchange } = blofin();
     try {
-      store.addOrUpdatePositionsFull(exchange.mapPositions([rawBlofin] as any));
-      store.updatePosition({ id: 'BTCUSDT' }, { leverage: Number.NaN });
+      (() => {
+        const incoming: StoreData['positions'] = exchange.mapPositions([rawBlofin] as any);
+        return store.apply(
+          nativeFixture(
+            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      (() => {
+        const target = { id: 'BTCUSDT' };
+        const changes: Partial<StoreData['positions'][number]> = { leverage: Number.NaN };
+        return store.apply(
+          nativeFixture(
+            { positions: store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
       expect(store.positionSettings.BTCUSDT.leverage).toBe(50);
       expect(exchange.mapPositions([{ ...rawBlofin, leverage: '' }] as any)[0].leverage).toBeNaN();
     } finally {
@@ -532,8 +763,29 @@ describe('retained adapters reopen without fabricated settings', () => {
 
   it('Binance does not revive closed settings over explicitly unknown live values', () => {
     const { store, reopen } = binance();
-    store.addOrUpdatePositionsFull([position()]);
-    store.updatePosition({ id: 'BTCUSDT' }, { leverage: Number.NaN, marginType: undefined, liquidationPrice: null });
+    (() => {
+      const incoming: StoreData['positions'] = [position()];
+      return store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
+    (() => {
+      const target = { id: 'BTCUSDT' };
+      const changes: Partial<StoreData['positions'][number]> = {
+        leverage: Number.NaN,
+        marginType: undefined,
+        liquidationPrice: null,
+      };
+      return store.apply(
+        nativeFixture(
+          { positions: store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     expect(store.positionSettings.BTCUSDT.leverage).toBe(17);
     reopen();
     expect(store.positions[0].leverage).toBeNaN();

@@ -1,9 +1,11 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { KucoinExchange } from './kucoin.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
-import { OrderStatus } from '../../../types';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { OrderStatus } from '../../../types';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { ENDPOINTS } from './kucoin.types';
 
 export class KucoinPrivateWebsocket extends BaseWebSocket<KucoinExchange> {
@@ -171,12 +173,42 @@ export class KucoinPrivateWebsocket extends BaseWebSocket<KucoinExchange> {
     }
 
     if (eventType === 'canceled' || eventType === 'cancel' || status === 'canceled' || status === 'cancelled') {
-      orders.forEach((order) => this.store.updateOrderStatus(order, OrderStatus.Canceled));
+      orders.forEach((order) =>
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [order];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })(),
+      );
       return;
     }
 
     if (eventType === 'filled' || (status === 'done' && parseFloat(rawOrder.remainSize || '0') === 0)) {
-      orders.forEach((order) => this.store.updateOrderStatus(order, OrderStatus.Closed));
+      orders.forEach((order) =>
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [order];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })(),
+      );
       return;
     }
 
@@ -187,7 +219,25 @@ export class KucoinPrivateWebsocket extends BaseWebSocket<KucoinExchange> {
       eventType === 'update' ||
       eventType === 'match'
     ) {
-      orders.forEach((order) => this.store.addOrUpdateOrder(order));
+      orders.forEach((order) =>
+        (() => {
+          const incoming: StoreData['orders'] = [order];
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })(),
+      );
     }
   };
 
@@ -202,11 +252,40 @@ export class KucoinPrivateWebsocket extends BaseWebSocket<KucoinExchange> {
     if (!parentOrder) return;
 
     if (eventType === 'cancel') {
-      this.store.updateOrderStatus(parentOrder, OrderStatus.Canceled);
+      (() => {
+        const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [parentOrder];
+        const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+        return this.store.apply(
+          nativeFixture(
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
 
     if (eventType === 'triggered' || eventType === 'active' || eventType === 'open') {
-      this.store.addOrUpdateOrder(parentOrder);
+      (() => {
+        const incoming: StoreData['orders'] = [parentOrder];
+        return this.store.apply(
+          nativeFixture(
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
   };
 

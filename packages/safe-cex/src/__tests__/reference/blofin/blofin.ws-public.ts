@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook, OrderBookOrders } from '../../../types';
 import type { BlofinExchange } from './blofin.exchange';
 
@@ -5,13 +6,14 @@ import flatten from 'lodash/flatten';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { BASE_WS_URL, INTERVAL } from '../../../exchanges/blofin/blofin.types';
 import { LogSeverity } from '../../../types';
 import { getCandleStartTime } from '../../../utils/getCandleStartTime';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { roundUSD } from '../../../utils/roundUSD';
 import { updateOrderBook } from '../../../utils/updateOrderBook';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { BASE_WS_URL, INTERVAL } from '../../../exchanges/blofin/blofin.types';
+import { nativeFixture } from '../../cutover/nativeFixture';
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -238,9 +240,9 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
     const last = parseFloat(update.last);
     const percentage = roundUSD(((last - open) / open) * 100);
 
-    this.store.updateTicker(
-      { id: update.instId },
-      {
+    (() => {
+      const target = { id: update.instId };
+      const changes: Partial<StoreData['tickers'][number]> = {
         bid: parseFloat(update.bidPrice),
         ask: parseFloat(update.askPrice),
         last,
@@ -250,15 +252,30 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
         percentage,
         volume: parseFloat(update.volCurrency24h),
         quoteVolume: parseFloat(update.vol24h),
-      },
-    );
+      };
+      return this.store.apply(
+        nativeFixture(
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   handleFundingRateEvents = ({ data: [update] }: Data) => {
-    this.store.updateTicker(
-      { id: update.instId },
-      { fundingRate: parseFloat(update.fundingRate), fundingTime: parseFloat(update.fundingTime) },
-    );
+    (() => {
+      const target = { id: update.instId };
+      const changes: Partial<StoreData['tickers'][number]> = {
+        fundingRate: parseFloat(update.fundingRate),
+        fundingTime: parseFloat(update.fundingTime),
+      };
+      return this.store.apply(
+        nativeFixture(
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {

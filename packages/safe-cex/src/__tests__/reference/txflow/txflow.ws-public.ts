@@ -1,9 +1,11 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook } from '../../../types';
 import type { TxFlowExchange } from './txflow.exchange';
 import type { TxFlowCandle, TxFlowContext, TxFlowTicker } from './txflow.types';
 
-import { calcOrderBookTotal, sortOrderBook } from '../../../utils/orderbook';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { calcOrderBookTotal, sortOrderBook } from '../../../utils/orderbook';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { mapTxFlowCandle, mapTxFlowContext, mapTxFlowTicker, txflowNumber } from './txflow.public';
 import { TXFLOW_TESTNET_REST_URL } from './txflow.types';
 
@@ -16,22 +18,32 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
   private readonly candleListeners = new Map<string, Set<(candle: Candle) => void>>();
   private readonly bookTimes = new Map<string, number>();
 
-  constructor(parent: TxFlowExchange, readonly api: boolean) { super(parent); }
+  constructor(
+    parent: TxFlowExchange,
+    readonly api: boolean,
+  ) {
+    super(parent);
+  }
 
   connectAndSubscribe = () => {
     if (this.isDisposed) return;
     const url = `${TXFLOW_TESTNET_REST_URL.replace('https:', 'wss:')}/${this.api ? 'api-ws' : 'ws'}`;
     const socket = this.createWebsocket(url);
     this.ws = socket;
-    socket.addEventListener('open', () => { if (this.ws === socket) this.opened(); });
-    socket.addEventListener('message', (event: MessageEvent) => { if (this.ws === socket) this.onMessage(event); });
+    socket.addEventListener('open', () => {
+      if (this.ws === socket) this.opened();
+    });
+    socket.addEventListener('message', (event: MessageEvent) => {
+      if (this.ws === socket) this.onMessage(event);
+    });
     socket.addEventListener('close', (event: unknown) => {
       if (this.ws !== socket) return;
       this.stopHeartbeat();
       this.stopSubscriptions();
       if (!this.api) {
         this.bookTimes.clear();
-        for (const listeners of this.bookListeners.values()) for (const listener of listeners) listener({ bids: [], asks: [] });
+        for (const listeners of this.bookListeners.values())
+          for (const listener of listeners) listener({ bids: [], asks: [] });
         this.parent.account.disconnected();
       }
       this.onClose(event);
@@ -44,7 +56,8 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
     this.subscriptionsSuspended = false;
     this.trackLastReceived();
     if (this.api) {
-      for (const market of this.store.markets) this.subscription('subscribe', { type: 'ticker', coin: market.base, instrumentId: Number(market.id) });
+      for (const market of this.store.markets)
+        this.subscription('subscribe', { type: 'ticker', coin: market.base, instrumentId: Number(market.id) });
       for (const key of this.candleListeners.keys()) {
         const [symbol, interval] = key.split('|');
         const market = this.store.marketsBySymbol[symbol];
@@ -57,7 +70,8 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
         if (market) this.subscription('subscribe', { type: 'l2Book', coin: market.id });
       }
       if (!this.parent.options.publicDataOnly) {
-        for (const type of ['orderUpdates', 'clearinghouseState', 'userAssetData']) this.subscription('subscribe', { type, user: this.parent.wallet() });
+        for (const type of ['orderUpdates', 'clearinghouseState', 'userAssetData'])
+          this.subscription('subscribe', { type, user: this.parent.wallet() });
         void this.parent.account.refresh().catch((error) => this.parent.emitAndLogError(error));
       }
     }
@@ -76,7 +90,9 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
       this.startHeartbeat();
     }, 10_000);
   }
-  ping = () => { if (this.isConnected) this.ws?.send('{"method":"ping"}'); };
+  ping = () => {
+    if (this.isConnected) this.ws?.send('{"method":"ping"}');
+  };
 
   private subscription(method: string, subscription: Record<string, unknown>) {
     if (!this.isConnected || this.subscriptionsSuspended) return;
@@ -87,7 +103,9 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
       void this.reconnect();
       return;
     }
-    this.subscriptionQueue.push(JSON.stringify({ method, ...(!this.api ? { type: subscription.type } : {}), subscription }));
+    this.subscriptionQueue.push(
+      JSON.stringify({ method, ...(!this.api ? { type: subscription.type } : {}), subscription }),
+    );
     if (!this.subscriptionTimer) this.flushSubscription();
   }
 
@@ -98,13 +116,16 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
   }
   private flushSubscription = () => {
     this.subscriptionTimer = undefined;
-    if (this.isDisposed || !this.isConnected) { this.stopSubscriptions(); return; }
+    if (this.isDisposed || !this.isConnected) {
+      this.stopSubscriptions();
+      return;
+    }
     const frame = this.subscriptionQueue.shift();
     if (frame === undefined) return;
     this.ws?.send(frame);
     // The gateway drops subscription bursts without identifying the lost frame.
     this.subscriptionTimer = setTimeout(this.flushSubscription, 150);
-  }
+  };
 
   onMessage = (event: MessageEvent) => {
     if (this.isDisposed) return;
@@ -126,19 +147,47 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
         for (const row of rows as Array<{ coin: string; ctx: TxFlowContext }>) {
           const market = this.parent.marketById(row.coin);
           const ticker = market && this.store.tickersBySymbol[market.symbol];
-          if (ticker) this.store.updateTicker(ticker, mapTxFlowContext(ticker, row.ctx));
+          if (ticker)
+            (() => {
+              const target = ticker;
+              const changes: Partial<StoreData['tickers'][number]> = mapTxFlowContext(ticker, row.ctx);
+              return this.store.apply(
+                nativeFixture(
+                  { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                  this.store.markets.map((row) => row.symbol),
+                ),
+              );
+            })();
         }
       } else if (frame.channel === 'ticker') {
         const row = data as TxFlowTicker;
         const market = this.parent.marketById(String(row.instrumentId));
         const ticker = market && this.store.tickersBySymbol[market.symbol];
-        if (ticker) this.store.updateTicker(ticker, mapTxFlowTicker(ticker, row));
+        if (ticker)
+          (() => {
+            const target = ticker;
+            const changes: Partial<StoreData['tickers'][number]> = mapTxFlowTicker(ticker, row);
+            return this.store.apply(
+              nativeFixture(
+                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
       } else if (frame.channel === 'l2Book') {
         const market = this.parent.marketById(String(data.coin));
-        if (!market || !this.bookListeners.has(market.symbol) || data.time < (this.bookTimes.get(market.symbol) ?? 0)) return;
+        if (!market || !this.bookListeners.has(market.symbol) || data.time < (this.bookTimes.get(market.symbol) ?? 0))
+          return;
         const levels = data.levels as Array<Array<{ px: string; sz: string }>>;
-        if (levels.length !== 2 || levels.flat().some((level) => txflowNumber(level.px) <= 0 || txflowNumber(level.sz) < 0)) return;
-        const map = (rows: Array<{ px: string; sz: string }>) => rows.filter((row) => txflowNumber(row.sz) > 0).map((row) => ({ price: txflowNumber(row.px), amount: txflowNumber(row.sz), total: 0 }));
+        if (
+          levels.length !== 2 ||
+          levels.flat().some((level) => txflowNumber(level.px) <= 0 || txflowNumber(level.sz) < 0)
+        )
+          return;
+        const map = (rows: Array<{ px: string; sz: string }>) =>
+          rows
+            .filter((row) => txflowNumber(row.sz) > 0)
+            .map((row) => ({ price: txflowNumber(row.px), amount: txflowNumber(row.sz), total: 0 }));
         const book = { bids: map(levels[0]), asks: map(levels[1]) };
         sortOrderBook(book);
         calcOrderBookTotal(book);
@@ -147,7 +196,9 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
       } else if (frame.channel === 'candle') {
         for (const row of (Array.isArray(data) ? data : [data]) as TxFlowCandle[]) {
           const market = this.parent.marketById(row.s);
-          if (market) for (const listener of this.candleListeners.get(`${market.symbol}|${row.i}`) ?? []) listener(mapTxFlowCandle(row));
+          if (market)
+            for (const listener of this.candleListeners.get(`${market.symbol}|${row.i}`) ?? [])
+              listener(mapTxFlowCandle(row));
         }
       }
       if (this.api) this.parent.account.apiFrame(text);
@@ -195,5 +246,11 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
       }
     };
   };
-  dispose() { this.stopHeartbeat(); this.stopSubscriptions(); this.bookListeners.clear(); this.candleListeners.clear(); super.dispose(); }
+  dispose() {
+    this.stopHeartbeat();
+    this.stopSubscriptions();
+    this.bookListeners.clear();
+    this.candleListeners.clear();
+    super.dispose();
+  }
 }

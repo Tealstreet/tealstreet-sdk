@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderStopTriggerType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
 
 vi.mock('zklink-web-sdk-alpha', () => ({}));
 vi.mock('../reference/apexomni/zklink/signer/utils', () => ({ initSdk: vi.fn() }));
@@ -24,20 +25,25 @@ const row = (filled = 6, status = 'OPEN', updatedAt = NOW) => ({
 });
 
 const fixtureForTest = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTC-USDT',
-        symbol: 'BTCUSDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 100 } },
+        markets: [
+          {
+            id: 'BTC-USDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 100 } },
+          },
+        ] as any,
       },
-    ] as any,
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new ApexOmniExchange(
     'apexomni' as any,
     { key: 'key', secret: 'secret', passphrase: 'passphrase' } as any,

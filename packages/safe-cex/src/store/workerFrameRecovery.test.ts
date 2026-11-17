@@ -7,12 +7,8 @@ import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { consumerFrame } from '../__tests__/cutover/consumerFrame';
-import { marketDataFrameApplier } from './marketDataFrameApplier.fixture';
-import { marketDataWorkerExchange } from './marketDataWorkerExchange.fixture';
-import { DefaultStore } from './store.base';
-
-const BaseExchange = marketDataWorkerExchange();
-type BaseExchange = InstanceType<typeof BaseExchange>;
+import { BaseExchange } from '../exchanges/base';
+import { FrameStore } from './frameStore';
 
 const mirrors: BaseExchange[] = [];
 const valid = () =>
@@ -23,7 +19,7 @@ const valid = () =>
 const settle = () => vi.advanceTimersByTimeAsync(0);
 
 function mirror(snapshot: () => EngineSnapshot) {
-  const exchange = new BaseExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+  const exchange = new BaseExchange('bybit', { key: '', secret: '' }, new FrameStore());
   mirrors.push(exchange);
   const calls = vi.fn();
   exchange.on('callMethod', (event: { requestId: string; method: string }) => {
@@ -49,7 +45,7 @@ it.each([0, 0.5, 0.999])(
   'bounds malformed frames and snapshots with exponential backoff and a capped delay (jitter %s)',
   async (jitter) => {
     vi.mocked(Math.random).mockReturnValue(jitter);
-    const { exchange, calls } = mirror(() => ({ frame: new ArrayBuffer(0), fetchedLeverage: {} }));
+    const { exchange, calls } = mirror(() => ({ frame: new ArrayBuffer(0) }));
     for (let i = 0; i < 600; i++) {
       exchange.applyWorkerFrame(new ArrayBuffer(0));
       await settle();
@@ -61,7 +57,7 @@ it.each([0, 0.5, 0.999])(
 );
 
 it('resets recovery after a good replacement frame', async () => {
-  const { exchange, calls } = mirror(() => ({ frame: new ArrayBuffer(0), fetchedLeverage: {} }));
+  const { exchange, calls } = mirror(() => ({ frame: new ArrayBuffer(0) }));
   exchange.applyWorkerFrame(new ArrayBuffer(0));
   await settle();
   exchange.applyWorkerFrame(new ArrayBuffer(0));
@@ -98,9 +94,7 @@ beforeAll(() => {
 const nativeFrame = (name: string) => Uint8Array.from(fixtures[name]).buffer;
 
 it('keeps callback signals scoped to the rejected section and subscription identity and removes them on unsubscribe', async () => {
-  const { exchange } = mirror(() => ({ frame: nativeFrame('snapshot'), fetchedLeverage: {} }));
-  const Applier = marketDataFrameApplier();
-  Object.defineProperty(exchange, 'workerFrameApplier', { value: new Applier(exchange.store) });
+  const { exchange } = mirror(() => ({ frame: nativeFrame('snapshot') }));
   const book = vi.fn();
   const candle = vi.fn();
   const stopBook = exchange.listenOrderBookWebworker('ZERO/USD', () => {}, book);
@@ -131,9 +125,7 @@ it.each([
   { rejected: 'invalidCandle', unrelated: 'bookOnly' },
   { rejected: 'unordered', unrelated: 'candleOnly' },
 ])('does not reset $rejected on unrelated valid $unrelated traffic', async ({ rejected, unrelated }) => {
-  const { exchange, calls } = mirror(() => ({ frame: nativeFrame(unrelated), fetchedLeverage: {} }));
-  const Applier = marketDataFrameApplier();
-  Object.defineProperty(exchange, 'workerFrameApplier', { value: new Applier(exchange.store) });
+  const { exchange, calls } = mirror(() => ({ frame: nativeFrame(unrelated) }));
   exchange.applyWorkerFrame(nativeFrame('snapshot'));
   exchange.applyWorkerFrame(nativeFrame(rejected));
   await settle();
@@ -148,7 +140,7 @@ it.each([
 });
 
 it('doubles the cooldown to the jittered cap instead of polling at a fixed interval', async () => {
-  const { exchange, calls } = mirror(() => ({ frame: new ArrayBuffer(0), fetchedLeverage: {} }));
+  const { exchange, calls } = mirror(() => ({ frame: new ArrayBuffer(0) }));
   exchange.applyWorkerFrame(new ArrayBuffer(0));
   await settle();
   let count = 1;
@@ -165,7 +157,7 @@ it('doubles the cooldown to the jittered cap instead of polling at a fixed inter
 });
 
 it('ignores an older in-flight recovery snapshot after an accepted replacement frame', async () => {
-  const exchange = new BaseExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+  const exchange = new BaseExchange('bybit', { key: '', secret: '' }, new FrameStore());
   mirrors.push(exchange);
   let reply: ((snapshot: EngineSnapshot) => void) | undefined;
   exchange.on('callMethod', (event: { requestId: string }) => {
@@ -178,13 +170,13 @@ it('ignores an older in-flight recovery snapshot after an accepted replacement f
   await settle();
   exchange.applyWorkerFrame(valid());
   if (!reply) throw new Error('Expected pending snapshot request');
-  reply({ frame: new ArrayBuffer(0), fetchedLeverage: {} });
+  reply({ frame: new ArrayBuffer(0) });
   await settle();
   expect(rejection).toHaveBeenCalledTimes(1);
 });
 
 it('isolates rejection observers and never requests recovery after disposal', async () => {
-  const { exchange, calls } = mirror(() => ({ frame: valid(), fetchedLeverage: {} }));
+  const { exchange, calls } = mirror(() => ({ frame: valid() }));
   exchange.listenOrderBookWebworker(
     'A',
     () => {},
@@ -212,8 +204,6 @@ it.each([
   const { exchange, calls } = mirror(() => {
     throw new Error('snapshot unavailable');
   });
-  const Applier = marketDataFrameApplier();
-  Object.defineProperty(exchange, 'workerFrameApplier', { value: new Applier(exchange.store) });
   exchange.applyWorkerFrame(nativeFrame('snapshot'));
   exchange.applyWorkerFrame(nativeFrame(rejected));
   await settle();
@@ -225,7 +215,7 @@ it.each([
 });
 
 it('queues a newer rejection received while a now-stale snapshot RPC is in flight', async () => {
-  const exchange = new BaseExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+  const exchange = new BaseExchange('bybit', { key: '', secret: '' }, new FrameStore());
   mirrors.push(exchange);
   let requests = 0;
   let reply: ((snapshot: EngineSnapshot) => void) | undefined;
@@ -240,7 +230,7 @@ it('queues a newer rejection received while a now-stale snapshot RPC is in fligh
   exchange.applyWorkerFrame(new ArrayBuffer(0));
   expect(requests).toBe(1);
   if (!reply) throw new Error('Expected pending snapshot');
-  reply({ frame: new ArrayBuffer(0), fetchedLeverage: {} });
+  reply({ frame: new ArrayBuffer(0) });
   await settle();
   expect(requests).toBe(2);
 });
@@ -268,9 +258,7 @@ function identityFrame(name: string, market = 0, interval = '1m') {
 }
 
 function identityMirror(snapshot: () => ArrayBuffer) {
-  const result = mirror(() => ({ frame: snapshot(), fetchedLeverage: {} }));
-  const Applier = marketDataFrameApplier();
-  Object.defineProperty(result.exchange, 'workerFrameApplier', { value: new Applier(result.exchange.store) });
+  const result = mirror(() => ({ frame: snapshot() }));
   const market = (symbol: string, id: string) => ({
     symbol,
     id,

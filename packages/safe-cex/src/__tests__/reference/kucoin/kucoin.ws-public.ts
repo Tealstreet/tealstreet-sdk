@@ -1,11 +1,13 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook, Ticker, Writable } from '../../../types';
 import type { KucoinExchange } from './kucoin.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../../utils/updateOrderBook';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { ENDPOINTS, WS_INTERVAL } from './kucoin.types';
 
 type Data = Record<string, any>;
@@ -260,10 +262,19 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
     const data = json.data;
     const ticker = this.tickerForApiSymbol(data?.symbol);
     if (!ticker) return;
-    this.parent.store.updateTicker(ticker, {
-      bid: parseFloat(data.bestBidPrice || ticker.bid || '0'),
-      ask: parseFloat(data.bestAskPrice || ticker.ask || '0'),
-    });
+    (() => {
+      const target = ticker;
+      const changes: Partial<StoreData['tickers'][number]> = {
+        bid: parseFloat(data.bestBidPrice || ticker.bid || '0'),
+        ask: parseFloat(data.bestAskPrice || ticker.ask || '0'),
+      };
+      return this.parent.store.apply(
+        nativeFixture(
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   // /contractMarket/snapshot (subject snapshot.24h) — last price, 24h change,
@@ -278,7 +289,17 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
     if (data.fundingRate != null) update.fundingRate = parseFloat(data.fundingRate);
     if (data.volume != null) update.volume = parseFloat(data.volume);
     if (data.turnover != null) update.quoteVolume = parseFloat(data.turnover);
-    if (Object.keys(update).length) this.parent.store.updateTicker(ticker, update);
+    if (Object.keys(update).length)
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = update;
+        return this.parent.store.apply(
+          nativeFixture(
+            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
   };
 
   // /contract/instrument (subject mark.index.price) — mark + index price. The
@@ -291,7 +312,17 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
     const update: Partial<Writable<Ticker>> = {};
     if (data.markPrice != null) update.mark = parseFloat(data.markPrice);
     if (data.indexPrice != null) update.index = parseFloat(data.indexPrice);
-    if (Object.keys(update).length) this.parent.store.updateTicker(ticker, update);
+    if (Object.keys(update).length)
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = update;
+        return this.parent.store.apply(
+          nativeFixture(
+            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
   };
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {

@@ -2,10 +2,11 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { ExchangeOptions, Market, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
 import { ENDPOINTS } from '../reference/orderly/orderly.types';
-import { DefaultStore } from '../../store/store.base';
-import { ExchangeOptions, Market, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
 
 const MARKET: Market = {
   id: 'BTC/USDC:USDC',
@@ -40,8 +41,13 @@ const createExchange = (
   orderOverrides: Partial<Order> = {},
   response: unknown = { success: true, data: { status: 'EDIT_SENT' }, timestamp: 1_784_505_600_000 },
 ) => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new OrderlyExchange(
     'woofi',
     {
@@ -59,7 +65,12 @@ const createExchange = (
     timeInForce: OrderTimeInForce.GoodTillCancel,
     ...orderOverrides,
   };
-  store.update({ orders: [order] });
+  store.apply(
+    nativeFixture(
+      { orders: [order] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
 
   const put = vi.fn().mockResolvedValue({ data: response });
   exchange.xhr = { put } as unknown as Axios;
@@ -265,7 +276,12 @@ describe('audit regression: Orderly stable-ID native LIMIT amend', () => {
   it('rejects an unreconciled and malformed combined update before every write', async () => {
     const { exchange, store, order, put, cancelOrders, placeOrder } = createExchange();
     const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError');
-    store.update({ orders: [] });
+    store.apply(
+      nativeFixture(
+        { orders: [] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await expect(exchange.updateOrder({ order, update: { price: 50_100, amount: 1 } } as any)).rejects.toThrow(
       'requires exactly one price or quantity change',

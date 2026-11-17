@@ -1,13 +1,15 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { BitrueExchange } from './bitrue.exchange';
 
 import dayjs from 'dayjs';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { Candle, OHLCVOptions, OrderBook, Ticker, Timeframe } from '../../../types';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { readBlob } from '../../../utils/readBlob';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { BASE_WS_URL, INTERVAL, ORDER_BOOK_WS_UPDATE, TICKER_WS_UPDATE } from './bitrue.types';
 
 type Data = Record<string, any>;
@@ -127,7 +129,9 @@ export class BitruePublicWebsocket extends BaseWebSocket<BitrueExchange> {
   };
 
   mapKline = (json: Data, symbol?: string) => {
-    const multiplier = symbol ? Number(this.parent.store.marketsBySymbol[this.resolveMarketSymbol(symbol)]?.info?.multiplier || 1) : 1;
+    const multiplier = symbol
+      ? Number(this.parent.store.marketsBySymbol[this.resolveMarketSymbol(symbol)]?.info?.multiplier || 1)
+      : 1;
     const rawCandles: {
       amount: number;
       close: number;
@@ -240,7 +244,16 @@ export class BitruePublicWebsocket extends BaseWebSocket<BitrueExchange> {
       quoteVolume: +json.amount * multiplier,
       info: json,
     };
-    this.parent.store.updateTicker({ id: resolvedSymbol }, ticker);
+    (() => {
+      const target = { id: resolvedSymbol };
+      const changes: Partial<StoreData['tickers'][number]> = ticker;
+      return this.parent.store.apply(
+        nativeFixture(
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   makeRequest = (topic: string): any => {
@@ -296,7 +309,16 @@ export class BitruePublicWebsocket extends BaseWebSocket<BitrueExchange> {
         bid: orderBook.bids[0]?.price,
         ask: orderBook.asks[0]?.price,
       };
-      this.parent.store.updateTicker({ id: resolvedSymbol }, tickerUpdate);
+      (() => {
+        const target = { id: resolvedSymbol };
+        const changes: Partial<StoreData['tickers'][number]> = tickerUpdate;
+        return this.parent.store.apply(
+          nativeFixture(
+            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
 
       callback(orderBook);
     };
@@ -324,7 +346,18 @@ export class BitruePublicWebsocket extends BaseWebSocket<BitrueExchange> {
           bid: 0,
           ask: 0,
         };
-        this.parent.store.updateTicker({ id: resolvedSymbol }, tickerUpdate);
+        (() => {
+          const target = { id: resolvedSymbol };
+          const changes: Partial<StoreData['tickers'][number]> = tickerUpdate;
+          return this.parent.store.apply(
+            nativeFixture(
+              {
+                tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+              },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       } else {
         timeoutId = setTimeout(() => waitForConnectedAndSubscribe(), 100);
       }

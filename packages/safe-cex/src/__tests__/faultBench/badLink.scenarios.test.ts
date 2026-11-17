@@ -2,9 +2,10 @@ import type { Market, Order, PlaceOrderOpts } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { OKXExchange } from '../reference/okx/okx.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 import { deferred } from './deferred';
 import { createFakeVenue } from './fakeVenue';
 import { createFaultAdapter } from './faultAdapter';
@@ -39,8 +40,13 @@ const exchanges: OKXExchange[] = [];
 const filledOnVenue = new Set<number>();
 
 const setup = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const options = { key: 'key', secret: 'secret', passphrase: 'passphrase', tealstreetTunnel: false };
   const exchange = new OKXExchange('okx', options as any, store);
   exchanges.push(exchange);
@@ -170,7 +176,12 @@ describe('bad link: finding an order whose response was lost', () => {
 
   it('answers from the store without asking the venue when the stream already has it', async () => {
     const { exchange, store, venue } = setup();
-    store.update({ orders: [openOrder({ id: 'okx-9', info: { clOrdId: 'tealStored1' } })] });
+    store.apply(
+      nativeFixture(
+        { orders: [openOrder({ id: 'okx-9', info: { clOrdId: 'tealStored1' } })] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await expect(exchange.findOrderByClientOrderId(MARKET.symbol, 'tealStored1')).resolves.toMatchObject({
       found: true,
@@ -214,7 +225,7 @@ describe('bad link: finding an order whose response was lost', () => {
   });
 });
 
-describe('bad link: a REST snapshot racing the private stream (real BaseExchange + DefaultStore)', () => {
+describe('bad link: a REST snapshot racing the private stream (real BaseExchange + FrameStore)', () => {
   const frame = (state: string) => ({
     ordId: 'okx-a',
     instId: MARKET.id,
@@ -233,7 +244,12 @@ describe('bad link: a REST snapshot racing the private stream (real BaseExchange
   const raceSnapshotAgainst = async (state: 'canceled' | 'filled') => {
     const { exchange, store } = setup();
     const order = openOrder();
-    store.update({ orders: [order] });
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     // A second apart, so a fix comparing times is not decided by a tie.
     vi.useFakeTimers({ toFake: ['Date'], now: 1_000_000 });
@@ -254,7 +270,7 @@ describe('bad link: a REST snapshot racing the private stream (real BaseExchange
     return store.orders.find((candidate) => candidate.id === order.id)?.status;
   };
 
-  // Gap 4, fixed by DefaultStore.markOrdersTerminal: the snapshot read the venue
+  // Gap 4, fixed by FrameStore.markOrdersTerminal: the snapshot read the venue
   // before the cancel/fill and lands after it; it must not reopen the order.
   it('a snapshot taken before a cancel does not reopen the cancelled order', async () => {
     expect(await raceSnapshotAgainst('canceled')).not.toBe(OrderStatus.Open);

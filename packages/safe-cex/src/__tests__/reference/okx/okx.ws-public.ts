@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Market, OrderBook, OrderBookOrders } from '../../../types';
 import type { OKXExchange } from './okx.exchange';
 
@@ -5,14 +6,15 @@ import flatten from 'lodash/flatten';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { BASE_WS_URLS } from '../../../exchanges/okx/okx.types';
+import { resolveTransportRouting } from '../../../transport/registry';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { roundUSD } from '../../../utils/roundUSD';
 import { multiply } from '../../../utils/safe-math';
 import { updateOrderBook } from '../../../utils/updateOrderBook';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { BASE_WS_URLS } from '../../../exchanges/okx/okx.types';
-import { resolveTransportRouting } from '../../../transport/registry';
 import { WsDirectFallback } from '../../../utils/wsDirectFallback';
+import { nativeFixture } from '../../cutover/nativeFixture';
 
 const tickerNumber = (value: unknown): number =>
   value === '' || value === undefined || value === null ? 0 : Number.parseFloat(String(value));
@@ -234,41 +236,83 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
     const percentage =
       last === undefined || open === undefined ? undefined : open === 0 ? 0 : roundUSD(((last - open) / open) * 100);
 
-    this.store.updateTicker(
-      { id: update.instId },
-      {
+    (() => {
+      const target = { id: update.instId };
+      const changes: Partial<StoreData['tickers'][number]> = {
         bid: tickerNumber(update.bidPx),
         ask: tickerNumber(update.askPx),
         ...(last !== undefined && { last }),
         ...(percentage !== undefined && { percentage }),
         volume: tickerNumber(update.volCcy24h),
         quoteVolume: tickerNumber(update.vol24h),
-      },
-    );
+      };
+      return this.store.apply(
+        nativeFixture(
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   handleMarkPriceEvents = ({ data: [update] }: Data) => {
     this.parent.markPriceLoaded(update.instId);
-    this.store.updateTicker({ id: update.instId }, { mark: parseFloat(update.markPx) });
+    (() => {
+      const target = { id: update.instId };
+      const changes: Partial<StoreData['tickers'][number]> = { mark: parseFloat(update.markPx) };
+      return this.store.apply(
+        nativeFixture(
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   handleIndexTickerEvents = ({ data: [update] }: Data) => {
     const indexPrice = parseFloat(update.idxPx);
     for (const market of this.parent.getMarketsForIndexTickerInstId(update.instId)) {
       this.parent.indexPriceLoaded(market.id);
-      this.store.updateTicker({ id: market.id }, { index: indexPrice });
+      (() => {
+        const target = { id: market.id };
+        const changes: Partial<StoreData['tickers'][number]> = { index: indexPrice };
+        return this.store.apply(
+          nativeFixture(
+            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
   };
 
   handleOpenInterestEvents = ({ data: [update] }: Data) => {
-    this.store.updateTicker({ id: update.instId }, { openInterest: parseFloat(update.oiCcy) });
+    (() => {
+      const target = { id: update.instId };
+      const changes: Partial<StoreData['tickers'][number]> = { openInterest: parseFloat(update.oiCcy) };
+      return this.store.apply(
+        nativeFixture(
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   handleFundingRateEvents = ({ data: [update] }: Data) => {
-    this.store.updateTicker(
-      { id: update.instId },
-      { fundingRate: parseFloat(update.fundingRate), fundingTime: parseFloat(update.fundingTime) },
-    );
+    (() => {
+      const target = { id: update.instId };
+      const changes: Partial<StoreData['tickers'][number]> = {
+        fundingRate: parseFloat(update.fundingRate),
+        fundingTime: parseFloat(update.fundingTime),
+      };
+      return this.store.apply(
+        nativeFixture(
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {

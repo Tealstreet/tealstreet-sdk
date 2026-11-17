@@ -3,9 +3,7 @@ import type { Axios } from 'axios';
 import { describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
-import { ENDPOINTS } from '../reference/orderly/orderly.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import {
   MarginType,
   Market,
@@ -16,6 +14,9 @@ import {
   PositionMode,
   PositionSide,
 } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
+import { ENDPOINTS } from '../reference/orderly/orderly.types';
 
 const MARKET: Market = {
   id: 'BTC/USDC:USDC',
@@ -28,27 +29,32 @@ const MARKET: Market = {
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [MARKET],
-    tickers: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: MARKET.id,
-        symbol: MARKET.symbol,
-        bid: 109,
-        ask: 111,
-        last: 110,
-        mark: 110,
-        index: 110,
-        percentage: 0,
-        openInterest: 0,
-        fundingRate: 0,
-        fundingTime: 0,
-        volume: 0,
-        quoteVolume: 0,
+        markets: [MARKET],
+        tickers: [
+          {
+            id: MARKET.id,
+            symbol: MARKET.symbol,
+            bid: 109,
+            ask: 111,
+            last: 110,
+            mark: 110,
+            index: 110,
+            percentage: 0,
+            openInterest: 0,
+            fundingRate: 0,
+            fundingTime: 0,
+            volume: 0,
+            quoteVolume: 0,
+          },
+        ],
       },
-    ],
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new OrderlyExchange(
     'woofi',
     { key: 'test-key', secret: 'test-secret', applicationId: 'test-account' },
@@ -247,25 +253,30 @@ describe('audit regression: Orderly isolated-margin support', () => {
 
   it('keeps positional TP/SL sibling handling scoped to the selected margin mode', async () => {
     const { exchange, store } = createExchange();
-    store.update({
-      orders: [
+    store.apply(
+      nativeFixture(
         {
-          id: '11',
-          parentId: '10',
-          status: OrderStatus.Open,
-          symbol: 'BTCUSDC',
-          type: OrderType.TakeProfit,
-          side: OrderSide.Sell,
-          price: 120,
-          amount: 1,
-          reduceOnly: true,
-          filled: 0,
-          remaining: 1,
-          lastUpdate: 1,
-          info: { margin_mode: 'CROSS' },
+          orders: [
+            {
+              id: '11',
+              parentId: '10',
+              status: OrderStatus.Open,
+              symbol: 'BTCUSDC',
+              type: OrderType.TakeProfit,
+              side: OrderSide.Sell,
+              price: 120,
+              amount: 1,
+              reduceOnly: true,
+              filled: 0,
+              remaining: 1,
+              lastUpdate: 1,
+              info: { margin_mode: 'CROSS' },
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const post = vi
       .fn()
       .mockResolvedValueOnce({ data: { success: true } })
@@ -305,9 +316,14 @@ describe('audit regression: Orderly isolated-margin support', () => {
       contracts: 1,
       liquidationPrice: 50,
     });
-    store.update({
-      positions: [position('BTCUSDC', MarginType.Cross), position('BTCUSDC:isolated', MarginType.Isolated)],
-    });
+    store.apply(
+      nativeFixture(
+        {
+          positions: [position('BTCUSDC', MarginType.Cross), position('BTCUSDC:isolated', MarginType.Isolated)],
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const post = vi.fn();
     exchange.xhr = { post } as unknown as Axios;
 

@@ -1,9 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
-import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, ExchangeOptions, PlaceOrderOpts } from '../../types';
@@ -11,10 +5,17 @@ import type { ExchangeName, ExchangeOptions, PlaceOrderOpts } from '../../types'
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
-import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 const exchanges: RustEngineExchange[] = [];
 const setup = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'lighter') => {
@@ -29,13 +30,17 @@ const setup = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'lig
       commands.push(command);
       return JSON.stringify([{ op: 'done', command: command.command, result: '[]' }]);
     },
-    takeFrame: () => new Uint8Array(consumerFrame({
-      loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
-    })),
+    takeFrame: () =>
+      new Uint8Array(
+        consumerFrame({
+          loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+        }),
+      ),
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noop,
     wsMessage: noop,
-    wsClose: noop, wsRouteExhausted: noop,
+    wsClose: noop,
+    wsRouteExhausted: noop,
     httpStart: noop,
     httpChunk: noop,
     httpEnd: noop,
@@ -47,9 +52,14 @@ const setup = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'lig
     return engine;
   });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
-  const store = new DefaultStore();
+  const store = new FrameStore();
   installNativeStartupFrames(engine, store);
-  store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+  store.apply(
+    nativeFixture(
+      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new RustEngineExchange(name, { key: '', secret: '', ...options }, store);
   exchanges.push(exchange);
   return { exchange, construct, commands };
@@ -127,8 +137,9 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('Rust %s wrapper contra
     expect(sign).not.toHaveBeenCalled();
   });
   it('refuses a private payload-only account and keeps explicit public-only authoritative', async () => {
-    expect(() => variantSetup({ key: 'account', apiKeyIndex: '0', payloadSigner: vi.fn() }))
-      .toThrow('no REST-only PayloadSigner lifecycle');
+    expect(() => variantSetup({ key: 'account', apiKeyIndex: '0', payloadSigner: vi.fn() })).toThrow(
+      'no REST-only PayloadSigner lifecycle',
+    );
     const explicit = variantSetup({ publicDataOnly: true, secret: 'local', apiKeyIndex: '0' });
     expect(explicit.exchange.isPublicDataOnly).toBe(true);
   });

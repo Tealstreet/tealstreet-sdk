@@ -1,5 +1,7 @@
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 import type { Balance, FetchedLeverage, Market, Order, OrderFillEvent, Position } from '../../../types';
+
+import { FrameStore } from '../../../store/frameStore';
 import {
   MarginType,
   OrderSide,
@@ -9,11 +11,12 @@ import {
   PositionMode,
   PositionSide,
 } from '../../../types';
+import { nativeFixture } from '../../cutover/nativeFixture';
 
 // TxFlow account reads are unsigned. The subject is applicationId (the main
 // wallet), never the locally held approved agent's address.
 type Context = {
-  store: Store;
+  store: FrameStore;
   emitFill: (fill: OrderFillEvent) => void;
   reportError: (error: Error) => void;
   requestInfo: <T>(body: Record<string, unknown>) => Promise<T>;
@@ -96,7 +99,8 @@ function mode(type: string): MarginType {
   throw new Error('Unknown TxFlow margin mode');
 }
 function setting(leverage: Leverage): FetchedLeverage {
-  if (leverage.mode !== undefined && !['oneWay', 'hedge'].includes(leverage.mode)) throw new Error('Unknown TxFlow position mode');
+  if (leverage.mode !== undefined && !['oneWay', 'hedge'].includes(leverage.mode))
+    throw new Error('Unknown TxFlow position mode');
   const marginType = mode(leverage.type);
   const buyLeverage = num(leverage.mode === 'hedge' ? leverage.long_value : leverage.value);
   const sellLeverage = num(leverage.mode === 'hedge' ? leverage.short_value : leverage.value);
@@ -105,7 +109,9 @@ function setting(leverage: Leverage): FetchedLeverage {
     buyLeverage,
     sellLeverage,
     marginType,
-    ...(leverage.mode === undefined ? {} : { positionMode: leverage.mode === 'hedge' ? PositionMode.Hedged : PositionMode.OneWay }),
+    ...(leverage.mode === undefined
+      ? {}
+      : { positionMode: leverage.mode === 'hedge' ? PositionMode.Hedged : PositionMode.OneWay }),
   };
 }
 function status(value: string): OrderStatus {
@@ -145,7 +151,12 @@ export class TxflowAccount {
     if (this.started) return;
     this.started = true;
     this.startupAt = Math.max(0, Math.floor(Date.now()));
-    this.cx.store.setSetting('isHedged', false);
+    this.cx.store.apply(
+      nativeFixture(
+        { options: { ...this.cx.store.options, ['isHedged']: false } },
+        this.cx.store.markets.map((row) => row.symbol),
+      ),
+    );
     await this.refresh();
   };
 
@@ -239,11 +250,16 @@ export class TxflowAccount {
         ...(p.updateTime == null ? {} : { lastUpdate: num(p.updateTime) }),
       });
     }
-    return { balance: { total: equity, used, free: equity - used, upnl: equity - num(native.marginSummary.totalRawUsd) }, positions };
+    return {
+      balance: { total: equity, used, free: equity - used, upnl: equity - num(native.marginSummary.totalRawUsd) },
+      positions,
+    };
   };
 
-  fetchBalance = async (): Promise<Balance> => this.mapState(await this.read<NativeState>('clearinghouseState', { accountType: 'perp' })).balance;
-  fetchPositions = async (): Promise<Position[]> => this.mapState(await this.read<NativeState>('clearinghouseState', { accountType: 'perp' })).positions;
+  fetchBalance = async (): Promise<Balance> =>
+    this.mapState(await this.read<NativeState>('clearinghouseState', { accountType: 'perp' })).balance;
+  fetchPositions = async (): Promise<Position[]> =>
+    this.mapState(await this.read<NativeState>('clearinghouseState', { accountType: 'perp' })).positions;
 
   private refreshState = async (): Promise<void> => {
     if (this.inflight.has('state')) return;
@@ -255,7 +271,8 @@ export class TxflowAccount {
       const native = await this.read<NativeState>('clearinghouseState', { accountType: 'perp' });
       const mapped = this.mapState(native);
       const time = native.time === undefined ? undefined : num(native.time);
-      if (!this.alive(generation) || revision !== this.stateRevision || (time !== undefined && time < this.stateTime)) return;
+      if (!this.alive(generation) || revision !== this.stateRevision || (time !== undefined && time < this.stateTime))
+        return;
       this.commitState(mapped, time, modeRevision === this.settingsRevision);
     } catch (e) {
       if (this.alive(generation)) this.cx.reportError(e instanceof Error ? e : new Error('TxFlow account read failed'));
@@ -264,11 +281,41 @@ export class TxflowAccount {
     }
   };
 
-  private commitState(mapped: ReturnType<TxflowAccount['mapState']>, time: number | undefined, applyMode: boolean): void {
+  private commitState(
+    mapped: ReturnType<TxflowAccount['mapState']>,
+    time: number | undefined,
+    applyMode: boolean,
+  ): void {
     if (time !== undefined) this.stateTime = time;
-    this.cx.store.update({ balance: mapped.balance, loaded: { ...this.cx.store.loaded, balance: true, positions: true } });
-    if (applyMode && mapped.positions[0]) this.cx.store.setSetting('isHedged', mapped.positions[0].positionMode === PositionMode.Hedged);
-    this.cx.store.addOrUpdatePositionsFull(mapped.positions);
+    this.cx.store.apply(
+      nativeFixture(
+        { balance: mapped.balance, loaded: { ...this.cx.store.loaded, balance: true, positions: true } },
+        this.cx.store.markets.map((row) => row.symbol),
+      ),
+    );
+    if (applyMode && mapped.positions[0])
+      this.cx.store.apply(
+        nativeFixture(
+          {
+            options: {
+              ...this.cx.store.options,
+              ['isHedged']: mapped.positions[0].positionMode === PositionMode.Hedged,
+            },
+          },
+          this.cx.store.markets.map((row) => row.symbol),
+        ),
+      );
+    (() => {
+      const incoming: StoreData['positions'] = mapped.positions;
+      return this.cx.store.apply(
+        nativeFixture(
+          {
+            positions: incoming.map((row) => ({ ...this.cx.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.cx.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   }
 
   private mapOrder = (native: NativeOrder, state: string, at: number): Order => {
@@ -281,26 +328,43 @@ export class TxflowAccount {
     let type: OrderType;
     if (native.isTrigger) {
       const trigger = (native.triggerType ?? '').toLowerCase();
-      type = ['tp', 'takeprofit'].includes(trigger) ? OrderType.TakeProfit : ['sl', 'stoploss'].includes(trigger) ? OrderType.StopLoss : OrderType.Conditional;
+      type = ['tp', 'takeprofit'].includes(trigger)
+        ? OrderType.TakeProfit
+        : ['sl', 'stoploss'].includes(trigger)
+          ? OrderType.StopLoss
+          : OrderType.Conditional;
     } else if (native.orderType === 'Limit') type = OrderType.Limit;
     else if (native.orderType === 'Market') type = OrderType.Market;
     else throw new Error('Unknown TxFlow order type');
     const tifs: Record<string, OrderTimeInForce> = {
-      GTC: OrderTimeInForce.GoodTillCancel, Gtc: OrderTimeInForce.GoodTillCancel,
-      IOC: OrderTimeInForce.ImmediateOrCancel, Ioc: OrderTimeInForce.ImmediateOrCancel,
-      FOK: OrderTimeInForce.FillOrKill, Fok: OrderTimeInForce.FillOrKill,
-      ALO: OrderTimeInForce.PostOnly, Alo: OrderTimeInForce.PostOnly, PostOnly: OrderTimeInForce.PostOnly,
+      GTC: OrderTimeInForce.GoodTillCancel,
+      Gtc: OrderTimeInForce.GoodTillCancel,
+      IOC: OrderTimeInForce.ImmediateOrCancel,
+      Ioc: OrderTimeInForce.ImmediateOrCancel,
+      FOK: OrderTimeInForce.FillOrKill,
+      Fok: OrderTimeInForce.FillOrKill,
+      ALO: OrderTimeInForce.PostOnly,
+      Alo: OrderTimeInForce.PostOnly,
+      PostOnly: OrderTimeInForce.PostOnly,
     };
     if (native.tif && !tifs[native.tif]) throw new Error('Unknown TxFlow order tif');
     return {
-      id: id(native.oid), symbol: market.symbol, status: status(state), type,
+      id: id(native.oid),
+      symbol: market.symbol,
+      status: status(state),
+      type,
       side: native.side === 'B' ? OrderSide.Buy : OrderSide.Sell,
       price: native.isTrigger && native.triggerPx != null ? num(native.triggerPx) : num(native.limitPx),
-      amount, remaining, filled: amount - remaining, reduceOnly: native.reduceOnly ?? false,
+      amount,
+      remaining,
+      filled: amount - remaining,
+      reduceOnly: native.reduceOnly ?? false,
       ...(native.cloid == null ? {} : { clientOrderId: native.cloid }),
       ...(native.tif ? { timeInForce: tifs[native.tif] } : {}),
       lastUpdate: Math.max(at, num(native.timestamp)),
-      info: { childrenKnown: Object.hasOwn(native, 'children') && (native.children == null || native.children.length === 0) },
+      info: {
+        childrenKnown: Object.hasOwn(native, 'children') && (native.children == null || native.children.length === 0),
+      },
     };
   };
 
@@ -331,8 +395,21 @@ export class TxflowAccount {
       const orders = await this.fetchOrders();
       if (!this.alive(generation) || revision !== this.ordersRevision) return;
       for (const order of orders) this.rememberOrder(order);
-      this.cx.store.addOrUpdateOrdersFull(orders.filter((o) => !this.terminal.has(o.id)));
-      this.cx.store.update({ loaded: { ...this.cx.store.loaded, orders: true } });
+      (() => {
+        const incoming: StoreData['orders'] = orders.filter((o) => !this.terminal.has(o.id));
+        return this.cx.store.apply(
+          nativeFixture(
+            { orders: incoming.map((row) => ({ ...this.cx.store.orders.find((old) => old.id === row.id), ...row })) },
+            this.cx.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      this.cx.store.apply(
+        nativeFixture(
+          { loaded: { ...this.cx.store.loaded, orders: true } },
+          this.cx.store.markets.map((row) => row.symbol),
+        ),
+      );
       this.trimOrderMemo();
       this.cx.onOrders?.();
     } catch (e) {
@@ -352,13 +429,23 @@ export class TxflowAccount {
       for (let offset = 0; ; offset += PAGE) {
         if (offset > 200_000) throw new Error('TxFlow execution coverage exhausted');
         const page = await this.read<{ data: NativeFill[]; hasMore: boolean }>('userFills', {
-          accountType: ['perp'], offset, limit: PAGE, startTimeMs: this.startupAt,
+          accountType: ['perp'],
+          offset,
+          limit: PAGE,
+          startTimeMs: this.startupAt,
         });
-        if (!Array.isArray(page.data) || typeof page.hasMore !== 'boolean') throw new Error('Malformed TxFlow execution page');
+        if (!Array.isArray(page.data) || typeof page.hasMore !== 'boolean')
+          throw new Error('Malformed TxFlow execution page');
         for (const fill of page.data) {
-          id(fill.tid); id(fill.oid); id(fill.instrumentId);
-          if (num(fill.px) <= 0 || num(fill.sz) <= 0 || num(fill.time) < 0 || !['B', 'A'].includes(fill.side)) throw new Error('Malformed TxFlow execution');
-          if (!ids.has(fill.tid)) { ids.add(fill.tid); fills.push(fill); }
+          id(fill.tid);
+          id(fill.oid);
+          id(fill.instrumentId);
+          if (num(fill.px) <= 0 || num(fill.sz) <= 0 || num(fill.time) < 0 || !['B', 'A'].includes(fill.side))
+            throw new Error('Malformed TxFlow execution');
+          if (!ids.has(fill.tid)) {
+            ids.add(fill.tid);
+            fills.push(fill);
+          }
         }
         if (!page.hasMore) break;
         if (fills.length > FILL_CAP) throw new Error('TxFlow execution coverage exhausted');
@@ -373,10 +460,18 @@ export class TxflowAccount {
         this.seenFills.add(fill.tid);
         if (num(fill.time) < this.startupAt) continue;
         const market = this.cx.marketById(String(fill.instrumentId));
-        if (market) this.cx.emitFill({ id: String(fill.oid), symbol: market.symbol, side: fill.side === 'B' ? OrderSide.Buy : OrderSide.Sell, price: num(fill.px), amount: num(fill.sz) });
+        if (market)
+          this.cx.emitFill({
+            id: String(fill.oid),
+            symbol: market.symbol,
+            side: fill.side === 'B' ? OrderSide.Buy : OrderSide.Sell,
+            price: num(fill.px),
+            amount: num(fill.sz),
+          });
       }
     } catch (e) {
-      if (this.alive(generation)) this.cx.reportError(e instanceof Error ? e : new Error('TxFlow execution read failed'));
+      if (this.alive(generation))
+        this.cx.reportError(e instanceof Error ? e : new Error('TxFlow execution read failed'));
     } finally {
       if (generation === this.generation) this.inflight.delete('fills');
     }
@@ -394,10 +489,22 @@ export class TxflowAccount {
     if (settings.length === 0) return;
     const fetchedLeverage = { ...this.cx.store.fetchedLeverage };
     for (const [symbol, s] of settings) {
-      if (s.positionMode !== undefined) this.cx.store.setSetting('isHedged', s.positionMode === PositionMode.Hedged);
-      this.settings.set(symbol, s); fetchedLeverage[symbol] = s;
+      if (s.positionMode !== undefined)
+        this.cx.store.apply(
+          nativeFixture(
+            { options: { ...this.cx.store.options, ['isHedged']: s.positionMode === PositionMode.Hedged } },
+            this.cx.store.markets.map((row) => row.symbol),
+          ),
+        );
+      this.settings.set(symbol, s);
+      fetchedLeverage[symbol] = s;
     }
-    this.cx.store.update({ fetchedLeverage });
+    this.cx.store.apply(
+      nativeFixture(
+        { fetchedLeverage },
+        this.cx.store.markets.map((row) => row.symbol),
+      ),
+    );
   }
 
   private nextSetting = async (): Promise<void> => {
@@ -419,13 +526,19 @@ export class TxflowAccount {
     } finally {
       if (generation === this.generation) {
         this.inflight.delete('setting');
-        this.settingTimer = setTimeout(() => { this.settingTimer = undefined; void this.nextSetting(); }, 100);
+        this.settingTimer = setTimeout(() => {
+          this.settingTimer = undefined;
+          void this.nextSetting();
+        }, 100);
       }
     }
   };
 
   private rememberOrder(order: Order): void {
-    if (!this.memoIds.has(order.id)) { this.memoIds.add(order.id); this.orderMemo.push(order.id); }
+    if (!this.memoIds.has(order.id)) {
+      this.memoIds.add(order.id);
+      this.orderMemo.push(order.id);
+    }
     if (order.clientOrderId !== undefined) this.orderIds.set(order.clientOrderId, order.id);
   }
 
@@ -433,7 +546,10 @@ export class TxflowAccount {
     const live = new Set(this.cx.store.orders.map((o) => o.id));
     while (this.orderMemo.length > 16_384 + live.size) {
       const oldest = this.orderMemo.shift()!;
-      if (live.has(oldest)) { this.orderMemo.push(oldest); continue; }
+      if (live.has(oldest)) {
+        this.orderMemo.push(oldest);
+        continue;
+      }
       this.memoIds.delete(oldest);
       this.orderTimes.delete(oldest);
       for (const [cloid, oid] of this.orderIds) if (oid === oldest) this.orderIds.delete(cloid);
@@ -463,16 +579,54 @@ export class TxflowAccount {
           if (order.status === OrderStatus.Closed || order.status === OrderStatus.Canceled) {
             this.terminal.add(order.id);
             this.terminalQueue.push(order.id);
-            this.cx.store.markOrdersTerminal([{ id: order.id }], order.status);
-            this.cx.store.removeOrder({ id: order.id });
-          } else this.cx.store.addOrUpdateOrder(order);
+            (() => {
+              const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+              const nativeStatus: StoreData['orders'][number]['status'] = order.status;
+              return this.cx.store.apply(
+                nativeFixture(
+                  {
+                    orders: this.cx.store.orders.map((row) =>
+                      targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+                    ),
+                  },
+                  this.cx.store.markets.map((row) => row.symbol),
+                ),
+              );
+            })();
+            (() => {
+              const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+              return this.cx.store.apply(
+                nativeFixture(
+                  { orders: this.cx.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+                  this.cx.store.markets.map((row) => row.symbol),
+                ),
+              );
+            })();
+          } else
+            (() => {
+              const incoming: StoreData['orders'] = [order];
+              return this.cx.store.apply(
+                nativeFixture(
+                  {
+                    orders: [
+                      ...this.cx.store.orders.map((row) => {
+                        const change = incoming.find((item) => item.id === row.id);
+                        return change ? { ...row, ...change } : row;
+                      }),
+                      ...incoming.filter((row) => !this.cx.store.orders.some((old) => old.id === row.id)),
+                    ],
+                  },
+                  this.cx.store.markets.map((row) => row.symbol),
+                ),
+              );
+            })();
         }
         while (this.terminalQueue.length > 16_384) {
           const oldest = this.terminalQueue.shift()!;
           this.terminal.delete(oldest);
         }
         this.trimOrderMemo();
-      this.cx.onOrders?.();
+        this.cx.onOrders?.();
         void this.refresh();
       } else if (frame.channel === 'activeAssetData') {
         const mapped = this.mapAsset(frame.data as AssetData);

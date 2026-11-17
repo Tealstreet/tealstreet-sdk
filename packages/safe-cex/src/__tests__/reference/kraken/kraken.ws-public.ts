@@ -1,8 +1,11 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook, Timeframe } from '../../../types';
 import type { KrakenExchange } from './kraken.exchange';
 
-import { v } from '../../../utils/get-key';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { FrameStore } from '../../../store/frameStore';
+import { v } from '../../../utils/get-key';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { BASE_WS_URL } from './kraken.types';
 
 export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
@@ -165,7 +168,16 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
     if (fundingTime !== undefined) changes.fundingTime = fundingTime as any;
     if (percentage !== undefined) changes.percentage = percentage;
 
-    this.store.updateTicker(ticker, changes);
+    (() => {
+      const target = ticker;
+      const nativeChanges: Partial<StoreData['tickers'][number]> = changes;
+      return this.store.apply(
+        nativeFixture(
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...nativeChanges } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   // Public OHLCV - Note: Kraken Futures doesn't support OHLC via WebSocket
@@ -217,7 +229,7 @@ export class KrakenPublicWebsocket extends BaseWebSocket<KrakenExchange> {
         console.error('[Kraken WS] Failed to send book subscription:', e);
       }
     } else {
-      // Store subscription to send when connected
+      // FrameStore subscription to send when connected
       const sendWhenReady = () => {
         if (this.isConnected) {
           try {

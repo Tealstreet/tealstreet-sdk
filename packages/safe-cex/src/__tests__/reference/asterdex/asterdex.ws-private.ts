@@ -1,13 +1,15 @@
-import type { Store } from '../../../store/store.interface';
+import type { Balance } from '../../../generated/Balance';
+import type { StoreData } from '../../../generated/StoreData';
 import type { AsterDEXExchange } from './asterdex.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
-import type { Balance } from '../../../generated/Balance';
+import { ASTERDEX_ENDPOINTS } from '../../../exchanges/asterdex/asterdex.types';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { FrameStore } from '../../../store/frameStore';
 import { LogSeverity, OrderSide, OrderStatus, PositionSide } from '../../../types';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { ASTERDEX_ENDPOINTS } from '../../../exchanges/asterdex/asterdex.types';
+import { nativeFixture } from '../../cutover/nativeFixture';
 
 type MessageHandlers = {
   [eventType: string]: Array<(data: any) => void>;
@@ -57,7 +59,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     outboundAccountPosition: [(d: any) => this.handleAccountUpdate(d)],
   };
 
-  constructor(parent: AsterDEXExchange, _store: Store) {
+  constructor(parent: AsterDEXExchange, _store: FrameStore) {
     super(parent);
 
     // BaseWebSocket.onClose is an instance arrow-function field (not a
@@ -187,11 +189,20 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
       const status = statusMap[data.X] || OrderStatus.Open;
 
-      this.parent.store.updateOrder(order, {
-        status,
-        filled: parseFloat(data.z || '0'),
-        remaining: parseFloat(data.q || '0') - parseFloat(data.z || '0'),
-      });
+      (() => {
+        const target = order;
+        const changes: Partial<StoreData['orders'][number]> = {
+          status,
+          filled: parseFloat(data.z || '0'),
+          remaining: parseFloat(data.q || '0') - parseFloat(data.z || '0'),
+        };
+        return this.parent.store.apply(
+          nativeFixture(
+            { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
 
       // Emit order update event
       this.parent.emitter.emit('order', order.id, order);
@@ -207,22 +218,40 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
     // Handle NEW orders - add to store
     if (orderData.X === 'NEW') {
-      this.parent.store.addOrUpdateOrder({
-        id: orderData.i?.toString(),
-        status: OrderStatus.Open,
-        symbol: orderData.s,
-        type: this.parent['reverseMapOrderType'](orderData.o),
-        side: orderData.S === 'BUY' ? OrderSide.Buy : OrderSide.Sell,
-        price: parseFloat(orderData.p || '0') || parseFloat(orderData.sp || '0'),
-        amount: parseFloat(orderData.q || '0'),
-        filled: parseFloat(orderData.z || '0'),
-        remaining: parseFloat(orderData.q || '0') - parseFloat(orderData.z || '0'),
-        // For closePosition TP/SL orders, cp=true while R may be false/omitted.
-        // Treat both as reduce-only in local state.
-        reduceOnly: Boolean(orderData.R || orderData.cp),
-        lastUpdate: virtualClock.getCurrentTimeMs(),
-        info: orderData,
-      });
+      (() => {
+        const incoming: StoreData['orders'] = [
+          {
+            id: orderData.i?.toString(),
+            status: OrderStatus.Open,
+            symbol: orderData.s,
+            type: this.parent['reverseMapOrderType'](orderData.o),
+            side: orderData.S === 'BUY' ? OrderSide.Buy : OrderSide.Sell,
+            price: parseFloat(orderData.p || '0') || parseFloat(orderData.sp || '0'),
+            amount: parseFloat(orderData.q || '0'),
+            filled: parseFloat(orderData.z || '0'),
+            remaining: parseFloat(orderData.q || '0') - parseFloat(orderData.z || '0'),
+            // For closePosition TP/SL orders, cp=true while R may be false/omitted.
+            // Treat both as reduce-only in local state.
+            reduceOnly: Boolean(orderData.R || orderData.cp),
+            lastUpdate: virtualClock.getCurrentTimeMs(),
+            info: orderData,
+          },
+        ];
+        return this.parent.store.apply(
+          nativeFixture(
+            {
+              orders: [
+                ...this.parent.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
 
       this.parent.log(
         `Order added to store: ${orderData.i} ${orderData.s} ${orderData.o} ${orderData.S}`,
@@ -254,12 +283,21 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     if (orderData.X === 'FILLED') {
       const order = this.parent.store.orders.find((o) => o.id === orderData.i?.toString());
       if (order) {
-        this.parent.store.updateOrder(order, {
-          status: OrderStatus.Closed,
-          filled: parseFloat(orderData.z || '0'),
-          remaining: 0,
-          lastUpdate: this.getOrderUpdateTime(orderData),
-        });
+        (() => {
+          const target = order;
+          const changes: Partial<StoreData['orders'][number]> = {
+            status: OrderStatus.Closed,
+            filled: parseFloat(orderData.z || '0'),
+            remaining: 0,
+            lastUpdate: this.getOrderUpdateTime(orderData),
+          };
+          return this.parent.store.apply(
+            nativeFixture(
+              { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
         this.parent.emitter.emit('order', order.id, order);
       }
       return;
@@ -269,10 +307,19 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     if (orderData.X === 'CANCELED' || orderData.X === 'REJECTED' || orderData.X === 'EXPIRED') {
       const order = this.parent.store.orders.find((o) => o.id === orderData.i?.toString());
       if (order) {
-        this.parent.store.updateOrder(order, {
-          status: OrderStatus.Canceled,
-          lastUpdate: this.getOrderUpdateTime(orderData),
-        });
+        (() => {
+          const target = order;
+          const changes: Partial<StoreData['orders'][number]> = {
+            status: OrderStatus.Canceled,
+            lastUpdate: this.getOrderUpdateTime(orderData),
+          };
+          return this.parent.store.apply(
+            nativeFixture(
+              { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
         this.parent.emitter.emit('order', order.id, order);
       }
       return;
@@ -292,12 +339,21 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
       const status = statusMap[orderData.X] || OrderStatus.Open;
 
-      this.parent.store.updateOrder(order, {
-        status,
-        filled: parseFloat(orderData.z || '0'),
-        remaining: parseFloat(orderData.q || '0') - parseFloat(orderData.z || '0'),
-        lastUpdate: this.getOrderUpdateTime(orderData),
-      });
+      (() => {
+        const target = order;
+        const changes: Partial<StoreData['orders'][number]> = {
+          status,
+          filled: parseFloat(orderData.z || '0'),
+          remaining: parseFloat(orderData.q || '0') - parseFloat(orderData.z || '0'),
+          lastUpdate: this.getOrderUpdateTime(orderData),
+        };
+        return this.parent.store.apply(
+          nativeFixture(
+            { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
 
       this.parent.emitter.emit('order', order.id, order);
     }
@@ -312,15 +368,21 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
       return;
     }
 
-    this.parent.store.updateOrder(
-      { id: orderId },
-      {
+    (() => {
+      const target = { id: orderId };
+      const changes: Partial<StoreData['orders'][number]> = {
         status: orderData.X === 'FILLED' ? OrderStatus.Closed : OrderStatus.Open,
         filled,
         remaining: Math.max(amount - filled, 0),
         lastUpdate: this.getOrderUpdateTime(orderData),
-      },
-    );
+      };
+      return this.parent.store.apply(
+        nativeFixture(
+          { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   }
 
   private getOrderUpdateTime(orderData: { T?: unknown; E?: unknown }): number {
@@ -352,7 +414,8 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
           ? free + used
           : undefined;
       const derivedUsed = used ?? (total !== undefined && free !== undefined ? total - free : undefined);
-      if (!asset || total === undefined || free === undefined || derivedUsed === undefined || derivedUsed < 0) return undefined;
+      if (!asset || total === undefined || free === undefined || derivedUsed === undefined || derivedUsed < 0)
+        return undefined;
       updates.push({ asset, total, free, used: derivedUsed });
     }
     return updates;
@@ -455,7 +518,12 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     ) {
       return needsAuthoritativeReconcile;
     }
-    this.parent.store.update({ balance: nextBalance });
+    this.parent.store.apply(
+      nativeFixture(
+        { balance: nextBalance },
+        this.parent.store.markets.map((row) => row.symbol),
+      ),
+    );
     return needsAuthoritativeReconcile;
   }
 
@@ -520,13 +588,26 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
               `Updating existing position: ${pos.s} ${positionSide} with contracts=${Math.abs(positionAmount)}`,
               LogSeverity.Info,
             );
-            this.parent.store.updatePosition(existingPosition, {
-              contracts: Math.abs(positionAmount),
-              entryPrice: parseFloat(pos.ep || '0'),
-              notional: Math.abs(positionAmount) * parseFloat(pos.ep || '0'),
-              unrealizedPnl: parseFloat(pos.up || '0'),
-              realizedPnl: parseFloat(pos.cr || '0'),
-            });
+            (() => {
+              const target = existingPosition;
+              const changes: Partial<StoreData['positions'][number]> = {
+                contracts: Math.abs(positionAmount),
+                entryPrice: parseFloat(pos.ep || '0'),
+                notional: Math.abs(positionAmount) * parseFloat(pos.ep || '0'),
+                unrealizedPnl: parseFloat(pos.up || '0'),
+                realizedPnl: parseFloat(pos.cr || '0'),
+              };
+              return this.parent.store.apply(
+                nativeFixture(
+                  {
+                    positions: this.parent.store.positions.map((row) =>
+                      row.id === target.id ? { ...row, ...changes } : row,
+                    ),
+                  },
+                  this.parent.store.markets.map((row) => row.symbol),
+                ),
+              );
+            })();
           } else {
             this.parent.log(
               `Position not found in store: ${pos.s} ${positionSide}, will be created by fetchPositions()`,
@@ -547,9 +628,14 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
                   LogSeverity.Info,
                 );
                 // Remove the opposite position by updating the store
-                this.parent.store.update({
-                  positions: this.parent.store.positions.filter((p) => p.id !== oppositePosition.id),
-                });
+                this.parent.store.apply(
+                  nativeFixture(
+                    {
+                      positions: this.parent.store.positions.filter((p) => p.id !== oppositePosition.id),
+                    },
+                    this.parent.store.markets.map((row) => row.symbol),
+                  ),
+                );
               }
             }
           }
@@ -560,9 +646,14 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
           if (positionsToRemove.length > 0) {
             this.parent.log(`Removing ${positionsToRemove.length} closed position(s): ${pos.s}`, LogSeverity.Info);
-            this.parent.store.update({
-              positions: this.parent.store.positions.filter((p) => p.symbol !== pos.s),
-            });
+            this.parent.store.apply(
+              nativeFixture(
+                {
+                  positions: this.parent.store.positions.filter((p) => p.symbol !== pos.s),
+                },
+                this.parent.store.markets.map((row) => row.symbol),
+              ),
+            );
           }
         }
       });
@@ -756,8 +847,26 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
       if (eventVersionAtStart === this.parent.getPositionStateVersion()) {
         this.parent.log('AsterDEX position repair completed successfully', LogSeverity.Debug);
-        this.parent.store.addOrUpdatePositionsFull(positions);
-        this.parent.store.update({ loaded: { ...this.parent.store.loaded, positions: true } });
+        (() => {
+          const incoming: StoreData['positions'] = positions;
+          return this.parent.store.apply(
+            nativeFixture(
+              {
+                positions: incoming.map((row) => ({
+                  ...this.parent.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
+              },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
+        this.parent.store.apply(
+          nativeFixture(
+            { loaded: { ...this.parent.store.loaded, positions: true } },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
       } else {
         this.parent.log(
           'Skipping stale AsterDEX position repair because a newer websocket position update arrived',
@@ -765,7 +874,10 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
         );
       }
     } catch (error: any) {
-      this.parent.log(`Failed to repair AsterDEX positions after account update: ${error?.message || error}`, LogSeverity.Warning);
+      this.parent.log(
+        `Failed to repair AsterDEX positions after account update: ${error?.message || error}`,
+        LogSeverity.Warning,
+      );
     } finally {
       this.positionRepairInFlight = false;
 
@@ -837,15 +949,23 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
       const orders = await this.parent.fetchOrders();
       if (this.isDisposed) return;
       this.parent.log('AsterDEX order reconcile completed successfully', LogSeverity.Debug);
-      this.parent.store.update({
-        orders,
-        loaded: {
-          ...this.parent.store.loaded,
-          orders: true,
-        },
-      });
+      this.parent.store.apply(
+        nativeFixture(
+          {
+            orders,
+            loaded: {
+              ...this.parent.store.loaded,
+              orders: true,
+            },
+          },
+          this.parent.store.markets.map((row) => row.symbol),
+        ),
+      );
     } catch (error: any) {
-      this.parent.log(`Failed to reconcile AsterDEX orders after order event: ${error?.message || error}`, LogSeverity.Warning);
+      this.parent.log(
+        `Failed to reconcile AsterDEX orders after order event: ${error?.message || error}`,
+        LogSeverity.Warning,
+      );
     }
   };
 

@@ -1,4 +1,5 @@
-import { LogSeverity, type Candle, type OHLCVOptions, type OrderBook, type Ticker } from '../../../types';
+import type { StoreData } from '../../../generated/StoreData';
+import type { Candle, OHLCVOptions, OrderBook, Ticker } from '../../../types';
 import type {
   CryptocomWsBookUpdate,
   CryptocomWsCandlestickUpdate,
@@ -11,9 +12,11 @@ import type {
 import throttle from 'lodash/throttle';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { LogSeverity } from '../../../types';
 import { calcOrderBookTotal, sortOrderBook } from '../../../utils/orderbook';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { CryptocomExchange } from './cryptocom.exchange';
 import {
   CRYPTOCOM_WS_IDLE_PING_THRESHOLD_MS,
@@ -330,7 +333,16 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
           openInterest: data.oi ? parseFloat(data.oi) : 0,
         };
 
-        this.store.updateTicker(ticker, tickerUpdate);
+        (() => {
+          const target = ticker;
+          const changes: Partial<StoreData['tickers'][number]> = tickerUpdate;
+          return this.store.apply(
+            nativeFixture(
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       } catch (error) {
         this.parent.emitAndLogError(`Error handling ticker update: ${error}`);
       }
@@ -352,7 +364,17 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
         if (!market) continue;
 
         const ticker = this.store.tickersBySymbol[market.symbol];
-        if (ticker) this.store.updateTicker(ticker, { index: value });
+        if (ticker)
+          (() => {
+            const target = ticker;
+            const changes: Partial<StoreData['tickers'][number]> = { index: value };
+            return this.store.apply(
+              nativeFixture(
+                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
       }
       return;
     }
@@ -364,11 +386,29 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
     if (!ticker) return;
 
     if (update.channel === 'mark') {
-      this.store.updateTicker(ticker, { mark: value });
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = { mark: value };
+        return this.store.apply(
+          nativeFixture(
+            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     } else if (update.channel === 'funding') {
       // Crypto.com documents `funding` as the rate settling at the end of the
       // current hour. It is already a decimal rate, matching Ticker semantics.
-      this.store.updateTicker(ticker, { fundingRate: value });
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = { fundingRate: value };
+        return this.store.apply(
+          nativeFixture(
+            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
   };
 
@@ -399,10 +439,19 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
         // Use O(1) hashmap lookup instead of O(n) find
         const ticker = this.store.tickersBySymbol[market.symbol];
         if (ticker) {
-          this.store.updateTicker(ticker, {
-            bid: data.bids[0] ? parseFloat(data.bids[0][0]) : 0,
-            ask: data.asks[0] ? parseFloat(data.asks[0][0]) : 0,
-          });
+          (() => {
+            const target = ticker;
+            const changes: Partial<StoreData['tickers'][number]> = {
+              bid: data.bids[0] ? parseFloat(data.bids[0][0]) : 0,
+              ask: data.asks[0] ? parseFloat(data.asks[0][0]) : 0,
+            };
+            return this.store.apply(
+              nativeFixture(
+                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
 
         // Trigger message handlers for order book updates

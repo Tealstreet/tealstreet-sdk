@@ -1,6 +1,6 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 import type { Balance, ExchangeName } from '../../../types';
 
 import rateLimit from 'axios-rate-limit';
@@ -13,6 +13,19 @@ import times from 'lodash/times';
 import uniqBy from 'lodash/uniqBy';
 import { mapSeries } from 'p-iteration';
 
+import { BaseExchange } from '../../../exchanges/base';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import {
+  ENDPOINTS,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  ORDER_SIDE,
+  ORDER_STATUS,
+  ORDER_TYPE,
+  POSITIONS_RESPONSE,
+  TIME_IN_FORCE,
+} from '../../../exchanges/phemex/phemex.types';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Candle,
   ExchangeOptions,
@@ -45,19 +58,8 @@ import { roundUSD } from '../../../utils/roundUSD';
 import { adjust, multiply1, subtract } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { BROKER_ID, createAPI } from './phemex.api';
-import {
-  ENDPOINTS,
-  GRAFANA_ENDPOINTS_EVERY,
-  GRAFANA_ENDPOINTS_PERIODIC,
-  ORDER_SIDE,
-  ORDER_STATUS,
-  ORDER_TYPE,
-  POSITIONS_RESPONSE,
-  TIME_IN_FORCE,
-} from '../../../exchanges/phemex/phemex.types';
 import { BinancePrivateWebsocket } from './phemex.ws-private';
 import { BinancePublicWebsocket } from './phemex.ws-public';
 
@@ -75,7 +77,7 @@ export class PhemexExchange extends BaseExchange {
   grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
   grafanaEndpointsEvery = GRAFANA_ENDPOINTS_EVERY;
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 3 }) });
@@ -136,10 +138,15 @@ export class PhemexExchange extends BaseExchange {
       const [, rawTickers] = await Promise.all([
         this.fetchMarkets().then((markets) => {
           if (this.isDisposed) return [];
-          this.store.update({
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          });
+          this.store.apply(
+            nativeFixture(
+              {
+                markets,
+                loaded: { ...this.store.loaded, markets: true },
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
 
           // start public websocket streams as soon as markets loaded.
           this.publicWebsocket.connectAndSubscribe();
@@ -151,10 +158,15 @@ export class PhemexExchange extends BaseExchange {
 
       if (this.isDisposed) return;
       const tickers = this.parseTickers(rawTickers);
-      this.store.update({
-        tickers,
-        loaded: { ...this.store.loaded, tickers: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            tickers,
+            loaded: { ...this.store.loaded, tickers: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     }
 
     if (!publicDataOnly) {
@@ -168,7 +180,12 @@ export class PhemexExchange extends BaseExchange {
     this.privateWebsocket.connectAndSubscribe();
 
     // fetch current position mode (Hedge/One-way)
-    this.store.setSetting('isHedged', true);
+    this.store.apply(
+      nativeFixture(
+        { options: { ...this.store.options, ['isHedged']: true } },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     // start ticking live data
     // balance, tickers, positions
@@ -197,17 +214,22 @@ export class PhemexExchange extends BaseExchange {
     if (this.isDisposed) return;
 
     this.log(`Ready to watch public data on Binance`);
-    this.store.update({
-      orders: [],
-      balance: {
-        used: 0,
-        free: 0,
-        total: 0,
-        upnl: 0,
-      },
-      positions: [],
-      loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
-    });
+    this.store.apply(
+      nativeFixture(
+        {
+          orders: [],
+          balance: {
+            used: 0,
+            free: 0,
+            total: 0,
+            upnl: 0,
+          },
+          positions: [],
+          loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
   };
 
   tick = async () => {
@@ -340,11 +362,8 @@ export class PhemexExchange extends BaseExchange {
     const ticker = this.store.tickersBySymbol[symbol];
     const markPrice = parseFloat(v(p, 'markPriceRp'));
     const last = ticker?.last;
-    const lastPrice = typeof last === 'number' && Number.isFinite(last)
-      ? last
-      : Number.isFinite(markPrice)
-        ? markPrice
-        : entryPrice;
+    const lastPrice =
+      typeof last === 'number' && Number.isFinite(last) ? last : Number.isFinite(markPrice) ? markPrice : entryPrice;
 
     // we probably need this for COIN-M, but USD-M is not contracts based
     //const contracts = size ? multiply1(size, market.precision.amount) : 0;
@@ -915,24 +934,34 @@ export class PhemexExchange extends BaseExchange {
 
       // need to filter out prev positions as mode changed, so different count
       const symbolPos = await this.fetchPositions([symbol]);
-      this.store.update({
-        positions: [...this.store.positions.filter((p) => p.symbol !== symbol), ...symbolPos],
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            positions: [...this.store.positions.filter((p) => p.symbol !== symbol), ...symbolPos],
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
 
       const context = await this.resolveLeverageContext(symbol);
       if (context) {
         const existing = this.store.fetchedLeverage[symbol];
-        this.store.update({
-          fetchedLeverage: {
-            ...this.store.fetchedLeverage,
-            [symbol]: {
-              buyLeverage: existing?.buyLeverage ?? context.longLeverage,
-              sellLeverage: existing?.sellLeverage ?? context.shortLeverage,
-              marginType: context.marginType,
-              positionMode: context.positionMode,
+        this.store.apply(
+          nativeFixture(
+            {
+              fetchedLeverage: {
+                ...this.store.fetchedLeverage,
+                [symbol]: {
+                  buyLeverage: existing?.buyLeverage ?? context.longLeverage,
+                  sellLeverage: existing?.sellLeverage ?? context.shortLeverage,
+                  marginType: context.marginType,
+                  positionMode: context.positionMode,
+                },
+              },
             },
-          },
-        });
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       }
     } catch (e: any) {
       this.emitAndLogError(e, e?.response?.data?.msg || e?.message);
@@ -1103,7 +1132,23 @@ export class PhemexExchange extends BaseExchange {
     }
 
     const positions = await this.fetchPositions([symbol]);
-    this.store.addOrUpdatePositions(positions);
+    (() => {
+      const incoming: StoreData['positions'] = positions;
+      return this.store.apply(
+        nativeFixture(
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
 
     // Record the new leverage even when the symbol is flat. mapPosition drops
     // size-0 rows, so a leverage change on a symbol with no open position
@@ -1114,17 +1159,22 @@ export class PhemexExchange extends BaseExchange {
     const appliedSignedLeverage = prepLeverage(inputLeverage);
     const appliedLeverage = Math.abs(appliedSignedLeverage);
     const existing = this.store.fetchedLeverage[symbol];
-    this.store.update({
-      fetchedLeverage: {
-        ...this.store.fetchedLeverage,
-        [symbol]: {
-          buyLeverage: side === PositionSide.Short ? (existing?.buyLeverage ?? appliedLeverage) : appliedLeverage,
-          sellLeverage: side === PositionSide.Long ? (existing?.sellLeverage ?? appliedLeverage) : appliedLeverage,
-          marginType: appliedSignedLeverage < 0 ? MarginType.Cross : MarginType.Isolated,
-          positionMode: context.positionMode,
+    this.store.apply(
+      nativeFixture(
+        {
+          fetchedLeverage: {
+            ...this.store.fetchedLeverage,
+            [symbol]: {
+              buyLeverage: side === PositionSide.Short ? (existing?.buyLeverage ?? appliedLeverage) : appliedLeverage,
+              sellLeverage: side === PositionSide.Long ? (existing?.sellLeverage ?? appliedLeverage) : appliedLeverage,
+              marginType: appliedSignedLeverage < 0 ? MarginType.Cross : MarginType.Isolated,
+              positionMode: context.positionMode,
+            },
+          },
         },
-      },
-    });
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
   };
 
   cancelOrders = async (_orders: Order[]) => {
@@ -1185,10 +1235,20 @@ export class PhemexExchange extends BaseExchange {
           throw new Error(r.data?.msg);
         }
       }
-      this.store.updateOrdersStatus(
-        _orders.map((order) => ({ id: order.id })),
-        OrderStatus.Canceled,
-      );
+      (() => {
+        const targets: Array<Pick<StoreData['orders'][number], 'id'>> = _orders.map((order) => ({ id: order.id }));
+        const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+        return this.store.apply(
+          nativeFixture(
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     } catch (err: any) {
       this.emitAndLogError(err, err?.response?.data?.msg || err?.message);
       throw err;
@@ -1265,7 +1325,23 @@ export class PhemexExchange extends BaseExchange {
       }
     }
     if (openOrders.length > 0) {
-      this.store.addOrUpdateOrders(openOrders);
+      (() => {
+        const incoming: StoreData['orders'] = openOrders;
+        return this.store.apply(
+          nativeFixture(
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
     if (errMsg) {
       this.emitAndLogError(errMsg);
@@ -1280,10 +1356,15 @@ export class PhemexExchange extends BaseExchange {
 
     const markets = await this.fetchMarkets();
     if (!this.isDisposed && Array.isArray(markets) && markets.length > 0) {
-      this.store.update({
-        markets,
-        loaded: { ...this.store.loaded, markets: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            markets,
+            loaded: { ...this.store.loaded, markets: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     }
 
     return this.store.marketsBySymbol[symbol] || markets.find((market) => market.symbol === symbol);

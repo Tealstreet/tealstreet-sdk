@@ -1,10 +1,13 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
 
+import { BaseExchange } from '../../../exchanges/base';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -33,8 +36,7 @@ import { loop } from '../../../utils/loop';
 import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { createKucoinSpotAPI } from './kucoinspot.api';
 import {
   KUCOIN_SPOT_ENDPOINTS,
@@ -68,7 +70,7 @@ export class KucoinSpotExchange extends BaseExchange {
   grafanaEndpointsEvery = KUCOIN_SPOT_GRAFANA_ENDPOINTS_EVERY;
   grafanaEndpointsPeriodic = KUCOIN_SPOT_GRAFANA_ENDPOINTS_PERIODIC;
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createKucoinSpotAPI, {
@@ -131,18 +133,28 @@ export class KucoinSpotExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      this.store.update({
-        markets,
-        loaded: { ...this.store.loaded, markets: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            markets,
+            loaded: { ...this.store.loaded, markets: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
 
       const tickers = await this.fetchTickers();
       if (this.isDisposed) return;
 
-      this.store.update({
-        tickers,
-        loaded: { ...this.store.loaded, tickers: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            tickers,
+            loaded: { ...this.store.loaded, tickers: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
 
       this.publicWebsocket.connectAndSubscribe();
       this.log(`Loaded ${Math.min(markets.length, tickers.length)} KuCoin Spot markets`);
@@ -151,19 +163,32 @@ export class KucoinSpotExchange extends BaseExchange {
     const positions = await this.fetchPositions();
     if (this.isDisposed) return;
 
-    this.store.addOrUpdatePositionsFull(positions);
+    (() => {
+      const incoming: StoreData['positions'] = positions;
+      return this.store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
 
     if (this.isPublicDataOnly) {
-      this.store.update({
-        orders: [],
-        balance: {
-          used: 0,
-          free: 0,
-          total: 0,
-          upnl: 0,
-        },
-        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            orders: [],
+            balance: {
+              used: 0,
+              free: 0,
+              total: 0,
+              upnl: 0,
+            },
+            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
       this.log(`Ready to watch public data on KuCoin Spot`);
       return;
     }
@@ -270,12 +295,17 @@ export class KucoinSpotExchange extends BaseExchange {
   };
 
   setLeverage = async (symbol: string, _leverage: number, _side?: PositionSide): Promise<void> => {
-    this.store.update({
-      fetchedLeverage: {
-        ...this.store.fetchedLeverage,
-        [symbol]: { buyLeverage: 1, sellLeverage: 1 },
-      },
-    });
+    this.store.apply(
+      nativeFixture(
+        {
+          fetchedLeverage: {
+            ...this.store.fetchedLeverage,
+            [symbol]: { buyLeverage: 1, sellLeverage: 1 },
+          },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
   };
 
   changeMarginType = async (_isolated: boolean, _symbol?: string): Promise<void> => {};
@@ -293,17 +323,32 @@ export class KucoinSpotExchange extends BaseExchange {
       ]);
       if (this.isDisposed) return;
 
-      this.store.addOrUpdatePositionsFull(positions);
-      this.store.update({
-        orders,
-        balance,
-        loaded: {
-          ...this.store.loaded,
-          balance: true,
-          positions: true,
-          orders: true,
-        },
-      });
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return this.store.apply(
+          nativeFixture(
+            {
+              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      this.store.apply(
+        nativeFixture(
+          {
+            orders,
+            balance,
+            loaded: {
+              ...this.store.loaded,
+              balance: true,
+              positions: true,
+              orders: true,
+            },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
     }
@@ -560,18 +605,16 @@ export class KucoinSpotExchange extends BaseExchange {
         return [];
       }
 
-      return (data.data?.items || []).map(
-        (fill: Record<string, any>): Execution => ({
-          timestamp: parseInt(fill.createdAt || `${Date.now()}`, 10),
-          symbol: fill.symbol,
-          orderId: fill.orderId,
-          price: parseFloat(fill.price || '0'),
-          qty: parseFloat(fill.size || '0'),
-          side: fill.side === 'sell' ? OrderSide.Sell : OrderSide.Buy,
-          commission: parseFloat(fill.fee || '0'),
-          commissionAsset: fill.feeCurrency,
-        }),
-      );
+      return (data.data?.items || []).map((fill: Record<string, any>): Execution => ({
+        timestamp: parseInt(fill.createdAt || `${Date.now()}`, 10),
+        symbol: fill.symbol,
+        orderId: fill.orderId,
+        price: parseFloat(fill.price || '0'),
+        qty: parseFloat(fill.size || '0'),
+        side: fill.side === 'sell' ? OrderSide.Sell : OrderSide.Buy,
+        commission: parseFloat(fill.fee || '0'),
+        commissionAsset: fill.feeCurrency,
+      }));
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return [];
@@ -683,16 +726,14 @@ export class KucoinSpotExchange extends BaseExchange {
     }
 
     return data.data
-      .map(
-        (c: any[]): Candle => ({
-          timestamp: parseInt(c[0], 10),
-          open: parseFloat(c[1]),
-          close: parseFloat(c[2]),
-          high: parseFloat(c[3]),
-          low: parseFloat(c[4]),
-          volume: parseFloat(c[5]),
-        }),
-      )
+      .map((c: any[]): Candle => ({
+        timestamp: parseInt(c[0], 10),
+        open: parseFloat(c[1]),
+        close: parseFloat(c[2]),
+        high: parseFloat(c[3]),
+        low: parseFloat(c[4]),
+        volume: parseFloat(c[5]),
+      }))
       .sort((a: Candle, b: Candle) => a.timestamp - b.timestamp);
   };
 

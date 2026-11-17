@@ -11,8 +11,7 @@ import { EngineHost } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { prepareRecordedHttp } from '../__tests__/support/managedHttp';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
-import { FrameApplier } from '../store/frameApplier';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 
 const DEXES = ['xyz', 'flx', 'vntl', 'hyna', 'km', 'abcd', 'cash', 'para', 'mkts', 'io'];
 const hosts: EngineHost[] = [];
@@ -74,7 +73,7 @@ it.each([0, 8000])(
     });
     const { WasmEngine } = await loadNodeEngine();
     const startedAt = Date.now();
-    const stores: DefaultStore[] = [];
+    const stores: FrameStore[] = [];
     const events: EngineEvent[] = [];
     const loadedAt = [0, 0, 0, 0];
     const connectCounts = [0, 0, 0, 0];
@@ -96,9 +95,9 @@ it.each([0, 8000])(
       vi.resetModules();
       const { createEngineTransport } = await import('./engine');
       const key = account === 0 ? '0x7e5f4552091a69125d5dfcb7b8c2659029395bdf' : `0x${String(account + 1).repeat(40)}`;
-      const store = new DefaultStore();
+      const store = new FrameStore();
       stores.push(store);
-      const applier = new FrameApplier(store);
+      const applier = store;
       const raw: Transport = {
         now: () => Date.now(),
         setTimeout: (callback, ms) => setTimeout(callback, ms),

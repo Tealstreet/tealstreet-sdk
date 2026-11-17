@@ -2,8 +2,7 @@ import type { ExchangeOptions, Market, Order, Position } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import {
   MarginType,
   OrderSide,
@@ -14,6 +13,8 @@ import {
   PositionMode,
   PositionSide,
 } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -34,8 +35,13 @@ const market: Market = {
 
 const exchanges: BitunixExchange[] = [];
 const createExchange = () => {
-  const exchange = new BitunixExchange('bitunix', options, new DefaultStore());
-  exchange.store.update({ markets: [market] });
+  const exchange = new BitunixExchange('bitunix', options, new FrameStore());
+  exchange.store.apply(
+    nativeFixture(
+      { markets: [market] },
+      exchange.store.markets.map((row) => row.symbol),
+    ),
+  );
   exchanges.push(exchange);
   return exchange;
 };
@@ -145,7 +151,12 @@ describe('Bitunix TS/Rust parity regressions', () => {
 
   it('(2) WS UPDATE/CLOSE emit one fill per execution from cumulative dealAmount/averagePrice', () => {
     const exchange = createExchange();
-    exchange.store.update({ orders: [storedOrder()] });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: [storedOrder()] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const fills = captureFills(exchange);
 
     exchange.privateWebsocket.onMessage({
@@ -163,9 +174,14 @@ describe('Bitunix TS/Rust parity regressions', () => {
 
   it('(2) does not re-emit the fill already known from the REST snapshot', () => {
     const exchange = createExchange();
-    exchange.store.update({
-      orders: [storedOrder({ filled: 0.4, remaining: 0.6, info: { orderId: 'order-1', averagePrice: '2999.5' } })],
-    });
+    exchange.store.apply(
+      nativeFixture(
+        {
+          orders: [storedOrder({ filled: 0.4, remaining: 0.6, info: { orderId: 'order-1', averagePrice: '2999.5' } })],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const fills = captureFills(exchange);
 
     exchange.privateWebsocket.onMessage({
@@ -222,7 +238,12 @@ describe('Bitunix TS/Rust parity regressions', () => {
 
   it('(5) changeMarginType updates both legs in the store on success', async () => {
     const exchange = createExchange();
-    exchange.store.update({ positions: [crossLeg(PositionSide.Long), crossLeg(PositionSide.Short)] });
+    exchange.store.apply(
+      nativeFixture(
+        { positions: [crossLeg(PositionSide.Long), crossLeg(PositionSide.Short)] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = { post: vi.fn().mockResolvedValue({ data: { code: 0 } }) } as any;
 
     await exchange.changeMarginType(true, 'ETHUSDT');
@@ -233,7 +254,12 @@ describe('Bitunix TS/Rust parity regressions', () => {
   it('(2) values a REST-known fill without an average at the order price', async () => {
     const exchange = createExchange();
     const orders = await fetchRegularOrders(exchange, [pendingOrder({ price: '90000', tradeQty: '0.001' })]);
-    exchange.store.update({ orders });
+    exchange.store.apply(
+      nativeFixture(
+        { orders },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const fills = captureFills(exchange);
 
     exchange.privateWebsocket.onMessage({
@@ -247,14 +273,24 @@ describe('Bitunix TS/Rust parity regressions', () => {
 
   it('(2) a REST refresh ahead of the stream does not swallow the next streamed delta', async () => {
     const exchange = createExchange();
-    exchange.store.update({ orders: [storedOrder()] });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: [storedOrder()] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const fills = captureFills(exchange);
 
     exchange.privateWebsocket.onMessage({
       data: wsOrderFrame('UPDATE', { dealAmount: '0.4', averagePrice: '3000' }),
     } as MessageEvent);
     const refreshed = await fetchRegularOrders(exchange, [pendingOrder({ tradeQty: '0.6', avgPrice: '3000' })]);
-    exchange.store.update({ orders: refreshed });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: refreshed },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     expect(exchange.store.orders.find((o) => o.id === 'order-1')?.filled).toBe(0.6);
     exchange.privateWebsocket.onMessage({
       data: wsOrderFrame('UPDATE', { dealAmount: '0.6', averagePrice: '3000' }),
@@ -265,7 +301,12 @@ describe('Bitunix TS/Rust parity regressions', () => {
 
   it('(5) changeMarginType rejected inside an HTTP 200 throws and changes nothing', async () => {
     const exchange = createExchange();
-    exchange.store.update({ positions: [crossLeg(PositionSide.Long), crossLeg(PositionSide.Short)] });
+    exchange.store.apply(
+      nativeFixture(
+        { positions: [crossLeg(PositionSide.Long), crossLeg(PositionSide.Short)] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.symbolSettings.set('ETHUSDT', { marginType: MarginType.Cross, leverage: 10 });
     exchange.xhr = { post: vi.fn().mockResolvedValue({ data: { code: 10001, msg: 'rejected' } }) } as any;
 
@@ -308,25 +349,30 @@ describe('Bitunix TS/Rust parity regressions', () => {
     { name: 'epoch ms', nft: '1792598400000', expected: 1_792_598_400_000 },
   ])('(7) WS ticker fundingTime reads nft as $name', ({ nft, expected }) => {
     const exchange = createExchange();
-    exchange.store.update({
-      tickers: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'ETHUSDT',
-          symbol: 'ETHUSDT',
-          bid: 0,
-          ask: 0,
-          last: 3000,
-          mark: 3000,
-          index: 3000,
-          percentage: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-          openInterest: 0,
+          tickers: [
+            {
+              id: 'ETHUSDT',
+              symbol: 'ETHUSDT',
+              bid: 0,
+              ask: 0,
+              last: 3000,
+              mark: 3000,
+              index: 3000,
+              percentage: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+              openInterest: 0,
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     exchange.publicWebsocket.handlePriceStreamEvent({
       symbol: 'ETHUSDT',

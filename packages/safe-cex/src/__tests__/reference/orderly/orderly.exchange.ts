@@ -1,5 +1,5 @@
 import type { Axios } from 'axios';
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import cloneDeep from 'lodash/cloneDeep';
@@ -8,6 +8,9 @@ import times from 'lodash/times';
 import uniqBy from 'lodash/uniqBy';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
+import { BaseExchange } from '../../../exchanges/base';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Candle,
   ExchangeName,
@@ -35,8 +38,7 @@ import { loop } from '../../../utils/loop';
 import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust, subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { createAPI } from './orderly.api';
 import {
   ACCOUNT_RESPONSE,
@@ -108,7 +110,7 @@ export class OrderlyExchange extends BaseExchange {
   private _accountPositionMode: PositionMode | null = null;
   private marginTypeBySymbol = new Map<string, MarginType>();
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     // Ensure key and secret have the "ed25519:" prefix
     const normalizedOpts = { ...opts };
     if (normalizedOpts.key && !normalizedOpts.key.startsWith('ed25519:')) {
@@ -202,10 +204,15 @@ export class OrderlyExchange extends BaseExchange {
     const markets = await this.fetchMarkets();
     if (this.isDisposed) return;
 
-    this.store.update({
-      markets,
-      loaded: { ...this.store.loaded, markets: true },
-    });
+    this.store.apply(
+      nativeFixture(
+        {
+          markets,
+          loaded: { ...this.store.loaded, markets: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const tickers = await this.fetchTickers();
     if (this.isDisposed) return;
@@ -223,17 +230,27 @@ export class OrderlyExchange extends BaseExchange {
 
     this.log(`Loaded ${Math.min(tickers.length, markets.length)} ${this.orderlyExchangeName} markets`);
 
-    this.store.update({
-      tickers,
-      loaded: { ...this.store.loaded, tickers: true },
-    });
+    this.store.apply(
+      nativeFixture(
+        {
+          tickers,
+          loaded: { ...this.store.loaded, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     this.publicWebsocket.connectAndSubscribe();
 
     if (publicDataOnly) {
-      this.store.update({
-        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
       return;
     }
 
@@ -249,10 +266,15 @@ export class OrderlyExchange extends BaseExchange {
 
     this.log(`Loaded ${this.orderlyExchangeName} orders`);
 
-    this.store.update({
-      orders,
-      loaded: { ...this.store.loaded, orders: true },
-    });
+    this.store.apply(
+      nativeFixture(
+        {
+          orders,
+          loaded: { ...this.store.loaded, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
   };
 
   tick = async (count = 0) => {
@@ -263,30 +285,45 @@ export class OrderlyExchange extends BaseExchange {
         // after fetch account in case positionMode or leverage updated
         const positions = await this.fetchPositions();
         if (this.isDisposed) return;
-        this.store.update({ positions, loaded: { ...this.store.loaded, positions: true } });
+        this.store.apply(
+          nativeFixture(
+            { positions, loaded: { ...this.store.loaded, positions: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
 
         // positions will provide the following update:
         // free: free_collateral,
         // used: total_collateral_value - free_collateral,
         // total: total_collateral_value,
         const upnl = positions.length > 0 ? Math.round(sumBy(positions, 'unrealizedPnl') * 100) / 100 : 0;
-        this.store.update({
-          balance: {
-            total: this.store.balance.total - upnl,
-            used: this.store.balance.used - upnl,
-            free: this.store.balance.free,
-            upnl,
-          },
-          loaded: {
-            ...this.store.loaded,
-            balance: true,
-          },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              balance: {
+                total: this.store.balance.total - upnl,
+                used: this.store.balance.used - upnl,
+                free: this.store.balance.free,
+                upnl,
+              },
+              loaded: {
+                ...this.store.loaded,
+                balance: true,
+              },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
 
         if (count % 4 === 0) {
           const orders = await this.fetchOrders();
           if (this.isDisposed) return;
-          this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+          this.store.apply(
+            nativeFixture(
+              { orders, loaded: { ...this.store.loaded, orders: true } },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
         }
 
         // if (count % 10 === 0) {
@@ -513,14 +550,19 @@ export class OrderlyExchange extends BaseExchange {
         return acc;
       }, []);
 
-      this.store.update({
-        balance: {
-          ...this.store.balance,
-          free: free_collateral,
-          used: total_collateral_value - free_collateral,
-          total: total_collateral_value,
-        },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            balance: {
+              ...this.store.balance,
+              free: free_collateral,
+              used: total_collateral_value - free_collateral,
+              total: total_collateral_value,
+            },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
 
       return uniqBy([...realPositions, ...fakePositions], 'id');
     } catch (err: any) {
@@ -996,7 +1038,20 @@ export class OrderlyExchange extends BaseExchange {
       }
     } catch (err: any) {
       if (err?.response?.data?.message?.includes('already canceled')) {
-        this.store.updateOrderStatus({ id: order.id }, OrderStatus.Canceled);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       } else {
         this.emitAndLogError(err?.response?.data?.message || err?.message);
       }
@@ -1284,11 +1339,23 @@ export class OrderlyExchange extends BaseExchange {
       const { data } = await this.xhr.post(ENDPOINTS.LEVERAGE, payload);
       if (data?.success !== true) throw new Error(data?.message || 'Orderly leverage update failed');
       if (marginType === MarginType.Cross) this.accountLeverage = leverage;
-      this.store.updatePositions(
-        this.store.positions
-          .filter((position) => position.symbol === symbol && position.marginType === marginType)
-          .map((position) => [position, { leverage }] as [Position, Partial<Position>]),
-      );
+      (() => {
+        const updates: Array<[Pick<StoreData['positions'][number], 'id'>, Partial<StoreData['positions'][number]>]> =
+          this.store.positions
+            .filter((position) => position.symbol === symbol && position.marginType === marginType)
+            .map((position) => [position, { leverage }] as [Position, Partial<Position>]);
+        return this.store.apply(
+          nativeFixture(
+            {
+              positions: this.store.positions.map((row) => {
+                const change = updates.find(([target]) => target.id === row.id);
+                return change ? { ...row, ...change[1] } : row;
+              }),
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
       throw err;

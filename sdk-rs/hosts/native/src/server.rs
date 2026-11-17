@@ -2581,7 +2581,7 @@ mod tests {
                 .find(|(k, _)| *k == 32)
                 .unwrap();
             let info = safe_cex_store_frames::decode_section(bytes).unwrap();
-            assert!(info.get("tier").unwrap().text_equals("pro"));
+            assert!(info.get("tier").unwrap().as_str() == Some("pro"));
             assert!(rx.try_recv().is_err(), "no store side channel");
         }
     }

@@ -1,26 +1,32 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { GrvtExchange } from '../reference/grvt/grvt.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 
 const makeExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTC_USDT_Perp',
-        symbol: 'BTC_USDT_PERP',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        info: { ih: '0x030501', bd: 9, qd: 6 },
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+        markets: [
+          {
+            id: 'BTC_USDT_Perp',
+            symbol: 'BTC_USDT_PERP',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            info: { ih: '0x030501', bd: 9, qd: 6 },
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+          },
+        ] as any,
+        loaded: { ...store.loaded, markets: true },
       },
-    ] as any,
-    loaded: { ...store.loaded, markets: true },
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new GrvtExchange('grvt' as any, {} as any, store);
   exchange.grvtTradingAccountId = '7';
   return exchange;

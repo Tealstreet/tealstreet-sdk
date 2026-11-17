@@ -1,6 +1,6 @@
 import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import type { Market, Position } from '../types';
-import type { Store } from './store.interface';
+import type { StoreData } from '../generated/StoreData';
 
 import { positionEnums } from '@tealstreet/safe-cex-wasm/wire';
 import { MarginType, PositionMode, PositionSide } from '../types';
@@ -10,7 +10,7 @@ const modes = { hedged: PositionMode.Hedged, oneway: PositionMode.OneWay };
 const margins = { cross: MarginType.Cross, isolated: MarginType.Isolated };
 
 /** Decode the native Position contract without repairing numbers, sizes or identity. */
-export function readPositionFrame(frame: Frame, store: Store, markets?: readonly Market[]): Position[] | undefined {
+export function readPositionFrame(frame: Frame, store: Pick<StoreData, 'markets'>, markets?: readonly Market[]): Position[] | undefined {
   const positions = frame.positions();
   if (positions) {
     const rows: Position[] = [];
@@ -38,7 +38,7 @@ export function readPositionFrame(frame: Frame, store: Store, markets?: readonly
     for (let i = 0; i < positions.count; i++) {
       const enums = positionEnums(positions.enums[i]);
       const symbol = positions.symbol(i);
-      const market = markets ? markets[positions.market[i]] : store.marketsBySymbol[symbol];
+      const market = markets ? markets[positions.market[i]] : store.markets.find(row => row.symbol === symbol);
       const mode = enums.positionMode === undefined ? undefined : modes[enums.positionMode];
       if (enums.side === undefined) throw new Error('missing Position side');
       const id = positions.id(i);

@@ -1,6 +1,6 @@
 import type { Axios } from 'axios';
-import type { Store } from '../../../store/store.interface';
 import type { ClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import flatten from 'lodash/flatten';
@@ -9,7 +9,9 @@ import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { createApiWithSecondaryKey } from '../../../createApiWithSecondaryKey';
+import { BaseExchange, CallableMethodsInWorker } from '../../../exchanges/base';
 import { wooOrdersToPositionRecords } from '../../../journal/woo.position-adapter';
+import { FrameStore } from '../../../store/frameStore';
 import { getTransport } from '../../../transport/registry';
 import {
   Balance,
@@ -53,7 +55,7 @@ import { loop } from '../../../utils/loop';
 import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust, subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange, CallableMethodsInWorker } from '../../../exchanges/base';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { createAPI } from './woo.api';
 import { buildWooIncomeParams, mapWooIncomeRecord, wooIncomeIdentity } from './woo.income';
 import { buildWooLegacyFillsParams } from './woo.legacy-fills';
@@ -281,11 +283,27 @@ export class WOOXExchange extends BaseExchange {
         this._orderVersions.delete(id);
       }
     }
-    this.store.addOrUpdateOrder(row);
+    (() => {
+      const incoming: StoreData['orders'] = [row];
+      return this.store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     return row;
   };
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     const [xhr, primaryXhr, secondaryXhr] = createApiWithSecondaryKey(opts, this, createAPI, {
@@ -412,7 +430,16 @@ export class WOOXExchange extends BaseExchange {
         if (!ticker || rawSymbol !== reverseSymbol(ticker.symbol)) continue;
 
         if (this.isDisposed) return;
-        this.store.updateTicker(ticker, { fundingRate, fundingTime });
+        (() => {
+          const target = ticker;
+          const changes: Partial<StoreData['tickers'][number]> = { fundingRate, fundingTime };
+          return this.store.apply(
+            nativeFixture(
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     } catch (err: any) {
       if (!this.isDisposed) {
@@ -428,7 +455,12 @@ export class WOOXExchange extends BaseExchange {
       const data = await this.fetchAccountInfo();
       this._accountPositionMode = data.positionMode === 'ONE_WAY' ? PositionMode.OneWay : PositionMode.Hedged;
     }
-    this.store.setSetting('isHedged', this._accountPositionMode === PositionMode.Hedged);
+    this.store.apply(
+      nativeFixture(
+        { options: { ...this.store.options, ['isHedged']: this._accountPositionMode === PositionMode.Hedged } },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
     return this._accountPositionMode;
   }
 
@@ -755,7 +787,23 @@ export class WOOXExchange extends BaseExchange {
       const positions = await this.fetchPositions([symbol]);
       if (this.isDisposed) return;
 
-      this.store.addOrUpdatePositions(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return this.store.apply(
+          nativeFixture(
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
       const afterSignature = this.getPositionSignatureForSymbol(symbol);
       shouldRetry = expectedSignature ? afterSignature !== expectedSignature : beforeSignature === afterSignature;
 
@@ -816,16 +864,22 @@ export class WOOXExchange extends BaseExchange {
     const nextSide = nextSignedContracts >= 0 ? PositionSide.Long : PositionSide.Short;
 
     if (currentOpenPosition && (nextContracts === 0 || currentOpenPosition.side !== nextSide)) {
-      this.store.updatePosition(
-        { id: currentOpenPosition.id },
-        {
+      (() => {
+        const target = { id: currentOpenPosition.id };
+        const changes: Partial<StoreData['positions'][number]> = {
           entryPrice: 0,
           notional: 0,
           unrealizedPnl: 0,
           contracts: 0,
           liquidationPrice: 0,
-        },
-      );
+        };
+        return this.store.apply(
+          nativeFixture(
+            { positions: this.store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
 
     if (nextContracts === 0) {
@@ -868,7 +922,23 @@ export class WOOXExchange extends BaseExchange {
       marginType,
     };
 
-    this.store.addOrUpdatePosition(optimisticPosition);
+    (() => {
+      const incoming: StoreData['positions'] = [optimisticPosition];
+      return this.store.apply(
+        nativeFixture(
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     return true;
   };
 
@@ -934,10 +1004,15 @@ export class WOOXExchange extends BaseExchange {
       const [, rawTickers] = await Promise.all([
         this.fetchMarkets().then((markets) => {
           if (this.isDisposed) return [];
-          this.store.update({
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          });
+          this.store.apply(
+            nativeFixture(
+              {
+                markets,
+                loaded: { ...this.store.loaded, markets: true },
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
 
           // start public websocket streams as soon as markets loaded.
           this.publicWebsocket.connectAndSubscribe();
@@ -952,14 +1027,24 @@ export class WOOXExchange extends BaseExchange {
       }
 
       const tickers = this.parseTickers(rawTickers);
-      this.store.update({ tickers, loaded: { ...this.store.loaded, tickers: true } });
+      this.store.apply(
+        nativeFixture(
+          { tickers, loaded: { ...this.store.loaded, tickers: true } },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
       this.startFundingRatesRefresh();
     }
 
     if (publicDataOnly) {
-      this.store.update({
-        loaded: { ...this.store.loaded, orders: true, positions: true, balance: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            loaded: { ...this.store.loaded, orders: true, positions: true, balance: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
       return;
     }
 
@@ -968,18 +1053,46 @@ export class WOOXExchange extends BaseExchange {
     await Promise.all([
       this.fetchBalance().then((balance) => {
         if (this.isDisposed) return;
-        this.store.update({ balance, loaded: { ...this.store.loaded, balance: true } });
+        this.store.apply(
+          nativeFixture(
+            { balance, loaded: { ...this.store.loaded, balance: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
         return balance;
       }),
       this.fetchPositions().then((positions) => {
         if (this.isDisposed) return;
-        this.store.addOrUpdatePositionsFull(positions);
-        this.store.update({ loaded: { ...this.store.loaded, positions: true } });
+        (() => {
+          const incoming: StoreData['positions'] = positions;
+          return this.store.apply(
+            nativeFixture(
+              {
+                positions: incoming.map((row) => ({
+                  ...this.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
+        this.store.apply(
+          nativeFixture(
+            { loaded: { ...this.store.loaded, positions: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
         return positions;
       }),
       this.fetchOrders().then((orders) => {
         if (this.isDisposed) return;
-        this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+        this.store.apply(
+          nativeFixture(
+            { orders, loaded: { ...this.store.loaded, orders: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
         return orders;
       }),
     ]);
@@ -997,18 +1110,54 @@ export class WOOXExchange extends BaseExchange {
         if (count % 5 === 0) {
           const { positions, balance } = await this.fetchPositionsAndBalance();
           if (this.isDisposed) return;
-          this.store.addOrUpdatePositionsFull(positions);
-          this.store.update({ balance, loaded: { ...this.store.loaded, balance: true, positions: true } });
+          (() => {
+            const incoming: StoreData['positions'] = positions;
+            return this.store.apply(
+              nativeFixture(
+                {
+                  positions: incoming.map((row) => ({
+                    ...this.store.positions.find((old) => old.id === row.id),
+                    ...row,
+                  })),
+                },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
+          this.store.apply(
+            nativeFixture(
+              { balance, loaded: { ...this.store.loaded, balance: true, positions: true } },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
         } else {
           const positions = await this.fetchPositions();
           if (this.isDisposed) return;
-          this.store.addOrUpdatePositionsFull(positions);
+          (() => {
+            const incoming: StoreData['positions'] = positions;
+            return this.store.apply(
+              nativeFixture(
+                {
+                  positions: incoming.map((row) => ({
+                    ...this.store.positions.find((old) => old.id === row.id),
+                    ...row,
+                  })),
+                },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
 
         if ((count + 5) % 10 === 0) {
           const orders = await this.fetchOrders();
           if (this.isDisposed) return;
-          this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+          this.store.apply(
+            nativeFixture(
+              { orders, loaded: { ...this.store.loaded, orders: true } },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
         }
       } catch (err: any) {
         this.emitAndLogError(err?.message);
@@ -1030,7 +1179,12 @@ export class WOOXExchange extends BaseExchange {
 
       // same with positionMode
       this._accountPositionMode = data.positionMode === 'ONE_WAY' ? PositionMode.OneWay : PositionMode.Hedged;
-      this.store.setSetting('isHedged', this._accountPositionMode === PositionMode.Hedged);
+      this.store.apply(
+        nativeFixture(
+          { options: { ...this.store.options, ['isHedged']: this._accountPositionMode === PositionMode.Hedged } },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
 
       const free = Math.round(data.freeCollateral * 100) / 100;
       const total = Math.round(data.totalAccountValue * 100) / 100;
@@ -1297,7 +1451,12 @@ export class WOOXExchange extends BaseExchange {
         this._positionMetadataCache.clear();
         this._positionMetadataRateLimitedUntil.clear();
         const positions = await this.fetchPositions();
-        this.store.update({ positions });
+        this.store.apply(
+          nativeFixture(
+            { positions },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
         return;
       }
 
@@ -2186,7 +2345,20 @@ export class WOOXExchange extends BaseExchange {
       }
     } catch (err: any) {
       if (err?.response?.data?.message?.includes('already canceled')) {
-        this.store.updateOrderStatus({ id: order.id }, OrderStatus.Canceled);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       } else {
         this.emitAndLogError(err?.response?.data?.message || err?.message);
         throw err;

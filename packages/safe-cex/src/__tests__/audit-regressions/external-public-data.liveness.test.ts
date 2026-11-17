@@ -4,7 +4,7 @@ import {
   EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS,
   ExternalPublicDataProvider,
 } from '../../exchanges/external-public-data';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 const createParent = () =>
   ({
@@ -48,9 +48,7 @@ describe('ExternalPublicDataProvider liveness', () => {
       exchangeId: 'contract-test',
     });
 
-    vi.advanceTimersByTime(
-      EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS - EXTERNAL_PUBLIC_DATA_PING_THRESHOLD_MS,
-    );
+    vi.advanceTimersByTime(EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS - EXTERNAL_PUBLIC_DATA_PING_THRESHOLD_MS);
 
     expect(close).toHaveBeenCalledTimes(1);
     provider.dispose();
@@ -109,7 +107,7 @@ describe('ExternalPublicDataProvider liveness', () => {
   });
 
   test('reports gateway disconnects through the exchange public socket-health bridge', () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = new BaseExchange('binance', { key: '', secret: '', publicDataOnly: true }, store);
     const provider = new ExternalPublicDataProvider(exchange, {
       url: 'wss://gateway.example.test',

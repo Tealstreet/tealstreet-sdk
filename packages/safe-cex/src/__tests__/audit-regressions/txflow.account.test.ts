@@ -1,46 +1,139 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TxflowAccount } from '../reference/txflow/txflow.account';
-import { DefaultStore } from '../../store/store.base';
 import type { Market } from '../../types';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { TxflowAccount } from '../reference/txflow/txflow.account';
 
 const NOW = 1_700_000_000_000;
 const WALLET = '0x0000000000000000000000000000000000000001';
-const MARKET: Market = { id: '1', symbol: 'BTC-USDC', base: 'BTC', quote: 'USDC', active: true, precision: { amount: 0.001, price: 0.1 }, limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } } };
-const STATE = { time: NOW, marginSummary: { accountValue: '1000', totalMarginUsed: '20', totalRawUsd: '995' }, assetPositions: [{ type: 'oneWay', position: { asset: '1', szi: '2', leverage: { type: 'Cross', value: 10 }, positionValue: '200', unrealizedPnl: '5', marginUsed: '20', entryPx: '97.5', liquidationPx: '10', updateTime: NOW } }] };
-const ORDER = { asset: 1, oid: 42, side: 'B', orderType: 'Limit', limitPx: '100', origSz: '2', sz: '1.5', timestamp: NOW, isTrigger: false, reduceOnly: false, cloid: 'caller-id', state: 'Open', tif: 'GTC', children: [] };
+const MARKET: Market = {
+  id: '1',
+  symbol: 'BTC-USDC',
+  base: 'BTC',
+  quote: 'USDC',
+  active: true,
+  precision: { amount: 0.001, price: 0.1 },
+  limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
+};
+const STATE = {
+  time: NOW,
+  marginSummary: { accountValue: '1000', totalMarginUsed: '20', totalRawUsd: '995' },
+  assetPositions: [
+    {
+      type: 'oneWay',
+      position: {
+        asset: '1',
+        szi: '2',
+        leverage: { type: 'Cross', value: 10 },
+        positionValue: '200',
+        unrealizedPnl: '5',
+        marginUsed: '20',
+        entryPx: '97.5',
+        liquidationPx: '10',
+        updateTime: NOW,
+      },
+    },
+  ],
+};
+const ORDER = {
+  asset: 1,
+  oid: 42,
+  side: 'B',
+  orderType: 'Limit',
+  limitPx: '100',
+  origSz: '2',
+  sz: '1.5',
+  timestamp: NOW,
+  isTrigger: false,
+  reduceOnly: false,
+  cloid: 'caller-id',
+  state: 'Open',
+  tif: 'GTC',
+  children: [],
+};
 function create() {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const emitFill = vi.fn();
   const reportError = vi.fn();
   let fills: unknown[] = [];
   const requestInfo = vi.fn(async <T>(body: Record<string, unknown>): Promise<T> => {
     expect(body.user).toBe(WALLET);
-    const response = body.type === 'clearinghouseState' ? structuredClone(STATE) : body.type === 'frontendOpenOrders' ? [ORDER] : body.type === 'userFills' ? { data: fills, hasMore: false } : { coin: '1', user: WALLET, leverage: { type: 'Cross', mode: 'oneWay', value: 10 } };
+    const response =
+      body.type === 'clearinghouseState'
+        ? structuredClone(STATE)
+        : body.type === 'frontendOpenOrders'
+          ? [ORDER]
+          : body.type === 'userFills'
+            ? { data: fills, hasMore: false }
+            : { coin: '1', user: WALLET, leverage: { type: 'Cross', mode: 'oneWay', value: 10 } };
     return response as T;
   });
-  const account = new TxflowAccount({ store, emitFill, reportError, requestInfo: <T>(body: Record<string, unknown>) => requestInfo(body) as Promise<T>, wallet: () => WALLET, marketById: (id) => id === '1' ? MARKET : undefined, disposed: () => false });
-  return { account, store, emitFill, reportError, requestInfo, setFills: (rows: unknown[]) => { fills = rows; } };
+  const account = new TxflowAccount({
+    store,
+    emitFill,
+    reportError,
+    requestInfo: <T>(body: Record<string, unknown>) => requestInfo(body) as Promise<T>,
+    wallet: () => WALLET,
+    marketById: (id) => (id === '1' ? MARKET : undefined),
+    disposed: () => false,
+  });
+  return {
+    account,
+    store,
+    emitFill,
+    reportError,
+    requestInfo,
+    setFills: (rows: unknown[]) => {
+      fills = rows;
+    },
+  };
 }
 function hedgeState(legs: ReadonlyArray<readonly [number, number]>, time = NOW + 200) {
-  return { ...STATE, time, assetPositions: legs.map(([size, leverage]) => ({
-    type: 'hedge', position: { ...STATE.assetPositions[0].position, szi: String(size), leverage: { type: 'Isolated', value: leverage } },
-  })) };
+  return {
+    ...STATE,
+    time,
+    assetPositions: legs.map(([size, leverage]) => ({
+      type: 'hedge',
+      position: {
+        ...STATE.assetPositions[0].position,
+        szi: String(size),
+        leverage: { type: 'Isolated', value: leverage },
+      },
+    })),
+  };
 }
 function hedgeSettings(long = 5, short = 8) {
-  return { coin: '1', user: WALLET, leverage: { mode: 'hedge', type: 'Isolated', long_value: long, short_value: short } };
+  return {
+    coin: '1',
+    user: WALLET,
+    leverage: { mode: 'hedge', type: 'Isolated', long_value: long, short_value: short },
+  };
 }
 function pushHedgeSettings(account: TxflowAccount, long = 5, short = 8) {
   account.nodeFrame(JSON.stringify({ channel: 'activeAssetData', data: hedgeSettings(long, short) }));
 }
-function assertHedgeRails(store: DefaultStore, account: TxflowAccount, long = 5, short = 8) {
+function assertHedgeRails(store: FrameStore, account: TxflowAccount, long = 5, short = 8) {
   expect(account.confirmedSetting('BTC-USDC')).toMatchObject({ buyLeverage: long, sellLeverage: short });
   expect(store.fetchedLeverage['BTC-USDC']).toMatchObject({ buyLeverage: long, sellLeverage: short });
   expect(store.options.isHedged).toBe(true);
 }
 describe('TxFlow account state from documented native payloads', () => {
-  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); });
-  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
   it('maps signed size and equity units without zero configuration positions', async () => {
     const { account, store } = create();
     await account.start();
@@ -56,14 +149,37 @@ describe('TxFlow account state from documented native payloads', () => {
     const { account, store, requestInfo } = create();
     await account.start();
     let release: (value: unknown) => void = () => undefined;
-    requestInfo.mockImplementationOnce(<T>() => new Promise<T>((resolve) => { release = resolve as (v: unknown) => void; }));
+    requestInfo.mockImplementationOnce(
+      <T>() =>
+        new Promise<T>((resolve) => {
+          release = resolve as (v: unknown) => void;
+        }),
+    );
     const refresh = account.refresh();
-    account.nodeFrame(JSON.stringify({ channel: 'clearinghouseState', data: { ...STATE, assetPositions: [{ ...STATE.assetPositions[0], position: { ...STATE.assetPositions[0].position, szi: '3' } }] } }));
+    account.nodeFrame(
+      JSON.stringify({
+        channel: 'clearinghouseState',
+        data: {
+          ...STATE,
+          assetPositions: [{ ...STATE.assetPositions[0], position: { ...STATE.assetPositions[0].position, szi: '3' } }],
+        },
+      }),
+    );
     release(STATE);
     await refresh;
     expect(store.positions[0].contracts).toBe(3);
-    account.nodeFrame(JSON.stringify({ channel: 'orderUpdates', data: [{ order: ORDER, status: 'Filled', statusTimestamp: NOW + 1000 }] }));
-    account.nodeFrame(JSON.stringify({ channel: 'orderUpdates', data: [{ order: ORDER, status: 'Open', statusTimestamp: NOW + 2000 }] }));
+    account.nodeFrame(
+      JSON.stringify({
+        channel: 'orderUpdates',
+        data: [{ order: ORDER, status: 'Filled', statusTimestamp: NOW + 1000 }],
+      }),
+    );
+    account.nodeFrame(
+      JSON.stringify({
+        channel: 'orderUpdates',
+        data: [{ order: ORDER, status: 'Open', statusTimestamp: NOW + 2000 }],
+      }),
+    );
     expect(store.orders).toHaveLength(0);
     expect(account.orderIds.get('caller-id')).toBe('42');
     account.disconnected();
@@ -78,7 +194,15 @@ describe('TxFlow account state from documented native payloads', () => {
     expect(store.positions[0].contracts).toBe(2);
     expect(store.orders).toHaveLength(1);
     expect(reportError).toHaveBeenCalled();
-    account.nodeFrame(JSON.stringify({ channel: 'clearinghouseState', data: { ...STATE, assetPositions: [{ type: 'oneWay', position: { ...STATE.assetPositions[0].position, szi: 'NaN' } }] } }));
+    account.nodeFrame(
+      JSON.stringify({
+        channel: 'clearinghouseState',
+        data: {
+          ...STATE,
+          assetPositions: [{ type: 'oneWay', position: { ...STATE.assetPositions[0].position, szi: 'NaN' } }],
+        },
+      }),
+    );
     expect(store.positions[0].contracts).toBe(2);
     account.dispose();
   });
@@ -90,7 +214,13 @@ describe('TxFlow account state from documented native payloads', () => {
     expect(emitFill).not.toHaveBeenCalled();
     setFills([execution, execution]);
     await account.refresh();
-    expect(emitFill).toHaveBeenCalledExactlyOnceWith({ id: '42', symbol: 'BTC-USDC', side: 'buy', price: 102, amount: 0.5 });
+    expect(emitFill).toHaveBeenCalledExactlyOnceWith({
+      id: '42',
+      symbol: 'BTC-USDC',
+      side: 'buy',
+      price: 102,
+      amount: 0.5,
+    });
     account.disconnected();
     await account.refresh();
     account.apiFrame(JSON.stringify({ channel: 'userFills', data: { fills: [execution], isSnapshot: true } }));
@@ -101,7 +231,12 @@ describe('TxFlow account state from documented native payloads', () => {
     const { account, store } = create();
     await account.start();
     account.nodeFrame(JSON.stringify({ channel: 'clearinghouseState', data: { ...STATE, assetPositions: [] } }));
-    account.nodeFrame(JSON.stringify({ channel: 'userAssetData', data: { user: WALLET, coins: [{ coin: '1', leverage: { type: 'Isolated', value: 7 } }] } }));
+    account.nodeFrame(
+      JSON.stringify({
+        channel: 'userAssetData',
+        data: { user: WALLET, coins: [{ coin: '1', leverage: { type: 'Isolated', value: 7 } }] },
+      }),
+    );
     expect(store.positions.filter((p) => p.contracts > 0)).toHaveLength(0);
     expect(account.confirmedSetting('BTC-USDC')).toMatchObject({ buyLeverage: 7, marginType: 'isolated' });
     account.dispose();
@@ -110,13 +245,30 @@ describe('TxFlow account state from documented native payloads', () => {
     const { account, emitFill, setFills } = create();
     setFills([{ tid: 99, oid: 42, instrumentId: 1, px: '123', sz: '0.5', side: 'B', time: NOW + 50 }]);
     await account.start();
-    expect(emitFill).toHaveBeenCalledExactlyOnceWith({ id: '42', symbol: 'BTC-USDC', side: 'buy', price: 123, amount: 0.5 });
+    expect(emitFill).toHaveBeenCalledExactlyOnceWith({
+      id: '42',
+      symbol: 'BTC-USDC',
+      side: 'buy',
+      price: 123,
+      amount: 0.5,
+    });
     account.dispose();
   });
   it('learns flat hedge mode from account settings and preserves directional leverage', async () => {
     const { account, store, requestInfo } = create();
     requestInfo.mockImplementation(async <T>(body: Record<string, unknown>): Promise<T> => {
-      const value = body.type === 'clearinghouseState' ? { ...STATE, assetPositions: [] } : body.type === 'frontendOpenOrders' ? [] : body.type === 'userFills' ? { data: [], hasMore: false } : { coin: '1', user: WALLET, leverage: { type: 'Isolated', mode: 'hedge', long_value: 5, short_value: 8 } };
+      const value =
+        body.type === 'clearinghouseState'
+          ? { ...STATE, assetPositions: [] }
+          : body.type === 'frontendOpenOrders'
+            ? []
+            : body.type === 'userFills'
+              ? { data: [], hasMore: false }
+              : {
+                  coin: '1',
+                  user: WALLET,
+                  leverage: { type: 'Isolated', mode: 'hedge', long_value: 5, short_value: 8 },
+                };
       return value as T;
     });
     await account.start();
@@ -127,7 +279,16 @@ describe('TxFlow account state from documented native payloads', () => {
   });
 
   it('keeps configured hedge rails while position legs carry their effective leverage in either row order', async () => {
-    for (const legs of [[ [2, 5], [-3, 8] ], [ [-3, 8], [2, 5] ]] as const) {
+    for (const legs of [
+      [
+        [2, 5],
+        [-3, 8],
+      ],
+      [
+        [-3, 8],
+        [2, 5],
+      ],
+    ] as const) {
       const { account, store } = create();
       await account.start();
       pushHedgeSettings(account);
@@ -140,7 +301,10 @@ describe('TxFlow account state from documented native payloads', () => {
     }
   });
   it('keeps the absent leg rail when only one hedge position remains', async () => {
-    for (const leg of [[2, 5], [-3, 8]] as const) {
+    for (const leg of [
+      [2, 5],
+      [-3, 8],
+    ] as const) {
       const { account, store } = create();
       await account.start();
       pushHedgeSettings(account);
@@ -152,17 +316,37 @@ describe('TxFlow account state from documented native payloads', () => {
     }
   });
   it('REST clearinghouse rows never replace authoritative configured rails', async () => {
-    for (const legs of [[[2, 5], [-3, 8]], [[-3, 8], [2, 5]], [[2, 5]], [[-3, 8]]] as const) {
+    for (const legs of [
+      [
+        [2, 5],
+        [-3, 8],
+      ],
+      [
+        [-3, 8],
+        [2, 5],
+      ],
+      [[2, 5]],
+      [[-3, 8]],
+    ] as const) {
       const { account, store, requestInfo } = create();
       await account.start();
       pushHedgeSettings(account);
       requestInfo.mockImplementation(async <T>(body: Record<string, unknown>): Promise<T> => {
-        return (body.type === 'clearinghouseState' ? hedgeState(legs) : body.type === 'frontendOpenOrders' ? [] : body.type === 'userFills' ? { data: [], hasMore: false } : hedgeSettings()) as T;
+        return (
+          body.type === 'clearinghouseState'
+            ? hedgeState(legs)
+            : body.type === 'frontendOpenOrders'
+              ? []
+              : body.type === 'userFills'
+                ? { data: [], hasMore: false }
+                : hedgeSettings()
+        ) as T;
       });
       await account.refresh();
       assertHedgeRails(store, account);
       expect(store.positions.filter((p) => p.contracts > 0)).toHaveLength(legs.length);
-      for (const [size, leverage] of legs) expect(store.positions.find((p) => p.contracts === Math.abs(size))?.leverage).toBe(leverage);
+      for (const [size, leverage] of legs)
+        expect(store.positions.find((p) => p.contracts === Math.abs(size))?.leverage).toBe(leverage);
       account.dispose();
     }
   });
@@ -170,16 +354,42 @@ describe('TxFlow account state from documented native payloads', () => {
     const { account, store, requestInfo } = create();
     await account.start();
     pushHedgeSettings(account);
-    account.nodeFrame(JSON.stringify({ channel: 'clearinghouseState', data: hedgeState([[2, 5], [-3, 8]]) }));
+    account.nodeFrame(
+      JSON.stringify({
+        channel: 'clearinghouseState',
+        data: hedgeState([
+          [2, 5],
+          [-3, 8],
+        ]),
+      }),
+    );
     let release: (value: unknown) => void = () => undefined;
-    requestInfo.mockImplementationOnce(<T>() => new Promise<T>((resolve) => { release = resolve as (v: unknown) => void; }));
+    requestInfo.mockImplementationOnce(
+      <T>() =>
+        new Promise<T>((resolve) => {
+          release = resolve as (v: unknown) => void;
+        }),
+    );
     const refresh = account.refresh();
-    account.nodeFrame(JSON.stringify({ channel: 'userAssetData', data: { user: WALLET, coins: [hedgeSettings(9, 12)] } }));
+    account.nodeFrame(
+      JSON.stringify({ channel: 'userAssetData', data: { user: WALLET, coins: [hedgeSettings(9, 12)] } }),
+    );
     release({ ...STATE, time: NOW + 250 });
     await refresh;
     assertHedgeRails(store, account, 9, 12);
     const positions = structuredClone(store.positions);
-    account.nodeFrame(JSON.stringify({ channel: 'clearinghouseState', data: hedgeState([[4, 5], [-5, 0]], NOW + 300) }));
+    account.nodeFrame(
+      JSON.stringify({
+        channel: 'clearinghouseState',
+        data: hedgeState(
+          [
+            [4, 5],
+            [-5, 0],
+          ],
+          NOW + 300,
+        ),
+      }),
+    );
     expect(store.positions).toEqual(positions);
     assertHedgeRails(store, account, 9, 12);
     account.nodeFrame(JSON.stringify({ channel: 'clearinghouseState', data: hedgeState([[-3, 8]], NOW + 400) }));
@@ -191,7 +401,16 @@ describe('TxFlow account state from documented native payloads', () => {
     const { account, store, requestInfo } = create();
     requestInfo.mockImplementation(async <T>(body: Record<string, unknown>): Promise<T> => {
       if (body.type === 'activeAssetData') throw new Error('settings unavailable');
-      return (body.type === 'clearinghouseState' ? hedgeState([[2, 5], [-3, 8]]) : body.type === 'frontendOpenOrders' ? [] : { data: [], hasMore: false }) as T;
+      return (
+        body.type === 'clearinghouseState'
+          ? hedgeState([
+              [2, 5],
+              [-3, 8],
+            ])
+          : body.type === 'frontendOpenOrders'
+            ? []
+            : { data: [], hasMore: false }
+      ) as T;
     });
     await account.start();
     expect(store.positions.filter((p) => p.contracts > 0)).toHaveLength(2);
@@ -204,9 +423,22 @@ describe('TxFlow account state from documented native payloads', () => {
     const { account, store, requestInfo } = create();
     await account.start();
     pushHedgeSettings(account);
-    account.nodeFrame(JSON.stringify({ channel: 'clearinghouseState', data: hedgeState([[2, 5], [-3, 8]]) }));
+    account.nodeFrame(
+      JSON.stringify({
+        channel: 'clearinghouseState',
+        data: hedgeState([
+          [2, 5],
+          [-3, 8],
+        ]),
+      }),
+    );
     let release: (value: unknown) => void = () => undefined;
-    requestInfo.mockImplementationOnce(<T>() => new Promise<T>((resolve) => { release = resolve as (v: unknown) => void; }));
+    requestInfo.mockImplementationOnce(
+      <T>() =>
+        new Promise<T>((resolve) => {
+          release = resolve as (v: unknown) => void;
+        }),
+    );
     const refresh = account.refresh();
     account.writeAccepted();
     release(hedgeState([[9, 99]], NOW + 300));
@@ -220,8 +452,17 @@ describe('TxFlow account state from documented native payloads', () => {
     const { account, store, requestInfo } = create();
     let release: (value: unknown) => void = () => undefined;
     requestInfo.mockImplementation(<T>(body: Record<string, unknown>): Promise<T> => {
-      if (body.type === 'clearinghouseState') return new Promise<T>((resolve) => { release = resolve as (v: unknown) => void; });
-      return Promise.resolve((body.type === 'activeAssetData' ? hedgeSettings() : body.type === 'frontendOpenOrders' ? [] : { data: [], hasMore: false }) as T);
+      if (body.type === 'clearinghouseState')
+        return new Promise<T>((resolve) => {
+          release = resolve as (v: unknown) => void;
+        });
+      return Promise.resolve(
+        (body.type === 'activeAssetData'
+          ? hedgeSettings()
+          : body.type === 'frontendOpenOrders'
+            ? []
+            : { data: [], hasMore: false }) as T,
+      );
     });
     const startup = account.start();
     await vi.advanceTimersByTimeAsync(0);
@@ -232,5 +473,4 @@ describe('TxFlow account state from documented native payloads', () => {
     assertHedgeRails(store, account);
     account.dispose();
   });
-
 });

@@ -1,4 +1,4 @@
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 import type {
   Balance,
   CoinBalance,
@@ -12,11 +12,6 @@ import type {
   Writable,
 } from '../../../types';
 
-import { MarginType, OrderSide, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../../../types';
-import { createPositionId } from '../../../utils/createPositionId';
-import { adjust, multiply, subtract } from '../../../utils/safe-math';
-import { virtualClock } from '../../../utils/virtualClock';
-import { BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE, BitgetExchange } from './bitget.exchange';
 import {
   ENDPOINTS,
   FETCH_POSITIONS_V2_RESPONSE,
@@ -26,6 +21,13 @@ import {
   POSITION_SIDE,
   TIME_IN_FORCE,
 } from '../../../exchanges/bitget/bitget.types';
+import { FrameStore } from '../../../store/frameStore';
+import { MarginType, OrderSide, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../../../types';
+import { createPositionId } from '../../../utils/createPositionId';
+import { adjust, multiply, subtract } from '../../../utils/safe-math';
+import { virtualClock } from '../../../utils/virtualClock';
+import { nativeFixture } from '../../cutover/nativeFixture';
+import { BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE, BitgetExchange } from './bitget.exchange';
 
 /**
  * BitGet Inverse Exchange
@@ -44,7 +46,7 @@ import {
 export class BitgetInverseExchange extends BitgetExchange {
   protected supportsUtaRouting = false;
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
   }
 
@@ -128,16 +130,15 @@ export class BitgetInverseExchange extends BitgetExchange {
    * Override fetchBalance to handle multi-currency balances for inverse contracts
    */
   fetchBalance = async (): Promise<Balance> => {
-    const {
-      data: response,
-    } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.BALANCE, {
+    const { data: response } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.BALANCE, {
       params: { productType: this.apiProductType },
     });
 
     if (parseInt(`${(response as any).code ?? 0}`, 10) !== 0) {
-      const message = `${(response as any).code ?? ''}` === '40085'
-        ? BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE
-        : (response as any).msg || 'Bitget inverse account balance request failed';
+      const message =
+        `${(response as any).code ?? ''}` === '40085'
+          ? BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE
+          : (response as any).msg || 'Bitget inverse account balance request failed';
       throw new Error(message);
     }
 
@@ -578,7 +579,23 @@ export class BitgetInverseExchange extends BitgetExchange {
         }
 
         const positions = await this.fetchPositions([symbol]);
-        this.store.addOrUpdatePositions(positions);
+        (() => {
+          const incoming: StoreData['positions'] = positions;
+          return this.store.apply(
+            nativeFixture(
+              {
+                positions: [
+                  ...this.store.positions.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       } catch (err: any) {
         this.emitAndLogError(err, err?.response?.data?.msg || err?.message);
         throw err;
@@ -608,7 +625,23 @@ export class BitgetInverseExchange extends BitgetExchange {
         throw new Error(data.msg);
       }
       const positions = await this.fetchPositions([symbol]);
-      this.store.addOrUpdatePositions(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return this.store.apply(
+          nativeFixture(
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;
@@ -620,7 +653,7 @@ export class BitgetInverseExchange extends BitgetExchange {
    * For inverse contracts:
    * - API returns quantities in USD (e.g., 1000 = $1000 worth)
    * - We convert to crypto amount for display (e.g., 0.02 BTC)
-   * - Store native USD value in extra.remainingNative
+   * - FrameStore native USD value in extra.remainingNative
    */
   mapOrder = (o: Record<string, any>): Order[] => {
     const symbol = (o.symbol || o.instId).replace(`_${this.apiProductType.toUpperCase()}`, '');

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 // Well-known test pair; no value, never used in production.
 const KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
@@ -11,7 +11,7 @@ const OTHER_ADDRESS = '0x5398bB4A1b292598Ce641C108FFBB9faF8ABCAfA';
 const INVALID_ADDRESS = '0x0000000000000000000000000000000000000001';
 
 const build = (options: Record<string, unknown>) => {
-  const exchange = new HyperliquidExchange('hyperliquid' as any, options as any, new DefaultStore());
+  const exchange = new HyperliquidExchange('hyperliquid' as any, options as any, new FrameStore());
   const errors: string[] = [];
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation((msg: any) => {
     errors.push(String(msg));

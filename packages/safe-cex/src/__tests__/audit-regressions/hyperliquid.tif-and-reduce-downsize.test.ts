@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
 import { parseHyperliquidOrderTimeInForce } from '../../exchanges/hyperliquid/hyperliquid.order-inference';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, OrderSide, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
 
 const createExchange = () =>
-  new HyperliquidExchange('hyperliquid' as any, { key: 'test', secret: 'test' } as any, new DefaultStore());
+  new HyperliquidExchange('hyperliquid' as any, { key: 'test', secret: 'test' } as any, new FrameStore());
 
 // e2e run 31317468325 sent {"s":"336","r":true} against a 168-contract long and
 // Hyperliquid rested it at 336 — it does not cap reduce-only size server-side.
@@ -24,7 +25,7 @@ describe('hyperliquid reduce-only downsizing', () => {
 
 describe('hyperliquid core-perp trigger order safety', () => {
   const createExchangeWithBtcMarket = () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const market = {
       id: 'BTC',
       symbol: 'BTC-PERP',
@@ -38,41 +39,46 @@ describe('hyperliquid core-perp trigger order safety', () => {
       info: { hyperliquidId: 0 },
     } as any;
 
-    store.update({
-      markets: [market],
-      tickers: [
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTC',
-          symbol: 'BTC-PERP',
-          bid: 78490,
-          ask: 78510,
-          last: 78500,
-          mark: 78500,
-          index: 78502,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-        } as any,
-      ],
-      positions: [
-        {
-          id: 'BTC-PERP:long',
-          symbol: 'BTC-PERP',
-          side: PositionSide.Long,
-          contracts: 0.00014,
-          entryPrice: 78500,
-          notional: 10.99,
-          leverage: 1,
-          unrealizedPnl: 0,
-          liquidationPrice: 0,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.OneWay,
-        } as any,
-      ],
-    });
+          markets: [market],
+          tickers: [
+            {
+              id: 'BTC',
+              symbol: 'BTC-PERP',
+              bid: 78490,
+              ask: 78510,
+              last: 78500,
+              mark: 78500,
+              index: 78502,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+            } as any,
+          ],
+          positions: [
+            {
+              id: 'BTC-PERP:long',
+              symbol: 'BTC-PERP',
+              side: PositionSide.Long,
+              contracts: 0.00014,
+              entryPrice: 78500,
+              notional: 10.99,
+              leverage: 1,
+              unrealizedPnl: 0,
+              liquidationPrice: 0,
+              marginType: MarginType.Cross,
+              positionMode: PositionMode.OneWay,
+            } as any,
+          ],
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const exchange = new HyperliquidExchange(
       'hyperliquid' as any,
@@ -122,7 +128,7 @@ describe('hyperliquid core-perp trigger order safety', () => {
   });
 
   it('dedupes duplicate frontendOpenOrders rows before mutating the store', async () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const market = {
       id: 'ARB',
       symbol: 'ARB-PERP',
@@ -136,7 +142,12 @@ describe('hyperliquid core-perp trigger order safety', () => {
       info: { hyperliquidId: 11 },
     } as any;
 
-    store.update({ markets: [market] });
+    store.apply(
+      nativeFixture(
+        { markets: [market] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const exchange = new HyperliquidExchange(
       'hyperliquid' as any,
@@ -168,7 +179,10 @@ describe('hyperliquid core-perp trigger order safety', () => {
       tif: null,
       cloid: null,
     };
-    const post = vi.fn().mockResolvedValueOnce({ data: [openOrder] }).mockResolvedValueOnce({ data: [openOrder] });
+    const post = vi
+      .fn()
+      .mockResolvedValueOnce({ data: [openOrder] })
+      .mockResolvedValueOnce({ data: [openOrder] });
     exchange.xhr = { post } as any;
 
     await expect(exchange.fetchOrders()).resolves.toHaveLength(1);
@@ -246,25 +260,30 @@ describe('hyperliquid core-perp trigger order safety', () => {
 
   it('rejects trigger orders before POST when ticker price data is missing', async () => {
     const { exchange, store } = createExchangeWithBtcMarket();
-    store.update({
-      tickers: [
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTC',
-          symbol: 'BTC-PERP',
-          bid: 0,
-          ask: 0,
-          last: 0,
-          mark: 0,
-          index: 0,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-        } as any,
-      ],
-    });
+          tickers: [
+            {
+              id: 'BTC',
+              symbol: 'BTC-PERP',
+              bid: 0,
+              ask: 0,
+              last: 0,
+              mark: 0,
+              index: 0,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+            } as any,
+          ],
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const post = vi.fn();
     exchange.xhr = { post } as any;
 

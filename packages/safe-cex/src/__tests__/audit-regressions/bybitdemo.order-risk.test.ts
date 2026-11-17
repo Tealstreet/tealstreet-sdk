@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { BybitDemoExchange } from '../reference/bybit/bybitdemo.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { Market, Position, PositionMode, PositionSide, Ticker } from '../../types';
 import { calculateOrdersRisk } from '../../utils/risk';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BybitDemoExchange } from '../reference/bybit/bybitdemo.exchange';
 
 const market = {
   id: 'ARBUSDT',
@@ -84,12 +85,17 @@ const demoTradingStopOrder = (overrides: Record<string, unknown>) => ({
 
 describe('Bybit Demo order risk', () => {
   it('estimates realized and unrealized PnL for side-less demo position TP/SL rows', () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [market],
-      tickers: [ticker],
-      positions: [position],
-    });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        {
+          markets: [market],
+          tickers: [ticker],
+          positions: [position],
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const exchange = new BybitDemoExchange('bybitdemo', { key: 'key', secret: 'secret' }, store);
     const [takeProfit] = exchange.mapOrder(demoTradingStopOrder({}));

@@ -1,5 +1,5 @@
 import type { Axios } from 'axios';
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 
 import createHash from 'create-hash';
 import chunk from 'lodash/chunk';
@@ -7,6 +7,10 @@ import uniq from 'lodash/uniq';
 import uniqBy from 'lodash/uniqBy';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { BaseExchange } from '../../../exchanges/base';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { paginateIncomeRange } from '../../../exchanges/income-paging';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -43,9 +47,7 @@ import { loop } from '../../../utils/loop';
 import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
-import { paginateIncomeRange } from '../../../exchanges/income-paging';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { createAPI } from './weex.api';
 import {
   ENDPOINTS,
@@ -130,7 +132,7 @@ export class WeexExchange extends BaseExchange {
   private symbolSettings = new Map<string, SymbolConfig>();
   private accountPositionMode: PositionMode = PositionMode.OneWay;
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI);
@@ -177,26 +179,41 @@ export class WeexExchange extends BaseExchange {
     if (!useExternalPublicData) {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
-      this.store.update({
-        markets,
-        loaded: { ...this.store.loaded, markets: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            markets,
+            loaded: { ...this.store.loaded, markets: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
 
       const tickers = await this.fetchTickers();
       if (this.isDisposed) return;
-      this.store.update({
-        tickers,
-        loaded: { ...this.store.loaded, tickers: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            tickers,
+            loaded: { ...this.store.loaded, tickers: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
 
       this.publicWebsocket.connectAndSubscribe();
       this.log(`Loaded ${Math.min(markets.length, tickers.length)} WEEX markets`);
     }
 
     if (this.isPublicDataOnly) {
-      this.store.update({
-        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
       return;
     }
 
@@ -205,7 +222,12 @@ export class WeexExchange extends BaseExchange {
     try {
       const { data } = await this.xhr.get(ENDPOINTS.ACCOUNT_CONFIG);
       this.accountPositionMode = data?.dualSidePosition ? PositionMode.Hedged : PositionMode.OneWay;
-      this.store.setSetting('isHedged', this.accountPositionMode === PositionMode.Hedged);
+      this.store.apply(
+        nativeFixture(
+          { options: { ...this.store.options, ['isHedged']: this.accountPositionMode === PositionMode.Hedged } },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     } catch (err: any) {
       this.log(`Failed to load WEEX account config: ${err?.response?.data?.msg || err?.message}`, LogSeverity.Warning);
     }
@@ -216,18 +238,28 @@ export class WeexExchange extends BaseExchange {
     await Promise.all([
       this.fetchBalanceAndPositions().then(({ balance, positions }) => {
         if (this.isDisposed) return;
-        this.store.update({
-          balance,
-          positions,
-          loaded: { ...this.store.loaded, balance: true, positions: true },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              balance,
+              positions,
+              loaded: { ...this.store.loaded, balance: true, positions: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       }),
       this.fetchOrders().then((orders) => {
         if (this.isDisposed) return;
-        this.store.update({
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              orders,
+              loaded: { ...this.store.loaded, orders: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       }),
     ]);
 
@@ -243,11 +275,26 @@ export class WeexExchange extends BaseExchange {
     try {
       const { balance, positions } = await this.fetchBalanceAndPositions();
       if (this.isDisposed) return;
-      this.store.addOrUpdatePositionsFull(positions);
-      this.store.update({
-        balance,
-        loaded: { ...this.store.loaded, balance: true, positions: true },
-      });
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return this.store.apply(
+          nativeFixture(
+            {
+              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      this.store.apply(
+        nativeFixture(
+          {
+            balance,
+            loaded: { ...this.store.loaded, balance: true, positions: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
     }
@@ -255,10 +302,15 @@ export class WeexExchange extends BaseExchange {
     try {
       const orders = await this.fetchOrders();
       if (this.isDisposed) return;
-      this.store.update({
-        orders,
-        loaded: { ...this.store.loaded, orders: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            orders,
+            loaded: { ...this.store.loaded, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
     }
@@ -321,12 +373,17 @@ export class WeexExchange extends BaseExchange {
         buyLeverage: config.marginType === MarginType.Isolated ? config.isolatedLongLeverage : config.crossLeverage,
         sellLeverage: config.marginType === MarginType.Isolated ? config.isolatedShortLeverage : config.crossLeverage,
       };
-      this.store.update({
-        fetchedLeverage: {
-          ...this.store.fetchedLeverage,
-          [symbol]: leverageObj,
-        },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            fetchedLeverage: {
+              ...this.store.fetchedLeverage,
+              [symbol]: leverageObj,
+            },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
       return leverageObj;
     } catch (err: any) {
       this.log(
@@ -584,7 +641,18 @@ export class WeexExchange extends BaseExchange {
     );
 
     if (opts.timeInForce === OrderTimeInForce.PostOnly) {
-      ids.forEach((id) => this.store.updateOrder({ id }, { timeInForce: OrderTimeInForce.PostOnly }));
+      ids.forEach((id) =>
+        (() => {
+          const target = { id };
+          const changes: Partial<StoreData['orders'][number]> = { timeInForce: OrderTimeInForce.PostOnly };
+          return this.store.apply(
+            nativeFixture(
+              { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })(),
+      );
     }
 
     return ids;
@@ -668,7 +736,16 @@ export class WeexExchange extends BaseExchange {
         throw err;
       }
 
-      this.store.updateOrder({ id: order.id }, { price: update.price });
+      (() => {
+        const target = { id: order.id };
+        const changes: Partial<StoreData['orders'][number]> = { price: update.price };
+        return this.store.apply(
+          nativeFixture(
+            { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
       return [order.id];
     }
 
@@ -718,10 +795,20 @@ export class WeexExchange extends BaseExchange {
       });
     }
 
-    this.store.updateOrdersStatus(
-      orders.map((order) => ({ id: order.id })),
-      OrderStatus.Canceled,
-    );
+    (() => {
+      const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders.map((order) => ({ id: order.id }));
+      const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+      return this.store.apply(
+        nativeFixture(
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   cancelSymbolOrders = async (symbol: string): Promise<void> => {
@@ -729,10 +816,22 @@ export class WeexExchange extends BaseExchange {
       this.xhr.delete(ENDPOINTS.CANCEL_ALL_OPEN_ORDERS, { params: { symbol } }),
       this.xhr.delete(ENDPOINTS.CANCEL_ALL_ALGO_ORDERS, { params: { symbol } }),
     ]);
-    this.store.updateOrdersStatus(
-      this.store.orders.filter((order) => order.symbol === symbol).map((order) => ({ id: order.id })),
-      OrderStatus.Canceled,
-    );
+    (() => {
+      const targets: Array<Pick<StoreData['orders'][number], 'id'>> = this.store.orders
+        .filter((order) => order.symbol === symbol)
+        .map((order) => ({ id: order.id }));
+      const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+      return this.store.apply(
+        nativeFixture(
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   cancelAllOrders = async (): Promise<void> => {
@@ -740,10 +839,22 @@ export class WeexExchange extends BaseExchange {
       this.xhr.delete(ENDPOINTS.CANCEL_ALL_OPEN_ORDERS),
       this.xhr.delete(ENDPOINTS.CANCEL_ALL_ALGO_ORDERS),
     ]);
-    this.store.updateOrdersStatus(
-      this.store.orders.map((order) => ({ id: order.id })),
-      OrderStatus.Canceled,
-    );
+    (() => {
+      const targets: Array<Pick<StoreData['orders'][number], 'id'>> = this.store.orders.map((order) => ({
+        id: order.id,
+      }));
+      const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+      return this.store.apply(
+        nativeFixture(
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   setLeverage = async (symbol: string, inputLeverage: number, side?: PositionSide): Promise<void> => {
@@ -800,13 +911,23 @@ export class WeexExchange extends BaseExchange {
     }
 
     this.accountPositionMode = hedged ? PositionMode.Hedged : PositionMode.OneWay;
-    this.store.setSetting('isHedged', hedged);
+    this.store.apply(
+      nativeFixture(
+        { options: { ...this.store.options, ['isHedged']: hedged } },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
   };
 
   nukePositions = async (): Promise<void> => {
     await this.xhr.post(ENDPOINTS.CLOSE_POSITIONS, {});
     const positions = await this.fetchPositions();
-    this.store.update({ positions });
+    this.store.apply(
+      nativeFixture(
+        { positions },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
   };
 
   nuke = async (): Promise<void> => {
@@ -1000,7 +1121,16 @@ export class WeexExchange extends BaseExchange {
 
     orderedResults.forEach((result, index) => {
       if (result.success && orders[index].timeInForce === OrderTimeInForce.PostOnly) {
-        this.store.updateOrder({ id: result.orderId as string }, { timeInForce: OrderTimeInForce.PostOnly });
+        (() => {
+          const target = { id: result.orderId as string };
+          const changes: Partial<StoreData['orders'][number]> = { timeInForce: OrderTimeInForce.PostOnly };
+          return this.store.apply(
+            nativeFixture(
+              { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     });
 

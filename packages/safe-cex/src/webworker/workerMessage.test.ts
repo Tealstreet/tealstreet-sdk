@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
+
 import { describe, expect, it, vi } from 'vitest';
+
 import start from './store.webworker';
 import { isWorkerMessage, isWorkerWriteMarks } from './workerMessage';
 
 describe('worker routing envelope', () => {
   it.each([null, undefined, 1, 'init', [], {}, { op: 1 }, { op: 'unrecognized' }, { op: 'dispose', instanceId: 7 }])(
-    'ignores an unusable routing envelope (%j)', value => {
+    'ignores an unusable routing envelope (%j)',
+    (value) => {
       expect(isWorkerMessage(value)).toBe(false);
     },
   );
@@ -20,8 +23,16 @@ describe('worker routing envelope', () => {
   it('checks init routing fields without resolving venue or credential policy', () => {
     const data = { exchangeName: 'bybit', options: {}, accountName: 'connection:account' };
     expect(isWorkerMessage({ op: 'init', instanceId: 'generation', data })).toBe(true);
-    for (const invalid of [undefined, [], {}, { ...data, accountName: 1 }, { ...data, exchangeName: 1 },
-      { ...data, options: null }, { ...data, settings: [] }, { ...data, metadata: false }, { ...data, store: 3 }]) {
+    for (const invalid of [
+      undefined,
+      [],
+      {},
+      { ...data, accountName: 1 },
+      { ...data, exchangeName: 1 },
+      { ...data, options: null },
+      { ...data, settings: [] },
+      { ...data, metadata: false },
+    ]) {
       expect(isWorkerMessage({ op: 'init', data: invalid })).toBe(false);
     }
     expect(isWorkerMessage({ op: '__workerConfig', data: [] })).toBe(false);
@@ -37,11 +48,17 @@ describe('worker routing envelope', () => {
 
 it('answers heartbeat before init and envelope generation validation', async () => {
   const listen = vi.fn<Worker['addEventListener']>();
-  const postMessage = vi.fn<(message: unknown, transferOrOptions?: Transferable[] | StructuredSerializeOptions) => void>();
+  const postMessage =
+    vi.fn<(message: unknown, transferOrOptions?: Transferable[] | StructuredSerializeOptions) => void>();
   const worker: Worker = {
-    onerror: null, onmessage: null, onmessageerror: null,
-    addEventListener: listen, postMessage,
-    removeEventListener: vi.fn(), dispatchEvent: vi.fn(() => true), terminate: vi.fn(),
+    onerror: null,
+    onmessage: null,
+    onmessageerror: null,
+    addEventListener: listen,
+    postMessage,
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(() => true),
+    terminate: vi.fn(),
   };
   start(worker);
   const listener = listen.mock.calls.find(([type]) => type === 'message')?.[1];
@@ -50,7 +67,9 @@ it('answers heartbeat before init and envelope generation validation', async () 
   if (typeof listener !== 'function') throw new Error('Expected the worker message callback');
   await listener.call(worker, new MessageEvent('message', { data: { op: '__worker_ping__', instanceId: 7 } }));
   expect(postMessage).toHaveBeenCalledExactlyOnceWith({
-    op: '__worker_pong__', instanceId: 7, data: { ts: expect.any(Number) },
+    op: '__worker_pong__',
+    instanceId: 7,
+    data: { ts: expect.any(Number) },
   });
   await listener.call(worker, new MessageEvent('message', { data: null }));
   await listener.call(worker, new MessageEvent('message', { data: { op: 'init', data: {} } }));

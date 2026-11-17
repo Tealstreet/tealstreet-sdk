@@ -6,12 +6,13 @@ import { getPublicKey, verify } from '@noble/ed25519';
 import bs58 from 'bs58';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+
 import '../reference/orderly/orderly.encryption';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { createExchange } from '../../index';
-import { DefaultStore } from '../../store/store.base';
 import { virtualClock } from '../../utils/virtualClock';
 import { hostedSigningReferenceRegistry } from '../reference/legacyVenueRegistry';
 
@@ -54,7 +55,9 @@ describe('OUT hosted accounts are refused while signing references remain availa
     for (const name of orderlyNames) {
       const options: ExchangeOptions = { key: 'hosted-key', secret: '', remoteSigner, privateOnly: true };
       await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
-      expect(() => new RustEngineExchange(name, options, new DefaultStore())).toThrow(`${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`);
+      expect(() => new RustEngineExchange(name, options, new FrameStore())).toThrow(
+        `${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`,
+      );
     }
     expect(clock).not.toHaveBeenCalled();
   });
@@ -64,8 +67,8 @@ describe('OUT hosted accounts are refused while signing references remain availa
       const options = { ...orderlyCredentials() };
       const signing = request(name, 'https://api-evm.orderly.org', '/v1/positions');
       const Venue = await hostedSigningReferenceRegistry[name]!();
-      const engine = new Venue(name, options, new DefaultStore());
-      const venue = new Venue(name, options, new DefaultStore());
+      const engine = new Venue(name, options, new FrameStore());
+      const venue = new Venue(name, options, new FrameStore());
       try {
         const signed = await engine.signHttpRequest(signing);
         expect(signed.error, name).toBeUndefined();
@@ -92,8 +95,8 @@ describe('OUT hosted accounts are refused while signing references remain availa
       const options = coinbaseCredentials();
       const signing = request(name, 'https://api.coinbase.com', '/api/v3/brokerage/accounts');
       const Venue = await hostedSigningReferenceRegistry[name]!();
-      const engine = new Venue(name, options, new DefaultStore());
-      const venue = new Venue(name, options, new DefaultStore());
+      const engine = new Venue(name, options, new FrameStore());
+      const venue = new Venue(name, options, new FrameStore());
       try {
         const signed = await engine.signHttpRequest(signing);
         const reference = await venue.signHttpRequest(signing);
@@ -130,26 +133,34 @@ describe('OUT hosted accounts are refused while signing references remain availa
     }
   });
   it('BloFin hosted HTTP and WS auth sign through the Rust provider with the TS wire', async () => {
-    const engine = new RustEngineExchange('blofin', { key: 'k', secret: 's', passphrase: 'p' }, new DefaultStore());
+    const engine = new RustEngineExchange('blofin', { key: 'k', secret: 's', passphrase: 'p' }, new FrameStore());
     try {
-      const signed = await engine.signHttpRequest(request('blofin', 'https://openapi.blofin.com', '/api/v1/account/balance'));
+      const signed = await engine.signHttpRequest(
+        request('blofin', 'https://openapi.blofin.com', '/api/v1/account/balance'),
+      );
       expect(signed.error).toBeUndefined();
       const headers = signed.config!.headers!;
-      const mac = (text: string) => Buffer.from(createHmac('sha256', 's').update(text).digest('hex')).toString('base64');
+      const mac = (text: string) =>
+        Buffer.from(createHmac('sha256', 's').update(text).digest('hex')).toString('base64');
       expect(headers['ACCESS-KEY']).toBe('k');
       expect(headers['ACCESS-PASSPHRASE']).toBe('p');
       expect(headers['ACCESS-SIGN']).toBe(
-        mac(`/api/v1/account/balanceGET${headers['ACCESS-TIMESTAMP']}${headers['ACCESS-NONCE']}`));
+        mac(`/api/v1/account/balanceGET${headers['ACCESS-TIMESTAMP']}${headers['ACCESS-NONCE']}`),
+      );
       await expect(
-        engine.signWsAuth({ id: 'ws-1', type: 'ws-auth', exchangeName: 'blofin',
-          wsAuth: { toSign: '/users/self/verifyGET1nonce', outputFormat: 'hex-base64' } }),
+        engine.signWsAuth({
+          id: 'ws-1',
+          type: 'ws-auth',
+          exchangeName: 'blofin',
+          wsAuth: { toSign: '/users/self/verifyGET1nonce', outputFormat: 'hex-base64' },
+        }),
       ).resolves.toEqual({ id: 'ws-1', wsAuthSignature: mac('/users/self/verifyGET1nonce') });
     } finally {
       engine.dispose();
     }
   });
   it('an unsupported signing family refuses without a TS or raw-secret fallback', async () => {
-    const engine = new RustEngineExchange('krakenspot', { key: 'k', secret: 's' }, new DefaultStore());
+    const engine = new RustEngineExchange('krakenspot', { key: 'k', secret: 's' }, new FrameStore());
     try {
       await expect(
         engine.signHttpRequest(request('krakenspot', 'https://api.kraken.com', '/0/private/Balance')),

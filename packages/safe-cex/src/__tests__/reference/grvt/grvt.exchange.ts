@@ -1,7 +1,14 @@
-import type { Axios, AxiosRequestConfig } from 'axios';
 import type { IApiCancelOrderRequest } from '@tealstreet/grvt-client/interfaces';
-import type { Store } from '../../../store/store.interface';
-import type { GrvtInstrumentLite, GrvtKline, GrvtOrderSide, GrvtOrderType, GrvtTimeInForce } from '../../../exchanges/grvt/grvt.types';
+import type { Axios, AxiosRequestConfig } from 'axios';
+import type { ClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import type {
+  GrvtInstrumentLite,
+  GrvtKline,
+  GrvtOrderSide,
+  GrvtOrderType,
+  GrvtTimeInForce,
+} from '../../../exchanges/grvt/grvt.types';
+import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import { ethers } from 'ethers';
@@ -14,6 +21,22 @@ import {
   OrderWithBuilderFee as OrderWithBuilderFeeTypes,
 } from '@tealstreet/grvt-ts-sdk';
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { BaseExchange } from '../../../exchanges/base';
+import {
+  createGrvtBuilderInfo,
+  DEFAULT_GRVT_BUILDER_FEE_RATE,
+  getGrvtBuilderAddress,
+  grvtBuilderFeeRateToRaw,
+  GrvtBuilderInfo,
+  GrvtBuilderUnauthorizedError,
+} from '../../../exchanges/grvt/grvt.builder';
+import {
+  ENDPOINTS,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  GrvtCandlestickInterval,
+} from '../../../exchanges/grvt/grvt.types';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -43,23 +66,13 @@ import { createPositionId } from '../../../utils/createPositionId';
 import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import type { ClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { createAPI, createEdgeAPI, createTradingAPI } from './grvt.api';
-import {
-  createGrvtBuilderInfo,
-  DEFAULT_GRVT_BUILDER_FEE_RATE,
-  getGrvtBuilderAddress,
-  grvtBuilderFeeRateToRaw,
-  GrvtBuilderInfo,
-  GrvtBuilderUnauthorizedError,
-} from '../../../exchanges/grvt/grvt.builder';
 import { grvtNanoseconds, grvtScaledUint64, grvtUint64 } from './grvt.integer';
+import { getGrvtOrderTimeInForce, getGrvtTriggerMetadata } from './grvt.order-semantics';
 import { validatePrivateKey } from './grvt.signing';
-import { ENDPOINTS, GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC, GrvtCandlestickInterval } from '../../../exchanges/grvt/grvt.types';
 import { GrvtPrivateWebSocket } from './grvt.ws-private';
 import { GrvtPublicWebSocket } from './grvt.ws-public';
-import { getGrvtOrderTimeInForce, getGrvtTriggerMetadata } from './grvt.order-semantics';
 
 type GrvtBuilderAuthState =
   | { status: 'unknown' }
@@ -122,7 +135,7 @@ export class GrvtExchange extends BaseExchange {
   grafanaEndpointsEvery = GRAFANA_ENDPOINTS_EVERY;
   grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     // Initialize apiExtras with subAccountId if provided
@@ -206,8 +219,7 @@ export class GrvtExchange extends BaseExchange {
   recordNonce(nonce: string, realOrderId?: string, creationTimeMs?: number) {
     const existingCreationTime = this._nonceCreationTimes.get(nonce);
     const hasExistingCreationTime = this._nonceCreationTimes.has(nonce);
-    const validCreationTime =
-      creationTimeMs !== undefined && Number.isFinite(creationTimeMs) && creationTimeMs > 0;
+    const validCreationTime = creationTimeMs !== undefined && Number.isFinite(creationTimeMs) && creationTimeMs > 0;
 
     if (!hasExistingCreationTime) {
       this._nonceCreationTimes.set(nonce, validCreationTime ? creationTimeMs : undefined);
@@ -264,10 +276,15 @@ export class GrvtExchange extends BaseExchange {
         const balance = await this.fetchBalance();
         if (this.isDisposed) return;
 
-        this.store.update({
-          balance,
-          loaded: { ...this.store.loaded, balance: true },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              balance,
+              loaded: { ...this.store.loaded, balance: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
 
         // Re-derive upnl from live ticker prices so the REST API's
         // potentially stale total_upnl doesn't freeze the display.
@@ -372,16 +389,35 @@ export class GrvtExchange extends BaseExchange {
     }
 
     if (positionUpdates.length > 0) {
-      this.store.updatePositions(positionUpdates);
+      (() => {
+        const updates: Array<[Pick<StoreData['positions'][number], 'id'>, Partial<StoreData['positions'][number]>]> =
+          positionUpdates;
+        return this.store.apply(
+          nativeFixture(
+            {
+              positions: this.store.positions.map((row) => {
+                const change = updates.find(([target]) => target.id === row.id);
+                return change ? { ...row, ...change[1] } : row;
+              }),
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
 
     if (Math.abs((this.store.balance.upnl || 0) - totalUpnl) > 1e-9) {
-      this.store.update({
-        balance: {
-          ...this.store.balance,
-          upnl: totalUpnl,
-        },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            balance: {
+              ...this.store.balance,
+              upnl: totalUpnl,
+            },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     }
   };
 
@@ -514,10 +550,7 @@ export class GrvtExchange extends BaseExchange {
         // Response format: { results: [...] } (full) or { r: [...] } (lite)
         const builders = data?.results || data?.r || [];
 
-        this.log(
-          `get_authorized_builders returned ${builders.length} builder(s)`,
-          LogSeverity.Debug,
-        );
+        this.log(`get_authorized_builders returned ${builders.length} builder(s)`, LogSeverity.Debug);
 
         const requiredRaw = grvtBuilderFeeRateToRaw(DEFAULT_GRVT_BUILDER_FEE_RATE);
         let nextState: GrvtBuilderAuthState = { status: 'unauthorized' };
@@ -652,7 +685,12 @@ export class GrvtExchange extends BaseExchange {
         // Fetch and set markets in store with loaded flag
         const markets = await this.fetchMarkets();
 
-        this.store.update({ markets, loaded: { ...this.store.loaded, markets: true } });
+        this.store.apply(
+          nativeFixture(
+            { markets, loaded: { ...this.store.loaded, markets: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
 
         // Connect WebSocket now that markets are loaded
         // This will auto-subscribe to all ticker streams via onOpen handler
@@ -660,13 +698,23 @@ export class GrvtExchange extends BaseExchange {
 
         // Fetch and set tickers in store with loaded flag
         const tickers = await this.fetchTickers();
-        this.store.update({ tickers, loaded: { ...this.store.loaded, tickers: true } });
+        this.store.apply(
+          nativeFixture(
+            { tickers, loaded: { ...this.store.loaded, tickers: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       }
 
       if (publicDataOnly) {
-        this.store.update({
-          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
         this.log('GRVT exchange started in public-only mode', LogSeverity.Info);
         return;
       }
@@ -675,11 +723,21 @@ export class GrvtExchange extends BaseExchange {
       // Note: fetchBalance() also auto-detects grvtTradingAccountId if not provided
       try {
         const balance = await this.fetchBalance();
-        this.store.update({ balance, loaded: { ...this.store.loaded, balance: true } });
+        this.store.apply(
+          nativeFixture(
+            { balance, loaded: { ...this.store.loaded, balance: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       } catch (err) {
         this.log(`Error fetching balance: ${err}`, LogSeverity.Warning);
         // Set loaded flag even if fetch fails (empty balance)
-        this.store.update({ loaded: { ...this.store.loaded, balance: true } });
+        this.store.apply(
+          nativeFixture(
+            { loaded: { ...this.store.loaded, balance: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       }
 
       // fetchBalance() auto-detects the trading account for ordinary GRVT
@@ -689,7 +747,12 @@ export class GrvtExchange extends BaseExchange {
       // so startup and the balance-loaded safety contract stay intact.
       if (!useExternalPublicData && this.grvtTradingAccountId) {
         const markets = await this.updateMarketLeverageLimits(this.store.markets);
-        this.store.update({ markets, loaded: { ...this.store.loaded, markets: true } });
+        this.store.apply(
+          nativeFixture(
+            { markets, loaded: { ...this.store.loaded, markets: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       }
 
       // Check builder authorization status (uses tradingXhr, so it's fast)
@@ -713,22 +776,42 @@ export class GrvtExchange extends BaseExchange {
       // Fetch positions and set loaded flag
       try {
         const positions = await this.fetchPositions();
-        this.store.update({ positions, loaded: { ...this.store.loaded, positions: true } });
+        this.store.apply(
+          nativeFixture(
+            { positions, loaded: { ...this.store.loaded, positions: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
         this.syncBalanceUpnlFromPositions(positions);
       } catch (err) {
         this.log(`Error fetching positions: ${err}`, LogSeverity.Warning);
         // Set loaded flag even if fetch fails (empty positions)
-        this.store.update({ loaded: { ...this.store.loaded, positions: true } });
+        this.store.apply(
+          nativeFixture(
+            { loaded: { ...this.store.loaded, positions: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       }
 
       // Fetch open orders and set loaded flag
       try {
         const orders = await this.fetchOpenOrders();
-        this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+        this.store.apply(
+          nativeFixture(
+            { orders, loaded: { ...this.store.loaded, orders: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       } catch (err) {
         this.log(`Error fetching orders: ${err}`, LogSeverity.Warning);
         // Set loaded flag even if fetch fails (empty orders)
-        this.store.update({ loaded: { ...this.store.loaded, orders: true } });
+        this.store.apply(
+          nativeFixture(
+            { loaded: { ...this.store.loaded, orders: true } },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       }
 
       // Start balance polling tick
@@ -810,7 +893,12 @@ export class GrvtExchange extends BaseExchange {
       (market) => !newMarkets.some((newMarket) => newMarket.id === market.id),
     );
 
-    this.store.update({ markets: newMarkets });
+    this.store.apply(
+      nativeFixture(
+        { markets: newMarkets },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     if (added.length > 0 || removed.length > 0) {
       this.emitter.emit('markets:changed', { added, removed });
@@ -1347,20 +1435,42 @@ export class GrvtExchange extends BaseExchange {
     return this.fetchOpenOrders();
   };
 
-  placeOrder = async (opts: PlaceOrderOpts, execution?: { isMarket: boolean; limitPrice: number }): Promise<string[]> => {
+  placeOrder = async (
+    opts: PlaceOrderOpts,
+    execution?: { isMarket: boolean; limitPrice: number },
+  ): Promise<string[]> => {
     const callerClientOrderId = this.resolveCallerClientOrderId(opts);
-    if ((opts.type === OrderType.Market || opts.type === OrderType.Limit) && (opts.takeProfit !== undefined || opts.stopLoss !== undefined)) {
+    if (
+      (opts.type === OrderType.Market || opts.type === OrderType.Limit) &&
+      (opts.takeProfit !== undefined || opts.stopLoss !== undefined)
+    ) {
       for (const price of [opts.takeProfit, opts.stopLoss]) {
-        if (price !== undefined && (!Number.isFinite(price) || price <= 0)) throw new Error('Invalid GRVT bracket trigger price');
+        if (price !== undefined && (!Number.isFinite(price) || price <= 0))
+          throw new Error('Invalid GRVT bracket trigger price');
       }
       const { takeProfit, stopLoss, tpTriggerType, slTriggerType, ...entry } = opts;
       const ids = await this.placeOrder(entry);
       const side = opts.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy;
       try {
-        for (const [type, price] of [[OrderType.StopLoss, stopLoss], [OrderType.TakeProfit, takeProfit]] as const) {
+        for (const [type, price] of [
+          [OrderType.StopLoss, stopLoss],
+          [OrderType.TakeProfit, takeProfit],
+        ] as const) {
           if (price === undefined) continue;
-          ids.push(...await this.placeOrder({ symbol: opts.symbol, type, side, amount: opts.amount, price,
-            triggerPrice: price, reduceOnly: true, close: false, tpTriggerType, slTriggerType }));
+          ids.push(
+            ...(await this.placeOrder({
+              symbol: opts.symbol,
+              type,
+              side,
+              amount: opts.amount,
+              price,
+              triggerPrice: price,
+              reduceOnly: true,
+              close: false,
+              tpTriggerType,
+              slTriggerType,
+            })),
+          );
         }
       } catch {
         throw new Error(`GRVT bracket placement failed after creating ${ids.join(',')}; reconcile these orders`);
@@ -1385,11 +1495,7 @@ export class GrvtExchange extends BaseExchange {
         throw new Error(`Market ${opts.symbol} not found`);
       }
 
-      const {
-        ih: instrumentHash,
-        bd: baseDecimals,
-        qd: quoteDecimals,
-      } = this.getInstrumentSigningMetadata(market);
+      const { ih: instrumentHash, bd: baseDecimals, qd: quoteDecimals } = this.getInstrumentSigningMetadata(market);
 
       this.log(
         `Instrument details: hash=${instrumentHash}, baseDecimals=${baseDecimals}, quoteDecimals=${quoteDecimals}`,
@@ -1398,7 +1504,13 @@ export class GrvtExchange extends BaseExchange {
 
       // Map safe-cex types to GRVT types
       const side: GrvtOrderSide = opts.side === OrderSide.Buy ? 'BUY' : 'SELL';
-      const type: GrvtOrderType = execution ? (execution.isMarket ? 'MARKET' : 'LIMIT') : [OrderType.Market, OrderType.StopLoss, OrderType.TakeProfit].includes(opts.type) ? 'MARKET' : 'LIMIT';
+      const type: GrvtOrderType = execution
+        ? execution.isMarket
+          ? 'MARKET'
+          : 'LIMIT'
+        : [OrderType.Market, OrderType.StopLoss, OrderType.TakeProfit].includes(opts.type)
+          ? 'MARKET'
+          : 'LIMIT';
 
       // Map time in force
       let timeInForce: GrvtTimeInForce = 'GOOD_TILL_TIME';
@@ -1761,8 +1873,10 @@ export class GrvtExchange extends BaseExchange {
       let accountIdentity = this.apiExtras?.accountId;
       const ensureActive = () => {
         if (this.isDisposed) throw new Error('GRVT exchange disposed during symbol cancellation');
-        if (this.grvtTradingAccountId !== account ||
-            (accountIdentity !== undefined && this.apiExtras?.accountId !== accountIdentity)) {
+        if (
+          this.grvtTradingAccountId !== account ||
+          (accountIdentity !== undefined && this.apiExtras?.accountId !== accountIdentity)
+        ) {
           throw new Error('GRVT cancellation account changed');
         }
       };
@@ -1776,7 +1890,8 @@ export class GrvtExchange extends BaseExchange {
           this.store.updateIds.orders !== orderVersion ||
           this._nonceToOrderId.get(id) !== nativeAtStart.get(id) ||
           this._nonceCreationTimes.get(id) !== createdAtStart.get(id)
-        ) throw new Error('GRVT client cancellation identity changed during snapshot or authentication');
+        )
+          throw new Error('GRVT client cancellation identity changed during snapshot or authentication');
       };
       const readConfig = await client.authenticatedEndpoint();
       ensureActive();
@@ -1871,7 +1986,8 @@ export class GrvtExchange extends BaseExchange {
         if (
           acknowledgement.status !== 200 ||
           Object.keys(ackEnvelope).some((key) => !['r', 'result', 'ri', 'request_id'].includes(key))
-        ) throw invalidAck();
+        )
+          throw invalidAck();
         const ack = object(field(ackEnvelope, 'result', 'r'));
         if (['e', 'error', 'c', 'code'].some((key) => key in ack)) throw invalidAck();
         if ('ack' in ack || 'a' in ack) {
@@ -1887,15 +2003,19 @@ export class GrvtExchange extends BaseExchange {
           const ackLegs = field(ack, 'legs', 'l');
           if (
             field(ack, 'sub_account_id', 'sa') !== account ||
-            !Array.isArray(ackLegs) || ackLegs.length !== 1 ||
+            !Array.isArray(ackLegs) ||
+            ackLegs.length !== 1 ||
             field(object(ackLegs[0]), 'instrument', 'i') !== market.id
-          ) throw invalidAck();
+          )
+            throw invalidAck();
           if (payload.order_id !== undefined) {
             const native = field(ack, 'order_id', 'oi');
             if (
-              typeof native !== 'string' || !/^0x[0-9a-f]{1,32}$/i.test(native) ||
+              typeof native !== 'string' ||
+              !/^0x[0-9a-f]{1,32}$/i.test(native) ||
               BigInt(native) !== BigInt(payload.order_id)
-            ) throw invalidAck();
+            )
+              throw invalidAck();
           } else {
             const metadata = object(field(ack, 'metadata', 'm'));
             if (field(metadata, 'client_order_id', 'co') !== payload.client_order_id) throw invalidAck();
@@ -1961,14 +2081,21 @@ export class GrvtExchange extends BaseExchange {
       };
 
       let replacementExecution: { isMarket: boolean; limitPrice: number } | undefined;
-      if (!Number.isFinite(newOrderOpts.amount) || newOrderOpts.amount <= 0) throw new Error('GRVT replacement has no remaining quantity');
+      if (!Number.isFinite(newOrderOpts.amount) || newOrderOpts.amount <= 0)
+        throw new Error('GRVT replacement has no remaining quantity');
       if (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) {
         const info = order.info;
         const legs = info?.legs ?? info?.l;
         const isMarket = info?.is_market ?? info?.im ?? false;
         const limitPrice = Number(legs?.[0]?.limit_price ?? legs?.[0]?.lp ?? 0);
-        if (typeof isMarket !== 'boolean' || !Array.isArray(legs) || legs.length !== 1 || !Number.isFinite(limitPrice)
-          || (!isMarket && limitPrice <= 0) || (isMarket && order.timeInForce === OrderTimeInForce.PostOnly)) {
+        if (
+          typeof isMarket !== 'boolean' ||
+          !Array.isArray(legs) ||
+          legs.length !== 1 ||
+          !Number.isFinite(limitPrice) ||
+          (!isMarket && limitPrice <= 0) ||
+          (isMarket && order.timeInForce === OrderTimeInForce.PostOnly)
+        ) {
           throw new Error('Cannot safely update GRVT order: invalid native execution semantics');
         }
         replacementExecution = { isMarket, limitPrice: isMarket ? 0 : limitPrice };
@@ -2004,18 +2131,32 @@ export class GrvtExchange extends BaseExchange {
       if (!market) throw new Error('Unknown GRVT replacement market');
       const { bd: baseDecimals } = this.getInstrumentSigningMetadata(market);
       const replacementSize = adjust(newOrderOpts.amount, market.precision.amount);
-      if (!Number.isFinite(replacementSize) || replacementSize <= 0 || replacementSize < market.limits.amount.min || (market.limits.amount.max > 0 && replacementSize > market.limits.amount.max)) {
+      if (
+        !Number.isFinite(replacementSize) ||
+        replacementSize <= 0 ||
+        replacementSize < market.limits.amount.min ||
+        (market.limits.amount.max > 0 && replacementSize > market.limits.amount.max)
+      ) {
         throw new Error('GRVT replacement amount is outside market precision or limits');
       }
       grvtScaledUint64(replacementSize.toString(), baseDecimals);
-      const replacementIsMarket = replacementExecution?.isMarket ?? (newOrderOpts.type === OrderType.Market || newOrderOpts.type === OrderType.StopLoss || newOrderOpts.type === OrderType.TakeProfit);
+      const replacementIsMarket =
+        replacementExecution?.isMarket ??
+        (newOrderOpts.type === OrderType.Market ||
+          newOrderOpts.type === OrderType.StopLoss ||
+          newOrderOpts.type === OrderType.TakeProfit);
       if (!replacementIsMarket) {
-        const replacementPrice = adjust(replacementExecution?.limitPrice ?? newOrderOpts.price ?? 0, market.precision.price);
-        if (!Number.isFinite(replacementPrice) || replacementPrice <= 0) throw new Error('Invalid GRVT replacement limit price');
+        const replacementPrice = adjust(
+          replacementExecution?.limitPrice ?? newOrderOpts.price ?? 0,
+          market.precision.price,
+        );
+        if (!Number.isFinite(replacementPrice) || replacementPrice <= 0)
+          throw new Error('Invalid GRVT replacement limit price');
         grvtScaledUint64(replacementPrice.toString(), 9);
       }
       if (newOrderOpts.triggerPrice !== undefined) {
-        if (!Number.isFinite(newOrderOpts.triggerPrice) || newOrderOpts.triggerPrice <= 0) throw new Error('Invalid GRVT replacement trigger price');
+        if (!Number.isFinite(newOrderOpts.triggerPrice) || newOrderOpts.triggerPrice <= 0)
+          throw new Error('Invalid GRVT replacement trigger price');
         grvtScaledUint64(newOrderOpts.triggerPrice.toString(), 9);
       }
 
@@ -2024,7 +2165,9 @@ export class GrvtExchange extends BaseExchange {
       this.log(`Order ${order.id} cancelled for update`, LogSeverity.Debug);
 
       // Step 2: Create the semantically equivalent replacement.
-      const newOrderIds = replacementExecution ? await this.placeOrder(newOrderOpts, replacementExecution) : await this.placeOrder(newOrderOpts);
+      const newOrderIds = replacementExecution
+        ? await this.placeOrder(newOrderOpts, replacementExecution)
+        : await this.placeOrder(newOrderOpts);
       this.log(
         `Order updated successfully: cancelled ${order.id}, created ${newOrderIds.join(', ')}`,
         LogSeverity.Info,
@@ -2223,12 +2366,17 @@ export class GrvtExchange extends BaseExchange {
           sellLeverage: this.defaultLeverage,
         };
 
-        this.store.update({
-          fetchedLeverage: {
-            ...this.store.fetchedLeverage,
-            [symbol]: defaultLeverageObj,
-          },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              fetchedLeverage: {
+                ...this.store.fetchedLeverage,
+                [symbol]: defaultLeverageObj,
+              },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
 
         return defaultLeverageObj;
       }
@@ -2252,12 +2400,17 @@ export class GrvtExchange extends BaseExchange {
           sellLeverage: this.defaultLeverage,
         };
 
-        this.store.update({
-          fetchedLeverage: {
-            ...this.store.fetchedLeverage,
-            [symbol]: defaultLeverageObj,
-          },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              fetchedLeverage: {
+                ...this.store.fetchedLeverage,
+                [symbol]: defaultLeverageObj,
+              },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
 
         return defaultLeverageObj;
       }
@@ -2280,12 +2433,17 @@ export class GrvtExchange extends BaseExchange {
           sellLeverage: this.defaultLeverage,
         };
 
-        this.store.update({
-          fetchedLeverage: {
-            ...this.store.fetchedLeverage,
-            [symbol]: defaultLeverageObj,
-          },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              fetchedLeverage: {
+                ...this.store.fetchedLeverage,
+                [symbol]: defaultLeverageObj,
+              },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
 
         return defaultLeverageObj;
       }
@@ -2299,13 +2457,18 @@ export class GrvtExchange extends BaseExchange {
         sellLeverage: leverage,
       };
 
-      // Store the fetched leverage in the store for UI access
-      this.store.update({
-        fetchedLeverage: {
-          ...this.store.fetchedLeverage,
-          [symbol]: leverageObj,
-        },
-      });
+      // FrameStore the fetched leverage in the store for UI access
+      this.store.apply(
+        nativeFixture(
+          {
+            fetchedLeverage: {
+              ...this.store.fetchedLeverage,
+              [symbol]: leverageObj,
+            },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
 
       return leverageObj;
     } catch (err: any) {
@@ -2320,12 +2483,17 @@ export class GrvtExchange extends BaseExchange {
         sellLeverage: this.defaultLeverage,
       };
 
-      this.store.update({
-        fetchedLeverage: {
-          ...this.store.fetchedLeverage,
-          [symbol]: defaultLeverageObj,
-        },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            fetchedLeverage: {
+              ...this.store.fetchedLeverage,
+              [symbol]: defaultLeverageObj,
+            },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
 
       return defaultLeverageObj;
     }
@@ -2376,20 +2544,34 @@ export class GrvtExchange extends BaseExchange {
       this.log(`Leverage set successfully for ${symbol}: ${leverage}`, LogSeverity.Info);
 
       // Update the fetchedLeverage cache
-      this.store.update({
-        fetchedLeverage: {
-          ...this.store.fetchedLeverage,
-          [symbol]: {
-            buyLeverage: leverage,
-            sellLeverage: leverage,
+      this.store.apply(
+        nativeFixture(
+          {
+            fetchedLeverage: {
+              ...this.store.fetchedLeverage,
+              [symbol]: {
+                buyLeverage: leverage,
+                sellLeverage: leverage,
+              },
+            },
           },
-        },
-      });
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
 
       // Update the position's leverage in the store
       const position = this.store.positions.find((p) => p.symbol === symbol);
       if (position) {
-        this.store.updatePosition(position, { leverage });
+        (() => {
+          const target = position;
+          const changes: Partial<StoreData['positions'][number]> = { leverage };
+          return this.store.apply(
+            nativeFixture(
+              { positions: this.store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     } catch (err: any) {
       this.log(`Error setting leverage for ${symbol}: ${err.message}`, LogSeverity.Error);
@@ -2424,9 +2606,7 @@ export class GrvtExchange extends BaseExchange {
         ? Math.min(...(creationTimes as number[]))
         : undefined;
       const startTimeMs =
-        oldestCreationTime === undefined
-          ? 0
-          : Math.max(0, oldestCreationTime - GrvtExchange.CHASER_FILL_CLOCK_SKEW_MS);
+        oldestCreationTime === undefined ? 0 : Math.max(0, oldestCreationTime - GrvtExchange.CHASER_FILL_CLOCK_SKEW_MS);
       const nowNs = String(Date.now() * 1_000_000);
       const startTimeNs = String(startTimeMs * 1_000_000);
 

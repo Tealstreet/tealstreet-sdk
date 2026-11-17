@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
-import { CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS } from '../reference/cryptocom/cryptocom.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
+import { CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS } from '../reference/cryptocom/cryptocom.types';
 
-const createExchange = () => new CryptocomExchange('cryptocom', { key: 'key', secret: 'secret' }, new DefaultStore());
+const createExchange = () => new CryptocomExchange('cryptocom', { key: 'key', secret: 'secret' }, new FrameStore());
 
 describe('audit regression: Crypto.com WebSocket protocol', () => {
   it('waits for the documented rate-limit reset before reconnect auth and subscriptions', async () => {
@@ -36,17 +37,22 @@ describe('audit regression: Crypto.com WebSocket protocol', () => {
 
   it('processes every order and position in documented batched private frames', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: ['BTC', 'ETH'].map((base) => ({
-        id: `${base}USD-PERP`,
-        symbol: `${base}USD-PERP`,
-        base,
-        quote: 'USD',
-        active: true,
-        precision: { amount: 0.001, price: 0.5 },
-        limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
-      })),
-    });
+    exchange.store.apply(
+      nativeFixture(
+        {
+          markets: ['BTC', 'ETH'].map((base) => ({
+            id: `${base}USD-PERP`,
+            symbol: `${base}USD-PERP`,
+            base,
+            quote: 'USD',
+            active: true,
+            precision: { amount: 0.001, price: 0.5 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
+          })),
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     exchange.privateWebsocket.onMessage({
       data: JSON.stringify({
@@ -176,19 +182,24 @@ describe('audit regression: Crypto.com WebSocket protocol', () => {
     vi.useFakeTimers();
     const exchange = createExchange();
     const callback = vi.fn();
-    exchange.store.update({
-      markets: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'BTCUSD-PERP',
-          symbol: 'BTCUSD-PERP',
-          base: 'BTC',
-          quote: 'USD',
-          active: true,
-          precision: { amount: 0.001, price: 0.5 },
-          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
+          markets: [
+            {
+              id: 'BTCUSD-PERP',
+              symbol: 'BTCUSD-PERP',
+              base: 'BTC',
+              quote: 'USD',
+              active: true,
+              precision: { amount: 0.001, price: 0.5 },
+              limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.publicWebsocket.ws = { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebSocket;
     exchange.listenOrderBook('BTCUSD-PERP', callback);
 
@@ -204,7 +215,15 @@ describe('audit regression: Crypto.com WebSocket protocol', () => {
       }),
     });
 
-    exchange.publicWebsocket.onMessage(frame([['100', '1', '1'], ['99', '2', '1']], [['101', '3', '1']]) as MessageEvent);
+    exchange.publicWebsocket.onMessage(
+      frame(
+        [
+          ['100', '1', '1'],
+          ['99', '2', '1'],
+        ],
+        [['101', '3', '1']],
+      ) as MessageEvent,
+    );
     exchange.publicWebsocket.onMessage(frame([], [['102', '5', '1']]) as MessageEvent);
     await vi.advanceTimersByTimeAsync(100);
 
@@ -225,9 +244,7 @@ describe('audit regression: Crypto.com WebSocket protocol', () => {
         data: JSON.stringify({ id: 1_750_000_000_123, method: 'public/heartbeat', code: 0 }),
       } as MessageEvent);
 
-      expect(send).toHaveBeenCalledWith(
-        JSON.stringify({ id: 1_750_000_000_123, method: 'public/respond-heartbeat' }),
-      );
+      expect(send).toHaveBeenCalledWith(JSON.stringify({ id: 1_750_000_000_123, method: 'public/respond-heartbeat' }));
     },
   );
 

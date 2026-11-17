@@ -352,7 +352,7 @@ async fn self_fence_parks_and_same_box_reconnect_gets_the_retained_notice() {
             "ownerGeneration":owner.generation,"options":options,"state":state}])).await;
         let store = returned.until("native-frame", |d| d["data"]["activeTWAPs"].as_array().is_some_and(|rows| !rows.is_empty())).await;
         assert_eq!(store["data"]["activeTWAPs"][0]["status"], "paused");
-        assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"], 7);
+        assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"].as_f64(), Some(7.0));
         returned.close().await;
     }).await;
 }

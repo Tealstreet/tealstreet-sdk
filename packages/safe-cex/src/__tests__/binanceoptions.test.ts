@@ -2,6 +2,9 @@ import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../store/frameStore';
+import { OrderSide, OrderStatus, OrderTimeInForce, OrderType, PositionSide } from '../types';
+import { nativeFixture } from './cutover/nativeFixture';
 import { createAPI } from './reference/binance/binanceoptions.api';
 import { BinanceOptionsExchange } from './reference/binance/binanceoptions.exchange';
 import {
@@ -20,8 +23,6 @@ import {
   optionContractsByUnderlying,
 } from './reference/binance/binanceoptions.mappers';
 import { ENDPOINTS } from './reference/binance/binanceoptions.types';
-import { DefaultStore } from '../store/store.base';
-import { OrderSide, OrderStatus, OrderTimeInForce, OrderType, PositionSide } from '../types';
 
 // Recorded from eapi.binance.com/eapi/v1/exchangeInfo, /mark and /ticker on 2026-10-20.
 const EXCHANGE_INFO = {
@@ -405,14 +406,19 @@ const live: BinanceOptionsExchange[] = [];
 afterEach(() => live.splice(0).forEach((e) => e.dispose()));
 
 const create = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new BinanceOptionsExchange(
     'binanceoptions',
     { key: 'k', secret: 's', tuning: { consoleLogging: false } } as any,
     store,
   );
   live.push(exchange);
-  store.update({ markets: [btcMarket, dogeMarket] });
+  store.apply(
+    nativeFixture(
+      { markets: [btcMarket, dogeMarket] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const calls: Array<[string, string, any]> = [];
   const respond = (method: string, url: string, body: any) => {
     calls.push([method, url, body]);
@@ -481,7 +487,12 @@ describe('BinanceOptionsExchange requests', () => {
   it('cancels by orderId, and treats an order Binance no longer has as cancelled', async () => {
     const { exchange, store, calls } = create();
     const order = mapBinanceOptionOrder(OPEN_ORDER, 1);
-    store.update({ orders: [order] });
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange.xhr.delete as any).mockImplementationOnce((url: string, config: any) => {
       calls.push(['delete', url, config.params]);
       return Promise.reject(Object.assign(new Error('Unknown order sent.'), { code: -2011 }));
@@ -495,7 +506,12 @@ describe('BinanceOptionsExchange requests', () => {
   it('refuses an amend it cannot place before cancelling anything', async () => {
     const { exchange, store, calls } = create();
     const order = mapBinanceOptionOrder(OPEN_ORDER, 1);
-    store.update({ orders: [order] });
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     await expect(exchange.updateOrder({ order, update: { amount: 250 } })).rejects.toThrow(/above the 200 maximum/);
     expect(calls).toEqual([]);
     expect(store.orders[0].status).not.toBe(OrderStatus.Canceled);
@@ -535,7 +551,12 @@ describe('BinanceOptionsExchange requests', () => {
   it('keeps an order open when the cancel fails for another reason', async () => {
     const { exchange, store } = create();
     const order = mapBinanceOptionOrder(OPEN_ORDER, 1);
-    store.update({ orders: [order] });
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange.xhr.delete as any).mockRejectedValueOnce(
       Object.assign(new Error('Timestamp outside recvWindow'), { code: -1021 }),
     );
@@ -545,12 +566,17 @@ describe('BinanceOptionsExchange requests', () => {
 
   it("marks only the cancelled symbol's orders cancelled", async () => {
     const { exchange, store } = create();
-    store.update({
-      orders: [
-        mapBinanceOptionOrder(OPEN_ORDER, 1),
-        mapBinanceOptionOrder({ ...OPEN_ORDER, orderId: '2', symbol: DOGE }, 1),
-      ],
-    });
+    store.apply(
+      nativeFixture(
+        {
+          orders: [
+            mapBinanceOptionOrder(OPEN_ORDER, 1),
+            mapBinanceOptionOrder({ ...OPEN_ORDER, orderId: '2', symbol: DOGE }, 1),
+          ],
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     await exchange.cancelSymbolOrders(BTC);
     expect(store.orders.map((o) => [o.symbol, o.status])).toEqual([
       [BTC, OrderStatus.Canceled],
@@ -561,7 +587,12 @@ describe('BinanceOptionsExchange requests', () => {
   it('amends by cancelling, then placing what is left with the same side, reduce-only and time in force', async () => {
     const { exchange, store, calls } = create();
     const order = mapBinanceOptionOrder({ ...OPEN_ORDER, reduceOnly: true, timeInForce: 'IOC' }, 1);
-    store.update({ orders: [order] });
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     await exchange.updateOrder({ order, update: { price: 110 } });
     expect(calls).toEqual([
       ['delete', ENDPOINTS.ORDER, { symbol: BTC, orderId: '4611875134427365000' }],
@@ -607,7 +638,12 @@ describe('BinanceOptionsExchange requests', () => {
     const { exchange, store } = create();
     (exchange.xhr.get as any).mockRejectedValue(new Error('down'));
     expect(await exchange.fetchMarkets()).toBe(store.markets);
-    store.update({ markets: [] });
+    store.apply(
+      nativeFixture(
+        { markets: [] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     await expect(exchange.fetchMarkets()).rejects.toThrow('down');
   });
 

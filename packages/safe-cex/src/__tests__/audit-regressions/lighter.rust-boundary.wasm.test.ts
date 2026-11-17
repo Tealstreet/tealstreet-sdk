@@ -1,32 +1,27 @@
-import { vi } from 'vitest';
+import type { Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { ExchangeName, ExchangeOptions, OrderFillEvent, RemoteSignerRequest } from '../../types';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { BaseExchange } from '../../exchanges/base';
+import { extractLighterAccountTierFromPayload } from '../../exchanges/lighter/lighter.account-tier';
+import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
+import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
+import { FrameStore } from '../../store/frameStore';
+import { MarginType, OrderSide, OrderType } from '../../types';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
   return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
 });
 
-import type { Transport } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeName, ExchangeOptions, OrderFillEvent, RemoteSignerRequest } from '../../types';
-
-import { afterEach, describe, expect, it } from 'vitest';
-
-import { BaseExchange } from '../../exchanges/base';
-import { extractLighterAccountTierFromPayload } from '../../exchanges/lighter/lighter.account-tier';
-import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
-import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { MarginType, OrderSide, OrderType } from '../../types';
-import { prepareRecordedHttp } from '../support/managedHttp';
-
 const NOW = 1700000000000;
 const KEY = `01${'00'.repeat(39)}`;
 const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
 
-const recorded = (
-  accountLimits: unknown = { code: 200, user_tier_name: 'premium' },
-  integrator = 158385,
-) => {
+const recorded = (accountLimits: unknown = { code: 200, user_tier_name: 'premium' }, integrator = 158385) => {
   const requests: Array<{ method: string; url: string; body?: string }> = [];
   const sockets: Array<{ subscriptions: string[]; message(text: string): void }> = [];
   let marginMode = 0;
@@ -133,11 +128,13 @@ const options = (): ExchangeOptions => ({
   testnet: true,
 });
 const start = async (opts = options(), name: ExchangeName = 'lighter', accountLimits?: unknown) => {
-  const integrator = Number(opts.extra?.lighterIntegratorAccountIndex ?? (name === 'lighter-robinhood' ? 47296 : 158385));
+  const integrator = Number(
+    opts.extra?.lighterIntegratorAccountIndex ?? (name === 'lighter-robinhood' ? 47296 : 158385),
+  );
   const tape = recorded(accountLimits, integrator);
   setWasmEngineLoader(loadNodeEngine);
   setRustEngineTransport(() => tape.transport);
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new RustEngineExchange(name, opts, store);
   cleanup.push(() => exchange.dispose());
   await exchange.start();
@@ -187,7 +184,7 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('%s real WASM boundary'
 
   it('applies exactly one execution to worker and main frames including the initial five seconds', async () => {
     const { exchange, sockets } = await variantStart();
-    const main = new BaseExchange(name, { key: '', secret: '' }, new DefaultStore());
+    const main = new BaseExchange(name, { key: '', secret: '' }, new FrameStore());
     cleanup.push(() => main.dispose());
     main.applyWorkerFrame(exchange.snapshotFrame()!);
     exchange.onFrame = (frame) => main.applyWorkerFrame(frame.slice(0));
@@ -303,7 +300,7 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('%s real WASM boundary'
 
   it('a remote-signed account signs Lighter statements through its signer and sends nothing it refuses', async () => {
     // The keyed browser answers auth statements and refuses the transaction.
-    const keyed = new RustEngineExchange(name, options(), new DefaultStore());
+    const keyed = new RustEngineExchange(name, options(), new FrameStore());
     cleanup.push(() => keyed.dispose());
     const asked: RemoteSignerRequest[] = [];
     const { exchange, requests, store } = await variantStart({

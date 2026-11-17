@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { prepareRecordedHttp } from '../support/managedHttp';
 
@@ -265,7 +265,7 @@ async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) 
   const source = new RustEngineExchange(
     'bybit',
     { key: 'fixture-key', secret: '', remoteSigner: signer },
-    new DefaultStore(),
+    new FrameStore(),
   );
   cleanup.push(() => source.dispose());
   await source.start();
@@ -284,7 +284,7 @@ async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) 
       workerMirror: true,
       publicDataOnly: false,
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   cleanup.push(() => {
     source.onFrame = undefined;

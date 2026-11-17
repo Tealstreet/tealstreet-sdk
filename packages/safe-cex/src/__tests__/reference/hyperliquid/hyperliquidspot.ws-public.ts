@@ -1,11 +1,14 @@
+import type { StoreData } from '../../../generated/StoreData';
+
 import flatten from 'lodash/flatten';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { Candle, OHLCVOptions, OrderBook } from '../../../types';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { adjust } from '../../../utils/safe-math';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { HyperliquidSpotExchange } from './hyperliquidspot.exchange';
 import { AllMids, HyperliquidCandle, WsBook, WSS_URLS } from './hyperliquidspot.types';
 
@@ -180,7 +183,16 @@ export class HyperliquidSpotPublicWebSocket extends BaseWebSocket<HyperliquidSpo
       const last = parseFloat(data[tickerPrefix]);
       updateBuf.last = last;
       updateBuf.midPrice = last;
-      this.parent.store.updateTicker(ticker, updateBuf);
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = updateBuf;
+        return this.parent.store.apply(
+          nativeFixture(
+            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
   };
 

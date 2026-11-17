@@ -1,8 +1,11 @@
+import type { StoreData } from '../../generated/StoreData';
+
 import { describe, expect, it, vi } from 'vitest';
 
-import { PhemexExchange } from '../reference/phemex/phemex.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, PositionMode, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 
 // A flat ADAUSDT row as accountPositions actually returns it: size 0, but
 // carrying the leverage and margin fields the leverage endpoint needs.
@@ -31,19 +34,24 @@ const flatHedgedRow = {
 };
 
 const buildExchange = (positionRows = [flatCrossRow]) => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'ADAUSDT',
-        symbol: 'ADAUSDT',
-        info: { symbol: 'ADAUSDT' },
-        precision: { amount: 1, price: 0.0001 },
-        limits: { amount: { min: 1, max: 100000 }, leverage: { min: 1, max: 100 } },
+        markets: [
+          {
+            id: 'ADAUSDT',
+            symbol: 'ADAUSDT',
+            info: { symbol: 'ADAUSDT' },
+            precision: { amount: 1, price: 0.0001 },
+            limits: { amount: { min: 1, max: 100000 }, leverage: { min: 1, max: 100 } },
+          },
+        ] as any,
+        tickers: [{ id: 'ADAUSDT', symbol: 'ADAUSDT', last: 0.2 }] as any,
       },
-    ] as any,
-    tickers: [{ id: 'ADAUSDT', symbol: 'ADAUSDT', last: 0.2 }] as any,
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
   const put = vi.fn().mockResolvedValue({ data: { code: 0, msg: '' } });
   // The store stays empty: loaded.positions is false on the hosted-mode mirror,
@@ -143,17 +151,33 @@ describe('audit regression: Phemex margin type on a flat symbol', () => {
 
   it('prefers the current raw row over stale stored margin metadata', async () => {
     const { exchange } = buildExchange([flatIsolatedRow]);
-    exchange.store.addOrUpdatePositions([
-      {
-        id: 'ADAUSDT-long',
-        symbol: 'ADAUSDT',
-        side: PositionSide.Long,
-        contracts: 1,
-        leverage: 10,
-        marginType: MarginType.Cross,
-        positionMode: PositionMode.OneWay,
-      } as any,
-    ]);
+    (() => {
+      const incoming: StoreData['positions'] = [
+        {
+          id: 'ADAUSDT-long',
+          symbol: 'ADAUSDT',
+          side: PositionSide.Long,
+          contracts: 1,
+          leverage: 10,
+          marginType: MarginType.Cross,
+          positionMode: PositionMode.OneWay,
+        } as any,
+      ];
+      return exchange.store.apply(
+        nativeFixture(
+          {
+            positions: [
+              ...exchange.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !exchange.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          exchange.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
 
     const context = await (exchange as any).resolveLeverageContext('ADAUSDT');
 

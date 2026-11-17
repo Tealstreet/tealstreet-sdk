@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 import { BinancePMPrivateWebsocket } from '../reference/binance/binancepm.ws-private';
-import { DefaultStore } from '../../store/store.base';
-import { PositionSide } from '../../types';
 
 describe('Binance portfolio-margin WS position signs', () => {
   afterEach(() => {
@@ -12,22 +13,27 @@ describe('Binance portfolio-margin WS position signs', () => {
 
   it('keeps short contracts and notional non-negative like the REST mapper', async () => {
     vi.useFakeTimers();
-    const store = new DefaultStore();
-    store.update({
-      positions: [
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTCUSDT:short',
-          symbol: 'BTCUSDT',
-          side: PositionSide.Short,
-          entryPrice: 50_000,
-          contracts: 0.01,
-          notional: 500,
-          leverage: 10,
-          unrealizedPnl: 0,
-          liquidationPrice: 0,
+          positions: [
+            {
+              id: 'BTCUSDT:short',
+              symbol: 'BTCUSDT',
+              side: PositionSide.Short,
+              entryPrice: 50_000,
+              contracts: 0.01,
+              notional: 500,
+              leverage: 10,
+              unrealizedPnl: 0,
+              liquidationPrice: 0,
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BinancePMExchange('binancepm', { key: 'key', secret: 'secret' }, store);
     // ACCOUNT_UPDATE also schedules a REST reconcile, outside this WS mapper test.
     const refresh = vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([]);

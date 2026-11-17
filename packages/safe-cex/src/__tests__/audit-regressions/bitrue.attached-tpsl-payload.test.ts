@@ -1,9 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import {
+  MarginType,
+  Market,
+  OrderSide,
+  OrderStopTriggerType,
+  OrderType,
+  Position,
+  PositionMode,
+  PositionSide,
+} from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
 import { ENDPOINTS } from '../reference/bitrue/bitrue.types';
-import { DefaultStore } from '../../store/store.base';
-import { MarginType, Market, OrderSide, OrderStopTriggerType, OrderType, Position, PositionMode, PositionSide } from '../../types';
 
 const MARKET: Market = {
   id: 'E-BTC-USDT',
@@ -34,12 +44,17 @@ const POSITION: Position = {
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [MARKET],
-    positions: [POSITION],
-    tickers: [{ symbol: MARKET.symbol, mark: 60_000, last: 60_000, bid: 59_999, ask: 60_001 } as any],
-  });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      {
+        markets: [MARKET],
+        positions: [POSITION],
+        tickers: [{ symbol: MARKET.symbol, mark: 60_000, last: 60_000, bid: 59_999, ask: 60_001 } as any],
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   return new BitrueExchange('bitrue', { key: 'test-key', secret: 'test-secret' }, store);
 };
 
@@ -72,7 +87,13 @@ describe('audit regression: Bitrue attached TP/SL payloads', () => {
     expect(post).toHaveBeenCalledTimes(1);
     const [endpoint, parent] = post.mock.calls[0] as [string, Record<string, unknown>];
     expect(endpoint).toBe(ENDPOINTS.PLACE_ORDER);
-    expect(parent).toEqual(expect.objectContaining({ side: expectedSide, open: 'OPEN', type: type === OrderType.Limit ? 'LIMIT' : 'MARKET' }));
+    expect(parent).toEqual(
+      expect.objectContaining({
+        side: expectedSide,
+        open: 'OPEN',
+        type: type === OrderType.Limit ? 'LIMIT' : 'MARKET',
+      }),
+    );
     expect(parent).not.toHaveProperty('conditionOrder');
     if (type === OrderType.Limit) {
       expect(parent.volume).toBe('0.01');
@@ -85,8 +106,20 @@ describe('audit regression: Bitrue attached TP/SL payloads', () => {
     expect(children).toHaveLength(2);
     expect(children).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ triggerType: 1, triggerPriceType: 1, triggerPrice: side === OrderSide.Buy ? 59_000 : 61_000, type: 'MARKET', price: 0 }),
-        expect.objectContaining({ triggerType: 2, triggerPriceType: 2, triggerPrice: side === OrderSide.Buy ? 61_000 : 59_000, type: 'MARKET', price: 0 }),
+        expect.objectContaining({
+          triggerType: 1,
+          triggerPriceType: 1,
+          triggerPrice: side === OrderSide.Buy ? 59_000 : 61_000,
+          type: 'MARKET',
+          price: 0,
+        }),
+        expect.objectContaining({
+          triggerType: 2,
+          triggerPriceType: 2,
+          triggerPrice: side === OrderSide.Buy ? 61_000 : 59_000,
+          type: 'MARKET',
+          price: 0,
+        }),
       ]),
     );
     for (const child of children) {

@@ -1,11 +1,13 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook } from '../../../types';
 import type { WeexExchange } from './weex.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { LogSeverity } from '../../../types';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../../utils/updateOrderBook';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { BASE_WS_URL, INTERVAL, SUPPORTED_WS_INTERVALS } from './weex.types';
 import { normalizeCandle, toIntegerString, toNumber } from './weex.utils';
 
@@ -198,10 +200,7 @@ export class WeexPublicWebsocket extends BaseWebSocket<WeexExchange> {
     }
 
     const reconciledTopics = new Set(this.tickerTopics);
-    if (
-      topicsToUnsubscribe.length &&
-      this.sendSubscriptionOperation('UNSUBSCRIBE', topicsToUnsubscribe)
-    ) {
+    if (topicsToUnsubscribe.length && this.sendSubscriptionOperation('UNSUBSCRIBE', topicsToUnsubscribe)) {
       topicsToUnsubscribe.forEach((topic) => reconciledTopics.delete(topic));
     }
     if (topicsToSubscribe.length && this.sendSubscriptionOperation('SUBSCRIBE', topicsToSubscribe)) {
@@ -295,14 +294,23 @@ export class WeexPublicWebsocket extends BaseWebSocket<WeexExchange> {
     const index = toNumber(update.i, ticker.index);
     const percentage = toNumber(update.P, ticker.percentage);
 
-    this.store.updateTicker(ticker, {
-      last,
-      mark,
-      index,
-      percentage: Math.abs(percentage) <= 1 ? percentage * 100 : percentage,
-      volume: toNumber(update.v, ticker.volume),
-      quoteVolume: toNumber(update.q, ticker.quoteVolume),
-    });
+    (() => {
+      const target = ticker;
+      const changes: Partial<StoreData['tickers'][number]> = {
+        last,
+        mark,
+        index,
+        percentage: Math.abs(percentage) <= 1 ? percentage * 100 : percentage,
+        volume: toNumber(update.v, ticker.volume),
+        quoteVolume: toNumber(update.q, ticker.quoteVolume),
+      };
+      return this.store.apply(
+        nativeFixture(
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   private handleDepth = (json: Record<string, any>) => {

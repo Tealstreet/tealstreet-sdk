@@ -120,8 +120,8 @@ pub struct OrderSnapshotToken(
     pub(crate) u64,
 );
 
-/// Packed ticker delta field order; matches `PACKED_TICKER_FIELDS` in
-/// `packages/safe-cex/src/store/store.base.ts`.
+/// Packed ticker delta field order; matches `TICKER_FIELDS` in
+/// `sdk-rs/hosts/wasm/js/wire.mjs`.
 pub const TICKER_FIELDS: [&str; 12] = [
     "bid",
     "ask",

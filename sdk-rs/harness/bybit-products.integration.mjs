@@ -1,11 +1,11 @@
+import { nativeFixture } from '../../packages/safe-cex/src/__tests__/cutover/nativeFixture.ts';
 // Real TS API/signing vs native WASM commands; documented V5 product payloads.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHmac } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { BybitExchange } from '../../packages/safe-cex/src/__tests__/reference/bybit/bybit.exchange.ts';
-import { DefaultStore } from '../../packages/safe-cex/src/store/store.base.ts';
-import { FrameApplier } from '../../packages/safe-cex/src/store/frameApplier.ts';
+import { FrameStore } from '../../packages/safe-cex/src/store/frameStore.ts';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 const require = createRequire(import.meta.url);
 const { WasmEngine } = require('../hosts/wasm/pkg/node/safe_cex_wasm.js');
@@ -191,12 +191,12 @@ class Native {
   }
   store() {
     const bytes = this.engine.snapshotFrame(this.now).slice();
-    const store = new DefaultStore(); new FrameApplier(store).apply(new Frame(bytes.buffer), false); return store;
+    const store = new FrameStore(); store.apply(new Frame(bytes.buffer), false); return store;
   }
   free() { this.waitingClaims.clear(); this.timers.clear(); this.engine.free(); }
 }
 async function ts(options) {
-  const store = new DefaultStore(), requests = [];
+  const store = new FrameStore(), requests = [];
   const exchange = new BybitExchange('bybit', { key: KEY, secret: SECRET, ...options }, store);
   let fixtureError;
   exchange.xhr.defaults.adapter = async (config) => {
@@ -210,7 +210,7 @@ async function ts(options) {
   };
   let markets;
   try { markets = await exchange.fetchMarkets(); } catch (error) { throw fixtureError ?? error; }
-  store.update({ markets });
+  store.apply(nativeFixture({ markets }, store.markets.map(row => row.symbol)));
   return { exchange, store, requests };
 }
 test('Bybit independent raw fixture validator rejects signature, clock, economic and category alias mutations', () => {

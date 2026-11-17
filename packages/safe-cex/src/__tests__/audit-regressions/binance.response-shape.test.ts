@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { ENDPOINTS } from '../../exchanges/binance/binance.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
 
 const malformedResponse = { code: -1003, msg: 'Too many requests' };
 
 const createExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, store);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
   return { exchange, store };
@@ -31,7 +32,12 @@ describe('Binance malformed REST response guards', () => {
   it('preserves markets when leverage brackets return a non-array envelope', async () => {
     const { exchange, store } = createExchange();
     const preservedMarkets = [createMarket()];
-    store.update({ markets: preservedMarkets as any });
+    store.apply(
+      nativeFixture(
+        { markets: preservedMarkets as any },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange.publicXhr, 'get').mockResolvedValue({
       data: {
         symbols: [
@@ -64,7 +70,12 @@ describe('Binance malformed REST response guards', () => {
   it('preserves tickers when public ticker arrays return a non-array envelope', async () => {
     const { exchange, store } = createExchange();
     const preservedTickers = [{ id: 'BTC/USDT:USDT', symbol: 'BTCUSDT', last: 50_000 }];
-    store.update({ tickers: preservedTickers as any });
+    store.apply(
+      nativeFixture(
+        { tickers: preservedTickers as any },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange.publicXhr, 'get').mockResolvedValue({ data: malformedResponse } as any);
 
     await expect(exchange.fetchTickers()).resolves.toBe(store.tickers);

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { BinancePrivateWebsocket } from '../reference/binance/binance.ws-private';
-import { DefaultStore } from '../../store/store.base';
 
 const preservedOrders = [{ id: 'regular-order' }, { id: 'algo-order' }] as any[];
 
@@ -13,8 +14,13 @@ const transientFailures = [
 ] as const;
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ orders: preservedOrders as any });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { orders: preservedOrders as any },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, store);
   return { exchange, store };
 };
@@ -32,10 +38,14 @@ const runStartupSnapshot = async (exchange: BinanceExchange) => {
 
 const snapshotCommitters = [
   ['private startup', (exchange: BinanceExchange) => runStartupSnapshot(exchange), false],
-  ['private-WS throttled refresh', (exchange: BinanceExchange) => {
-    const websocket = new BinancePrivateWebsocket(exchange);
-    return (websocket as any).fetchThrottledOrders();
-  }, false],
+  [
+    'private-WS throttled refresh',
+    (exchange: BinanceExchange) => {
+      const websocket = new BinancePrivateWebsocket(exchange);
+      return (websocket as any).fetchThrottledOrders();
+    },
+    false,
+  ],
   ['private-WS reconnect snapshot', (exchange: BinanceExchange) => exchange.fetchAndSetPrivateSnapshot(), true],
   ['worker-triggered full refresh', (exchange: BinanceExchange) => exchange.fetchAndSetOrders(), true],
 ] as const;
@@ -81,13 +91,16 @@ describe('Binance order snapshot audit regression', () => {
     },
   );
 
-  it.each(snapshotCommitters)('%s clears orders after a successful genuinely empty response', async (_name, commitSnapshot) => {
-    const { exchange, store } = createExchange();
-    vi.spyOn(exchange.xhr, 'get').mockResolvedValue({ data: [] } as any);
+  it.each(snapshotCommitters)(
+    '%s clears orders after a successful genuinely empty response',
+    async (_name, commitSnapshot) => {
+      const { exchange, store } = createExchange();
+      vi.spyOn(exchange.xhr, 'get').mockResolvedValue({ data: [] } as any);
 
-    await commitSnapshot(exchange);
+      await commitSnapshot(exchange);
 
-    expect(store.orders).toEqual([]);
-    expect(store.loaded.orders).toBe(true);
-  });
+      expect(store.orders).toEqual([]);
+      expect(store.loaded.orders).toBe(true);
+    },
+  );
 });

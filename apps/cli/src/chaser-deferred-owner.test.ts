@@ -1,10 +1,11 @@
 import type { ExchangeAccountConfig } from '@tealstreet/cli-core';
 import type { ClientOrderLookup } from '@tealstreet/safe-cex/src/exchanges/clientOrderId';
-import type { ExchangeName, Market, Order, Ticker } from '@tealstreet/safe-cex/src/types';
+import type { ExchangeName, Order, Ticker } from '@tealstreet/safe-cex/src/types';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { BaseExchange } from '@tealstreet/safe-cex/src/exchanges/base';
-import { DefaultStore } from '@tealstreet/safe-cex/src/store/store.base';
+import { FrameStore } from '@tealstreet/safe-cex/src/store/frameStore';
+import { nativeFixture } from '@tealstreet/safe-cex/src/__tests__/cutover/nativeFixture';
 import { OrderSide, OrderStatus, OrderType } from '@tealstreet/safe-cex/src/types';
 import { ChaserOrderInstance } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderInstance';
 import { chaserOrderManagerInstance as chasers } from '@tealstreet/safe-cex/src/webworker/chaserOrder/ChaserOrderManager';
@@ -21,7 +22,21 @@ vi.mock('../../../packages/safe-cex/src/health/ExchangeHealthMonitor', () => ({
 
 const account: ExchangeAccountConfig = { name: 'Main', exchange: 'bitget', apiKey: 'fixture', apiSecret: 'fixture' };
 const options = { symbol: 'FILUSDT', size: 1, side: OrderSide.Buy, maxAttempts: 10, delay: 1000 };
-const ticker = (bid: number): Ticker => ({ symbol: 'FILUSDT', bid, ask: bid + 0.001, last: bid }) as Ticker;
+const ticker = (bid: number): Ticker => ({
+  id: 'FILUSDT',
+  symbol: 'FILUSDT',
+  bid,
+  ask: bid + 0.001,
+  last: bid,
+  mark: bid,
+  index: bid,
+  percentage: 0,
+  openInterest: 0,
+  fundingRate: 0,
+  fundingTime: 0,
+  volume: 0,
+  quoteVolume: 0,
+});
 const order = (id = 'A-order', price = 5): Order => ({
   id,
   symbol: 'FILUSDT',
@@ -45,11 +60,26 @@ const deferred = <T>() => {
   return { promise, resolve, reject };
 };
 const exchange = (name: ExchangeName) => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [{ symbol: 'FILUSDT', precision: { price: 0.001, amount: 1 } } as Market],
-    tickers: [ticker(5)],
-  });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      {
+        markets: [
+          {
+            id: 'FILUSDT',
+            symbol: 'FILUSDT',
+            base: 'FIL',
+            quote: 'USDT',
+            active: true,
+            precision: { price: 0.001, amount: 1 },
+            limits: { amount: { min: 1, max: 10000 }, leverage: { min: 1, max: 100 } },
+          },
+        ],
+        tickers: [ticker(5)],
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const result = new BaseExchange(name, { key: 'fixture', secret: 'fixture' }, store);
   vi.spyOn(result, 'placeOrder').mockResolvedValueOnce(['A-order']).mockResolvedValue(['A-replacement']);
   vi.spyOn(result, 'cancelOrders').mockResolvedValue();
@@ -92,9 +122,14 @@ async function session(name: ExchangeName = 'bitget') {
   };
   const startResting = async () => {
     await start();
-    a.store.update({ orders: [order()] });
+    a.store.apply(
+      nativeFixture(
+        { orders: [order()] },
+        a.store.markets.map((row) => row.symbol),
+      ),
+    );
     await vi.advanceTimersByTimeAsync(1100);
-    a.emitter.emit('update', a.store);
+    a.emitter.emit('update', a.store.data);
     await vi.advanceTimersByTimeAsync(50);
   };
   const switchToB = async () => {
@@ -167,7 +202,12 @@ it.each(['cancel', 'fills'] as const)('fences active %s success and failure cont
       await s.startResting();
       if (phase === 'cancel') vi.mocked(s.a.cancelOrders).mockImplementationOnce(() => cancel.promise);
       else fills.mockImplementationOnce(() => read.promise);
-      s.a.store.update({ tickers: [ticker(6)] });
+      s.a.store.apply(
+        nativeFixture(
+          { tickers: [ticker(6)] },
+          s.a.store.markets.map((row) => row.symbol),
+        ),
+      );
       await vi.advanceTimersByTimeAsync(50);
       if (phase === 'cancel') expect(fills).not.toHaveBeenCalled();
       else expect(fills).toHaveBeenCalledExactlyOnceWith(['A-order']);
@@ -220,14 +260,19 @@ it.each(['retry', 'lookup-delay', 'lookup-reply', 'private-ws'] as const)('pins 
     if (retire) await s.switchToB();
     if (phase === 'lookup-reply') lookupReply.resolve({ found: true, order: order() });
     if (phase === 'private-ws' && !retire) {
-      s.a.store.update({
-        socketHealth: {
-          publicInitialized: true,
-          publicHealthy: true,
-          privateInitialized: true,
-          privateHealthy: true,
-        },
-      });
+      s.a.store.apply(
+        nativeFixture(
+          {
+            socketHealth: {
+              publicInitialized: true,
+              publicHealthy: true,
+              privateInitialized: true,
+              privateHealthy: true,
+            },
+          },
+          s.a.store.markets.map((row) => row.symbol),
+        ),
+      );
     }
     await vi.advanceTimersByTimeAsync(2100);
     if (retire) {
@@ -251,20 +296,45 @@ it.each(['ticker', 'orders'] as const)('drops a queued %s check when its owner r
     const s = await session();
     await s.startResting();
     if (phase === 'ticker') {
-      s.a.store.update({ tickers: [ticker(5)] });
+      s.a.store.apply(
+        nativeFixture(
+          { tickers: [{ ...ticker(5), volume: 1 }] },
+          s.a.store.markets.map((row) => row.symbol),
+        ),
+      );
       await vi.advanceTimersByTimeAsync(0);
-      s.a.store.update({ tickers: [ticker(6)] });
+      s.a.store.apply(
+        nativeFixture(
+          { tickers: [ticker(6)] },
+          s.a.store.markets.map((row) => row.symbol),
+        ),
+      );
     } else {
       const cancel = deferred<void>();
       vi.mocked(s.a.cancelOrders).mockImplementationOnce(() => cancel.promise);
-      s.a.store.update({ tickers: [ticker(6)] });
+      s.a.store.apply(
+        nativeFixture(
+          { tickers: [ticker(6)] },
+          s.a.store.markets.map((row) => row.symbol),
+        ),
+      );
       await vi.advanceTimersByTimeAsync(50);
       expect(s.old.pendingOrdersUpdate).toBe(true);
-      s.a.store.update({ orders: [{ ...order(), lastUpdate: 1 }], tickers: [ticker(7)] });
+      s.a.store.apply(
+        nativeFixture(
+          { orders: [{ ...order(), lastUpdate: 1 }], tickers: [ticker(7)] },
+          s.a.store.markets.map((row) => row.symbol),
+        ),
+      );
       await vi.advanceTimersByTimeAsync(0);
       cancel.resolve();
       await vi.advanceTimersByTimeAsync(0);
-      s.a.store.update({ orders: [order('A-replacement', 6)] });
+      s.a.store.apply(
+        nativeFixture(
+          { orders: [order('A-replacement', 6)] },
+          s.a.store.markets.map((row) => row.symbol),
+        ),
+      );
       await vi.advanceTimersByTimeAsync(1000);
     }
     const placed = phase === 'ticker' ? 1 : 2;

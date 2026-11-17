@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { consumerFrame } from './cutover/consumerFrame';
 import { prepareRecordedHttp } from './support/managedHttp';
 
@@ -71,7 +71,7 @@ it('keyed Bybit candles use a real public WASM source while its frame-fed accoun
       workerMirror: true,
       publicDataOnly: false,
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   accounts.push(exchange);
   expect(await exchange.frameFedReady).toBe(true);

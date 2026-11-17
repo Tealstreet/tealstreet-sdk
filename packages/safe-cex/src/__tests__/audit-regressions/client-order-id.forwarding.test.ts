@@ -1,12 +1,12 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { Market, PlaceOrderOpts } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { RustEngineExchange as OrderlyExchange } from '../../exchanges/rust/rust.exchange';
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 import { BackpackExchange } from '../reference/backpack/backpack.exchange';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
@@ -19,6 +19,7 @@ import { BlofinExchange } from '../reference/blofin/blofin.exchange';
 import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 import { BybitSpotExchange } from '../reference/bybit/bybitspot.exchange';
+import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
 import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
@@ -26,13 +27,13 @@ import { KucoinSpotExchange } from '../reference/kucoin/kucoinspot.exchange';
 import { OKXExchange } from '../reference/okx/okx.exchange';
 import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { PhemexExchange } from '../reference/phemex/phemex.exchange';
-import { RustEngineExchange as OrderlyExchange } from '../../exchanges/rust/rust.exchange';
 import { WeexExchange } from '../reference/weex/weex.exchange';
 import { WOOXExchange } from '../reference/woo/woo.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
-import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
-import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 const MARKET: Market = {
   id: 'BTCUSDT',
@@ -47,9 +48,14 @@ const MARKET: Market = {
 
 const OPTIONS = { key: 'key', secret: 'secret', passphrase: 'passphrase', tealstreetTunnel: false };
 
-const create = <T>(Ctor: new (name: any, options: any, store: DefaultStore) => T, name: string, options = OPTIONS) => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+const create = <T>(Ctor: new (name: any, options: any, store: FrameStore) => T, name: string, options = OPTIONS) => {
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new Ctor(name, options, store);
   vi.spyOn(exchange as any, 'log').mockImplementation(() => undefined);
   // Venue internals (private formatters, transports) are driven directly, so the handle is untyped.
@@ -398,8 +404,13 @@ describe('Binance Spot clientOrderId charset (Spot rejects . : / that USD-M acce
 
 describe('generated IDs are untouched when no caller ID is supplied', () => {
   it('keeps the Binance broker-prefixed IDs, one per split payload', () => {
-    const store = new DefaultStore();
-    store.update({ markets: [{ ...MARKET, limits: { ...MARKET.limits, amount: { min: 0.001, max: 0.5 } } }] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [{ ...MARKET, limits: { ...MARKET.limits, amount: { min: 0.001, max: 0.5 } } }] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BinanceExchange('binance', OPTIONS, store) as any;
 
     const ids = exchange.formatCreateOrder(limit({ amount: 1.2 })).regular.map((p: any) => p.newClientOrderId);

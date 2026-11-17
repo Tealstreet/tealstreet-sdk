@@ -1,11 +1,13 @@
 import type { Axios } from 'axios';
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 
 import createHash from 'create-hash';
 import chunk from 'lodash/chunk';
 import uniqBy from 'lodash/uniqBy';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { BaseExchange } from '../../../exchanges/base';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -39,7 +41,7 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { createAPI } from './mexc.api';
 import {
   ENDPOINTS,
@@ -56,20 +58,20 @@ import {
   fakePositionsForMarket,
   fromMexcSymbol,
   isTradableMexcMarket,
+  nativeVolumeToAmount,
   normalizeBalance,
   normalizeExecution,
   normalizeKlineResponse,
   normalizeMarginType,
   normalizeMarket,
-  nativeVolumeToAmount,
   normalizeOrder,
   normalizeOrderBook,
   normalizePlanOrder,
   normalizePosition,
   normalizePositionMode,
   normalizeStopOrder,
-  normalizeTimestampToSeconds,
   normalizeTicker,
+  normalizeTimestampToSeconds,
   toIntegerString,
   toMexcSymbol,
   toNumber,
@@ -179,7 +181,7 @@ export class MexcExchange extends BaseExchange {
   // trailing window.
   private pendingStopSnapshotRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI);
@@ -215,26 +217,41 @@ export class MexcExchange extends BaseExchange {
     if (!useExternalPublicData) {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
-      this.store.update({
-        markets,
-        loaded: { ...this.store.loaded, markets: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            markets,
+            loaded: { ...this.store.loaded, markets: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
 
       const tickers = await this.fetchTickers();
       if (this.isDisposed) return;
-      this.store.update({
-        tickers,
-        loaded: { ...this.store.loaded, tickers: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            tickers,
+            loaded: { ...this.store.loaded, tickers: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
 
       this.publicWebsocket.connectAndSubscribe();
       this.log(`Loaded ${Math.min(markets.length, tickers.length)} MEXC markets`);
     }
 
     if (this.isPublicDataOnly) {
-      this.store.update({
-        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
       return;
     }
 
@@ -242,26 +259,44 @@ export class MexcExchange extends BaseExchange {
 
     try {
       this.accountPositionMode = await this.fetchPositionMode();
-      this.store.setSetting('isHedged', this.accountPositionMode === PositionMode.Hedged);
+      this.store.apply(
+        nativeFixture(
+          { options: { ...this.store.options, ['isHedged']: this.accountPositionMode === PositionMode.Hedged } },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     } catch (err: any) {
-      this.log(`Failed to load MEXC position mode: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
+      this.log(
+        `Failed to load MEXC position mode: ${err?.response?.data?.message || err?.message}`,
+        LogSeverity.Warning,
+      );
     }
 
     await Promise.all([
       this.fetchBalanceAndPositions().then(({ balance, positions }) => {
         if (this.isDisposed) return;
-        this.store.update({
-          balance,
-          positions,
-          loaded: { ...this.store.loaded, balance: true, positions: true },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              balance,
+              positions,
+              loaded: { ...this.store.loaded, balance: true, positions: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       }),
       this.fetchOrders().then((orders) => {
         if (this.isDisposed) return;
-        this.store.update({
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              orders,
+              loaded: { ...this.store.loaded, orders: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
       }),
     ]);
 
@@ -275,11 +310,26 @@ export class MexcExchange extends BaseExchange {
     try {
       const { balance, positions } = await this.fetchBalanceAndPositions();
       if (this.isDisposed) return;
-      this.store.addOrUpdatePositionsFull(positions);
-      this.store.update({
-        balance,
-        loaded: { ...this.store.loaded, balance: true, positions: true },
-      });
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return this.store.apply(
+          nativeFixture(
+            {
+              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+      this.store.apply(
+        nativeFixture(
+          {
+            balance,
+            loaded: { ...this.store.loaded, balance: true, positions: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
     }
@@ -298,9 +348,7 @@ export class MexcExchange extends BaseExchange {
   fetchMarkets = async (): Promise<Market[]> => {
     try {
       const { data } = await this.xhr.get(ENDPOINTS.CONTRACT_DETAIL);
-      return extractRows<Record<string, any>>(data)
-        .filter(isTradableMexcMarket)
-        .map(normalizeMarket);
+      return extractRows<Record<string, any>>(data).filter(isTradableMexcMarket).map(normalizeMarket);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
       return this.store.markets;
@@ -372,7 +420,9 @@ export class MexcExchange extends BaseExchange {
       return uniqBy([...openPositions, ...fakePositions], 'id');
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
-      return symbols ? this.store.positions.filter((position) => symbols.includes(position.symbol)) : this.store.positions;
+      return symbols
+        ? this.store.positions.filter((position) => symbols.includes(position.symbol))
+        : this.store.positions;
     }
   };
 
@@ -403,7 +453,10 @@ export class MexcExchange extends BaseExchange {
             .filter((order): order is Order => !!order),
         );
       } catch (err: any) {
-        this.log(`Failed to fetch MEXC plan orders: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
+        this.log(
+          `Failed to fetch MEXC plan orders: ${err?.response?.data?.message || err?.message}`,
+          LogSeverity.Warning,
+        );
       }
 
       try {
@@ -424,7 +477,10 @@ export class MexcExchange extends BaseExchange {
             .filter((order): order is Order => !!order),
         );
       } catch (err: any) {
-        this.log(`Failed to fetch MEXC position TP/SL orders: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
+        this.log(
+          `Failed to fetch MEXC position TP/SL orders: ${err?.response?.data?.message || err?.message}`,
+          LogSeverity.Warning,
+        );
       }
     }
 
@@ -470,10 +526,19 @@ export class MexcExchange extends BaseExchange {
             !this.isRecentlyCanceledStopLikeOrder(order) &&
             this.isRecentlyPlacedStopLikeOrder(order),
         );
-        this.store.setOrdersForSymbol(
-          symbol,
-          uniqBy([...symbolOrders, ...existingOpenOrders, ...shieldedStopLikeOrders], 'id'),
-        );
+        (() => {
+          const nativeSymbol = symbol;
+          const incoming: StoreData['orders'] = uniqBy(
+            [...symbolOrders, ...existingOpenOrders, ...shieldedStopLikeOrders],
+            'id',
+          );
+          return this.store.apply(
+            nativeFixture(
+              { orders: [...this.store.orders.filter((row) => row.symbol !== nativeSymbol), ...incoming] },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     } else {
       // Full-scope refreshes are authoritative for the whole account, so
@@ -489,10 +554,15 @@ export class MexcExchange extends BaseExchange {
           !this.isRecentlyCanceledStopLikeOrder(order) &&
           this.isRecentlyPlacedStopLikeOrder(order),
       );
-      this.store.update({
-        orders: uniqBy([...orders, ...shieldedStopLikeOrders], 'id'),
-        loaded: { ...this.store.loaded, orders: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            orders: uniqBy([...orders, ...shieldedStopLikeOrders], 'id'),
+            loaded: { ...this.store.loaded, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     }
 
     return orders;
@@ -516,7 +586,10 @@ export class MexcExchange extends BaseExchange {
         });
         this.assertCommonSuccess(data, 'MEXC open orders read');
         const payload = extractData(data);
-        if (!Array.isArray(payload) && !['orders', 'items'].some((key) => Array.isArray(payload?.[key]) || Array.isArray(payload?.data?.[key]))) {
+        if (
+          !Array.isArray(payload) &&
+          !['orders', 'items'].some((key) => Array.isArray(payload?.[key]) || Array.isArray(payload?.data?.[key]))
+        ) {
           throw new Error('Invalid MEXC open orders read');
         }
         for (const row of extractRows<Record<string, any>>(data, ['orders', 'items'])) {
@@ -525,7 +598,10 @@ export class MexcExchange extends BaseExchange {
           orders.push(order);
         }
       } catch (err: any) {
-        this.log(`Failed to fetch MEXC open orders: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
+        this.log(
+          `Failed to fetch MEXC open orders: ${err?.response?.data?.message || err?.message}`,
+          LogSeverity.Warning,
+        );
         throw err;
       }
     }
@@ -542,14 +618,25 @@ export class MexcExchange extends BaseExchange {
       for (const symbol of symbols) {
         const symbolRegularOrders = regularOrders.filter((order) => order.symbol === symbol);
         const fetchedIds = new Set(symbolRegularOrders.map((order) => order.id));
-        const symbolStopLikeOrders = this.store.orders.filter((order) => this.shouldPreserveStopLikeOrder(order, symbol));
+        const symbolStopLikeOrders = this.store.orders.filter((order) =>
+          this.shouldPreserveStopLikeOrder(order, symbol),
+        );
         const preservedRegularOrders = this.store.orders.filter((order) =>
           this.shouldPreserveRecentRegularOrder(order, fetchedIds, symbol),
         );
-        this.store.setOrdersForSymbol(
-          symbol,
-          uniqBy([...symbolStopLikeOrders, ...preservedRegularOrders, ...symbolRegularOrders], 'id'),
-        );
+        (() => {
+          const nativeSymbol = symbol;
+          const incoming: StoreData['orders'] = uniqBy(
+            [...symbolStopLikeOrders, ...preservedRegularOrders, ...symbolRegularOrders],
+            'id',
+          );
+          return this.store.apply(
+            nativeFixture(
+              { orders: [...this.store.orders.filter((row) => row.symbol !== nativeSymbol), ...incoming] },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     } else {
       const fetchedIds = new Set(regularOrders.map((order) => order.id));
@@ -557,10 +644,15 @@ export class MexcExchange extends BaseExchange {
       const preservedRegularOrders = this.store.orders.filter((order) =>
         this.shouldPreserveRecentRegularOrder(order, fetchedIds),
       );
-      this.store.update({
-        orders: uniqBy([...stopLikeOrders, ...preservedRegularOrders, ...regularOrders], 'id'),
-        loaded: { ...this.store.loaded, orders: true },
-      });
+      this.store.apply(
+        nativeFixture(
+          {
+            orders: uniqBy([...stopLikeOrders, ...preservedRegularOrders, ...regularOrders], 'id'),
+            loaded: { ...this.store.loaded, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
     }
 
     return regularOrders;
@@ -571,9 +663,17 @@ export class MexcExchange extends BaseExchange {
     if (!current) return order;
     let next = order;
     if (!this.isStopLikeOrder(order) && order.filled < current.filled) {
-      next = { ...order, filled: current.filled, remaining: current.remaining, extra: { ...order.extra, ...current.extra } };
+      next = {
+        ...order,
+        filled: current.filled,
+        remaining: current.remaining,
+        extra: { ...order.extra, ...current.extra },
+      };
     }
-    if (current.status === OrderStatus.Closed || (current.status === OrderStatus.Canceled && order.status === OrderStatus.Open)) {
+    if (
+      current.status === OrderStatus.Closed ||
+      (current.status === OrderStatus.Canceled && order.status === OrderStatus.Open)
+    ) {
       next = { ...next, status: current.status };
     }
     // Retain presence as well as values: a sparse frame after an explicit
@@ -590,10 +690,20 @@ export class MexcExchange extends BaseExchange {
     return {
       ...next,
       info,
-      stopLoss: Object.hasOwn(order.info ?? {}, 'stopLossPrice') ? order.stopLoss : order.stopLoss ?? current.stopLoss,
-      takeProfit: Object.hasOwn(order.info ?? {}, 'takeProfitPrice') ? order.takeProfit : order.takeProfit ?? current.takeProfit,
-      triggerType: order.triggerType ?? (order.type === OrderType.StopLoss ? slTriggerType :
-        order.type === OrderType.TakeProfit ? tpTriggerType : undefined) ?? current.triggerType,
+      stopLoss: Object.hasOwn(order.info ?? {}, 'stopLossPrice')
+        ? order.stopLoss
+        : (order.stopLoss ?? current.stopLoss),
+      takeProfit: Object.hasOwn(order.info ?? {}, 'takeProfitPrice')
+        ? order.takeProfit
+        : (order.takeProfit ?? current.takeProfit),
+      triggerType:
+        order.triggerType ??
+        (order.type === OrderType.StopLoss
+          ? slTriggerType
+          : order.type === OrderType.TakeProfit
+            ? tpTriggerType
+            : undefined) ??
+        current.triggerType,
       slTriggerType,
       tpTriggerType,
     };
@@ -662,13 +772,18 @@ export class MexcExchange extends BaseExchange {
     const payload = extractData<Record<string, any>>(data);
     const version = toIntegerString(payload?.version);
     const number = (value: unknown): number =>
-      typeof value === 'number' || (typeof value === 'string' && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(value.trim())) ? Number(value) : NaN;
-    const validSide = (rows: unknown): boolean => Array.isArray(rows) && rows.every((row) => {
-      if (!Array.isArray(row) || row.length < 2) return false;
-      const price = number(row[0]);
-      const volume = number(row[1]);
-      return Number.isFinite(price) && price > 0 && Number.isFinite(volume) && volume >= 0;
-    });
+      typeof value === 'number' ||
+      (typeof value === 'string' && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(value.trim()))
+        ? Number(value)
+        : NaN;
+    const validSide = (rows: unknown): boolean =>
+      Array.isArray(rows) &&
+      rows.every((row) => {
+        if (!Array.isArray(row) || row.length < 2) return false;
+        const price = number(row[0]);
+        const volume = number(row[1]);
+        return Number.isFinite(price) && price > 0 && Number.isFinite(volume) && volume >= 0;
+      });
     if (!/^\d+$/.test(version) || !validSide(payload?.bids) || !validSide(payload?.asks)) {
       throw new Error('Invalid MEXC depth snapshot');
     }
@@ -697,11 +812,21 @@ export class MexcExchange extends BaseExchange {
       if (!orderId) throw new Error('MEXC order placement returned no order id');
       this.addOptimisticRegularOrder(opts, orderId);
       if (opts.timeInForce === OrderTimeInForce.PostOnly) {
-        this.store.updateOrder({ id: orderId }, { timeInForce: OrderTimeInForce.PostOnly });
+        (() => {
+          const target = { id: orderId };
+          const changes: Partial<StoreData['orders'][number]> = { timeInForce: OrderTimeInForce.PostOnly };
+          return this.store.apply(
+            nativeFixture(
+              { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
       return [orderId];
     } catch (err: any) {
-      const message = err?.response?.data?.message || err?.response?.data?.msg || err?.message || 'MEXC order placement failed';
+      const message =
+        err?.response?.data?.message || err?.response?.data?.msg || err?.message || 'MEXC order placement failed';
       this.emitAndLogError(message);
       throw err;
     }
@@ -736,7 +861,8 @@ export class MexcExchange extends BaseExchange {
       stopLossPrice: opts.stopLoss === undefined ? undefined : `${adjust(opts.stopLoss, market.precision.price)}`,
       takeProfitPrice: opts.takeProfit === undefined ? undefined : `${adjust(opts.takeProfit, market.precision.price)}`,
       lossTrend: opts.stopLoss === undefined ? undefined : this.stopOrderTrend({ ...opts, type: OrderType.StopLoss }),
-      profitTrend: opts.takeProfit === undefined ? undefined : this.stopOrderTrend({ ...opts, type: OrderType.TakeProfit }),
+      profitTrend:
+        opts.takeProfit === undefined ? undefined : this.stopOrderTrend({ ...opts, type: OrderType.TakeProfit }),
     });
   };
 
@@ -750,15 +876,17 @@ export class MexcExchange extends BaseExchange {
   };
 
   private enqueueRegularOrderSubmit = async <T>(task: () => Promise<T>): Promise<T> => {
-    const run = this.regularOrderSubmitQueue.catch(() => undefined).then(async () => {
-      await this.waitForRegularOrderSubmitSlot();
-      try {
-        return await task();
-      } catch (err: any) {
-        this.noteRegularOrderSubmitError(err);
-        throw err;
-      }
-    });
+    const run = this.regularOrderSubmitQueue
+      .catch(() => undefined)
+      .then(async () => {
+        await this.waitForRegularOrderSubmitSlot();
+        try {
+          return await task();
+        } catch (err: any) {
+          this.noteRegularOrderSubmitError(err);
+          throw err;
+        }
+      });
 
     this.regularOrderSubmitQueue = run.then(
       () => undefined,
@@ -825,7 +953,10 @@ export class MexcExchange extends BaseExchange {
     }
 
     const config = await this.ensureSymbolConfig(opts.symbol);
-    const leverage = Math.min(Math.max(this.getLeverageForOrder({ ...opts, reduceOnly: true }), market.limits.leverage.min), market.limits.leverage.max);
+    const leverage = Math.min(
+      Math.max(this.getLeverageForOrder({ ...opts, reduceOnly: true }), market.limits.leverage.min),
+      market.limits.leverage.max,
+    );
     const payload = omitUndefined({
       symbol: market.id,
       vol,
@@ -849,13 +980,18 @@ export class MexcExchange extends BaseExchange {
       this.scheduleStopOrderSnapshotRefresh(opts.symbol);
       return orderId;
     } catch (err: any) {
-      const message = err?.response?.data?.message || err?.response?.data?.msg || err?.message || 'MEXC plan order placement failed';
+      const message =
+        err?.response?.data?.message || err?.response?.data?.msg || err?.message || 'MEXC plan order placement failed';
       this.emitAndLogError(message);
       throw err;
     }
   };
 
-  private placePositionStopOrder = async (opts: PlaceOrderOpts, market: Market, triggerPrice: number): Promise<string> => {
+  private placePositionStopOrder = async (
+    opts: PlaceOrderOpts,
+    market: Market,
+    triggerPrice: number,
+  ): Promise<string> => {
     const targetSide = opts.side === OrderSide.Sell ? PositionSide.Long : PositionSide.Short;
     let position = this.findOpenPosition(opts.symbol, targetSide, this.store.positions);
     if (!position || !this.nativePositionId(position)) {
@@ -910,8 +1046,7 @@ export class MexcExchange extends BaseExchange {
       const { data } = await this.xhr.post(ENDPOINTS.STOP_ORDER_PLACE, payload);
       const responseData = extractData(data);
       const responseRow = Array.isArray(responseData) ? responseData[0] : responseData;
-      const scalarId =
-        typeof responseData === 'string' || typeof responseData === 'number' ? responseData : undefined;
+      const scalarId = typeof responseData === 'string' || typeof responseData === 'number' ? responseData : undefined;
       const orderId = toIntegerString(responseRow?.id ?? responseRow?.orderId ?? scalarId);
       if (!orderId) throw new Error('MEXC position TP/SL placement returned no order id');
       this.addOptimisticStopOrder(opts, market, orderId, triggerPrice, '__mexcStopOrder');
@@ -919,7 +1054,10 @@ export class MexcExchange extends BaseExchange {
       return orderId;
     } catch (err: any) {
       const message =
-        err?.response?.data?.message || err?.response?.data?.msg || err?.message || 'MEXC position TP/SL placement failed';
+        err?.response?.data?.message ||
+        err?.response?.data?.msg ||
+        err?.message ||
+        'MEXC position TP/SL placement failed';
       this.emitAndLogError(message);
       throw err;
     }
@@ -972,18 +1110,32 @@ export class MexcExchange extends BaseExchange {
       timeInForce: opts.timeInForce || OrderTimeInForce.GoodTillCancel,
       stopLoss: opts.stopLoss === undefined ? undefined : toNumber(adjust(opts.stopLoss, market.precision.price)),
       takeProfit: opts.takeProfit === undefined ? undefined : toNumber(adjust(opts.takeProfit, market.precision.price)),
-      slTriggerType: opts.stopLoss === undefined ? opts.slTriggerType :
-        opts.slTriggerType ?? opts.triggerType ?? OrderStopTriggerType.LastPrice,
-      tpTriggerType: opts.takeProfit === undefined ? opts.tpTriggerType :
-        opts.tpTriggerType ?? opts.triggerType ?? OrderStopTriggerType.LastPrice,
+      slTriggerType:
+        opts.stopLoss === undefined
+          ? opts.slTriggerType
+          : (opts.slTriggerType ?? opts.triggerType ?? OrderStopTriggerType.LastPrice),
+      tpTriggerType:
+        opts.takeProfit === undefined
+          ? opts.tpTriggerType
+          : (opts.tpTriggerType ?? opts.triggerType ?? OrderStopTriggerType.LastPrice),
       lastUpdate: virtualClock.getCurrentTimeMs(),
       info: {
         __mexcOptimisticRegular: true,
         symbol: market.id,
         vol: nativeVol,
         price: `${price}`,
-        ...(opts.stopLoss === undefined ? {} : { stopLossPrice: `${adjust(opts.stopLoss, market.precision.price)}`, lossTrend: this.stopOrderTrend({ ...opts, type: OrderType.StopLoss }) }),
-        ...(opts.takeProfit === undefined ? {} : { takeProfitPrice: `${adjust(opts.takeProfit, market.precision.price)}`, profitTrend: this.stopOrderTrend({ ...opts, type: OrderType.TakeProfit }) }),
+        ...(opts.stopLoss === undefined
+          ? {}
+          : {
+              stopLossPrice: `${adjust(opts.stopLoss, market.precision.price)}`,
+              lossTrend: this.stopOrderTrend({ ...opts, type: OrderType.StopLoss }),
+            }),
+        ...(opts.takeProfit === undefined
+          ? {}
+          : {
+              takeProfitPrice: `${adjust(opts.takeProfit, market.precision.price)}`,
+              profitTrend: this.stopOrderTrend({ ...opts, type: OrderType.TakeProfit }),
+            }),
       },
       extra: {
         remainingNative: nativeVol,
@@ -991,7 +1143,23 @@ export class MexcExchange extends BaseExchange {
     } as Order;
     // Native WS may precede the HTTP acknowledgement. Its explicit values
     // take precedence; only metadata omitted on the wire falls back to intent.
-    this.store.addOrUpdateOrder(existing ? this.mergeOrderSnapshot(existing, optimistic) : optimistic);
+    (() => {
+      const incoming: StoreData['orders'] = [existing ? this.mergeOrderSnapshot(existing, optimistic) : optimistic];
+      return this.store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   private addOptimisticStopOrder = (
@@ -1003,33 +1171,53 @@ export class MexcExchange extends BaseExchange {
   ): void => {
     const nativeAmount = toNumber(opts.amount, 0);
     const amount = nativeAmount === 0 ? 0 : nativeVolumeToAmount(nativeAmount, market);
-    const trigger = (opts.type === OrderType.TakeProfit ? opts.tpTriggerType : opts.slTriggerType) ??
-      opts.triggerType ?? OrderStopTriggerType.LastPrice;
-    this.store.addOrUpdateOrder({
-      id: orderId,
-      status: OrderStatus.Open,
-      symbol: opts.symbol,
-      type: opts.type,
-      side: opts.side,
-      price: toNumber(adjust(triggerPrice, market.precision.price)),
-      amount,
-      filled: 0,
-      remaining: amount,
-      reduceOnly: true,
-      timeInForce: OrderTimeInForce.GoodTillCancel,
-      triggerType: trigger,
-      slTriggerType: opts.type === OrderType.StopLoss ? trigger : opts.slTriggerType,
-      tpTriggerType: opts.type === OrderType.TakeProfit ? trigger : opts.tpTriggerType,
-      lastUpdate: virtualClock.getCurrentTimeMs(),
-      info: {
-        [marker]: true,
-        symbol: market.id,
-        vol: nativeAmount,
-      },
-      extra: {
-        remainingNative: nativeAmount,
-      },
-    } as Order);
+    const trigger =
+      (opts.type === OrderType.TakeProfit ? opts.tpTriggerType : opts.slTriggerType) ??
+      opts.triggerType ??
+      OrderStopTriggerType.LastPrice;
+    (() => {
+      const incoming: StoreData['orders'] = [
+        {
+          id: orderId,
+          status: OrderStatus.Open,
+          symbol: opts.symbol,
+          type: opts.type,
+          side: opts.side,
+          price: toNumber(adjust(triggerPrice, market.precision.price)),
+          amount,
+          filled: 0,
+          remaining: amount,
+          reduceOnly: true,
+          timeInForce: OrderTimeInForce.GoodTillCancel,
+          triggerType: trigger,
+          slTriggerType: opts.type === OrderType.StopLoss ? trigger : opts.slTriggerType,
+          tpTriggerType: opts.type === OrderType.TakeProfit ? trigger : opts.tpTriggerType,
+          lastUpdate: virtualClock.getCurrentTimeMs(),
+          info: {
+            [marker]: true,
+            symbol: market.id,
+            vol: nativeAmount,
+          },
+          extra: {
+            remainingNative: nativeAmount,
+          },
+        } as Order,
+      ];
+      return this.store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     // Shield the id so a rapid subsequent `fetchAndSetOrders([symbol])` won't
     // wholesale-drop the optimistic row while `planorder/list` or
     // `stoporder/list` still lag the placement HTTP `200`.
@@ -1073,7 +1261,10 @@ export class MexcExchange extends BaseExchange {
       this.pendingStopSnapshotRefreshTimers.delete(symbol);
       if (this.isDisposed) return;
       void this.fetchAndSetOrders([symbol]).catch((err: any) => {
-        this.log(`Failed to refresh MEXC TP/SL orders: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
+        this.log(
+          `Failed to refresh MEXC TP/SL orders: ${err?.response?.data?.message || err?.message}`,
+          LogSeverity.Warning,
+        );
       });
     }, MEXC_STOP_SNAPSHOT_REFRESH_DELAY_MS);
     (timeout as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
@@ -1094,7 +1285,8 @@ export class MexcExchange extends BaseExchange {
   };
 
   private stopOrderTrend = (opts: PlaceOrderOpts): number => {
-    const triggerType = (opts.type === OrderType.TakeProfit ? opts.tpTriggerType : opts.slTriggerType) ?? opts.triggerType;
+    const triggerType =
+      (opts.type === OrderType.TakeProfit ? opts.tpTriggerType : opts.slTriggerType) ?? opts.triggerType;
     if (triggerType === OrderStopTriggerType.MarkPrice) return 2;
     if (triggerType === OrderStopTriggerType.IndexPrice) return 3;
     return MEXC_TRIGGER_TREND_LATEST_PRICE;
@@ -1117,7 +1309,9 @@ export class MexcExchange extends BaseExchange {
             throw err;
           }
           this.nativeBatchOrdersAvailable = false;
-          this.log('MEXC native batch order placement is unavailable for this account; falling back to paced sequential placement.');
+          this.log(
+            'MEXC native batch order placement is unavailable for this account; falling back to paced sequential placement.',
+          );
         }
       }
       return await this.placeOrdersSequentially(orders, MEXC_SCALED_ORDER_SUBMIT_GAP_MS);
@@ -1151,7 +1345,9 @@ export class MexcExchange extends BaseExchange {
     order.type === OrderType.Limit || order.type === OrderType.Market;
 
   private placeRegularOrdersBatch = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
-    await Promise.all([...new Set(orders.map((order) => order.symbol))].map((symbol) => this.ensureSymbolConfig(symbol)));
+    await Promise.all(
+      [...new Set(orders.map((order) => order.symbol))].map((symbol) => this.ensureSymbolConfig(symbol)),
+    );
 
     const payload = orders.map((order) => ({
       ...this.formatRegularOrderPayload(order),
@@ -1171,7 +1367,16 @@ export class MexcExchange extends BaseExchange {
         if (!orderId) return;
         this.addOptimisticRegularOrder(order, orderId);
         if (order.timeInForce === OrderTimeInForce.PostOnly) {
-          this.store.updateOrder({ id: orderId }, { timeInForce: OrderTimeInForce.PostOnly });
+          (() => {
+            const target = { id: orderId };
+            const changes: Partial<StoreData['orders'][number]> = { timeInForce: OrderTimeInForce.PostOnly };
+            return this.store.apply(
+              nativeFixture(
+                { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
       });
       return ids;
@@ -1182,7 +1387,9 @@ export class MexcExchange extends BaseExchange {
 
   private isNativeBatchAccessDeniedError = (err: any): boolean => {
     const code = toNumber(err?.response?.data?.code ?? err?.code, Number.NaN);
-    const message = String(err?.response?.data?.message ?? err?.response?.data?.msg ?? err?.message ?? '').toLowerCase();
+    const message = String(
+      err?.response?.data?.message ?? err?.response?.data?.msg ?? err?.message ?? '',
+    ).toLowerCase();
     return (
       code === 511 ||
       message.includes('do not have access') ||
@@ -1193,7 +1400,9 @@ export class MexcExchange extends BaseExchange {
 
   private assertRegularOrderBatchSucceeded = (payload: any, totalOrderCount: number): void => {
     if (payload?.success === false) {
-      const error = new Error(payload.message || payload.msg || `MEXC batch order placement failed with code ${payload.code}`);
+      const error = new Error(
+        payload.message || payload.msg || `MEXC batch order placement failed with code ${payload.code}`,
+      );
       (error as any).response = { data: payload };
       throw error;
     }
@@ -1261,8 +1470,16 @@ export class MexcExchange extends BaseExchange {
       const order = normalizeOrder(raw, this.store.marketsBySymbol[original.symbol]);
       const volume = toNumber(raw?.vol, Number.NaN);
       const filled = toNumber(raw?.dealVol, Number.NaN);
-      if (!order || order.id !== original.id || order.symbol !== original.symbol ||
-          !Number.isFinite(volume) || volume <= 0 || !Number.isFinite(filled) || filled < 0 || filled > volume) {
+      if (
+        !order ||
+        order.id !== original.id ||
+        order.symbol !== original.symbol ||
+        !Number.isFinite(volume) ||
+        volume <= 0 ||
+        !Number.isFinite(filled) ||
+        filled < 0 ||
+        filled > volume
+      ) {
         throw new Error('Invalid MEXC amend order read; replacement withheld');
       }
       const current = this.store.orders.find((row) => row.id === original.id);
@@ -1270,16 +1487,75 @@ export class MexcExchange extends BaseExchange {
         throw new Error('MEXC amend read regressed cumulative fills; replacement withheld');
       }
       if (order.status === OrderStatus.Closed) {
-        if (current?.status !== OrderStatus.Closed || current.filled < order.filled) this.store.addOrUpdateOrder(order);
-        this.store.markOrdersTerminal([{ id: order.id }], OrderStatus.Closed);
+        if (current?.status !== OrderStatus.Closed || current.filled < order.filled)
+          (() => {
+            const incoming: StoreData['orders'] = [order];
+            return this.store.apply(
+              nativeFixture(
+                {
+                  orders: [
+                    ...this.store.orders.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
         throw new Error('MEXC original order filled during amend');
       }
       if (current?.status === OrderStatus.Closed) throw new Error('MEXC original order filled during amend');
       const state = toNumber(raw.state, Number.NaN);
       if (state === 4) {
         const reconciled = this.mergeOrderSnapshot(order, current ?? original);
-        this.store.addOrUpdateOrder(reconciled);
-        this.store.markOrdersTerminal([{ id: order.id }], OrderStatus.Canceled);
+        (() => {
+          const incoming: StoreData['orders'] = [reconciled];
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
         return reconciled;
       }
       if ((state !== 1 && state !== 2) || attempt === 5) {
@@ -1337,10 +1613,25 @@ export class MexcExchange extends BaseExchange {
     }
 
     this.noteRecentlyCanceledStopLikeOrders(acceptedStopLikeCancels);
-    this.store.markOrdersTerminal(
-      orders.filter((order) => !this.store.orders.some((current) => current.id === order.id && current.status === OrderStatus.Closed)).map((order) => ({ id: order.id })),
-      OrderStatus.Canceled,
-    );
+    (() => {
+      const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders
+        .filter(
+          (order) =>
+            !this.store.orders.some((current) => current.id === order.id && current.status === OrderStatus.Closed),
+        )
+        .map((order) => ({ id: order.id }));
+      const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+      return this.store.apply(
+        nativeFixture(
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   private shouldPreserveStopLikeOrder = (order: Order, symbol?: string): boolean =>
@@ -1354,11 +1645,7 @@ export class MexcExchange extends BaseExchange {
   // reflected a WS-delivered or just-placed order. Bounded by
   // `MEXC_RECENT_REGULAR_ORDER_PRESERVE_MS` so orders whose cancellation
   // we missed still clear within one window.
-  private shouldPreserveRecentRegularOrder = (
-    order: Order,
-    fetchedIds: Set<string>,
-    symbol?: string,
-  ): boolean => {
+  private shouldPreserveRecentRegularOrder = (order: Order, fetchedIds: Set<string>, symbol?: string): boolean => {
     if (fetchedIds.has(order.id)) return false;
     if (order.status !== OrderStatus.Open) return false;
     if (this.isStopLikeOrder(order)) return false;
@@ -1398,8 +1685,7 @@ export class MexcExchange extends BaseExchange {
     }
   };
 
-  private isRecentlyCanceledStopLikeOrder = (order: Order): boolean =>
-    this.isRecentlyCanceledStopLikeOrderId(order.id);
+  private isRecentlyCanceledStopLikeOrder = (order: Order): boolean => this.isRecentlyCanceledStopLikeOrderId(order.id);
 
   // Public shield-check for the private WS handlers. WS frames don't carry a
   // full `Order`, so `handlePlanOrder` / `handleStopOrder` need an id-based
@@ -1434,7 +1720,20 @@ export class MexcExchange extends BaseExchange {
 
     const existing = this.store.orders.find((order) => order.id === cleanId);
     if (existing && existing.status !== OrderStatus.Canceled && existing.status !== OrderStatus.Closed) {
-      this.store.updateOrderStatus({ id: cleanId }, OrderStatus.Canceled);
+      (() => {
+        const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: cleanId }];
+        const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+        return this.store.apply(
+          nativeFixture(
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
 
     const reason = MEXC_ORDER_CANCEL_REASONS[errorCode];
@@ -1467,7 +1766,10 @@ export class MexcExchange extends BaseExchange {
     if (!failedRows.length) return;
 
     const message = failedRows
-      .map((row) => `${toIntegerString(row.orderId) || 'unknown'}: ${row.errorMsg || row.message || row.msg || row.errorCode}`)
+      .map(
+        (row) =>
+          `${toIntegerString(row.orderId) || 'unknown'}: ${row.errorMsg || row.message || row.msg || row.errorCode}`,
+      )
       .join(', ');
     throw new Error(`MEXC order cancellation failed: ${message}`);
   };
@@ -1481,18 +1783,45 @@ export class MexcExchange extends BaseExchange {
     ] as const) {
       const { data } = await this.xhr.post(endpoint, { symbol: market?.id || toMexcSymbol(symbol) });
       this.assertCommonSuccess(data, 'MEXC cancel-all');
-      const orders = this.store.orders.filter((order) => order.symbol === symbol && accepts(order) && order.status !== OrderStatus.Closed);
+      const orders = this.store.orders.filter(
+        (order) => order.symbol === symbol && accepts(order) && order.status !== OrderStatus.Closed,
+      );
       this.noteRecentlyCanceledStopLikeOrders(orders.filter((order) => this.isStopLikeOrder(order)));
-      this.store.markOrdersTerminal(orders.map((order) => ({ id: order.id })), OrderStatus.Canceled);
+      (() => {
+        const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders.map((order) => ({ id: order.id }));
+        const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+        return this.store.apply(
+          nativeFixture(
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
   };
 
   cancelAllOrders = async (): Promise<void> => {
     await this.xhr.post(ENDPOINTS.ORDER_CANCEL_ALL, {});
-    this.store.updateOrdersStatus(
-      this.store.orders.map((order) => ({ id: order.id })),
-      OrderStatus.Canceled,
-    );
+    (() => {
+      const targets: Array<Pick<StoreData['orders'][number], 'id'>> = this.store.orders.map((order) => ({
+        id: order.id,
+      }));
+      const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+      return this.store.apply(
+        nativeFixture(
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
@@ -1513,7 +1842,9 @@ export class MexcExchange extends BaseExchange {
           .map((row) => toNumber(row.maxLeverageView ?? row.maxLeverage, Number.NaN))
           .filter(Number.isFinite);
         const maxLeverage = maxLeverageCandidates.length ? Math.min(...maxLeverageCandidates) : undefined;
-        const marginType = normalizeMarginType(longRow?.openType ?? shortRow?.openType ?? REVERSE_MARGIN_TYPE[config.marginType]);
+        const marginType = normalizeMarginType(
+          longRow?.openType ?? shortRow?.openType ?? REVERSE_MARGIN_TYPE[config.marginType],
+        );
         const nextConfig = {
           ...config,
           buyLeverage,
@@ -1522,9 +1853,9 @@ export class MexcExchange extends BaseExchange {
         };
 
         if (maxLeverage && maxLeverage > 0 && maxLeverage !== market.limits.leverage.max) {
-          this.store.updateMarket(
-            { id: market.id },
-            {
+          (() => {
+            const target = { id: market.id };
+            const changes: Partial<StoreData['markets'][number]> = {
               limits: {
                 ...market.limits,
                 leverage: {
@@ -1532,8 +1863,14 @@ export class MexcExchange extends BaseExchange {
                   max: maxLeverage,
                 },
               },
-            },
-          );
+            };
+            return this.store.apply(
+              nativeFixture(
+                { markets: this.store.markets.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
 
         this.symbolSettings.set(symbol, nextConfig);
@@ -1543,16 +1880,24 @@ export class MexcExchange extends BaseExchange {
           marginType,
           positionMode: config.positionMode,
         };
-        this.store.update({
-          fetchedLeverage: {
-            ...this.store.fetchedLeverage,
-            [symbol]: fetchedLeverage,
-          },
-        });
+        this.store.apply(
+          nativeFixture(
+            {
+              fetchedLeverage: {
+                ...this.store.fetchedLeverage,
+                [symbol]: fetchedLeverage,
+              },
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
         return fetchedLeverage;
       }
     } catch (err: any) {
-      this.log(`Failed to fetch MEXC leverage cap for ${symbol}: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
+      this.log(
+        `Failed to fetch MEXC leverage cap for ${symbol}: ${err?.response?.data?.message || err?.message}`,
+        LogSeverity.Warning,
+      );
     }
 
     const fetchedLeverage = {
@@ -1561,12 +1906,17 @@ export class MexcExchange extends BaseExchange {
       marginType: config.marginType,
       positionMode: config.positionMode,
     };
-    this.store.update({
-      fetchedLeverage: {
-        ...this.store.fetchedLeverage,
-        [symbol]: fetchedLeverage,
-      },
-    });
+    this.store.apply(
+      nativeFixture(
+        {
+          fetchedLeverage: {
+            ...this.store.fetchedLeverage,
+            [symbol]: fetchedLeverage,
+          },
+        },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
     return fetchedLeverage;
   };
 
@@ -1609,9 +1959,22 @@ export class MexcExchange extends BaseExchange {
       this.symbolSettings.set(symbol, nextConfig);
       this.updateFetchedLeverage(symbol, nextConfig);
     }
-    this.store.setSetting('isHedged', hedged);
+    this.store.apply(
+      nativeFixture(
+        { options: { ...this.store.options, ['isHedged']: hedged } },
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
     const positions = await this.fetchPositions();
-    this.store.addOrUpdatePositionsFull(positions);
+    (() => {
+      const incoming: StoreData['positions'] = positions;
+      return this.store.apply(
+        nativeFixture(
+          { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
+          this.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
   };
 
   changeMarginType = async (isolated: boolean, symbol?: string): Promise<void> => {
@@ -1628,9 +1991,16 @@ export class MexcExchange extends BaseExchange {
     for (const positionType of [1, 2] as const) {
       const { data } = await this.xhr.post(
         ENDPOINTS.CHANGE_LEVERAGE,
-        this.formatChangeLeveragePayload(symbol, market, positionType, leverageByPositionType[positionType], marginType, {
-          includeOpenTypeWithPositionId: true,
-        }),
+        this.formatChangeLeveragePayload(
+          symbol,
+          market,
+          positionType,
+          leverageByPositionType[positionType],
+          marginType,
+          {
+            includeOpenTypeWithPositionId: true,
+          },
+        ),
       );
       this.assertCommonSuccess(data, 'MEXC margin type change');
     }
@@ -1643,17 +2013,22 @@ export class MexcExchange extends BaseExchange {
   };
 
   private updateFetchedLeverage = (symbol: string, config: MexcSymbolConfig): void => {
-    this.store.update({
-      fetchedLeverage: {
-        ...this.store.fetchedLeverage,
-        [symbol]: {
-          buyLeverage: config.buyLeverage,
-          sellLeverage: config.sellLeverage,
-          marginType: config.marginType,
-          positionMode: config.positionMode,
+    this.store.apply(
+      nativeFixture(
+        {
+          fetchedLeverage: {
+            ...this.store.fetchedLeverage,
+            [symbol]: {
+              buyLeverage: config.buyLeverage,
+              sellLeverage: config.sellLeverage,
+              marginType: config.marginType,
+              positionMode: config.positionMode,
+            },
+          },
         },
-      },
-    });
+        this.store.markets.map((row) => row.symbol),
+      ),
+    );
   };
 
   private formatChangeLeveragePayload = (
@@ -1692,7 +2067,8 @@ export class MexcExchange extends BaseExchange {
     const positionMode = position?.positionMode || existingConfig?.positionMode || this.accountPositionMode;
     const longPosition = positions.find((item) => item.side === PositionSide.Long);
     const shortPosition = positions.find((item) => item.side === PositionSide.Short);
-    const oneWayPositionLeverage = positionMode === PositionMode.OneWay && position ? toNumber(position.leverage, 20) : undefined;
+    const oneWayPositionLeverage =
+      positionMode === PositionMode.OneWay && position ? toNumber(position.leverage, 20) : undefined;
     return {
       marginType: normalizeMarginType(position?.info?.openType ?? position?.marginType ?? existingConfig?.marginType),
       buyLeverage:

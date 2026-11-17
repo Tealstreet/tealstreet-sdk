@@ -1,11 +1,13 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { OrderlyExchange } from './orderly.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { OrderStatus } from '../../../types';
 import { v } from '../../../utils/get-key';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { orderlySign } from './orderly.encryption';
 import { BASE_WS_URL, ORDER_SIDE } from './orderly.types';
 import { normalizeSymbol } from './orderly.utils';
@@ -103,7 +105,24 @@ export class OrderlyPrivateWebSocket extends BaseWebSocket<OrderlyExchange> {
     const positions = Array.isArray(data?.positions) ? data.positions : [];
     for (const rawPosition of positions) {
       const position = this.parent.mapPosition(rawPosition);
-      if (position) this.store.addOrUpdatePosition(position);
+      if (position)
+        (() => {
+          const incoming: StoreData['positions'] = [position];
+          return this.store.apply(
+            nativeFixture(
+              {
+                positions: [
+                  ...this.store.positions.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
     }
   };
 
@@ -117,15 +136,42 @@ export class OrderlyPrivateWebSocket extends BaseWebSocket<OrderlyExchange> {
 
     if (status === 'REPLACED' || status === 'NEW' || isPartiallyFilled) {
       if (updatedOrder) {
-        this.store.addOrUpdateOrder(updatedOrder);
+        (() => {
+          const incoming: StoreData['orders'] = [updatedOrder];
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     }
 
     if (status === 'CANCELLED' || status === 'FILLED') {
-      this.store.updateOrderStatus(
-        { id: `${data.orderId}` },
-        status === 'CANCELLED' ? OrderStatus.Canceled : OrderStatus.Closed,
-      );
+      (() => {
+        const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: `${data.orderId}` }];
+        const nativeStatus: StoreData['orders'][number]['status'] =
+          status === 'CANCELLED' ? OrderStatus.Canceled : OrderStatus.Closed;
+        return this.store.apply(
+          nativeFixture(
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
 
     if (updatedOrder) {
@@ -236,7 +282,23 @@ export class OrderlyPrivateWebSocket extends BaseWebSocket<OrderlyExchange> {
         const updatedOrders = this.parent.mapAlgoOrder(row);
 
         for (const order of updatedOrders) {
-          this.store.addOrUpdateOrder(order);
+          (() => {
+            const incoming: StoreData['orders'] = [order];
+            return this.store.apply(
+              nativeFixture(
+                {
+                  orders: [
+                    ...this.store.orders.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
       }
 
@@ -251,15 +313,37 @@ export class OrderlyPrivateWebSocket extends BaseWebSocket<OrderlyExchange> {
       }
 
       if (status === 'CANCELLED' || status === 'FILLED') {
-        this.store.updateOrderStatus(
-          { id: `${v(row, 'algoOrderId')}` },
-          status === 'CANCELLED' ? OrderStatus.Canceled : OrderStatus.Closed,
-        );
-        for (const childOrder of row.childOrders || []) {
-          this.store.updateOrderStatus(
-            { id: `${v(childOrder, 'algoOrderId')}` },
-            status === 'CANCELLED' ? OrderStatus.Canceled : OrderStatus.Closed,
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: `${v(row, 'algoOrderId')}` }];
+          const nativeStatus: StoreData['orders'][number]['status'] =
+            status === 'CANCELLED' ? OrderStatus.Canceled : OrderStatus.Closed;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
           );
+        })();
+        for (const childOrder of row.childOrders || []) {
+          (() => {
+            const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: `${v(childOrder, 'algoOrderId')}` }];
+            const nativeStatus: StoreData['orders'][number]['status'] =
+              status === 'CANCELLED' ? OrderStatus.Canceled : OrderStatus.Closed;
+            return this.store.apply(
+              nativeFixture(
+                {
+                  orders: this.store.orders.map((row) =>
+                    targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+                  ),
+                },
+                this.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
         }
       }
     });

@@ -1,15 +1,17 @@
-import type { Store } from '../../../store/store.interface';
+import type { AsterDEXStreamDepth, AsterDEXStreamTrade } from '../../../exchanges/asterdex/asterdex.types';
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OrderBook, Ticker, Writable } from '../../../types';
 import type { AsterDEXExchange } from './asterdex.exchange';
-import type { AsterDEXStreamDepth, AsterDEXStreamTrade } from '../../../exchanges/asterdex/asterdex.types';
 
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
-import { calcOrderBookTotal } from '../../../utils/orderbook';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { ASTERDEX_ENDPOINTS } from '../../../exchanges/asterdex/asterdex.types';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { FrameStore } from '../../../store/frameStore';
+import { calcOrderBookTotal } from '../../../utils/orderbook';
+import { nativeFixture } from '../../cutover/nativeFixture';
 
 type MessageHandlers = {
   [topic: string]: Array<(data: any) => void>;
@@ -41,7 +43,7 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
     kline: [(d: any) => this.handleKlineUpdate(d)],
   };
 
-  constructor(parent: AsterDEXExchange, _store: Store) {
+  constructor(parent: AsterDEXExchange, _store: FrameStore) {
     super(parent);
 
     // BaseWebSocket.onClose is an instance arrow-function field (not a
@@ -163,7 +165,7 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
     // Track subscribed topics
     // For depth and kline streams, we store the full stream name as the key
     streams.forEach((stream) => {
-      // Store the full stream as a key for proper resubscription
+      // FrameStore the full stream as a key for proper resubscription
       if (stream.includes('@depth') || stream.includes('@kline')) {
         this.topics[stream] = [stream];
       } else {
@@ -328,7 +330,16 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
     if (data.v) update.volume = parseFloat(data.v); // Volume
     if (data.q) update.quoteVolume = parseFloat(data.q); // Quote volume
 
-    this.parent.store.updateTicker(ticker, update);
+    (() => {
+      const target = ticker;
+      const changes: Partial<StoreData['tickers'][number]> = update;
+      return this.parent.store.apply(
+        nativeFixture(
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     this.parent.emitter.emit('ticker', data.s, ticker);
   }
 
@@ -382,10 +393,19 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
     // Update ticker with best bid/ask from the authoritative snapshot.
     const ticker = this.parent.store.tickersBySymbol[data.s];
     if (ticker) {
-      this.parent.store.updateTicker(ticker, {
-        bid: orderBook.bids[0].price,
-        ask: orderBook.asks[0].price,
-      });
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = {
+          bid: orderBook.bids[0].price,
+          ask: orderBook.asks[0].price,
+        };
+        return this.parent.store.apply(
+          nativeFixture(
+            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
 
     const subscription = this.orderBookSubscriptions.get(`${data.s.toLowerCase()}@depth20@100ms`);
@@ -406,9 +426,18 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
     // Use O(1) hashmap lookup instead of O(n) find
     const ticker = this.parent.store.tickersBySymbol[data.s];
     if (ticker) {
-      this.parent.store.updateTicker(ticker, {
-        last: parseFloat(data.p),
-      });
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = {
+          last: parseFloat(data.p),
+        };
+        return this.parent.store.apply(
+          nativeFixture(
+            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
 
     this.parent.emitter.emit('trade', {
@@ -435,7 +464,16 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
     }
     if (data.T) update.fundingTime = data.T;
 
-    this.parent.store.updateTicker(ticker, update);
+    (() => {
+      const target = ticker;
+      const changes: Partial<StoreData['tickers'][number]> = update;
+      return this.parent.store.apply(
+        nativeFixture(
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     this.parent.emitter.emit('markPrice', data.s, ticker);
   }
 

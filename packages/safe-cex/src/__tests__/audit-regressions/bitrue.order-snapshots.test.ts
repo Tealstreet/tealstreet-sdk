@@ -1,26 +1,32 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
 
 const fixture = () => {
   vi.useFakeTimers();
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'E-BTC-USDT',
-        symbol: 'E-BTC-USDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        contractSize: 10,
-        precision: { amount: 10, price: 0.1 },
-        limits: { amount: { min: 10, max: 10000 }, leverage: { min: 1, max: 100 } },
+        markets: [
+          {
+            id: 'E-BTC-USDT',
+            symbol: 'E-BTC-USDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            contractSize: 10,
+            precision: { amount: 10, price: 0.1 },
+            limits: { amount: { min: 10, max: 10000 }, leverage: { min: 1, max: 100 } },
+          },
+        ],
       },
-    ],
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BitrueExchange('bitrue', { key: 'key', secret: 'secret' }, store);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
   return { exchange, store };
@@ -67,7 +73,12 @@ it('flattens authoritative protective children and keeps their identity on priva
     amount: 100,
     slTriggerType: OrderStopTriggerType.LastPrice,
   });
-  store.update({ orders: rows });
+  store.apply(
+    nativeFixture(
+      { orders: rows },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   exchange.privateWebsocket.handleOrderTradeUpdate({
     e: 'ORDER_TRADE_UPDATE',
     E: 1,
@@ -95,11 +106,9 @@ it('flattens authoritative protective children and keeps their identity on priva
 it('classifies standalone conditionals before their MARKET execution type', async () => {
   const { exchange } = fixture();
   exchange.xhr = {
-    get: vi
-      .fn()
-      .mockResolvedValue({
-        data: { code: '0', data: [{ ...child, action: 'CLOSE', origQty: undefined, executedQty: 2 }] },
-      }),
+    get: vi.fn().mockResolvedValue({
+      data: { code: '0', data: [{ ...child, action: 'CLOSE', origQty: undefined, executedQty: 2 }] },
+    }),
   } as any;
   expect(await exchange.fetchOrdersForSymbol('E-BTC-USDT')).toMatchObject([
     { type: OrderType.StopLoss, amount: 2, filled: 0, remaining: 2 },
@@ -120,13 +129,16 @@ it('retains the complete previous symbol snapshot when any child is malformed', 
     reduceOnly: false,
     lastUpdate: 0,
   };
-  store.update({ orders: [previous] });
+  store.apply(
+    nativeFixture(
+      { orders: [previous] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   exchange.xhr = {
-    get: vi
-      .fn()
-      .mockResolvedValue({
-        data: { code: '0', data: [{ ...parent, childOrders: [{ ...child, orderId: undefined }] }] },
-      }),
+    get: vi.fn().mockResolvedValue({
+      data: { code: '0', data: [{ ...parent, childOrders: [{ ...child, orderId: undefined }] }] },
+    }),
   } as any;
   expect(await exchange.fetchOrdersForSymbol('E-BTC-USDT')).toEqual([previous]);
 });

@@ -1,10 +1,14 @@
+import type { StoreData } from '../../../generated/StoreData';
+
 import throttle from 'lodash/throttle';
 
-import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker, timeframeToSeconds } from '../../../types';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { FrameStore } from '../../../store/frameStore';
+import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker, timeframeToSeconds } from '../../../types';
+import { nativeFixture } from '../../cutover/nativeFixture';
 import { ParadexExchange } from './paradex.exchange';
-import { BASE_WS_URL } from './paradex.types';
 import { decodeParadexMessage } from './paradex.sbe';
+import { BASE_WS_URL } from './paradex.types';
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -49,8 +53,8 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
   private ohlcvPollingActive = new Map<string, boolean>();
   private ohlcvSubscriptionVersions = new Map<string, number>();
   private lastCandleCache = new Map<string, Candle>();
-  private ohlcvCallbacks = new Map<string, Set<(candle: Candle) => void>>(); // Store callbacks for trade updates
-  private ohlcvIntervals = new Map<string, number>(); // Store interval in ms for each subscription
+  private ohlcvCallbacks = new Map<string, Set<(candle: Candle) => void>>(); // FrameStore callbacks for trade updates
+  private ohlcvIntervals = new Map<string, number>(); // FrameStore interval in ms for each subscription
   private ohlcvLastTradeAt = new Map<string, number>();
   private ohlcvRevisions = new Map<string, number>();
   private ohlcvLastRecoveryAt = new Map<string, number>();
@@ -146,7 +150,8 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
             this.pendingSubscribeRequests.delete(data.id);
             if (data.error || data.result?.channel !== pendingSubscribe.channel) {
               this.retrySubscribeChannel(
-                pendingSubscribe.channel, pendingSubscribe.attempt,
+                pendingSubscribe.channel,
+                pendingSubscribe.attempt,
                 data.error?.message || 'missing or mismatched subscription acknowledgement',
               );
             }
@@ -220,13 +225,16 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       LogSeverity.Warning,
     );
 
-    const timeoutId = setTimeout(() => {
-      this.subscriptionRetryTimeouts.delete(timeoutId);
-      if (this.isDisposed || !this.hasActiveSubscriptionInterest(channel)) {
-        return;
-      }
-      this.sendJsonRpcSubscription('subscribe', channel, attempt + 1);
-    }, SUBSCRIPTION_RETRY_DELAY_MS * (attempt + 1));
+    const timeoutId = setTimeout(
+      () => {
+        this.subscriptionRetryTimeouts.delete(timeoutId);
+        if (this.isDisposed || !this.hasActiveSubscriptionInterest(channel)) {
+          return;
+        }
+        this.sendJsonRpcSubscription('subscribe', channel, attempt + 1);
+      },
+      SUBSCRIPTION_RETRY_DELAY_MS * (attempt + 1),
+    );
 
     this.subscriptionRetryTimeouts.add(timeoutId);
   };
@@ -269,80 +277,97 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
   };
 
   private handleBBOUpdate = (data: any) => {
-      try {
-        const bboData = data?.data;
-        if (!bboData) {
-          return;
-        }
-
-        const channel = String(data?.channel || '');
-        const channelSymbol = channel.split('.')[1];
-        const symbol = String(bboData.market || channelSymbol || '');
-        if (!symbol) {
-          return;
-        }
-
-        // BBO format: { market, bid_price, bid_size, ask_price, ask_size, mark_price, index_price }
-        // last_price is intentionally NOT updated from bbo — that comes from the trades feed.
-        const bid = parseFloat(bboData.bid_price || '0');
-        const ask = parseFloat(bboData.ask_price || '0');
-        const index = parseFloat(bboData.index_price || '0');
-
-        const update: Partial<Ticker> = {
-          symbol,
-          ...(Number.isFinite(bid) && bid > 0 ? { bid } : {}),
-          ...(Number.isFinite(ask) && ask > 0 ? { ask } : {}),
-          ...(Number.isFinite(index) && index > 0 ? { index } : {}),
-        };
-
-        this.parent.store.updateTicker({ id: symbol }, update);
-      } catch (err) {
-        this.parent.log(`Error handling BBO update: ${err}`, LogSeverity.Error);
+    try {
+      const bboData = data?.data;
+      if (!bboData) {
+        return;
       }
+
+      const channel = String(data?.channel || '');
+      const channelSymbol = channel.split('.')[1];
+      const symbol = String(bboData.market || channelSymbol || '');
+      if (!symbol) {
+        return;
+      }
+
+      // BBO format: { market, bid_price, bid_size, ask_price, ask_size, mark_price, index_price }
+      // last_price is intentionally NOT updated from bbo — that comes from the trades feed.
+      const bid = parseFloat(bboData.bid_price || '0');
+      const ask = parseFloat(bboData.ask_price || '0');
+      const index = parseFloat(bboData.index_price || '0');
+
+      const update: Partial<Ticker> = {
+        symbol,
+        ...(Number.isFinite(bid) && bid > 0 ? { bid } : {}),
+        ...(Number.isFinite(ask) && ask > 0 ? { ask } : {}),
+        ...(Number.isFinite(index) && index > 0 ? { index } : {}),
+      };
+
+      (() => {
+        const target = { id: symbol };
+        const changes: Partial<StoreData['tickers'][number]> = update;
+        return this.parent.store.apply(
+          nativeFixture(
+            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
+    } catch (err) {
+      this.parent.log(`Error handling BBO update: ${err}`, LogSeverity.Error);
+    }
   };
 
   private handleMarketSummaryUpdate = (data: any) => {
-      try {
-        const rawData = Array.isArray(data?.data) ? data.data : [data?.data || data];
-        for (const summary of rawData) {
-          if (!summary || typeof summary !== 'object') {
-            continue;
-          }
-
-          const symbol = String(summary.symbol || summary.market || '');
-          if (!symbol) {
-            continue;
-          }
-
-          const bid = parseFloat(summary.bid || '0');
-          const ask = parseFloat(summary.ask || '0');
-          const last = parseFloat(summary.last_traded_price || summary.last_price || summary.last || '0');
-          const mark = parseFloat(summary.mark_price || '0');
-          const index = parseFloat(summary.oracle_price || summary.index_price || summary.underlying_price || '0');
-          const percentageRaw = parseFloat(summary.price_change_rate_24h || '0');
-          const volume = parseFloat(summary.volume_24h || summary.volume || '0');
-          const openInterest = parseFloat(summary.open_interest || '0');
-          const fundingRate = parseFloat(summary.funding_rate || '0');
-
-          this.parent.store.updateTicker(
-            { id: symbol },
-            {
-              symbol,
-              ...(Number.isFinite(bid) && bid > 0 ? { bid } : {}),
-              ...(Number.isFinite(ask) && ask > 0 ? { ask } : {}),
-              ...(Number.isFinite(last) && last > 0 ? { last } : {}),
-              ...(Number.isFinite(mark) && mark > 0 ? { mark } : {}),
-              ...(Number.isFinite(index) && index > 0 ? { index } : {}),
-              ...(Number.isFinite(percentageRaw) ? { percentage: percentageRaw * 100 } : {}),
-              ...(Number.isFinite(volume) ? { volume } : {}),
-              ...(Number.isFinite(openInterest) ? { openInterest } : {}),
-              ...(Number.isFinite(fundingRate) ? { fundingRate } : {}),
-            },
-          );
+    try {
+      const rawData = Array.isArray(data?.data) ? data.data : [data?.data || data];
+      for (const summary of rawData) {
+        if (!summary || typeof summary !== 'object') {
+          continue;
         }
-      } catch (err) {
-        this.parent.log(`Error handling markets_summary update: ${err}`, LogSeverity.Error);
+
+        const symbol = String(summary.symbol || summary.market || '');
+        if (!symbol) {
+          continue;
+        }
+
+        const bid = parseFloat(summary.bid || '0');
+        const ask = parseFloat(summary.ask || '0');
+        const last = parseFloat(summary.last_traded_price || summary.last_price || summary.last || '0');
+        const mark = parseFloat(summary.mark_price || '0');
+        const index = parseFloat(summary.oracle_price || summary.index_price || summary.underlying_price || '0');
+        const percentageRaw = parseFloat(summary.price_change_rate_24h || '0');
+        const volume = parseFloat(summary.volume_24h || summary.volume || '0');
+        const openInterest = parseFloat(summary.open_interest || '0');
+        const fundingRate = parseFloat(summary.funding_rate || '0');
+
+        (() => {
+          const target = { id: symbol };
+          const changes: Partial<StoreData['tickers'][number]> = {
+            symbol,
+            ...(Number.isFinite(bid) && bid > 0 ? { bid } : {}),
+            ...(Number.isFinite(ask) && ask > 0 ? { ask } : {}),
+            ...(Number.isFinite(last) && last > 0 ? { last } : {}),
+            ...(Number.isFinite(mark) && mark > 0 ? { mark } : {}),
+            ...(Number.isFinite(index) && index > 0 ? { index } : {}),
+            ...(Number.isFinite(percentageRaw) ? { percentage: percentageRaw * 100 } : {}),
+            ...(Number.isFinite(volume) ? { volume } : {}),
+            ...(Number.isFinite(openInterest) ? { openInterest } : {}),
+            ...(Number.isFinite(fundingRate) ? { fundingRate } : {}),
+          };
+          return this.parent.store.apply(
+            nativeFixture(
+              {
+                tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+              },
+              this.parent.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
+    } catch (err) {
+      this.parent.log(`Error handling markets_summary update: ${err}`, LogSeverity.Error);
+    }
   };
 
   private clearOrderbooks = () => {
@@ -369,15 +394,25 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
     const state = this.orderbooks.get(symbol);
     const callbacks = this.orderbookCallbacks.get(symbol);
     if (!state?.initialized || !callbacks?.size || this.isDisposed) return;
-    const levels = (side: Map<number, number>, descending: boolean) => [...side]
-      .sort(([a], [b]) => descending ? b - a : a - b)
-      .map(([price, amount]) => ({ price, amount, total: price * amount }));
+    const levels = (side: Map<number, number>, descending: boolean) =>
+      [...side]
+        .sort(([a], [b]) => (descending ? b - a : a - b))
+        .map(([price, amount]) => ({ price, amount, total: price * amount }));
     const orderbook = { bids: levels(state.bids, true), asks: levels(state.asks, false) };
     if (orderbook.bids.length && orderbook.asks.length) {
-      this.parent.store.updateTicker({ id: symbol }, {
-        bid: orderbook.bids[0].price,
-        ask: orderbook.asks[0].price,
-      });
+      (() => {
+        const target = { id: symbol };
+        const changes: Partial<StoreData['tickers'][number]> = {
+          bid: orderbook.bids[0].price,
+          ask: orderbook.asks[0].price,
+        };
+        return this.parent.store.apply(
+          nativeFixture(
+            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
+          ),
+        );
+      })();
     }
     callbacks.forEach((callback) => callback(orderbook));
   };
@@ -402,7 +437,8 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       if (!symbol || symbol !== channelSymbol || !this.orderbookCallbacks.get(symbol)?.size) continue;
       const state = this.depthState(symbol);
       const sequenceText = String(row?.seq_no ?? '');
-      const sequenceValid = (typeof row?.seq_no === 'string' || Number.isSafeInteger(row?.seq_no)) && /^\d+$/.test(sequenceText);
+      const sequenceValid =
+        (typeof row?.seq_no === 'string' || Number.isSafeInteger(row?.seq_no)) && /^\d+$/.test(sequenceText);
       const decode = (value: unknown): DepthLevel[] | undefined => {
         if (!Array.isArray(value)) return;
         const levels: DepthLevel[] = [];
@@ -411,9 +447,14 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
           const size = Number(level?.size);
           if (
             !['BUY', 'SELL'].includes(level?.side) ||
-            !['string', 'number'].includes(typeof level?.size) || String(level.size).trim() === '' ||
-            !Number.isFinite(price) || price <= 0 || !Number.isFinite(size) || size < 0
-          ) return;
+            !['string', 'number'].includes(typeof level?.size) ||
+            String(level.size).trim() === '' ||
+            !Number.isFinite(price) ||
+            price <= 0 ||
+            !Number.isFinite(size) ||
+            size < 0
+          )
+            return;
           levels.push({ side: level.side, price, size });
         }
         return levels;
@@ -426,9 +467,11 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
         continue;
       }
       const sequence = BigInt(sequenceText);
-      if (state.sequence !== undefined && (
-        sequence < state.sequence || (sequence === state.sequence && (row.update_type !== 's' || state.initialized))
-      )) continue;
+      if (
+        state.sequence !== undefined &&
+        (sequence < state.sequence || (sequence === state.sequence && (row.update_type !== 's' || state.initialized)))
+      )
+        continue;
       if (row.update_type === 'd' && (!state.initialized || sequence !== state.sequence! + 1n)) {
         this.recoverOrderbook(symbol, state);
         continue;
@@ -488,14 +531,24 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
           //   LogSeverity.Info,
           // );
 
-          this.parent.store.updateTicker(
-            { id: symbol },
-            {
+          (() => {
+            const target = { id: symbol };
+            const changes: Partial<StoreData['tickers'][number]> = {
               symbol,
               last: tradePrice,
               mark: tradePrice,
-            },
-          );
+            };
+            return this.parent.store.apply(
+              nativeFixture(
+                {
+                  tickers: this.parent.store.tickers.map((row) =>
+                    row.id === target.id ? { ...row, ...changes } : row,
+                  ),
+                },
+                this.parent.store.markets.map((row) => row.symbol),
+              ),
+            );
+          })();
 
           // Update OHLCV candles for all active subscriptions for this symbol
           this.updateOHLCVFromTrade(symbol, tradePrice, Number.isFinite(tradeSize) ? tradeSize : 0, tradeTimestamp);
@@ -705,7 +758,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
     // Calculate interval in milliseconds for trade updates
     const intervalMs = (timeframeToSeconds[opts.interval] || 60) * 1000;
 
-    // Store callback and interval for trade-based updates. Multiple chart
+    // FrameStore callback and interval for trade-based updates. Multiple chart
     // listeners can share a symbol:interval; one cleanup must not tear down
     // another active listener.
     const callbacks = this.ohlcvCallbacks.get(pollKey);
@@ -776,18 +829,18 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
           const latestCandle = candles[candles.length - 1];
           const previousCandle = this.lastCandleCache.get(pollKey);
           // REST can lag a trade that was already present before this poll began.
-          const advances = !previousCandle || latestCandle.timestamp > previousCandle.timestamp || (
-            latestCandle.timestamp === previousCandle.timestamp && latestCandle.volume >= previousCandle.volume
-          );
+          const advances =
+            !previousCandle ||
+            latestCandle.timestamp > previousCandle.timestamp ||
+            (latestCandle.timestamp === previousCandle.timestamp && latestCandle.volume >= previousCandle.volume);
 
           // Only emit if the candle has changed
           if (
-            advances && (
-              !previousCandle ||
+            advances &&
+            (!previousCandle ||
               previousCandle.timestamp !== latestCandle.timestamp ||
               previousCandle.close !== latestCandle.close ||
-              previousCandle.volume !== latestCandle.volume
-            )
+              previousCandle.volume !== latestCandle.volume)
           ) {
             this.lastCandleCache.set(pollKey, latestCandle);
             this.ohlcvCallbacks.get(pollKey)?.forEach((activeCallback) => activeCallback(latestCandle));
@@ -799,10 +852,7 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       }
 
       // Schedule next poll only if still active (poll every 3 seconds)
-      if (
-        this.ohlcvPollingActive.get(pollKey) &&
-        this.ohlcvSubscriptionVersions.get(pollKey) === subscriptionVersion
-      ) {
+      if (this.ohlcvPollingActive.get(pollKey) && this.ohlcvSubscriptionVersions.get(pollKey) === subscriptionVersion) {
         const timeoutId = setTimeout(pollCandle, OHLCV_POLL_INTERVAL_MS);
         this.ohlcvPollingTimeouts.set(pollKey, timeoutId);
       }

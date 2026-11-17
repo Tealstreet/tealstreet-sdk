@@ -1,10 +1,11 @@
 import type { ExchangeOptions, Market } from '../../types';
+import type { ORDER_EVENT } from '../reference/coinbase/coinbase.types';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
-import type { ORDER_EVENT } from '../reference/coinbase/coinbase.types';
-import { DefaultStore } from '../../store/store.base';
 
 const makeMarket = (overrides: Partial<Market> = {}): Market => ({
   id: 'BTC-28MAR27',
@@ -58,7 +59,10 @@ const makeOrder = (overrides: Partial<ORDER_EVENT['orders'][0]> = {}): ORDER_EVE
   ...overrides,
 });
 
-const makeOrderEvent = (orders: ORDER_EVENT['orders'] = [makeOrder()], type: ORDER_EVENT['type'] = 'snapshot'): ORDER_EVENT => ({
+const makeOrderEvent = (
+  orders: ORDER_EVENT['orders'] = [makeOrder()],
+  type: ORDER_EVENT['type'] = 'snapshot',
+): ORDER_EVENT => ({
   type,
   orders,
 });
@@ -74,8 +78,13 @@ const makePosition = (product_id: string, number_of_contracts = '1.5') =>
   }) as any;
 
 const createExchange = (markets: Market[] = [makeMarket()]) => {
-  const store = new DefaultStore();
-  store.update({ markets });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new CoinbaseExchange(
     'coinbase' as any,
     {
@@ -172,7 +181,9 @@ describe('Coinbase CFM contract-size quarantine', () => {
     const valid = makeMarket({ id: 'BTC-VALID', symbol: 'BTC-VALID', contractSize: 0.01 });
 
     const empty = createExchange([valid]);
-    empty.exchange.privateWebsocket.handleUserEventOrders(makeOrderEvent([makeOrder({ order_id: 'old-empty', product_id: 'BTC-VALID' })], 'update'));
+    empty.exchange.privateWebsocket.handleUserEventOrders(
+      makeOrderEvent([makeOrder({ order_id: 'old-empty', product_id: 'BTC-VALID' })], 'update'),
+    );
     empty.exchange.privateWebsocket.handleUserEventOrders(makeOrderEvent([]));
     expect(empty.store.orders).toEqual([]);
     expect(empty.store.loaded.orders).toBe(true);
@@ -187,9 +198,9 @@ describe('Coinbase CFM contract-size quarantine', () => {
     );
     expect(invalidOnly.store.orders.map((order) => order.id)).toEqual(['old-invalid-only']);
     expect(invalidOnly.store.loaded.orders).toBe(false);
-    expect(invalidOnlyError.mock.calls.some(([message]) => message === 'Coinbase order skipped: missing market for UNKNOWN')).toBe(
-      true,
-    );
+    expect(
+      invalidOnlyError.mock.calls.some(([message]) => message === 'Coinbase order skipped: missing market for UNKNOWN'),
+    ).toBe(true);
 
     const mixed = createExchange([valid]);
     const mixedError = vi.spyOn(mixed.exchange, 'emitAndLogError').mockImplementation(() => undefined);
@@ -204,7 +215,9 @@ describe('Coinbase CFM contract-size quarantine', () => {
     );
     expect(mixed.store.orders.map((order) => order.id)).toEqual(['valid-mixed']);
     expect(mixed.store.loaded.orders).toBe(true);
-    expect(mixedError.mock.calls.some(([message]) => message === 'Coinbase order skipped: missing market for UNKNOWN')).toBe(true);
+    expect(
+      mixedError.mock.calls.some(([message]) => message === 'Coinbase order skipped: missing market for UNKNOWN'),
+    ).toBe(true);
 
     const invalidBatched = createExchange([valid]);
     vi.spyOn(invalidBatched.exchange, 'emitAndLogError').mockImplementation(() => undefined);

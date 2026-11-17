@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { BybitSpotExchange } from './bybitspot.exchange';
 
 import createHmac from 'create-hmac';
@@ -6,16 +7,17 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
-import { getTransport, resolveTransportRouting } from '../../../transport/registry';
-import { WsDirectFallback } from '../../../utils/wsDirectFallback';
-import { isWsRelayEnabled } from '../../../transport/tealstreet/wsRelay';
-import { OrderStatus, Writable } from '../../../types';
-import { cleanFloat, createIncrementalFills } from '../../../utils/incrementalFills';
-import { resolveBybitExecution } from './bybit.fill-event';
-import { v } from '../../../utils/get-key';
-import { virtualClock } from '../../../utils/virtualClock';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { getBybitWebSocketOptions } from '../../../exchanges/bybit/bybit.site';
+import { getTransport, resolveTransportRouting } from '../../../transport/registry';
+import { isWsRelayEnabled } from '../../../transport/tealstreet/wsRelay';
+import { OrderStatus, Writable } from '../../../types';
+import { v } from '../../../utils/get-key';
+import { cleanFloat, createIncrementalFills } from '../../../utils/incrementalFills';
+import { virtualClock } from '../../../utils/virtualClock';
+import { WsDirectFallback } from '../../../utils/wsDirectFallback';
+import { nativeFixture } from '../../cutover/nativeFixture';
+import { resolveBybitExecution } from './bybit.fill-event';
 import { BASE_WS_URL, DEMO_WS_URL } from './bybitspot.types';
 
 export class BybitPrivateWebsocket extends BaseWebSocket<BybitSpotExchange> {
@@ -41,7 +43,10 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitSpotExchange> {
       );
       if (baseUrl === route.fallback || baseUrl === route.relay) {
         try {
-          this.parent.emitter.emit('grafana-info', `Using tealstreet bybit private spot ${baseUrl === route.relay ? 'relay' : 'proxy'}`);
+          this.parent.emitter.emit(
+            'grafana-info',
+            `Using tealstreet bybit private spot ${baseUrl === route.relay ? 'relay' : 'proxy'}`,
+          );
         } catch (_e) {}
       }
       const webSocketOptions = this.parent.isDemo ? undefined : getBybitWebSocketOptions(this.parent.options);
@@ -226,7 +231,23 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitSpotExchange> {
         for (let i = 0; i < orders.length; i++) {
           (orders[i] as Writable<(typeof orders)[number]>).status = newStatus;
         }
-        this.store.addOrUpdateOrders(orders);
+        (() => {
+          const incoming: StoreData['orders'] = orders;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
         // this.store.updateOrdersStatus(
         //   [{ id: orders[0].id }, { id: `${orders[0].id}__stop_loss` }, { id: `${orders[0].id}__take_profit` }],
         //   order.orderStatus === 'Filled' ? OrderStatus.Closed : OrderStatus.Canceled,
@@ -238,7 +259,23 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitSpotExchange> {
         order.orderStatus === 'Untriggered' ||
         order.orderStatus === 'PartiallyFilled'
       ) {
-        this.store.addOrUpdateOrders(orders);
+        (() => {
+          const incoming: StoreData['orders'] = orders;
+          return this.store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
       }
     });
   };

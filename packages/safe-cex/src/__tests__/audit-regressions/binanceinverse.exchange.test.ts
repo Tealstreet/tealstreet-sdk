@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { MarginType, OrderSide, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BinanceInverseExchange } from '../reference/binance/binanceinverse.exchange';
 import { BinanceInversePrivateWebsocket } from '../reference/binance/binanceinverse.ws-private';
-import { DefaultStore } from '../../store/store.base';
-import { MarginType, OrderSide, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../../types';
 
 const makeExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new BinanceInverseExchange('binanceinverse', { key: 'key', secret: 'secret' }, store);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
   return { exchange, store };
@@ -84,7 +85,12 @@ describe('BinanceInverseExchange', () => {
 
   it('converts native contract positions to base exposure and USD notional', async () => {
     const { exchange, store } = makeExchange();
-    store.update({ markets: [btcMarket], tickers: [btcTicker] });
+    store.apply(
+      nativeFixture(
+        { markets: [btcMarket], tickers: [btcTicker] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange.xhr, 'get').mockResolvedValue({
       data: [
         {
@@ -120,7 +126,12 @@ describe('BinanceInverseExchange', () => {
 
   it('aggregates coin balances into USD totals while preserving coin balances', async () => {
     const { exchange, store } = makeExchange();
-    store.update({ markets: [btcMarket], tickers: [btcTicker] });
+    store.apply(
+      nativeFixture(
+        { markets: [btcMarket], tickers: [btcTicker] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange.xhr, 'get').mockResolvedValue({
       data: {
         assets: [
@@ -147,24 +158,29 @@ describe('BinanceInverseExchange', () => {
 
   it('formats native contract quantities for limit and full-position stop orders', () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [btcMarket],
-      positions: [
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTCUSD_PERP-short-one_way',
-          symbol: 'BTCUSD_PERP',
-          side: PositionSide.Short,
-          entryPrice: 50_000,
-          notional: 10_000,
-          leverage: 10,
-          unrealizedPnl: 0,
-          contracts: 0.2,
-          liquidationPrice: 60_000,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.OneWay,
+          markets: [btcMarket],
+          positions: [
+            {
+              id: 'BTCUSD_PERP-short-one_way',
+              symbol: 'BTCUSD_PERP',
+              side: PositionSide.Short,
+              entryPrice: 50_000,
+              notional: 10_000,
+              leverage: 10,
+              unrealizedPnl: 0,
+              contracts: 0.2,
+              liquidationPrice: 60_000,
+              marginType: MarginType.Cross,
+              positionMode: PositionMode.OneWay,
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const [limit] = exchange.formatCreateOrder({
       symbol: 'BTCUSD_PERP',
@@ -204,7 +220,12 @@ describe('BinanceInverseExchange', () => {
 
   it('maps private account updates through inverse contract size', () => {
     const { exchange, store } = makeExchange();
-    store.update({ markets: [btcMarket], tickers: [btcTicker] });
+    store.apply(
+      nativeFixture(
+        { markets: [btcMarket], tickers: [btcTicker] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([]);
     const socket = new BinanceInversePrivateWebsocket(exchange);
 

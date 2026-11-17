@@ -2,14 +2,15 @@ import type { Market, Order, Position } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { parseAccountEquity } from '../reference/okx/okx.account-equity';
 import { OKXExchange } from '../reference/okx/okx.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
 
 const exchanges: OKXExchange[] = [];
 const fixture = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const market: Market = {
     id: 'BTC-USD-SWAP',
     symbol: 'BTCUSD',
@@ -50,23 +51,28 @@ const fixture = () => {
     lastUpdate: 1,
     info: { ccy: 'BTC', lever: '10' },
   };
-  store.update({
-    markets: [market],
-    tickers: [{ id: market.id, symbol: market.symbol, last: 40000, mark: 40000 } as never],
-    positions: [position],
-    orders: [order],
-    balance: {
-      used: 50,
-      free: 40017,
-      total: 40087.18,
-      upnl: 12.82,
-      info: [
-        { ccy: 'BTC', eq: '1' },
-        { ccy: 'USD', eq: '100' },
-      ],
-    },
-    loaded: { markets: true, tickers: true, positions: true, balance: true, orders: true },
-  });
+  store.apply(
+    nativeFixture(
+      {
+        markets: [market],
+        tickers: [{ id: market.id, symbol: market.symbol, last: 40000, mark: 40000 } as never],
+        positions: [position],
+        orders: [order],
+        balance: {
+          used: 50,
+          free: 40017,
+          total: 40087.18,
+          upnl: 12.82,
+          info: [
+            { ccy: 'BTC', eq: '1' },
+            { ccy: 'USD', eq: '100' },
+          ],
+        },
+        loaded: { markets: true, tickers: true, positions: true, balance: true, orders: true },
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new OKXExchange('okx', { key: 'key', secret: 'secret', passphrase: 'pass' }, store);
   exchange._accountLevel = 2;
   exchange._accountPositionMode = PositionMode.OneWay;
@@ -117,7 +123,11 @@ describe('OKX account equity anchor', () => {
     vi.useFakeTimers();
     const { exchange, store } = fixture();
     const stale = store.balance;
-    const writes = vi.spyOn(store, 'update');
+    const writes = (() => {
+      const observed = vi.fn<(value: typeof store.data) => void>();
+      store.subscribe((value) => observed(value));
+      return observed;
+    })();
     let beforeWs = -1;
     vi.spyOn(exchange, 'fetchMarkets').mockResolvedValue(store.markets);
     vi.spyOn(exchange, 'fetchTickersRaw').mockResolvedValue([

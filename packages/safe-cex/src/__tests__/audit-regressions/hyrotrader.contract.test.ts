@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
-import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
-import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, Market, Order, OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
+import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
 
 class TestHyroExchange extends HyrotraderExchange {
   getBybitRestBaseUrl() {
@@ -15,20 +16,25 @@ class TestHyroExchange extends HyrotraderExchange {
 
 const exchanges: TestHyroExchange[] = [];
 const setup = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTCUSDT',
-        symbol: 'BTCUSDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
-      } as Market,
-    ],
-  });
+        markets: [
+          {
+            id: 'BTCUSDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+          } as Market,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new TestHyroExchange('hyrotrader', { key: 'test-key', secret: 'test-secret' }, store);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
   exchanges.push(exchange);
@@ -82,7 +88,12 @@ describe('HyroTrader supported subset (partner simulator contract)', () => {
   });
   it('sends conditional triggerDirection as a number for the simulator contract', async () => {
     const { exchange, store } = setup();
-    store.update({ tickers: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', mark: 83_000, last: 83_000 } as any] });
+    store.apply(
+      nativeFixture(
+        { tickers: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', mark: 83_000, last: 83_000 } as any] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const post = vi.fn().mockResolvedValue(success({ orderId: 'conditional' }));
     exchange.xhr = { post } as any;
     await exchange.placeOrder({
@@ -102,7 +113,12 @@ describe('HyroTrader supported subset (partner simulator contract)', () => {
   it('cancels individual orders and retires only successful rows', async () => {
     const { exchange, store } = setup();
     const rows = ['first', 'second'].map((id) => ({ ...order, id, status: OrderStatus.Open }) as Order);
-    store.update({ orders: rows });
+    store.apply(
+      nativeFixture(
+        { orders: rows },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const post = vi
       .fn()
       .mockResolvedValueOnce(success({}))
@@ -118,7 +134,12 @@ describe('HyroTrader supported subset (partner simulator contract)', () => {
   it('accepts an already-terminal cancellation and skips virtual bracket IDs', async () => {
     const { exchange, store } = setup();
     const rows = ['first', 'first__stop_loss'].map((id) => ({ ...order, id, status: OrderStatus.Open }) as Order);
-    store.update({ orders: rows });
+    store.apply(
+      nativeFixture(
+        { orders: rows },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const post = vi
       .fn()
       .mockResolvedValue({ data: { retCode: 110001, retMsg: 'order not exists or too late to cancel' } });
@@ -130,7 +151,12 @@ describe('HyroTrader supported subset (partner simulator contract)', () => {
   it('retires rows silently when cancel-all races a simulator "no longer open" response', async () => {
     const { exchange, store } = setup();
     const rows = ['first', 'second'].map((id) => ({ ...order, id, status: OrderStatus.Open }) as Order);
-    store.update({ orders: rows });
+    store.apply(
+      nativeFixture(
+        { orders: rows },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const mockXhr = {
       post: vi
         .fn()
@@ -146,7 +172,7 @@ describe('HyroTrader supported subset (partner simulator contract)', () => {
     // The base classifier only accepts Bybit livenet's "order not exists" /
     // "too late to cancel" phrasing. Hyro extends it via `isAlreadyGoneCancelMessage`
     // without mutating the shared regex; this guard keeps that boundary.
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const bybit = new BybitExchange('bybit' as any, { key: 'k', secret: 's' }, store);
     exchanges.push(bybit as unknown as TestHyroExchange);
     const emit = vi.spyOn(bybit, 'emitAndLogError').mockImplementation(() => {});
