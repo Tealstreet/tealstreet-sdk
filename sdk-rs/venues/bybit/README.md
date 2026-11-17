@@ -116,3 +116,19 @@ the SDK, and the worker posts `{ op: 'ws-diagnostic', data: [event] }`.
 Account UX, consuming that event in the web Requests Log, and the beta user
 document belong to the NX web workstream. Production promotion requires separate
 approval after reachability and that smoke pass are accepted.
+
+## Order-history terminal retention
+
+The default `/v5/order/history` walk keeps the caller's full range and existing
+seven-day paging for filled orders. The additional `Cancelled`, `Rejected` and
+`Deactivated` passes clip the lower bound to the last 24 hours on the calibrated
+protocol clock; an older range skips these passes. Explicit upper bounds remain
+unchanged, including valid future end times. Existing seven-day splitting still
+applies, and wholly-future slices are omitted. This matches the
+[V5 order-history retention rules](https://bybit-exchange.github.io/docs/v5/order/order-list)
+and prevents an unavailable terminal slice from refusing the default history.
+Terminal bounds use the shared integer wire-timestamp conversion after clipping;
+fractional calibration, default query bounds and scheduling clocks are unchanged.
+Caller deadlines, read-key selection, pacing, cursors and partial-row markers
+remain shared with the original walk. This does not recover terminal rows the
+venue no longer retains.
