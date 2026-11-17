@@ -17,6 +17,37 @@ pub(super) struct WaitingCandle {
 }
 
 impl Hyperliquid {
+    pub(super) fn record_spot_candle_catalog(
+        &mut self,
+        meta: &SpotMeta,
+        markets: &[Market],
+        excluded: &[String],
+    ) {
+        self.candle_spot_catalog_complete = meta.universe.iter().all(|row| {
+            row.0.as_ref().is_some_and(|native| {
+                markets.iter().any(|market| market.id == native.name)
+                    || excluded.contains(&native.name)
+            })
+        });
+        self.candle_spot_excluded = meta
+            .universe
+            .iter()
+            .filter_map(|row| row.0.as_ref())
+            .filter(|native| excluded.contains(&native.name))
+            .filter_map(|native| {
+                let token = |index| {
+                    meta.tokens
+                        .iter()
+                        .filter_map(|row| row.0.as_ref())
+                        .find(|token| token.index == index)
+                };
+                let base = token(*native.tokens.first()?)?;
+                let quote = token(*native.tokens.get(1)?)?;
+                Some(format!("{}/{}", base.name, quote.name))
+            })
+            .collect();
+    }
+
     fn candle_discovery_pending(&self, symbol: &str) -> bool {
         if self.spot {
             return self.core_discovery_incomplete;
@@ -38,7 +69,10 @@ impl Hyperliquid {
                         .candle_complete_scopes
                         .contains(&dex.to_ascii_lowercase()));
         }
-        symbol.contains('/') && self.spot_markets && !self.spot_committed
+        symbol.contains('/')
+            && self.spot_markets
+            && !self.candle_spot_catalog_complete
+            && !self.candle_spot_excluded.contains(symbol)
     }
 
     pub(super) fn start_candle_read(&mut self, cx: &mut Cx<'_, Pending>, read: CandleQuery) {

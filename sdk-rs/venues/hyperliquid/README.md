@@ -57,6 +57,9 @@ rows arrive. A candle read for a missing row waits only while its catalogue is
 unresolved; an existing core row can read immediately. A completed relevant
 catalogue or explicit exclusion refuses with `Market not found`, even if an
 unrelated DEX is still loading. Failed/malformed discovery is not proof of absence.
+Optional spot publication is not completion: every universe row must resolve to
+a usable market or explicit exclusion. A malformed or missing context keeps the
+original read bound; usable siblings publish and explicit exclusions still refuse.
 
 The wait owns its original command Context and timer, capped at 20 seconds and
 any shorter caller bound. Discovery and HTTP share that deadline; neither arrival

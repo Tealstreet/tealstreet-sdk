@@ -449,3 +449,140 @@ fn merged_spot_candles_wait_for_the_late_spot_catalogue() {
     reply(&mut e, 1400., &candles, "[]");
     assert_eq!(results(&prepared_now(&mut e), 115), vec![Ok("[]".into())]);
 }
+
+fn merged_spot_read() -> (Engine<Hyperliquid>, HttpRequest) {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
+        public_data_only: true,
+        enable_spot_markets: true,
+        ..Default::default()
+    }));
+    e.start(1000.);
+    let actions = prepared_now(&mut e);
+    let core = request(&actions, "metaAndAssetCtxs");
+    let spot = request(&actions, "spotMetaAndAssetCtxs");
+    reply(&mut e, 1000., &core, CORE);
+    let dexes = request(&prepared_now(&mut e), "perpDexs");
+    reply(&mut e, 1050., &dexes, "[null]");
+    prepared_now(&mut e);
+    (e, spot)
+}
+
+fn two_spot_rows(contexts: serde_json::Value) -> String {
+    serde_json::json!([
+        {
+            "tokens": [
+                {"name":"USDC", "index":0, "szDecimals":8},
+                {"name":"UBTC", "index":1, "szDecimals":5},
+                {"name":"UETH", "index":2, "szDecimals":4}
+            ],
+            "universe": [
+                {"name":"@11", "index":11, "tokens":[1,0]},
+                {"name":"@22", "index":22, "tokens":[2,0]}
+            ]
+        }, contexts
+    ])
+    .to_string()
+}
+
+fn partial_spot_read_keeps_its_bound(contexts: serde_json::Value) {
+    let (mut e, spot) = merged_spot_read();
+    let actions = ask(&mut e, 1100., 116, "UBTC/USDC", Some(1000));
+    let timer = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == 2100. => Some(*timer),
+            _ => None,
+        })
+        .expect("original candle discovery deadline");
+    reply(&mut e, 1200., &spot, &two_spot_rows(contexts));
+    let actions = prepared_now(&mut e);
+    assert!(
+        e.store().market("UETH/USDC").is_some(),
+        "valid sibling publishes"
+    );
+    assert!(e.store().market("UBTC/USDC").is_none());
+    assert!(
+        results(&actions, 116).is_empty(),
+        "publication does not establish the requested row's absence"
+    );
+    no_candles(&actions);
+
+    let known = request(
+        &ask(&mut e, 1201., 117, "UETH/USDC", None),
+        "candleSnapshot",
+    );
+    assert!(known.body.as_deref().unwrap().contains(r#""coin":"@22""#));
+    reply(&mut e, 1202., &known, "[]");
+    assert_eq!(results(&prepared_now(&mut e), 117), vec![Ok("[]".into())]);
+    e.handle(2100., Event::TimerFired { timer });
+    let actions = prepared_now(&mut e);
+    let terminal = results(&actions, 116);
+    assert_eq!(terminal.len(), 1);
+    assert_eq!(
+        terminal[0].as_ref().unwrap_err().kind,
+        Some(ErrorKind::Timeout)
+    );
+    no_candles(&actions);
+}
+
+#[test]
+fn merged_spot_publication_does_not_settle_a_malformed_requested_context() {
+    partial_spot_read_keeps_its_bound(serde_json::json!([
+        {"coin":"@11", "midPx":"malformed"},
+        {"coin":"@22", "midPx":"3000", "markPx":"3001"}
+    ]));
+}
+
+#[test]
+fn merged_spot_publication_does_not_settle_a_missing_requested_context() {
+    partial_spot_read_keeps_its_bound(serde_json::json!([
+        {"coin":"@22", "midPx":"3000", "markPx":"3001"}
+    ]));
+}
+
+#[test]
+fn a_complete_merged_spot_catalogue_releases_its_row_and_refuses_absent_rows() {
+    let (mut e, spot) = merged_spot_read();
+    assert!(results(&ask(&mut e, 1100., 118, "UBTC/USDC", Some(1000)), 118).is_empty());
+    assert!(results(&ask(&mut e, 1100., 119, "REMOVED/USDC", Some(1000)), 119).is_empty());
+    reply(
+        &mut e,
+        1200.,
+        &spot,
+        &two_spot_rows(serde_json::json!([
+            {"coin":"@11", "midPx":"60000", "markPx":"60010"},
+            {"coin":"@22", "midPx":"3000", "markPx":"3001"}
+        ])),
+    );
+    let actions = prepared_now(&mut e);
+    assert!(results(&actions, 118).is_empty());
+    let terminal = results(&actions, 119);
+    assert_eq!(terminal.len(), 1);
+    assert_eq!(
+        terminal[0].as_ref().unwrap_err().message,
+        "Market not found"
+    );
+    let candles = request(&actions, "candleSnapshot");
+    assert!(candles.body.as_deref().unwrap().contains(r#""coin":"@11""#));
+    reply(&mut e, 1201., &candles, "[]");
+    assert_eq!(results(&prepared_now(&mut e), 118), vec![Ok("[]".into())]);
+    assert_missing(&ask(&mut e, 1202., 120, "REMOVED/USDC", None), 120);
+}
+
+#[test]
+fn an_excluded_merged_spot_row_refuses_while_its_sibling_is_unresolved() {
+    let (mut e, spot) = merged_spot_read();
+    assert!(results(&ask(&mut e, 1100., 121, "UBTC/USDC", Some(1000)), 121).is_empty());
+    reply(
+        &mut e,
+        1200.,
+        &spot,
+        &two_spot_rows(serde_json::json!([
+            {"coin":"@11", "midPx":null},
+            {"coin":"@22", "midPx":"malformed"}
+        ])),
+    );
+    assert_missing(&prepared_now(&mut e), 121);
+    assert_missing(&ask(&mut e, 1201., 122, "UBTC/USDC", None), 122);
+    assert!(results(&ask(&mut e, 1202., 123, "UETH/USDC", Some(1000)), 123).is_empty());
+}

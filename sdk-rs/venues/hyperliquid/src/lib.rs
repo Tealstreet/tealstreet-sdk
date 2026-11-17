@@ -198,6 +198,8 @@ pub struct Hyperliquid {
     candles: HashMap<(String, Interval), usize>,
     waiting_candles: Vec<candle_read::WaitingCandle>,
     candle_dex_catalog_complete: bool,
+    candle_spot_catalog_complete: bool,
+    candle_spot_excluded: HashSet<String>,
     candle_complete_scopes: HashSet<String>,
     candle_excluded: HashSet<String>,
     /// Newest trade time per watched symbol whose `last` is now its trade price;
@@ -244,6 +246,8 @@ impl Hyperliquid {
             candles: HashMap::new(),
             waiting_candles: Vec::new(),
             candle_dex_catalog_complete: false,
+            candle_spot_catalog_complete: false,
+            candle_spot_excluded: HashSet::new(),
             candle_complete_scopes: HashSet::new(),
             candle_excluded: HashSet::new(),
             trade_last: HashMap::new(),
@@ -375,6 +379,7 @@ impl Hyperliquid {
             tickers,
             excluded,
         } = catalog;
+        self.record_spot_candle_catalog(&meta, &markets, &excluded);
         self.register_spot(cx, &meta, &markets);
         let count = markets.len();
         self.commit_discovery(cx, markets, tickers, excluded);
