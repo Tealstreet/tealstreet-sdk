@@ -15,7 +15,7 @@ import { coinbasePrivateTape } from '../../../../../sdk-rs/harness/private-tape-
 import { Tape } from '../../../../../sdk-rs/harness/tape.mjs';
 import { venueOf } from '../../../../../sdk-rs/harness/venues.mjs';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
-import { RustPublicFeedProvider } from '../../exchanges/rust/publicFeed';
+import { inProcessPortPair, RustPublicFeedProvider } from '../../exchanges/rust/publicFeed';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { FrameStore } from '../../store/frameStore';
 import { directTransport } from '../../transport/direct';
@@ -23,6 +23,7 @@ import { virtualClock } from '../../utils/virtualClock';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { setMainAcceptsFrames } from '../../webworker/frameForwarding';
 import { consumerFrame } from './consumerFrame';
+import { statsFrame } from './nativeStatsFixture';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
@@ -495,6 +496,7 @@ describe('native public-feed ownership through real private workers', () => {
       }
     };
     const source: PublicDataSource = {
+      snapshotFrame: () => current.snapshotFrame(),
       store: {
         subscribe: (callback) => {
           const listener = () => callback(current.store as unknown as StoreData);
@@ -675,6 +677,35 @@ describe('native public-feed ownership through real private workers', () => {
     await waitFor(() => expect(receiver.account.isDisposed).toBe(true));
     await expect(receiver.startup).rejects.toThrow('catalog/product mismatch');
     expect(receiver.input.sockets.every((socket) => socket.closed)).toBe(true);
+  }, 15_000);
+
+  it('republishes source SCXF subscription diagnostics through the real native receiver and late snapshots', async () => {
+    const source = await exchange({ key: '', secret: '', publicDataOnly: true });
+    await source.startup;
+    let observer: Parameters<RustEngineExchange['observePublicFeed']>[0] | undefined;
+    vi.spyOn(source.account, 'observePublicFeed').mockImplementation((next) => { observer = next; return () => {}; });
+    const provider = new RustPublicFeedProvider(source.account);
+    cleanups.push(() => provider.dispose());
+    const [providerPort, accountPort] = inProcessPortPair();
+    provider.attach(providerPort);
+    const side = await exchange({ ...COINBASE_REPLAY, privateOnly: true,
+      publicFeed: { mode: 'shared', port: accountPort } });
+    const main = new FrameStore();
+    side.account.onFrame = (buffer) => main.apply(new Frame(buffer));
+    await waitFor(() => expect(side.input.sockets.some(socket => socket.channel === 'private')).toBe(true));
+    side.input.deliver('user');
+    await side.startup;
+    observer!.diagnostics!(statsFrame([{ group: 0, topic: 'native-provider-ticker', flags: 3, age: 5 }]));
+    await waitFor(() => {
+      for (const store of [side.account.store, main])
+        expect(store.messageHandlerStats?.public?.['native-provider-ticker']?.lastCallbacksCount).toBe(1);
+    });
+    const late = new FrameStore();
+    late.apply(new Frame(side.account.snapshotFrame()!));
+    expect(late.messageHandlerStats?.public?.['native-provider-ticker']?.lastCallbacksCount).toBe(1);
+    observer!.diagnostics!(statsFrame([]));
+    await waitFor(() => expect(main.messageHandlerStats?.public).toEqual({}));
+    expect(side.input.failures).toEqual([]);
   }, 15_000);
 
   it('requires a loaded direct provider', () => {

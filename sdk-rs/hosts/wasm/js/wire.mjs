@@ -34,6 +34,9 @@ export const SECTION = {
   DISPLAYED_POSITIONS: 30,
   DISPLAYED_MARGIN: 31,
   BALANCE_INFO: 32,
+  MANAGED_ORDERS: 33,
+  PUBLIC_MESSAGE_HANDLER_STATS: 34,
+  REQUEST_STATS: 35,
 };
 
 export const NONE = 0xffffffff;
@@ -44,7 +47,7 @@ export const TICKER_FIELDS = [
 ];
 
 const LEGACY_TICKER_FIELDS = TICKER_FIELDS.slice(0, 11);
-const REVISED_SECTIONS = new Set([SECTION.MARKETS, SECTION.TICKERS, SECTION.TICKER_DELTAS, SECTION.ORDERS, SECTION.POSITIONS, SECTION.FILLS, SECTION.SETTINGS, SECTION.SOCKET_HEALTH, SECTION.ACTIVE_CHASERS, SECTION.ACTIVE_TWAPS, SECTION.ORDERS_RISK, SECTION.DISPLAYED_POSITIONS, SECTION.DISPLAYED_MARGIN, SECTION.BALANCE_INFO]);
+const REVISED_SECTIONS = new Set([SECTION.MARKETS, SECTION.TICKERS, SECTION.TICKER_DELTAS, SECTION.ORDERS, SECTION.POSITIONS, SECTION.FILLS, SECTION.SETTINGS, SECTION.SOCKET_HEALTH, SECTION.ACTIVE_CHASERS, SECTION.ACTIVE_TWAPS, SECTION.ORDERS_RISK, SECTION.DISPLAYED_POSITIONS, SECTION.DISPLAYED_MARGIN, SECTION.BALANCE_INFO, SECTION.MANAGED_ORDERS]);
 const KNOWN_SECTIONS = new Set(Object.values(SECTION));
 
 export const MARKET_COLUMNS = [
@@ -331,6 +334,36 @@ export class Frame {
   displayedPositions() { return this.nativeStoreSection(SECTION.DISPLAYED_POSITIONS); }
   displayedMargin() { return this.nativeStoreSection(SECTION.DISPLAYED_MARGIN); }
   balanceInfo() { return this.nativeStoreSection(SECTION.BALANCE_INFO); }
+  requestStats() {
+    const section = this.first(SECTION.REQUEST_STATS);
+    if (!section) return undefined;
+    if (section.length !== 24) throw new Error('invalid native request stats');
+    const values = new Uint32Array(this.buffer, section.offset, 5);
+    return { ok: values[0], rateLimit: values[1], auth: values[2], network: values[3], other: values[4] };
+  }
+  managedOrders() {
+    const rows = this.nativeStoreSection(SECTION.MANAGED_ORDERS);
+    if (rows === undefined) return undefined;
+    if (!rows || typeof rows !== 'object' || Array.isArray(rows)) throw new Error('invalid managed orders');
+    for (const owner of Object.values(rows)) {
+      if (!owner || typeof owner !== 'object' || Array.isArray(owner)) throw new Error('invalid managed order owner');
+      if (owner.isFromChaser !== true && owner.isFromTwap !== true) throw new Error('empty managed order owner');
+      if (owner.isFromChaser === true && (typeof owner.chaserId !== 'string' || !Number.isFinite(owner.chaserAttempts) || !Number.isFinite(owner.chaserMaxAttempts)))
+        throw new Error('incomplete chaser ownership');
+      if (owner.isFromTwap === true && typeof owner.twapId !== 'string') throw new Error('incomplete TWAP ownership');
+      for (const [key, value] of Object.entries(owner)) {
+        if (key === 'isFromChaser' || key === 'isFromTwap') {
+          if (value !== true) throw new Error('invalid managed order flag');
+        } else if (key === 'chaserId' || key === 'twapId') {
+          if (typeof value !== 'string') throw new Error('invalid managed order id');
+        } else if (key === 'chaserAttempts' || key === 'chaserMaxAttempts') {
+          if (!Number.isFinite(value)) throw new Error('invalid managed order attempts');
+        } else throw new Error('unknown managed order field');
+      }
+    }
+    return rows;
+  }
+
 
   /** A synchronous read does not represent a fresh streaming observation. */
   accountRead() {
@@ -500,8 +533,12 @@ export class Frame {
   }
 
   /** Subscription snapshot or changed rows; ages use the engine clock. */
-  messageHandlerStats() {
-    const section = this.first(SECTION.MESSAGE_HANDLER_STATS);
+  publicMessageHandlerStats() {
+    return this.messageHandlerStats(SECTION.PUBLIC_MESSAGE_HANDLER_STATS);
+  }
+
+  messageHandlerStats(kind = SECTION.MESSAGE_HANDLER_STATS) {
+    const section = this.first(kind);
     if (!section) return undefined;
     if (section.length < 8) throw new Error('truncated message handler stats');
     const count = this.view.getUint32(section.offset, true);
@@ -515,7 +552,7 @@ export class Frame {
     for (let i = 0; i < count; i++) {
       requiredString(this, this.view.getUint32(at(i) + 4, true));
       const age = ageMs(i);
-      if (group(i) > 3 || flags(i) > 3 || (!Number.isNaN(age) && (!Number.isFinite(age) || age < 0)) ||
+      if (group(i) > (kind === SECTION.PUBLIC_MESSAGE_HANDLER_STATS ? 2 : 3) || flags(i) > 3 || (!Number.isNaN(age) && (!Number.isFinite(age) || age < 0)) ||
           ((flags(i) & 2) && (!(flags(i) & 1) || Number.isNaN(age)))) throw new Error('invalid message handler stats row');
     }
     return { count, replace: Boolean(mode), group, topic: (i) => requiredString(this, this.view.getUint32(at(i) + 4, true)),

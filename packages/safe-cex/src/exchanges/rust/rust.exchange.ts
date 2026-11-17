@@ -17,8 +17,6 @@ import type { ExchangeErrorKind } from '../../commandOutcome';
 import type { JoinProofResponse } from '../../joinProof.types';
 import type {
   AccountGreeks,
-  ActiveChaser,
-  ActiveTWAP,
   Candle,
   ClosedPnlEntry,
   ExchangeAccount,
@@ -456,7 +454,6 @@ const rowsFromAccountFrame = (method: string, result: unknown, symbols: unknown)
   const rows: ReadonlyArray<{ symbol: string }> = method === 'fetchOrders' ? store.orders : store.positions;
   return Array.isArray(symbols) ? rows.filter((row) => symbols.includes(row.symbol)) : rows;
 };
-type NativeAccountRead = (typeof NATIVE_ACCOUNT_READS)[number];
 const MULTI_COMMAND_WAIT_FACTOR = 5;
 /** Engine ops safe to delay until the engine exists; anything unlisted is treated as a write. */
 const COLD_START_READS = /^(fetch|find|refresh)/;
@@ -679,10 +676,10 @@ export class RustEngineExchange extends BaseExchange {
   private readonly commandTimeoutMs: number;
   private readonly bridgeConstruction: EngineBridgeConstruction;
   private publicDemandReady = false;
-  private readonly publicFeedObservers = new Set<{ updated(catalogChanged: boolean): void; closed(): void }>();
+  private readonly publicFeedObservers = new Set<{ updated(catalogChanged: boolean): void; diagnostics?(frame: Frame): void; closed(): void }>();
 
   /** Public providers observe applied native ticker frames, without replacing onFrame. */
-  observePublicFeed(observer: { updated(catalogChanged: boolean): void; closed(): void }): () => void {
+  observePublicFeed(observer: { updated(catalogChanged: boolean): void; diagnostics?(frame: Frame): void; closed(): void }): () => void {
     this.publicFeedObservers.add(observer);
     return () => {
       this.publicFeedObservers.delete(observer);
@@ -1850,6 +1847,7 @@ export class RustEngineExchange extends BaseExchange {
         enableSpotMarkets: Boolean(enableSpotMarkets),
         enableInverseMarkets: Boolean(options.enableInverseMarkets && !options.externalPublicData),
         enableOptionMarkets: Boolean(options.enableOptionMarkets),
+        tuning: { calculateUpnlFromRealtimeLastPrice: options.tuning?.calculateUpnlFromRealtimeLastPrice === true },
         grvtTradingAccountId: options.grvtTradingAccountId,
         grvtSignerAddress: options.grvtSignerAddress,
         polymarket: options.polymarket,
@@ -2489,7 +2487,7 @@ export class RustEngineExchange extends BaseExchange {
         await this.fetchSymbolMaxLeverage(symbol);
         return;
       }
-      const rails = await this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol }, { report: false });
+      await this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol }, { report: false });
       this.host?.flush();
     } catch (error) {
       this.log(`Error refreshing leverage for ${symbol}: ${error}`, LogSeverity.Warning);
@@ -2568,6 +2566,9 @@ export class RustEngineExchange extends BaseExchange {
       let publicChanged = catalogChanged;
       try {
         publicChanged ||= Boolean(frame.tickers() || frame.tickerDeltas() || frame.tickerObservations?.());
+        if (frame.messageHandlerStats?.())
+          for (const observer of this.publicFeedObservers)
+            this.dispatchFrameEvent(() => observer.diagnostics?.(decoded));
       } catch (error) {
         needsSnapshot = true;
         diagnosticConsole.error('Engine public feed section failed', error);

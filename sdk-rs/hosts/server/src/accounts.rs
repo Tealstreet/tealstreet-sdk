@@ -827,6 +827,12 @@ pub fn refuse_misplaced_site(init: &InitPayload) -> Result<(), String> {
 
 pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     let mut options = Map::new();
+    if let Some(tuning) = &init.tuning {
+        options.insert(
+            "tuning".into(),
+            serde_json::to_value(tuning).expect("display tuning"),
+        );
+    }
     if !public_only && matches!(init.exchange_name.as_str(), "coinbase" | "coinbasespot") {
         options.insert(
             "coinbaseJwtAlgorithm".into(),

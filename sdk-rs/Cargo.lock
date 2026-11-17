@@ -4229,7 +4229,9 @@ name = "safe-cex-store-frames"
 version = "0.1.0"
 dependencies = [
  "safe-cex-chaser",
+ "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-venue-lighter",
  "serde",
  "serde_json",
 ]

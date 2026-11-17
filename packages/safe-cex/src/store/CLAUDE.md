@@ -37,7 +37,7 @@ mirrors accept source frames without constructing a page engine.
 Derived sections replace socketHealth, activeChasers, activeTWAPs, ordersRisk,
 displayedPositions, displayedMargin and balance.info. Absence preserves state;
 explicit empty values clear it. Unknown displayed-margin values remain null.
-Native subscription diagnostics retain their existing table protocol.
+Native subscription diagnostics retain their existing table protocol. Section 33 joins Rust-authored managed-order ownership by exact order ID; TypeScript only copies those facts and clears previous tags on empty replacement.
 
 ## Baselines and recovery
 
@@ -47,7 +47,7 @@ Snapshots reset book baselines and decoded readiness. Authoritative replacement
 position tables remove omitted rows, including every row on an empty table.
 No closed exposure is manufactured. Native POSITIONS projects the generated
 `positionSettings` cache by exact position ID, retaining confirmed settings
-after closure; reset clears this cache.
+after closure and recovery snapshots; native SETTINGS updates retained rails. Explicit reset clears this cache. Row update counters remain monotonic across both snapshots and reset.
 
 STATUS loaded bits cannot prove that a section decoded. Accepted empty tables
 count as evidence. A rejected section revokes only its evidence; bad market
@@ -125,7 +125,7 @@ clears it. No TS repair fabricates missing balance dictionaries.
 
 Subscription diagnostics section 25 replaces native-owned groups on snapshots
 and patches named topics on periodic updates. Shared-provider groups remain
-independent. Row groups are public/business/futures/private; never-received
+independent. Shared public-provider section 34 is republished by the receiving native engine, including late snapshots; section 35 carries native HTTP requestStats counters. Row groups are public/business/futures/private; never-received
 timestamps stay zero and a retired subscription has zero callbacks.
 
 ## Verification

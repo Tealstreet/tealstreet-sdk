@@ -53,6 +53,14 @@ const walk = (root, dir, files) => {
   }
 };
 
+const sharedDisplayPolicy = 'packages/safe-cex/src/exchange-display-policy.json';
+const appendSharedPolicy = (root, files) => {
+  const path = join(root, sharedDisplayPolicy);
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('shared display policy is not a regular file');
+  files.push([sharedDisplayPolicy, sha256(readFileSync(path))]);
+};
+
 /**
  * Inventory every input under `<root>/sdk-rs` (path and SHA-256), plus the
  * toolchain and profile the release builds with, and fingerprint them together.
@@ -64,6 +72,7 @@ export const betaWasmInputs = (root, toolchain) => {
   if (lstatSync(join(root, 'sdk-rs')).isSymbolicLink()) throw new Error('sdk-rs is a symlink');
   const files = [];
   walk(root, join(root, 'sdk-rs'), files);
+  appendSharedPolicy(root, files);
   files.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const record = JSON.stringify({
     toolchain: Object.fromEntries(Object.entries(toolchain).sort(([a], [b]) => a.localeCompare(b))),
@@ -76,6 +85,7 @@ export const betaWasmInputs = (root, toolchain) => {
 export const betaWasmInputPaths = (root) => {
   const files = [];
   walk(root, join(root, 'sdk-rs'), files);
+  appendSharedPolicy(root, files);
   return files.map(([rel]) => rel).sort();
 };
 

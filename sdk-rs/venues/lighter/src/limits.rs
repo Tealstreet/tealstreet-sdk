@@ -363,6 +363,8 @@ impl Lighter {
             && let Ok(payload) = serde_json::from_str::<Payload<'_>>(response.body)
         {
             self.limits.tier = payload.tier();
+            cx.store
+                .set_balance_info_json(format!(r#"{{"lighterAccountLimits":{}}}"#, response.body));
             self.limits.next_fetch_at = started_at + CACHE_MS;
         } else {
             self.limits.next_fetch_at = started_at + RETRY_MS;

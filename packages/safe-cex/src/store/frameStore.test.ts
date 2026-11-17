@@ -138,3 +138,51 @@ it('retains only confirmed native settings after closing positions and clears th
   store.reset();
   expect(store.positionSettings).toEqual({});
 });
+
+it('refuses readiness from the exact 40-byte STATUS-only snapshot, including after recovery', () => {
+  const bytes = new ArrayBuffer(40);
+  const view = new DataView(bytes);
+  view.setUint32(0, 0x46584353, true);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 1, true);
+  view.setUint16(16, 10, true);
+  view.setUint32(20, 16, true);
+  view.setUint32(24, 31, true);
+  const store = new FrameStore();
+  for (const recovered of [false, true]) {
+    if (recovered) store.ingest(frame(fixtures.ready), { snapshot: true });
+    store.ingest(new Frame(bytes), { snapshot: true });
+    expect(store.hasMarketIdentity).toBe(false);
+    expect(store.hasTickerState).toBe(false);
+    expect(store.hasAccountState).toBe(false);
+    expect(store.loaded).toEqual({ markets: false, tickers: false, balance: false, orders: false, positions: false });
+  }
+});
+
+it('keeps order and position update counters monotonic through snapshot recovery and reset', () => {
+  const store = new FrameStore();
+  store.ingest(frame(fixtures.ready), { snapshot: true });
+  const first = store.updateIds;
+  store.ingest(frame(fixtures.ready), { snapshot: true });
+  expect(store.updateIds).toEqual(first);
+  store.reset();
+  const reset = store.updateIds;
+  expect(reset.orders).toBeGreaterThanOrEqual(first.orders);
+  expect(reset.positions).toBeGreaterThanOrEqual(first.positions);
+  store.ingest(frame(fixtures.ready), { snapshot: true });
+  expect(store.updateIds.orders).toBeGreaterThanOrEqual(reset.orders);
+  expect(store.updateIds.positions).toBeGreaterThanOrEqual(reset.positions);
+});
+
+it('retains native closed-position settings through same-account snapshot recovery', () => {
+  const store = new FrameStore();
+  store.ingest(nativeFixture({ positions: [{
+    id: 'closed-native', symbol: 'BTC', side: PositionSide.Long, contracts: 2,
+    entryPrice: 100, notional: 200, leverage: 10, unrealizedPnl: 7, liquidationPrice: null,
+  }] }));
+  store.ingest(nativeFixture({ positions: [] }), { snapshot: true });
+  expect(store.positionSettings['closed-native']?.leverage).toBe(10);
+  expect(store.positions).toEqual([]);
+  store.ingest(nativeFixture({ fetchedLeverage: { BTC: { buyLeverage: 20, sellLeverage: 20 } } }, ['BTC']));
+  expect(store.positionSettings['closed-native']?.leverage).toBe(20);
+});

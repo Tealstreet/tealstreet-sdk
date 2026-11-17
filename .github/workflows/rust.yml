@@ -1416,7 +1416,7 @@ jobs:
       # Collector steps retain strict FAIL reports so every product runs. Only
       # this mandatory verifier can certify the job; unknown/missing gates fail.
       - name: Verify strict replay results and declared known failures
-        if: always()
+        if: always() && steps.cpu_prepare.outcome == 'success'
         id: cpu_collect
         env:
           GITHUB_TOKEN: ${{ github.token }}

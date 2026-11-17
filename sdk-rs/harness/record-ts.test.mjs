@@ -267,6 +267,8 @@ function scenario(t, { missing = false, failSink = false, failLoader = false, ha
         markets: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', active: true,
           precision: { price: 0.1, amount: 0.001 },
           limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 100 } } }],
+        tickers: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', bid: 99, ask: 101, last: 100, mark: 100, index: 100,
+          percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0 }],
         loaded: { ...this.store.loaded, markets: true, tickers: true },
       }));
       this.socket = new globalThis.WebSocket('wss://public.example/ws');

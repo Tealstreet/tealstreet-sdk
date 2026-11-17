@@ -865,7 +865,7 @@ Server to client, one message per engine flush per account:
 All account state is carried by SCXF. The shared Rust `hosts/store-frames` producer
 adds socket health, active chasers/TWAPs, order risk, displayed positions/margin
 and retained balance info to the account actor's ordered frame stream. Native
-subscription diagnostics use section 25. There is no `op:'store'` side channel.
+subscription diagnostics use section 25; shared public diagnostics use section 34, request outcomes section 35 and managed-order ownership section 33. Display policy is shared with SDK metadata and optional init tuning; holder relabeling preserves tuning. There is no `op:'store'` side channel.
 The LOCAL wasm host uses the same producer; mobile imports only the pure-JS
 frame reader. See `hosts/store-frames/README.md` for replacement/clear semantics.
 

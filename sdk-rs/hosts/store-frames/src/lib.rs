@@ -11,12 +11,15 @@ mod model;
 use model::*;
 pub mod risk;
 pub use codec::decode as decode_section;
+pub use model::ActiveChaser;
+include!(concat!(env!("OUT_DIR"), "/display_policy.rs"));
 
 #[derive(Clone)]
 pub struct Inputs {
     pub account: String,
     pub venue: String,
     pub calculate_upnl_from_last: bool,
+    realtime_last_price_tuning: bool,
     pub active_chasers: Vec<ActiveChaser>,
     active_twaps: Value,
     pub balance_info: Value,
@@ -28,6 +31,7 @@ impl Default for Inputs {
             account: String::new(),
             venue: String::new(),
             calculate_upnl_from_last: false,
+            realtime_last_price_tuning: false,
             active_chasers: Vec::new(),
             active_twaps: Value::Array(Vec::new()),
             balance_info: Value::Null,
@@ -36,14 +40,22 @@ impl Default for Inputs {
     }
 }
 impl Inputs {
+    pub fn new(account: &str, venue: &str, realtime_last_price: bool) -> Self {
+        let mut inputs = Self {
+            realtime_last_price_tuning: realtime_last_price,
+            ..Self::default()
+        };
+        inputs.configure(account, venue);
+        inputs
+    }
     pub fn configure(&mut self, account: &str, venue: &str) {
         self.account = account.into();
         self.venue = venue.into();
+        self.calculate_upnl_from_last =
+            calculate_upnl_from_last(venue) || self.realtime_last_price_tuning;
     }
-    pub fn algos<C: Serialize + ?Sized, T: Serialize + ?Sized>(&mut self, chasers: &C, twaps: &T) {
-        self.active_chasers =
-            serde_json::from_value(serde_json::to_value(chasers).expect("algo rows"))
-                .expect("native chasers");
+    pub fn algos<T: Serialize + ?Sized>(&mut self, chasers: &[ActiveChaser], twaps: &T) {
+        self.active_chasers = chasers.to_vec();
         self.active_twaps = serde_json::to_value(twaps).expect("native TWAP options");
     }
     pub fn balance_info(&mut self, info: &serde_json::Value) {
@@ -108,9 +120,13 @@ impl Emitter {
             let mut data = self.data.take().unwrap_or_default();
             if has(9) || inputs_changed {
                 data.balance.balance = store.balance().clone();
-                data.balance.info = match &input.balance_info {
-                    Value::Null => None,
-                    info => Some(info.clone()),
+                data.balance.info = if let Some(info) = store.balance_info_json() {
+                    Some(serde_json::from_str(info).expect("validated native balance metadata"))
+                } else {
+                    match &input.balance_info {
+                        Value::Null => None,
+                        info => Some(info.clone()),
+                    }
                 };
                 data.balance.coins = store.coin_balances().map(|rows| {
                     rows.iter()
@@ -180,8 +196,51 @@ impl Emitter {
             Section::ActiveTwaps,
             encoded(&self.data.as_ref().expect("native data").active_twaps),
         );
+        self.current.insert(
+            Section::BalanceInfo,
+            match self
+                .data
+                .as_ref()
+                .and_then(|data| data.balance.info.as_ref())
+            {
+                Some(info) => wire::encode(info),
+                None => wire::encode(&Value::Null),
+            },
+        );
+        let data = self.data.as_ref().expect("native data");
+        let mut ownership = BTreeMap::new();
+        for order in &data.orders {
+            let mut owner = model::ManagedOrder::default();
+            if let Some(chaser) = input
+                .active_chasers
+                .iter()
+                .rev()
+                .find(|c| c.current_order_ids.contains(&order.id))
+            {
+                owner.is_from_chaser = Some(true);
+                owner.chaser_id = Some(chaser.id.clone());
+                owner.chaser_attempts = Some(chaser.attempts);
+                owner.chaser_max_attempts = Some(chaser.max_attempts);
+                if let Some(id) = &chaser.twap_id {
+                    owner.is_from_twap = Some(true);
+                    owner.twap_id = Some(id.clone());
+                }
+            }
+            if let Some(twap) = data.active_twaps.iter().rev().find(|t| {
+                t.state
+                    .get("currentOrderIds")
+                    .and_then(Value::as_array)
+                    .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(&order.id)))
+            }) {
+                owner.is_from_twap = Some(true);
+                owner.twap_id = Some(twap.id.clone());
+            }
+            if owner.is_from_chaser.is_some() || owner.is_from_twap.is_some() {
+                ownership.insert(&order.id, owner);
+            }
+        }
         self.current
-            .insert(Section::BalanceInfo, wire::encode(&input.balance_info));
+            .insert(Section::ManagedOrders, encoded(&ownership));
         for (&kind, payload) in &self.current {
             if snapshot || self.sent.get(&kind) != Some(payload) {
                 wire::append(&mut frame, kind, payload);
@@ -292,7 +351,7 @@ impl Emitter {
                     .any(|c| !c.is_stopped && c.symbol == p.symbol && chaser_side(c) == side),
                 has_active_twap: data.active_twaps.iter().any(|t| {
                     t.status == "running"
-                        && t.active_market.symbol == p.symbol
+                        && t.symbol == p.symbol
                         && (if t.side == OrderSide::Buy {
                             PositionSide::Long
                         } else {
@@ -433,43 +492,56 @@ impl Emitter {
     }
 }
 fn twap_rows(input: &Value, markets: &[Market], previous: &[ActiveTwap]) -> Vec<ActiveTwap> {
-    let Value::Array(rows) = input else {
-        return Vec::new();
-    };
+    let rows = input.as_array().expect("native TWAP rows");
     rows.iter()
         .map(|row| {
-            let mut row = row.clone();
-            // Algo options may contain only the selected symbol. The UI gets the
-            // engine's canonical generated Market, never the partial caller object.
-            if let Some(active) = row.get_mut("activeMarket") {
-                let symbol = active
-                    .get("symbol")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
-                if let Some(market) = markets
-                    .iter()
-                    .find(|m| Some(&m.symbol) == symbol.as_ref())
-                    .or_else(|| {
-                        previous
-                            .iter()
-                            .find(|t| Some(&t.active_market.symbol) == symbol.as_ref())
-                            .map(|t| &t.active_market)
-                    })
-                {
-                    *active = serde_json::to_value(market).expect("native active market");
-                }
+            let mut fields = row.as_object().expect("native TWAP record").clone();
+            let mut text = |key| {
+                fields
+                    .remove(key)
+                    .and_then(|v| v.as_str().map(str::to_owned))
+                    .expect("native TWAP identity")
+            };
+            let id = text("id");
+            let symbol = text("symbol");
+            let account_name = text("accountName");
+            let status = text("status");
+            let side = match text("side").as_str() {
+                "buy" => OrderSide::Buy,
+                "sell" => OrderSide::Sell,
+                _ => panic!("native TWAP side"),
+            };
+            // Market/pricing decisions use the native catalogue. Admitted algo metadata
+            // only needs forwarding; decoding it again instantiated an entire Market
+            // deserializer in every family without adding an independent source of truth.
+            let admitted_market = fields.remove("activeMarket").expect("native TWAP market");
+            let active_market = if let Some(market) = markets.iter().find(|m| m.symbol == symbol) {
+                serde_json::to_value(market).expect("native active market")
+            } else if let Some(twap) = previous.iter().find(|t| t.symbol == symbol) {
+                twap.active_market.clone()
+            } else {
+                admitted_market
+            };
+            ActiveTwap {
+                id,
+                symbol,
+                account_name,
+                status,
+                side,
+                active_market,
+                state: fields.into_iter().collect(),
             }
-            serde_json::from_value(row).expect("native active TWAP")
         })
         .collect()
 }
+
 fn side_name(side: PositionSide) -> &'static str {
     match side {
         PositionSide::Long => "long",
         PositionSide::Short => "short",
     }
 }
-fn encoded(value: &(impl Serialize + ?Sized)) -> Vec<u8> {
+fn encoded(value: &impl Serialize) -> Vec<u8> {
     wire::encode(value)
 }
 
@@ -622,7 +694,7 @@ mod tests {
         let mut input = input();
         input.balance_info(&serde_json::json!({"tier":"pro"}));
         let frame = emitter.frame(empty(1000.0), &store, &input, true);
-        assert_eq!(safe_cex_engine::wire::sections(&frame).count(), 7);
+        assert_eq!(safe_cex_engine::wire::sections(&frame).count(), 8);
         let data = emitter.data.as_ref().unwrap();
         let row = &data.displayed_positions[0];
         assert_eq!(row.key.as_deref(), Some("account-1:BTCUSDT:long"));
@@ -654,7 +726,7 @@ mod tests {
         let mut store = store();
         let input = input();
         let first = emitter.frame(empty(1000.0), &store, &input, false);
-        assert_eq!(safe_cex_engine::wire::sections(&first).count(), 7);
+        assert_eq!(safe_cex_engine::wire::sections(&first).count(), 8);
         assert_eq!(
             emitter.frame(empty(1000.0), &store, &input, false).len(),
             16
@@ -689,7 +761,7 @@ mod tests {
         let mut store = store();
         store.set_positions(vec![]);
         let mut input = input();
-        input.algos(&serde_json::json!([{"id":"chase-1","symbol":"BTCUSDT","size":3,"side":"buy","maxAttempts":10,"attempts":1,"isStopped":false,"stopReason":"","currentOrderIds":["o"]}]),&Vec::<serde_json::Value>::new());
+        input.algos(&serde_json::from_value::<Vec<ActiveChaser>>(serde_json::json!([{"id":"chase-1","symbol":"BTCUSDT","size":3,"side":"buy","maxAttempts":10,"attempts":1,"isStopped":false,"stopReason":"","currentOrderIds":["o"]}])).unwrap(),&Vec::<serde_json::Value>::new());
         let frame = emitter.frame(empty(1000.0), &store, &input, true);
         let data = emitter.data.as_ref().unwrap();
         let row = &data.displayed_positions[0];
@@ -733,7 +805,7 @@ mod tests {
         let mut emitter = Emitter::default();
         let mut store = store();
         let mut input = input();
-        input.algos(&Vec::<serde_json::Value>::new(),&serde_json::json!([{
+        input.algos(&[],&serde_json::json!([{
             "id":"twap-1","symbol":"BTCUSDT","accountName":"account-1","activeMarket":{"symbol":"BTCUSDT"},
             "size":1,"duration":60,"ordersCount":2,"side":"buy","chaserDelay":500,"reduceOnly":false,
             "randomnessPercentage":0,"useLimitOrders":false,"useChaserOrders":false,
@@ -744,7 +816,95 @@ mod tests {
         emitter.frame(empty(2000.0), &store, &input, true);
         let twaps = &emitter.data.as_ref().unwrap().active_twaps;
         assert_eq!(twaps.len(), 1);
-        assert_eq!(twaps[0].active_market.id, "BTC");
+        assert_eq!(twaps[0].active_market["id"], "BTC");
+    }
+
+    #[test]
+    fn real_scxf_orders_keep_and_clear_managed_ownership_in_frame_store() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let store = store();
+        let mut inputs = input();
+        inputs.algos(&serde_json::from_value::<Vec<ActiveChaser>>(serde_json::json!([{
+            "id":"chase-1","symbol":"BTCUSDT","size":1,"side":"sell", "maxAttempts":10,
+            "attempts":2,"isStopped":false,"stopReason":"","currentOrderIds":["profit"], "twapId":"parent-twap"
+        }])).unwrap(), &serde_json::json!([{
+            "id":"twap-1","symbol":"BTCUSDT","accountName":"account-1", "activeMarket":{"symbol":"BTCUSDT"},
+            "side":"sell","status":"running","currentOrderIds":["stop"]
+        }]));
+        let mut emitter = Emitter::default();
+        let mut writer = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 1000.0);
+        store.write(&store.everything(), &mut writer);
+        let first = emitter.frame(writer.finish(), &store, &inputs, true);
+        inputs.active_chasers[0].attempts = 3;
+        let changed = emitter.frame(empty(2000.0), &store, &inputs, false);
+        inputs.algos(&[], &Vec::<serde_json::Value>::new());
+        let cleared = emitter.frame(empty(3000.0), &store, &inputs, false);
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .canonicalize()
+            .unwrap();
+        let script = r#"
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {Frame} from './sdk-rs/hosts/wasm/js/wire.mjs';
+import {FrameStore} from './packages/safe-cex/src/store/frameStore.ts';
+const store = new FrameStore();
+const frames = JSON.parse(readFileSync(0, 'utf8')).map(bytes => new Frame(Uint8Array.from(bytes).buffer));
+store.ingest(frames[0], {snapshot:true});
+const profit = () => store.orders.find(order => order.id === 'profit');
+const stop = () => store.orders.find(order => order.id === 'stop');
+assert.equal(profit().extra?.isFromChaser, true);
+assert.equal(profit().extra.chaserId, 'chase-1');
+assert.equal(profit().extra.chaserAttempts, 2);
+assert.equal(profit().extra.chaserMaxAttempts, 10);
+assert.equal(profit().extra.isFromTwap, true);
+assert.equal(profit().extra.twapId, 'parent-twap');
+assert.equal(stop().extra?.isFromTwap, true);
+assert.equal(stop().extra.twapId, 'twap-1');
+const previous = profit();
+store.ingest(frames[1]);
+assert.equal(profit().extra.chaserAttempts, 3);
+assert.equal(previous.extra.chaserAttempts, 2);
+store.ingest(frames[2]);
+assert.equal(profit().extra?.isFromChaser, undefined);
+assert.equal(profit().extra?.isFromTwap, undefined);
+assert.equal(stop().extra?.isFromTwap, undefined);
+"#;
+        let mut child = Command::new("node")
+            .current_dir(root)
+            .args(["--import", "tsx", "--input-type=module", "-e", script])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&[first, changed, cleared]).unwrap())
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn venue_metadata_revalues_nonzero_reported_pnl_without_mutating_positions() {
+        for (venue, tuning, expected) in [
+            ("bybit", false, 20.0),
+            ("bybit", true, 20.0),
+            ("bingx", false, 7.0),
+            ("bingx", true, 20.0),
+        ] {
+            let mut store = store();
+            store.update_positions(|position| position.unrealized_pnl = 7.0);
+            let input = Inputs::new("account-1", venue, tuning);
+            let frame = Emitter::default().frame(empty(1000.0), &store, &input, true);
+            assert_eq!(
+                payload(&frame, Section::DisplayedPositions)[0]["unrealizedPnl"],
+                expected,
+                "metadata policy for {venue} must apply even to nonzero API PnL"
+            );
+            assert_eq!(store.positions()[0].unrealized_pnl, 7.0);
+        }
     }
 
     #[test]

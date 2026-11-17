@@ -1,19 +1,19 @@
 //! Native account UI records composed from engine and algorithm models.
 pub use safe_cex_chaser::ActiveChaser;
 use safe_cex_engine::model::*;
-use serde::{Deserialize, Serialize, ser::SerializeMap};
+use serde::{Serialize, ser::SerializeMap};
 use std::{
     collections::BTreeMap,
     ops::{Deref, DerefMut},
 };
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActiveTwap {
     pub id: String,
     pub symbol: String,
     pub account_name: String,
-    pub active_market: Market,
+    pub active_market: serde_json::Value,
     pub side: OrderSide,
     pub status: String,
     #[serde(flatten)]
@@ -168,4 +168,22 @@ pub struct Projection {
     pub displayed_positions: Vec<DisplayedPosition>,
     pub displayed_margin: DisplayedMargin,
     pub orders_risk: BTreeMap<String, Vec<OrderRiskProfile>>,
+}
+
+/// Ownership facts emitted by the native algo host, keyed by native order ID.
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedOrder {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_from_chaser: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chaser_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chaser_attempts: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chaser_max_attempts: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_from_twap: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub twap_id: Option<String>,
 }

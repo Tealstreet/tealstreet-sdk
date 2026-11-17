@@ -18,6 +18,7 @@ pub enum Section {
     DisplayedPositions = 30,
     DisplayedMargin = 31,
     BalanceInfo = 32,
+    ManagedOrders = 33,
 }
 
 pub fn encode<T: Serialize + ?Sized>(value: &T) -> Vec<u8> {

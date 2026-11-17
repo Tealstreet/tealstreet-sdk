@@ -1402,6 +1402,14 @@ test('native message-handler statistics carry snapshot and topic-update semantic
   const removal = numericFrame([stringSection, statsSection(false, [[3, 1, 0, NaN]])]).messageHandlerStats();
   assert.equal(removal.replace, false); assert.equal(removal.subscribed(0), false);
   assert.equal(numericFrame([]).messageHandlerStats(), undefined);
+  const shared = statsSection(true, [[0, 0, 3, 12]]);
+  shared.kind = SECTION.PUBLIC_MESSAGE_HANDLER_STATS;
+  const publicTable = numericFrame([stringSection, shared]).publicMessageHandlerStats();
+  assert.equal(publicTable.topic(0), 'ticker.BTC');
+  assert.equal(publicTable.ageMs(0), 12);
+  const privateShared = statsSection(true, [[3, 1, 3, 12]]);
+  privateShared.kind = SECTION.PUBLIC_MESSAGE_HANDLER_STATS;
+  assert.throws(() => numericFrame([stringSection, privateShared]).publicMessageHandlerStats(), /invalid message handler stats row/);
   for (const row of [[4, 0, 1, NaN], [0, 0, 2, 1], [0, 0, 3, -1]]) {
     assert.throws(() => numericFrame([stringSection, statsSection(false, [row])]).messageHandlerStats(), /invalid message handler stats row/);
   }

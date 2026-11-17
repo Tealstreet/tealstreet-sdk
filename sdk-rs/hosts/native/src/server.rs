@@ -226,6 +226,7 @@ impl FrameServer {
         signer: Option<safe_cex_engine::signing::Provider>,
     ) -> io::Result<()> {
         struct Register<'a, T> {
+            inputs: safe_cex_store_frames::Inputs,
             server: &'a mut FrameServer,
             id: &'a str,
             token: &'a str,
@@ -234,13 +235,26 @@ impl FrameServer {
         impl<T: Transport + 'static> safe_cex_venues::Visit for Register<'_, T> {
             type Output = io::Result<()>;
             fn visit<V: Venue + 'static>(self, engine: safe_cex_engine::Engine<V>) -> Self::Output {
-                self.server
-                    .add_account(self.id, self.token, Host::new(engine, self.transport))
+                self.server.add_account_with_inputs(
+                    self.id,
+                    self.token,
+                    Host::new(engine, self.transport),
+                    self.inputs,
+                )
             }
         }
-        let options = serde_json::from_str(options_json)
+        let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        let inputs = safe_cex_store_frames::Inputs::new(
+            "",
+            venue,
+            options
+                .tuning
+                .as_ref()
+                .is_some_and(|t| t.calculate_upnl_from_realtime_last_price),
+        );
         let register = Register {
+            inputs,
             server: self,
             id,
             token,
@@ -276,6 +290,16 @@ impl FrameServer {
         token: &str,
         host: Host<V, T>,
     ) -> io::Result<()> {
+        self.add_account_with_inputs(id, token, host, safe_cex_store_frames::Inputs::default())
+    }
+
+    fn add_account_with_inputs<V: Venue + 'static, T: Transport + 'static>(
+        &mut self,
+        id: &str,
+        token: &str,
+        host: Host<V, T>,
+        inputs: safe_cex_store_frames::Inputs,
+    ) -> io::Result<()> {
         if host.engine.has_received_commands() {
             return Err(invalid(
                 "account engine must not receive commands before server registration",
@@ -301,6 +325,7 @@ impl FrameServer {
         }
         let (commands, inbox) = mpsc::channel(256);
         let actor = Account::new(host, self.config.clone());
+        *actor.store_inputs.lock().unwrap() = inputs;
         self.tasks.push(tokio::task::spawn_local(
             actor.run(inbox, self.shutdown.subscribe()),
         ));
@@ -407,8 +432,16 @@ pub struct ClientLink {
 /// Starts an account actor without a frame-server listener. The task ends after
 /// `dispose` or when every handle is dropped; await it to observe teardown.
 pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
+    host: Host<V, T>,
+    config: ServerConfig,
+) -> io::Result<(AccountHandle, JoinHandle<io::Result<()>>)> {
+    spawn_account_with_inputs(host, config, safe_cex_store_frames::Inputs::default())
+}
+
+fn spawn_account_with_inputs<V: Venue + 'static, T: Transport + 'static>(
     mut host: Host<V, T>,
     config: ServerConfig,
+    inputs: safe_cex_store_frames::Inputs,
 ) -> io::Result<(AccountHandle, JoinHandle<io::Result<()>>)> {
     config.validate()?;
     if host.engine.has_received_commands() {
@@ -428,6 +461,7 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
     let (commands, inbox) = mpsc::channel(256);
     let (stop, stopped) = watch::channel(false);
     let actor = Account::new(host, config.clone());
+    *actor.store_inputs.lock().unwrap() = inputs;
     let disposal = actor.disposal.clone();
     let store_inputs = actor.store_inputs.clone();
     let task = tokio::task::spawn_local(async move {
@@ -463,23 +497,36 @@ pub fn spawn_venue_account<T: Transport + 'static>(
     config: ServerConfig,
 ) -> io::Result<(AccountHandle, JoinHandle<io::Result<()>>)> {
     struct Spawn<T> {
+        inputs: safe_cex_store_frames::Inputs,
         transport: T,
         config: ServerConfig,
     }
     impl<T: Transport + 'static> safe_cex_venues::Visit for Spawn<T> {
         type Output = io::Result<(AccountHandle, JoinHandle<io::Result<()>>)>;
         fn visit<V: Venue + 'static>(self, engine: safe_cex_engine::Engine<V>) -> Self::Output {
-            spawn_account(Host::new(engine, self.transport), self.config)
+            spawn_account_with_inputs(Host::new(engine, self.transport), self.config, self.inputs)
         }
     }
-    let mut options = serde_json::from_str(options_json)
+    let mut options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     if let Some(state) = &config.trusted_signer_state {
         state
             .apply(venue, &mut options)
             .map_err(construction_refusal)?;
     }
-    let spawn = Spawn { transport, config };
+    let inputs = safe_cex_store_frames::Inputs::new(
+        "",
+        venue,
+        options
+            .tuning
+            .as_ref()
+            .is_some_and(|t| t.calculate_upnl_from_realtime_last_price),
+    );
+    let spawn = Spawn {
+        inputs,
+        transport,
+        config,
+    };
     let entropy = Some(crate::production_entropy());
     let result = match signer {
         Some(signer) => safe_cex_venues::build_with_signer_in_context(
@@ -513,9 +560,9 @@ impl AccountHandle {
     pub fn configure_store_frames(&self, account: &str, venue: &str) {
         self.store_inputs.lock().unwrap().configure(account, venue);
     }
-    pub fn store_algos<C: Serialize + ?Sized, T: Serialize + ?Sized>(
+    pub fn store_algos<T: Serialize + ?Sized>(
         &self,
-        chasers: &C,
+        chasers: &[safe_cex_store_frames::ActiveChaser],
         twaps: &T,
     ) {
         self.store_inputs.lock().unwrap().algos(chasers, twaps);
@@ -2470,6 +2517,21 @@ mod tests {
             Box::new(std::iter::empty())
         }
     }
+    #[cfg(feature = "venues")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn hosted_constructor_supplies_display_metadata_and_user_tuning() {
+        tokio::task::LocalSet::new().run_until(async {
+            for (venue, tuning, expected) in [("bybit", false, true), ("bybit", true, true), ("bingx", false, false), ("bingx", true, true)] {
+                let options = serde_json::json!({"publicDataOnly":true,"tuning":{"calculateUpnlFromRealtimeLastPrice":tuning}}).to_string();
+                let (handle, task) = spawn_venue_account(venue, &options, NoTransport, None, ServerConfig::default()).unwrap();
+                handle.configure_store_frames("account-1", venue);
+                assert_eq!(handle.store_inputs.lock().unwrap().calculate_upnl_from_last, expected, "{venue}/{tuning}");
+                handle.dispose();
+                task.await.unwrap().unwrap();
+            }
+        }).await;
+    }
+
     struct NoTransport;
     impl Transport for NoTransport {
         fn connect(&self, _: SocketId, _: String, _: Events) -> mpsc::UnboundedSender<String> {

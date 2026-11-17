@@ -20,6 +20,7 @@ import {
 } from '../../exchanges/rust/publicFeed';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 
 const market = (symbol: string) =>
   ({ id: symbol, symbol, contractSize: 1, isSpot: false, isPerpetual: true }) as Market;
@@ -60,6 +61,7 @@ function restartableSource() {
   let current = create();
   const storeListeners = new Set<() => void>();
   const source: PublicDataSource = {
+    snapshotFrame: () => nativeFixture({}).buffer,
     store: {
       subscribe: (callback) => {
         const listener = () => callback({} as StoreData);
