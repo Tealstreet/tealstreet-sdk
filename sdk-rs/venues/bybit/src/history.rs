@@ -138,8 +138,15 @@ impl RowKind {
         } else {
             MAX_PAGES_PER_WINDOW
         };
+        use safe_cex_engine::history::HistoryOperation;
+        let operation = match self {
+            Self::Orders => HistoryOperation::BybitOrders,
+            Self::Fills => HistoryOperation::BybitFills,
+            Self::Income => HistoryOperation::BybitIncome,
+            Self::Trades => HistoryOperation::BybitTrades,
+        };
         CursorHistory::new(
-            completion,
+            completion.with_operation(operation),
             CursorWalk::new(max_pages),
             |reason| {
                 match reason {

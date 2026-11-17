@@ -1,3 +1,12 @@
+export type HistoryFailureDetail = {
+  readonly operation: 'bybitClosedPnl' | 'bybitOrders' | 'bybitFills' | 'bybitIncome' | 'bybitTrades';
+  readonly kind: 'rejected' | 'invalidInput' | 'insufficientBalance' | 'authInvalid' | 'authExpired' |
+    'authPermission' | 'rateLimited' | 'network' | 'timeout' | 'venueUnavailable' | 'unsupported' | 'internal';
+  readonly venueCode?: '10000' | '10001' | '10002' | '10003' | '10004' | '10005' | '10006' | '10010' |
+    '10016' | '10018' | '10024' | '10027' | '10028' | '10029' | '100028' | '33004' | '429' | 'other';
+};
+export function historyFailureOf(value: unknown): HistoryFailureDetail | undefined;
+
 /** Runs a WasmEngine against a transport. See host.mjs. */
 import type { EngineCapabilities } from './wire.mjs';
 

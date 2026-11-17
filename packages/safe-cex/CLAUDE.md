@@ -1061,6 +1061,13 @@ and `copyHistoryCompleteness` helpers preserve it before row transformations;
 Rust derived position and reported closed-PnL mappings retain it even on empty
 results. Bybit's derived history combines both source axes' assertions.
 
+Optional `completeness.failure: { operation, kind, venueCode? }` retains a Bybit
+later-page failure through the same owning-result mapping and serialization.
+`historyFailureOf` allowlists every field; native messages and row values never
+enter it. The array's `historyFailure` property is non-enumerable. Replacing an
+assertion replaces its diagnostic too, so a different partial input cannot
+borrow the earlier input's error facts. Grouping is a caller concern.
+
 The journal fold rejects flagged fills and symbol-scoped income; with complete
 account-wide fills it discards flagged income enrichment and leaves funding
 unattributed. NX ingestion must still inspect completeness before transforms

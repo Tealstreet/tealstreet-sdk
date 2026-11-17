@@ -1,3 +1,5 @@
+import { historyFailureOf } from './history-failure.mjs';
+export { historyFailureOf } from './history-failure.mjs';
 import { historyDecodeOf } from './history-decode.mjs';
 export { historyDecodeOf } from './history-decode.mjs';
 import { ManagedHttp, prepareFetch } from './managed-http.mjs';
@@ -1621,7 +1623,12 @@ export class EngineHost {
         const pending = Number.isInteger(command) && command >= 0 && command <= 0xffff_ffff
           ? this.commands.get(command) : undefined;
         // The engine's closed reason code, never the message (which may quote the venue).
-        if (code === 'history.incomplete' && pending) pending.incomplete = typeof fields?.reason === 'string' ? fields.reason : true;
+        if (code === 'history.incomplete' && pending) {
+          pending.incomplete = typeof fields?.reason === 'string' ? fields.reason : true;
+          pending.historyFailure = fields?.reason === 'laterPageFailed' ? historyFailureOf({
+            operation: fields.historyOperation, kind: fields.historyFailureKind, venueCode: fields.historyVenueCode,
+          }) : undefined;
+        }
         const event = { level, code, message, fields };
         let callbackFailure;
         try { pending?.onEvent?.(event); }
@@ -1701,6 +1708,7 @@ export class EngineHost {
           if (pending.incomplete && Array.isArray(result)) {
             Object.defineProperty(result, 'incomplete', { value: true, writable: true, configurable: true });
             if (typeof pending.incomplete === 'string') Object.defineProperty(result, 'incompleteReason', { value: pending.incomplete, writable: true, configurable: true });
+            if (pending.historyFailure) Object.defineProperty(result, 'historyFailure', { value: pending.historyFailure, writable: true, configurable: true });
           }
           this.settleCommand(action.command, result);
         }

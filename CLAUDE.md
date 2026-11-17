@@ -94,3 +94,7 @@ Update `sdk-rs/harness/CLAUDE.md` with the next real fingerprint mover; its CPU 
 Hyperliquid pre-send `/info` admission diagnostics retain timeout/NotSent with the
 closed `info_admission` cause. The relay/post-handoff boundary is documented in
 `sdk-rs/README.md` under Browser request-failure diagnostics.
+
+Bybit's closed later-page read diagnostics and owning-result completeness bridge
+are documented in `sdk-rs/venues/bybit/README.md` under Later-page history failure
+diagnostics. They add no pagination, retry or write authority.

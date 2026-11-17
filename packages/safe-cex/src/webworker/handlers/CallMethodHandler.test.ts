@@ -72,6 +72,23 @@ describe('CallMethodHandler', () => {
     );
   });
 
+  it('serializes a later-page failure beside the original successful rows', async () => {
+    const rows = Object.defineProperties([{ id: 'accepted' }], {
+      incomplete: { value: true }, incompleteReason: { value: 'laterPageFailed' },
+      historyFailure: { value: { operation: 'bybitFills', kind: 'rateLimited', venueCode: '10006', raw: 'PRIVATE_CANARY' } },
+    });
+    mockExchange.fetchHistoricalFills = vi.fn().mockResolvedValue(rows);
+    await handler.handleCallMethod('history-failure', 'fetchHistoricalFills', []);
+    const reply = mockPostMessage.mock.calls.at(-1)?.[0];
+    expect(reply).toEqual({ op: 'callMethod:done', data: {
+      requestId: 'history-failure', success: true, result: [{ id: 'accepted' }], completeness: {
+        incomplete: true, reason: 'laterPageFailed', failure: { operation: 'bybitFills', kind: 'rateLimited', venueCode: '10006' },
+      },
+    } });
+    expect(JSON.stringify(reply)).not.toContain('PRIVATE_CANARY');
+    expect(structuredClone(reply).data.completeness).toEqual(reply.data.completeness);
+  });
+
   describe('handle', () => {
     describe('callMethod', () => {
       it.each([
