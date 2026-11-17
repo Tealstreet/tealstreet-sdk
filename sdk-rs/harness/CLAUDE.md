@@ -17,6 +17,11 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
+OKX empty-envelope diagnostics retain code-0 cancellation continuation, nonzero
+stop behavior and the original native outcomes. Its scoped ordered-write tests
+pin complete per-order cancellation reporting and the explicit unknown-diagnostic
+fallback; optimized family evidence remains separate from these native controls.
+
 BingX Spot qualification adds independent Spot public/private cases to the `bingx` suite.
 The nondefault `bingx-spot-replay` WASM feature exports a fixed-credential fixture constructor;
 normal factories still refuse Spot. Shipped family size checks run before the fixture build.

@@ -1703,13 +1703,13 @@ impl Okx {
             if matches!(envelope.code, "0" | "2") {
                 return self.unproven(cx, request, "Malformed OKX write response");
             }
-            let message = format!("OKX {}: {}", envelope.code, envelope.msg);
+            let message = write_failure_message(&envelope);
             return self.failure(cx, request, Some(envelope.code), message, response.status);
         };
         // A refused envelope with no failing rows is one whole native failure.
         if !matches!(envelope.code, "0" | "2") && acks.iter().all(|a| matches!(a.s_code, "" | "0"))
         {
-            let message = format!("OKX {}: {}", envelope.code, envelope.msg);
+            let message = write_failure_message(&envelope);
             return self.failure(cx, request, Some(envelope.code), message, response.status);
         }
         let Some(job) = self.trading.jobs.get_mut(&request.command) else {
@@ -1925,7 +1925,7 @@ impl Okx {
             let message = if envelope.msg.is_empty() && !errors.is_empty() {
                 errors.join_with("; ")
             } else {
-                format!("OKX {}: {}", envelope.code, envelope.msg)
+                write_failure_message(&envelope)
             };
             return self.failure(cx, request, Some(envelope.code), message, response.status);
         }
@@ -1989,7 +1989,7 @@ impl Okx {
         };
         if unproven {
             let message = if errors.is_empty() {
-                format!("OKX {}: {}", envelope.code, envelope.msg)
+                write_failure_message(&envelope)
             } else {
                 errors.join_with("; ")
             };
@@ -2009,9 +2009,26 @@ impl Okx {
             continue_cancel_errors && acks.iter().any(|a| !matches!(a.s_code, "" | "0"));
         // Legacy TS's response interceptor throws on every nonzero envelope.
         if envelope.code != "0" {
-            let error = if errors.is_empty() {
-                let error = format!("OKX {}: {}", envelope.code, envelope.msg);
-                rejection(error, Some(envelope.code), response.status)
+            let mut error = if errors.is_empty() {
+                // A satisfied cancel row stays quiet unless the empty envelope
+                // would otherwise erase its only available native diagnostic.
+                if envelope.msg.is_empty()
+                    && let Some(ack) = acks.iter().find(|ack| !matches!(ack.s_code, "" | "0"))
+                {
+                    rejection(
+                        format!("{} (code {})", ack.s_msg, ack.s_code),
+                        Some(envelope.code),
+                        response.status,
+                    )
+                    .venue_code(ack.s_code)
+                    .venue_message(ack.s_msg)
+                } else {
+                    rejection(
+                        write_failure_message(&envelope),
+                        Some(envelope.code),
+                        response.status,
+                    )
+                }
             } else {
                 refused(rejection(
                     errors.join_with("; "),
@@ -2019,6 +2036,12 @@ impl Okx {
                     response.status,
                 ))
             };
+            if matches!(
+                step.path,
+                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+            ) {
+                error.elements = Some(Box::new(cancel_outcomes(&response, &acks, &requested)));
+            }
             self.end(cx, request.command, Some(&request), error, false);
             if continue_cancel_errors && acks.iter().any(|a| a.s_code == "51400") {
                 self.account_refresh(cx);
@@ -2473,6 +2496,18 @@ fn cancel_outcomes(
             })
             .collect(),
     )
+}
+
+/// A missing native reason is explicit; never invent one from a malformed row.
+fn write_failure_message(envelope: &wire::Envelope<'_>) -> String {
+    if envelope.msg.is_empty() {
+        format!(
+            "OKX {}: operation failed without per-order diagnostics",
+            envelope.code
+        )
+    } else {
+        format!("OKX {}: {}", envelope.code, envelope.msg)
+    }
 }
 
 /// A definitive OKX refusal. Its kind comes from the table (the native code,

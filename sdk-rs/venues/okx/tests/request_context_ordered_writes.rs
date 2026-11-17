@@ -1759,6 +1759,11 @@ fn empty_code_one_absent_cancel_keeps_native_diagnostics_and_stops() {
             }),
         );
         let sent = prepared(&mut engine, 5.);
+        assert!(
+            matches!(post(&sent), Action::Http(request) if request.url.ends_with(
+                if algo { "/cancel-algos" } else { "/cancel-batch-orders" }
+            ))
+        );
         let field = if algo { "algoId" } else { "ordId" };
         let wire_id = if algo { "202" } else { "101" };
         reply(
@@ -1823,14 +1828,17 @@ fn empty_partial_cancel_retains_applied_and_refused_order_diagnostics() {
     assert_eq!(errors.len(), 1);
     assert!(errors[0].message.contains("Parameter error"));
     assert!(
-        errors[0].message.contains("Order does not exist"),
-        "{errors:?}"
+        !errors[0].message.contains("Order does not exist"),
+        "a satisfied sibling must not hide the real refusal: {errors:?}"
     );
     let elements = errors[0]
         .elements
         .as_ref()
         .expect("one passive outcome per requested order");
     assert_eq!(elements.len(), 3);
+    assert_eq!(errors[0].outcome, None);
+    assert_eq!(errors[0].partial.as_ref().unwrap().total, Some(3));
+    assert_eq!(errors[0].partial.as_ref().unwrap().failed_index, Some(1));
     for index in [0, 2] {
         assert!(matches!(&elements[index].result, ElementResult::Applied {
             effect: AppliedEffect::Cancel, target_order_id: Some(id), ..
@@ -1863,6 +1871,10 @@ fn empty_operation_failure_without_usable_rows_has_a_nonblank_reason() {
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].venue_code.as_deref(), Some("1"));
         assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(
+            errors[0].partial.is_none(),
+            "a contradictory envelope proves no accepted sibling"
+        );
         let reason = errors[0]
             .venue_message
             .as_deref()

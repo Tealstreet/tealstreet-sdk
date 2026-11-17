@@ -82,6 +82,14 @@ the native code and message. Mixed settings rows retain Unknown and include the
 failed-row reasons; they never prove the whole call was refused. Nonempty
 settings-envelope messages and successful ACK handling are unchanged.
 
+Cancellation keeps `51400` as a satisfied intent, quiet in code-0 continuations
+and behind any genuine sibling failure. If a nonzero envelope has no message
+or other row failure, its already-absent row supplies the native code/reason
+instead of an empty `OKX 1:`. Complete identity-validated cancellation batches
+also retain passive per-order outcomes on failure. Dispatch, retry, store and
+aggregate outcome rules are unchanged. Missing or unusable row diagnostics are
+explicitly unavailable; contradictory acknowledgements remain Unknown.
+
 `tests/write_errors.rs` records the [OKX v5 response shape](https://www.okx.com/docs-v5/en/#order-book-trading-trade-post-place-order)
 and pins decoded diagnostics, accepted siblings, unchanged settings on failure,
 and no extra writes after a failure. The fixture uses the public documentation's
