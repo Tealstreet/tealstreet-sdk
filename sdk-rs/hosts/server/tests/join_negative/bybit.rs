@@ -5,7 +5,9 @@ use safe_cex_engine::signing::Algorithm;
 use safe_cex_exchange_server::{accounts::now_ms, envelope::InitPayload};
 use serde_json::{Value, json};
 
-pub struct Bybit;
+pub struct BybitCase<const VARIANT: u8 = 0, const TESTNET: bool = false, const BRAZIL: bool = false>;
+pub type Bybit = BybitCase<0, false, false>;
+
 const KEY: &str = "synthetic-primary-api-key";
 const OTHER_KEY: &str = "synthetic-secondary-api-key";
 const SECRET: &str = "synthetic-primary-material";
@@ -17,8 +19,16 @@ fn dated(mut reply: Value) -> Value {
     reply
 }
 
-impl Venue for Bybit {
-    const NAME: &'static str = "bybit";
+impl<const VARIANT: u8, const TESTNET: bool, const BRAZIL: bool> Venue
+    for BybitCase<VARIANT, TESTNET, BRAZIL>
+{
+    const NAME: &'static str = match VARIANT {
+        0 => "bybit",
+        1 => "bybitinverse",
+        2 => "bybitdemo",
+        3 => "bybitspot",
+        _ => panic!("invalid Bybit test variant"),
+    };
     fn algorithm() -> Algorithm {
         Algorithm::HmacSha256
     }
@@ -30,14 +40,21 @@ impl Venue for Bybit {
             .starts_with("GET/realtime")
     }
     fn init() -> InitPayload {
-        InitPayload {
+        let mut init = InitPayload {
             account_name: ACCOUNT.into(),
             exchange_name: Self::NAME.into(),
             key: KEY.into(),
             signing_mode: Some("cosigned".into()),
             instance_id: Some("negative-join-registration".into()),
             ..Default::default()
+        };
+        if TESTNET {
+            init.testnet = Some(true);
         }
+        if BRAZIL {
+            init.bybit_site_id = Some("BRA_BTL".into());
+        }
+        init
     }
     fn credentials(other: bool) -> Value {
         if other {
@@ -105,6 +122,29 @@ impl Venue for Bybit {
             }
         } else {
             assert_eq!(method, Method::GET, "unsigned write");
+        }
+        if VARIANT != 0 {
+            let captures: Value = serde_json::from_str(if VARIANT == 1 {
+                include_str!("../fixtures/admission-reads.json")
+            } else {
+                include_str!("../fixtures/admission-variant-reads.json")
+            })
+            .unwrap();
+            let bodies = captures[Self::NAME]
+                .as_object()
+                .expect("exact Bybit product fixture");
+            let response = if path.ends_with("/market/instruments-info")
+                && uri.query().is_some_and(|q| q.contains("PreLaunch"))
+            {
+                bodies["*"].clone()
+            } else {
+                bodies
+                    .iter()
+                    .find(|(suffix, _)| suffix.as_str() != "*" && path.ends_with(suffix.as_str()))
+                    .map_or(&bodies["*"], |(_, body)| body)
+                    .clone()
+            };
+            return dated(response);
         }
         let fixtures: Value =
             serde_json::from_str(include_str!("../fixtures/delegated-bybit-public.json")).unwrap();
