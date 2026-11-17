@@ -134,9 +134,21 @@ async fn sealed_init(
     bytes: &[u8],
     venue: &str,
 ) -> Value {
+    // dfecc8bd2: existing cross-venue refusal fixtures retain their Bybit-bound offer.
+    sealed_init_for_offer(session, sent, vector, bytes, venue, "bybit").await
+}
+
+async fn sealed_init_for_offer(
+    session: &mut Session,
+    sent: &mut crate::out::Receiver,
+    vector: &Value,
+    bytes: &[u8],
+    venue: &str,
+    offer_venue: &str,
+) -> Value {
     wire(
         session,
-        json!({"t":"msg","d":{"op":"delegated-key-req","accountName":ACCOUNT,"data":{"exchangeName":"bybit"}}}),
+        json!({"t":"msg","d":{"op":"delegated-key-req","accountName":ACCOUNT,"data":{"exchangeName":offer_venue}}}),
     )
     .await;
     let response = next(sent, "delegated-key").await;
@@ -418,6 +430,138 @@ async fn delegated_e2e_bybit_declaration_off_refuses_valid_handover_without_io()
     assert!(account.delegated().is_some() && account.link.is_none());
     assert!(venue.observed.lock().unwrap().reads > 0);
     session.close();
+}
+
+#[cfg(target_os = "linux")]
+async fn hyperliquid_protected_placement(typed: bool) {
+    let material = format!("0x{:064x}", 7);
+    let wallet = safe_cex_crypto::ethereum::private_key_address(&format!("0x{:064x}", 8)).unwrap();
+    let signer = safe_cex_crypto::ethereum::private_key_address(&material).unwrap();
+    let vector = json!({"input":{"key":signer}});
+    let venue = MockVenue::for_hyperliquid(wallet.clone(), material.clone());
+    let registry = crate::accounts::testing::e2e_registry(USER, venue.clone());
+    let (mut session, mut sent) = connection(registry.clone());
+    session.order_frames_enabled = typed;
+    let mut results = session.take_verified();
+    let bytes = serde_json::to_vec(&json!({"key":signer,"secret":material})).unwrap();
+    let mut init = sealed_init_for_offer(
+        &mut session,
+        &mut sent,
+        &vector,
+        &bytes,
+        "hyperliquid",
+        "hyperliquid",
+    )
+    .await;
+    init["d"]["hyperliquidSignerAddress"] = signer.into();
+    init["d"]["applicationId"] = wallet.into();
+    wire(&mut session, init).await;
+    let result = completed(&mut results).await;
+    assert!(result.candidate.is_ok());
+    assert!(result.probe.as_ref().unwrap().permit.is_ok());
+    session.verification_completed(result).await.unwrap();
+    let account = registry
+        .held(USER, ACCOUNT, session.socket)
+        .expect("proved handover admitted");
+    assert!(account.link.is_none());
+    let resident = account.delegated().unwrap();
+    assert!(
+        resident
+            .identities()
+            .primary
+            .as_ref()
+            .unwrap()
+            .credential_absent()
+    );
+    snapshot(&mut session, &mut sent).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while account
+            .handle
+            .read(|s| s.loaded().markets && s.loaded().orders && s.loaded().positions)
+            .await
+            != Some(true)
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("real native startup completes before placement");
+    assert!(venue.observed.lock().unwrap().reads > 0);
+    assert!(venue.observed.lock().unwrap().writes.is_empty());
+    if typed {
+        let epoch = format!("{:012x}", crate::accounts::now_ms());
+        let intent = format!("{}-{}-7101-8101-010101010101", &epoch[..8], &epoch[8..]);
+        let params =
+            json!({"symbol":"BTC-PERP","type":"limit","side":"buy","amount":0.001,"price":55000});
+        let fingerprint = crate::order_contract::fingerprint(ACCOUNT, &intent, &params, 1).unwrap();
+        wire(
+            &mut session,
+            json!({"t":"order.submit","d":{"accountName":ACCOUNT,"instanceId":INSTANCE,
+            "intentId":intent,"params":params,"seq":1,"ageMs":0,"fingerprint":fingerprint}}),
+        )
+        .await;
+        let ack = hyperliquid_order_frame(&mut sent, "order.ack").await;
+        assert_eq!(ack["d"]["received"], true);
+        let outcome = hyperliquid_order_frame(&mut sent, "order.outcome").await;
+        // fa4b80b08 exposed the separate UUID/cloid mismatch: keep its no-send refusal.
+        assert_eq!(outcome["d"]["outcome"], "refused", "{outcome}");
+        assert_eq!(outcome["d"]["error"]["outcome"], "notSent");
+        assert_eq!(
+            outcome["d"]["error"]["message"],
+            "Hyperliquid client order ID must be 0x followed by 32 lowercase hex characters"
+        );
+        assert!(outcome["d"]["venueOrderId"].is_null());
+        assert_eq!(outcome["d"]["clientOrderId"], intent);
+        assert_eq!(outcome["d"]["instanceId"], INSTANCE);
+        assert!(venue.observed.lock().unwrap().writes.is_empty());
+        session.close();
+        return;
+    } else {
+        wire(&mut session, json!({"t":"msg","d":{"op":"callMethod","accountName":ACCOUNT,"data":{"requestId":"hl-manual","method":"placeOrders","args":[[{"symbol":"BTC-PERP","type":"limit","side":"buy","amount":0.001,"price":55000}]]}}})).await;
+        let reply = next(&mut sent, "callMethod:done").await;
+        assert_eq!(
+            reply["d"]["data"],
+            json!({"requestId":"hl-manual","success":true,"result":["77"]})
+        );
+    }
+    {
+        let observed = venue.observed.lock().unwrap();
+        assert_eq!(observed.writes.len(), 1, "no fallback or duplicate send");
+        let order = &observed.writes[0]["action"]["orders"][0];
+        assert_eq!(order["a"], 0);
+        assert_eq!(order["b"], true);
+        assert_eq!(order["s"], "0.001");
+        assert_eq!(order["p"], "55000");
+    }
+    session.close();
+}
+
+#[cfg(target_os = "linux")]
+async fn hyperliquid_order_frame(sent: &mut crate::out::Receiver, kind: &str) -> Value {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(text) = sent.recv().await {
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            assert_ne!(frame["t"], "sign-req");
+            if frame["t"] == kind {
+                return frame;
+            }
+        }
+        panic!("missing typed Hyperliquid receipt")
+    })
+    .await
+    .expect("bounded native order receipt")
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn delegated_hyperliquid_protected_identity_survives_session_construction() {
+    hyperliquid_protected_placement(false).await;
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_hyperliquid_typed_submit_refuses_incompatible_uuid_before_send() {
+    hyperliquid_protected_placement(true).await;
 }
 
 #[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]

@@ -1381,6 +1381,8 @@ impl Session {
         }
         let requested_mode = envelope::AccountSigningMode::requested(&init);
         let fingerprint = init.fingerprint();
+        // #3535: passphrase normalization is safe only because this snapshot path
+        // reuses the proved account/provider and never installs or forwards init credentials.
         let snapshot_only = self.joined.get(&init.account_name).is_some_and(|joined| {
             joined.admitted_mode == requested_mode
                 && joined.account.matches_init(self.user(), &init)
