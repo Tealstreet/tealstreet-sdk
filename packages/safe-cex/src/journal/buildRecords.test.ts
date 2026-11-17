@@ -106,13 +106,24 @@ describe('buildFoldedPositionRecords — a failed income read is not an empty ac
     expect(serialized).not.toHaveProperty('request');
   });
 
-  it('retains the host timeout outcome without inventing a venue classification', async () => {
+  it('does not invent a write outcome or venue classification for a read timeout', async () => {
     const original = new CommandTimeoutError(20_000);
     const thrown: unknown = await buildFoldedPositionRecords(
       { fetchHistoricalFills: async () => [], fetchIncomeHistoryRange: async () => { throw original; } },
       options({ symbolScoped: true }),
     ).catch((error: unknown) => error);
-    expect(thrown).toMatchObject({ name: 'CommandTimeoutError', outcome: 'unknown', cause: original });
+    expect(thrown).toMatchObject({ name: 'CommandTimeoutError', cause: original });
+    expect(thrown).not.toHaveProperty('kind');
+    expect(thrown).not.toHaveProperty('outcome');
+  });
+
+  it('retains an explicit notSent outcome from a refused income read', async () => {
+    const original = Object.assign(new Error('read admission refused'), { outcome: 'notSent' });
+    const thrown: unknown = await buildFoldedPositionRecords(
+      { fetchHistoricalFills: async () => [], fetchIncomeHistoryRange: async () => { throw original; } },
+      options({ symbolScoped: true }),
+    ).catch((error: unknown) => error);
+    expect(thrown).toMatchObject({ outcome: 'notSent', cause: original });
     expect(thrown).not.toHaveProperty('kind');
   });
 
