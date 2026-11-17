@@ -10,7 +10,10 @@ validateWasmBudgetSource(readFileSync(new URL(import.meta.url), 'utf8'));
 // Single-venue family bundles: 1.28125 MiB (RUST_WASM_FAMILIES.md), raised from
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
 // total package size; Sam raised the combined ceiling to 17 MiB on 2026-11-06 after #3140 measured 16,778,652 B.
-export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_792 });
+// #3640 raised it to 17.25 MiB (coordinator call, recorded in the Sam decisions doc): the native store cutover
+// moves the store sections and managed-order joins into Rust and deletes the TS store machinery; pinned
+// optimized build measured 17,856,202 B (SHA256 ace1672aa095232b48e78e281067c3d2328c9b47da87178e384e9a14d429d6a6).
+export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 18_087_936 });
 // #2219 Base64Url/EvmHex signing on the #2208 tip: CI Bitget 1,482,166 rounded up to KiB (overseer ceiling 1448 KiB);
 // #2224 serial call pacing: CI 1,482,920, +1 KiB under the 2 KiB shared-code rule.
 // AsterDEX: managed sockets (#2212) measured 1,384,485 in CI, within the standing 5% venue
@@ -479,7 +482,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3513 CI43622387718, artifact14125280270: optimized web/Node 2,557,426 B.
   // SHA256 bd2760d7eaa57e7ef051fa344dc7ff5cb7b23b4791bbd0a971b550087b0b6c41.
   // Measured + 10 KiB rounded up; source/tree provenance and boundaries in wasm-budget.test.mjs.
-  bybit: 2_568_192,
+  // #3640 native store (sections 26-35, managed-order ownership) at 7b723d8837: pinned optimized
+  // web/Node 2,685,476 B; SHA256 aa3992642073916293af0ea4b6112ca418e9d37f326919da97a8a1d9bcc0fc11.
+  // Rust1.99, bindgen0.2.129, Binaryen132 twice -Oz; measured + 10 KiB rounded up (rule 17).
+  bybit: 2_696_192,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 1,967,433 B + 10 KiB, rounded up.
   // #3397 run 42571903722 attempt 2, job 129025075890: 1,968,376 B + 10 KiB rounded up.
   // #3301 at 7a2f4816ce4: CI run 42555202714, job 128959723881 measured 2,091,319 B.
