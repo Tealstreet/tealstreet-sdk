@@ -13,12 +13,62 @@ const OTHER_KEY: &str = "synthetic-secondary-api-key";
 const SECRET: &str = "synthetic-primary-material";
 const OTHER_SECRET: &str = "synthetic-secondary-material";
 
-// Red checkpoint: the negative controls must detect these unchecked verifiers.
-fn valid_read(_path: &str, _query: Option<&str>, _headers: &HeaderMap) -> bool {
-    true
+fn material(key: &str) -> Option<&'static str> {
+    match key {
+        KEY => Some(SECRET),
+        OTHER_KEY => Some(OTHER_SECRET),
+        _ => None,
+    }
 }
-fn valid_auth(_request: &Value) -> bool {
-    true
+fn single<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    let mut values = headers.get_all(name).iter();
+    let value = values.next()?.to_str().ok()?;
+    values.next().is_none().then_some(value)
+}
+fn valid_expiry(expiry: u64) -> bool {
+    let now = now_ms() / 1000;
+    expiry > now && expiry <= now + 65
+}
+fn valid_read(path: &str, query: Option<&str>, headers: &HeaderMap) -> bool {
+    (|| {
+        let secret = material(single(headers, "x-phemex-access-token")?)?;
+        let expiry = single(headers, "x-phemex-request-expiry")?;
+        let seconds = expiry.parse::<u64>().ok()?;
+        if expiry != seconds.to_string() || !valid_expiry(seconds) {
+            return None;
+        }
+        Some(
+            single(headers, "x-phemex-request-signature")?
+                == hmac_sha256(
+                    secret.as_bytes(),
+                    format!("{path}{}{expiry}", query.unwrap_or_default()).as_bytes(),
+                    Encoding::Hex,
+                ),
+        )
+    })() == Some(true)
+}
+fn valid_auth(request: &Value) -> bool {
+    (|| {
+        let params = request["params"].as_array()?;
+        if request["method"] != "user.auth" || params.len() != 4 || params[0] != "API" {
+            return None;
+        }
+        let key = params[1].as_str()?;
+        let secret = material(key)?;
+        // The native Phemex writer emits an unsigned integer, not JSON text.
+        let expiry = params[3].as_u64()?;
+        if !valid_expiry(expiry) {
+            return None;
+        }
+        Some(
+            params[2].as_str()?
+                == hmac_sha256(
+                    secret.as_bytes(),
+                    format!("{key}{expiry}").as_bytes(),
+                    Encoding::Hex,
+                ),
+        )
+    })() == Some(true)
 }
 fn refusal(id: &Value, seen: &mut Observed) -> Value {
     seen.rejections += 1;
