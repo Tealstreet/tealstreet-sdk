@@ -102,6 +102,9 @@ included. Inspection runs only after an existing decode failure and cannot accep
 or skip a rejected row. HTTP/key/rate-limit and transport errors keep their typed
 refusals instead. Production diagnosis still needs this evidence from a failing
 response; no claim is made that one schema change explains all historical alerts.
+Inspection streams a closed set of fields and types instead of constructing a JSON
+tree. Optional diagnostic storage keeps the engine's original two-byte footprint;
+ordinary errors and socket-auth queues retain their existing allocation budgets.
 
 REST order history accepts documented `PARTIALLYFILLED` as open and `FAILED` as
 canceled alongside the existing status spellings. Other unknown states still

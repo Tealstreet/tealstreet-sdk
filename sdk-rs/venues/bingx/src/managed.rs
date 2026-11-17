@@ -13,14 +13,11 @@ use safe_cex_engine::selected_read::{
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::{CredentialSlot, Cx, ErrorKind, Method, Outcome, RequestId, VenueError};
 
-// Keep optional history diagnostics off the queue Result's stack allocation.
-type Queued = Result<RequestId, (Box<Pending>, Box<VenueError>)>;
-fn refused() -> Box<VenueError> {
-    Box::new(
-        VenueError::new("BingX managed read lifecycle is unavailable")
-            .kind(ErrorKind::Internal)
-            .outcome(Outcome::NotSent),
-    )
+type Queued = Result<RequestId, (Box<Pending>, VenueError)>;
+fn refused() -> VenueError {
+    VenueError::new("BingX managed read lifecycle is unavailable")
+        .kind(ErrorKind::Internal)
+        .outcome(Outcome::NotSent)
 }
 
 /// The engine authority a signed request holds until it completes.

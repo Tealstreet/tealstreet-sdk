@@ -797,6 +797,29 @@ fn income_decode_identifies_closed_field_and_json_types_without_values() {
 }
 
 #[test]
+fn non_object_history_rows_keep_their_type_without_treating_arrays_as_structs() {
+    for (row, actual) in [
+        ("[]", "array"),
+        ("null", "null"),
+        ("false", "boolean"),
+        ("7", "number"),
+    ] {
+        expect_decode_shape(
+            diagnostic_income_query(),
+            &format!(r#"{{"code":0,"data":[{row}]}}"#),
+            [
+                "bingxIncome",
+                "rowShape",
+                "row",
+                "object",
+                actual,
+                "present",
+            ],
+        );
+    }
+}
+
+#[test]
 fn orders_decode_identifies_closed_field_and_value_refusals_without_values() {
     let mut row = diagnostic_order_row();
     row["origQty"] = serde_json::json!({"private-quantity-canary":2});

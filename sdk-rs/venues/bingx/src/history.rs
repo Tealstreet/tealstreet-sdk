@@ -259,22 +259,157 @@ struct Envelope<T> {
     data: Option<T>,
 }
 
+// on_item validates every financial row. Retained metadata lists must be empty;
+// stream their shape without buffering or deserializing financial rows again.
+struct FillData;
+
 #[derive(Deserialize)]
-#[serde(untagged)]
-enum FillData {
-    Direct(Vec<FillRow>),
-    History { fill_history_orders: Vec<FillRow> },
-    Orders { fill_orders: Vec<FillRow> },
+#[serde(field_identifier)]
+enum FillDataField {
+    #[serde(rename = "fill_history_orders")]
+    History,
+    #[serde(rename = "fill_orders")]
+    Orders,
+    #[serde(other)]
+    Other,
 }
 
-impl FillData {
-    fn is_empty(&self) -> bool {
-        match self {
-            Self::Direct(rows)
-            | Self::History {
-                fill_history_orders: rows,
+struct FillRows;
+impl<'de> Visitor<'de> for FillRows {
+    type Value = FillData;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("list")
+    }
+    fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<FillData, A::Error> {
+        if seq.next_element::<de::IgnoredAny>()?.is_some() {
+            return Err(de::Error::custom("invalid fill metadata"));
+        }
+        Ok(FillData)
+    }
+    fn visit_map<M: de::MapAccess<'de>>(self, mut map: M) -> Result<FillData, M::Error> {
+        let mut seen = 0_u8;
+        while let Some(field) = map.next_key::<FillDataField>()? {
+            let bit = match field {
+                FillDataField::History => 1,
+                FillDataField::Orders => 2,
+                FillDataField::Other => {
+                    map.next_value::<de::IgnoredAny>()?;
+                    continue;
+                }
+            };
+            if seen & bit != 0 {
+                return Err(de::Error::custom("invalid fill metadata"));
             }
-            | Self::Orders { fill_orders: rows } => rows.is_empty(),
+            seen |= bit;
+            map.next_value_seed(FillRows)?;
+        }
+        if seen == 0 {
+            return Err(de::Error::custom("invalid fill metadata"));
+        }
+        Ok(FillData)
+    }
+}
+impl<'de> de::DeserializeSeed<'de> for FillRows {
+    type Value = FillData;
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<FillData, D::Error> {
+        d.deserialize_seq(self)
+    }
+}
+impl<'de> Deserialize<'de> for FillData {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<FillData, D::Error> {
+        d.deserialize_any(FillRows)
+            .map_err(|_| de::Error::custom("invalid fill metadata"))
+    }
+}
+
+#[cfg(test)]
+mod fill_metadata_tests {
+    use super::*;
+
+    fn permits_completion(data: &str) -> bool {
+        serde_json::from_str::<FillData>(data).is_ok()
+    }
+
+    #[test]
+    fn history_side_mapping_keeps_every_ascii_case_and_exact_refusals() {
+        for (base, expected) in [("buy", "buy"), ("sell", "sell")] {
+            for mask in 0..(1 << base.len()) {
+                let text: String = base
+                    .bytes()
+                    .enumerate()
+                    .map(|(i, byte)| {
+                        if mask & (1 << i) != 0 {
+                            byte.to_ascii_uppercase() as char
+                        } else {
+                            byte as char
+                        }
+                    })
+                    .collect();
+                assert_eq!(side(&text), Ok(expected));
+            }
+        }
+        for invalid in ["", " buy", "BUY ", "buying", "büy", "ＳＥＬＬ", "bu\0y"] {
+            assert_eq!(side(invalid), Err(format!("invalid side {invalid}")));
+        }
+    }
+
+    #[test]
+    fn empty_fill_metadata_keeps_every_supported_envelope() {
+        for data in [
+            "[]",
+            r#"{"fill_history_orders":[]}"#,
+            r#"{"fill_orders":[]}"#,
+            r#"{"fill_orders":[],"fill_history_orders":[]}"#,
+            r#"{"fill_history_orders":[],"unrelated":{"private":"canary"}}"#,
+            r#"{"fill_histo\u0072y_orders":[]}"#,
+        ] {
+            assert!(permits_completion(data), "{data}");
+        }
+    }
+
+    #[test]
+    fn malformed_fill_metadata_does_not_echo_private_values() {
+        for raw in [
+            r#""private-secret-canary""#,
+            r#"{"fill_orders":"private-secret-canary"}"#,
+        ] {
+            let error = match serde_json::from_str::<FillData>(raw) {
+                Ok(_) => panic!("malformed metadata accepted"),
+                Err(error) => error.to_string(),
+            };
+            assert!(!error.contains("private-secret-canary"), "{error}");
+        }
+    }
+
+    #[test]
+    fn malformed_fill_metadata_stays_refused() {
+        for data in [
+            "null",
+            "{}",
+            "true",
+            "7",
+            r#""text""#,
+            r#"{"fill_history_orders":null}"#,
+            r#"{"fill_history_orders":[],"fill_history_orders":[]}"#,
+            r#"{"fill_orders":[],"fill_orders":[]}"#,
+            r#"{"fill_history_orders":[],"fill_orders":[{}]}"#,
+        ] {
+            assert!(!permits_completion(data), "{data}");
+        }
+    }
+
+    #[test]
+    fn retained_fill_metadata_cannot_fall_through_to_an_empty_sibling() {
+        for data in [
+            r#"{"fill_history_orders":[{"private-id":"canary"}],"fill_orders":[]}"#,
+            r#"{"fill_history_orders":[{"private-id":"canary"}]}"#,
+            r#"{"fill_orders":[{"private-id":"canary"}]}"#,
+            r#"[{"private-id":"canary"}]"#,
+        ] {
+            assert!(
+                !permits_completion(data),
+                "retained rows cannot complete: {data}"
+            );
         }
     }
 }
@@ -973,13 +1108,6 @@ impl History {
                         return Err(format!("{}: {}", response.code, response.msg));
                     }
                     response.data.ok_or_else(|| "missing fill data".to_owned())
-                })
-                .and_then(|data| {
-                    if data.is_empty() {
-                        Ok(())
-                    } else {
-                        Err("streamed fill metadata retained unexpected rows".into())
-                    }
                 });
             if let Err(error) = result {
                 request.error = Some(error);
@@ -1296,10 +1424,16 @@ fn map_order(row: OrderRow) -> Result<Row, String> {
 }
 
 fn side(value: &str) -> Result<&'static str, String> {
-    match value.to_ascii_uppercase().as_str() {
-        "BUY" => Ok("buy"),
-        "SELL" => Ok("sell"),
-        _ => Err(format!("invalid side {value}")),
+    side_value(value).ok_or_else(|| format!("invalid side {value}"))
+}
+
+fn side_value(value: &str) -> Option<&'static str> {
+    if value.eq_ignore_ascii_case("BUY") {
+        Some("buy")
+    } else if value.eq_ignore_ascii_case("SELL") {
+        Some("sell")
+    } else {
+        None
     }
 }
 
