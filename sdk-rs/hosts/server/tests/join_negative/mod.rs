@@ -297,20 +297,7 @@ impl Client {
             f.registry.held(USER, ACCOUNT, self.socket()).is_none(),
             "unproved socket attached"
         );
-        assert!(
-            self.frames.iter().any(|x| x["d"]["accountName"] == ACCOUNT
-                && x["d"]["instanceId"] == "negative-join-registration"
-                && x["d"]["data"][1]["kind"] == "unverified"
-                && x["d"]["data"][1]["transient"] == false),
-            "typed proof refusal required"
-        );
-        assert!(
-            !self
-                .frames
-                .iter()
-                .any(|x| x["d"]["op"] == "account-signing-mode"),
-            "refusal confirmed a registration"
-        );
+        assert_permanent_bound_refusal(&self.frames);
         assert_eq!(f.seen.lock().unwrap().writes, 0);
     }
 }
@@ -628,14 +615,19 @@ pub async fn delegated_consumed<V: Venue>() {
 
 fn assert_permanent_bound_refusal(frames: &[Value]) {
     assert!(
-        frames
-            .iter()
-            .any(|x| x["d"]["data"][1]["kind"] == "unverified")
+        frames.iter().any(|x| x["t"] == "msg"
+            && x["d"]["op"] == "error"
+            && x["d"]["accountName"] == ACCOUNT
+            && x["d"]["instanceId"] == "negative-join-registration"
+            && x["d"]["data"][1]["kind"] == "unverified"
+            && x["d"]["data"][1]["transient"] == false),
+        "permanent proof refusal must retain the original account and registration"
     );
     assert!(
         !frames
             .iter()
-            .any(|x| x["d"]["op"] == "account-signing-mode")
+            .any(|x| x["d"]["op"] == "account-signing-mode"),
+        "refusal confirmed a registration"
     );
 }
 
