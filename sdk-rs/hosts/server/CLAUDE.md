@@ -79,8 +79,10 @@ handover pair. DELEGATED and COSIGNED share hosted eligibility: a supported
 `remoteSigning` policy and a configured server origin, with the existing
 unhosted refusal preserved. There is no separate DELEGATED venue allowlist or
 `delegated.enabled` declaration. The account retains the existing LocalSigner provider,
-passes opaque refs to the engine and creates no remote signer link. Public mode
-is recorded explicitly. Unproved/trusted construction still refuses cross-mode
+passes opaque refs to the engine and creates no remote signer link. Trusted
+construction also retains original typed identity facts bound to the same provider,
+venue and serialized refs; JSON must never restore ScalarOnly credential absence.
+Public mode is recorded explicitly. Unproved/trusted construction still refuses cross-mode
 attachment. Socket joins first prove their own credentials: COSIGNED can attach
 to a DELEGATED resident without downgrading it; a proved DELEGATED join upgrades
 a supported COSIGNED resident without replacing its actor, orders or algo jobs.
