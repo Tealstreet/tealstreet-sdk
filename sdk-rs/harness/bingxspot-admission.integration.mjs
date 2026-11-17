@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { loadEngine } from './engine.mjs';
+import './bingx-command-codecs.integration.mjs';
 const module = await loadEngine();
 const fixtureBuild = process.env.BINGX_SPOT_FIXTURE === '1';
 

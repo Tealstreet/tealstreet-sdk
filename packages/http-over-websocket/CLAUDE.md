@@ -151,6 +151,9 @@ yarn test           # Vitest
   without closing a shared connection or cancelling another request's refresh.
   When the deadline expires, the adapter rejects with
   `TradeTunnelTimeoutError` and must not transmit the now-stale request.
+  Successful token/poll settlement rechecks wall time and cancellation before
+  accepting the result: after suspension, its microtask can beat an overdue timer.
+  Frozen JavaScript cannot reject on time; elapsed diagnostics retain that delay.
 - Socket opening, time sync and authorization share a readiness cap of 30 s,
   bounded by the original request deadline. Exceeding that cap raises
   `TradeTunnelReadinessError`, a timeout subclass; readiness never resets the deadline.

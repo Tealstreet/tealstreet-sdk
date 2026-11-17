@@ -664,6 +664,7 @@ const BitunixMetadata: ExchangeMetadata = {
   alwaysCalculateUnrealizedPnlFromLastPrice: true,
   forceAccountPositionModeChangeOnExchangeItself: true,
   hideLightweightChartsPopovers: true,
+  supportsTunnel: true,
   enforceWsTunnel: true,
   autoDownSizeReduceOrders: true,
   latencyDomain: 'fapi.bitunix.com',
@@ -1543,6 +1544,7 @@ const HyperliquidMetadata: ExchangeMetadata = {
   forbidCors: true,
   supportsVault: true,
   alwaysCalculateUnrealizedPnlFromLastPrice: true,
+  supportsTunnel: true,
   enforceWsTunnel: true,
   latencyDomain: 'api.hyperliquid.xyz',
   fetchLeverageOnMarginSymbolChange: false, // Using bulk activeAssetData subscriptions instead
@@ -1590,6 +1592,7 @@ const HyperliquidSpotMetadata: ExchangeMetadata = {
   forbidCors: true,
   hideMarginTypeSelector: true,
   hidePositionModeSelector: true,
+  supportsTunnel: true,
   enforceWsTunnel: true,
   latencyDomain: 'api.hyperliquid.xyz',
   requiresTickersForMarketsLoaded: true,

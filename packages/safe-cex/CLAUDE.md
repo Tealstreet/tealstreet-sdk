@@ -66,6 +66,11 @@ Core exchange integration library. See also exchange-specific `CLAUDE.md` files 
 For exchange migrations that add first-class opening trigger/conditional orders,
 read `CONDITIONAL_ORDERS.md` before changing mapper or order lifecycle code.
 
+Hyperliquid, Hyperliquid Spot and Bitunix metadata explicitly declare
+`supportsTunnel: true` alongside their existing `enforceWsTunnel: true`.
+Enforcement still wins over disabled user preferences; inconsistent declarations
+remain observable through the general account-construction warning.
+
 ## DELEGATED handover
 
 `sealDelegatedHandover` is an additive, synchronous, host-neutral sender for
@@ -83,6 +88,11 @@ the private scalar. The optional private field is not copied into the result or
 HPKE context. The receiver rejects scalar-in-init layouts, foreign credential
 layouts and empty CEX secrets; existing trusted setup validates actual material.
 HMAC callers omit `signingKey` and retain byte-identical envelopes.
+ApeX additionally seals optional `omniKeySeed`, a packed 65-byte Ethereum
+signature encoded as hex. It never enters public init settings or HPKE context,
+and cannot be used as wallet `signingKey` or supplied to another venue. The
+receiver transfers it through zeroizing credentials into the canonical protected
+`primary.extra.zklinkSeed` role; native reconfiguration retains that provider.
 The sender uses RFC 9180 base mode with X25519/HKDF-SHA256/ChaCha20-Poly1305 and
 one fresh encapsulation per call. Deterministic RFC and shared synthetic handover
 fixtures exercise the same production sender. The shared fixture lives with
@@ -2377,6 +2387,10 @@ Cancellation or Claim without dispatch refunds only that token generation; a
 request handed to fetch is never refunded. Once IDB has worked in a realm,
 storage failure waits within the original read deadline rather than sending from
 an unshared memory budget. Never-opened IDB keeps the memory-only behavior.
+A proven pre-send `/info` admission deadline keeps `HTTP_PREPARATION_TIMED_OUT`
+and carries only closed cause `info_admission` / `HTTP admission deadline expired`.
+After handoff begins, errors retain their original classification and identity;
+this diagnostic distinction cannot extend budgets, change retries or suppress reports.
 Role/mode startup reads
 stay single-flight until their managed completion or deadline, including quota wait.
 Each Hyperliquid engine issues at most three routine account reads at once, with

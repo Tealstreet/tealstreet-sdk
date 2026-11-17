@@ -4027,3 +4027,18 @@ test('BingX Spot production constructor retains measured family reserve', () => 
   assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
 });
+
+// Fresh master 63f700d2 plus the ordinary BingX command codec gates.
+// Rust1.99/bindgen0.2.129/Binaryen132, canonical build.sh --venue bingx, two -Oz passes.
+test('BingX shared command codecs retain the measured optimized reserve', () => {
+  const measured = 2_168_354; // Equal web/Node maxima; SHA256 pinned below.
+  const sha256 = 'aeab98147da32f70379dbe9be6670fd523d92e292967e04bc9206483b5a6ab2e';
+  assert.match(sha256, /^[0-9a-f]{64}$/);
+  const minimum = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.bingx;
+  assert.ok(cap >= 2_174_976, 'retain the previous BingX floor');
+  assert.ok(cap >= minimum, `BingX codecs need ${minimum} bytes including reserve`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bingx'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
+});
