@@ -66,6 +66,10 @@ fn exercise(from_age: Option<f64>, to_age: Option<f64>, expected_statuses: usize
         let end = query_value(&request.url, "endTime").map(|v| v.parse::<f64>().unwrap());
         if let Some(status) = query_value(&request.url, "orderStatus") {
             statuses.push(status.to_owned());
+            if let (Some(start), Some(end)) = (start, end) {
+                assert!(end - start < 7.0 * DAY, "terminal page exceeds V5 range");
+                assert!(start <= now, "wholly future status slice must be omitted");
+            }
             // Fake venue rejects the documented retention violation, not a local assertion.
             if start.is_some_and(|start| start < now - DAY)
                 || end.is_some_and(|end| end < now - DAY)
@@ -213,4 +217,99 @@ fn fractional_caller_bounds_are_normalized_only_for_terminal_queries() {
 #[test]
 fn integer_protocol_clock_keeps_the_existing_terminal_bounds() {
     check_terminal_wire_clock(0.0, false);
+}
+
+#[test]
+fn replay_window_retains_explicit_end_and_all_terminal_cursor_rows() {
+    let mut h = ready();
+    let now = h.engine.signing_clock(h.now).0;
+    let from = now - 2600.0;
+    let to = from + 60_000.0;
+    h.command(Command::Query {
+        command: 904,
+        query: Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: Some(from),
+            to_ms: Some(to),
+            limit: None,
+        },
+    });
+    for (index, status) in ["Filled", "Cancelled", "Rejected", "Deactivated"]
+        .into_iter()
+        .enumerate()
+    {
+        let request = h.take("/v5/order/history");
+        assert_eq!(
+            query_value(&request.url, "endTime"),
+            Some(to.to_string().as_str())
+        );
+        assert_eq!(
+            query_value(&request.url, "startTime"),
+            Some(from.to_string().as_str())
+        );
+        assert_eq!(
+            query_value(&request.url, "orderStatus"),
+            (index > 0).then_some(status)
+        );
+        let row = serde_json::json!({
+            "orderId": format!("history-{status}"), "symbol": "BTCUSDT", "side": "Buy",
+            "orderType": "Limit", "orderStatus": status, "qty": "1",
+            "cumExecQty": if index == 0 { "1" } else { "0" }, "price": "100",
+            "createdTime": (from + index as f64).to_string()
+        });
+        let response = |cursor: &str| {
+            serde_json::json!({
+                "retCode": 0, "result": {"list": [row], "nextPageCursor": cursor}
+            })
+            .to_string()
+        };
+        h.reply(
+            request.id,
+            200,
+            &response(if index == 0 { "" } else { "shared" }),
+        );
+        if index > 0 {
+            let next = h.take("/v5/order/history");
+            assert_eq!(query_value(&next.url, "cursor"), Some("shared"));
+            assert_eq!(query_value(&next.url, "orderStatus"), Some(status));
+            assert_eq!(
+                query_value(&next.url, "endTime"),
+                Some(to.to_string().as_str())
+            );
+            h.reply(next.id, 200, &response(""));
+        }
+    }
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(h.result(904).unwrap().as_ref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 4);
+    for status in ["Filled", "Cancelled", "Rejected", "Deactivated"] {
+        assert!(
+            rows.iter()
+                .any(|row| row["id"] == format!("history-{status}"))
+        );
+    }
+    assert!(!h.has_request("/v5/order/history"));
+}
+
+#[test]
+fn wholly_future_window_keeps_default_read_without_terminal_passes() {
+    let mut h = ready();
+    let now = h.engine.signing_clock(h.now).0;
+    h.command(Command::Query {
+        command: 905,
+        query: Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: Some(now + 1000.0),
+            to_ms: Some(now + 60_000.0),
+            limit: None,
+        },
+    });
+    h.respond("/v5/order/history", 200, EMPTY);
+    assert_eq!(h.result(905), Some(&Ok("[]".into())));
+    assert!(!h.has_request("/v5/order/history"));
+}
+
+#[test]
+fn distant_future_end_retains_valid_past_status_pages_only() {
+    exercise(Some(DAY / 2.0), Some(-14.0 * DAY), 3);
 }
