@@ -31,11 +31,21 @@ fn single<'a>(h: &'a HeaderMap, n: &str) -> Option<&'a str> {
     i.next().is_none().then_some(v)
 }
 fn valid(key: Option<&str>, stamp: Option<&str>, signature: Option<&str>, query: &str) -> bool {
-    // RED: exercise the real wire with synthetic authentication deliberately unchecked.
-    let _ = (key.and_then(material), stamp, signature, query);
-    true
+    (|| {
+        let key = key?;
+        let material = material(key)?;
+        let stamp = stamp?;
+        if stamp.parse::<u64>().ok()?.abs_diff(now_ms()) > 20_000 {
+            return None;
+        }
+        let expected = hmac_sha256(
+            material.as_bytes(),
+            format!("{key}{stamp}{query}").as_bytes(),
+            Encoding::Hex,
+        );
+        Some(signature? == expected)
+    })() == Some(true)
 }
-
 fn valid_rest(uri: &Uri, headers: &HeaderMap) -> bool {
     valid(
         single(headers, "ApiKey"),
