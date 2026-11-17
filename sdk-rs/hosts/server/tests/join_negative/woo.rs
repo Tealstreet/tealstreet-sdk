@@ -12,23 +12,6 @@ const OTHER_KEY: &str = "synthetic-secondary-api-key";
 const SECRET: &str = "synthetic-primary-material";
 const OTHER_SECRET: &str = "synthetic-secondary-material";
 
-fn material(key: &str) -> Option<&'static str> {
-    match key {
-        KEY => Some(SECRET),
-        OTHER_KEY => Some(OTHER_SECRET),
-        _ => None,
-    }
-}
-fn single<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
-    let mut values = headers.get_all(name).iter();
-    let value = values.next()?.to_str().ok()?;
-    values.next().is_none().then_some(value)
-}
-fn fresh(stamp: &str) -> bool {
-    stamp
-        .parse::<u64>()
-        .is_ok_and(|value| stamp == value.to_string() && now_ms().abs_diff(value) < 5_000)
-}
 fn valid_read(_path: &str, _query: Option<&str>, _headers: &HeaderMap) -> bool {
     // RED checkpoint: actual verifier controls must expose unchecked fixture auth.
     true
