@@ -48,6 +48,7 @@ impl MockVenue {
         }
     }
 
+    #[cfg(target_os = "linux")]
     pub(crate) fn for_hyperliquid(key: String, material: String) -> Self {
         Self {
             hyperliquid: true,
