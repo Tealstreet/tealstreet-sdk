@@ -10,3 +10,7 @@ used by the wire reader, without a wasm engine or local signing.
 The candle backend accepts an `AsyncStorageLike` implementation, avoiding a
 specific storage dependency. Keep it free of browser globals and Node APIs.
 When changing the cache contract, run the scoped safe-cex candle-cache tests.
+
+The scoped `src/frameStore.test.ts` imports this barrel with WebAssembly
+unavailable, then applies real Rust-generated account frames through the
+exported FrameStore. No wasm test command or engine-loader seam remains.
