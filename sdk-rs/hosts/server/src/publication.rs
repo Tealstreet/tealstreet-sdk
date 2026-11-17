@@ -249,7 +249,7 @@ impl PublicState {
                     self.dirty_books.insert(symbol);
                 }
                 section::TICKER_OBSERVATIONS => {
-                    for row in part.payload.chunks_exact(32) {
+                    for row in part.payload.as_chunks::<32>().0 {
                         let mut cursor = Cursor::new(row);
                         let values = [cursor.f64()?, cursor.f64()?, cursor.f64()?, cursor.f64()?];
                         self.observations.insert(values[0] as u32, values);
