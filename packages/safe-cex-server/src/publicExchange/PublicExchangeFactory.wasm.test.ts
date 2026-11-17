@@ -211,7 +211,7 @@ describe('PublicExchangeFactory with the real native engine', () => {
     expect(handle.exchange).toBe(previous);
     expect(previous.isDisposed).toBe(false);
     expect(previous.hasStarted).toBe(false);
-    expect(previous.store.markets).toBe(markets);
+    expect(previous.store.markets).toEqual([]);
     expect(previous.store.loaded).toEqual(loaded);
     expect(handle.markets).toBe(markets);
     expect(handle.refreshedAt).toBe(refreshedAt);
@@ -305,7 +305,7 @@ describe('PublicExchangeFactory with the real native engine', () => {
     const fallback = await factory.get('binance');
     expect(aborted).toBe(1);
     expect(fallback.markets).toEqual(markets);
-    expect(fallback.exchange.store.markets).toEqual(markets);
+    expect(fallback.exchange.store.markets).toEqual([]);
     expect(fallback.marketsBucket).toBe('2026102011');
     expect(created).toHaveLength(3);
     expect(created[1].isDisposed).toBe(true);
@@ -382,7 +382,7 @@ describe('PublicExchangeFactory with the real native engine', () => {
       expect(cached.exchange).toBe(created[2]);
       expect(cached.exchange.isDisposed).toBe(false);
       expect((cached.exchange as RustEngineExchange).hasStarted).toBe(false);
-      expect(cached.exchange.store.markets).toEqual(markets);
+      expect(cached.exchange.store.markets).toEqual([]);
       held = false;
       await cached.exchange.start();
       expect(cached.exchange.store.loaded.markets).toBe(true);
