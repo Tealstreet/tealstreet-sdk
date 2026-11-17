@@ -32,3 +32,11 @@ cargo test --locked -j2 -p safe-cex-exchange-server --test negative_join_okx -- 
 
 This family leaf changes no shared helper, catalog, eligibility, signing codec,
 origin or canonical WASM input.
+
+The F1 wire regression opens the actual loopback fixture for every alias and
+uses the native `WsLogin` integer timestamp shape with both legitimate pairs.
+It also sends corrupt MAC/key/passphrase, null and fractional timestamp controls.
+The fixture accepts native unsigned integers and canonical legacy integer strings;
+it never rounds floats or relaxes signing/passphrase validation. The regression
+compiled and failed before this representation fix. Broad private-read admission
+success alone had not proved the WS fixture's positive authentication path.

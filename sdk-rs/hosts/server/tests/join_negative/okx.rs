@@ -67,7 +67,11 @@ fn valid_login(request: &Value) -> bool {
         if a["passphrase"] != PASS {
             return None;
         }
-        let stamp = a["timestamp"].as_str()?;
+        let stamp = match &a["timestamp"] {
+            Value::String(stamp) => stamp.clone(),
+            Value::Number(stamp) => stamp.as_u64()?.to_string(),
+            _ => return None,
+        };
         let parsed = stamp.parse::<u64>().ok()?;
         if stamp != parsed.to_string() {
             return None;
