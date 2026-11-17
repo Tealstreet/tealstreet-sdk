@@ -7,6 +7,9 @@ mod bybit_fixture;
 #[path = "join_negative/hyperliquid.rs"]
 mod hyperliquid_fixture;
 
+#[path = "join_negative/transport.rs"]
+mod transport_tests;
+
 use bybit_fixture::Bybit;
 use hyperliquid_fixture::Hyperliquid;
 use join_negative::*;

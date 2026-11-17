@@ -52,6 +52,13 @@ pub trait Venue: Send + Sync + 'static {
         seen: &mut Observed,
     ) -> Value;
     fn websocket(request: &Value, seen: &mut Observed) -> Value;
+    fn initial_websocket_frames() -> Vec<String> {
+        Vec::new()
+    }
+    fn websocket_text(text: &str, seen: &mut Observed) -> Option<String> {
+        let request = serde_json::from_str(text).expect("JSON venue WebSocket request");
+        Some(Self::websocket(&request, seen).to_string())
+    }
 }
 
 #[derive(Default)]
@@ -102,6 +109,7 @@ impl Device {
 pub struct Fixture {
     pub registry: Arc<Registry>,
     pub seen: Arc<Mutex<Observed>>,
+    pub websocket_url: String,
     server: tokio::task::JoinHandle<()>,
 }
 impl Fixture {
@@ -118,17 +126,25 @@ impl Fixture {
                     let seen = ws_seen.clone();
                     async move {
                         upgrade.on_upgrade(move |mut socket| async move {
-                            while let Some(Ok(axum::extract::ws::Message::Text(text))) =
-                                socket.recv().await
-                            {
-                                let request: Value = serde_json::from_str(&text).unwrap();
-                                let reply = V::websocket(&request, &mut seen.lock().unwrap());
+                            for text in V::initial_websocket_frames() {
                                 if socket
-                                    .send(axum::extract::ws::Message::Text(
-                                        reply.to_string().into(),
-                                    ))
+                                    .send(axum::extract::ws::Message::Text(text.into()))
                                     .await
                                     .is_err()
+                                {
+                                    return;
+                                }
+                            }
+                            while let Some(Ok(message)) = socket.recv().await {
+                                let axum::extract::ws::Message::Text(text) = message else {
+                                    continue;
+                                };
+                                let reply = V::websocket_text(&text, &mut seen.lock().unwrap());
+                                if let Some(reply) = reply
+                                    && socket
+                                        .send(axum::extract::ws::Message::Text(reply.into()))
+                                        .await
+                                        .is_err()
                                 {
                                     break;
                                 }
@@ -159,8 +175,9 @@ impl Fixture {
             prefix: base.clone(),
             ..Default::default()
         };
+        let websocket_url = base.replacen("http:", "ws:", 1) + "/ws";
         let ws = WsRoute {
-            host: Some(base.replacen("http:", "ws:", 1) + "/ws"),
+            host: Some(websocket_url.clone()),
             ..Default::default()
         };
         let mut registry = Registry::new(
@@ -188,6 +205,7 @@ impl Fixture {
         Self {
             registry: Arc::new(registry),
             seen,
+            websocket_url,
             server,
         }
     }
