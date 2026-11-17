@@ -95,7 +95,7 @@ export const createBinanceRequestInterceptor = (
     if (isBinancePublicSigningRequest(exchangeName, config.url)) {
       return markSkipRemoteSigning({
         ...config,
-        headers: AxiosHeaders.from({ 'Content-Type': 'application/json, charset=utf-8' }),
+        headers: AxiosHeaders.from({ 'Content-Type': 'application/json; charset=utf-8' }),
         timeout: 20_000,
       });
     }
