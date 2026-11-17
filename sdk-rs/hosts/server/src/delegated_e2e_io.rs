@@ -77,6 +77,7 @@ impl MockVenue {
         (mock, seen)
     }
 
+    #[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
     pub(crate) fn for_placement(
         venue: &'static str,
     ) -> (Self, Arc<Mutex<crate::delegated::probe::venue_tests::Seen>>) {
