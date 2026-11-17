@@ -857,15 +857,21 @@ Server to client, one message per engine flush per account:
 - **`snapshot: true`:** marks a full native snapshot. It replaces the client's catalog, book and order baselines.
   - The server sends one immediately after a successful init, and after every `sendSnapshot`.
   - A socket that joins an account later gets its own snapshot before any delta, which is FrameServer's join contract.
-- **Client side:** the client keeps one `FrameApplier` plus `DefaultStore` per account, and applies frames in `seq` order.
+- **Client side:** the client keeps one native `FrameStore` per account and applies frames in `seq` order. Its public rows use the generated types and retain unchanged section identities.
   - A `seq` gap, an `Invalid engine frame` or a `FrameApplyError` makes the client send the existing `{t:'msg', d:{op:'sendSnapshot', accountName}}`.
   - It then ignores deltas until a `snapshot: true` frame arrives. This reuses today's `hostedFrameClient.requestSnapshot` rate limit.
 - **Size:** FrameServer already splits a delta frame that is too big under `max_frame_bytes`. Each segment is its own `seq`.
 
-State that SCXF does not carry stays JSON, under the existing op names and shapes:
+All account state is carried by SCXF. The shared Rust `hosts/store-frames` producer
+adds socket health, active chasers/TWAPs, order risk, displayed positions/margin
+and retained balance info to the account actor's ordered frame stream. Native
+subscription diagnostics use section 25. There is no `op:'store'` side channel.
+The LOCAL wasm host uses the same producer; mobile imports only the pure-JS
+frame reader. See `hosts/store-frames/README.md` for replacement/clear semantics.
 
-- **`op:'store'` partial payloads:** these carry only the fields frames don't (`fetchedLeverage`, `balance.info`, `socketHealth`, `messageHandlerStats`, `activeChasers`, `activeTWAPs`, `ordersRisk`). They are merged over the frame store, which matches the worker's `_derivedStorePayload` in frame mode.
-- **Unchanged replies:** `error`, `warning`, `log`, `engine-event`, `command-progress`, `callMethod:done`, `exec-result`, `updatePositions:done`, `chaser:*` and `twap:*`.
+Non-state replies keep their existing envelopes: `error`, `warning`, `log`,
+`engine-event`, `command-progress`, `callMethod:done`, `exec-result`,
+`updatePositions:done`, `chaser:*` and `twap:*`.
 
 Account output captures a socket-local account generation before a callback,
 detached read, signer or frame pump can defer it. An accepted rebuilding init

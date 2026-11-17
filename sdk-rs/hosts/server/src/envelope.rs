@@ -211,19 +211,6 @@ pub(crate) fn with_account_label(text: String, label: &str) -> String {
         return text;
     }
     match data.get("op").and_then(Value::as_str) {
-        Some("store") => {
-            if let Some(rows) = data
-                .get_mut("data")
-                .and_then(|data| data.get_mut("activeTWAPs"))
-                .and_then(Value::as_array_mut)
-            {
-                for row in rows {
-                    if let Some(row) = row.as_object_mut() {
-                        row.insert("accountName".into(), label.into());
-                    }
-                }
-            }
-        }
         Some("twap:stateUpdate") => {
             if let Some(rows) = data.get_mut("data").and_then(Value::as_object_mut) {
                 for row in rows.values_mut() {

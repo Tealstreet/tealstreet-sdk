@@ -4131,6 +4131,7 @@ dependencies = [
  "safe-cex-exec",
  "safe-cex-native",
  "safe-cex-remote-signer",
+ "safe-cex-store-frames",
  "safe-cex-venue-backpack",
  "safe-cex-venue-coinbase",
  "safe-cex-venues",
@@ -4169,6 +4170,7 @@ dependencies = [
  "rustls",
  "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-store-frames",
  "safe-cex-venue-binance",
  "safe-cex-venues",
  "serde",
@@ -4220,6 +4222,18 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tokio",
+]
+
+[[package]]
+name = "safe-cex-store-frames"
+version = "0.1.0"
+dependencies = [
+ "indexmap 2.14.2",
+ "safe-cex-engine",
+ "safe-cex-num",
+ "safe-cex-types",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4592,6 +4606,7 @@ dependencies = [
  "safe-cex-crypto",
  "safe-cex-engine",
  "safe-cex-exec",
+ "safe-cex-store-frames",
  "safe-cex-venue-bingx",
  "safe-cex-venues",
  "serde",

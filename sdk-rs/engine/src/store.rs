@@ -1739,30 +1739,32 @@ impl Store {
         w.end();
     }
 
+    /// The same independent native quantity/PnL evidence carried by POSITIONS.
+    /// Host projections use this rather than reconstructing venue units.
+    pub fn position_output_extras(&self, index: usize) -> Option<[Option<f64>; 2]> {
+        let position = self.positions.get(index)?;
+        let native = self.position_native_extras.get(index)?;
+        if native.imported == [true; 2] {
+            return Some(native.values);
+        }
+        let market = self
+            .market_by_symbol
+            .get(position.symbol.as_str())
+            .map(|i| &self.markets[*i as usize]);
+        let derived = crate::position_output::native_extras(position, market, self.quantity_units);
+        Some(std::array::from_fn(|i| {
+            if native.imported[i] {
+                native.values[i]
+            } else {
+                derived[i]
+            }
+        }))
+    }
+
     fn write_positions<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let positions = &self.positions;
-        let extras: Vec<_> = positions
-            .iter()
-            .zip(&self.position_native_extras)
-            .map(|(position, native)| {
-                if native.imported == [true; 2] {
-                    return native.values;
-                }
-                let derived = {
-                    let market = self
-                        .market_by_symbol
-                        .get(position.symbol.as_str())
-                        .map(|index| &self.markets[*index as usize]);
-                    crate::position_output::native_extras(position, market, self.quantity_units)
-                };
-                std::array::from_fn(|i| {
-                    if native.imported[i] {
-                        native.values[i]
-                    } else {
-                        derived[i]
-                    }
-                })
-            })
+        let extras: Vec<_> = (0..positions.len())
+            .map(|i| self.position_output_extras(i).expect("position index"))
             .collect();
         w.begin_revision(section::POSITIONS, 2);
         w.u32(positions.len() as u32);
