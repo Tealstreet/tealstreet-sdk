@@ -138,7 +138,11 @@ async fn http_hook_preserves_success_and_returns_actual_refusal_status() {
         .timeout(Duration::from_secs(2))
         .build()
         .unwrap();
-    let success = client.get(format!("{base}/ok")).send().await.unwrap();
+    let success = client
+        .get(format!("{base}/v5/market/tickers"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(success.status(), axum::http::StatusCode::OK);
     assert_eq!(success.json::<Value>().await.unwrap()["retCode"], 0);
     let refusal = client.get(format!("{base}/refused")).send().await.unwrap();
