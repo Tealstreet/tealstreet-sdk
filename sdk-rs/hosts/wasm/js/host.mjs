@@ -1,6 +1,7 @@
 import { historyDecodeOf } from './history-decode.mjs';
 export { historyDecodeOf } from './history-decode.mjs';
 import { ManagedHttp, prepareFetch } from './managed-http.mjs';
+import { transportFailureMessage } from './request-failure.mjs';
 export { HttpPreparationError } from './managed-http.mjs';
 
 function signingNonce(value) {
@@ -1097,8 +1098,11 @@ export class EngineHost {
         signal: controller.signal,
       });
       if (!this.disposed) await this.receive(id, response);
-    } catch {
-      if (!this.disposed) this.run(this.invoke(this.engine.httpFailed, id, 'HTTP transport request failed', this.transport.now()));
+    } catch (error) {
+      if (!this.disposed) {
+        const message = transportFailureMessage(error);
+        if (!this.disposed) this.run(this.invoke(this.engine.httpFailed, id, message, this.transport.now()));
+      }
     } finally {
       this.requests.delete(id);
       this.stageCauses.delete(`http:${id}`);
