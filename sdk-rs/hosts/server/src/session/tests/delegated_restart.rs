@@ -49,7 +49,7 @@ async fn delegated_restart_ambiguous_unjoined_request_requires_an_explicit_venue
                 .collect();
             assert_eq!(
                 refused,
-                vec![serde_json::from_str::<Value>(&envelope::init_unverified("acct", false, envelope::InitRefusalReasonClass::Unknown)).unwrap()],
+                vec![serde_json::from_str::<Value>(&envelope::init_unverified("acct", false, envelope::InitRefusalReasonClass::Unknown, envelope::InitRefusalMetadata { stage: Some(RefusalStage::VenuePolicy), ..Default::default() })).unwrap()],
                 "an ambiguous target must not receive a key offer or waiting status"
             );
             assert!(session.joined.is_empty());

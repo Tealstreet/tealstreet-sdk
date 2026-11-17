@@ -31,7 +31,12 @@ async fn refused_candidates_leave_the_running_account_and_its_provider_untouched
         assert_eq!(
             sent.try_recv().unwrap(),
             envelope::with_instance_id(
-                envelope::init_unverified("acct", transient, reason_class),
+                envelope::init_unverified(
+                    "acct",
+                    transient,
+                    reason_class,
+                    private_read_metadata(code as i64)
+                ),
                 "candidate"
             )
         );
@@ -119,7 +124,8 @@ async fn a_refused_different_key_cannot_replace_a_running_delegated_account() {
         envelope::init_unverified(
             "acct",
             false,
-            envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions
+            envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+            private_read_metadata(10003)
         )
     );
     assert!(f.registry.held("alice", "acct", candidate.socket).is_none());
@@ -198,7 +204,15 @@ async fn a_lease_generation_changed_during_probe_cannot_be_recaptured() {
     finish(&mut session, &mut done).await;
     assert_eq!(
         sent.try_recv().unwrap(),
-        envelope::init_unverified("acct", true, envelope::InitRefusalReasonClass::Unknown)
+        envelope::init_unverified(
+            "acct",
+            true,
+            envelope::InitRefusalReasonClass::Unknown,
+            envelope::InitRefusalMetadata {
+                stage: Some(RefusalStage::Authority),
+                ..Default::default()
+            }
+        )
     );
     assert!(f.registry.held("alice", "acct", session.socket).is_none());
     session.close();
@@ -224,7 +238,15 @@ async fn native_probe_deadline_refuses_and_releases_its_engine() {
     session.verification_completed(completion).await.unwrap();
     assert_eq!(
         sent.try_recv().unwrap(),
-        envelope::init_unverified("acct", true, envelope::InitRefusalReasonClass::Unknown)
+        envelope::init_unverified(
+            "acct",
+            true,
+            envelope::InitRefusalReasonClass::Unknown,
+            envelope::InitRefusalMetadata {
+                stage: Some(RefusalStage::ProbeTimeout),
+                ..Default::default()
+            }
+        )
     );
     assert!(f.registry.held("alice", "acct", session.socket).is_none());
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -273,7 +295,12 @@ async fn probe_authority_is_captured_before_the_spawned_task_first_runs() {
     finish(&mut session, &mut done).await;
     assert_eq!(
         sent.try_recv().unwrap(),
-        envelope::init_unverified("acct", true, envelope::InitRefusalReasonClass::Unknown)
+        envelope::init_unverified(
+            "acct",
+            true,
+            envelope::InitRefusalReasonClass::Unknown,
+            Default::default()
+        )
     );
     assert_eq!(f.private_reads.load(Ordering::SeqCst), 0);
     assert!(f.registry.held("alice", "acct", session.socket).is_none());
@@ -383,7 +410,12 @@ async fn bybit_admission_retains_classified_refusal_and_original_attempt_context
         assert_eq!(
             sent.try_recv().unwrap(),
             envelope::with_instance_id(
-                envelope::init_unverified("acct", transient, reason_class),
+                envelope::init_unverified(
+                    "acct",
+                    transient,
+                    reason_class,
+                    private_read_metadata(code as i64)
+                ),
                 "candidate"
             )
         );
@@ -466,7 +498,9 @@ async fn assert_refusal_reason_class(code: usize, reason: &str, transient: bool)
         frame["d"]["data"][1],
         json!({
             "forceToast":true, "initRefused":true, "kind":"unverified",
-            "transient":transient, "reason_class":reason
+            "transient":transient, "reason_class":reason,
+            "error_kind":private_read_metadata(code as i64).error_kind,
+            "venue_code":code, "stage":"private_read"
         })
     );
     assert_eq!(frame["d"]["instanceId"], "reason-registration");
@@ -476,8 +510,8 @@ async fn assert_refusal_reason_class(code: usize, reason: &str, transient: bool)
         "Could not verify your key; account not attached"
     );
     assert!(
-        !raw.contains(&code.to_string()),
-        "numeric venue code must remain private"
+        !raw.contains("synthetic"),
+        "raw venue messages and credential material must remain private"
     );
     assert!(session.joined.is_empty());
     assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
