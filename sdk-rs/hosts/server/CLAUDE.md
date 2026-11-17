@@ -262,6 +262,21 @@ context follows its original pending verification. Never add credential identity
 account labels, tokens, signatures, handover bytes, raw venue messages or payloads
 to these lines. Diagnostics do not change admission or retry classification.
 
+The v1 `init_unverified` error metadata includes closed `reason_class`:
+`key_rejected_ip_or_permissions`, `key_invalid`, `venue_unavailable` or `unknown`.
+It derives only from the captured venue and typed private error kind/numeric code.
+Permission failures and the Binance -2015/-2014, Bybit 10003/10010 and OKX
+50110/50111 auth refusals use the broad key-rejection class; other invalid/expired
+keys use `key_invalid`. Network, timeout, rate-limit and venue-unavailable errors
+use `venue_unavailable`; missing/unrelated evidence stays `unknown`. Numeric
+namespaces are scoped to exact venue families, not prefixes. HyroTrader's
+ambiguous 10003 stays `unknown`: a disabled challenge can reject an unchanged
+valid key, as its Bybit CLAUDE contract documents. This is coarse
+recovery guidance, never proof of a specific IP or permission defect. Raw venue
+text never enters this frame; typed JS-safe venue codes may accompany the class. The fixed message, transient flag, registration
+binding and existing eight-field private diagnostic remain unchanged.
+
+
 ## TWAP restore binding
 
 Native TWAP restore authority carries both the verified owner and generation.
@@ -364,3 +379,21 @@ Rejecting that frame uses the ordinary error envelope: it supplies no proof
 about an earlier action and cannot fabricate an action refusal or negative ACK.
 See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
 `tests/data/delegated-actions-v1.json` contract.
+
+## Classified admission refusals
+
+`init_unverified` carries optional typed `error_kind`, JS-safe integer
+`venue_code`, and a closed host-owned `stage` from the actual ProbeRefusal.
+Probe/session completion and early handover refusal paths preserve those fields
+through the initiating account and registration output. Unknown classification
+and absent venue codes stay absent; no raw venue text enters the new fields.
+
+## ApeX encrypted seed
+
+ApeX handover accepts optional `omniKeySeed` exclusively inside the sealed
+credential schema. The in-place parser erases input and owns the field in a
+zeroizing string. Admission copies and construction transfer it to canonical
+ApeX protected setup, which installs `primary.extra.zklinkSeed` with hex encoding.
+The field is never public init/engine JSON, a fingerprint or wallet signingKey.
+Other venues, mixed wallet layouts and non-65-byte hex seeds refuse. Monitoring
+without a seed remains unchanged and supplies no placement-signing capability.

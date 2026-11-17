@@ -1,5 +1,6 @@
 //! Exercises the wire handover, native probe, account admission and manual write together.
 use super::*;
+use crate::delegated::probe::RefusalStage;
 use crate::delegated::{KeyOffer, Sealed};
 use crate::delegated_e2e_io::MockVenue;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -292,7 +293,35 @@ async fn delegated_refusal_case(case: &str) {
         complete(&mut session, &mut results).await;
     }
     let refusal = next_text(&mut sent, "error").await;
-    let expected = envelope::with_instance_id(envelope::init_unverified(ACCOUNT, false), INSTANCE);
+    let reason_class = if case == "wrong-pair" {
+        envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions
+    } else {
+        envelope::InitRefusalReasonClass::Unknown
+    };
+    let expected = envelope::with_instance_id(
+        envelope::init_unverified(
+            ACCOUNT,
+            false,
+            reason_class,
+            match case {
+                "wrong-pair" => envelope::InitRefusalMetadata {
+                    error_kind: Some(safe_cex_engine::ErrorKind::AuthInvalid),
+                    venue_code: Some(10003),
+                    stage: Some(RefusalStage::PrivateRead),
+                },
+                "replay" => envelope::InitRefusalMetadata {
+                    stage: Some(RefusalStage::HandoverAttempt),
+                    ..Default::default()
+                },
+                "other-venue" => envelope::InitRefusalMetadata {
+                    stage: Some(RefusalStage::VenuePolicy),
+                    ..Default::default()
+                },
+                _ => unreachable!(),
+            },
+        ),
+        INSTANCE,
+    );
     assert_eq!(refusal, expected);
     assert_empty(&session, &registry).await;
     assert!(
@@ -349,8 +378,18 @@ async fn delegated_e2e_bybit_declaration_off_refuses_valid_handover_without_io()
     crate::delegated::with_test_declaration(declaration, async {
         wire(&mut session, init).await;
         assert_empty(&session, &registry).await;
-        let expected =
-            envelope::with_instance_id(envelope::init_unverified(ACCOUNT, false), INSTANCE);
+        let expected = envelope::with_instance_id(
+            envelope::init_unverified(
+                ACCOUNT,
+                false,
+                envelope::InitRefusalReasonClass::Unknown,
+                envelope::InitRefusalMetadata {
+                    stage: Some(RefusalStage::VenuePolicy),
+                    ..Default::default()
+                },
+            ),
+            INSTANCE,
+        );
         assert_eq!(next_text(&mut sent, "error").await, expected);
         assert!(
             session
