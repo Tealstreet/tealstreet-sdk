@@ -23,14 +23,55 @@ fn single<'a>(h: &'a HeaderMap, n: &str) -> Option<&'a str> {
     let v = x.next()?.to_str().ok()?;
     x.next().is_none().then_some(v)
 }
-fn valid_rest(_path: &str, _query: Option<&str>, _headers: &HeaderMap) -> bool {
-    let _ = single(&HeaderMap::new(), "access-key");
-    true
+fn valid_rest(path: &str, query: Option<&str>, headers: &HeaderMap) -> bool {
+    (|| {
+        let material = secret(single(headers, "access-key")?)?;
+        if single(headers, "access-passphrase")? != PASS {
+            return None;
+        }
+        let stamp = single(headers, "access-timestamp")?;
+        let parsed = stamp.parse::<u64>().ok()?;
+        if parsed.abs_diff(now_ms()) > 30_000 {
+            return None;
+        }
+        let target = match query {
+            Some(q) => format!("{path}?{q}"),
+            None => path.to_owned(),
+        };
+        let payload = format!("{stamp}GET{target}");
+        Some(
+            single(headers, "access-sign")?
+                == hmac_sha256(material.as_bytes(), payload.as_bytes(), Encoding::Base64),
+        )
+    })() == Some(true)
 }
-fn valid_login(_v: &Value) -> bool {
-    let _ = secret(KEY);
-    let _ = now_ms();
-    true
+fn valid_login(v: &Value) -> bool {
+    (|| {
+        if v["op"] != "login" || v["args"].as_array()?.len() != 1 {
+            return None;
+        }
+        let a = &v["args"][0];
+        let material = secret(a["apiKey"].as_str()?)?;
+        if a["passphrase"] != PASS {
+            return None;
+        }
+        let stamp = if let Some(text) = a["timestamp"].as_str() {
+            text.to_owned()
+        } else {
+            a["timestamp"].as_f64()?.to_string()
+        };
+        if stamp.parse::<u64>().ok()?.to_string() != stamp {
+            return None;
+        }
+        Some(
+            a["sign"]
+                == hmac_sha256(
+                    material.as_bytes(),
+                    format!("{stamp}GET/user/verify").as_bytes(),
+                    Encoding::Base64,
+                ),
+        )
+    })() == Some(true)
 }
 fn simulated(value: &mut Value) {
     match value {
