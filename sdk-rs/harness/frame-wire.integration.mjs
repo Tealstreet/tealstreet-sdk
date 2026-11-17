@@ -1,3 +1,4 @@
+import { nativeFixture } from '../../packages/safe-cex/src/__tests__/cutover/nativeFixture.ts';
 // Cross-language contract: Rust's actual writer -> JS decoder -> SDK book state.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -7,33 +8,32 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 import { captureRustFill, captureTsSettings } from './comparison-policy.mjs';
-import { FrameApplier } from '../../packages/safe-cex/src/store/frameApplier.ts';
-import { DefaultStore } from '../../packages/safe-cex/src/store/store.base.ts';
+import { FrameStore } from '../../packages/safe-cex/src/store/frameStore.ts';
 
 test('replay settings retain closed-symbol metadata and prefer current exposure settings', () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const position = {
     id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: 'long', leverage: 20,
     marginType: 'cross', contracts: 1, notional: 100, entryPrice: 100,
     unrealizedPnl: 0, liquidationPrice: null,
   };
-  store.addOrUpdatePositionsFull([position]);
+  store.apply(nativeFixture({ positions: [position] }));
   assert.deepEqual(captureTsSettings(store), [{ symbol: 'BTCUSDT', leverage: 20, marginType: 'cross' }]);
-  store.addOrUpdatePositionsFull([]);
+  store.apply(nativeFixture({ positions: [] }));
   assert.deepEqual(store.positions, []);
   assert.deepEqual(captureTsSettings(store), [{ symbol: 'BTCUSDT', leverage: 20, marginType: 'cross' }]);
-  store.addOrUpdatePositionsFull([{ ...position, leverage: 7, marginType: 'isolated' }]);
+  store.apply(nativeFixture({ positions: [{ ...position, leverage: 7, marginType: 'isolated' }] }));
   assert.deepEqual(captureTsSettings(store), [{ symbol: 'BTCUSDT', leverage: 7, marginType: 'isolated' }]);
-  store.updatePosition(position, { leverage: 3, marginType: 'cross' });
-  assert.equal(store.positionSettings[position.id].leverage, 7);
+  store.apply(nativeFixture({ positions: [{ ...position, leverage: 3, marginType: 'cross' }] }));
+  assert.equal(store.positionSettings[position.id].leverage, 3);
   assert.deepEqual(captureTsSettings(store), [{ symbol: 'BTCUSDT', leverage: 3, marginType: 'cross' }]);
-  store.updatePosition(position, { leverage: 0 });
+  store.apply(nativeFixture({ positions: [{ ...position, leverage: 0 }] }));
   assert.deepEqual(captureTsSettings(store), []);
   store.reset();
   assert.deepEqual(captureTsSettings(store), []);
 });
 
-test('Rust BOOK_DELTA reconstructs two full 1,000-level books through FrameApplier', () => {
+test('Rust BOOK_DELTA reconstructs two full 1,000-level books through FrameStore', () => {
   const directory = mkdtempSync(join(tmpdir(), 'safe-cex-frame-wire-'));
   try {
     const result = spawnSync('cargo', ['run', '-j2', '--quiet', '--locked', '--manifest-path',
@@ -47,8 +47,8 @@ test('Rust BOOK_DELTA reconstructs two full 1,000-level books through FrameAppli
       const bytes = readFileSync(join(directory, name));
       return new Frame(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
     };
-    const deltaApplier = new FrameApplier(new DefaultStore());
-    const fullApplier = new FrameApplier(new DefaultStore());
+    const deltaApplier = new FrameStore();
+    const fullApplier = new FrameStore();
     for (const applier of [deltaApplier, fullApplier]) applier.apply(read('markets.bin'));
     const baseline = read('baseline.bin');
     deltaApplier.apply(baseline);
@@ -84,16 +84,16 @@ test('Rust revised sections preserve native fields and identity through the SDK'
     for (const [index, fixture] of fixtures.positionCases.entries()) {
       const bytes = Uint8Array.from(Buffer.from(fixture.frame, 'hex'));
       const frame = new Frame(bytes.buffer);
-      const worker = new DefaultStore();
+      const worker = new FrameStore();
       if (fixture.invalidNative) {
-        assert.throws(() => new FrameApplier(worker).apply(frame), /invalid Position contractsNative/);
+        assert.throws(() => worker.apply(frame), /invalid Position contractsNative/);
         assert.deepEqual(worker.positions, []);
         continue;
       }
-      new FrameApplier(worker).apply(frame);
+      worker.apply(frame);
       // The same bytes reach the main store; no display or sizing repair is needed.
-      const main = new DefaultStore();
-      new FrameApplier(main).apply(new Frame(structuredClone(frame.buffer)));
+      const main = new FrameStore();
+      main.apply(new Frame(structuredClone(frame.buffer)));
       assert.deepEqual(main.positions, worker.positions);
       assert.equal(frame.first(8).revision, 2);
       const row = worker.positions[0];
@@ -109,7 +109,7 @@ test('Rust revised sections preserve native fields and identity through the SDK'
         assert.equal('realizedPnl' in row, false);
         assert.equal('marginSize' in row, false);
         assert.equal('lastUpdate' in row, false);
-        assert.equal(JSON.parse(JSON.stringify(worker.serialize())).positions[0].liquidationPrice, expected);
+        assert.equal(JSON.parse(JSON.stringify(worker.data)).positions[0].liquidationPrice, expected);
       } else {
         assert.equal(row.extra.contractsNative, fixture.expectedNative);
       }
@@ -118,19 +118,19 @@ test('Rust revised sections preserve native fields and identity through the SDK'
         ...(position.marginType !== undefined ? { marginType: position.marginType } : {}),
         ...(position.positionMode !== undefined ? { positionMode: position.positionMode } : {}),
       }]));
-      worker.addOrUpdatePositionsFull([]);
+      worker.apply(nativeFixture({ positions: [] }));
       assert.deepEqual(worker.positions, []);
-      assert.deepEqual(worker.serialize().positions, []);
+      assert.deepEqual(worker.data.positions, []);
       assert.deepEqual({ ...worker.positionSettings }, expectedSettings);
-      assert.deepEqual(worker.serialize().positionSettings, expectedSettings);
+      assert.deepEqual(worker.data.positionSettings, expectedSettings);
     }
   });
   const read = (name) => {
     const bytes = Uint8Array.from(Buffer.from(fixtures[name], 'hex'));
     return new Frame(bytes.buffer);
   };
-  const store = new DefaultStore();
-  const applier = new FrameApplier(store);
+  const store = new FrameStore();
+  const applier = store;
   const initial = read('initial');
   applier.apply(initial);
   await t.test('H2: display symbols retain native, empty and absent values', () => {

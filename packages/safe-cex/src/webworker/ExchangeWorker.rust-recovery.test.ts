@@ -392,8 +392,6 @@ describe('Rust worker engine ownership', () => {
       else worker.handlePayload({ op: 'deactivate' });
       const before = messages.length;
       worker.handlePayload({ op: 'ui:state', data: { activeSymbol: 'BTCUSDT' } } as never);
-      worker.handlePayload({ op: 'store', data: {} } as never);
-      worker.handlePayload({ op: 'merge-loaded', data: {} } as never);
       worker.handlePayload({ op: 'twap:stop', data: { id: 'gone' } } as never);
       expect(messages.slice(before).filter((message) => message.op === 'error')).toEqual([]);
       worker.handlePayload({ op: 'twap:start', data: {} } as never);
