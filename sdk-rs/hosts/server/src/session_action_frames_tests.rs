@@ -625,8 +625,10 @@ async fn action_fix_cancel_all_expires_during_its_symbol_store_read() {
                     assert_eq!(writes, &vec!["cancel"]);
                 } else {
                     assert!(writes.is_empty(), "expired {clock} cancelAll wrote: {observed:?}");
-                    assert_eq!(result["d"]["outcome"], "unknown", "{result}");
-                    assert_eq!(result["d"]["error"]["outcome"], "unknown");
+                    // 116aeae12: symbol discovery dispatches no mutation. This
+                    // whole-action expiry proves notSent; later-leg guards stay unknown.
+                    assert_eq!(result["d"]["outcome"], "refused", "{result}");
+                    assert_eq!(result["d"]["error"]["outcome"], "notSent");
                     assert!(result["d"]["error"]["message"].as_str().unwrap().contains("expired"));
                     assert!(result["d"]["result"].is_null());
                 }

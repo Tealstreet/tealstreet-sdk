@@ -1,5 +1,8 @@
 # ApeX Omni signing and socket liveness
 
+No-body REST requests use `application/json; charset=utf-8`. Form and multipart
+requests retain their own media types; unsigned klines retain no signing headers.
+
 ## Hosted and delegated signing
 
 RemoteSigner accounts use the same dispatch recipes as local accounts for every

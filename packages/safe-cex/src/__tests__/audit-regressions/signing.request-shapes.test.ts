@@ -31,7 +31,7 @@ describe('standalone request interceptors without API or venue construction', ()
       const sign = createBinanceRequestInterceptor({ key: 'public-key', secret: '', payloadSigner }, name, clock);
       const publicConfig = await sign(config({ url: publicPath, headers: new AxiosHeaders({ Authorization: 'old' }) }));
       expect(publicConfig).toMatchObject({ safeCexSkipRemoteSigning: true, timeout: 20000 });
-      expect(publicConfig.headers.toJSON()).toEqual({ 'Content-Type': 'application/json, charset=utf-8' });
+      expect(publicConfig.headers.toJSON()).toEqual({ 'Content-Type': 'application/json; charset=utf-8' });
       expect(clock).not.toHaveBeenCalled();
       expect(payloadSigner).not.toHaveBeenCalled();
       const privateConfig = await sign(config({ method: 'post', url: '/private', data: { ids: ['2', '1'], qty: '0.0100' } }));
