@@ -613,3 +613,13 @@ classifications without forwarding the free-form message or a signed request.
 the owning page. It supplies dedicated workers' timer-lateness diagnostics;
 it changes no reconnect, throttle or account policy. A callback delivered after
 the page is visible is not counted as a hidden callback.
+
+
+## Closed history diagnostics
+
+`logError` projects only allowlisted native history causes and validated
+`historyDecode` schema/reason pairs into its detached error object. Shared
+`exchangeErrorTags` indexes them as `cause_code`, `history_schema` and
+`history_reason`, including when message text is redacted. Unknown causes,
+invalid pairs and extra row/request fields are dropped; the diagnostic packet
+still passes through the existing redactor and the web Sentry sanitizer.
