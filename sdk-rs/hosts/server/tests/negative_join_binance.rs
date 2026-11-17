@@ -50,6 +50,31 @@ suite!(spot, Binance<3,false>);
 suite!(spot_testnet, Binance<3,true>);
 suite!(options, Binance<4,false>);
 #[tokio::test]
+async fn fixture_auth_refusal_has_unauthorized_http_status() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let f = Fixture::new::<Binance<0, false>>().await;
+    let http = f.websocket_url.replacen("ws://", "http://", 1);
+    let base = http.strip_suffix("/ws").unwrap();
+    let response = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap()
+        .get(format!(
+            "{base}/fapi/v3/account?timestamp=1&signature=invalid"
+        ))
+        .header("X-MBX-APIKEY", Binance::<0, false>::init().key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["code"], -2015);
+    assert_eq!(f.registry.account_count(), 0);
+    let seen = f.seen.lock().unwrap();
+    assert_eq!((seen.signed_reads, seen.rejections, seen.writes), (1, 1, 0));
+}
+#[tokio::test]
 async fn options_testnet_refuses_without_private_io() {
     type V = Binance<4, true>;
     let f = Fixture::new::<V>().await;
