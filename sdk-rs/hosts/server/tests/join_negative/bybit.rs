@@ -99,12 +99,26 @@ impl Venue for Bybit {
                 uri.query().unwrap_or_default()
             );
             let expected = hmac_sha256(material.as_bytes(), preimage.as_bytes(), Encoding::Hex);
-            if material.is_empty() || header("x-bapi-sign") != Some(expected.as_str()) {
+            let valid_stamp = header("x-bapi-timestamp")
+                .and_then(|value| value.parse::<u64>().ok())
+                .is_some();
+            let valid_window = header("x-bapi-recv-window")
+                .and_then(|value| value.parse::<u64>().ok())
+                .is_some_and(|window| window > 0);
+            if material.is_empty()
+                || !valid_stamp
+                || !valid_window
+                || header("x-bapi-sign") != Some(expected.as_str())
+            {
                 seen.rejections += 1;
                 return json!({"retCode":10003,"retMsg":"synthetic proof refusal","result":{}});
             }
         } else {
             assert_eq!(method, Method::GET, "unsigned write");
+            if !path.ends_with("/market/instruments-info") && !path.ends_with("/market/tickers") {
+                seen.rejections += 1;
+                return json!({"retCode":10003,"retMsg":"synthetic proof refusal","result":{}});
+            }
         }
         let fixtures: Value =
             serde_json::from_str(include_str!("../fixtures/delegated-bybit-public.json")).unwrap();
