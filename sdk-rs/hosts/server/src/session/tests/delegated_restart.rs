@@ -215,12 +215,15 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
         account,
         &f.registry.held("alice", "acct", session.socket).unwrap()
     ));
-    account
-        .algos
-        .as_ref()
-        .unwrap()
-        .send(crate::algos::AlgoInput::Joined)
-        .unwrap();
+    // A refused resume changes no native state, so the delta stream correctly
+    // suppresses the identical TWAP section. Read an authoritative snapshot.
+    session
+        .msg(AccountMsg {
+            op: "sendSnapshot".into(),
+            account_name: Some("acct".into()),
+            data: Value::Null,
+        })
+        .await;
     let still_paused = twap_row(&mut sent, "paused").await;
     assert_eq!(
         still_paused, restored,

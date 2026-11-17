@@ -400,6 +400,8 @@ export type IncomeHistoryOptions = {
  * Any Exchange/BaseExchange instance satisfies this interface naturally.
  */
 export interface PublicDataSource {
+  /** Native source snapshot, including subscription diagnostics. */
+  snapshotFrame?: () => ArrayBuffer | undefined;
   readonly store: {
     subscribe: (cb: (data: StoreData) => void) => () => void;
     readonly tickers: StoreData['tickers'];

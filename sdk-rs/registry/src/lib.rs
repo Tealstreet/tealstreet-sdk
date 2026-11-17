@@ -2808,6 +2808,14 @@ pub struct PublicFeedOptions {
     pub mode: safe_cex_engine::PublicFeedPolicy,
 }
 
+/// Display-only account tuning, shared by LOCAL and hosted frame producers.
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DisplayTuning {
+    #[serde(default)]
+    pub calculate_upnl_from_realtime_last_price: bool,
+}
+
 #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2848,6 +2856,8 @@ pub struct KucoinExtra {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EngineOptions {
+    #[serde(default)]
+    pub tuning: Option<DisplayTuning>,
     /// Injected (remote, delegated or hosted) refs always carry a signing ref;
     /// credential-only slots come only from trusted local setup.
     #[serde(default, deserialize_with = "EngineOptions::injected_identities")]

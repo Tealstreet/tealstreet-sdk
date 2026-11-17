@@ -60,6 +60,8 @@ pub mod section {
     pub const TICKER_OBSERVATIONS: u16 = 24;
     /// Per-subscription group, topic ref, subscribed/active flags and monotonic message age.
     pub const MESSAGE_HANDLER_STATS: u16 = 25;
+    /// Shared public-provider diagnostics, independently replaced from private groups.
+    pub const PUBLIC_MESSAGE_HANDLER_STATS: u16 = 34;
 }
 
 pub mod status_flag {

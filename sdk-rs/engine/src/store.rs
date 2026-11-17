@@ -16,6 +16,9 @@ use crate::wire::market_flag;
 use crate::wire::{self, FrameWriter, loaded_flag, section};
 use std::collections::{HashMap, HashSet};
 
+/// Captured provider rows retain receive time, so snapshots do not freshen their age.
+type PublicMessageStats = std::collections::BTreeMap<(u8, String), (bool, bool, Option<f64>)>;
+
 /// Each imported column owns its value (including absence) until its inputs
 /// change. A size update must not discard independent native PnL evidence.
 #[derive(Clone, Copy, Default)]
@@ -83,6 +86,9 @@ pub struct Store {
     position_native_extras: Vec<PositionNativeExtras>,
     position_ids: bool,
     balance: Balance,
+    request_stats: [u32; 5],
+    public_message_stats: Option<PublicMessageStats>,
+    balance_info_json: Option<String>,
     coin_balances: Option<Vec<CoinBalance>>,
     currency_balances: Option<Vec<CurrencyBalance>>,
     /// Stable symbols retain account settings across market replacement/delisting.
@@ -920,6 +926,24 @@ impl Store {
         }
     }
 
+    pub(crate) fn set_public_message_stats(
+        &mut self,
+        stats: crate::public_feed::PublicMessageStats,
+        now: f64,
+    ) {
+        let current = self.public_message_stats.get_or_insert_default();
+        if stats.replace {
+            current.clear();
+        }
+        for row in stats.rows {
+            current.insert(
+                (row.group, row.topic),
+                (row.subscribed, row.active, row.age_ms.map(|age| now - age)),
+            );
+        }
+        self.changes.status = true;
+    }
+
     pub fn positions(&self) -> &[Position] {
         &self.positions
     }
@@ -1056,6 +1080,30 @@ impl Store {
         }
     }
 
+    /// Final physical HTTP outcomes, shared by hosted and LOCAL engines.
+    pub fn record_request_outcome(&mut self, status: Option<u16>) {
+        let index = match status {
+            Some(200..=299) => 0,
+            Some(418 | 429) => 1,
+            Some(401 | 403) => 2,
+            None => 3,
+            _ => 4,
+        };
+        self.request_stats[index] = self.request_stats[index].saturating_add(1);
+        self.changes.status = true;
+    }
+
+    /// Opaque venue metadata is decoded only at the host boundary.
+    pub fn balance_info_json(&self) -> Option<&str> {
+        self.balance_info_json.as_deref()
+    }
+    pub fn set_balance_info_json(&mut self, info: String) {
+        if self.balance_info_json.as_ref() != Some(&info) {
+            self.balance_info_json = Some(info);
+            self.changes.balance = true;
+        }
+    }
+
     pub fn set_balance(&mut self, balance: Balance) {
         if !self.loaded.balance || balance != self.balance {
             self.balance = balance;
@@ -1078,6 +1126,7 @@ impl Store {
                     .map(|market| (market.symbol.clone().into_boxed_str(), setting))
             })
             .collect();
+        self.sync_position_leverages();
         self.changes.settings = true;
         #[cfg(feature = "metadata-freshness")]
         if let Some(metadata) = &mut self.metadata {
@@ -1096,10 +1145,28 @@ impl Store {
             .collect();
         if settings != self.settings {
             self.settings = settings;
+            self.sync_position_leverages();
             self.changes.settings = true;
             #[cfg(feature = "metadata-freshness")]
             if let Some(metadata) = &mut self.metadata {
                 metadata.changed(None);
+            }
+        }
+    }
+
+    fn sync_position_leverages(&mut self) {
+        for position in &mut self.positions {
+            let Some(setting) = self.settings.get(position.symbol.as_str()) else {
+                continue;
+            };
+            let leverage = match position.side {
+                crate::model::PositionSide::Long => setting.buy_leverage,
+                crate::model::PositionSide::Short => setting.sell_leverage,
+            }
+            .unwrap_or(setting.leverage);
+            if leverage.is_finite() && leverage > 0.0 && position.leverage != leverage {
+                position.leverage = leverage;
+                self.changes.positions = true;
             }
         }
     }
@@ -1115,6 +1182,7 @@ impl Store {
                 metadata.changed(Some(symbol));
             }
         }
+        self.sync_position_leverages();
     }
 }
 
@@ -1498,6 +1566,25 @@ impl Store {
                 };
             w.u32s([loaded, flags]);
             w.f64(self.latency.unwrap_or(0.0));
+            w.end();
+            if let Some(stats) = &self.public_message_stats {
+                w.begin(section::PUBLIC_MESSAGE_HANDLER_STATS);
+                w.u32s([stats.len() as u32, 1]);
+                for ((group, topic), (subscribed, active, received)) in stats {
+                    let topic = w.string(topic);
+                    w.u32s([
+                        u32::from(*group),
+                        topic,
+                        u32::from(*subscribed) | (u32::from(*active) << 1),
+                        0,
+                    ]);
+                    w.f64(received.map_or(f64::NAN, |at| (self.clock - at).max(0.)));
+                }
+                w.end();
+            }
+            w.begin(35);
+            w.u32s(self.request_stats);
+            w.pad();
             w.end();
         }
     }

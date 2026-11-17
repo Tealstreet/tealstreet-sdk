@@ -27,6 +27,8 @@ pub struct InitPayload {
     #[serde(default, deserialize_with = "text")]
     pub passphrase: Option<String>,
     pub testnet: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tuning: Option<safe_cex_venues::DisplayTuning>,
     #[serde(default, deserialize_with = "text")]
     pub application_id: Option<String>,
     #[serde(default, deserialize_with = "text")]

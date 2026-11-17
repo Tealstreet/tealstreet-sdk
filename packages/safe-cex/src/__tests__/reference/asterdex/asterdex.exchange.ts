@@ -156,6 +156,10 @@ export class AsterDEXExchange extends BaseExchange {
           this.store.markets.map((row) => row.symbol),
         ),
       );
+      // This retained oracle emits separate bootstrap tables. Publish the full
+      // private readiness claim only once all three native tables decoded.
+      if (this.store.hasAccountState)
+        this.store.apply(nativeFixture({ loaded: { ...this.store.loaded, balance: true, orders: true, positions: true } }));
       this.lastBalanceReconciliationAt = Date.now();
       return true;
     } catch (error: any) {

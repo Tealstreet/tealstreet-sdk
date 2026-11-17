@@ -1201,6 +1201,10 @@ impl WasmEngine {
             .map_err(|_| js_sys::Error::new("Invalid Coinbase public signing binding"))?;
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
+        let realtime_last_price = options
+            .tuning
+            .as_ref()
+            .is_some_and(|tuning| tuning.calculate_upnl_from_realtime_last_price);
         let inner = safe_cex_venues::build_with_signer_in_context(
             safe_cex_venues::ConstructionContext::Client,
             venue,
@@ -1216,7 +1220,7 @@ impl WasmEngine {
         Ok(Self {
             inner,
             construction,
-            store_frames: store_frames::LocalFrames::new(venue),
+            store_frames: store_frames::LocalFrames::new(venue, realtime_last_price),
             dispatch_signing,
             external_signer,
             #[cfg(feature = "hosted-signing")]
@@ -1830,6 +1834,24 @@ mod public_custody_tests;
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(feature = "bybit", feature = "bingx"))]
+    #[test]
+    fn constructor_supplies_display_metadata_and_user_tuning_to_local_frames() {
+        for (venue, tuning, expected) in [
+            ("bybit", false, true),
+            ("bybit", true, true),
+            ("bingx", false, false),
+            ("bingx", true, true),
+        ] {
+            let options = serde_json::json!({"publicDataOnly":true, "tuning":{"calculateUpnlFromRealtimeLastPrice":tuning}}).to_string();
+            let engine = super::WasmEngine::new(venue, &options, None).unwrap();
+            assert_eq!(
+                engine.store_frames.inputs.borrow().calculate_upnl_from_last,
+                expected,
+                "{venue}/{tuning}"
+            );
+        }
+    }
     #[test]
     fn socket_public_topics_are_optional_and_do_not_replace_the_primary_role() {
         let mut action = safe_cex_engine::Action::WsConnect {

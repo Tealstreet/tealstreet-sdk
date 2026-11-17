@@ -3,11 +3,11 @@
 This host boundary composes engine models and native chaser rows into UI records.
 It does not depend on the restored port crates. Financial calculations use native
 floating-point arithmetic and display labels use Rust fixed precision formatting.
-Public TypeScript declarations and accessor signatures remain unchanged.
+Generated TypeScript records remain unchanged.
 
 SCXF sections 26–32 replace socket health, active chasers, active TWAPs, order
 risk, displayed positions, displayed margin and balance info. Section 25 remains
-the engine's subscription diagnostics table. Absent sections preserve consumer
+the engine's subscription diagnostics table. Section 33 replaces native managed-order ownership by exact order ID; empty maps clear chaser/TWAP tags. Common engine sections 34 and 35 carry shared public subscription diagnostics and monotonic request-outcome counters respectively. Absent sections preserve consumer
 identities; empty collections clear them, and balance info null clears that field.
 
 The typed Serde encoder lives in `engine/src/store_frame_wire.rs`. Revision one
@@ -37,3 +37,22 @@ PATH=/tmp/pybin:$PATH ./scripts/check-bans.sh
 The risk differential test needs the root Yarn TypeScript dependency; set
 `SAFE_CEX_TYPESCRIPT_PATH` if it is outside normal Node resolution. Its numeric
 comparison permits floating-point roundoff from native arithmetic.
+
+Display PnL uses the shared `packages/safe-cex/src/exchange-display-policy.json`
+metadata plus `tuning.calculateUpnlFromRealtimeLastPrice`. Both hosted and LOCAL
+constructors pass this tuning into the producer; relabeling preserves it. The
+policy is compiled at build time and included in wasm artifact fingerprints.
+Bybit's default and explicit tuning both calculate `(110 - 100) * 2 = 20`,
+even when the venue reports 7. The source position retains the venue value.
+
+Native SETTINGS completions update canonical position leverage rails. FrameStore
+retains position settings after closure and recovery snapshots, and owns its
+monotonic row update counters. Readiness requires decoded catalogue, ticker and
+account evidence in addition to STATUS claims. A STATUS-only snapshot is unloaded.
+
+Shared public diagnostics enter the account engine as validated public-feed
+facts, with independent replacement and retained message ages. They are emitted
+in account deltas and late snapshots, so forwarding workers use the same path.
+In-process public sources must expose their native `snapshotFrame`; the native
+shared-feed server refuses a source without it. Lighter limits use native
+validated API metadata in `balance.info.lighterAccountLimits`.

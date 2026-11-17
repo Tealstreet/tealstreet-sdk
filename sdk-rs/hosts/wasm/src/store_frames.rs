@@ -27,9 +27,9 @@ pub(crate) struct LocalFrames {
     now: f64,
 }
 impl LocalFrames {
-    pub(crate) fn new(venue: &str) -> Self {
+    pub(crate) fn new(venue: &str, realtime_last_price: bool) -> Self {
         let this = Self::default();
-        this.inputs.borrow_mut().configure("", venue);
+        *this.inputs.borrow_mut() = Inputs::new("", venue, realtime_last_price);
         this
     }
     pub(crate) fn actions(&mut self, actions: &[Action]) {
@@ -164,7 +164,7 @@ mod tests {
     use super::*;
     #[test]
     fn local_socket_lifecycle_and_shared_public_role_are_native_sections() {
-        let mut host = LocalFrames::new("bybit");
+        let mut host = LocalFrames::new("bybit", false);
         host.actions(&[Action::WsConnect {
             socket: SocketId(1),
             url: "wss://fixture.invalid".into(),

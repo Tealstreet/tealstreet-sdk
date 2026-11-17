@@ -15,6 +15,7 @@ export function readNativeDerivedSections(
       reject(error);
     }
   };
+  read('requestStats', () => frame.requestStats?.());
   read('socketHealth', () => frame.socketHealth?.());
   read('activeChasers', () => frame.activeChasers?.());
   read('activeTWAPs', () => frame.activeTWAPs?.());

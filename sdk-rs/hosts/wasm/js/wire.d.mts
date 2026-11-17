@@ -34,6 +34,9 @@ export const SECTION: {
   DISPLAYED_POSITIONS: 30;
   DISPLAYED_MARGIN: 31;
   BALANCE_INFO: 32;
+  MANAGED_ORDERS: 33;
+  PUBLIC_MESSAGE_HANDLER_STATS: 34;
+  REQUEST_STATS: 35;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -288,6 +291,11 @@ export interface FillRows {
   orderId(i: number): string;
 }
 
+export type ManagedOrderOwnership = Pick<NonNullable<StoreData['orders'][number]['extra']>,
+  'isFromChaser' | 'chaserId' | 'chaserAttempts' | 'chaserMaxAttempts'> & {
+  isFromTwap?: boolean;
+  twapId?: string;
+};
 export class Frame {
   constructor(buffer: ArrayBuffer);
   readonly buffer: ArrayBuffer;
@@ -307,6 +315,7 @@ export class Frame {
   tickers(owned?: boolean): TickerTable | undefined;
   tickerDeltas(): Float64Array | undefined;
   messageHandlerStats(): MessageHandlerStatsTable | undefined;
+  publicMessageHandlerStats(): MessageHandlerStatsTable | undefined;
   tickerObservations(): Float64Array | undefined;
   books(): Generator<BookRows>;
   bookDeltas(): Generator<BookDeltaRows>;
@@ -323,6 +332,8 @@ export class Frame {
   displayedMargin(): StoreData['displayedMargin'] | undefined;
   /** null explicitly clears info; undefined means the section is absent. */
   balanceInfo(): Balance['info'] | undefined;
+  managedOrders(): Readonly<Record<string, ManagedOrderOwnership>> | undefined;
+  requestStats(): StoreData['requestStats'] | undefined;
   status(): Status | undefined;
   capabilities(): EngineCapabilities | undefined;
   settings(): SettingTable | undefined;

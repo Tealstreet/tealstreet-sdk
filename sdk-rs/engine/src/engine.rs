@@ -5571,6 +5571,9 @@ impl<V: Venue> Engine<V> {
         }
         // Validate the complete update before changing state.
         update.validate()?;
+        if let Some(stats) = update.message_handler_stats {
+            self.store.set_public_message_stats(stats, now);
+        }
         let mut accepted_tickers = false;
         for ticker in update.tickers {
             if !ticker.has_values() || self.store.market(&ticker.symbol).is_none() {
@@ -6374,6 +6377,7 @@ impl<V: Venue> Engine<V> {
                 cx.io.core.streams.remove(&request);
                 cx.io.core.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
+                    cx.store.record_request_outcome(None);
                     cx.io.core.health.count(log_code::HTTP_FAILED);
                     let kind = cx.io.core.http_failure_kind;
                     let make_failure = || VenueError::new(error).kind(kind);
@@ -6767,6 +6771,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn count_http_status(&mut self, status: u16) {
+        self.store.record_request_outcome(Some(status));
         if status == 429 {
             self.io.core.health.count(log_code::RATE_LIMITED);
         } else if status >= 500 {
@@ -7942,6 +7947,7 @@ impl<V: Venue> Engine<V> {
     /// this method deliberately leaves the stream's baseline untouched.
     pub fn snapshot_frame(&mut self, now: f64) -> &[u8] {
         self.assert_live();
+        self.store.set_clock(now);
         self.expire_read_roots(now);
         #[cfg(feature = "managed-sockets")]
         self.io.core.socket_driver.state.prepare_stats();
@@ -8007,6 +8013,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn write_frame(&mut self, now: f64, store: bool) -> Option<&[u8]> {
+        self.store.set_clock(now);
         // A fill must not reach a consumer before its order: a book-cadence
         // flush carrying fills writes the store sections with them.
         let store = store || !self.io.core.fills.is_empty();

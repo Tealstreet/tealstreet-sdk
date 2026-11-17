@@ -1,6 +1,6 @@
 import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import type { StoreData } from '../generated/StoreData';
-import type { FetchedLeverage, MessageHandlerStatsType, OrderFillEvent } from '../types';
+import type { MessageHandlerStatsType, OrderFillEvent } from '../types';
 import type { FrameBook } from './bookFrames';
 import type { FrameCandle } from './candleFrames';
 
@@ -14,7 +14,7 @@ import { readCandleFrame } from './candleFrames';
 import { readFillFrame } from './fillFrames';
 import { readMarketFrame } from './marketFrames';
 import { readNativeDerivedSections } from './nativeDerivedFrames';
-import { readOrderFrame } from './orderFrames';
+import { readManagedOrderFrame, readOrderFrame } from './orderFrames';
 import { readPositionFrame } from './positionFrames';
 import { readStoreSettings, readStoreStatus } from './storeFrames';
 import { readTickerDeltaFrame, readTickerFrame, readTickerObservationFrame } from './tickerFrames';
@@ -175,6 +175,8 @@ export class FrameStore {
   private readonly invalidMarketFrames = new WeakSet<Frame>();
   private marketsNeedSnapshot = false;
   private appliedSections = 0;
+  private statusLoaded = initialStoreData.loaded;
+  private managedOrders: NonNullable<ReturnType<Frame['managedOrders']>> = {};
 
   /** STATUS flags cannot prove that a section survived frame decoding. */
   get hasMarketIdentity(): boolean {
@@ -191,6 +193,7 @@ export class FrameStore {
   }
 
   private nativeStatsGroups = new Set<MessageHandlerStatsType>();
+  private publicStatsGroups = new Set<MessageHandlerStatsType>();
 
   private readonly listeners = new Set<FrameListener>();
   private readonly sectionVersions: Partial<Record<FrameSection, number>> = {};
@@ -256,7 +259,7 @@ export class FrameStore {
       next = { ...next, [key]: value };
       this.sectionVersions[key] = this.version(key) + 1;
     };
-    for (const key of Object.keys(changes)) replace(key as FrameSection);
+    for (const key of Object.keys(changes)) if (key !== 'updateIds') replace(key as FrameSection);
     if (next === this.state) return;
     if (!accountRead && (next.orders !== this.state.orders || next.positions !== this.state.positions)) {
       next = {
@@ -304,6 +307,8 @@ export class FrameStore {
     if (snapshot) {
       this.clearBookBaselines();
       this.appliedSections = 0;
+      this.statusLoaded = initialStoreData.loaded;
+      this.managedOrders = {};
       this.marketSymbols = [];
       this.marketIds = [];
       this.marketsNeedSnapshot = false;
@@ -318,23 +323,26 @@ export class FrameStore {
     this.sequence = undefined;
     this.needsSnapshot = false;
     this.appliedSections = 0;
+    this.statusLoaded = initialStoreData.loaded;
+    this.managedOrders = {};
     this.marketSymbols = [];
     this.marketIds = [];
     this.marketsNeedSnapshot = false;
     this.nativeStatsGroups.clear();
+    this.publicStatsGroups.clear();
     this.clearBookBaselines();
     this.recovery.clear();
     this.publish(initialStoreData, true);
   }
 
   /** A frame-fed trading engine does not own its source's subscription diagnostics. */
-  applyMessageHandlerStats(frame: Frame): void {
-    const stats = this.readMessageHandlerStats(frame);
+  applyMessageHandlerStats(frame: Frame, source: 'account' | 'public' = 'account'): void {
+    const stats = this.readMessageHandlerStats(frame, source);
     if (stats) this.publish({ messageHandlerStats: stats });
   }
 
-  private readMessageHandlerStats(frame: Frame): StoreData['messageHandlerStats'] {
-    const stats = frame.messageHandlerStats?.();
+  private readMessageHandlerStats(frame: Frame, source: 'account' | 'public' = 'account', previous = this.messageHandlerStats, sharedSection = false): StoreData['messageHandlerStats'] {
+    const stats = sharedSection ? frame.publicMessageHandlerStats?.() : frame.messageHandlerStats?.();
     if (!stats) return undefined;
     const groups: MessageHandlerStatsType[] = ['public', 'business', 'futures', 'private'];
     const buckets: NonNullable<StoreData['messageHandlerStats']> = {
@@ -342,18 +350,22 @@ export class FrameStore {
       business: {},
       futures: {},
       private: {},
-      ...this.messageHandlerStats,
+      ...previous,
     };
     const owned = new Set<MessageHandlerStatsType>();
-    for (let i = 0; i < stats.count; i++) owned.add(groups[stats.group(i)]);
+    for (let i = 0; i < stats.count; i++) {
+      const group = groups[stats.group(i)];
+      if (source !== 'public' || group !== 'private') owned.add(group);
+    }
     if (stats.replace) {
-      for (const group of this.nativeStatsGroups) buckets[group] = {};
+      for (const group of source === 'public' ? this.publicStatsGroups : this.nativeStatsGroups) buckets[group] = {};
       for (const group of owned) buckets[group] = {};
     }
     const copied = new Set<MessageHandlerStatsType>();
     const now = Date.now();
     for (let i = 0; i < stats.count; i++) {
       const group = groups[stats.group(i)];
+      if (source === 'public' && group === 'private') continue;
       const age = stats.ageMs(i);
       if (!copied.has(group)) {
         buckets[group] = { ...buckets[group] };
@@ -365,14 +377,17 @@ export class FrameStore {
         hadHandlers: true,
       };
     }
-    if (stats.replace) this.nativeStatsGroups = owned;
+    if (stats.replace) {
+      if (source === 'public') this.publicStatsGroups = owned;
+      else this.nativeStatsGroups = owned;
+    }
     return buckets;
   }
 
   /** Forwarding workers skip book reconstruction before transferring the frame. */
   apply(frame: Frame, applyBooks = true, snapshot = false): void {
     if (this.needsSnapshot) throw new FrameApplyError('Frame sequence gap requires snapshot');
-    const update: { -readonly [K in keyof StoreData]?: StoreData[K] } = snapshot ? { ...initialStoreData } : {};
+    const update: { -readonly [K in keyof StoreData]?: StoreData[K] } = snapshot ? { ...initialStoreData, positionSettings: this.positionSettings } : {};
 
     const errors: unknown[] = [];
     let accepted = 0;
@@ -410,6 +425,8 @@ export class FrameStore {
     attempt(() => {
       const stats = this.readMessageHandlerStats(frame);
       if (stats) update.messageHandlerStats = stats;
+      const shared = this.readMessageHandlerStats(frame, 'public', update.messageHandlerStats, true);
+      if (shared) update.messageHandlerStats = shared;
     });
 
     this.marketsNeedSnapshot = marketsFailed;
@@ -453,10 +470,13 @@ export class FrameStore {
 
     attempt(() => {
       if (marketsFailed) return;
+      const ownership = frame.managedOrders?.();
       const rows = readOrderFrame(frame, this.data, update.markets);
-      if (rows) {
-        update.orders = rows;
-        accepted |= LOADED_FLAG.ORDERS;
+      if (rows || ownership !== undefined) {
+        const owners = ownership ?? this.managedOrders;
+        update.orders = readManagedOrderFrame(rows ?? this.orders, owners);
+        if (ownership !== undefined) this.managedOrders = ownership;
+        if (rows) accepted |= LOADED_FLAG.ORDERS;
       }
     }, LOADED_FLAG.ORDERS);
 
@@ -499,7 +519,7 @@ export class FrameStore {
       const status = frame.status();
       if (status) {
         const statusUpdate = readStoreStatus(status);
-        update.loaded = { ...this.loaded, ...statusUpdate.loaded };
+        this.statusLoaded = { ...this.statusLoaded, ...statusUpdate.loaded };
         update.latency = statusUpdate.latency;
         update.options = { ...this.options, ...statusUpdate.options };
       }
@@ -512,6 +532,17 @@ export class FrameStore {
       const settings = frame.settings();
       if (settings) {
         update.fetchedLeverage = readStoreSettings(settings, (update.options ?? this.options).isHedged, resolveSymbol);
+        const retained = { ...(update.positionSettings ?? this.positionSettings) };
+        for (const [id, previous] of Object.entries(retained)) {
+          const rails = update.fetchedLeverage[previous.symbol];
+          if (!rails) continue;
+          retained[id] = {
+            ...previous,
+            leverage: previous.side === 'long' ? rails.buyLeverage : rails.sellLeverage,
+            ...(rails.marginType !== undefined && { marginType: rails.marginType }),
+          };
+        }
+        update.positionSettings = retained;
       }
     });
 
@@ -546,6 +577,14 @@ export class FrameStore {
     // count; rejected sections leave independent accepted peers usable.
     if (accepted & LOADED_FLAG.MARKETS) this.recovery.acceptMarketSnapshot();
     this.appliedSections |= accepted;
+    // Readiness requires successfully decoded data, including after a new snapshot.
+    update.loaded = {
+      markets: this.statusLoaded.markets && this.hasMarketIdentity,
+      tickers: this.statusLoaded.tickers && this.hasTickerState,
+      balance: this.statusLoaded.balance && this.hasAccountState,
+      orders: this.statusLoaded.orders && this.hasAccountState,
+      positions: this.statusLoaded.positions && this.hasAccountState,
+    };
 
     let changed = false;
     for (const _key in update) {

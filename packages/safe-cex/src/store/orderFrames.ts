@@ -112,3 +112,19 @@ export function readOrderFrame(frame: Frame, store: Pick<StoreData, 'markets'>, 
   }
   return rows;
 }
+
+
+/** Copy native ownership facts; account/algo matching belongs to the Rust producer. */
+export function readManagedOrderFrame(
+  orders: StoreData['orders'],
+  ownership: NonNullable<ReturnType<Frame['managedOrders']>>,
+): StoreData['orders'] {
+  return orders.map((order) => {
+    const previous: NonNullable<typeof order.extra> & { isFromTwap?: boolean; twapId?: string } = order.extra ?? {};
+    const { isFromChaser, chaserId: _chaserId, chaserAttempts: _chaserAttempts, chaserMaxAttempts: _chaserMaxAttempts, isFromTwap, twapId: _twapId, ...extra } = previous;
+    const managed = Object.hasOwn(ownership, order.id) ? ownership[order.id] : undefined;
+    if (managed) return { ...order, extra: { ...extra, ...managed } };
+    if (isFromChaser === undefined && isFromTwap === undefined) return order;
+    return { ...order, extra: Object.keys(extra).length ? extra : undefined };
+  });
+}

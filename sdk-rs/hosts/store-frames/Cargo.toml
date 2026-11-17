@@ -10,5 +10,13 @@ safe-cex-chaser = { path = "../../algos/chaser" }
 serde.workspace = true
 serde_json.workspace = true
 
+[build-dependencies]
+serde_json.workspace = true
+
+[dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }
+safe-cex-crypto = { workspace = true, features = ["schnorr"] }
+safe-cex-venue-lighter = { path = "../../venues/lighter" }
+
 [lints]
 workspace = true
