@@ -167,7 +167,7 @@ impl Emitter {
                 data.orders = native(store.orders());
             }
             data.active_chasers.clone_from(&input.active_chasers);
-            data.active_twaps = twap_rows(&input.active_twaps, &data.markets);
+            data.active_twaps = twap_rows(&input.active_twaps, &data.markets, &data.active_twaps);
             self.display(&mut data, input, now);
             if refresh {
                 data.orders_risk = risk::calculate(&data);
@@ -444,7 +444,11 @@ impl Emitter {
         data.displayed_positions = rows;
     }
 }
-fn twap_rows(input: &Input, markets: &[safe_cex_types::Market]) -> Vec<ActiveTWAP> {
+fn twap_rows(
+    input: &Input,
+    markets: &[safe_cex_types::Market],
+    previous: &[ActiveTWAP],
+) -> Vec<ActiveTWAP> {
     let Input::Array(rows) = input else {
         return Vec::new();
     };
@@ -458,7 +462,16 @@ fn twap_rows(input: &Input, markets: &[safe_cex_types::Market]) -> Vec<ActiveTWA
                     .get("symbol")
                     .and_then(Input::as_text)
                     .map(String::from_utf16_lossy);
-                if let Some(market) = markets.iter().find(|m| Some(&m.symbol) == symbol.as_ref()) {
+                if let Some(market) = markets
+                    .iter()
+                    .find(|m| Some(&m.symbol) == symbol.as_ref())
+                    .or_else(|| {
+                        previous
+                            .iter()
+                            .find(|t| Some(&t.active_market.symbol) == symbol.as_ref())
+                            .map(|t| &t.active_market)
+                    })
+                {
                     *active = js_capture_output(market).expect("native active market");
                 }
             }
@@ -626,6 +639,16 @@ mod tests {
         wire::decode(bytes).unwrap()
     }
     #[test]
+    fn native_host_retains_the_engine_json_map_profile() {
+        // Source-parity features must not unify through the host dependency:
+        // account fingerprints and venue encoders depend on this sorted map.
+        assert_eq!(
+            serde_json::to_string(&serde_json::json!({"z":1,"a":2})).unwrap(),
+            r#"{"a":2,"z":1}"#
+        );
+    }
+
+    #[test]
     fn real_rows_include_native_valuation_risk_coverage_and_balance_info() {
         let mut emitter = Emitter::default();
         let store = store();
@@ -744,6 +767,25 @@ mod tests {
             Some(&"alias:BTCUSDT:long".encode_utf16().collect::<Vec<_>>()[..])
         );
     }
+    #[test]
+    fn active_twap_keeps_its_typed_market_when_the_catalogue_delists_it() {
+        let mut emitter = Emitter::default();
+        let mut store = store();
+        let mut input = input();
+        input.algos(&Vec::<serde_json::Value>::new(),&serde_json::json!([{
+            "id":"twap-1","symbol":"BTCUSDT","accountName":"account-1","activeMarket":{"symbol":"BTCUSDT"},
+            "size":1,"duration":60,"ordersCount":2,"side":"buy","chaserDelay":500,"reduceOnly":false,
+            "randomnessPercentage":0,"useLimitOrders":false,"useChaserOrders":false,
+            "ordersSizes":[0.5,0.5],"status":"running","ordersExecuted":0,"nextOrderAt":1000
+        }]));
+        emitter.frame(empty(1000.0), &store, &input, true);
+        store.set_markets(vec![]);
+        emitter.frame(empty(2000.0), &store, &input, true);
+        let twaps = &emitter.data.as_ref().unwrap().active_twaps;
+        assert_eq!(twaps.len(), 1);
+        assert_eq!(twaps[0].active_market.id, "BTC");
+    }
+
     #[test]
     fn pnl_windows_sample_once_a_second_and_evict_closed_positions() {
         let mut emitter = Emitter::default();

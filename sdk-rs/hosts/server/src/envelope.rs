@@ -210,19 +210,16 @@ pub(crate) fn with_account_label(text: String, label: &str) -> String {
     if data.get("accountName").and_then(Value::as_str) == Some(label) {
         return text;
     }
-    match data.get("op").and_then(Value::as_str) {
-        Some("twap:stateUpdate") => {
-            if let Some(rows) = data.get_mut("data").and_then(Value::as_object_mut) {
-                for row in rows.values_mut() {
-                    for field in ["options", "state"] {
-                        if let Some(fields) = row.get_mut(field).and_then(Value::as_object_mut) {
-                            fields.insert("accountName".into(), label.into());
-                        }
-                    }
+    if data.get("op").and_then(Value::as_str) == Some("twap:stateUpdate")
+        && let Some(rows) = data.get_mut("data").and_then(Value::as_object_mut)
+    {
+        for row in rows.values_mut() {
+            for field in ["options", "state"] {
+                if let Some(fields) = row.get_mut(field).and_then(Value::as_object_mut) {
+                    fields.insert("accountName".into(), label.into());
                 }
             }
         }
-        _ => {}
     }
     data.insert("accountName".into(), label.into());
     envelope(kind, frame["d"].take())

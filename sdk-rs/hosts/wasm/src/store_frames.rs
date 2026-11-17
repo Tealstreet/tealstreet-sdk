@@ -158,3 +158,55 @@ impl LocalFrames {
         self.emitter.frame(frame, store, &input, snapshot)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn local_socket_lifecycle_and_shared_public_role_are_native_sections() {
+        let mut host = LocalFrames::new("bybit");
+        host.actions(&[Action::WsConnect {
+            socket: SocketId(1),
+            url: "wss://fixture.invalid".into(),
+            binary: false,
+            headers: vec![],
+            channel: Some(SocketChannel::Private),
+            public_topics: true,
+            context: None,
+        }]);
+        let store = safe_cex_engine::Store::default();
+        let health = |host: &mut LocalFrames, now| {
+            let bytes = host.frame(safe_cex_store_frames::empty(now), Some(&store), true, now);
+            let (_, data) = safe_cex_engine::wire::sections(&bytes)
+                .find(|(kind, _)| *kind == 26)
+                .unwrap();
+            safe_cex_store_frames::decode_section(data).unwrap()
+        };
+        host.opened(SocketId(1), 1000.0);
+        host.received(SocketId(1), 1001.0);
+        let up = health(&mut host, 1001.0);
+        assert_eq!(up.get("privateInitialized").unwrap().as_bool(), Some(true));
+        assert_eq!(up.get("publicInitialized").unwrap().as_bool(), Some(true));
+        assert_eq!(up.get("privateHealthy").unwrap().as_bool(), Some(true));
+        let stale = health(&mut host, 61_001.0);
+        assert_eq!(stale.get("privateHealthy").unwrap().as_bool(), Some(false));
+        host.closed(SocketId(1), Some(1006), 61_002.0);
+        let closed = health(&mut host, 61_002.0);
+        assert_eq!(
+            closed.get("privateInitialized").unwrap().as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            closed.get("publicInitialized").unwrap().as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            closed.get("privateCloseCode").unwrap().as_f64(),
+            Some(1006.0)
+        );
+        assert_eq!(
+            closed.get("publicCloseCountTotal").unwrap().as_f64(),
+            Some(1.0)
+        );
+    }
+}
