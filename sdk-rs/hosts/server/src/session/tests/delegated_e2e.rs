@@ -454,6 +454,7 @@ async fn hyperliquid_protected_placement(typed: bool) {
     )
     .await;
     init["d"]["hyperliquidSignerAddress"] = signer.into();
+    init["d"]["applicationId"] = wallet.into();
     wire(&mut session, init).await;
     let result = completed(&mut results).await;
     assert!(result.candidate.is_ok());
