@@ -125,6 +125,8 @@ seven-day paging for filled orders. The additional `Cancelled`, `Rejected` and
 calibrated protocol clock; an older range skips these passes. This matches the
 [V5 order-history retention rules](https://bybit-exchange.github.io/docs/v5/order/order-list)
 and prevents an unavailable terminal slice from refusing the default history.
+Terminal bounds use the shared integer wire-timestamp conversion after clipping;
+fractional calibration, default query bounds and scheduling clocks are unchanged.
 Caller deadlines, read-key selection, pacing, cursors and partial-row markers
 remain shared with the original walk. This does not recover terminal rows the
 venue no longer retains.

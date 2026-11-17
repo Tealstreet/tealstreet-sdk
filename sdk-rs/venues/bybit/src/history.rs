@@ -319,7 +319,10 @@ fn terminal_windows(
     if from > to {
         VecDeque::new()
     } else {
-        VecDeque::from([(Some(from), Some(to))])
+        VecDeque::from([(
+            Some(safe_cex_engine::time::wire_stamp_ms(from)),
+            Some(safe_cex_engine::time::wire_stamp_ms(to)),
+        )])
     }
 }
 
