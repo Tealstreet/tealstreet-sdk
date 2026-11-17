@@ -3049,7 +3049,7 @@ mod tests {
 
     use super::*;
     use safe_cex_engine::Command;
-    #[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
+    #[cfg(any(feature = "asterdex", feature = "kucoinspot", feature = "bingx"))]
     use safe_cex_engine::model::CancelOrderRef;
     #[cfg(feature = "asterdex")]
     use safe_cex_engine::model::StpMode;
@@ -3059,12 +3059,12 @@ mod tests {
         let wire = safe_cex_engine::command::decode_command(
             r#"{"op":"amendOrderWithSymbol","command":19,"id":"unobserved","symbol":"BTC-USDT","price":100}"#,
         );
-        #[cfg(feature = "kucoinspot")]
+        #[cfg(any(feature = "kucoinspot", feature = "bingx"))]
         assert!(
             matches!(wire.unwrap(), Command::AmendOrderWithSymbol { command: 19, id, symbol, price: Some(100.0), amount: None }
             if id == "unobserved" && symbol == "BTC-USDT")
         );
-        #[cfg(not(feature = "kucoinspot"))]
+        #[cfg(not(any(feature = "kucoinspot", feature = "bingx")))]
         assert!(wire.is_err());
         let legacy = safe_cex_engine::command::decode_command(
             r#"{"op":"amendOrder","command":19,"id":"legacy","symbol":"ignored","price":100}"#,
@@ -3388,7 +3388,7 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
+    #[cfg(any(feature = "asterdex", feature = "kucoinspot", feature = "bingx"))]
     #[test]
     fn cancellation_with_symbols_preserves_caller_identity() {
         let wire = safe_cex_engine::command::decode_command(
@@ -3400,7 +3400,7 @@ mod tests {
         );
     }
 
-    // Compile command parsers only for venues that expose each SDK method.
+    // Decoder ingress follows the compiled family; venue capability guards stay separate.
     #[test]
     fn aster_commands_follow_the_compiled_venue_feature() {
         let commands = [
@@ -3414,7 +3414,11 @@ mod tests {
             if index == 0 {
                 assert_eq!(
                     safe_cex_engine::command::decode_command(json).is_ok(),
-                    cfg!(any(feature = "asterdex", feature = "kucoinspot"))
+                    cfg!(any(
+                        feature = "asterdex",
+                        feature = "kucoinspot",
+                        feature = "bingx"
+                    ))
                 );
                 continue;
             }
@@ -3463,7 +3467,7 @@ mod tests {
                 _ => panic!("Aster command {index} changed its wire mapping"),
             }
             #[cfg(not(feature = "asterdex"))]
-            if cfg!(feature = "polymarket") && matches!(index, 2 | 3) {
+            if cfg!(any(feature = "polymarket", feature = "bingx")) && matches!(index, 2 | 3) {
                 let command = parsed.unwrap();
                 assert!(matches!(
                     (index, command),

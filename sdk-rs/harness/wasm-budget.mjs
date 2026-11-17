@@ -342,7 +342,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3273 third merge 47a277eb4a6b + b86a48664ac8: optimized web/Node 2,164,521 B.
   // Rust1.99, bindgen0.2.129, Binaryen132, two required -Oz passes; build.sh --venue bingx.
   // Measured + 10 KiB rounded up; retain both parent floors and all CI provenance.
-  bingx: 2_174_976,
+  // Shared command codecs: optimized web/Node 2,168,354 B, SHA aeab98147da32f70.
+  // Rust1.99/bindgen0.2.129/Binaryen132, canonical family build with two -Oz passes.
+  // Maximum + 10 KiB rounded to KiB; retain every historical floor.
+  bingx: 2_179_072,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
   // #3426 run 43187677592, job 131079474589, artifact 13930235036, CI source b3c4cf6212e6.

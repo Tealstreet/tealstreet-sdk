@@ -24,6 +24,14 @@ native units; only remaining and position display sizes use the TS price-based
 8-decimal conversion. Collateral uses each market's base coin and preserves the
 per-coin balance map through worker frames.
 
+Native public subscription envelopes retain the legacy catalogue IDs, order,
+product type and three-way ticker partition, but split requests by serialized
+UTF-8 bytes to respect the Classic V2 4096-byte limit. JSON escaping and the
+envelope count toward that bound. A topic must fit its later unsubscribe too;
+an individually unencodable topic is refused visibly without dropping the other
+topics or emitting an empty request. Reconnect and book/candle repair share the
+same formatter. There is no stock-symbol blacklist or public V3 migration.
+
 An empty inverse catalogue keeps its terminal `venueUnavailable` startup failure
 and emits the same cause as an error-level `request.failed` event for UI consumers.
 It does not retry discovery or change the selected API product.
@@ -72,6 +80,10 @@ endpoints. The adapter now routes UTA for **livenet `bitget` USDT-futures** and
   list, and Bitget documents UTA futures order `marginMode` as defaulting to
   `crossed`, so metadata fallback must still return `holdMode` plus cross
   margin instead of blocking order placement.
+  That documented margin-mode fallback does not supply leverage. Native optional
+  leverage reads return `null` for an omitted fresh/flat symbol without prior
+  numeric rails; metadata enrichment retains unknown leverage without warning.
+  Real read failures and omissions for known settings/open positions remain errors.
 - Standalone TP/SL placement, open-order fetch, and cancel use v3 strategy
   endpoints (`type: "tpsl"`; `tpslMode: "full"` without `qty`, or
   `tpslMode: "partial"` with base-coin `qty`). Bitget's docs describe both

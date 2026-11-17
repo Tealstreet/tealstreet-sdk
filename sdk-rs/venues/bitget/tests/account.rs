@@ -1199,3 +1199,61 @@ fn a_same_session_cancel_clears_a_stop() {
     let status = h.engine.store().order("my-stop").map(|o| o.status);
     assert_ne!(status, Some(safe_cex_engine::model::OrderStatus::Open));
 }
+#[test]
+fn a_fresh_flat_uta_symbol_without_a_setting_returns_no_leverage() {
+    let mut h = uta(r#"{"code":"00000","data":{"list":[]}}"#);
+    assert!(h.engine.store().setting("BTCUSDT").is_none());
+    let balance = h.engine.store().balance().clone();
+    let loaded = h.engine.store().loaded();
+    fetch_leverage(&mut h, 86, "BTCUSDT");
+    let request = h.take("/account/settings");
+    assert_eq!(request.method, safe_cex_engine::Method::Get);
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"holdMode":"hedge_mode","symbolConfigList":[]}}"#,
+    );
+    assert!(fetched(&h, 86).is_null());
+    assert!(h.engine.store().setting("BTCUSDT").is_none());
+    assert_eq!(h.engine.store().balance(), &balance);
+    assert_eq!(h.engine.store().loaded(), loaded);
+    assert!(h.failures.is_empty());
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get)
+    );
+}
+
+#[test]
+fn a_foreign_product_row_does_not_supply_uta_leverage() {
+    let mut h = uta(r#"{"code":"00000","data":{"list":[]}}"#);
+    fetch_leverage(&mut h, 87, "BTCUSDT");
+    let request = h.take("/account/settings");
+    h.reply(request.id, 200, r#"{"code":"00000","data":{"holdMode":"hedge_mode","symbolConfigList":[{"symbol":"BTCUSDT","category":"USDC-FUTURES","leverage":"44","marginMode":"crossed"}]}}"#);
+    assert!(fetched(&h, 87).is_null());
+    assert!(h.engine.store().setting("BTCUSDT").is_none());
+}
+
+#[test]
+fn an_invalid_uta_settings_reply_is_not_optional_leverage_absence() {
+    for (status, body) in [
+        (200, r#"{"code":"00000","data":{}}"#),
+        (200, r#"{"code":"40001","msg":"no permission","data":null}"#),
+        (
+            200,
+            r#"{"code":"00000","data":{"holdMode":"hedge_mode","symbolConfigList":[{"symbol":"BTCUSDT","category":"USDT-FUTURES","marginMode":"crossed"}]}}"#,
+        ),
+        (200, "not-json"),
+        (503, r#"{"code":"00000","data":{"holdMode":"hedge_mode"}}"#),
+    ] {
+        let mut h = uta(r#"{"code":"00000","data":{"list":[]}}"#);
+        fetch_leverage(&mut h, 88, "BTCUSDT");
+        let request = h.take("/account/settings");
+        h.reply(request.id, status, body);
+        let (_, result) = h.done.iter().find(|(id, _)| *id == 88).unwrap();
+        assert!(result.is_err(), "{status}: {body}");
+        assert!(h.engine.store().setting("BTCUSDT").is_none());
+        assert!(h.engine.store().loaded().balance);
+    }
+}

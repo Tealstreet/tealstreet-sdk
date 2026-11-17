@@ -337,6 +337,12 @@ export type InfoBudgetGrant = {
   cancelWait?: () => void;
 };
 
+// Only an existing deadline refusal inside admission gets this diagnostic label.
+const infoAdmissionFailure = (error: unknown): unknown =>
+  error instanceof HttpPreparationError && error.code === 'HTTP_PREPARATION_TIMED_OUT'
+    ? new HttpPreparationError('timedOut', 'info_admission')
+    : error;
+
 /** Admission precedes managed HTTP claim; only a physical handoff consumes tokens. */
 export class HyperliquidInfoBudget {
   constructor(private readonly backend: InfoBudgetStorage = storage()) {}
@@ -348,6 +354,8 @@ export class HyperliquidInfoBudget {
     signal: AbortSignal,
     readClass: InfoReadClass = 'normal',
   ): Promise<InfoBudgetGrant> {
+    // A cancellation predating this stage is not an admission diagnosis.
+    const abortedBeforeAdmission = signal.aborted;
     readClass = readClassFor(body, readClass);
     const weight = hyperliquidInfoWeight(body);
     let waiterId: string | undefined;
@@ -405,7 +413,7 @@ export class HyperliquidInfoBudget {
       }
     } catch (error) {
       cancelWait();
-      throw error;
+      throw abortedBeforeAdmission ? error : infoAdmissionFailure(error);
     }
   }
 
@@ -417,11 +425,14 @@ export class HyperliquidInfoBudget {
     send: () => T,
     wasSent: () => boolean = () => true,
   ): Promise<T> {
+    // A cancellation predating this stage is not an admission diagnosis.
+    const abortedBeforeAdmission = signal.aborted;
     const cost = grant.weight * MS_PER_WEIGHT;
     const readClass = grant.readClass ?? 'normal';
     const waiterId = grant.waiterId ?? `${dispatchRealm}:${++dispatchSequence}`;
     let charged = false;
     let dispatched = false;
+    let handoffStarted = false;
     const active = () => {
       signal.throwIfAborted();
       if (Date.now() >= deadline) throw new HttpPreparationError('timedOut');
@@ -477,6 +488,7 @@ export class HyperliquidInfoBudget {
                 throw new HttpPreparationError('timedOut');
               handoffCalled = true;
               try {
+                handoffStarted = true;
                 resolve({ value: send() });
               } catch (error) {
                 reject(error);
@@ -495,6 +507,8 @@ export class HyperliquidInfoBudget {
         if ('value' in decision) return await decision.value;
         await waitUntil(decision.at, signal);
       }
+    } catch (error) {
+      throw handoffStarted || abortedBeforeAdmission ? error : infoAdmissionFailure(error);
     } finally {
       grant.cancelWait?.();
       if (!dispatched) {

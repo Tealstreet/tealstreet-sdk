@@ -712,8 +712,8 @@ pub struct Registry {
     /// Seeded test accounts can retain their pre-admission fixture setup.
     #[cfg(any(test, feature = "test-support"))]
     join_admission_override: Option<bool>,
-    /// Unit-test loopback routing; the normal construction and transport run unchanged.
-    #[cfg(test)]
+    /// Test-only loopback routing; normal construction and transport run unchanged.
+    #[cfg(any(test, feature = "test-support"))]
     construction_test_plans: HashMap<String, RoutingPlan>,
     #[cfg(test)]
     e2e_venue: Option<crate::delegated_e2e_io::MockVenue>,
@@ -1104,7 +1104,7 @@ impl Registry {
             repairs: Mutex::default(),
             #[cfg(any(test, feature = "test-support"))]
             join_admission_override: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             construction_test_plans: HashMap::new(),
             #[cfg(test)]
             e2e_venue: None,
@@ -1987,7 +1987,7 @@ impl Registry {
             config.interest_observer = Some(self.public_topics.observer(&venue));
         }
         let (spawned, receive) = tokio::sync::oneshot::channel();
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         let plan = self
             .construction_test_plans
             .get(user)
@@ -2833,6 +2833,16 @@ pub fn resume_id() -> String {
 /// (`tests/boxes.rs`); built only for tests or the `test-support` feature.
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing {
+    /// Integration fixtures route real probe and resident transports to loopback.
+    /// This does not disable admission, replace proof strategies or inject outcomes.
+    pub fn set_routing(
+        registry: &mut super::Registry,
+        user: &str,
+        plan: safe_cex_native::RoutingPlan,
+    ) {
+        registry.construction_test_plans.insert(user.into(), plan);
+    }
+
     /// Synthetic venue fixtures have no real private-startup transport. The
     /// production proof requirement remains the default; legacy fixtures opt out explicitly.
     pub fn set_join_admission(registry: &mut super::Registry, enabled: bool) {
