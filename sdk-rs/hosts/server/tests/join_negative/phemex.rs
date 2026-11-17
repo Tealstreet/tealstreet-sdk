@@ -14,7 +14,7 @@ const SECRET: &str = "synthetic-primary-material";
 const OTHER_SECRET: &str = "synthetic-secondary-material";
 
 // Red checkpoint: the negative controls must detect these unchecked verifiers.
-fn valid_read(_uri: &Uri, _headers: &HeaderMap) -> bool {
+fn valid_read(_path: &str, _query: Option<&str>, _headers: &HeaderMap) -> bool {
     true
 }
 fn valid_auth(_request: &Value) -> bool {
@@ -66,6 +66,8 @@ impl<const TESTNET: bool> Venue for Phemex<TESTNET> {
             .expect("native Phemex signing bytes");
         assert!(
             preimage.starts_with("/g-accounts/accountPositionscurrency=")
+                || preimage.starts_with("/public/products")
+                || preimage.starts_with("/md/v3/ticker/24hr/all")
                 || preimage.starts_with(KEY),
             "only native Phemex private reads or login may sign"
         );
@@ -93,9 +95,26 @@ impl<const TESTNET: bool> Venue for Phemex<TESTNET> {
             seen.writes += 1;
             panic!("join attempted a non-read Phemex request");
         }
+        // Native proxy routes preserve the upstream URL in the loopback path.
+        // Strip only that envelope and keep the original signed query unchanged.
+        let path = if let Some(target) = uri.path().strip_prefix("/https://") {
+            let slash = target.find('/').expect("forwarded Phemex path");
+            assert_eq!(
+                &target[..slash],
+                if TESTNET {
+                    "testnet-api.phemex.com"
+                } else {
+                    "api.phemex.com"
+                },
+                "wrong forwarded Phemex origin"
+            );
+            &target[slash..]
+        } else {
+            uri.path()
+        };
         let fixtures: Value =
             serde_json::from_str(include_str!("../fixtures/phemex-admission-reads.json")).unwrap();
-        match uri.path() {
+        match path {
             "/public/products" => fixtures["products"].clone(),
             "/md/v3/ticker/24hr/all" => fixtures["tickers"].clone(),
             "/g-accounts/accountPositions" => {
@@ -105,7 +124,7 @@ impl<const TESTNET: bool> Venue for Phemex<TESTNET> {
                     other => panic!("unexpected Phemex private read scope: {other:?}"),
                 };
                 seen.signed_reads += 1;
-                if !valid_read(uri, headers) {
+                if !valid_read(path, uri.query(), headers) {
                     seen.rejections += 1;
                     return json!({"code":401,"msg":"synthetic credential refusal"});
                 }
@@ -199,6 +218,34 @@ mod controls {
         let expiry = (now_ms() / 1000 + 60).to_string();
         for (key, material) in [(KEY, SECRET), (OTHER_KEY, OTHER_SECRET)] {
             assert_eq!(response(&headers(key, material, &expiry))["code"], 0);
+            for testnet in [false, true] {
+                let origin = if testnet {
+                    "testnet-api.phemex.com"
+                } else {
+                    "api.phemex.com"
+                };
+                let uri = format!("/https://{origin}/g-accounts/accountPositions?currency=USDT")
+                    .parse()
+                    .unwrap();
+                let response = if testnet {
+                    Phemex::<true>::http(
+                        &Method::GET,
+                        &uri,
+                        &headers(key, material, &expiry),
+                        &Value::Null,
+                        &mut Observed::default(),
+                    )
+                } else {
+                    Phemex::<false>::http(
+                        &Method::GET,
+                        &uri,
+                        &headers(key, material, &expiry),
+                        &Value::Null,
+                        &mut Observed::default(),
+                    )
+                };
+                assert_eq!(response["code"], 0);
+            }
         }
     }
     #[test]
