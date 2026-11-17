@@ -68,3 +68,15 @@ construction feature checks reject raw duplicate keys and missing policy rows.
 Bybit terminal order-history retention is documented in `sdk-rs/venues/bybit/README.md`.
 Its `history.rs` change is a counted beta-WASM input and requires a fresh release/pin;
 this routing correction does not change family caps or construction membership.
+
+Session adapter integration consumes native frames through `FrameStore`, including
+fresh snapshot baselines on reconnect. The retained Lighter TS replay oracle uses
+the generated nullable liquidation price contract: unknown prices, including
+zero-quantity placeholders, are null before fixture encoding. It retains the
+order-ID randomness and signature verification assertions.
+
+#3640 includes native store projection and wire emission in the twelve selected
+family artifacts. Their cap entries record fresh optimized web/Node byte counts
+and SHA-256 hashes from Rust 1.99.0, bindgen 0.2.129 and Binaryen 132 (two -Oz
+passes), with at least 10 KiB reserve rounded up to KiB. Historical floors and
+the combined ceiling remain unchanged.

@@ -197,7 +197,6 @@ trait AnyEngine {
         Health::default()
     }
     /// The engine store, projected for algos between engine calls.
-    #[cfg(feature = "algos")]
     fn store(&self) -> Option<&safe_cex_engine::Store> {
         None
     }
@@ -386,7 +385,6 @@ impl<V: Venue> AnyEngine for Engine<V> {
         Engine::health(self).clone()
     }
 
-    #[cfg(feature = "algos")]
     fn store(&self) -> Option<&safe_cex_engine::Store> {
         Some(Engine::store(self))
     }

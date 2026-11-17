@@ -3473,7 +3473,6 @@ pub mod exchange_metadata;
 pub mod prepared_order;
 pub use prepared_order::PreparedOrderOpts;
 
-
 /// Source JSON removes an own property without reordering other members. The
 /// host profile uses serde_json's sorted map, where remove has that property.
 pub(crate) fn remove_json_member(
