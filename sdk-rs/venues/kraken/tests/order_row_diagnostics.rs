@@ -304,3 +304,108 @@ fn diagnostic_types_are_closed_for_every_json_kind() {
         assert!(!format!("{events:?}").contains("PRIVATE"));
     }
 }
+
+#[test]
+fn type_only_collection_matches_the_original_json_value_projection() {
+    const FIELDS: [&str; 29] = [
+        "order_id",
+        "orderId",
+        "uid",
+        "symbol",
+        "instrument",
+        "orderType",
+        "type",
+        "side",
+        "direction",
+        "limitPrice",
+        "limit_price",
+        "price",
+        "stopPrice",
+        "stop_price",
+        "unfilledSize",
+        "filledSize",
+        "filled",
+        "qty",
+        "quantity",
+        "size",
+        "reduceOnly",
+        "reduce_only",
+        "cliOrdId",
+        "cli_ord_id",
+        "trigger_signal",
+        "triggerSignal",
+        "lastUpdateTime",
+        "last_update_time",
+        "lastUpdateTimestamp",
+    ];
+    let mut cases = Vec::new();
+    for field in FIELDS {
+        for value in [
+            json!(null),
+            json!(true),
+            json!(-2.5),
+            json!("PRIVATE_STRING"),
+            json!([true, {"nested":null}]),
+            json!({"private_nested":[1, "SECRET"]}),
+        ] {
+            let mut bad = row();
+            bad["type"] = json!("unsupported");
+            bad[field] = value;
+            // Every case refuses even when it changes a field the mapper otherwise ignores.
+            bad[if field == "limit_price" {
+                "stop_price"
+            } else {
+                "limit_price"
+            }] = json!({"invalid":true});
+            cases.push(bad.to_string());
+        }
+    }
+    cases.extend([
+        r#"{"\u006frder_id":"escaped-private-id","instrument":"PF_XBTUSD","qty":2,"direction":0,"type":"unsupported"}"#.into(),
+        r#"{"order_id":"private-id","instrument":"PF_XBTUSD","qty":2,"type":"limit","type":false}"#.into(),
+        r#"{"order_id":"private-id","instrument":"PF_XBTUSD","qty":1e999,"type":"unsupported"}"#.into(),
+        r#"{"order_id":"private-id","instrument":"PF_XBTUSD","qty":2,"type":"unsupported","unknown":[{"overflow":1e999}]}"#.into(),
+        "null".into(), "[]".into(), "false".into(),
+    ]);
+    for raw in cases {
+        let reference = serde_json::from_str::<Value>(&raw).ok();
+        let expected: String = FIELDS
+            .iter()
+            .map(
+                |name| match reference.as_ref().and_then(|row| row.get(name)) {
+                    None => '-',
+                    Some(Value::Null) => 'z',
+                    Some(Value::Bool(_)) => 'b',
+                    Some(Value::Number(_)) => 'n',
+                    Some(Value::String(_)) => 's',
+                    Some(Value::Array(_)) => 'a',
+                    Some(Value::Object(_)) => 'o',
+                },
+            )
+            .collect();
+        let (mut e, socket) = ready();
+        e.drain_actions().for_each(drop);
+        message(
+            &mut e,
+            socket,
+            NOW,
+            &format!(r#"{{"feed":"open_orders_snapshot","orders":[{raw}]}}"#),
+        );
+        let events = reports(&mut e);
+        assert_eq!(events.len(), 1, "{raw}");
+        let actual = events[0]
+            .fields
+            .iter()
+            .find(|(key, _)| *key == "order_row_fields")
+            .unwrap()
+            .1
+            .as_str()
+            .unwrap();
+        assert_eq!(actual, expected, "{raw}");
+        assert!(
+            e.store().orders().is_empty(),
+            "diagnostic decoding cannot admit a refused row"
+        );
+        assert!(!format!("{events:?}").contains("private-id"));
+    }
+}

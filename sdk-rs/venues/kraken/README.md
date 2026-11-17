@@ -121,6 +121,9 @@ No field contents, unknown field names, symbols, identifiers, amounts or raw
 deserializer errors are reported. `wire_decode` reports schema refusal rather
 than guessing which value was invalid; the type vector distinguishes absent,
 null and incompatible JSON types without disclosing them.
+The collector walks JSON types without building a generic value tree. Unknown
+values are still validated, so invalid numeric ranges or depth cannot turn a
+previously unavailable type vector into partially accepted diagnostic data.
 
 ## Kraken Spot hosted signing
 

@@ -301,18 +301,78 @@ fn order_field_types(item: &str) -> String {
         "last_update_time",
         "lastUpdateTimestamp",
     ];
-    let row = serde_json::from_str::<serde_json::Value>(item).ok();
-    FIELDS
-        .iter()
-        .map(|field| match row.as_ref().and_then(|row| row.get(field)) {
-            None => '-',
-            Some(serde_json::Value::Null) => 'z',
-            Some(serde_json::Value::Bool(_)) => 'b',
-            Some(serde_json::Value::Number(_)) => 'n',
-            Some(serde_json::Value::String(_)) => 's',
-            Some(serde_json::Value::Array(_)) => 'a',
-            Some(serde_json::Value::Object(_)) => 'o',
-        })
+    struct Type(u8);
+    impl<'de> Deserialize<'de> for Type {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct Kind;
+            impl<'de> serde::de::Visitor<'de> for Kind {
+                type Value = Type;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("a JSON value")
+                }
+                fn visit_unit<E: serde::de::Error>(self) -> Result<Type, E> {
+                    Ok(Type(b'z'))
+                }
+                fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<Type, E> {
+                    Ok(Type(b'b'))
+                }
+                fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<Type, E> {
+                    Ok(Type(b'n'))
+                }
+                fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<Type, E> {
+                    Ok(Type(b'n'))
+                }
+                fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<Type, E> {
+                    Ok(Type(b'n'))
+                }
+                fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<Type, E> {
+                    Ok(Type(b's'))
+                }
+                fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                    self,
+                    mut seq: A,
+                ) -> Result<Type, A::Error> {
+                    while seq.next_element::<Type>()?.is_some() {}
+                    Ok(Type(b'a'))
+                }
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    mut map: A,
+                ) -> Result<Type, A::Error> {
+                    while map.next_entry::<serde::de::IgnoredAny, Type>()?.is_some() {}
+                    Ok(Type(b'o'))
+                }
+            }
+            deserializer.deserialize_any(Kind)
+        }
+    }
+    struct Fields;
+    impl<'de> serde::de::Visitor<'de> for Fields {
+        type Value = [u8; FIELDS.len()];
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("an order object")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut types = [b'-'; FIELDS.len()];
+            while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+                // Validate unknown values too, preserving the old decoder's range/depth refusal.
+                let kind = map.next_value::<Type>()?.0;
+                if let Some(index) = FIELDS.iter().position(|name| *name == key.as_ref()) {
+                    types[index] = kind;
+                }
+            }
+            Ok(types)
+        }
+    }
+    let mut decoder = serde_json::Deserializer::from_str(item);
+    serde::Deserializer::deserialize_map(&mut decoder, Fields)
+        .and_then(|types| decoder.end().map(|()| types))
+        .unwrap_or([b'-'; FIELDS.len()])
+        .into_iter()
+        .map(char::from)
         .collect()
 }
 #[derive(Deserialize)]
