@@ -4,7 +4,7 @@
 //! the wire envelopes may change. These are synthetic, offline catalogue rows.
 mod support;
 
-use safe_cex_engine::{Command, Event, SocketId, model::Interval};
+use safe_cex_engine::{Command, Event, SocketId, Venue, model::Interval};
 use safe_cex_venue_bitget::Product;
 use serde_json::{Value, json};
 use support::{FixtureOptions, Harness};
@@ -191,6 +191,29 @@ fn public_subscription_accepts_exact_wire_limit_and_refuses_only_an_oversized_to
         refused[0].message.len() < 200,
         "do not log the oversized ID"
     );
+}
+
+#[test]
+fn a_book_topic_that_fits_can_also_be_unsubscribed_within_the_limit() {
+    let envelope = json!({"op":"unsubscribe", "args":[{
+        "instType":"USDT-FUTURES", "channel":"books", "instId":""
+    }]})
+    .to_string();
+    let id = "X".repeat(MAX_BYTES - envelope.len());
+    let mut h = loaded(Product::Usdt, false, std::slice::from_ref(&id));
+    h.sent.clear();
+    h.command(Command::SubscribeOrderBook { symbol: id.clone() });
+    h.command(Command::UnsubscribeOrderBook { symbol: id.clone() });
+    assert_eq!(h.sent.len(), 2);
+    for ((_, wire), op) in h.sent.iter().zip(["subscribe", "unsubscribe"]) {
+        assert!(wire.len() <= MAX_BYTES);
+        let frame: Value = serde_json::from_str(wire).unwrap();
+        assert_eq!(frame["op"], op);
+        assert_eq!(frame["args"][0]["channel"], "books");
+        assert_eq!(frame["args"][0]["instId"], id);
+    }
+    assert_eq!(h.sent[1].1.len(), MAX_BYTES);
+    assert_eq!(h.engine.venue().books().count(), 0);
 }
 
 #[test]
