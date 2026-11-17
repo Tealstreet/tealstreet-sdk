@@ -324,6 +324,9 @@ contract is documented in `docs/plans/callers/delegated-order-frames.md`.
 Whole-action guards before any native command return their real `notSent`
 reason; guards after possible effects remain unknown. Typed completion audits add
 only closed `result_shape`; initial refusals log `stage: preflight` and the real reason.
+Expired-token submits/actions receive correlated `notSent` receipts during the
+unchanged socket grace. Queue cancellations cannot prove an earlier intent was
+unsent and keep their existing expiry handling.
 
 Receipt sequencing belongs to each registration output and is shared by its
 clones. Replacing or retiring that registration also retires its order receipts;

@@ -1082,6 +1082,32 @@ impl Session {
             let name = envelope::account_name(text);
             let out = match serde_json::from_str::<Inbound>(text) {
                 Ok(Inbound::Init(init)) => self.out.with_instance_id(init.instance_id.as_deref()),
+                Ok(Inbound::OrderSubmit(submit))
+                    if self.identity.user.is_some()
+                        && text.len() <= crate::order_contract::SUBMIT_MAX =>
+                {
+                    self.refuse_expired_order(
+                        &submit.account_name,
+                        submit.instance_id.as_deref(),
+                        &submit.intent_id,
+                        submit.seq,
+                        false,
+                    );
+                    return Ok(());
+                }
+                Ok(Inbound::OrderAction(request))
+                    if self.identity.user.is_some()
+                        && text.len() <= crate::order_contract::SUBMIT_MAX =>
+                {
+                    self.refuse_expired_order(
+                        &request.account_name,
+                        request.instance_id.as_deref(),
+                        &request.intent_id,
+                        request.seq,
+                        true,
+                    );
+                    return Ok(());
+                }
                 Ok(Inbound::Msg(AccountMsg {
                     op,
                     account_name: Some(name),
@@ -2628,7 +2654,10 @@ impl Session {
                 && let Some(pending) = pending.lock().unwrap().remove(&id)
             {
                 let mut detail = failure_detail("Error", &message, false);
-                if matches!(pending.reply, methods::Reply::Action { .. }) {
+                if matches!(
+                    pending.reply,
+                    methods::Reply::Intent { .. } | methods::Reply::Action { .. }
+                ) {
                     detail["outcome"] = "notSent".into();
                 }
                 settle(&out, &name, pending, Err(detail));
