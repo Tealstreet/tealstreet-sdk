@@ -311,8 +311,16 @@ mod activation_tests {
                 assert_eq!(client_order_id(venue, intent), first);
                 assert_eq!(&first.unwrap()[2..], intent.replace('-', ""));
             }
-            for venue in ["bybit", "bybitinverse", "binance", "okx"] {
+            for venue in ["bybit", "bybitinverse", "binance", "kucoin"] {
                 assert_eq!(client_order_id(venue, intent).as_deref(), Some(intent));
+            }
+            // 85b32c274 moved OKX to compact hex alongside Bitget/BloFin/PM;
+            // keep its lossless-bit assertion here rather than dropping it.
+            for venue in ["okx", "bitget", "blofin", "binancepm"] {
+                assert_eq!(
+                    client_order_id(venue, intent),
+                    Some(intent.replace('-', ""))
+                );
             }
         }
     }
