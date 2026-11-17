@@ -32,6 +32,10 @@ HyroTrader main-thread/process CPU and every other venue's CPU objectives retain
 BingX Spot qualification adds independent Spot public/private cases to the `bingx` suite.
 The nondefault `bingx-spot-replay` WASM feature exports a fixed-credential fixture constructor;
 normal factories still refuse Spot. Shipped family size checks run before the fixture build.
+The ordinary BingX family includes the existing book and symbol-cancel input
+codecs. Offline production probes run through the shipped/fixture admission
+entry point and require no dispatch of unadvertised commands; perpetual capability
+flags and the Spot admission/smoke gates remain independent.
 
 WASM venue caps retain both parents' measured floors. Fresh compositions must
 retain at least 10 KiB above their optimized web/Node measurement, rounded up
