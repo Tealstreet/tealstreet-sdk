@@ -217,7 +217,8 @@ describe('unavailable shared storage', () => {
       await flushDatabase();
       await vi.advanceTimersByTimeAsync(200);
     }
-    expect(await firstOutcome).toMatchObject([{ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } }]);
+    // c0705fca9 supersedes d732927cb30's blackout; recovery still restores the shared cap.
+    expect(await firstOutcome).toMatchObject([{ status: 'fulfilled' }]);
     await admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal());
     const end = Date.now() + 60_000;
     const sends: number[] = [];
@@ -240,7 +241,7 @@ describe('unavailable shared storage', () => {
     await flushDatabase();
     await bursting;
     expect(stalls).toBe(0);
-    // No extra local bucket is available after joining the shared coordinator.
+    // After the cooldown, merged local debt shares the original aggregate bucket.
     expect(sends.length * 20).toBeLessThanOrEqual(2000);
     expect(sends.length * 20).toBeGreaterThanOrEqual(1500);
   });
@@ -1366,7 +1367,6 @@ it.each(['wait', 'dispatch'] as const)(
   },
 );
 
-
 describe('mid-session storage degradation', () => {
   it('serves two candle reads after an established transaction never answers', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -1375,13 +1375,15 @@ describe('mid-session storage degradation', () => {
     const stalled = { objectStore: () => ({ get: () => ({}) }), abort: vi.fn() };
     vi.spyOn(IDBDatabase.prototype, 'transaction').mockReturnValue(stalled as unknown as IDBTransaction);
     const send = vi.fn(() => 0);
-    const pending = Promise.allSettled([0, 1].map(async () => {
-      const controller = new AbortController();
-      const body = JSON.stringify({ type: 'candleSnapshot' });
-      const deadline = Date.now() + 20_000;
-      const grant = await budget.wait(ORIGIN, body, deadline, controller.signal, 'bulk');
-      return budget.admitDispatch(ORIGIN, grant, deadline, controller.signal, send);
-    }));
+    const pending = Promise.allSettled(
+      [0, 1].map(async () => {
+        const controller = new AbortController();
+        const body = JSON.stringify({ type: 'candleSnapshot' });
+        const deadline = Date.now() + 20_000;
+        const grant = await budget.wait(ORIGIN, body, deadline, controller.signal, 'bulk');
+        return budget.admitDispatch(ORIGIN, grant, deadline, controller.signal, send);
+      }),
+    );
     await flushDatabase();
     await vi.advanceTimersByTimeAsync(1500);
     await flushDatabase();
@@ -1392,10 +1394,15 @@ describe('mid-session storage degradation', () => {
   });
 
   it.each(['critical', 'reconciliation', 'normal', 'bulk'] as const)(
-    'halves both local burst and refill after prior shared storage: %s', async (readClass) => {
+    'halves both local burst and refill after prior shared storage: %s',
+    async (readClass) => {
       vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       await client().response(ORIGIN, 200, '');
-      const unavailable = { open: () => { throw new Error('unavailable'); } } as unknown as IDBFactory;
+      const unavailable = {
+        open: () => {
+          throw new Error('unavailable');
+        },
+      } as unknown as IDBFactory;
       const budget = new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(unavailable));
       const run = async () => {
         const controller = new AbortController();
@@ -1405,15 +1412,19 @@ describe('mid-session storage degradation', () => {
       };
       const burst = readClass === 'critical' || readClass === 'reconciliation' ? 25 : 20;
       let burstCompleted = false;
-      const sends = Promise.allSettled([(async () => {
-        for (let i = 0; i < burst; i++) await run();
-        burstCompleted = true;
-      })()]);
+      const sends = Promise.allSettled([
+        (async () => {
+          for (let i = 0; i < burst; i++) await run();
+          burstCompleted = true;
+        })(),
+      ]);
       await vi.advanceTimersByTimeAsync(0);
       expect(burstCompleted).toBe(true);
       expect(await sends).toMatchObject([{ status: 'fulfilled' }]);
       let completed = false;
-      const waiting = run().then(() => { completed = true; });
+      const waiting = run().then(() => {
+        completed = true;
+      });
       await vi.advanceTimersByTimeAsync(2399);
       expect(completed).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
@@ -1432,9 +1443,11 @@ describe('mid-session storage degradation', () => {
       throw new DOMException('closed', 'InvalidStateError');
     });
     let initialSent = false;
-    const first = Promise.allSettled([admit(budget, ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
-      initialSent = true;
-    })]);
+    const first = Promise.allSettled([
+      admit(budget, ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
+        initialSent = true;
+      }),
+    ]);
     await flushDatabase();
     await vi.advanceTimersByTimeAsync(0);
     expect(initialSent).toBe(true);
@@ -1452,4 +1465,109 @@ describe('mid-session storage degradation', () => {
     await admit(budget, ORIGIN, ORDERS, Date.now() + 20_000, signal());
     expect(unavailable).toHaveBeenCalled();
   });
+});
+
+it('tops up a shared reservation if storage degrades immediately before handoff', async () => {
+  await client().response(ORIGIN, 200, '');
+  const now = Date.now();
+  const state = { nextAt: now + 58_800, pausedUntil: 0, generation: 0, failures: 0 };
+  let updates = 0;
+  const storage = {
+    update: async <T>(_key: string, change: (draft: typeof state, shared: boolean) => T) =>
+      change(state, ++updates === 1),
+  };
+  const budget = new budgetModule.HyperliquidInfoBudget(storage);
+  const send = vi.fn(() => 0);
+  const result = budget.admitDispatch(
+    ORIGIN,
+    { generation: 0, weight: 20, readClass: 'critical' },
+    now + 20_000,
+    signal(),
+    send,
+  );
+  await vi.advanceTimersByTimeAsync(1199);
+  expect(send).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  await result;
+  expect(send).toHaveBeenCalledOnce();
+});
+
+it('keeps public-only candle preparation off private proxy authorization and tunnel readiness', async () => {
+  vi.stubGlobal('indexedDB', factory);
+  const { createEngineTransport } = await import('./engine');
+  const { directTransport } = await import('./direct');
+  const privateRoute = vi.fn(() => {
+    throw new Error('Private route must not prepare public candles');
+  });
+  const send = vi.fn(async () => ({ status: 200, headers: '', body: new Uint8Array() }));
+  const prepare = vi.fn((_packet: { url: string }) => ({ bind: () => ({ ready: () => true, dispatch: send }) }));
+  const transport = createEngineTransport(
+    'hyperliquid',
+    {
+      key: '',
+      secret: '',
+      publicDataOnly: true,
+      tealstreetProxy: true,
+      tealstreetTunnel: true,
+      transport: { ...directTransport, name: 'route-boundary', rest: privateRoute, restAdapter: privateRoute },
+    },
+    { ...nativeTransport(), request: send, prepareHttp: prepare },
+  );
+  const packet = {
+    request: 1,
+    method: 'POST' as const,
+    url: ORIGIN + '/info',
+    headers: {},
+    body: JSON.stringify({ type: 'candleSnapshot' }),
+    timeoutMs: 20_000,
+  };
+  try {
+    await (await transport.prepareHttp!({ ...packet, intent: 'public' })).bind(packet).dispatch();
+    expect(send).toHaveBeenCalledOnce();
+    expect(prepare.mock.calls[0][0].url).toBe(ORIGIN + '/info');
+    expect(privateRoute).not.toHaveBeenCalled();
+  } finally {
+    transport.dispose?.();
+  }
+});
+
+it('keeps two actual candle transports available when an established IndexedDB stops responding', async () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  vi.stubGlobal('indexedDB', factory);
+  const { createEngineTransport } = await import('./engine');
+  const send = vi.fn(async () => ({ status: 200, headers: '', body: new Uint8Array() }));
+  const transport = createEngineTransport(
+    'hyperliquid',
+    { key: '', secret: '', publicDataOnly: true },
+    {
+      ...nativeTransport(),
+      request: send,
+      prepareHttp: () => ({ bind: () => ({ ready: () => true, dispatch: send }) }),
+    },
+  );
+  const packet = {
+    request: 1,
+    method: 'POST' as const,
+    url: ORIGIN + '/info',
+    headers: {},
+    body: JSON.stringify({ type: 'candleSnapshot' }),
+    timeoutMs: 20_000,
+  };
+  const run = async (request: number) =>
+    (await transport.prepareHttp!({ ...packet, request, intent: 'public' })).bind({ ...packet, request }).dispatch();
+  try {
+    await run(1);
+    const stalled = { objectStore: () => ({ get: () => ({}) }), abort: vi.fn() };
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockReturnValue(stalled as unknown as IDBTransaction);
+    const pending = Promise.allSettled([run(2), run(3)]);
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(await pending).toMatchObject([{ status: 'fulfilled' }, { status: 'fulfilled' }]);
+  } finally {
+    transport.dispose?.();
+  }
 });
