@@ -54,6 +54,67 @@ afterEach(() => {
 });
 
 describe('a keyless public-data engine reads through the public CORS proxy, off the trading fleet', () => {
+  it('sends Coinbase catalogue POST and history GET reads through the public proxy without a token', async () => {
+    for (const method of ['POST', 'GET']) {
+      const url = `https://drb.coinbase.com/api/v2/public/${method === 'POST' ? 'get_instruments' : 'get_tradingview_chart_data?instrument_name=BTC_USDC-PERPETUAL'}`;
+      const body =
+        method === 'POST'
+          ? new TextEncoder().encode('{"method":"public/get_instruments","params":{"currency":"USDC"}}')
+          : undefined;
+      const packet = { method, url, headers: { 'Content-Type': 'application/json' }, ...(body ? { body } : {}) };
+      const raw = makeRaw();
+      const routed = createEngineTransport('coinbase', chartSource({ tealstreetTunnel: false }), raw);
+      try {
+        await routed.request(packet);
+        expect(raw.request).toHaveBeenCalledOnce();
+        expect(raw.request.mock.calls[0][0]).toMatchObject({ ...packet, url: `${getPublicCorsProxy()}/${url}` });
+        expect(mocks.token).not.toHaveBeenCalled();
+      } finally {
+        routed.dispose?.();
+      }
+    }
+  });
+
+  it('prepares the native managed Coinbase catalogue POST on the public route', async () => {
+    const dispatch = vi.fn(async () => ({ status: 200, body: new Uint8Array() }));
+    const bind = vi.fn((_packet: Parameters<Transport['request']>[0]) => ({ ready: () => true, dispatch }));
+    const raw = { ...makeRaw(), prepareHttp: async () => ({ bind }) };
+    const routed = createEngineTransport('coinbase', chartSource({ tealstreetTunnel: false }), raw);
+    const packet = {
+      request: 1,
+      method: 'POST',
+      url: 'https://drb.coinbase.com/api/v2/public/get_instruments',
+      headers: { 'Content-Type': 'application/json' },
+      body: new TextEncoder().encode('{"method":"public/get_instruments","params":{"currency":"USDC"}}'),
+    };
+    try {
+      const prepared = await routed.prepareHttp!({ ...packet, intent: 'public' });
+      await prepared.bind(packet).dispatch();
+      expect(bind.mock.calls[0]?.[0]).toMatchObject({ ...packet, url: `${getPublicCorsProxy()}/${packet.url}` });
+      expect(dispatch).toHaveBeenCalledOnce();
+      expect(mocks.token).not.toHaveBeenCalled();
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
+  it('keeps direct Coinbase reads direct and refuses credentials on the explicit public route', async () => {
+    const url = 'https://drb.coinbase.com/api/v2/public/get_instruments';
+    expect(
+      (await sent('coinbase', chartSource({ tealstreetProxy: false, tealstreetTunnel: false }), 'POST', url)).url,
+    ).toBe(url);
+    const raw = makeRaw();
+    const routed = createEngineTransport('coinbase', chartSource(), raw);
+    try {
+      await expect(
+        routed.request({ route: 'publicCors', method: 'POST', url, headers: { Authorization: 'Bearer synthetic' } }),
+      ).rejects.toThrow('refused: signed request to the public proxy');
+      expect(raw.request).not.toHaveBeenCalled();
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
   it('sends BingX chart history through the public proxy without the proxy token', async () => {
     const request = await sent('bingx', chartSource());
     expect(request.url).toBe(`${getPublicCorsProxy()}/${KLINES}`);
