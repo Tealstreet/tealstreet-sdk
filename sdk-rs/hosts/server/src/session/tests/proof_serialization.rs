@@ -301,7 +301,10 @@ async fn proof_queue_identity_overflow_keeps_registration_and_refuses_both_modes
                     "acct",
                     true,
                     envelope::InitRefusalReasonClass::Unknown,
-                    Default::default()
+                    envelope::InitRefusalMetadata {
+                        stage: (mode == "delegated").then_some(RefusalStage::Permit),
+                        ..Default::default()
+                    }
                 ),
                 "identity-overflow"
             )
