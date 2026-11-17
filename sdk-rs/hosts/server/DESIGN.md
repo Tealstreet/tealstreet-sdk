@@ -696,7 +696,12 @@ HKDF-SHA256 and ChaCha20-Poly1305. The application info is
 `tealstreet/delegated-handover/v1`; associated data joins the attempt ID, process
 boot ID, exchange name and init key with `|`. `enc` and `ciphertext` are padded
 standard base64. Decrypted JSON contains `key`, `secret` and optional
-`passphrase` and optional `signingKey`; its public key must match the nonsecret
+`passphrase`, optional `signingKey` and optional ApeX-only `omniKeySeed`; the
+last is a packed 65-byte hex Ethereum signature, never an L2 private scalar.
+The zeroizing credential/pair path transfers that seed directly to canonical
+protected setup as the primary's `zklinkSeed` extra role, never into public JSON.
+Omission preserves monitoring without granting placement-signing capability.
+Other venues and mixed wallet/Omni layouts refuse it. Its public key must match the nonsecret
 init key. The registry's key-only setup takes its private scalar exclusively
 from sealed `signingKey`, with the public init identity equal to `subkeyAddress`.
 Other credential mappings refuse that field and still require their signing
@@ -752,9 +757,13 @@ account keeps its generation. Pending handover replies retain their separate
 registration lifecycle.
 
 Probe refusals use `initRefused`, `kind:"unverified"` and the existing fixed
-message. Auth kinds are permanent refusals; rate, network, timeout and venue
-availability failures are transient. Replies retain the init's registration ID;
-clients without one retain the original envelope bytes. Verified admission does
+message. Optional `error_kind`, `venue_code` and `stage` preserve the probe's
+classified error, exact JS-safe integer venue code and closed actual failure
+stage; unknown kinds/codes stay absent. The same fields survive transient
+refusals and early handover failures without copying venue text or credentials.
+Auth kinds are permanent refusals; rate, network, timeout and venue availability
+failures are transient. Replies retain the initiating init's registration ID;
+clients without one receive the same metadata without an instance ID. Verified admission does
 not replace a running account with different settings. A supported private
 COSIGNED venue without proof readiness returns the permanent `proof-unavailable` init
 refusal before probe I/O or attachment; unsupported names retain `unsupported`.

@@ -100,6 +100,7 @@ pub struct Credentials {
     pub secret: Zeroizing<String>,
     pub passphrase: Option<Zeroizing<String>>,
     pub signing_key: Option<Zeroizing<String>>,
+    pub omni_key_seed: Option<Zeroizing<String>>,
 }
 
 impl<'de> Deserialize<'de> for Credentials {
@@ -249,6 +250,7 @@ impl Opening {
                 exchange,
                 &fields.secret,
                 fields.signing_key.as_deref().map(String::as_str),
+                fields.omni_key_seed.as_deref().map(String::as_str),
             )
         {
             return Err(Refused);
@@ -261,7 +263,23 @@ fn key_only_mapping(venue: &str) -> bool {
     safe_cex_venues::signer_setup_mapping(venue) == Some(safe_cex_venues::SetupMapping::Paradex)
 }
 
-fn valid_credential_shape(venue: &str, secret: &str, signing_key: Option<&str>) -> bool {
+fn valid_credential_shape(
+    venue: &str,
+    secret: &str,
+    signing_key: Option<&str>,
+    omni_key_seed: Option<&str>,
+) -> bool {
+    if let Some(seed) = omni_key_seed {
+        let hex = seed.strip_prefix("0x").unwrap_or(seed);
+        if safe_cex_venues::signer_setup_mapping(venue)
+            != Some(safe_cex_venues::SetupMapping::ApexOmni)
+            || signing_key.is_some()
+            || hex.len() != 130
+            || !hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return false;
+        }
+    }
     if key_only_mapping(venue) {
         signing_key.is_some_and(|value| !value.is_empty())
     } else {

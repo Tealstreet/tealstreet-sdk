@@ -489,7 +489,14 @@ impl Session {
         }
         if !self.admission_token_valid() {
             self.drop_early(&completed.account_name, "verification refused");
-            out.send(envelope::init_unverified(&completed.account_name, false));
+            out.send(envelope::init_unverified(
+                &completed.account_name,
+                false,
+                envelope::InitRefusalReasonClass::Unknown,
+                ProbeRefusal::INVALID
+                    .at(RefusalStage::Authentication)
+                    .into(),
+            ));
             return Ok(());
         }
         if let Some(probe) = completed.probe {
@@ -608,6 +615,12 @@ impl Session {
                             None => envelope::init_unverified(
                                 &completed.account_name,
                                 refusal.transient,
+                                envelope::InitRefusalReasonClass::from_error(
+                                    &probe.init.exchange_name,
+                                    refusal.error_kind,
+                                    refusal.venue_code,
+                                ),
+                                refusal.into(),
                             ),
                         }
                     });
@@ -621,6 +634,13 @@ impl Session {
         out.send(envelope::init_unverified(
             &completed.account_name,
             transient,
+            envelope::InitRefusalReasonClass::Unknown,
+            ProbeRefusal {
+                transient,
+                ..ProbeRefusal::INVALID
+            }
+            .at(RefusalStage::HandoverOpen)
+            .into(),
         ));
         Ok(())
     }
@@ -682,7 +702,7 @@ impl Session {
                 self.handover_out(&init.account_name)
                     .send(envelope::init_proof_unavailable(&init.account_name));
             } else {
-                self.refuse_handover(&init.account_name, false);
+                self.refuse_handover(&init.account_name, ProbeRefusal::INVALID.at(kind));
             }
             return;
         }
@@ -692,7 +712,10 @@ impl Session {
             }
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "verification capacity reached");
-            self.refuse_handover(&init.account_name, true);
+            self.refuse_handover(
+                &init.account_name,
+                ProbeRefusal::TRANSIENT.at(RefusalStage::Capacity),
+            );
             return;
         }
         // DELEGATED CDP handover remains separate from COSIGNED JWT proof readiness.
@@ -710,7 +733,10 @@ impl Session {
         } else if init.sealed.is_some() {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "verification refused");
-            self.refuse_handover(&init.account_name, false);
+            self.refuse_handover(
+                &init.account_name,
+                ProbeRefusal::INVALID.at(RefusalStage::HandoverOpen),
+            );
         } else {
             self.handovers.forget(&init.account_name);
             self.open_probed_cosigned(init);
@@ -760,7 +786,7 @@ impl Session {
                 diagnostic.refused(refusal.at(RefusalStage::Permit));
                 self.handovers.forget(&init.account_name);
                 self.drop_early(&init.account_name, "verification refused");
-                self.refuse_handover(&init.account_name, refusal.transient);
+                self.refuse_handover(&init.account_name, refusal.at(RefusalStage::Permit));
                 return;
             }
         };
@@ -768,7 +794,10 @@ impl Session {
             diagnostic.refused(ProbeRefusal::INVALID.at(RefusalStage::MissingHandover));
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "delegated init refused");
-            self.refuse_handover(&init.account_name, false);
+            self.refuse_handover(
+                &init.account_name,
+                ProbeRefusal::INVALID.at(RefusalStage::MissingHandover),
+            );
             return;
         };
         let opening =
@@ -780,7 +809,10 @@ impl Session {
                 Err(_) => {
                     diagnostic.refused(ProbeRefusal::INVALID.at(RefusalStage::HandoverAttempt));
                     self.drop_early(&init.account_name, "delegated init refused");
-                    self.refuse_handover(&init.account_name, false);
+                    self.refuse_handover(
+                        &init.account_name,
+                        ProbeRefusal::INVALID.at(RefusalStage::HandoverAttempt),
+                    );
                     return;
                 }
             };
@@ -823,7 +855,10 @@ impl Session {
         let Some(sealed) = init.sealed.take() else {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "delegated init refused");
-            self.refuse_handover(&init.account_name, false);
+            self.refuse_handover(
+                &init.account_name,
+                ProbeRefusal::INVALID.at(RefusalStage::MissingHandover),
+            );
             return;
         };
         let opening =
@@ -834,7 +869,10 @@ impl Session {
                 Ok(opening) => opening,
                 Err(_) => {
                     self.drop_early(&init.account_name, "delegated init refused");
-                    self.refuse_handover(&init.account_name, false);
+                    self.refuse_handover(
+                        &init.account_name,
+                        ProbeRefusal::INVALID.at(RefusalStage::HandoverAttempt),
+                    );
                     return;
                 }
             };
@@ -922,9 +960,13 @@ impl Session {
             .unwrap_or_else(|| self.account_out(name))
     }
 
-    fn refuse_handover(&self, name: &str, transient: bool) {
-        self.handover_out(name)
-            .send(envelope::init_unverified(name, transient));
+    fn refuse_handover(&self, name: &str, refusal: ProbeRefusal) {
+        self.handover_out(name).send(envelope::init_unverified(
+            name,
+            refusal.transient,
+            envelope::InitRefusalReasonClass::Unknown,
+            refusal.into(),
+        ));
     }
 
     /// Exercise the trusted construction entry point from this authenticated
@@ -1294,7 +1336,10 @@ impl Session {
         self.handovers.forget(&init.account_name);
         if init.sealed.is_some() {
             self.drop_early(&init.account_name, "sealed init requires delegated signing");
-            self.refuse_handover(&init.account_name, false);
+            self.refuse_handover(
+                &init.account_name,
+                ProbeRefusal::INVALID.at(RefusalStage::SigningMode),
+            );
             return Ok(());
         }
         self.forget_disposed();
@@ -1324,7 +1369,10 @@ impl Session {
         if !public_only && admission_enabled {
             if !self.admission_token_valid() {
                 self.drop_early(&init.account_name, "verification refused");
-                self.refuse_handover(&init.account_name, false);
+                self.refuse_handover(
+                    &init.account_name,
+                    ProbeRefusal::INVALID.at(RefusalStage::Authentication),
+                );
                 return Ok(());
             }
             if !snapshot_only {
@@ -1636,7 +1684,7 @@ impl Session {
                     .refused(ProbeRefusal::INVALID.at(RefusalStage::VenuePolicy));
                 self.handovers.forget(&name);
                 self.drop_early(&name, "delegated init refused");
-                self.refuse_handover(&name, false);
+                self.refuse_handover(&name, ProbeRefusal::INVALID.at(RefusalStage::VenuePolicy));
             }
             return;
         }
@@ -1896,7 +1944,7 @@ impl Session {
             Err(_) => {
                 diagnostic.refused(ProbeRefusal::INVALID.at(RefusalStage::KeyOffer));
                 self.drop_early(name, "delegated init refused");
-                self.refuse_handover(name, false);
+                self.refuse_handover(name, ProbeRefusal::INVALID.at(RefusalStage::KeyOffer));
             }
         }
     }

@@ -7,6 +7,7 @@
 // (and the direct `error.config = config` on the reject path) is what every
 // built-in axios adapter does and what we have to reproduce here.
 
+import { AxiosHeaders } from 'axios';
 import Emitter from 'tiny-emitter';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -56,6 +57,7 @@ vi.mock('./HOWWebSocket', () => {
 import { configureHOW } from './config';
 import {
   TRADE_TUNNEL_RPC_VERSION,
+  READINESS_CAP_MS,
   createAxiosHttpOverWebsocketAdapter,
   howWebSocketJA,
   howWebSocketSG,
@@ -600,6 +602,109 @@ it('attaches caller config (with custom keys + headers) to the resolved tunnel r
 
     expect(getProxyToken).not.toHaveBeenCalled();
     expect(mockWs.sendToken).not.toHaveBeenCalled();
+  });
+
+  describe.each(['prepare', 'prepareLegacy'] as const)('%s token-wait deadlines', (method) => {
+    const config = () => ({
+      url: '/v5/market/instruments-info',
+      baseURL: 'https://example.com',
+      method: 'GET',
+      headers: new AxiosHeaders(),
+      timeout: 90_000,
+    });
+
+    it.each([READINESS_CAP_MS + 1, 1_198_297])(
+      'refuses a token settling at %i ms before an overdue timer can run',
+      async (elapsedMs) => {
+        vi.useFakeTimers();
+        vi.setSystemTime(0);
+        const token = Promise.withResolvers<string>();
+        const lookup = vi.fn(() => token.promise);
+        configureHOW({ getProxyToken: lookup, isTokenExpired: () => false });
+        mockWs.authState = 'Unknown';
+        const adapter = createAxiosHttpOverWebsocketAdapter();
+        const callerConfig = config();
+        try {
+          const pending = adapter[method](callerConfig).then(
+            (prepared) => {
+              prepared.cancel();
+              return { prepared: true };
+            },
+            (error: unknown) => ({ error }),
+          );
+          await vi.waitFor(() => expect(lookup).toHaveBeenCalledOnce());
+          // A resumed token microtask can run before overdue timers. Another request
+          // may already have authenticated the shared socket; this one's clock still wins.
+          vi.setSystemTime(elapsedMs);
+          mockWs.authState = 'Good';
+          token.resolve('late-fixture-token');
+          expect(await pending).toMatchObject({
+            error: {
+              name: 'ProxyTokenUnavailableError',
+              config: callerConfig,
+              budgetMs: 90_000,
+              elapsedMs,
+            },
+          });
+          expect(mockWs.sendToken).not.toHaveBeenCalled();
+          expect(mockWs.sentMessages).toEqual([]);
+          expect(vi.getTimerCount()).toBe(0);
+        } finally {
+          adapter.dispose();
+          vi.useRealTimers();
+        }
+      },
+    );
+
+    it('accepts an on-time token without disturbing shared authentication', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      const token = Promise.withResolvers<string>();
+      const lookup = vi.fn(() => token.promise);
+      configureHOW({ getProxyToken: lookup, isTokenExpired: () => false });
+      mockWs.authState = 'Unknown';
+      const adapter = createAxiosHttpOverWebsocketAdapter();
+      try {
+        const pending = adapter[method](config());
+        await vi.waitFor(() => expect(lookup).toHaveBeenCalledOnce());
+        vi.setSystemTime(1_000);
+        mockWs.authState = 'Good';
+        token.resolve('on-time-fixture-token');
+        const prepared = await pending;
+        prepared.cancel();
+        expect(mockWs.sendToken).not.toHaveBeenCalled();
+        expect(mockWs.sentMessages).toEqual([]);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        adapter.dispose();
+        vi.useRealTimers();
+      }
+    });
+
+    it('bounds a never-settling provider while normal timers run', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      configureHOW({ getProxyToken: () => new Promise<string>(() => {}), isTokenExpired: () => false });
+      mockWs.authState = 'Unknown';
+      const adapter = createAxiosHttpOverWebsocketAdapter();
+      const callerConfig = config();
+      try {
+        const pending = adapter[method](callerConfig).catch((error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(READINESS_CAP_MS);
+        expect(await pending).toMatchObject({
+          name: 'ProxyTokenUnavailableError',
+          config: callerConfig,
+          budgetMs: 90_000,
+          elapsedMs: READINESS_CAP_MS,
+        });
+        expect(mockWs.sendToken).not.toHaveBeenCalled();
+        expect(mockWs.sentMessages).toEqual([]);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        adapter.dispose();
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('request cancellation during token acquisition sends neither credentials nor a stale write', async () => {
