@@ -3120,9 +3120,34 @@ async fn pump(
         ))
     };
     loop {
+        // Service cadence after each received item, even with a permanently ready inbox.
+        // The preceding item's private sections/notices have already been sent.
+        if !draining.load(Ordering::Relaxed) {
+            let interval = *publish_interval.borrow_and_update();
+            let ready = publisher.set_interval(interval).and_then(|mut frames| {
+                if publisher
+                    .deadline()
+                    .is_some_and(|at| at <= tokio::time::Instant::now())
+                {
+                    frames.extend(publisher.flush()?);
+                }
+                Ok(frames)
+            });
+            match ready {
+                Ok(frames) => {
+                    if !publish_frames(&out, &name, &mut seq, frames) {
+                        break;
+                    }
+                }
+                Err(_) => {
+                    Log::warn("public publication baseline unavailable; requesting snapshot");
+                    let _ = dropped.send((name.clone(), client));
+                    break;
+                }
+            }
+        }
         let deadline = publisher.deadline();
         let item = tokio::select! {
-            biased;
             item = link.outgoing.recv() => match item {
                 Some(item) => item,
                 None => {
@@ -3134,33 +3159,10 @@ async fn pump(
                 }
             },
             changed = publish_interval.changed(), if configuration_open => {
-                if changed.is_err() {
-                    configuration_open = false;
-                    continue;
-                }
-                let interval = *publish_interval.borrow_and_update();
-                if draining.load(Ordering::Relaxed) { continue; }
-                match publisher.set_interval(interval) {
-                    Ok(frames) => if !publish_frames(&out, &name, &mut seq, frames) { break; },
-                    Err(_) => {
-                        Log::warn("public publication baseline unavailable; requesting snapshot");
-                        let _ = dropped.send((name.clone(), client));
-                        break;
-                    }
-                }
+                if changed.is_err() { configuration_open = false; }
                 continue;
             }
             _ = async { match deadline { Some(at) => tokio::time::sleep_until(at).await, None => std::future::pending::<()>().await } }, if !draining.load(Ordering::Relaxed) => {
-                // A re-snapshot can retire this pump while its timer is already waiting.
-                if draining.load(Ordering::Relaxed) { continue; }
-                match publisher.flush() {
-                    Ok(frames) => if !publish_frames(&out, &name, &mut seq, frames) { break; },
-                    Err(_) => {
-                        Log::warn("public publication could not encode; requesting snapshot");
-                        let _ = dropped.send((name.clone(), client));
-                        break;
-                    }
-                }
                 continue;
             }
             _ = hold_tick.tick(), if held.is_some() && hold.is_some() => {

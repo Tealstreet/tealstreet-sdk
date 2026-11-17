@@ -609,6 +609,8 @@ against its own last published baseline. It does not drop raw deltas or queue a
 history of frames. The first snapshot is immediate; a catalogue/readiness barrier
 publishes dependent public rows before announcing readiness. Output sequences
 stay contiguous and filtered frames keep their original string references.
+Cadence/deadline maintenance runs after each received item, before another
+receive, so a ready inbox cannot starve publication or live interval updates.
 Orders, positions, fills, balance, command outcomes, signer/control messages,
 settings and all other sections remain immediate for COSIGNED and DELEGATED.
 Re-snapshots and settings rebuilds retain this connection's interval; retired
