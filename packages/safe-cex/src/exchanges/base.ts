@@ -29,6 +29,7 @@ import { forEachSeries, mapSeries } from 'p-iteration';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { classifiedError, deserializeCommandError, exchangeErrorTags, markErrorReported } from '../commandOutcome';
+import { workerErrorProtectionTags } from '../utils/workerErrorProtectionTags';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { withHistoryCompleteness } from '../historyCompleteness';
@@ -2288,6 +2289,7 @@ export class BaseExchange implements Exchange {
       ...(structuredExtraData.engineEvent?.code === 'startup.incomplete'
         ? startupDiagnosticTags(structuredExtraData.engineEvent)
         : {}),
+      ...workerErrorProtectionTags(err),
     };
     const sentryExtra =
       structuredExtraData.sentryExtra && typeof structuredExtraData.sentryExtra === 'object'

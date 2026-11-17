@@ -614,6 +614,14 @@ the owning page. It supplies dedicated workers' timer-lateness diagnostics;
 it changes no reconnect, throttle or account policy. A callback delivered after
 the page is visible is not counted as a hidden callback.
 
+## Protection-loss telemetry
+
+`workerErrorProtectionTags` derives only `worker_error_unprotected: true` from the
+closed native `protection: 'unprotected'` fact before diagnostic Error cloning.
+BaseExchange and direct worker error reporting attach it to plain metadata;
+custom Error properties disappear during `postMessage` structured cloning.
+Hosts may preserve this fixed safety fact through privacy projection; the SDK
+does not decide host reporting policy or add a telemetry client.
 
 ## Closed history diagnostics
 

@@ -20,6 +20,7 @@ import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { unsupportedVenueError } from '../unsupportedVenue';
 import { diagnosticConsole, diagnosticText, redactDiagnosticData } from '../utils/diagnosticRedaction';
 import { virtualClock } from '../utils/virtualClock';
+import { workerErrorProtectionTags } from '../utils/workerErrorProtectionTags';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
 import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
 import { mainAcceptsFrames } from './frameForwarding';
@@ -288,6 +289,7 @@ export class ExchangeWorker {
                   tunnel_port: tunnelLanePort(),
                   ...splitExtra.sentryTags,
                   ...workerSentryControl.tags,
+                  ...workerErrorProtectionTags(error),
                 },
                 extra: {
                   ...splitExtra.extra,

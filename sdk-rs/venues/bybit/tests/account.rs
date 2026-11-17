@@ -4602,9 +4602,9 @@ fn explicit_terminal_history_failure_retains_rows_with_incomplete_marker() {
 }
 
 #[test]
-fn terminal_order_history_reuses_the_requested_windows_for_each_status() {
+fn terminal_order_history_preserves_default_windows_and_clips_each_status() {
     let mut h = ready();
-    let to = 1_672_300_000_000.0;
+    let to = h.engine.signing_clock(h.now).0;
     h.command(Command::Query {
         command: 913,
         query: Query::OrderHistory {
@@ -4614,30 +4614,24 @@ fn terminal_order_history_reuses_the_requested_windows_for_each_status() {
             limit: None,
         },
     });
-    let mut original = Vec::new();
+    // V5 retains these statuses only for 24h; the old seven-day reuse was invalid.
     for status in [
         None,
         Some("Cancelled"),
         Some("Rejected"),
         Some("Deactivated"),
     ] {
-        for window in 0..2 {
+        for _ in 0..if status.is_none() { 2 } else { 1 } {
             let request = h.take("/v5/order/history");
             assert_eq!(request.url.contains("orderStatus="), status.is_some());
             if let Some(status) = status {
                 assert!(request.url.contains(&format!("orderStatus={status}")));
-            }
-            let bounds: Vec<_> = request
-                .url
-                .split('&')
-                .filter(|part| part.starts_with("startTime=") || part.starts_with("endTime="))
-                .map(str::to_owned)
-                .collect();
-            assert_eq!(bounds.len(), 2);
-            if status.is_none() {
-                original.push(bounds);
-            } else {
-                assert_eq!(bounds, original[window]);
+                assert!(
+                    request
+                        .url
+                        .contains(&format!("startTime={}", to - 86_400_000.0))
+                );
+                assert!(request.url.contains(&format!("endTime={to}")));
             }
             h.reply(request.id, 200, EMPTY_LIST);
         }

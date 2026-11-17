@@ -109,6 +109,12 @@ tunnel or unknown). Raw errors, configs, URLs and nested causes never cross that
 boundary; group failures are classified only after every physical handoff.
 This diagnostic summary does not alter native error kind, retry or owner policy.
 
+Hyperliquid `/info` quota admission tags a proven pre-send deadline refusal with
+closed cause `info_admission` and fixed title `HTTP admission deadline expired`.
+It retains Timeout/NotSent and the original deadline, budget, retry and delivery.
+Generic relay readiness failures and errors after handoff keep their existing paths;
+`phase=preparing` alone does not prove an admission failure.
+
 ## Startup discovery deadlines
 
 Before both markets and tickers load, credential-free Background Reads using the

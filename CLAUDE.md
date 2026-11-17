@@ -86,3 +86,7 @@ measurement helpers remain for replay collection and offline evidence inspection
 CI no longer plans, certifies or publishes CPU gate statuses.
 
 Update `sdk-rs/harness/CLAUDE.md` with the next real fingerprint mover; its CPU gate policy is superseded by this decision.
+
+Hyperliquid pre-send `/info` admission diagnostics retain timeout/NotSent with the
+closed `info_admission` cause. The relay/post-handoff boundary is documented in
+`sdk-rs/README.md` under Browser request-failure diagnostics.
