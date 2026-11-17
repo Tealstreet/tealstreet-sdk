@@ -378,3 +378,124 @@ async fn private_orders_positions_fills_and_outcomes_never_wait_for_publication(
         session.close(); account.handle.dispose();
     }).await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn shared_account_holders_keep_independent_publication_rates() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (mut slow, mut slow_sent, account, _) = setup(Some(json!(500))).await;
+            let (mut fast, mut fast_sent) = user_session(slow.registry.clone(), "u");
+            let mut data = serde_json::to_value(acct_init()).unwrap();
+            data["publishIntervalMs"] = json!(50);
+            fast.handle(&json!({"t":"init","d":data}).to_string())
+                .await
+                .unwrap();
+            first(&mut fast_sent).await;
+            drain(&mut fast_sent);
+            assert!(Arc::ptr_eq(
+                &slow.joined["acct"].account,
+                &fast.joined["acct"].account
+            ));
+            update(&slow, &account, 111, 1);
+            tick(70).await;
+            assert_eq!(public_frames(&drain(&mut fast_sent)).len(), 1);
+            assert!(public_frames(&drain(&mut slow_sent)).is_empty());
+            set(&mut slow, "acct", json!(1000)).await;
+            update(&fast, &account, 222, 2);
+            tick(70).await;
+            assert_eq!(public_frames(&drain(&mut fast_sent)).len(), 1);
+            assert!(public_frames(&drain(&mut slow_sent)).is_empty());
+            tick(900).await;
+            assert_eq!(public_frames(&drain(&mut slow_sent)).len(), 1);
+            assert!(Arc::ptr_eq(&slow.joined["acct"].account, &account));
+            slow.close();
+            fast.close();
+            account.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn resnapshot_keeps_rate_and_stops_the_old_pending_publication() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (mut session, mut sent, account, _) = setup(Some(json!(500))).await;
+            update(&session, &account, 111, 1);
+            tick(70).await;
+            assert!(public_frames(&drain(&mut sent)).is_empty());
+            // A waiting reply keeps the old pump alive after the new snapshot takes over.
+            session.joined["acct"]
+                .client
+                .pending
+                .lock()
+                .unwrap()
+                .insert(
+                    999,
+                    Pending {
+                        request_id: json!(999),
+                        method: "fetchCandles".into(),
+                        reply: methods::Reply::Result,
+                        group: None,
+                        incomplete: false,
+                        audit: None,
+                    },
+                );
+            assert!(session.resnapshot("acct", None).await);
+            let snapshot = first(&mut sent).await;
+            assert_eq!(snapshot["d"]["seq"], 1);
+            assert_eq!(session.joined["acct"].old.len(), 1);
+            assert_eq!(
+                *session.joined["acct"].client.publish_interval.borrow(),
+                500
+            );
+            drain(&mut sent);
+            tick(600).await;
+            assert!(
+                public_frames(&drain(&mut sent)).is_empty(),
+                "old pump emitted a stale cached frame"
+            );
+            update(&session, &account, 222, 2);
+            tick(70).await;
+            let messages = drain(&mut sent);
+            let updates = public_frames(&messages);
+            assert_eq!(updates.len(), 1);
+            assert_eq!(updates[0]["d"]["seq"], 2);
+            session.close();
+            account.handle.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn integer_bounds_are_clamped_and_invalid_updates_never_replace_them() {
+    tokio::task::LocalSet::new().run_until(async {
+        let (mut session, mut sent, account, _) = setup(Some(json!(-1))).await;
+        assert_eq!(*session.joined["acct"].client.publish_interval.borrow(), 50);
+        for (value, expected) in [(json!(0),50), (json!(49),50), (json!(250),250), (json!(u64::MAX),5000)] {
+            set(&mut session, "acct", value).await;
+            assert_eq!(*session.joined["acct"].client.publish_interval.borrow(), expected);
+        }
+        for value in [json!(null),json!(true),json!("50"),json!(500.5),json!([]),json!({})] {
+            set(&mut session, "acct", value).await;
+            assert_eq!(*session.joined["acct"].client.publish_interval.borrow(),5000);
+            assert!(drain(&mut sent).iter().any(|v| v["d"]["data"][1]["kind"]=="invalid_publish_interval"));
+        }
+        session.handle(&json!({"t":"msg","d":{"op":"set-publish-interval","data":{"publishIntervalMs":50}}}).to_string()).await.unwrap();
+        assert!(drain(&mut sent).iter().any(|v| v["d"]["data"][1]["kind"]=="not_admitted"));
+        session.close(); account.handle.dispose();
+    }).await;
+}
+
+#[test]
+fn publication_metadata_is_not_an_engine_option_or_account_identity() {
+    let plain = acct_init();
+    for interval in [50, 5000] {
+        let mut paced = plain.clone();
+        paced.publish_interval_ms = envelope::RequestedInterval::Milliseconds(interval);
+        assert_eq!(plain.fingerprint(), paced.fingerprint());
+        assert_eq!(
+            serde_json::to_value(&plain).unwrap(),
+            serde_json::to_value(&paced).unwrap()
+        );
+    }
+}

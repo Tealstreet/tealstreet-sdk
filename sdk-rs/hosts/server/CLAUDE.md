@@ -5,6 +5,13 @@ changing server behavior. Validate scoped Rust changes with
 `cargo test -p safe-cex-exchange-server` and
 `cargo clippy -p safe-cex-exchange-server --all-targets` from `sdk-rs/`.
 
+## Connection-local public pacing
+
+The optional `publishIntervalMs` init field and `set-publish-interval` account op
+are documented in `DESIGN.md` under Connection-local publication interval.
+Keep cadence in the socket/account pump, never in shared engine identity or
+configuration. Private financial sections and outcomes bypass the public coalescer.
+
 ## Sentry owner identity
 
 The native Sentry allowlist and captured authentication-subject contract live in
