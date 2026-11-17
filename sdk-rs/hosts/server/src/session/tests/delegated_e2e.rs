@@ -426,6 +426,9 @@ async fn mobile_order_frame(sent: &mut crate::out::Receiver, kind: &str) -> Valu
         while let Some(text) = sent.recv().await {
             let frame: Value = serde_json::from_str(&text).unwrap();
             assert_ne!(frame["t"], "sign-req");
+            if frame["d"]["op"] == "error" {
+                println!("SYNTHETIC_MOBILE_NONRECEIPT={frame}");
+            }
             if frame["t"] == kind {
                 return frame;
             }
@@ -476,7 +479,11 @@ async fn bybit_mobile_receipt(case: &str) {
         params["triggerPrice"] = 55000.into();
     }
     session.order_frames_enabled = case != "disabled";
-    let is_action = !matches!(case, "submit" | "stop" | "take-profit");
+    let expired_token = case.starts_with("expired-token");
+    let is_action = !matches!(
+        case,
+        "submit" | "stop" | "take-profit" | "expired-token-submit"
+    );
     let action = json!({"kind":"place","orders":[params.clone()]});
     let fp = if is_action {
         crate::order_contract::action_wire_fingerprint(ACCOUNT, &intent, &action, 1).unwrap()
@@ -490,11 +497,17 @@ async fn bybit_mobile_receipt(case: &str) {
     } else {
         data["params"] = params;
     }
+    if expired_token {
+        session.identity.token.as_mut().unwrap().1 = crate::accounts::now_ms().saturating_sub(1);
+    }
     wire(
         &mut session,
         json!({"t":if is_action {"order.action"} else {"order.submit"},"d":data}),
     )
     .await;
+    if expired_token {
+        assert!(venue.observed.lock().unwrap().writes.is_empty());
+    }
     let ack = mobile_order_frame(
         &mut sent,
         if is_action {
@@ -516,11 +529,13 @@ async fn bybit_mobile_receipt(case: &str) {
     println!("SYNTHETIC_MOBILE_{case}_ACK={ack}");
     println!("SYNTHETIC_MOBILE_{case}_OUTCOME={receipt}");
     assert_eq!(receipt["d"]["intentId"], intent);
-    if matches!(case, "deadline" | "disabled" | "binding") {
+    if expired_token || matches!(case, "deadline" | "disabled" | "binding") {
         assert_eq!(receipt["d"]["outcome"], "refused", "{case}: {receipt}");
         assert_eq!(receipt["d"]["error"]["outcome"], "notSent");
         let reason = receipt["d"]["error"]["message"].as_str().unwrap();
-        assert!(reason.contains(if case == "deadline" {
+        assert!(reason.contains(if expired_token {
+            crate::auth::TOKEN_EXPIRED
+        } else if case == "deadline" {
             "expired"
         } else {
             "not admitted"
@@ -585,4 +600,15 @@ async fn delegated_mobile_bybit_stop_omits_unsupported_caller_id() {
 #[tokio::test]
 async fn delegated_mobile_bybit_take_profit_omits_unsupported_caller_id() {
     bybit_mobile_receipt("take-profit").await;
+}
+
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_mobile_bybit_expired_token_submit_is_not_sent() {
+    bybit_mobile_receipt("expired-token-submit").await;
+}
+#[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+#[tokio::test]
+async fn delegated_mobile_bybit_expired_token_action_is_not_sent() {
+    bybit_mobile_receipt("expired-token-action").await;
 }
