@@ -46,6 +46,15 @@ Malformed/canceled delegate results cannot publish partial signing batches or
 send a write; dispatched Unknown outcomes retain the existing reconciliation
 and no-replay behavior. Details: `docs/plans/callers/apexomni-hosted-signing.md`.
 
+## Unknown order status evidence
+
+Private-stream `row.skipped` warnings include only the rejected status token.
+Tokens of at most 32 printable ASCII bytes are quoted, with quotes and backslashes
+escaped. Longer tokens, control characters and non-ASCII input use a placeholder
+containing the UTF-8 byte count and SHA-256 hash. The complete warning is bounded
+to 128 printable ASCII bytes and includes no other row fields. Unknown statuses
+remain refused; this diagnostic does not add status mappings or change orders.
+
 ## Socket supervision
 
 Private sockets use `safe_cex_engine::socket::Supervisor` with a ten-second

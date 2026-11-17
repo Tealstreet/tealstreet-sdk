@@ -146,6 +146,104 @@ fn order(id: &str, status: &str, cumulative: &str) -> String {
     )
 }
 
+fn rejected_status_warning(status: &str) -> String {
+    let mut row: serde_json::Value = serde_json::from_str(&order("parent", "OPEN", "0.5")).unwrap();
+    row["status"] = status.into();
+    row["clientId"] = "private-client-id".into();
+    let (mut e, socket) = ready();
+    ws(&mut e, socket, 50.0, r#"{"op":"login","success":true}"#);
+    e.prepared(50.0).for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        100.0,
+        &frame("delta", &serde_json::json!({"orders":[row]}).to_string()),
+    );
+    // An unknown token cannot cancel or change an existing order.
+    assert_eq!(e.store().order("parent").unwrap().status, OrderStatus::Open);
+    assert_eq!(e.store().order("parent").unwrap().filled, 0.25);
+    let warnings = e
+        .prepared(100.0)
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::ROW_SKIPPED =>
+            {
+                Some(event.message)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(warnings.len(), 1);
+    let warning = warnings.into_iter().next().unwrap();
+    for field in ["parent", "private-client-id", "BTC-USDT", "BUY"] {
+        assert!(!warning.contains(field), "unrelated row field in warning");
+    }
+    assert!(warning.len() <= 128);
+    assert!(warning.bytes().all(|byte| (b' '..=b'~').contains(&byte)));
+    warning
+}
+
+#[test]
+fn unknown_status_warning_names_only_the_bounded_printable_token() {
+    for (status, expected) in [
+        ("FUTURE_STATUS", r#"unknown order status: "FUTURE_STATUS""#),
+        ("", r#"unknown order status: """#),
+        (
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            r#"unknown order status: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA""#,
+        ),
+        ("BAD\"\\STATUS", r#"unknown order status: "BAD\"\\STATUS""#),
+    ] {
+        assert_eq!(rejected_status_warning(status), expected);
+    }
+}
+
+#[test]
+fn unknown_status_warning_hashes_oversized_and_non_printable_input() {
+    for (status, bytes, hash) in [
+        (
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            33,
+            "5d873590851b7b00b60490c8e6966b3409c385adcc9590d801f0e03e268b5ba5",
+        ),
+        (
+            "BAD\nSTATUS",
+            10,
+            "597afc8f0b53f492a194e060a101a9191921dc34a69d3385d0a5e7caa0ecc5a4",
+        ),
+        (
+            "BAD\rSTATUS",
+            10,
+            "6b510d65773d8df5b103e8fca8dff5bb3ff9af7f1d3ec20a8fbbaa570d6c0f63",
+        ),
+        (
+            "BAD\tSTATUS",
+            10,
+            "41e735e4eb66c8c74398e02925f1e574dabcb202ab1320f7a058e55f0e21bda9",
+        ),
+        (
+            "BAD\0STATUS",
+            10,
+            "7285d685e1532ce24fcf19fe07a18d38b504b0cdaa09d4a741762f57573aab82",
+        ),
+        (
+            "BAD\x7fSTATUS",
+            10,
+            "9413ad9869ffcde7df3b563d956485b63b5edd9d66cc1d0c0cdcd63f117a2e34",
+        ),
+        (
+            "é",
+            2,
+            "4a99557e4033c3539de2eb65472017cad5f9557f7a0625a09f1c3f6e2ba69c4c",
+        ),
+    ] {
+        assert_eq!(
+            rejected_status_warning(status),
+            format!("unknown order status: <bytes={bytes} sha256={hash}>")
+        );
+    }
+}
+
 #[test]
 fn login_precedes_immediate_subscription_and_ping_with_private_role() {
     let (mut e, socket, _) = seeded();
