@@ -310,19 +310,25 @@ fn terminal_windows(
     to: Option<f64>,
     now: f64,
 ) -> VecDeque<(Option<f64>, Option<f64>)> {
-    // V5 retains Cancelled/Rejected/Deactivated only for the last 24 hours.
-    // Keep the default history range separate, including older filled orders.
+    // Retention clips the lower bound; explicit future endTime remains caller-owned.
+    // Existing splitting keeps pages valid; wholly future slices have no terminal records.
     let from = from
         .unwrap_or(now - TERMINAL_RETENTION_MS)
         .max(now - TERMINAL_RETENTION_MS);
-    let to = to.unwrap_or(now).min(now);
+    let to = to.unwrap_or(now);
     if from > to {
         VecDeque::new()
     } else {
-        VecDeque::from([(
-            Some(safe_cex_engine::time::wire_stamp_ms(from)),
-            Some(safe_cex_engine::time::wire_stamp_ms(to)),
-        )])
+        windows(Some(from), Some(to))
+            .into_iter()
+            .filter(|(from, _)| from.is_some_and(|from| from <= now))
+            .map(|(from, to)| {
+                (
+                    from.map(safe_cex_engine::time::wire_stamp_ms),
+                    to.map(safe_cex_engine::time::wire_stamp_ms),
+                )
+            })
+            .collect()
     }
 }
 
