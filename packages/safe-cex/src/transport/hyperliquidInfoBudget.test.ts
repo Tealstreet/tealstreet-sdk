@@ -56,7 +56,9 @@ afterEach(() => {
 });
 
 describe('unavailable shared storage', () => {
-  it.each([false, true])('allows local dispatch only if IDB never opened in this realm: %s', async (opened) => {
+  // Supersedes d732927cb30's established-store refusal: the maintainer now prioritizes
+  // chart availability with half-rate local admission after shared storage fails.
+  it.each([false, true])('allows conservative local dispatch after storage failure: opened=%s', async (opened) => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     if (opened) await client().response(ORIGIN, 200, '');
     const unavailable = {
@@ -69,9 +71,9 @@ describe('unavailable shared storage', () => {
       const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
       const send = vi.fn();
       const result = Promise.allSettled([a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, signal(), send)]);
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(await result).toMatchObject([{ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } }]);
-      expect(send).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(send).toHaveBeenCalledOnce();
+      expect(await result).toMatchObject([{ status: 'fulfilled' }]);
     } else {
       await spend(a);
       let sent = false;
@@ -261,6 +263,7 @@ describe('unavailable shared storage', () => {
     expect(warn).toHaveBeenCalledOnce();
   });
 
+  // d732927cb30's storage-fault matrix now requires the same degraded admission above.
   it.each([
     'throw',
     'error',
@@ -270,7 +273,7 @@ describe('unavailable shared storage', () => {
     'transactionError',
     'quota',
     'transactionStalled',
-  ])('bounds storage failure %s without leaking details or bypassing an established coordinator', async (failure) => {
+  ])('bounds storage failure %s and degrades admission without leaking details', async (failure) => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const openRequest: any = {};
     const readRequest: any = {};
@@ -311,10 +314,10 @@ describe('unavailable shared storage', () => {
     await flushDatabase();
     const established = failure.startsWith('transaction') || failure === 'quota';
     if (established) await vi.advanceTimersByTimeAsync(17_000);
-    expect((await first)[0].status).toBe(established ? 'rejected' : 'fulfilled');
+    expect((await first)[0].status).toBe('fulfilled');
     const next = Promise.allSettled([admit(new Budget(), ORIGIN, ORDERS, Date.now() + 20_000, signal())]);
     await vi.advanceTimersByTimeAsync(20_000);
-    expect((await next)[0].status).toBe(established ? 'rejected' : 'fulfilled');
+    expect((await next)[0].status).toBe('fulfilled');
     expect(open).toHaveBeenCalled();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls.flat().join(' ')).not.toContain('private details');
@@ -1362,3 +1365,91 @@ it.each(['wait', 'dispatch'] as const)(
     expect(send).not.toHaveBeenCalled();
   },
 );
+
+
+describe('mid-session storage degradation', () => {
+  it('serves two candle reads after an established transaction never answers', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const budget = client();
+    await budget.response(ORIGIN, 200, '');
+    const stalled = { objectStore: () => ({ get: () => ({}) }), abort: vi.fn() };
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockReturnValue(stalled as unknown as IDBTransaction);
+    const send = vi.fn(() => 0);
+    const pending = Promise.allSettled([0, 1].map(async () => {
+      const controller = new AbortController();
+      const body = JSON.stringify({ type: 'candleSnapshot' });
+      const deadline = Date.now() + 20_000;
+      const grant = await budget.wait(ORIGIN, body, deadline, controller.signal, 'bulk');
+      return budget.admitDispatch(ORIGIN, grant, deadline, controller.signal, send);
+    }));
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(await pending).toMatchObject([{ status: 'fulfilled' }, { status: 'fulfilled' }]);
+  });
+
+  it.each(['critical', 'reconciliation', 'normal', 'bulk'] as const)(
+    'halves both local burst and refill after prior shared storage: %s', async (readClass) => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      await client().response(ORIGIN, 200, '');
+      const unavailable = { open: () => { throw new Error('unavailable'); } } as unknown as IDBFactory;
+      const budget = new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(unavailable));
+      const run = async () => {
+        const controller = new AbortController();
+        const deadline = Date.now() + 20_000;
+        const grant = await budget.wait(ORIGIN, ORDERS, deadline, controller.signal, readClass);
+        return budget.admitDispatch(ORIGIN, grant, deadline, controller.signal, () => 0);
+      };
+      const burst = readClass === 'critical' || readClass === 'reconciliation' ? 25 : 20;
+      let burstCompleted = false;
+      const sends = Promise.allSettled([(async () => {
+        for (let i = 0; i < burst; i++) await run();
+        burstCompleted = true;
+      })()]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(burstCompleted).toBe(true);
+      expect(await sends).toMatchObject([{ status: 'fulfilled' }]);
+      let completed = false;
+      const waiting = run().then(() => { completed = true; });
+      await vi.advanceTimersByTimeAsync(2399);
+      expect(completed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await waiting;
+      expect(completed).toBe(true);
+    },
+  );
+
+  it('rejoins shared storage after cooldown and retains a known 429 pause', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const storage = new budgetModule.IndexedInfoBudgetStorage(factory);
+    const budget = new budgetModule.HyperliquidInfoBudget(storage);
+    await budget.response(ORIGIN, 200, '');
+    const original = IDBDatabase.prototype.transaction;
+    const unavailable = vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(() => {
+      throw new DOMException('closed', 'InvalidStateError');
+    });
+    let initialSent = false;
+    const first = Promise.allSettled([admit(budget, ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
+      initialSent = true;
+    })]);
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(initialSent).toBe(true);
+    await first;
+    await budget.response(ORIGIN, 429, 'Retry-After: 45');
+    await expect(admit(budget, ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+    });
+    unavailable.mockImplementation(original);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(admit(budget, ORIGIN, ORDERS, Date.now() + 1000, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+    });
+    await vi.advanceTimersByTimeAsync(16_200);
+    await admit(budget, ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    expect(unavailable).toHaveBeenCalled();
+  });
+});
