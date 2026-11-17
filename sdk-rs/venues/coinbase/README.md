@@ -107,7 +107,9 @@ Native refusal codes never grant a resend. Error text/data are available in
 Auth refresh uses the earlier of `expires_in` and the transport policy (15 minutes
 for HTTP, 49 minutes for WS), with a 10% margin capped at 30 seconds. Clock
 regression and non-finite time fail closed. Cache tokens are erased on drop or
-invalidation. Gateway JWTs use `iss: cdp`, a fresh nonce, and a 120-second lifetime
+invalidation. A rejected `public/auth` result names the first failing field
+(for example `scope is not a string`) without echoing any value; extra gateway
+fields such as `portfolio_uuid` and `gateway_id` are ignored. Gateway JWTs use `iss: cdp`, a fresh nonce, and a 120-second lifetime
 for both existing CDP signer algorithms. Existing spot JWT claims are preserved.
 
 The interface was published first in `af5df7922`; implementation follows on the

@@ -1064,3 +1064,57 @@ fn unknown_methods_are_rejected_on_both_transports_before_admission() {
         assert!(matches!(&actions[0], Action::WsSend { .. }));
     }
 }
+
+#[test]
+fn auth_accepts_live_gateway_extras_and_names_rejected_fields() {
+    // Shape observed from drb.coinbase.com public/auth for an INTX CDP key.
+    let live = json!({
+        "access_token": "synthetic-live-shape",
+        "expires_in": 899,
+        "scope": "rat#trade rat#view",
+        "token_type": "bearer",
+        "portfolio_uuid": "00000000-0000-0000-0000-000000000000",
+        "gateway_id": 0
+    });
+    let mut http = Session::new(Channel::Http);
+    http.accept(live, 1000.).unwrap();
+    assert!(http.refresh_at().is_some());
+
+    let base =
+        || json!({"access_token":"tok","expires_in":900,"scope":"trade","token_type":"bearer"});
+    let cases: [(&str, Value); 6] = [
+        ("expires_in is not a whole number", {
+            let mut v = base();
+            v["expires_in"] = json!(899.5);
+            v
+        }),
+        ("scope is not a string", {
+            let mut v = base();
+            v["scope"] = Value::Null;
+            v
+        }),
+        ("token_type is not bearer", {
+            let mut v = base();
+            v["token_type"] = json!("Bearer");
+            v
+        }),
+        ("access_token missing", {
+            let mut v = base();
+            v.as_object_mut().unwrap().remove("access_token");
+            v
+        }),
+        ("access_token contains whitespace", {
+            let mut v = base();
+            v["access_token"] = json!("secret value");
+            v
+        }),
+        ("result is not an object", json!("secret-value")),
+    ];
+    for (start, (reason, result)) in cases.into_iter().enumerate() {
+        let error = Session::new(Channel::Http)
+            .accept(result, 1000. + start as f64)
+            .unwrap_err();
+        assert!(error.contains(reason), "{error}");
+        assert!(!error.contains("secret"), "{error}");
+    }
+}
