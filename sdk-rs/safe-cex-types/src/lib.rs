@@ -3472,3 +3472,6 @@ pub mod exchange_metadata;
 
 pub mod prepared_order;
 pub use prepared_order::PreparedOrderOpts;
+
+/// Native UI sections appended to the SCXF account stream.
+pub mod store_frame_wire;
