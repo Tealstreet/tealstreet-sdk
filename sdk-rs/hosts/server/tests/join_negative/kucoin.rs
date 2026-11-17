@@ -60,9 +60,10 @@ impl<const TESTNET: bool> Venue for Kucoin<TESTNET> {
         let raw = f["d"]["wsAuth"]["toSign"].as_str().unwrap();
         let descriptor: Value = serde_json::from_str(raw).unwrap();
         assert!(
-            descriptor["broker_prefix"].is_null(),
+            descriptor["brokerPrefix"].is_null(),
             "no broker material in synthetic account"
         );
+        assert!(descriptor["slot"].is_null() || descriptor["slot"] == "primary", "synthetic account uses its primary slot");
         let payload = descriptor["payload"].as_str().unwrap();
         let secret = if other { OTHER_SECRET } else { SECRET };
         let batch =
