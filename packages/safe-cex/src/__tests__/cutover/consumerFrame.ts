@@ -150,13 +150,29 @@ export function consumerFrame(
         'fundingTime',
         'volume',
         'quoteVolume',
-      ].map((field) => data.tickers!.map((row) => row[field as keyof typeof row] as number)),
+        'midPrice',
+      ].map((field) => data.tickers!.map((row) => (row[field as keyof typeof row] as number) ?? NaN)),
+      [...data.tickers.map((row) => ref(row.symbol)), ...data.tickers.map((row) => ref(row.id))],
+      1,
+    );
+  if (data.tickers?.some((row) => row.observedAt))
+    table(
+      24,
+      [],
+      [
+        data.tickers.flatMap((row, index) => [
+          index,
+          ...(row.observedAt ?? [null, null, null]).map((time) => time ?? -Infinity),
+        ]),
+      ],
     );
   if (delta) table(4, [], [delta]);
   if (data.orders) {
     const rows = data.orders;
-    const columns: (keyof Pick<Order, 'price' | 'amount' | 'filled' | 'remaining' | 'lastUpdate' | 'takeProfit' | 'stopLoss'>)[] =
-      ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
+    const columns: (keyof Pick<
+      Order,
+      'price' | 'amount' | 'filled' | 'remaining' | 'lastUpdate' | 'takeProfit' | 'stopLoss'
+    >)[] = ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
     const status = ['open', 'closed', 'canceled', 'creating', 'updating', 'canceling'];
     const type = ['market', 'limit', 'conditional', 'stop_market', 'take_profit_market', 'trailing_stop_market'];
     const tif = [undefined, 'GoodTillCancel', 'ImmediateOrCancel', 'FillOrKill', 'PostOnly'];
@@ -182,7 +198,8 @@ export function consumerFrame(
         ...rows.map((row) => marketIndex(row.symbol)),
         ...rows.map(enums),
       ],
-      columns.map((field) => rows.map((row) => row[field] ?? NaN))
+      columns
+        .map((field) => rows.map((row) => row[field] ?? NaN))
         .concat([
           rows.map((row) => row.extra?.remainingNative ?? NaN),
           rows.map((row) => row.extra?.filledInPlacementUnits ?? NaN),
@@ -289,14 +306,14 @@ export function consumerFrame(
         ...rows.map((row) => [undefined, 'isolated', 'cross'].indexOf(row.marginType)),
       ],
       [rows.map((row) => row.buyLeverage), rows.map((row) => row.buyLeverage), rows.map((row) => row.sellLeverage)],
+      entries.map(([symbol]) => ref(symbol)),
+      1,
     );
   }
   if (events) {
     table(5, [0, 1, 1, 0], [[99, 2, 2, 101, 3, 3]]);
     table(6, [1, 0, ref('1m')], [[1_700_000_000, 100, 102, 99, 101, 5]]);
-    const fill = typeof events === 'object'
-      ? events
-      : { fillId: 'order-1', fillSymbol: marketSymbols[0] ?? 'BTCUSDT' };
+    const fill = typeof events === 'object' ? events : { fillId: 'order-1', fillSymbol: marketSymbols[0] ?? 'BTCUSDT' };
     const fills = new Uint8Array(56);
     const fillView = new DataView(fills.buffer);
     [1, ref('order-1'), 0, 0].forEach((word, i) => fillView.setUint32(i * 4, word, true));

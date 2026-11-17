@@ -1,26 +1,24 @@
 import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
+import type { StoreData } from '../generated/StoreData';
 import type { FetchedLeverage, MessageHandlerStatsType, OrderFillEvent } from '../types';
 import type { FrameBook } from './bookFrames';
 import type { FrameCandle } from './candleFrames';
-import type { StoreData } from '../generated/StoreData';
-import type { NativeDerivedFrame } from './nativeDerivedFrames';
 
-import { initialStoreData } from '../generated/StoreData';
 import { dequal } from 'dequal';
-import { TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
-import { WorkerFrameRecoveryScopes } from './workerFrameRecoveryScopes';
-import { readNativeDerivedSections } from './nativeDerivedFrames';
 
-import { LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
+import { LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
+import { initialStoreData } from '../generated/StoreData';
+import { readBalanceFrame } from './balanceFrames';
 import { BookFrames } from './bookFrames';
 import { readCandleFrame } from './candleFrames';
 import { readFillFrame } from './fillFrames';
-import { readBalanceFrame } from './balanceFrames';
 import { readMarketFrame } from './marketFrames';
+import { readNativeDerivedSections } from './nativeDerivedFrames';
 import { readOrderFrame } from './orderFrames';
 import { readPositionFrame } from './positionFrames';
-import { readStoreStatus, readStoreSettings } from './storeFrames';
-import { readTickerFrame, readTickerDeltaFrame, readTickerObservationFrame } from './tickerFrames';
+import { readStoreSettings, readStoreStatus } from './storeFrames';
+import { readTickerDeltaFrame, readTickerFrame, readTickerObservationFrame } from './tickerFrames';
+import { WorkerFrameRecoveryScopes } from './workerFrameRecoveryScopes';
 
 export type { FrameBook } from './bookFrames';
 export type { FrameCandle } from './candleFrames';
@@ -42,52 +40,112 @@ export type FrameListener = (data: StoreData, versions: FrameVersions) => void;
 
 export class FrameStore {
   private state: StoreData = { ...initialStoreData };
-  get latency(): StoreData['latency'] { return this.state.latency; }
-  get balance(): StoreData['balance'] { return this.state.balance; }
-  get markets(): StoreData['markets'] { return this.state.markets; }
-  get tickers(): StoreData['tickers'] { return this.state.tickers; }
-  get orders(): StoreData['orders'] { return this.state.orders; }
-  get starkConfig(): StoreData['starkConfig'] { return this.state.starkConfig; }
-  get zkLinkConfig(): StoreData['zkLinkConfig'] { return this.state.zkLinkConfig; }
-  get userData(): StoreData['userData'] { return this.state.userData; }
-  get positions(): StoreData['positions'] { return this.state.positions; }
-  get positionSettings(): StoreData['positionSettings'] { return this.state.positionSettings; }
-  get displayedPositions(): StoreData['displayedPositions'] { return this.state.displayedPositions; }
-  get displayedMargin(): StoreData['displayedMargin'] { return this.state.displayedMargin; }
-  get ordersRisk(): StoreData['ordersRisk'] { return this.state.ordersRisk; }
-  get activeChasers(): StoreData['activeChasers'] { return this.state.activeChasers; }
-  get activeTWAPs(): StoreData['activeTWAPs'] { return this.state.activeTWAPs; }
-  get loaded(): StoreData['loaded'] { return this.state.loaded; }
-  get options(): StoreData['options'] { return this.state.options; }
-  get updateIds(): StoreData['updateIds'] { return this.state.updateIds; }
-  get messageHandlerStats(): StoreData['messageHandlerStats'] { return this.state.messageHandlerStats; }
-  get requestStats(): StoreData['requestStats'] { return this.state.requestStats; }
-  get fetchedLeverage(): StoreData['fetchedLeverage'] { return this.state.fetchedLeverage; }
-  get socketHealth(): StoreData['socketHealth'] { return this.state.socketHealth; }
+  get latency(): StoreData['latency'] {
+    return this.state.latency;
+  }
+  get balance(): StoreData['balance'] {
+    return this.state.balance;
+  }
+  get markets(): StoreData['markets'] {
+    return this.state.markets;
+  }
+  get tickers(): StoreData['tickers'] {
+    return this.state.tickers;
+  }
+  get orders(): StoreData['orders'] {
+    return this.state.orders;
+  }
+  get starkConfig(): StoreData['starkConfig'] {
+    return this.state.starkConfig;
+  }
+  get zkLinkConfig(): StoreData['zkLinkConfig'] {
+    return this.state.zkLinkConfig;
+  }
+  get userData(): StoreData['userData'] {
+    return this.state.userData;
+  }
+  get positions(): StoreData['positions'] {
+    return this.state.positions;
+  }
+  get positionSettings(): StoreData['positionSettings'] {
+    return this.state.positionSettings;
+  }
+  get displayedPositions(): StoreData['displayedPositions'] {
+    return this.state.displayedPositions;
+  }
+  get displayedMargin(): StoreData['displayedMargin'] {
+    return this.state.displayedMargin;
+  }
+  get ordersRisk(): StoreData['ordersRisk'] {
+    return this.state.ordersRisk;
+  }
+  get activeChasers(): StoreData['activeChasers'] {
+    return this.state.activeChasers;
+  }
+  get activeTWAPs(): StoreData['activeTWAPs'] {
+    return this.state.activeTWAPs;
+  }
+  get loaded(): StoreData['loaded'] {
+    return this.state.loaded;
+  }
+  get options(): StoreData['options'] {
+    return this.state.options;
+  }
+  get updateIds(): StoreData['updateIds'] {
+    return this.state.updateIds;
+  }
+  get messageHandlerStats(): StoreData['messageHandlerStats'] {
+    return this.state.messageHandlerStats;
+  }
+  get requestStats(): StoreData['requestStats'] {
+    return this.state.requestStats;
+  }
+  get fetchedLeverage(): StoreData['fetchedLeverage'] {
+    return this.state.fetchedLeverage;
+  }
+  get socketHealth(): StoreData['socketHealth'] {
+    return this.state.socketHealth;
+  }
   private marketIndexRows = this.state.markets;
   private tickerIndexRows = this.state.tickers;
   private marketSymbolIndex: Record<string, StoreData['markets'][number]> = {};
   private marketIdIndex: Record<string, StoreData['markets'][number]> = {};
   private tickerSymbolIndex: Record<string, StoreData['tickers'][number]> = {};
   private tickerIdIndex: Record<string, StoreData['tickers'][number]> = {};
-  get marketsBySymbol() { this.indexMarkets(); return this.marketSymbolIndex; }
-  get marketsById() { this.indexMarkets(); return this.marketIdIndex; }
-  get tickersBySymbol() { this.indexTickers(); return this.tickerSymbolIndex; }
-  get tickersById() { this.indexTickers(); return this.tickerIdIndex; }
+  get marketsBySymbol() {
+    this.indexMarkets();
+    return this.marketSymbolIndex;
+  }
+  get marketsById() {
+    this.indexMarkets();
+    return this.marketIdIndex;
+  }
+  get tickersBySymbol() {
+    this.indexTickers();
+    return this.tickerSymbolIndex;
+  }
+  get tickersById() {
+    this.indexTickers();
+    return this.tickerIdIndex;
+  }
   private indexMarkets() {
     if (this.marketIndexRows === this.markets) return;
     this.marketIndexRows = this.markets;
-    this.marketSymbolIndex = Object.fromEntries(this.markets.map(row => [row.symbol, row]));
-    this.marketIdIndex = Object.fromEntries(this.markets.map(row => [row.id, row]));
+    this.marketSymbolIndex = Object.fromEntries(this.markets.map((row) => [row.symbol, row]));
+    this.marketIdIndex = Object.fromEntries(this.markets.map((row) => [row.id, row]));
   }
   private indexTickers() {
     if (this.tickerIndexRows === this.tickers) return;
     this.tickerIndexRows = this.tickers;
-    this.tickerSymbolIndex = Object.fromEntries(this.tickers.map(row => [row.symbol, row]));
-    this.tickerIdIndex = Object.fromEntries(this.tickers.map(row => [row.id, row]));
+    this.tickerSymbolIndex = Object.fromEntries(this.tickers.map((row) => [row.symbol, row]));
+    this.tickerIdIndex = Object.fromEntries(this.tickers.map((row) => [row.id, row]));
   }
-  getMarketsVersion() { return this.version('markets'); }
-  getTickersVersion() { return this.version('tickers'); }
+  getMarketsVersion() {
+    return this.version('markets');
+  }
+  getTickersVersion() {
+    return this.version('tickers');
+  }
 
   private patchTickers(rows: StoreData['tickers'], deltas: readonly (readonly number[])[]): StoreData['tickers'] {
     const result = [...rows];
@@ -111,8 +169,8 @@ export class FrameStore {
   private marketSymbols: string[] = [];
   private marketIds: string[] = [];
   private readonly bookFrames = new BookFrames();
-  private readonly bookErrors = new WeakMap<Frame, unknown>();
-  private readonly frameBooks = new WeakMap<Frame, FrameBook[]>();
+  private bookErrors = new WeakMap<Frame, unknown>();
+  private frameBooks = new WeakMap<Frame, FrameBook[]>();
   private readonly frameMarkets = new WeakMap<Frame, { symbols: string[]; ids: string[] }>();
   private readonly invalidMarketFrames = new WeakSet<Frame>();
   private marketsNeedSnapshot = false;
@@ -139,28 +197,55 @@ export class FrameStore {
   readonly recovery = new WorkerFrameRecoveryScopes();
   private sequence: number | undefined;
   private needsSnapshot = false;
+  private notifying = false;
+  private readonly notifications: Array<{ data: StoreData; versions: FrameVersions }> = [];
 
-  get data(): StoreData { return this.state; }
-  get seq(): number | undefined { return this.sequence; }
-  get snapshotRequired(): boolean { return this.needsSnapshot; }
-  version(section: FrameSection): number { return this.sectionVersions[section] ?? 0; }
+  private clearBookBaselines(): void {
+    this.bookFrames.clear();
+    this.frameBooks = new WeakMap();
+    this.bookErrors = new WeakMap();
+  }
+
+  get data(): StoreData {
+    return this.state;
+  }
+  get seq(): number | undefined {
+    return this.sequence;
+  }
+  get snapshotRequired(): boolean {
+    return this.needsSnapshot;
+  }
+  version(section: FrameSection): number {
+    return this.sectionVersions[section] ?? 0;
+  }
   get versions(): FrameVersions {
     return { ...this.sectionVersions };
   }
 
   subscribe(listener: FrameListener): () => void;
-  subscribe<K extends FrameSection>(section: K, listener: (value: StoreData[K], version: number, data: StoreData) => void): () => void;
-  subscribe<K extends FrameSection>(section: K | FrameListener, listener?: (value: StoreData[K], version: number, data: StoreData) => void): () => void {
-    const callback: FrameListener = typeof section === 'function' ? section : (data) => {
-      const version = this.version(section);
-      if (version !== previous) {
-        previous = version;
-        listener?.(data[section], version, data);
-      }
-    };
+  subscribe<K extends FrameSection>(
+    section: K,
+    listener: (value: StoreData[K], version: number, data: StoreData) => void,
+  ): () => void;
+  subscribe<K extends FrameSection>(
+    section: K | FrameListener,
+    listener?: (value: StoreData[K], version: number, data: StoreData) => void,
+  ): () => void {
+    const callback: FrameListener =
+      typeof section === 'function'
+        ? section
+        : (data, versions) => {
+            const version = versions[section] ?? 0;
+            if (version !== previous) {
+              previous = version;
+              listener?.(data[section], version, data);
+            }
+          };
     let previous = typeof section === 'function' ? 0 : this.version(section);
     this.listeners.add(callback);
-    return () => { this.listeners.delete(callback); };
+    return () => {
+      this.listeners.delete(callback);
+    };
   }
 
   private publish(changes: Partial<StoreData>, accountRead = false): void {
@@ -174,31 +259,50 @@ export class FrameStore {
     for (const key of Object.keys(changes)) replace(key as FrameSection);
     if (next === this.state) return;
     if (!accountRead && (next.orders !== this.state.orders || next.positions !== this.state.positions)) {
-      next = { ...next, updateIds: {
-        orders: this.state.updateIds.orders + Number(next.orders !== this.state.orders),
-        positions: this.state.updateIds.positions + Number(next.positions !== this.state.positions),
-      } };
+      next = {
+        ...next,
+        updateIds: {
+          orders: this.state.updateIds.orders + Number(next.orders !== this.state.orders),
+          positions: this.state.updateIds.positions + Number(next.positions !== this.state.positions),
+        },
+      };
       this.sectionVersions.updateIds = this.version('updateIds') + 1;
     }
     this.state = next;
+    this.notifications.push({ data: next, versions: this.versions });
+    if (this.notifying) return;
     const errors: unknown[] = [];
-    const versions = this.versions;
-    for (const listener of this.listeners) {
-      try { listener(next, versions); } catch (error) { errors.push(error); }
+    this.notifying = true;
+    try {
+      for (let entry = this.notifications.shift(); entry; entry = this.notifications.shift()) {
+        for (const listener of this.listeners) {
+          try {
+            listener(entry.data, entry.versions);
+          } catch (error) {
+            errors.push(error);
+          }
+        }
+      }
+    } finally {
+      this.notifying = false;
     }
     if (errors.length) throw new AggregateError(errors, 'FrameStore subscriber failed');
   }
 
   /** A transport snapshot establishes a new sequence domain; gaps refuse deltas. */
-  ingest(frame: NativeDerivedFrame, { snapshot = false, seq }: { snapshot?: boolean; seq?: number } = {}): void {
-    if (seq !== undefined && (!Number.isSafeInteger(seq) || seq < 0)) throw new FrameApplyError('Invalid frame sequence');
-    if (!snapshot && (this.needsSnapshot || (seq !== undefined && this.sequence !== undefined && seq !== this.sequence + 1))) {
+  ingest(frame: Frame, { snapshot = false, seq }: { snapshot?: boolean; seq?: number } = {}): void {
+    if (seq !== undefined && (!Number.isSafeInteger(seq) || seq < 0))
+      throw new FrameApplyError('Invalid frame sequence');
+    if (
+      !snapshot &&
+      (this.needsSnapshot || (seq !== undefined && this.sequence !== undefined && seq !== this.sequence + 1))
+    ) {
       this.needsSnapshot = true;
       this.invalidateMarketIdentity();
       throw new FrameApplyError('Frame sequence gap requires snapshot');
     }
     if (snapshot) {
-      this.bookFrames.clear();
+      this.clearBookBaselines();
       this.appliedSections = 0;
       this.marketSymbols = [];
       this.marketIds = [];
@@ -218,11 +322,10 @@ export class FrameStore {
     this.marketIds = [];
     this.marketsNeedSnapshot = false;
     this.nativeStatsGroups.clear();
-    this.bookFrames.clear();
+    this.clearBookBaselines();
     this.recovery.clear();
     this.publish(initialStoreData, true);
   }
-
 
   /** A frame-fed trading engine does not own its source's subscription diagnostics. */
   applyMessageHandlerStats(frame: Frame): void {
@@ -267,7 +370,8 @@ export class FrameStore {
   }
 
   /** Forwarding workers skip book reconstruction before transferring the frame. */
-  apply(frame: NativeDerivedFrame, applyBooks = true, snapshot = false): void {
+  apply(frame: Frame, applyBooks = true, snapshot = false): void {
+    if (this.needsSnapshot) throw new FrameApplyError('Frame sequence gap requires snapshot');
     const update: { -readonly [K in keyof StoreData]?: StoreData[K] } = snapshot ? { ...initialStoreData } : {};
 
     const errors: unknown[] = [];
@@ -278,6 +382,7 @@ export class FrameStore {
         read();
       } catch (error) {
         this.appliedSections &= ~section;
+        accepted &= ~section;
         errors.push(error);
       }
     };
@@ -311,21 +416,28 @@ export class FrameStore {
     if (marketsFailed) {
       this.invalidateMarketIdentity();
       this.invalidMarketFrames.add(frame);
+      // A rejected catalogue cannot replace the last accepted indexed sections.
+      delete update.markets;
+      delete update.tickers;
+      delete update.orders;
+      delete update.positions;
       if (!errors.length) errors.push(new Error('Market identity requires a snapshot'));
     }
     attempt(() => {
       if (marketsFailed) return;
       tickers = frame.tickers();
-      const rows = readTickerFrame(tickers, (index) => update.markets
-        ? update.markets[index]
-        : this.marketsBySymbol[resolveSymbol(index)]);
-      if (rows) { update.tickers = rows; accepted |= LOADED_FLAG.TICKERS; }
+      const rows = readTickerFrame(tickers, (index) =>
+        update.markets ? update.markets[index] : this.marketsBySymbol[resolveSymbol(index)],
+      );
+      if (rows) {
+        update.tickers = rows;
+        accepted |= LOADED_FLAG.TICKERS;
+      }
     }, LOADED_FLAG.TICKERS);
 
     attempt(() => {
       if (marketsFailed) return;
-      const deltas = readTickerDeltaFrame(frame,
-        (update.tickers ?? this.tickers).length, Boolean(tickers));
+      const deltas = readTickerDeltaFrame(frame, (update.tickers ?? this.tickers).length, Boolean(tickers));
       if (deltas) update.tickers = this.patchTickers(update.tickers ?? this.tickers, deltas);
     }, LOADED_FLAG.TICKERS);
 
@@ -342,13 +454,34 @@ export class FrameStore {
     attempt(() => {
       if (marketsFailed) return;
       const rows = readOrderFrame(frame, this.data, update.markets);
-      if (rows) { update.orders = rows; accepted |= LOADED_FLAG.ORDERS; }
+      if (rows) {
+        update.orders = rows;
+        accepted |= LOADED_FLAG.ORDERS;
+      }
     }, LOADED_FLAG.ORDERS);
 
     attempt(() => {
       if (marketsFailed) return;
       const positions = readPositionFrame(frame, this.data, update.markets);
-      if (positions) { update.positions = positions; accepted |= LOADED_FLAG.POSITIONS; }
+      if (positions) {
+        update.positions = positions;
+        // POSITIONS carries the native identity/settings independently of exposure.
+        // Retain those generated settings by exact ID after authoritative closure.
+        const settings = { ...(update.positionSettings ?? this.positionSettings) };
+        for (const row of positions) {
+          settings[row.id] = {
+            ...settings[row.id],
+            id: row.id,
+            symbol: row.symbol,
+            side: row.side,
+            leverage: row.leverage,
+            ...(row.marginType !== undefined && { marginType: row.marginType }),
+            ...(row.positionMode !== undefined && { positionMode: row.positionMode }),
+          };
+        }
+        update.positionSettings = settings;
+        accepted |= LOADED_FLAG.POSITIONS;
+      }
     }, LOADED_FLAG.POSITIONS);
 
     attempt(() => {
@@ -378,12 +511,19 @@ export class FrameStore {
       // `fetchedLeverage` when a market has no position.
       const settings = frame.settings();
       if (settings) {
-        update.fetchedLeverage = readStoreSettings(settings,
-          (update.options ?? this.options).isHedged, resolveSymbol);
+        update.fetchedLeverage = readStoreSettings(settings, (update.options ?? this.options).isHedged, resolveSymbol);
       }
     });
 
-    readNativeDerivedSections(frame, (key, value) => { update[key] = value; }, error => { errors.push(error); });
+    readNativeDerivedSections(
+      frame,
+      (key, value) => {
+        update[key] = value;
+      },
+      (error) => {
+        errors.push(error);
+      },
+    );
     this.frameMarkets.set(frame, { symbols, ids });
     if (applyBooks && !marketsFailed) {
       try {
@@ -423,7 +563,11 @@ export class FrameStore {
       }
     }
     if (errors.length) {
-      const error = new FrameApplyError(errors.map(String).join('; '), bookRejected, errors.length > (bookRejected ? 1 : 0));
+      const error = new FrameApplyError(
+        errors.map(String).join('; '),
+        bookRejected,
+        errors.length > (bookRejected ? 1 : 0),
+      );
       if (error.otherRejected) this.recovery.reject('frame', error);
       throw error;
     }

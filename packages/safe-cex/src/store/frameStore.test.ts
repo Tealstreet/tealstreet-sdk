@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
+import { nativeFixture, nativeStoreFrame } from '../__tests__/cutover/nativeFixture';
 import fixtures from '../../../../sdk-rs/engine/tests/fixtures/store-frames.json';
+import { PositionSide } from '../generated/PositionSide';
 import { FrameStore } from './frameStore';
 
 const frame = (bytes: number[]) => new Frame(Uint8Array.from(bytes).buffer);
@@ -63,10 +66,75 @@ describe('FrameStore native state', () => {
     expect(store.fetchedLeverage).toBe(leverage);
     expect(store.hasAccountState).toBe(true);
     const observed: boolean[] = [];
-    store.subscribe(() => { throw new Error('subscriber'); });
-    store.subscribe(() => { observed.push(true); });
+    store.subscribe(() => {
+      throw new Error('subscriber');
+    });
+    store.subscribe(() => {
+      observed.push(true);
+    });
     expect(() => store.ingest(frame(fixtures.empty))).toThrow('subscriber failed');
     expect(observed).toEqual([true]);
     expect(store.snapshotRequired).toBe(false);
   });
+});
+
+it('delivers reentrant section notifications in version order with immutable snapshots', () => {
+  const store = new FrameStore();
+  const seen: Array<[number, number]> = [];
+  store.subscribe('balance', (balance) => {
+    if (balance.total === 1) store.ingest(nativeFixture({ balance: { ...balance, total: 2 } }));
+  });
+  store.subscribe('balance', (balance, version) => seen.push([balance.total, version]));
+  store.ingest(nativeFixture({ balance: { used: 0, free: 0, total: 1, upnl: 0 } }));
+  expect(seen).toEqual([
+    [1, 1],
+    [2, 2],
+  ]);
+});
+
+it('applies independent derived sections when one native section is malformed', () => {
+  const store = new FrameStore();
+  const bytes = nativeStoreFrame({
+    socketHealth: { publicHealthy: true, privateHealthy: false, publicInitialized: true, privateInitialized: false },
+    ordersRisk: {},
+    displayedMargin: { longExposure: null, shortExposure: 5, totalNotional: null },
+  });
+  const view = new DataView(bytes);
+  for (let at = 16; at < bytes.byteLength; at += 8 + view.getUint32(at + 4, true)) {
+    if (view.getUint16(at, true) === 29) view.setUint8(at + 12, 255);
+  }
+  expect(() => store.ingest(new Frame(bytes))).toThrow('invalid native store tag');
+  expect(store.socketHealth?.publicHealthy).toBe(true);
+  expect(store.displayedMargin).toEqual({ longExposure: null, shortExposure: 5, totalNotional: null });
+});
+
+it('retains only confirmed native settings after closing positions and clears them on reset', () => {
+  const store = new FrameStore();
+  store.ingest(
+    nativeFixture({
+      positions: [
+        {
+          id: 'native-id',
+          symbol: 'BTC',
+          side: PositionSide.Long,
+          contracts: 2,
+          entryPrice: 10,
+          notional: 20,
+          leverage: 3,
+          unrealizedPnl: 1,
+          liquidationPrice: null,
+        },
+      ],
+    }),
+  );
+  store.ingest(nativeFixture({ positions: [] }));
+  expect(store.positionSettings['native-id']).toEqual({
+    id: 'native-id',
+    symbol: 'BTC',
+    side: PositionSide.Long,
+    leverage: 3,
+  });
+  expect(store.positions).toEqual([]);
+  store.reset();
+  expect(store.positionSettings).toEqual({});
 });

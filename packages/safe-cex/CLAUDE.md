@@ -1,3 +1,15 @@
+# Native store cutover (2026-11-17)
+
+Account state has one native path: Rust SCXF -> pure-JS wire reader -> FrameStore
+-> generated StoreData. FrameStore supplies immutable section identities and
+typed versioned subscriptions. Native worker snapshots carry exact bytes;
+there is no mutable Store, DefaultStore, FrameApplier, serialized seed or
+worker op:store path. Page mirrors apply source frames directly, including
+native derived sections; their optional signing engine cannot republish state.
+Public-only mirrors need no page engine. Mobile is DELEGATED-only with no wasm
+loader. Read `src/store/CLAUDE.md` for current state/recovery/unit contracts;
+older store-bridge notes in this historical package guide are superseded.
+
 # CLAUDE.md - safe-cex Package
 
 The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.

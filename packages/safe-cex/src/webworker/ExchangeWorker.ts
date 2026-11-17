@@ -4,8 +4,6 @@ import type { Exchange } from '../exchanges/base';
 import type { ExchangeName, ExchangeOptions, OrderFillEvent, StoreData, Ticker } from '../types';
 import type { StoreWorkerCommandProgress, StoreWorkerPayload } from './StoreWorkerPayload';
 import type { TwapOwner, TwapWorkerContext } from './twap/TwapOwner';
-import { captureTwapOwner } from './twap/TwapOwner';
-
 
 import { onTunnelLaneFallback, tunnelLanePort } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { classifiedError, exchangeErrorTags, historyErrorDiagnostics, isErrorReported } from '../commandOutcome';
@@ -32,6 +30,7 @@ import { OrderBookSubscriptionsHandler } from './handlers/OrderBookSubscriptions
 import { TwapHandler } from './handlers/TwapHandler';
 import { UiStateHandler } from './handlers/UiStateHandler';
 import { UpdatePositionsHandler } from './handlers/UpdatePositionsHandler';
+import { captureTwapOwner } from './twap/TwapOwner';
 
 // The tunnel lane is per realm, so one live ExchangeWorker reports this realm's fallback.
 const liveExchangeWorkers = new Set<ExchangeWorker>();
@@ -128,7 +127,6 @@ export class ExchangeWorker {
   private _recovering = false;
   private _recoveryAttempted = false;
   private _recoveryTimer: ReturnType<typeof setTimeout> | null = null;
-  private _recoveryUpdateIds: StoreData['updateIds'] | undefined;
   private _startTimedOut = false;
   private _startAnswer: string | undefined;
   private _startRetries = 0;
@@ -183,8 +181,6 @@ export class ExchangeWorker {
     this._sessionKey = sessionKey;
     this.instanceId = instanceId;
     liveExchangeWorkers.add(this);
-
-
   }
 
   /**
@@ -392,7 +388,6 @@ export class ExchangeWorker {
       this._mainDecodesFrames = this.forwardFrames(generation, true);
       // A recovered exchange keeps forwarding where main asked for this account's frames.
 
-
       // When privateOnly, disable public websocket connections before start().
       // Public data (tickers, orderbook, OHLCV) is provided by a shared public exchange.
       if (this._options.privateOnly) {
@@ -515,7 +510,6 @@ export class ExchangeWorker {
       const frame = this._exchange.snapshotFrame();
       if (frame) this._ctx.postMessage({ op: 'frame', data: frame, snapshot: true }, [frame]);
     }
-
   }
 
   /**
@@ -820,9 +814,6 @@ export class ExchangeWorker {
     // Startup belongs to store.webworker's !started cleanup. Never race it by
     // scheduling a replacement before that initial start has returned.
     if (this._stopped) return;
-    // BaseExchange.dispose resets its store. Preserve the last native freshness
-    // counters before releasing it, so the replacement cannot rewind them.
-    this._recoveryUpdateIds = { ...this._store.updateIds };
     if (!this._started || this._recovering) {
       // An op that beat startup can have started a Rust TWAP already.
       this._finishRustTwaps();
@@ -855,10 +846,9 @@ export class ExchangeWorker {
     if (cannotRecover) {
       this._stopped = true;
       this._recovering = false;
-      const message =
-        !ownerCurrent
-          ? 'TWAP owner changed; reinitialize the account worker.'
-          : this._options.publicFeed?.mode === 'shared'
+      const message = !ownerCurrent
+        ? 'TWAP owner changed; reinitialize the account worker.'
+        : this._options.publicFeed?.mode === 'shared'
           ? 'Rust shared public feed requires a fresh provider attachment and account init after engine failure.'
           : 'Rust engine recovery exhausted; reinitialize the account to retry.';
       this._ctx.postMessage({ op: 'warning', data: [message] });
@@ -893,7 +883,6 @@ export class ExchangeWorker {
     }
     this._startTimedOut = false;
     this._startRetries++;
-    this._recoveryUpdateIds = { ...this._store.updateIds };
     this._recovering = true;
     this._deferInterruptedRequests({
       message: 'Exchange start timed out; interrupted operation outcomes are unknown and were not replayed.',

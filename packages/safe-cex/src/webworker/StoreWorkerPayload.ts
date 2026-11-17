@@ -52,9 +52,7 @@ export type StoreWorkerIncomingOp =
 
 /** Ops the worker sends to the main thread */
 export type StoreWorkerOutgoingOp =
-  // Store
-  | 'store:delta'
-  // One Rust engine flush frame (an ArrayBuffer), see store/frameApplier
+  // One Rust engine flush frame (an ArrayBuffer), see store/frameStore
   | 'frame'
   // Orderbook
   | 'listenOrderBook'

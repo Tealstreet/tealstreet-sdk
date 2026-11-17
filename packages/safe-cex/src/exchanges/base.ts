@@ -29,7 +29,6 @@ import { forEachSeries, mapSeries } from 'p-iteration';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { classifiedError, deserializeCommandError, exchangeErrorTags, markErrorReported } from '../commandOutcome';
-import { workerErrorProtectionTags } from '../utils/workerErrorProtectionTags';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { withHistoryCompleteness } from '../historyCompleteness';
@@ -82,6 +81,7 @@ import { readHttpFailureContext, recordHttpFailure } from '../utils/httpFailureC
 import { adjust } from '../utils/safe-math';
 import { signHttpCapture } from '../utils/signHttpCapture';
 import { getTickIntervalMultiplier } from '../utils/tickIntervalOverride';
+import { workerErrorProtectionTags } from '../utils/workerErrorProtectionTags';
 import { claimWriteTiming, emitWriteTiming, TIMED_WRITE_METHODS } from '../writeTiming';
 import { BaseWebSocket } from './base.ws';
 import {
@@ -894,7 +894,6 @@ export class BaseExchange implements Exchange {
     try {
       this.accountMarketOverlay = await load();
       if (this.isDisposed || this.store.markets.length === 0) return;
-
     } catch (err: any) {
       const message = err?.response?.data?.msg || err?.message;
       if (err instanceof Error) this.emitAndLogError(err, message ? `Exchange Error: ${message}` : undefined);
@@ -1050,7 +1049,6 @@ export class BaseExchange implements Exchange {
     const removed = Array.from(oldMarkets.values()).filter((m) => !newMarkets.find((n) => n.id === m.id));
 
     if (added.length > 0 || removed.length > 0) {
-
       this.emitter.emit('markets:changed', { added, removed });
       this.log(
         `Markets refreshed: +${added.length} -${removed.length} (total: ${newMarkets.length})`,
@@ -1753,7 +1751,6 @@ export class BaseExchange implements Exchange {
     };
   }
 
-
   /** Engine-backed venues take the record a snapshot frame carries; others have none. */
   protected adoptEngineCapabilities(_capabilities: EngineCapabilities): void {}
   private workerFrameRecoveryPending = false;
@@ -1813,11 +1810,11 @@ export class BaseExchange implements Exchange {
    * to this store and emit its books, candles and fills as the worker's
    * object messages are emitted, so subscribers cannot tell the difference.
    */
-  applyWorkerFrame(buffer: ArrayBuffer) {
-    this.applyWorkerFrameBuffer(buffer, true);
+  applyWorkerFrame(buffer: ArrayBuffer, snapshot = false): boolean {
+    return this.applyWorkerFrameBuffer(buffer, true, snapshot);
   }
 
-  private applyWorkerFrameBuffer(buffer: ArrayBuffer, recover: boolean) {
+  private applyWorkerFrameBuffer(buffer: ArrayBuffer, recover: boolean, snapshot = false): boolean {
     const applier = this.store;
     let frame: Frame | undefined;
     let needsSnapshot = false;
@@ -1854,7 +1851,7 @@ export class BaseExchange implements Exchange {
         diagnosticConsole.error('Engine capabilities section failed', error);
       }
       try {
-        applier.apply(decoded);
+        applier.ingest(decoded, { snapshot });
         if (applier.hasMarketIdentity && decoded.markets()) this.workerFrameRejectedSections.acceptMarketSnapshot();
       } catch (error) {
         if (error instanceof FrameApplyError) {
@@ -1909,6 +1906,7 @@ export class BaseExchange implements Exchange {
       }
     }
     if (needsSnapshot && recover) this.requestWorkerFrameRecovery();
+    return !needsSnapshot;
   }
 
   private requestWorkerFrameRecovery() {
@@ -2163,7 +2161,6 @@ export class BaseExchange implements Exchange {
       if (this.isDisposed) return [];
 
       delete this._fetchPositionForSymbolPromise[symbol];
-
     }
     return foundPositions;
   };
