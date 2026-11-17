@@ -586,3 +586,75 @@ fn an_excluded_merged_spot_row_refuses_while_its_sibling_is_unresolved() {
     assert_missing(&ask(&mut e, 1201., 122, "UBTC/USDC", None), 122);
     assert!(results(&ask(&mut e, 1202., 123, "UETH/USDC", Some(1000)), 123).is_empty());
 }
+
+fn standalone_spot_read(eth_price: &str) -> Engine<Hyperliquid> {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.start(1000.);
+    let spot = request(&prepared_now(&mut e), "spotMetaAndAssetCtxs");
+    let mut catalogue: serde_json::Value =
+        serde_json::from_str(&two_spot_rows(serde_json::json!([
+            {"coin":"@11", "midPx":null},
+            {"coin":"@22", "midPx":eth_price},
+            {"coin":"@33", "midPx":"150", "markPx":"151"}
+        ])))
+        .unwrap();
+    catalogue[0]["tokens"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"name":"SOL", "index":3, "szDecimals":2}));
+    catalogue[0]["universe"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"name":"@33", "index":33, "tokens":[3,0]}));
+    reply(&mut e, 1050., &spot, &catalogue.to_string());
+    prepared_now(&mut e);
+    assert!(e.store().market("SOL/USDC").is_some());
+    e
+}
+
+#[test]
+fn standalone_spot_exclusion_refuses_despite_a_malformed_sibling() {
+    let mut e = standalone_spot_read("malformed");
+    assert!(e.store().market("UBTC/USDC").is_none());
+    assert_missing(&ask(&mut e, 1100., 124, "UBTC/USDC", Some(100)), 124);
+}
+
+#[test]
+fn standalone_spot_settled_exclusion_stays_immediate() {
+    let mut e = standalone_spot_read("3000");
+    assert_missing(&ask(&mut e, 1100., 125, "UBTC/USDC", Some(100)), 125);
+}
+
+#[test]
+fn standalone_spot_usable_sibling_reads_while_unresolved_row_keeps_its_deadline() {
+    let mut e = standalone_spot_read("malformed");
+    let waiting = ask(&mut e, 1100., 126, "UETH/USDC", Some(100));
+    assert!(results(&waiting, 126).is_empty());
+    no_candles(&waiting);
+    let timer = waiting
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1200. => Some(*timer),
+            _ => None,
+        })
+        .expect("original standalone discovery deadline");
+    let candles = request(
+        &ask(&mut e, 1101., 127, "SOL/USDC", Some(100)),
+        "candleSnapshot",
+    );
+    assert!(candles.body.as_deref().unwrap().contains(r#""coin":"@33""#));
+    reply(&mut e, 1102., &candles, "[]");
+    assert_eq!(results(&prepared_now(&mut e), 127), vec![Ok("[]".into())]);
+    e.handle(1200., Event::TimerFired { timer });
+    let actions = prepared_now(&mut e);
+    let terminal = results(&actions, 126);
+    assert_eq!(terminal.len(), 1);
+    assert_eq!(
+        terminal[0].as_ref().unwrap_err().kind,
+        Some(ErrorKind::Timeout)
+    );
+    no_candles(&actions);
+}

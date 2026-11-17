@@ -50,7 +50,7 @@ impl Hyperliquid {
 
     fn candle_discovery_pending(&self, symbol: &str) -> bool {
         if self.spot {
-            return self.core_discovery_incomplete;
+            return self.core_discovery_incomplete && !self.candle_spot_excluded.contains(symbol);
         }
         if let Some(coin) = symbol.strip_suffix("-PERP") {
             let native = coin.replace('|', ":").to_ascii_lowercase();

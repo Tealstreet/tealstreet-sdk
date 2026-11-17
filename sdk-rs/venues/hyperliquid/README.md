@@ -60,6 +60,8 @@ unrelated DEX is still loading. Failed/malformed discovery is not proof of absen
 Optional spot publication is not completion: every universe row must resolve to
 a usable market or explicit exclusion. A malformed or missing context keeps the
 original read bound; usable siblings publish and explicit exclusions still refuse.
+Standalone spot records the same per-row exclusion facts as merged spot, so an
+excluded row refuses immediately even while a malformed sibling remains unresolved.
 
 The wait owns its original command Context and timer, capped at 20 seconds and
 any shorter caller bound. Discovery and HTTP share that deadline; neither arrival

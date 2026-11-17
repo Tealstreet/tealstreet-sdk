@@ -1763,6 +1763,7 @@ impl Venue for Hyperliquid {
                 });
                 self.core_discovery_incomplete = !complete;
                 if let Some(meta) = &meta {
+                    self.record_spot_candle_catalog(meta, &markets, &excluded);
                     self.register_spot(cx, meta, &markets);
                 }
                 if complete || !markets.is_empty() {
