@@ -6,6 +6,168 @@ const REJECTED: &str = r#"{"event":"auth","success":false,"message":"bad key"}"#
 const ACCEPTED: &str = r#"{"event":"auth","success":true}"#;
 const PONG: &str = r#"{"event":"pong"}"#;
 
+fn auth_reply_actions(frame: &str) -> Vec<Action> {
+    let (mut engine, socket, now, _) = started();
+    engine.store_mut().set_balance(Balance {
+        total: 42.0,
+        ..Default::default()
+    });
+    engine.handle(
+        now + 1.0,
+        Event::WsMessage {
+            socket,
+            text: frame,
+        },
+    );
+    assert_eq!(engine.store().balance().total, 42.0);
+    engine.drain_actions().collect()
+}
+
+fn auth_notice(actions: &[Action]) -> &safe_cex_engine::LogEvent {
+    actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::AUTH_REJECTED =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("auth refusal notice")
+}
+
+#[test]
+fn code_less_signature_error_has_a_closed_reason_without_inventing_a_code() {
+    let actions =
+        auth_reply_actions(r#"{"event":"auth","success":false,"errorMsg":"signature error"}"#);
+    let event = auth_notice(&actions);
+    assert_eq!(
+        event.message,
+        "WOO X private websocket authentication failed: invalid signature"
+    );
+    assert!(
+        event
+            .fields
+            .contains(&("venueMessage", "invalid signature".into()))
+    );
+    assert!(event.fields.contains(&("kind", "authInvalid".into())));
+    assert!(event.fields.iter().all(|(key, _)| *key != "venueCode"));
+}
+
+#[test]
+fn signature_error_keeps_supplied_unknown_code_and_numeric_status() {
+    let actions = auth_reply_actions(
+        r#"{"event":"auth","success":false,"errorMsg":"signature error","code":"-9999","status":"401"}"#,
+    );
+    let event = auth_notice(&actions);
+    assert_eq!(
+        event.message,
+        "WOO X private websocket authentication failed (WOO code -9999) (status 401): invalid signature"
+    );
+    assert!(event.fields.contains(&("venueCode", "-9999".into())));
+    assert!(
+        event
+            .fields
+            .contains(&("venueMessage", "invalid signature".into()))
+    );
+}
+
+#[test]
+fn recognized_numeric_auth_reason_takes_precedence_over_message_class() {
+    for (code, reason) in [
+        (-1001, "invalid API key or signature format"),
+        (
+            -1002,
+            "unauthorized: invalid key, insufficient permission, expired or revoked key",
+        ),
+        (-1003, "rate limit exceeded"),
+        (-1000, "unknown venue error"),
+        (-1011, "venue RPC connection unavailable"),
+        (-1012, "venue RPC request rejected"),
+    ] {
+        let frame = serde_json::json!({"event":"auth","success":false,"code":code,"status":401,"errorMsg":"signature error"}).to_string();
+        let actions = auth_reply_actions(&frame);
+        let event = auth_notice(&actions);
+        assert!(event.message.ends_with(reason), "{event:?}");
+        assert!(
+            event
+                .fields
+                .contains(&("venueCode", code.to_string().into()))
+        );
+        assert!(event.message.contains("status 401"));
+    }
+}
+
+#[test]
+fn unknown_or_non_text_error_messages_stay_generic_and_private() {
+    for error in [
+        serde_json::json!("Signature error"),
+        serde_json::json!("signature error "),
+        serde_json::json!("signature error private-marker"),
+        serde_json::json!("IP not allowed private-marker"),
+        serde_json::json!({"private-marker": "signature error"}),
+        serde_json::json!(["signature error"]),
+        serde_json::json!(123),
+        serde_json::json!(false),
+        serde_json::Value::Null,
+    ] {
+        let frame = serde_json::json!({"event":"auth","success":false,"errorMsg":error,
+            "message":"private-marker", "params":{"apikey":"private-marker","sign":"private-marker"}}).to_string();
+        let actions = auth_reply_actions(&frame);
+        let event = auth_notice(&actions);
+        assert_eq!(
+            event.message,
+            "WOO X private websocket authentication failed: unclassified auth refusal"
+        );
+        assert!(!format!("{actions:?}").contains("private-marker"));
+    }
+}
+
+#[test]
+fn malformed_message_field_does_not_discard_existing_numeric_evidence() {
+    for error in [
+        serde_json::json!({"private-marker":true}),
+        serde_json::json!([1, 2]),
+        serde_json::json!(false),
+    ] {
+        let frame = serde_json::json!({"event":"auth","success":false,"errorMsg":error,"code":-1002,"status":403}).to_string();
+        let actions = auth_reply_actions(&frame);
+        let event = auth_notice(&actions);
+        assert!(event.message.ends_with(
+            "unauthorized: invalid key, insufficient permission, expired or revoked key"
+        ));
+        assert!(event.message.contains("status 403"));
+        assert!(event.fields.contains(&("venueCode", "-1002".into())));
+        assert!(!format!("{actions:?}").contains("private-marker"));
+    }
+}
+
+#[test]
+fn message_class_changes_neither_rejection_actions_nor_success_admission() {
+    let non_diagnostics = |actions: Vec<Action>| {
+        format!(
+            "{:?}",
+            actions
+                .into_iter()
+                .filter(|action| !matches!(action, Action::Notice(_)))
+                .collect::<Vec<_>>()
+        )
+    };
+    assert_eq!(
+        non_diagnostics(auth_reply_actions(REJECTED)),
+        non_diagnostics(auth_reply_actions(
+            r#"{"event":"auth","success":false,"errorMsg":"signature error"}"#
+        ))
+    );
+    assert_eq!(
+        non_diagnostics(auth_reply_actions(ACCEPTED)),
+        non_diagnostics(auth_reply_actions(
+            r#"{"event":"auth","success":true,"errorMsg":{"private-marker":true}}"#
+        ))
+    );
+}
+
 #[test]
 fn rejected_login_keeps_only_vendor_code_status_and_closed_reason() {
     let (mut engine, socket, now, _) = started();
