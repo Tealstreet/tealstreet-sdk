@@ -72,6 +72,10 @@ endpoints. The adapter now routes UTA for **livenet `bitget` USDT-futures** and
   list, and Bitget documents UTA futures order `marginMode` as defaulting to
   `crossed`, so metadata fallback must still return `holdMode` plus cross
   margin instead of blocking order placement.
+  That documented margin-mode fallback does not supply leverage. Native optional
+  leverage reads return `null` for an omitted fresh/flat symbol without prior
+  numeric rails; metadata enrichment retains unknown leverage without warning.
+  Real read failures and omissions for known settings/open positions remain errors.
 - Standalone TP/SL placement, open-order fetch, and cancel use v3 strategy
   endpoints (`type: "tpsl"`; `tpslMode: "full"` without `qty`, or
   `tpslMode: "partial"` with base-coin `qty`). Bitget's docs describe both
