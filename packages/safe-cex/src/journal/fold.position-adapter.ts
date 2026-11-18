@@ -45,10 +45,7 @@ export type FoldPositionAdapterDeps = {
   resolveFunding?: (interval: PositionInterval) => { funding: number; attributed: boolean };
 };
 
-export const mapFoldedInterval = (
-  interval: PositionInterval,
-  deps: FoldPositionAdapterDeps,
-): PositionRecord | null => {
+export const mapFoldedInterval = (interval: PositionInterval, deps: FoldPositionAdapterDeps): PositionRecord | null => {
   // Still-open positions are not journal entries. They are emitted by the fold so a caller
   // can see a symbol still carries size; they are not round trips.
   if (interval.closedAt === undefined) return null;
@@ -74,16 +71,25 @@ export const mapFoldedInterval = (
   const settleCurrency = deps.resolveSettleCurrency(interval.symbol);
   // A BNB charge is not a USDT cost. Without historical FX, refuse the fold
   // rather than publish mixed units or silently omit this closed position.
-  if (interval.feeCurrencies.some((currency) => currency !== settleCurrency)) {
+  if (interval.feeCurrencies.some((currency) => !currency || currency !== settleCurrency)) {
     throw new Error('journal fold: fee currency conversion is unavailable');
+  }
+
+  // A native execution can flatten this symbol+leg only once. Times cannot identify a
+  // lifecycle: even native millisecond timestamps can be shared by several round trips.
+  // Refuse missing identity instead of emitting a colliding key or silently dropping money.
+  if (!interval.closingExecutionId) {
+    throw new Error('journal fold: closing execution ID is required for stable position identity');
   }
 
   const funding = deps.resolveFunding?.(interval);
 
   return {
-    // The fold can produce several round trips per symbol+leg in one window, and a flip
-    // makes two of them share an instant, so the close time alone is not an identity.
-    key: `${deps.account}|${interval.symbol}|${interval.positionSide}|${interval.openedAt}|${interval.closedAt}`,
+    // Version the identity separately from timestamps and response order. A partial
+    // lookback may change the visible opening fill, but never the native final close.
+    key: ['fold-v2', deps.account, interval.symbol, interval.positionSide, interval.closingExecutionId]
+      .map(encodeURIComponent)
+      .join('|'),
     account: deps.account,
     symbol: interval.symbol,
     settleCurrency,

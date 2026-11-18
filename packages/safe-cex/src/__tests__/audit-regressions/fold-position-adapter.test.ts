@@ -14,6 +14,7 @@ const interval = (over: Partial<PositionInterval> = {}): PositionInterval => ({
   side: PositionSide.Long,
   openedAt: 1_000_000,
   closedAt: 2_000_000,
+  closingExecutionId: '2',
   maxSize: 1,
   closedSize: 1,
   complete: true,
@@ -88,6 +89,7 @@ describe('folded-interval position adapter (binance / hyperliquid)', () => {
   it('builds a whole round trip end-to-end from raw fills', () => {
     const intervals = reconstructPositionIntervals([
       {
+        id: '1',
         symbol: 'BTCUSDT',
         timestamp: 1_000,
         price: 100,
@@ -97,6 +99,7 @@ describe('folded-interval position adapter (binance / hyperliquid)', () => {
         commissionAsset: 'USDT',
       },
       {
+        id: '2',
         symbol: 'BTCUSDT',
         timestamp: 2_000,
         price: 110,
@@ -121,9 +124,32 @@ describe('folded-interval position adapter (binance / hyperliquid)', () => {
 });
 
 describe('folded fees retain their currency boundary', () => {
+  it.each([0.01, -0.01])('refuses an unlabeled nonzero fee or rebate (%s)', (commission) => {
+    const [folded] = reconstructPositionIntervals([
+      { id: 'unlabeled-open', symbol: 'BTCUSDT', timestamp: 1_000, price: 100, qty: 1,
+        side: OrderSide.Buy, commission, realizedPnl: 0 },
+      { id: 'labeled-close', symbol: 'BTCUSDT', timestamp: 2_000, price: 110, qty: 1,
+        side: OrderSide.Sell, commission: 0.01, commissionAsset: 'USDT', realizedPnl: 10 },
+    ]);
+    expect(() => mapFoldedInterval(folded, deps)).toThrow(/fee currency conversion/);
+  });
+
+  it('refuses both intervals sharing an unlabeled nonzero flip fee', () => {
+    const folded = reconstructPositionIntervals([
+      { id: 'open', timestamp: 1_000, side: OrderSide.Buy, qty: 1, commission: 0.1, commissionAsset: 'USDT' },
+      { id: 'flip', timestamp: 2_000, side: OrderSide.Sell, qty: 2, commission: 0.2 },
+      { id: 'close', timestamp: 3_000, side: OrderSide.Buy, qty: 1, commission: 0.1, commissionAsset: 'USDT' },
+    ].map((fill) => ({ ...fill, symbol: 'BTCUSDT', price: 100, realizedPnl: 0 })));
+    expect(folded).toHaveLength(2);
+    for (const interval of folded) {
+      expect(() => mapFoldedInterval(interval, deps)).toThrow(/fee currency conversion/);
+    }
+  });
+
   const roundTrip = (openingAsset: string, closingAsset: string, openingFee = 0.01, closingFee = 0.01) =>
     reconstructPositionIntervals([
       {
+        id: 'fee-open',
         symbol: 'BTCUSDT',
         timestamp: 1_000,
         price: 100,
@@ -134,6 +160,7 @@ describe('folded fees retain their currency boundary', () => {
         realizedPnl: 0,
       },
       {
+        id: 'fee-close',
         symbol: 'BTCUSDT',
         timestamp: 2_000,
         price: 110,
@@ -171,11 +198,11 @@ describe('folded fees retain their currency boundary', () => {
     expect(() => mapFoldedInterval(folded, deps)).toThrow(/fee currency conversion/);
   });
 
-  it('accepts zero foreign fees on both sides of a position flip', () => {
+  it.each([undefined, 0])('accepts absent/zero foreign fees on both sides of a position flip (%s)', (commission) => {
     const fills = [
-      { timestamp: 1_000, side: OrderSide.Buy, qty: 1, commission: 0.1, commissionAsset: 'USDT' },
-      { timestamp: 2_000, side: OrderSide.Sell, qty: 2, commission: 0, commissionAsset: 'BNB' },
-      { timestamp: 3_000, side: OrderSide.Buy, qty: 1, commission: 0.1, commissionAsset: 'USDT' },
+      { id: 'open', timestamp: 1_000, side: OrderSide.Buy, qty: 1, commission: 0.1, commissionAsset: 'USDT' },
+      { id: 'flip', timestamp: 2_000, side: OrderSide.Sell, qty: 2, commission, commissionAsset: 'BNB' },
+      { id: 'close', timestamp: 3_000, side: OrderSide.Buy, qty: 1, commission: 0.1, commissionAsset: 'USDT' },
     ].map((fill) => ({ symbol: 'BTCUSDT', price: 100, realizedPnl: 0, ...fill }));
     const folded = reconstructPositionIntervals(fills);
     expect(folded).toHaveLength(2);
