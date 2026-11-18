@@ -5,7 +5,9 @@ use crate::account::{order_side, order_status, order_type};
 use crate::sign::Query;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Pending, Rest, Then};
-use safe_cex_engine::history::{CursorAdmission, CursorHistory, ReadCompletion, ReadCursorHistory};
+use safe_cex_engine::history::{
+    CursorAdmission, CursorHistory, IncompleteReason, ReadCompletion, ReadCursorHistory,
+};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{self, CursorPage, CursorStep, CursorWalk, Stall, WindowOrder};
 use safe_cex_engine::request_context::{Context, Owner, Pacing};
@@ -540,6 +542,16 @@ impl BybitLinear {
                 // An omitted limit reads the whole window (bounded by the page guard), as TS does.
                 let cap = limit.unwrap_or(0) as usize;
                 let to_ms = to_ms.or(from_ms.map(|_| now));
+                // With no start bound, V5 defaults to seven days before the end.
+                let requested_from =
+                    from_ms.unwrap_or(to_ms.unwrap_or(now) - 7.0 * TERMINAL_RETENTION_MS);
+                let mut completion = completion;
+                if requested_from < now - TERMINAL_RETENTION_MS {
+                    completion.incomplete(
+                        IncompleteReason::RetentionLimit,
+                        "Bybit retains unfilled Cancelled/Rejected/Deactivated orders for only 24 hours; older terminal rows are unavailable",
+                    );
+                }
                 let mut params = vec![("category", self.paths.category.to_owned())];
                 params.extend(symbol.map(|s| ("symbol", s)));
                 Walk {
