@@ -373,6 +373,8 @@ export const reconstructPositionIntervals = (
   return intervals.sort((a, b) => (a.closedAt ?? Number.MAX_SAFE_INTEGER) - (b.closedAt ?? Number.MAX_SAFE_INTEGER));
 };
 
+export type FundingRow = { readonly symbol: string; readonly timestamp: number; readonly income: number };
+
 /**
  * Sum signed funding for a symbol over the interval a position was open.
  *
@@ -387,10 +389,10 @@ export const reconstructPositionIntervals = (
  */
 export const attributeFunding = (
   interval: PositionInterval,
-  fundingRows: Array<{ symbol: string; timestamp: number; income: number }>,
+  fundingRows: readonly FundingRow[],
   opts: { hedged: boolean },
 ): { funding: number; attributed: boolean } => {
-  if (interval.closedAt === undefined || !interval.complete) {
+  if (interval.closedAt === undefined || !interval.complete || opts.hedged) {
     return { funding: 0, attributed: false };
   }
 
@@ -401,7 +403,54 @@ export const attributeFunding = (
     funding += row.income;
   }
 
-  // A hedged symbol's funding cannot be split between the legs, so the SUM is reported but
-  // flagged unattributed — the number is right for the symbol and wrong for the leg.
-  return { funding, attributed: !opts.hedged };
+  return { funding, attributed: true };
+};
+
+/**
+ * Assign each ledger row at most once, using ALL visible intervals, including open legs
+ * and lookback intervals. A symbol-level row shared by hedge legs has no per-leg owner.
+ * Keep it separately instead of copying its money onto every matching position.
+ */
+export const allocateFunding = (
+  intervals: readonly PositionInterval[],
+  fundingRows: readonly FundingRow[],
+): {
+  byInterval: ReadonlyMap<PositionInterval, { funding: number; attributed: boolean }>;
+  unattributedFunding: FundingRow[];
+} => {
+  const assigned = new Map<PositionInterval, FundingRow[]>();
+  const ambiguous = new Set<PositionInterval>();
+  const unattributedFunding: FundingRow[] = [];
+
+  for (const row of fundingRows) {
+    const candidates = intervals.filter(
+      (interval) =>
+        interval.symbol === row.symbol &&
+        // An incomplete interval's true opening time is unknown; a first visible fill
+        // cannot prove the leg was absent from an earlier funding event.
+        (!interval.complete || row.timestamp >= interval.openedAt) &&
+        (interval.closedAt === undefined || row.timestamp <= interval.closedAt),
+    );
+    const candidate = candidates[0];
+    if (candidate && candidates.length === 1 && candidate.complete && candidate.closedAt !== undefined) {
+      const rows = assigned.get(candidate) ?? [];
+      rows.push(row);
+      assigned.set(candidate, rows);
+    } else {
+      unattributedFunding.push(row);
+      for (const interval of candidates) ambiguous.add(interval);
+    }
+  }
+
+  const byInterval = new Map<PositionInterval, { funding: number; attributed: boolean }>();
+  for (const interval of intervals) {
+    // These rows already have exactly one visible owner. Any ambiguous remainder stays
+    // outside the per-leg amount and makes that amount explicitly incomplete.
+    const attribution = attributeFunding(interval, assigned.get(interval) ?? [], { hedged: false });
+    byInterval.set(interval, {
+      funding: attribution.funding,
+      attributed: attribution.attributed && !ambiguous.has(interval),
+    });
+  }
+  return { byInterval, unattributedFunding };
 };

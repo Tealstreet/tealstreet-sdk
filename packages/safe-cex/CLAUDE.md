@@ -2559,3 +2559,15 @@ BingX cancel/amend `invalidInput` diagnostics preserve a validated, value-free
 `bingxWriteShape` through host errors, command cloning and typed telemetry tags.
 The closed schema and evidence bounds live in `sdk-rs/venues/bingx/README.md`;
 raw request/row fields are never copied into this diagnostic record.
+
+## Fills-derived journal funding ownership
+
+The journal fold assigns a symbol funding event only when exactly one visible,
+complete, closed interval can own it. Open legs also participate in that census;
+filtering them out before allocation would invent an owner. A shared hedge event
+is retained once in `BuildRecordsResult.unattributedFunding`, outside per-leg
+amounts. A leg affected by unresolved events has `fundingAttributed: false` and
+contains only the events that could be uniquely assigned (possibly zero).
+Source rows outside all reconstructed intervals remain in that separate list.
+This is an in-memory result, not a new durable income-ingestion axis or a repair
+of previously persisted rows. Reported-position PnL/fee conventions are unchanged.
