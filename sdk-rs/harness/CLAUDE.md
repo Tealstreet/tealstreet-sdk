@@ -117,3 +117,11 @@ The native host validates its configured account limit against Bitunix's declare
 by canonical native symbol. A never-opened private dial is not a login timeout.
 These source changes need fresh exact-head family/combined artifacts and CI;
 prior measurements do not attest the new source. The release-batch hold remains.
+
+The #2301 shared Venue declaration also requires fresh family reserve evidence.
+Exact source `fce94fa3c100` / dispatch44370048905 measures Hyperliquid 2,309,110 B
+(artifact14459236107) and Coinbase 2,349,208 B (artifact14458384002). Retain all
+historical floors; measured plus 10 KiB rounded up gives 2,319,360 B (+2KiB) for
+both Hyperliquid aliases and 2,360,320 B (+1KiB) for the Coinbase family.
+Optimized combined 17,693,387 B retains 132,405 B under its unchanged cap.
+The budget-only follow-up still needs fresh exact-head CI; no release is implied.

@@ -562,7 +562,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust1.99.0, bindgen0.2.129, Binaryen132, required two -Oz passes.
   // Read-scoped close/version guards retain causal floors across bounded cache eviction.
   // Current CI bytes +10 KiB rounded up; 10,609 B reserve, every prior floor retained.
-  coinbase: 2_359_296,
+  // #2301 source fce94fa3c100, dispatch44370048905, artifact14458384002.
+  // Optimized web/Node/replay 2,349,208 B; raw SHA256
+  // 7dddff3650cdad9da9c36934ef16b076483ebf0de5241986c924b316aed627c3.
+  // Measured +10 KiB rounded up; retain all parent floors, 11,112 B reserve.
+  coinbase: 2_360_320,
   // #3438 merged-head local build.sh --venue cryptocom: web/node 1,803,468 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3391 run 43204096369/job 131135453931, source d62f6d989c3a (3de5a492d792 tree).
@@ -654,7 +658,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3579 CI43782227341/jobs133022239190+133022239183, head b323ddf25c4a (checkout b5dc3b07feaf): web/Node 2,305,365 B.
   // CI SHA256 fe93956d5b10bf917f6281f5dbee10b8f366c72a539dd4f29a984e0b251ab921; local 2,306,669 B, SHA256 6df619c9c1fb891e336cd42715164081e63a4d689f7f723e6d467a8d9e552075.
   // Rust1.99/bindgen0.2.129/Binaryen132 twice -Oz; max(current CI, local) + 10 KiB rounded up, retaining historical floors.
-  hyperliquid: 2_317_312,
+  // #2301 source fce94fa3c100, dispatch44370048905, artifact14459236107.
+  // Optimized web/Node/replay 2,309,110 B; raw SHA256
+  // 3b68e23e7f5aad463d481be212ba6eb75e901fbb2ce307042b546cf3c8664add.
+  // Measured +10 KiB rounded up; retain all parent floors, 10,250 B reserve.
+  hyperliquid: 2_319_360,
   // #3438 merged-head local build.sh --venue hyperliquid: web/node 2,238,027 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3438 merge cf112c51b87c + 3f94ec11a27f: optimized web/node 2,238,644 B.
@@ -667,7 +675,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3513 shares the verified 2,268,301 B Hyperliquid module and its measured reserve floor.
   // #3579 shares the current CI/local measurements and hashes immediately above.
   // Both aliases retain the larger optimized measurement + 10 KiB rounded up.
-  hyperliquidspot: 2_317_312,
+  // Same fresh Hyperliquid family measurement and retained historical floors above.
+  hyperliquidspot: 2_319_360,
   // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
   // CI size plus 10 KiB rounded up to KiB; Kraken and Kraken Spot share the cap.
   // #3304 restage run 42558782819 at CI merge a068e6cb0876a3699d46fa843b9310887bd055f4:

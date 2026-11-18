@@ -4,6 +4,30 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #2301 shared Venue declaration, exact source fce94fa3c1000811e23e5e520dcb9dcec71d934c.
+// Full dispatch44370048905; raw optimized web/Node/replay modules and pinned manifests verified.
+// Artifacts14459236107 (Hyperliquid),14458384002 (Coinbase). Keep all older floors below.
+for (const [family, aliases, measured, previousFloor, requiredCap] of [
+  ['hyperliquid', ['hyperliquid', 'hyperliquidspot'], 2_309_110, 2_317_312, 2_319_360],
+  ['coinbase', ['coinbase', 'coinbasespot'], 2_349_208, 2_359_296, 2_360_320],
+]) {
+  test(`#2301 shared-input ${family} artifact retains current reserve and historical floors`, () => {
+    assert.equal(requiredCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.ok(cap >= Math.max(requiredCap, previousFloor));
+    assert.ok(cap - measured >= 10 * 1024);
+    for (const venue of aliases) {
+      assert.equal(venueFamily(venue), family);
+      if (Object.hasOwn(WASM_VENUE_OVERRIDES, venue)) {
+        assert.ok(WASM_VENUE_OVERRIDES[venue] >= cap);
+      }
+    }
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  });
+}
+
 // #2301 alias-retention source08d18516706c, CI44275298247/job134703677883.
 // Artifact14414113480: optimized web/Node/replay SHA25690538a5261dd88c12a5381a6a1bb40fbfa0a6ebef06a9c1b3305cb6e9faf2434.
 test('#2301 retained caller aliases preserve current measured reserve and prior floors', () => {

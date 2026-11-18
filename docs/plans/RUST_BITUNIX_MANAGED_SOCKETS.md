@@ -124,3 +124,18 @@ web/Node/replay 2,014,499 B (CI44275298247/job134703677883, artifact14414113480)
 Its 2,025,472 B family cap follows the same rounded 10KiB rule, retains the
 2,023,424 B historical floor and leaves 10,973 B reserve. Budget-only follow-ups
 do not replace fresh exact-head correctness/combined receipts or authorize release.
+
+
+The review fix at `fce94fa3c1000811e23e5e520dcb9dcec71d934c` adds the optional
+native account-capacity declaration to shared Venue input. Full exact-source
+dispatch44370048905 measures Bitunix 2,013,970 B, retaining 11,502 B under its
+unchanged 2,025,472-byte cap. All 27 fresh family artifacts were inspected;
+Hyperliquid and Coinbase retain only 8,202 B and 10,088 B at the inherited caps.
+Their measured-plus 10 KiB, KiB-rounded caps are 2,319,360 B (+2KiB, both
+Hyperliquid aliases) and 2,360,320 B (+1KiB, Coinbase family). Old provenance,
+floors and strict boundaries remain. Fresh combined web/Node 17,693,387 B
+retains 132,405 B under the unchanged 17,825,792-byte combined cap.
+Two reserve regressions fail against the inherited caps and pass with these
+minimal corrections. This budget-only follow-up requires fresh exact-head
+required coverage, correctness and actually executed combined consumers before
+lnmtfl/q6i90x re-review. The release-batch hold remains.
