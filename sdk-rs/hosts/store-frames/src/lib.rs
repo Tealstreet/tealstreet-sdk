@@ -141,10 +141,15 @@ impl Emitter {
             }
             // Public-only accounts have no derived exposure or algo market joins.
             // Do not retain a second full catalogue/ticker table for empty projections.
+            // Running opening chasers also need these joins before their first order.
             // Rehydrate from authoritative engine rows when exposure first arrives,
             // even if this delta carries no new catalogue or ticker section.
             let needs_public_rows = !store.positions().is_empty()
                 || !store.orders().is_empty()
+                || input
+                    .active_chasers
+                    .iter()
+                    .any(|chaser| !chaser.is_stopped && !chaser.reduce_only)
                 || input
                     .active_twaps
                     .as_array()
@@ -831,6 +836,67 @@ mod tests {
             16
         );
     }
+    #[test]
+    fn chaser_only_pending_position_rehydrates_public_joins_without_account_rows() {
+        for warm_public_projection in [false, true] {
+            let mut store = store();
+            store.set_orders(Vec::new());
+            store.set_positions(Vec::new());
+            let mut emitter = Emitter::default();
+            let mut input = input();
+            if warm_public_projection {
+                emitter.frame(empty(1000.), &store, &input, true);
+                assert!(emitter.data.as_ref().unwrap().markets.is_empty());
+                assert!(emitter.data.as_ref().unwrap().tickers.is_empty());
+            }
+            let mut chasers = serde_json::from_value::<Vec<ActiveChaser>>(serde_json::json!([{
+                "id":"chase-only", "symbol":"BTCUSDT", "size":3, "side":"buy",
+                "maxAttempts":10, "attempts":1, "isStopped":false, "reduceOnly":false,
+                "stopReason":"", "currentOrderIds":[]
+            }]))
+            .unwrap();
+            input.algos(&chasers, &Vec::<Value>::new());
+            let frame = emitter.frame(empty(2000.), &store, &input, false);
+            assert!(store.orders().is_empty());
+            assert!(store.positions().is_empty());
+            assert_eq!(payload(&frame, Section::ActiveTwaps), serde_json::json!([]));
+            let data = emitter.data.as_ref().unwrap();
+            assert_eq!(
+                data.displayed_positions.len(),
+                1,
+                "a running chaser needs its pending row before any account exposure exists"
+            );
+            let row = &data.displayed_positions[0];
+            assert_eq!(row.position.id, "fake-chaser-chase-only");
+            assert_eq!(row.position.symbol, "BTCUSDT");
+            assert_eq!(row.position.entry_price, 110.);
+            assert_eq!(row.position.contracts, 0.);
+            assert_eq!(row.position.side, PositionSide::Long);
+            assert_eq!(row.is_fake_position, Some(true));
+            assert!(row.has_active_chaser);
+            assert_eq!(row.chaser_size, Some(3.));
+            assert_eq!(row.market.as_ref().unwrap().symbol, "BTCUSDT");
+            assert_eq!(row.ticker.as_ref().unwrap().last, 110.);
+            assert_eq!(
+                payload(&frame, Section::DisplayedPositions)
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+            chasers[0].is_stopped = true;
+            input.algos(&chasers, &Vec::<Value>::new());
+            let stopped = emitter.frame(empty(3000.), &store, &input, false);
+            assert_eq!(
+                payload(&stopped, Section::DisplayedPositions),
+                serde_json::json!([])
+            );
+            let data = emitter.data.as_ref().unwrap();
+            assert!(data.markets.is_empty());
+            assert!(data.tickers.is_empty());
+        }
+    }
+
     #[test]
     fn active_chasers_make_pending_rows_and_native_inverse_evidence_is_used() {
         let mut emitter = Emitter::default();
