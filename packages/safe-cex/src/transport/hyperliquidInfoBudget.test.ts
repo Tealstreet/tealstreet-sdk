@@ -56,7 +56,9 @@ afterEach(() => {
 });
 
 describe('unavailable shared storage', () => {
-  it.each([false, true])('allows local dispatch only if IDB never opened in this realm: %s', async (opened) => {
+  // Supersedes d732927cb30's established-store refusal: the maintainer now prioritizes
+  // chart availability with half-rate local admission after shared storage fails.
+  it.each([false, true])('allows conservative local dispatch after storage failure: opened=%s', async (opened) => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     if (opened) await client().response(ORIGIN, 200, '');
     const unavailable = {
@@ -69,9 +71,9 @@ describe('unavailable shared storage', () => {
       const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
       const send = vi.fn();
       const result = Promise.allSettled([a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, signal(), send)]);
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(await result).toMatchObject([{ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } }]);
-      expect(send).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(send).toHaveBeenCalledOnce();
+      expect(await result).toMatchObject([{ status: 'fulfilled' }]);
     } else {
       await spend(a);
       let sent = false;
@@ -215,7 +217,8 @@ describe('unavailable shared storage', () => {
       await flushDatabase();
       await vi.advanceTimersByTimeAsync(200);
     }
-    expect(await firstOutcome).toMatchObject([{ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } }]);
+    // c0705fca9 supersedes d732927cb30's blackout; recovery still restores the shared cap.
+    expect(await firstOutcome).toMatchObject([{ status: 'fulfilled' }]);
     await admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal());
     const end = Date.now() + 60_000;
     const sends: number[] = [];
@@ -238,7 +241,7 @@ describe('unavailable shared storage', () => {
     await flushDatabase();
     await bursting;
     expect(stalls).toBe(0);
-    // No extra local bucket is available after joining the shared coordinator.
+    // After the cooldown, merged local debt shares the original aggregate bucket.
     expect(sends.length * 20).toBeLessThanOrEqual(2000);
     expect(sends.length * 20).toBeGreaterThanOrEqual(1500);
   });
@@ -261,6 +264,7 @@ describe('unavailable shared storage', () => {
     expect(warn).toHaveBeenCalledOnce();
   });
 
+  // d732927cb30's storage-fault matrix now requires the same degraded admission above.
   it.each([
     'throw',
     'error',
@@ -270,7 +274,7 @@ describe('unavailable shared storage', () => {
     'transactionError',
     'quota',
     'transactionStalled',
-  ])('bounds storage failure %s without leaking details or bypassing an established coordinator', async (failure) => {
+  ])('bounds storage failure %s and degrades admission without leaking details', async (failure) => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const openRequest: any = {};
     const readRequest: any = {};
@@ -311,10 +315,10 @@ describe('unavailable shared storage', () => {
     await flushDatabase();
     const established = failure.startsWith('transaction') || failure === 'quota';
     if (established) await vi.advanceTimersByTimeAsync(17_000);
-    expect((await first)[0].status).toBe(established ? 'rejected' : 'fulfilled');
+    expect((await first)[0].status).toBe('fulfilled');
     const next = Promise.allSettled([admit(new Budget(), ORIGIN, ORDERS, Date.now() + 20_000, signal())]);
     await vi.advanceTimersByTimeAsync(20_000);
-    expect((await next)[0].status).toBe(established ? 'rejected' : 'fulfilled');
+    expect((await next)[0].status).toBe('fulfilled');
     expect(open).toHaveBeenCalled();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls.flat().join(' ')).not.toContain('private details');
@@ -1277,4 +1281,293 @@ it('financial reconciliation cannot bypass the shared 429 pause', async () => {
     code: 'HTTP_PREPARATION_TIMED_OUT',
   });
   expect(send).not.toHaveBeenCalled();
+});
+
+describe('closed info admission timeout diagnosis', () => {
+  it('labels a refused quota reservation without changing its deadline or shared pause', async () => {
+    const a = client();
+    await a.response(ORIGIN, 429, 'retry-after: 30');
+    await expect(admit(client(), ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+      cause: 'info_admission',
+      message: 'HTTP admission deadline expired',
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    // The pause still owns the same empty-bucket refill; no earlier send is granted.
+    await expect(admit(client(), ORIGIN, ORDERS, Date.now() + 1, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+      cause: 'info_admission',
+    });
+  });
+
+  it('labels a final admission refusal and never calls physical handoff', async () => {
+    const a = client();
+    const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
+    await client().response(ORIGIN, 429, 'retry-after: 30');
+    const send = vi.fn();
+    await expect(a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, signal(), send)).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+      cause: 'info_admission',
+      message: 'HTTP admission deadline expired',
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('labels the original deadline timer only while the budget wait is pending', async () => {
+    const { HttpPreparationError } = await import('@tealstreet/safe-cex-wasm/host');
+    const a = client();
+    await spend(a);
+    const abort = new AbortController();
+    const waiting = a.wait(ORIGIN, ORDERS, Date.now() + 20_000, abort.signal, 'critical');
+    const checked = expect(waiting).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+      cause: 'info_admission',
+      message: 'HTTP admission deadline expired',
+    });
+    await flushDatabase();
+    abort.abort(new HttpPreparationError('timedOut'));
+    await checked;
+  });
+
+  it('preserves cancellation and errors after handoff instead of labelling them admission', async () => {
+    const { HttpPreparationError } = await import('@tealstreet/safe-cex-wasm/host');
+    const a = client();
+    const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
+    const error = new HttpPreparationError('timedOut');
+    const send = vi.fn(() => {
+      throw error;
+    });
+    await expect(a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, signal(), send)).rejects.toBe(error);
+    expect(send).toHaveBeenCalledOnce();
+    expect(error.cause).toBeUndefined();
+    const abort = new AbortController();
+    const cancelled = new Error('disposed');
+    abort.abort(cancelled);
+    await expect(a.wait(ORIGIN, ORDERS, Date.now() + 20_000, abort.signal)).rejects.toBe(cancelled);
+  });
+});
+
+it.each(['wait', 'dispatch'] as const)(
+  'does not relabel a timeout already aborted before %s admission starts',
+  async (stage) => {
+    const { HttpPreparationError } = await import('@tealstreet/safe-cex-wasm/host');
+    const a = client();
+    const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
+    const abort = new AbortController();
+    const error = new HttpPreparationError('timedOut');
+    abort.abort(error);
+    const send = vi.fn();
+    const work =
+      stage === 'wait'
+        ? a.wait(ORIGIN, ORDERS, Date.now() + 20_000, abort.signal)
+        : a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, abort.signal, send);
+    await expect(work).rejects.toBe(error);
+    expect(error.cause).toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
+  },
+);
+
+describe('mid-session storage degradation', () => {
+  it('serves two candle reads after an established transaction never answers', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const budget = client();
+    await budget.response(ORIGIN, 200, '');
+    const stalled = { objectStore: () => ({ get: () => ({}) }), abort: vi.fn() };
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockReturnValue(stalled as unknown as IDBTransaction);
+    const send = vi.fn(() => 0);
+    const pending = Promise.allSettled(
+      [0, 1].map(async () => {
+        const controller = new AbortController();
+        const body = JSON.stringify({ type: 'candleSnapshot' });
+        const deadline = Date.now() + 20_000;
+        const grant = await budget.wait(ORIGIN, body, deadline, controller.signal, 'bulk');
+        return budget.admitDispatch(ORIGIN, grant, deadline, controller.signal, send);
+      }),
+    );
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(await pending).toMatchObject([{ status: 'fulfilled' }, { status: 'fulfilled' }]);
+  });
+
+  it.each(['critical', 'reconciliation', 'normal', 'bulk'] as const)(
+    'halves both local burst and refill after prior shared storage: %s',
+    async (readClass) => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      await client().response(ORIGIN, 200, '');
+      const unavailable = {
+        open: () => {
+          throw new Error('unavailable');
+        },
+      } as unknown as IDBFactory;
+      const budget = new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(unavailable));
+      const run = async () => {
+        const controller = new AbortController();
+        const deadline = Date.now() + 20_000;
+        const grant = await budget.wait(ORIGIN, ORDERS, deadline, controller.signal, readClass);
+        return budget.admitDispatch(ORIGIN, grant, deadline, controller.signal, () => 0);
+      };
+      const burst = readClass === 'critical' || readClass === 'reconciliation' ? 25 : 20;
+      let burstCompleted = false;
+      const sends = Promise.allSettled([
+        (async () => {
+          for (let i = 0; i < burst; i++) await run();
+          burstCompleted = true;
+        })(),
+      ]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(burstCompleted).toBe(true);
+      expect(await sends).toMatchObject([{ status: 'fulfilled' }]);
+      let completed = false;
+      const waiting = run().then(() => {
+        completed = true;
+      });
+      await vi.advanceTimersByTimeAsync(2399);
+      expect(completed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await waiting;
+      expect(completed).toBe(true);
+    },
+  );
+
+  it('rejoins shared storage after cooldown and retains a known 429 pause', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const storage = new budgetModule.IndexedInfoBudgetStorage(factory);
+    const budget = new budgetModule.HyperliquidInfoBudget(storage);
+    await budget.response(ORIGIN, 200, '');
+    const original = IDBDatabase.prototype.transaction;
+    const unavailable = vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(() => {
+      throw new DOMException('closed', 'InvalidStateError');
+    });
+    let initialSent = false;
+    const first = Promise.allSettled([
+      admit(budget, ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
+        initialSent = true;
+      }),
+    ]);
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(initialSent).toBe(true);
+    await first;
+    await budget.response(ORIGIN, 429, 'Retry-After: 45');
+    await expect(admit(budget, ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+    });
+    unavailable.mockImplementation(original);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(admit(budget, ORIGIN, ORDERS, Date.now() + 1000, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+    });
+    await vi.advanceTimersByTimeAsync(16_200);
+    await admit(budget, ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    expect(unavailable).toHaveBeenCalled();
+  });
+});
+
+it('tops up a shared reservation if storage degrades immediately before handoff', async () => {
+  await client().response(ORIGIN, 200, '');
+  const now = Date.now();
+  const state = { nextAt: now + 58_800, pausedUntil: 0, generation: 0, failures: 0 };
+  let updates = 0;
+  const storage = {
+    update: async <T>(_key: string, change: (draft: typeof state, shared: boolean) => T) =>
+      change(state, ++updates === 1),
+  };
+  const budget = new budgetModule.HyperliquidInfoBudget(storage);
+  const send = vi.fn(() => 0);
+  const result = budget.admitDispatch(
+    ORIGIN,
+    { generation: 0, weight: 20, readClass: 'critical' },
+    now + 20_000,
+    signal(),
+    send,
+  );
+  await vi.advanceTimersByTimeAsync(1199);
+  expect(send).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  await result;
+  expect(send).toHaveBeenCalledOnce();
+});
+
+it('keeps public-only candle preparation off private proxy authorization and tunnel readiness', async () => {
+  vi.stubGlobal('indexedDB', factory);
+  const { createEngineTransport } = await import('./engine');
+  const { directTransport } = await import('./direct');
+  const privateRoute = vi.fn(() => {
+    throw new Error('Private route must not prepare public candles');
+  });
+  const send = vi.fn(async () => ({ status: 200, headers: '', body: new Uint8Array() }));
+  const prepare = vi.fn((_packet: { url: string }) => ({ bind: () => ({ ready: () => true, dispatch: send }) }));
+  const transport = createEngineTransport(
+    'hyperliquid',
+    {
+      key: '',
+      secret: '',
+      publicDataOnly: true,
+      tealstreetProxy: true,
+      tealstreetTunnel: true,
+      transport: { ...directTransport, name: 'route-boundary', rest: privateRoute, restAdapter: privateRoute },
+    },
+    { ...nativeTransport(), request: send, prepareHttp: prepare },
+  );
+  const packet = {
+    request: 1,
+    method: 'POST' as const,
+    url: ORIGIN + '/info',
+    headers: {},
+    body: JSON.stringify({ type: 'candleSnapshot' }),
+    timeoutMs: 20_000,
+  };
+  try {
+    await (await transport.prepareHttp!({ ...packet, intent: 'public' })).bind(packet).dispatch();
+    expect(send).toHaveBeenCalledOnce();
+    expect(prepare.mock.calls[0][0].url).toBe(ORIGIN + '/info');
+    expect(privateRoute).not.toHaveBeenCalled();
+  } finally {
+    transport.dispose?.();
+  }
+});
+
+it('keeps two actual candle transports available when an established IndexedDB stops responding', async () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  vi.stubGlobal('indexedDB', factory);
+  const { createEngineTransport } = await import('./engine');
+  const send = vi.fn(async () => ({ status: 200, headers: '', body: new Uint8Array() }));
+  const transport = createEngineTransport(
+    'hyperliquid',
+    { key: '', secret: '', publicDataOnly: true },
+    {
+      ...nativeTransport(),
+      request: send,
+      prepareHttp: () => ({ bind: () => ({ ready: () => true, dispatch: send }) }),
+    },
+  );
+  const packet = {
+    request: 1,
+    method: 'POST' as const,
+    url: ORIGIN + '/info',
+    headers: {},
+    body: JSON.stringify({ type: 'candleSnapshot' }),
+    timeoutMs: 20_000,
+  };
+  const run = async (request: number) =>
+    (await transport.prepareHttp!({ ...packet, request, intent: 'public' })).bind({ ...packet, request }).dispatch();
+  try {
+    await run(1);
+    const stalled = { objectStore: () => ({ get: () => ({}) }), abort: vi.fn() };
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockReturnValue(stalled as unknown as IDBTransaction);
+    const pending = Promise.allSettled([run(2), run(3)]);
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(await pending).toMatchObject([{ status: 'fulfilled' }, { status: 'fulfilled' }]);
+  } finally {
+    transport.dispose?.();
+  }
 });

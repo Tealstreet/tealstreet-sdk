@@ -32,6 +32,46 @@ impl Session {
             && !self.moved_by_drain()
     }
 
+    // Expiry refuses this new command; queue cancellation cannot prove the
+    // earlier business intent was unsent and keeps its existing handling.
+    pub(super) fn refuse_expired_order(
+        &mut self,
+        name: &str,
+        instance: Option<&str>,
+        id: &str,
+        seq: u64,
+        action: bool,
+    ) {
+        let out = self.order_out(name, instance);
+        if !out.order_receipt_binding_bounded()
+            || name.len() > 256
+            || id.len() > order_contract::KEY_MAX
+            || instance.is_some_and(|value| value.len() > 128)
+        {
+            out.send(envelope::error(Some(name), crate::auth::TOKEN_EXPIRED));
+            return;
+        }
+        if let Some(joined) = self.joined.get(name) {
+            audit_preflight(
+                &joined.account,
+                self.socket,
+                if action {
+                    "order.action"
+                } else {
+                    "order.submit"
+                },
+                &[],
+                crate::auth::TOKEN_EXPIRED,
+            );
+        }
+        let id = Value::String(id.to_owned());
+        if action {
+            crate::order_actions::refuse(&out, name, &id, seq, crate::auth::TOKEN_EXPIRED);
+        } else {
+            refuse(&out, name, &id, seq, crate::auth::TOKEN_EXPIRED);
+        }
+    }
+
     pub(super) async fn order_submit(&mut self, mut submit: OrderSubmit) {
         let name = submit.account_name.clone();
         let id = Value::String(submit.intent_id.clone());
@@ -87,8 +127,14 @@ impl Session {
             );
             return;
         }
-        let client_id =
-            order_contract::client_order_id(&self.joined[&name].account.venue, &submit.intent_id);
+        let venue = &self.joined[&name].account.venue;
+        // Native Bybit protection omits caller IDs; other orders retain the
+        // admitted venue's lossless UUID representation or unsupported-ID omission.
+        let client_id = if order_contract::bybit_protection(venue, params) {
+            None
+        } else {
+            order_contract::client_order_id(venue, &submit.intent_id)
+        };
         let method = if let Some(id) = client_id {
             params.insert("clientOrderId".into(), id.into());
             "placeOrderWithClientOrderId"

@@ -51,7 +51,7 @@ fn assert_prepared_read(mut engine: Engine<Bingx>, identity_read: bool) {
         request.headers,
         vec![
             ("X-SOURCE-KEY", "Tealstreet".into()),
-            ("Content-Type", "application/json, charset=utf-8".into()),
+            ("Content-Type", "application/json; charset=utf-8".into()),
         ]
     );
     assert!(request.signer_headers.is_empty());
@@ -803,7 +803,7 @@ fn metadata_preparation(secondary: bool) {
         request.headers,
         vec![
             ("X-SOURCE-KEY", "Tealstreet".into()),
-            ("Content-Type", "application/json, charset=utf-8".into()),
+            ("Content-Type", "application/json; charset=utf-8".into()),
         ]
     );
     assert!(request.signer_headers.is_empty());

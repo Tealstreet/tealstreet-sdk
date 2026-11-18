@@ -64,3 +64,7 @@ Budget imports validate raw duplicate/name membership before evaluating the map.
 The closed source scanner ignores nested template text and expressions, rejecting
 unsupported regex/division syntax instead of guessing their lexical boundaries;
 construction feature checks reject raw duplicate keys and missing policy rows.
+
+Bybit terminal order-history retention is documented in `sdk-rs/venues/bybit/README.md`.
+Its `history.rs` change is a counted beta-WASM input and requires a fresh release/pin;
+this routing correction does not change family caps or construction membership.

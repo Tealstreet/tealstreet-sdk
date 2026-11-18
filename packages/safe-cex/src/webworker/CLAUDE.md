@@ -622,3 +622,12 @@ BaseExchange and direct worker error reporting attach it to plain metadata;
 custom Error properties disappear during `postMessage` structured cloning.
 Hosts may preserve this fixed safety fact through privacy projection; the SDK
 does not decide host reporting policy or add a telemetry client.
+
+## Closed history diagnostics
+
+`logError` projects only allowlisted native history causes and validated
+`historyDecode` schema/reason pairs into its detached error object. Shared
+`exchangeErrorTags` indexes them as `cause_code`, `history_schema` and
+`history_reason`, including when message text is redacted. Unknown causes,
+invalid pairs and extra row/request fields are dropped; the diagnostic packet
+still passes through the existing redactor and the web Sentry sanitizer.

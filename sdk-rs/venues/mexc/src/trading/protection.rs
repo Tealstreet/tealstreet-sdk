@@ -634,15 +634,16 @@ impl MexcFutures {
             String::new()
         } else {
             let market = cx.store.market(&edit.observed.symbol).unwrap();
+            let end = cx.protocol_stamp_ms();
             let start = if edit.observed.last_update >= 1e12 {
-                edit.observed.last_update - 89. * 86400000.
+                safe_cex_engine::time::wire_stamp_ms(edit.observed.last_update) - 89. * 86400000.
             } else {
-                cx.protocol_now() - 89. * 86400000.
+                end - 89. * 86400000.
             };
             crate::sign::query(vec![
                 ("symbol", market.id.clone()),
                 ("start_time", num::format(start.max(0.))),
-                ("end_time", num::format(cx.protocol_now())),
+                ("end_time", num::format(end)),
                 ("page_num", page.to_string()),
                 ("page_size", "100".into()),
                 (

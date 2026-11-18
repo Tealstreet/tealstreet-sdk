@@ -219,6 +219,7 @@ async fn nuke_checks_the_captured_owner_after_the_private_load_deferral() {
                     a.clone(),
                     out.with_instance_id(None),
                     envelope::AccountSigningMode::Delegated,
+                    0,
                 )
                 .await;
             action(&mut alice, json!({"kind":"nuke"}), 1, false).await;
@@ -462,7 +463,7 @@ async fn action_fix_registered_replies_carry_the_captured_binding() {
             let (mut session,mut sent) = joined(registry.clone(),"A",account.clone()).await;
             let bound = session.account_out("synthetic-main").with_instance_id(Some("reg-A"));
             // Preserve this fixture's existing DELEGATED account admission.
-            session.join(account.clone(),bound, envelope::AccountSigningMode::Delegated).await;
+            session.join(account.clone(),bound, envelope::AccountSigningMode::Delegated, 0).await;
             let id = action_key();
             let fp = crate::order_contract::action_fingerprint("synthetic-main",&id,&payload,1).unwrap();
             session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","instanceId":"reg-A","intentId":id,"seq":1,"ageMs":0,"fingerprint":fp,"action":payload}}).to_string()).await.unwrap();
@@ -505,7 +506,7 @@ async fn action_fix_deferred_nuke_expires_without_any_physical_write() {
             session.order_frames_enabled = crate::order_contract::enabled();
             crate::accounts::tests::hold_live(&account,session.socket,out.outbox());
             // Preserve this fixture's existing DELEGATED account admission.
-            session.join(account.clone(),out.with_instance_id(None), envelope::AccountSigningMode::Delegated).await;
+            session.join(account.clone(),out.with_instance_id(None), envelope::AccountSigningMode::Delegated, 0).await;
             tokio::time::timeout(Duration::from_secs(3),async {
                 while tape.held_positions.lock().unwrap().is_empty() { tokio::task::yield_now().await; }
             }).await.unwrap();
@@ -624,8 +625,10 @@ async fn action_fix_cancel_all_expires_during_its_symbol_store_read() {
                     assert_eq!(writes, &vec!["cancel"]);
                 } else {
                     assert!(writes.is_empty(), "expired {clock} cancelAll wrote: {observed:?}");
-                    assert_eq!(result["d"]["outcome"], "unknown", "{result}");
-                    assert_eq!(result["d"]["error"]["outcome"], "unknown");
+                    // 116aeae12: symbol discovery dispatches no mutation. This
+                    // whole-action expiry proves notSent; later-leg guards stay unknown.
+                    assert_eq!(result["d"]["outcome"], "refused", "{result}");
+                    assert_eq!(result["d"]["error"]["outcome"], "notSent");
                     assert!(result["d"]["error"]["message"].as_str().unwrap().contains("expired"));
                     assert!(result["d"]["result"].is_null());
                 }
@@ -665,6 +668,7 @@ async fn action_fix_each_deferred_cancel_leg_keeps_deadline_and_owner() {
                         account.clone(),
                         out.with_instance_id(None),
                         envelope::AccountSigningMode::Delegated,
+                        0,
                     )
                     .await;
                 tokio::time::timeout(Duration::from_secs(3), async {
@@ -1284,7 +1288,7 @@ async fn v1_unknown_operations_and_fields_return_typed_unsupported_without_io() 
         let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
         let bound = session.account_out("synthetic-main").with_instance_id(Some("reg-v1"));
         // Preserve this fixture's existing DELEGATED account admission.
-        session.join(account.clone(), bound, envelope::AccountSigningMode::Delegated).await;
+        session.join(account.clone(), bound, envelope::AccountSigningMode::Delegated, 0).await;
         for case in ["kind", "duplicateKind", "actionField", "opVersion", "targetField", "updateField", "orderField", "bboField", "algoOp", "algoData", "twapMarket", "requestField", "envelopeField"] {
             let mut payload = match case {
                 "kind" => json!({"kind":"futureWrite"}),
@@ -1926,6 +1930,7 @@ async fn typed_twap_start_keeps_connection_labels_on_a_shared_identity() {
                             account.clone(),
                             out,
                             envelope::AccountSigningMode::Delegated,
+                            0,
                         )
                         .await;
                     assert!(Arc::ptr_eq(

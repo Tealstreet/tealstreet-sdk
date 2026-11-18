@@ -24,6 +24,10 @@ are documented in [`sdk-rs/venues/bybit/README.md`](sdk-rs/venues/bybit/README.m
 The engine owns the clocks and fences; only a validated native `10006` rejection
 is known, never resendable. Contradictory and unproven responses remain Unknown.
 
+Hyperliquid candle reads retain their original deadline while a requested public
+catalogue row is pending. Known markets stay immediate; settled missing or
+explicitly excluded rows refuse. See `sdk-rs/venues/hyperliquid/README.md`.
+
 DELEGATED is venue-generic under the same hosted eligibility as COSIGNED. Use
 one runtime `DELEGATED` kill switch/per-user pin; `DELEGATED_BYBIT` is only its
 compatibility alias. Mobile is DELEGATED-only; DELEGATED clients have no WASM
@@ -86,3 +90,7 @@ measurement helpers remain for replay collection and offline evidence inspection
 CI no longer plans, certifies or publishes CPU gate statuses.
 
 Update `sdk-rs/harness/CLAUDE.md` with the next real fingerprint mover; its CPU gate policy is superseded by this decision.
+
+Hyperliquid pre-send `/info` admission diagnostics retain timeout/NotSent with the
+closed `info_admission` cause. The relay/post-handoff boundary is documented in
+`sdk-rs/README.md` under Browser request-failure diagnostics.

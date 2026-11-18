@@ -68,6 +68,14 @@ Hyperliquid, Hyperliquid Spot and Bitunix metadata explicitly declare
 Enforcement still wins over disabled user preferences; inconsistent declarations
 remain observable through the general account-construction warning.
 
+Hyperliquid `/info` admission falls back after bounded IndexedDB failures to
+half-rate memory admission per JavaScript realm (500 weight/minute; burst 500
+for critical/reconciliation, 400 for normal/bulk). Known debt and 429 pauses remain;
+the existing 30-second cooldown retries shared storage and max-merges local spend.
+Independent fallback realms can exceed the shared cap: the maintainer chose chart
+availability over a perfect shared cap. A realm that never opened IndexedDB keeps
+its existing local policy; request deadlines, cancellation and single-send guards remain.
+
 ## DELEGATED handover
 
 `sealDelegatedHandover` is an additive, synchronous, host-neutral sender for
@@ -1070,6 +1078,10 @@ unattributed. NX ingestion must still inspect completeness before transforms
 and leave historical coverage uncompleted. Raw native/DO clients correlate the
 translated event command themselves; this SDK transport does not change their
 wire protocol. See B11 in `docs/plans/RUST_CUTOVER_CALLERS.md`.
+
+The fatal symbol-scoped income wrapper retains shared engine classification
+(`kind`, `outcome`, `venueCode`) alongside its existing name and cause. Failed
+income still stops the fold before any fill reads; no empty account is invented.
 
 ## Rust socket health
 
@@ -2387,6 +2399,10 @@ Cancellation or Claim without dispatch refunds only that token generation; a
 request handed to fetch is never refunded. Once IDB has worked in a realm,
 storage failure waits within the original read deadline rather than sending from
 an unshared memory budget. Never-opened IDB keeps the memory-only behavior.
+A proven pre-send `/info` admission deadline keeps `HTTP_PREPARATION_TIMED_OUT`
+and carries only closed cause `info_admission` / `HTTP admission deadline expired`.
+After handoff begins, errors retain their original classification and identity;
+this diagnostic distinction cannot extend budgets, change retries or suppress reports.
 Role/mode startup reads
 stay single-flight until their managed completion or deadline, including quota wait.
 Each Hyperliquid engine issues at most three routine account reads at once, with
