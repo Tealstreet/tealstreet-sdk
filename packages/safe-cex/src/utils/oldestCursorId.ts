@@ -26,7 +26,7 @@ const isSmaller = (candidate: string, current: string): boolean => {
   return candidate < current;
 };
 
-export const oldestCursorId = (rows: Array<Record<string, any>>, field: string): string | undefined => {
+export const oldestCursorId = (rows: Array<Record<string, unknown>>, field: string): string | undefined => {
   let oldest: string | undefined;
 
   for (const row of rows) {
