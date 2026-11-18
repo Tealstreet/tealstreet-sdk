@@ -1,6 +1,10 @@
 //! Structured command and lifecycle failures. `message` is the user-facing
 //! text hosts have always shown; the other fields let consumers classify a
 //! failure without matching that text.
+#[cfg(feature = "bingx-write-diagnostics")]
+#[path = "error/bingx_write_shape.rs"]
+pub mod bingx_write_shape;
+
 use serde::Serialize;
 use std::fmt;
 
@@ -516,9 +520,79 @@ impl Serialize for HistoryDecode {
     }
 }
 
+// A thin optional pointer offsets the closed diagnostic without growing native
+// error queues or Result error variants. Its JSON and string view stay unchanged.
+#[cfg(feature = "bingx-write-diagnostics")]
+#[derive(Clone, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct VenueMessage(Box<MessageText>);
+#[cfg(feature = "bingx-write-diagnostics")]
+#[derive(Clone, PartialEq, Serialize)]
+#[serde(transparent)]
+struct MessageText {
+    text: String,
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl std::ops::Deref for VenueMessage {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0.text
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl VenueMessage {
+    pub fn into_string(self) -> String {
+        self.0.text
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl AsRef<str> for VenueMessage {
+    fn as_ref(&self) -> &str {
+        &self.0.text
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl fmt::Display for VenueMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0.text, f)
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl fmt::Debug for VenueMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0.text, f)
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl From<String> for VenueMessage {
+    fn from(value: String) -> Self {
+        Self(Box::new(MessageText {
+            text: value.into_boxed_str().into_string(),
+        }))
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl From<&str> for VenueMessage {
+    fn from(value: &str) -> Self {
+        value.to_owned().into()
+    }
+}
+#[cfg(feature = "bingx-write-diagnostics")]
+impl From<Box<str>> for VenueMessage {
+    fn from(value: Box<str>) -> Self {
+        value.into_string().into()
+    }
+}
+
+#[cfg(not(feature = "bingx-write-diagnostics"))]
+pub type VenueMessage = Box<str>;
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VenueError {
+    #[cfg(feature = "bingx-write-diagnostics")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bingx_write_shape: Option<bingx_write_shape::BingxWriteShape>,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<ErrorKind>,
@@ -533,7 +607,7 @@ pub struct VenueError {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history_decode: Option<HistoryDecode>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub venue_message: Option<Box<str>>,
+    pub venue_message: Option<VenueMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_after_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -611,7 +685,7 @@ impl VenueError {
     }
 
     pub fn venue_message(mut self, message: impl Into<String>) -> Self {
-        self.venue_message = Some(message.into().into_boxed_str());
+        self.venue_message = Some(VenueMessage::from(message.into()));
         self
     }
 
@@ -1131,5 +1205,30 @@ mod tests {
             super::stop_gone_text("ETHUSDT", OrderSide::Buy, OrderType::TakeProfit, true)
                 .starts_with("Your ETHUSDT short position may have no take profit")
         );
+    }
+}
+
+#[cfg(all(test, feature = "bingx-write-diagnostics"))]
+mod venue_message_tests {
+    use super::*;
+    #[test]
+    fn thin_message_keeps_wire_text_and_discards_spare_capacity() {
+        let mut text = String::with_capacity(65_536);
+        text.push_str("fixture venue message");
+        let message = VenueMessage::from(text);
+        assert_eq!(message.0.text.capacity(), message.len());
+        assert_eq!(message.as_ref(), "fixture venue message");
+        assert_eq!(
+            serde_json::to_string(&message).unwrap(),
+            r#""fixture venue message""#
+        );
+        assert_eq!(format!("{message:?}"), r#""fixture venue message""#);
+        assert_eq!(message.clone().into_string(), "fixture venue message");
+        assert_eq!(
+            std::mem::size_of::<Option<VenueMessage>>(),
+            std::mem::size_of::<usize>()
+        );
+        #[cfg(target_pointer_width = "64")]
+        assert!(std::mem::size_of::<(Box<()>, VenueError)>() < 128);
     }
 }

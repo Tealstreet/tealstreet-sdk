@@ -99,3 +99,6 @@ Update `sdk-rs/harness/CLAUDE.md` with the next real fingerprint mover; its CPU 
 Hyperliquid pre-send `/info` admission diagnostics retain timeout/NotSent with the
 closed `info_admission` cause. The relay/post-handoff boundary is documented in
 `sdk-rs/README.md` under Browser request-failure diagnostics.
+
+BingX sent cancel/amend invalid-input diagnostics carry only closed request shape;
+its bounds and replacement-provenance semantics live in `sdk-rs/venues/bingx/README.md`.
