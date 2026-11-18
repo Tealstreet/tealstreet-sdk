@@ -16,6 +16,11 @@ before the store builds lookup tables and native UI frames. Live recovery can
 still append an omitted ticker. Keeping the unused catalogue slots through frame
 projection raises the WASM memory high-water mark, which cannot shrink afterward.
 
+Venue-reported positive position leverage is authoritative. Market settings,
+including successful settings writes, only fill unknown position leverage;
+they cannot confirm a new leverage for an existing position. Fills retain each
+hedged side's leverage and the selected margin-mode boundary.
+
 ## Crates
 
 ### Host ownership observation and teardown

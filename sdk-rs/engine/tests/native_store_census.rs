@@ -21,7 +21,7 @@ fn native_frames_publish_request_outcome_counters() {
 }
 
 #[test]
-fn fetched_leverage_updates_native_position_rows_on_each_hedged_side() {
+fn fetched_leverage_fills_unknown_native_position_rows_on_each_hedged_side() {
     let mut store = Store::default();
     store.set_positions(
         [PositionSide::Long, PositionSide::Short]
@@ -32,7 +32,13 @@ fn fetched_leverage_updates_native_position_rows_on_each_hedged_side() {
                 side,
                 entry_price: 100.0,
                 notional: 200.0,
-                leverage: 7.0,
+                // #3640: settings fill missing leverage; positive venue values
+                // are authoritative even when a later settings ACK differs.
+                leverage: if side == PositionSide::Long {
+                    0.0
+                } else {
+                    f64::NAN
+                },
                 margin_type: Some(MarginType::Cross),
                 position_mode: Some(PositionMode::Hedged),
                 unrealized_pnl: 7.0,
@@ -104,7 +110,9 @@ fn selected_margin_rails_do_not_overwrite_a_position_in_the_other_mode() {
                 side: PositionSide::Long,
                 entry_price: 100.,
                 notional: 100.,
-                leverage: if mode == MarginType::Cross { 10. } else { 5. },
+                // Both rows need a fill: retain 3adfcf3913's mode boundary
+                // without treating known venue leverage as settings-derived.
+                leverage: 0.,
                 margin_type: Some(mode),
                 position_mode: Some(PositionMode::Oneway),
                 unrealized_pnl: 0.,
@@ -121,7 +129,7 @@ fn selected_margin_rails_do_not_overwrite_a_position_in_the_other_mode() {
         setting.leverage = 12.;
     });
     assert_eq!(store.positions()[0].leverage, 12.);
-    assert_eq!(store.positions()[1].leverage, 5.);
+    assert_eq!(store.positions()[1].leverage, 0.);
     store.update_setting("BTC", |setting| {
         setting.margin_type = Some(MarginType::Isolated);
         setting.leverage = 6.;

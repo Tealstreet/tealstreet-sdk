@@ -1160,6 +1160,11 @@ impl Store {
 
     fn sync_position_leverages(&mut self) {
         for position in &mut self.positions {
+            // Venue-reported leverage is authoritative. Settings may fill an
+            // unknown row, but an ACK cannot confirm a new position leverage.
+            if position.leverage.is_finite() && position.leverage > 0.0 {
+                continue;
+            }
             let Some(setting) = self.settings.get(position.symbol.as_str()) else {
                 continue;
             };
@@ -3130,6 +3135,57 @@ mod tests {
             12_501.0
         );
     }
+    #[test]
+    fn settings_ack_preserves_venue_reported_position_leverage() {
+        use crate::model::{PositionMode, PositionSide};
+        let setters: [fn(&mut Store, MarketSetting); 3] = [
+            |store, setting| store.update_setting("BTC", |current| *current = setting),
+            |store, setting| store.set_settings([(0, setting)]),
+            |store, setting| store.replace_settings([("BTC", setting)]),
+        ];
+        for set in setters {
+            for mode in [MarginType::Cross, MarginType::Isolated] {
+                for side in [PositionSide::Long, PositionSide::Short] {
+                    let mut store = Store::default();
+                    store.set_markets(vec![market("BTC")]);
+                    let position = Position {
+                        id: "venue-position".into(),
+                        symbol: "BTC".into(),
+                        side,
+                        entry_price: 100.,
+                        notional: 200.,
+                        leverage: 10.,
+                        margin_type: Some(mode),
+                        position_mode: Some(PositionMode::Hedged),
+                        unrealized_pnl: 7.,
+                        realized_pnl: None,
+                        contracts: 2.,
+                        liquidation_price: 50.,
+                        margin_size: None,
+                        last_update: None,
+                    };
+                    store.set_positions(vec![position.clone()]);
+                    store.take_pending();
+                    let setting = MarketSetting {
+                        leverage: 12.,
+                        margin_type: Some(mode),
+                        buy_leverage: Some(20.),
+                        sell_leverage: Some(30.),
+                    };
+                    set(&mut store, setting);
+                    assert_eq!(store.setting("BTC"), Some(setting));
+                    assert_eq!(store.positions(), [position]);
+                    let pending = store.take_pending();
+                    assert!(pending.changes.settings);
+                    assert!(!pending.changes.positions);
+                    // A settings ACK must not publish a fictitious position change.
+                    set(&mut store, setting);
+                    assert!(!store.take_pending().changes.positions);
+                }
+            }
+        }
+    }
+
     fn market_position_store() -> Store {
         use crate::model::{Limits, MinMax, PositionSide, Precision};
         let mut store = Store::default();
