@@ -404,3 +404,7 @@ mod activation_tests {
 #[cfg(test)]
 #[path = "client_order_ids_tests.rs"]
 mod client_order_ids_tests;
+
+#[cfg(test)]
+#[path = "order_key_time_tests.rs"]
+mod key_time_tests;
