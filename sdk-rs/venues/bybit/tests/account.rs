@@ -4532,7 +4532,20 @@ fn explicit_terminal_order_history_walks_independent_cursors_and_deduplicates() 
     for id in ["filled", "Cancelled", "Rejected", "Deactivated"] {
         assert!(rows.iter().any(|row| row["id"] == id));
     }
-    assert!(owned_history_markers(&h, 910).is_empty());
+    // The omitted start requests V5's seven-day default, so the terminal
+    // statuses are incomplete even though every available cursor drained.
+    let markers = owned_history_markers(&h, 910);
+    assert_eq!(markers.len(), 1);
+    let safe_cex_engine::Notice::Event(event) = &h.notices[markers[0]] else {
+        panic!("expected the history incomplete event");
+    };
+    assert_eq!(
+        event.fields[1],
+        (
+            "reason",
+            safe_cex_engine::Value::Str("retentionLimit".into())
+        )
+    );
     assert!(!h.has_request(path));
 }
 
