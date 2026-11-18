@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import type { Exchange } from '@tealstreet/safe-cex/src/exchanges/base';
 import type { Market } from '@tealstreet/safe-cex/src/types';
 import { OrderSide } from '@tealstreet/safe-cex/src/types';
+import { FrameStore } from '@tealstreet/safe-cex/src/store/frameStore';
+import { nativeFixture } from '@tealstreet/safe-cex/src/__tests__/cutover/nativeFixture';
 import { deferred, sessionFixture } from './deferred-test.fixture';
 vi.setConfig({ testTimeout: 30_000 });
 beforeEach(() => {
@@ -141,19 +143,34 @@ it.each(['same', 'B', 'away and back'])(
       await held.promise;
       return ['A-order'];
     });
-    const ticker = { symbol: 'BTCUSDT', bid: 100, ask: 101, last: 100 };
+    // Rule 5 / #3640: real supervision needs the native observation subscription.
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture({
+        markets: [market],
+        tickers: [
+          {
+            id: 'BTCUSDT',
+            symbol: 'BTCUSDT',
+            bid: 100,
+            ask: 101,
+            last: 100,
+            mark: 100,
+            index: 100,
+            percentage: 0,
+            openInterest: 0,
+            fundingRate: 0,
+            fundingTime: 0,
+            volume: 0,
+            quoteVolume: 0,
+          },
+        ],
+      }),
+    );
     const exchange = {
       name: 'bybit',
       emitter,
-      store: {
-        positions: [],
-        orders: [],
-        markets: [market],
-        tickers: [ticker],
-        marketsBySymbol: { BTCUSDT: market },
-        tickersBySymbol: { BTCUSDT: ticker },
-        updateIds: { orders: 0, positions: 0 },
-      },
+      store,
       placeOrder,
       cancelOrders: vi.fn(async () => {}),
       on: emitter.on.bind(emitter),
