@@ -17,6 +17,13 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
+OKX ordinary-history replay serves both recent and archive sources on every
+product. The pinned eight-day window contains an archive-only fill, a stale
+overlapping filled identity and a recent unfilled cancellation. The test-only
+TS adapter reuses the frozen mapper/pager for both sources, keeping recent rows
+before deduplication and applying the caller limit after the union. Strict
+request matching and existing diagnostic allowlists remain required.
+
 MEXC's HTTP 425 read labels are diagnostics only; typed refusals, backoff,
 signing and write outcomes retain their existing controls. Exact source
 06c5b32372b7, Rust SDK run 44220118208, artifact 14390662738 measures equal
