@@ -196,15 +196,19 @@ impl<const TESTNET: bool> Venue for Apex<TESTNET> {
                     if frame["args"] == json!(["instrumentInfo.all"]) {
                         json!({"op":frame["op"],"success":true})
                     } else {
-                        assert!(
-                            authenticated,
-                            "private subscriptions require this socket's login"
-                        );
                         assert_eq!(
                             frame["args"],
                             json!(["ws_zk_accounts_v3", "ws_user_v1", "ws_notify_v1"])
                         );
-                        json!({"op":frame["op"],"success":true})
+                        // Native ApeX pipelines these frames before its login ACK.
+                        // Refuse unproved subscriptions without poisoning the
+                        // shared observation lock or publishing private data.
+                        if authenticated {
+                            json!({"op":frame["op"],"success":true})
+                        } else {
+                            seen.rejections += 1;
+                            json!({"op":frame["op"],"success":false,"ret_msg":"synthetic authentication required"})
+                        }
                     }
                 }
                 "ping" => json!({"op":"pong"}),
@@ -358,7 +362,10 @@ mod controls {
         first(&subscription, &mut Observed::default());
         let mut seen = Observed::default();
         let refused: Value = serde_json::from_str(&second(&subscription, &mut seen)[0]).unwrap();
-        assert_eq!(refused["success"], false, "pipelined private subscriptions must return an auth refusal without panicking");
+        assert_eq!(
+            refused["success"], false,
+            "pipelined private subscriptions must return an auth refusal without panicking"
+        );
         assert_eq!(seen.writes, 0);
     }
 }
