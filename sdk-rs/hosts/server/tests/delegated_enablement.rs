@@ -48,9 +48,11 @@ fn runtime_switch_uses_the_same_executable_and_keeps_the_ledger_router_owned() {
         let transport = &capabilities["transports"]["accountWorkerWebSocket"];
         assert_eq!(transport["delegatedOrderFramesV1"], expected == "1");
         assert_eq!(transport["delegatedOrderActionsV1"], expected == "1");
+        assert_eq!(transport["delegatedFullWriteActionsV1"], expected == "1");
         assert!(transport.get("delegatedOrderActionLedgerV1").is_none());
         assert!(transport.get("delegatedOrderLedgerV1").is_none());
-        let supported = safe_cex_exchange_server::order_contract::enabled();
+        assert!(transport.get("delegatedFullWriteLedgerV1").is_none());
+        let supported = safe_cex_exchange_server::order_contract::enabled_for("binance");
         assert_eq!(transport["delegatedActivationScopeV1"]["place"], supported);
         assert_eq!(
             transport["delegatedActivationScopeV1"]["close"],
@@ -60,8 +62,13 @@ fn runtime_switch_uses_the_same_executable_and_keeps_the_ledger_router_owned() {
                 "unsupported"
             }
         );
+        // 4c3b5f519 reports runtime-enabled typed actions for the selected venue.
+        // The minimum scope and router-owned ledger guards stay independent.
         for action in ["amend", "cancel", "cancelAll", "nuke"] {
-            assert_eq!(transport["delegatedActivationScopeV1"][action], false);
+            assert_eq!(
+                transport["delegatedActivationScopeV1"][action],
+                expected == "1" && supported
+            );
         }
         return;
     }

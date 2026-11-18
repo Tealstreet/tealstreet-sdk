@@ -147,6 +147,91 @@ fn order(id: &str, status: &str, cumulative: &str) -> String {
 }
 
 #[test]
+fn documented_order_statuses_map_on_rest_snapshots_and_private_deltas() {
+    // https://api-docs.omni.apex.exchange/#get-open-orders
+    // OPEN includes partial fills; CANCELED and EXPIRED can also have fills.
+    for (status, expected) in [
+        ("PENDING", OrderStatus::Open),
+        ("OPEN", OrderStatus::Open),
+        ("UNTRIGGERED", OrderStatus::Open),
+        ("FILLED", OrderStatus::Closed),
+        ("EXPIRED", OrderStatus::Closed),
+        ("CANCELED", OrderStatus::Canceled),
+    ] {
+        let (mut e, socket, http) = seeded();
+        let filled = match status {
+            "FILLED" => "2",
+            "PENDING" | "UNTRIGGERED" => "0",
+            _ => "0.25",
+        };
+        let body = format!(
+            r#"{{"code":0,"data":[{}]}}"#,
+            order("catalog", status, filled)
+        );
+        for request in http {
+            response(
+                &mut e,
+                &request,
+                30.0,
+                if request.url.ends_with("/v3/account") {
+                    ACCOUNT
+                } else {
+                    &body
+                },
+            );
+        }
+        let mapped = e.store().order("catalog").expect(status);
+        assert_eq!(mapped.status, expected, "REST {status}");
+        let filled: f64 = filled.parse().unwrap();
+        assert_eq!(mapped.filled, filled, "REST {status}");
+        assert_eq!(mapped.remaining, 2.0 - filled, "REST {status}");
+
+        e.handle(40.0, Event::WsOpened { socket });
+        e.prepared(40.0).for_each(drop);
+        ws(&mut e, socket, 50.0, r#"{"op":"login","success":true}"#);
+        let row = order("stream", status, &filled.to_string());
+        ws(
+            &mut e,
+            socket,
+            100.0,
+            &frame("delta", &format!(r#"{{"orders":[{row}]}}"#)),
+        );
+        if expected == OrderStatus::Canceled {
+            assert!(e.store().order("stream").is_none());
+        } else {
+            let mapped = e.store().order("stream").expect(status);
+            assert_eq!(mapped.status, expected, "WS {status}");
+            assert_eq!(mapped.filled, filled, "WS {status}");
+        }
+        assert!(!e.prepared(100.0).any(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::ROW_SKIPPED
+        )), "documented status {status} must not be skipped");
+    }
+}
+
+#[test]
+fn unknown_order_status_is_visible_and_preserves_the_live_order() {
+    // Neither spelling variants nor a future venue state establish terminality.
+    for status in ["CANCELLED", "UNKNOWN_ORDER_STATUS", "FUTURE_STATUS", ""] {
+        let (mut e, socket) = ready();
+        ws(&mut e, socket, 50.0, r#"{"op":"login","success":true}"#);
+        let row = order("parent", status, "0.5");
+        ws(
+            &mut e,
+            socket,
+            100.0,
+            &frame("delta", &format!(r#"{{"orders":[{row}]}}"#)),
+        );
+        assert_eq!(e.store().order("parent").unwrap().status, OrderStatus::Open);
+        assert_eq!(e.store().order("parent").unwrap().filled, 0.25);
+        assert!(e.prepared(100.0).any(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::ROW_SKIPPED
+                && event.message == "unknown order status"
+        )));
+    }
+}
+
+#[test]
 fn login_precedes_immediate_subscription_and_ping_with_private_role() {
     let (mut e, socket, _) = seeded();
     e.handle(20.0, Event::WsOpened { socket });

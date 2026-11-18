@@ -50,7 +50,16 @@ pub fn enabled_for(venue: &str) -> bool {
 
 pub fn action_capabilities(venue: Option<&str>) -> DelegatedActions {
     if activation_allowed(venue.is_some_and(enabled_for), &PLACE_AND_CLOSE) {
-        PLACE_AND_CLOSE
+        // e2dab6ad16 made scope venue-generic; 17865385b5 enabled full writes.
+        // c4370459d pins metadata matching that runtime, with the same activation floor.
+        let actions_enabled = runtime_enabled();
+        DelegatedActions {
+            amend: actions_enabled,
+            cancel: actions_enabled,
+            cancel_all: actions_enabled,
+            nuke: actions_enabled,
+            ..PLACE_AND_CLOSE
+        }
     } else {
         DelegatedActions {
             place: false,
@@ -118,15 +127,46 @@ pub fn key_time(id: &str) -> Option<u64> {
     u64::from_str_radix(&id[..13].replace('-', ""), 16).ok()
 }
 
-pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
-    let created = key_time(id).ok_or("not sent: invalid intent key")?;
-    let age = now
-        .checked_sub(created)
-        .ok_or("not sent: invalid key time")?;
+pub(crate) fn key_age(created: u64, now: u64) -> Result<u64, &'static str> {
+    if created.saturating_sub(now) > 5_000 {
+        return Err("not sent: invalid key time");
+    }
+    let age = now.saturating_sub(created);
     if age >= 10_000 {
         Err("not sent: expired")
     } else {
-        Ok(())
+        Ok(age)
+    }
+}
+
+pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
+    let created = key_time(id).ok_or("not sent: invalid intent key")?;
+    key_age(created, now)?;
+    let skew = created.saturating_sub(now);
+    if skew > 0 {
+        let bucket = match skew {
+            1..=1_000 => "le_1s",
+            1_001..=3_000 => "gt_1s_le_3s",
+            _ => "gt_3s_le_5s",
+        };
+        crate::state::Log::info(
+            &json!({"event":"order.intent_clock_skew","skew_bucket":bucket}).to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// #3630 audits native formats: keep all validated UUID bits in supported text
+/// IDs. Adapters without caller-ID support omit it; the router ledger still
+/// owns dedupe. Numeric-ID adapters retain their refusal pending a follow-up.
+pub(crate) fn client_order_id(venue: &str, intent: &str) -> Option<String> {
+    let hex = || intent.replace('-', "");
+    match venue {
+        "hyperliquid" | "hyperliquidspot" => Some(format!("0x{}", hex())),
+        "bitget" | "bitgetusdc" | "bitgetinverse" | "okx" | "okxdemo" | "okxeu" | "okxeudemo"
+        | "blofin" | "binancepm" => Some(hex()),
+        "lighter" | "lighter-robinhood" | "binanceinverse" | "asterdex" | "kraken" | "mexc" => None,
+        _ => Some(intent.to_owned()),
     }
 }
 
@@ -327,6 +367,39 @@ mod activation_tests {
     }
 
     #[test]
+    fn client_ids_preserve_the_same_intent_bits_and_other_venues() {
+        for (intent, expected) in [
+            (
+                "018bcfe5-6800-7101-8101-010101010101",
+                "0x018bcfe5680071018101010101010101",
+            ),
+            (
+                "018bcfe5-6801-7abc-bdef-fedcba987654",
+                "0x018bcfe568017abcbdeffedcba987654",
+            ),
+        ] {
+            assert!(key_time(intent).is_some());
+            for venue in ["hyperliquid", "hyperliquidspot"] {
+                let first = client_order_id(venue, intent);
+                assert_eq!(first.as_deref(), Some(expected));
+                assert_eq!(client_order_id(venue, intent), first);
+                assert_eq!(&first.unwrap()[2..], intent.replace('-', ""));
+            }
+            for venue in ["bybit", "bybitinverse", "binance", "kucoin"] {
+                assert_eq!(client_order_id(venue, intent).as_deref(), Some(intent));
+            }
+            // 85b32c274 moved OKX to compact hex alongside Bitget/BloFin/PM;
+            // keep its lossless-bit assertion here rather than dropping it.
+            for venue in ["okx", "bitget", "blofin", "binancepm"] {
+                assert_eq!(
+                    client_order_id(venue, intent),
+                    Some(intent.replace('-', ""))
+                );
+            }
+        }
+    }
+
+    #[test]
     fn place_and_reduce_only_close_activate_without_later_actions() {
         assert!(activation_allowed(true, &PLACE_AND_CLOSE));
         assert_eq!(
@@ -353,3 +426,11 @@ mod activation_tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "client_order_ids_tests.rs"]
+mod client_order_ids_tests;
+
+#[cfg(test)]
+#[path = "order_key_time_tests.rs"]
+mod key_time_tests;

@@ -2186,3 +2186,41 @@ async fn typed_place_rejects_shadowed_bbo_without_ack_job_or_write() {
 async fn typed_place_rejects_duplicate_bbo_level_without_ack_job_or_write() {
     duplicate_order_payload_is_unsupported("level").await;
 }
+
+#[tokio::test]
+async fn delegated_price_amend_tolerates_small_clock_skew_without_extending_expiry() {
+    tokio::task::LocalSet::new().run_until(async {
+        for (offset, expected) in [(0_i64, "applied"), (500, "applied"), (60_000, "refused"), (-10_001, "refused")] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let now = crate::accounts::now_ms();
+            let created = now.checked_add_signed(offset).unwrap();
+            let hex = format!("{created:012x}");
+            let id = format!("{}-{}-7101-8101-010101010101", &hex[..8], &hex[8..]);
+            let payload = json!({"kind":"amend","order":{"id":"resting-order","symbol":"BTCUSDT"},"update":{"price":51000}});
+            let fingerprint = crate::order_contract::action_wire_fingerprint("synthetic-main", &id, &payload, 1).unwrap();
+            session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main",
+                "intentId":id,"seq":1,"ageMs":0,"fingerprint":fingerprint,"action":payload}}).to_string()).await.unwrap();
+            let outcome = action_frame(&mut sent, "order.actionOutcome").await;
+            let writes = tape.writes.lock().unwrap().clone();
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+            assert_eq!(outcome["d"]["intentId"], id);
+            assert_eq!(outcome["d"]["outcome"], expected, "offset={offset}: {outcome}");
+            if expected == "applied" {
+                assert_eq!(writes, vec!["amend"]);
+                let rows = native_request_rows(&tape, "amend");
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0]["orderId"], "resting-order");
+                assert_eq!(rows[0]["price"], "51000");
+                assert!(rows[0].get("qty").is_none());
+                assert!(rows[0].get("orderLinkId").is_none());
+            } else {
+                assert!(writes.is_empty());
+                assert_eq!(outcome["d"]["error"]["outcome"], "notSent");
+                assert_eq!(outcome["d"]["error"]["message"], if offset > 0 {"not sent: invalid key time"} else {"not sent: expired"});
+            }
+        }
+    }).await;
+}

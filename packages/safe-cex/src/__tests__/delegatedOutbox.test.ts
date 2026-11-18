@@ -2073,3 +2073,75 @@ describe('DELEGATED host-neutral outbox', () => {
     box.close();
   });
 });
+
+describe('lossless venue receipt identities', () => {
+  it.each(['raw', 'none', 'compact', 'hyperliquid'] as const)(
+    'settles %s without changing intent or resending',
+    async (encoding) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const ticket = box.connect(f.connection());
+      const id = await box.enqueue(params);
+      const clientOrderId =
+        encoding === 'none'
+          ? null
+          : encoding === 'raw'
+            ? id
+            : `${encoding === 'hyperliquid' ? '0x' : ''}${id.replaceAll('-', '')}`;
+      await box.receive(
+        ticket,
+        response(id, 'order.outcome', { outcome: 'placed', venueOrderId: 'native-one', clientOrderId, error: null }),
+      );
+      expect(box.entries()[0].state).toBe('placed');
+      expect(box.entries()[0].intentId).toBe(id);
+      expect(box.entries()[0].venueOrderId).toBe('native-one');
+      box.close();
+      const restored = await DelegatedOutbox.open(f.options);
+      await restored.flush(restored.connect(f.connection('restored')));
+      expect(f.writes).toHaveLength(1);
+      restored.close();
+    },
+  );
+  it.each(['foreign', 'uppercase', 'prefix', 'numeric', 'idless'] as const)(
+    'rejects %s without consuming a valid receipt sequence',
+    async (kind) => {
+      const f = fixture();
+      const box = await DelegatedOutbox.open(f.options);
+      const ticket = box.connect(f.connection());
+      const id = await box.enqueue(params);
+      const invalid =
+        kind === 'foreign'
+          ? '0x' + 'f'.repeat(32)
+          : kind === 'uppercase'
+            ? id.replaceAll('-', '').toUpperCase()
+            : kind === 'prefix'
+              ? '0X' + id.replaceAll('-', '')
+              : kind === 'numeric'
+                ? '123'
+                : id;
+      await box.receive(
+        ticket,
+        response(id, 'order.outcome', {
+          outcome: 'placed',
+          venueOrderId: kind === 'idless' ? null : 'native-one',
+          clientOrderId: invalid,
+          outcomeSeq: 99,
+          error: null,
+        }),
+      );
+      expect(box.entries()[0].state).toBe('sending');
+      await box.receive(
+        ticket,
+        response(id, 'order.outcome', {
+          outcome: 'placed',
+          venueOrderId: 'native-one',
+          clientOrderId: id,
+          error: null,
+        }),
+      );
+      expect(box.entries()[0].state).toBe('placed');
+      expect(f.writes).toHaveLength(1);
+      box.close();
+    },
+  );
+});
