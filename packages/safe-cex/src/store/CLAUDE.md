@@ -21,7 +21,9 @@ A failing listener does not prevent peers from running or trigger recovery.
 
 `reset()` releases stream baselines and restores generated unloaded defaults.
 Defaults never establish decoded readiness. Generated `updateIds` track actual
-order/position changes; ACCOUNT_READ does not advance those observation IDs.
+order/position stream observations, including repeated equal tables. ACCOUNT_READ
+and recovery snapshots do not advance those observation IDs. Equal financial
+sections still retain their identities; only the observation counters change.
 
 ## Source ownership
 

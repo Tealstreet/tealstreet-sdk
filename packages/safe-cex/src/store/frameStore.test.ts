@@ -46,8 +46,11 @@ describe('FrameStore native state', () => {
     const before = store.data;
     const versions = store.versions;
     store.ingest(frame(fixtures.ready), { seq: 11 });
-    expect(store.data).toBe(before);
-    expect(store.versions).toEqual(versions);
+    expect(store.orders).toBe(before.orders);
+    expect(store.positions).toBe(before.positions);
+    expect(store.markets).toBe(before.markets);
+    expect(store.tickers).toBe(before.tickers);
+    expect(store.versions).toEqual({ ...versions, updateIds: (versions.updateIds ?? 0) + 1 });
     expect(store.hasMarketIdentity).toBe(true);
     expect(store.hasAccountState).toBe(true);
     expect(store.latency).toBe(0);
@@ -229,4 +232,16 @@ it('retains native closed-position settings through same-account snapshot recove
   expect(store.positions).toEqual([]);
   store.ingest(nativeFixture({ fetchedLeverage: { BTC: { buyLeverage: 20, sellLeverage: 20 } } }, ['BTC']));
   expect(store.positionSettings['closed-native']?.leverage).toBe(20);
+});
+
+it('counts independent empty stream observations after equal account reads without replacing rows', () => {
+  const store = new FrameStore();
+  store.apply(nativeFixture({ orders: [] }));
+  const orders = store.orders;
+  const before = store.updateIds.orders;
+  store.apply(new Frame(nativeStoreFrame({ orders: [] }, undefined, true)));
+  expect(store.updateIds.orders).toBe(before);
+  store.apply(nativeFixture({ orders: [] }));
+  expect(store.updateIds.orders).toBe(before + 1);
+  expect(store.orders).toBe(orders);
 });

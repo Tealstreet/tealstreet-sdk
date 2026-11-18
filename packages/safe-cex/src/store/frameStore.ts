@@ -260,17 +260,19 @@ export class FrameStore {
       this.sectionVersions[key] = this.version(key) + 1;
     };
     for (const key of Object.keys(changes)) if (key !== 'updateIds') replace(key as FrameSection);
-    if (next === this.state) return;
-    if (!accountRead && (next.orders !== this.state.orders || next.positions !== this.state.positions)) {
+    // Independent stream observations retain freshness even when their rows
+    // equal a prior ACCOUNT_READ. Financial section identities remain shared.
+    if (!accountRead && (changes.orders !== undefined || changes.positions !== undefined)) {
       next = {
         ...next,
         updateIds: {
-          orders: this.state.updateIds.orders + Number(next.orders !== this.state.orders),
-          positions: this.state.updateIds.positions + Number(next.positions !== this.state.positions),
+          orders: this.state.updateIds.orders + Number(changes.orders !== undefined),
+          positions: this.state.updateIds.positions + Number(changes.positions !== undefined),
         },
       };
       this.sectionVersions.updateIds = this.version('updateIds') + 1;
     }
+    if (next === this.state) return;
     this.state = next;
     this.notifications.push({ data: next, versions: this.versions });
     if (this.notifying) return;
@@ -341,7 +343,12 @@ export class FrameStore {
     if (stats) this.publish({ messageHandlerStats: stats });
   }
 
-  private readMessageHandlerStats(frame: Frame, source: 'account' | 'public' = 'account', previous = this.messageHandlerStats, sharedSection = false): StoreData['messageHandlerStats'] {
+  private readMessageHandlerStats(
+    frame: Frame,
+    source: 'account' | 'public' = 'account',
+    previous = this.messageHandlerStats,
+    sharedSection = false,
+  ): StoreData['messageHandlerStats'] {
     const stats = sharedSection ? frame.publicMessageHandlerStats?.() : frame.messageHandlerStats?.();
     if (!stats) return undefined;
     const groups: MessageHandlerStatsType[] = ['public', 'business', 'futures', 'private'];
@@ -387,7 +394,9 @@ export class FrameStore {
   /** Forwarding workers skip book reconstruction before transferring the frame. */
   apply(frame: Frame, applyBooks = true, snapshot = false): void {
     if (this.needsSnapshot) throw new FrameApplyError('Frame sequence gap requires snapshot');
-    const update: { -readonly [K in keyof StoreData]?: StoreData[K] } = snapshot ? { ...initialStoreData, positionSettings: this.positionSettings } : {};
+    const update: { -readonly [K in keyof StoreData]?: StoreData[K] } = snapshot
+      ? { ...initialStoreData, positionSettings: this.positionSettings }
+      : {};
 
     const errors: unknown[] = [];
     let accepted = 0;
@@ -595,7 +604,7 @@ export class FrameStore {
     // pending stream frame still owns order/position freshness when it arrives.
     if (changed) {
       try {
-        this.publish(update, frame.accountRead?.());
+        this.publish(update, snapshot || frame.accountRead?.());
       } catch (error) {
         if (!errors.length) throw error;
         errors.push(error);
