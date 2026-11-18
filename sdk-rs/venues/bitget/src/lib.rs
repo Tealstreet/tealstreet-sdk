@@ -148,8 +148,8 @@ pub struct BitgetFutures {
     candles: HashMap<(String, Interval), usize>,
     /// Topics Bitget answered with event:error, by (channel, instId): retries made, pending timer.
     refused_topics: HashMap<(String, String), (u32, Option<TimerId>)>,
-    /// Known missing ticker topics warned once for this engine's lifetime.
-    warned_ticker_refusals: HashSet<String>,
+    /// Exact native missing ticker topics retired for this engine's lifetime.
+    refused_ticker_topics: HashSet<String>,
     /// When an unreadable public message was last logged; at most one per minute.
     public_parse_logged_at: Option<f64>,
     order_caps: HashMap<String, OrderCaps>,
@@ -275,7 +275,7 @@ impl BitgetFutures {
             books: HashMap::new(),
             candles: HashMap::new(),
             refused_topics: HashMap::new(),
-            warned_ticker_refusals: HashSet::new(),
+            refused_ticker_topics: HashSet::new(),
             public_parse_logged_at: None,
             order_caps: HashMap::new(),
         }
@@ -500,6 +500,12 @@ impl BitgetFutures {
         let mut payload = prefix.clone();
         let overhead = (prefix.len() + 2).max(r#"{"op":"unsubscribe","args":[]}"#.len());
         for (channel, symbol) in topics {
+            if op == "subscribe"
+                && channel == "ticker"
+                && self.refused_ticker_topics.contains(symbol)
+            {
+                continue;
+            }
             let topic = serde_json::to_string(&Topic {
                 inst_type: &product,
                 channel,
@@ -580,9 +586,8 @@ impl BitgetFutures {
         let Some(native) = message.msg.strip_suffix(" doesn't exist") else {
             return false;
         };
-        if native != symbol
-            && native != format!("instType:{product},channel:ticker,instId:{symbol}")
-        {
+        let topic = format!("instType:{product},channel:ticker,instId:{symbol}");
+        if native != symbol && native != topic && native != format!("{topic},precision:null") {
             return false;
         }
         serde_json::from_str::<Refusal<'_>>(text).is_ok_and(|refusal| {
@@ -628,6 +633,19 @@ impl BitgetFutures {
                 message.arg.channel.to_string(),
                 message.arg.inst_id.to_string(),
             );
+            if self.known_ticker_refusal(cx, &message, text) {
+                if let Some((_, Some(timer))) = self.refused_topics.remove(&topic) {
+                    cx.clear_timer(timer);
+                }
+                if self.refused_ticker_topics.insert(topic.1) {
+                    cx.notice(
+                        Level::Warn,
+                        code::SUBSCRIPTION_REJECTED,
+                        "Bitget ticker subscription refused for a known market",
+                    );
+                }
+                return;
+            }
             let retry = (!topic.0.is_empty() && !topic.1.is_empty())
                 .then(|| {
                     self.refused_topics
@@ -647,25 +665,15 @@ impl BitgetFutures {
                 None if !topic.0.is_empty() => format!("{} {}: not retried", topic.0, topic.1),
                 None => String::new(),
             };
-            if self.known_ticker_refusal(cx, &message, text) {
-                if self.warned_ticker_refusals.insert(topic.1) {
-                    cx.notice(
-                        Level::Warn,
-                        code::SUBSCRIPTION_REJECTED,
-                        "Bitget ticker subscription refused for a known market",
-                    );
-                }
-            } else {
-                cx.notice(
-                    Level::Error,
-                    code::SUBSCRIPTION_REJECTED,
-                    if detail.is_empty() {
-                        format!("Bitget WS: {}", message.msg)
-                    } else {
-                        format!("Bitget WS: {} ({detail})", message.msg)
-                    },
-                );
-            }
+            cx.notice(
+                Level::Error,
+                code::SUBSCRIPTION_REJECTED,
+                if detail.is_empty() {
+                    format!("Bitget WS: {}", message.msg)
+                } else {
+                    format!("Bitget WS: {} ({detail})", message.msg)
+                },
+            );
             return;
         }
         if !self.refused_topics.is_empty()
