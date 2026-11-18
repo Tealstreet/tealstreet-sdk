@@ -518,8 +518,6 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 
 
 
-
-
 test('the approved combined ceiling accepts 17 MiB exactly and rejects the next byte', () => {
   for (const venue of [undefined, ...Object.keys(WASM_VENUE_OVERRIDES)]) {
     assert.equal(wasmBudgetError(16_778_652, 'combined', venue), undefined, '#3140 measured size');
@@ -1157,7 +1155,6 @@ test('#3150 final CI 42258955401 cap refresh: #3122 protective stop edits (run 4
   }
 });
 
-
 test('#3129 guarded GRVT edits (run 42145552491) retain measured headroom', () => {
   const [venue, measured, cap] = ['grvt', 1_806_590, 1_817_600];
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
@@ -1515,7 +1512,6 @@ test('#3191 run 42249705679 retains measured Paradex headroom', () => {
   assert.equal(wasmBudgetError(cap, 'venue', 'paradex'), undefined);
   assert.match(wasmBudgetError(WASM_VENUE_OVERRIDES['paradex'] + 1, 'venue', 'paradex'), /exceeds/);
 });
-
 
 test('#3229 Backpack hosted signing (run 42352281022, job 128343086016) retains CI headroom', () => {
   const measured = 1_994_139;
@@ -2315,7 +2311,6 @@ for (const venue of ['bitget', 'bitgetusdc']) {
   });
 }
 
-
 test('nullable history output retains current measured family headroom', () => {
   // Pinned local build.sh --venue FAMILY: Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
   for (const [venue, measured, minimumCap] of [
@@ -2422,7 +2417,6 @@ test('#3429 master restage retains current measured Hyperliquid and Weex headroo
   assert.equal(WASM_VENUE_OVERRIDES.hyperliquid, WASM_VENUE_OVERRIDES.hyperliquidspot);
 });
 
-
 test('#3342 (run 42480192430 at 188604decf7) retains measured wasm headroom', () => {
   for (const [venue, measured, minimumCap] of [
     ['bybit', 2_299_152, 2_310_144],
@@ -2528,7 +2522,6 @@ for (const [family, aliases, web, node, minimumCap] of [
     }
   });
 }
-
 
 test('#3372 reduced CI run 43341438240 retains current KuCoin Spot reserve', () => {
   // Previous run 43303561061 measured 2,463,988 B and required the superseded 2,475,008 cap.
@@ -2654,7 +2647,6 @@ test('#3391 run 43040714236 at 86083b569b50 retains exact-head measured wasm hea
 });
 
 
-
 // #3391 run 43204096369: source d62f6d989c3a35cacf7b20375a4b5edc334e3323,
 // tree 23178e76bbafb6f557c77ffd0431aee4cdeea9e2 (also 3de5a492d792).
 // Rust 1.99.0 / wasm-bindgen 0.2.129 / Binaryen 132, required -Oz.
@@ -2731,7 +2723,6 @@ for (const [family, web, node, minimumCap] of [
   });
 }
 
-
 test('#3391 merged artifact run 43254034225 retains AsterDEX measured reserve', () => {
   // Family job 131308189778, artifact 13960543088; web and Node both 2,218,535 B.
   const measured = 2_218_535;
@@ -2739,7 +2730,6 @@ test('#3391 merged artifact run 43254034225 retains AsterDEX measured reserve', 
   const cap = WASM_VENUE_OVERRIDES.asterdex;
   assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
 });
-
 
 test('#3391 round 2 current CI merge retains AsterDEX measured reserve', () => {
   // Run 43263509956/job 131345282843, artifact 13966760078; source 0fd07e1c89f8.
@@ -2839,7 +2829,6 @@ test('#3372 merged CI run 43381322258 retains current Bybit reserve', () => {
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
 });
 
-
 test('#3438 master merge retains newly measured conflict-family headroom', () => {
   // Merge cf112c51b87c + 3f94ec11a27f; pinned build.sh web/node sizes.
   for (const [venue, measured, minimumCap, resolvedCap = minimumCap] of [
@@ -2887,7 +2876,6 @@ test('#3342 Hyro Unknown presentation retains fresh merged-head Bybit reserve', 
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
 });
 
-
 test('#3372 (run 42484598496 at 44f62e31028) retains measured wasm headroom', () => {
   for (const [venue, measured, minimumCap] of [
     ['bybit', 2_285_327, 2_295_808],
@@ -2901,7 +2889,6 @@ test('#3372 (run 42484598496 at 44f62e31028) retains measured wasm headroom', ()
   }
 });
 
-
 test('#3372 restage (optimized merge 41d4292d6f3) retains current Bybit headroom', () => {
   const measured = 2_323_991;
   const minimumCap = 2_334_720;
@@ -2912,7 +2899,6 @@ test('#3372 restage (optimized merge 41d4292d6f3) retains current Bybit headroom
   assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
 });
-
 
 test('#3372 current CI run 43052995465 retains measured Bybit headroom', () => {
   // Head 5858609a705, CI merge cc0145a0f0ba (base d956d25f8b48), artifact 13869852410.
@@ -2926,7 +2912,6 @@ test('#3372 current CI run 43052995465 retains measured Bybit headroom', () => {
   assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
 });
-
 
 // #3391 fresh composition df6f095bd740 (master 353a3ab925b0).
 // build.sh --venue FAMILY; Rust1.99 / bindgen0.2.129 / Binaryen132, required twice -Oz.
@@ -2959,7 +2944,6 @@ test('#3391 fresh CI composition retains Bybit measured 10 KiB reserve', () => {
   assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
 });
-
 
 test('#3342 latest master composition retains fresh CI Bybit reserve', () => {
   // Run 43452683819/job 131979457461; wasm-family-bybit, CI source 0d075971b309.
@@ -3069,7 +3053,6 @@ for (const venue of ['bitget', 'bitgetusdc']) {
 }
 
 
-
 test('#3302 CI run 42564749959 at 0bac20f54f5f retains current measured wasm headroom', () => {
   const measured = 2_219_070;
   const minimumCap = 2_230_272;
@@ -3082,7 +3065,6 @@ test('#3302 CI run 42564749959 at 0bac20f54f5f retains current measured wasm hea
   assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
 });
 
-
 test('#3302 merged 207b88974ec retains current measured wasm headroom', () => {
   const measured = 2_218_910;
   const minimumCap = 2_229_248;
@@ -3093,7 +3075,6 @@ test('#3302 merged 207b88974ec retains current measured wasm headroom', () => {
   assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
 });
-
 
 test('#3302 (run 42435433699 at 080ed4b51ae) retains measured wasm headroom', () => {
   for (const [venue, measured, minimumCap] of [
@@ -3108,7 +3089,6 @@ test('#3302 (run 42435433699 at 080ed4b51ae) retains measured wasm headroom', ()
   }
 });
 
-
 test('#3302 pinned master merge 80d25442f36f retains measured asterdex headroom', () => {
   const measured = 2_231_057;
   const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
@@ -3120,7 +3100,6 @@ test('#3302 pinned master merge 80d25442f36f retains measured asterdex headroom'
   assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
 });
 
-
 test('#3302 pinned master merge 359c4b3e3c4d retains measured asterdex headroom', () => {
   const measured = 2_231_732;
   const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
@@ -3131,7 +3110,6 @@ test('#3302 pinned master merge 359c4b3e3c4d retains measured asterdex headroom'
   assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
 });
-
 
 test('#3302 CI job 129514220621 retains merged-head weex family headroom', () => {
   const measured = Math.max(1_991_705, 1_993_745);
@@ -3146,7 +3124,6 @@ test('#3302 CI job 129514220621 retains merged-head weex family headroom', () =>
   }
 });
 
-
 test('#3302 CI job 129514220728 retains merged-head hyperliquid family headroom', () => {
   const measured = Math.max(2_236_465, 2_238_386);
   const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
@@ -3159,7 +3136,6 @@ test('#3302 CI job 129514220728 retains merged-head hyperliquid family headroom'
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
-
 
 // #3302 run 43319605083, CI merge fb0f9b777241; pinned build inputs match a3275d876624.
 // AsterDEX web: job 131537312211; Node: artifact 13990380922.
@@ -3180,7 +3156,6 @@ for (const [venue, measured] of [
   });
 }
 
-
 // sam-mbp2/codex-4t8vx1: build.sh --venue asterdex at 3df8707ddee4.
 // Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz; equal web/Node bytes.
 test('#3302 reviewed merge retains the measured AsterDEX reserve', () => {
@@ -3193,7 +3168,6 @@ test('#3302 reviewed merge retains the measured AsterDEX reserve', () => {
   assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
 });
-
 
 // Isolated build.sh --venue asterdex at a5b5284402c8: equal web/Node bytes.
 // Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz.
@@ -3208,7 +3182,6 @@ test('#3302 fresh merged build keeps current reserve and the reviewed higher flo
   assert.equal(wasmBudgetError(cap, 'venue', 'asterdex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'asterdex'), /exceeds/);
 });
-
 
 // Standard isolated build at merge 1ccd7b26df0b: identical web/Node WASM bytes.
 // Rust 1.99.0, bindgen 0.2.129, Binaryen 132 twice -Oz.
@@ -3419,7 +3392,6 @@ test('#3225 private drb CI 42367168155 retains measured headroom and the exact b
     assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   }
 });
-
 
 test('#3225 refreshed private DRB artifacts retain 10 KiB and both Coinbase family boundaries', () => {
   const measured = 2_222_017;
@@ -3633,7 +3605,6 @@ test('#3314 agent setup e2da53cc9f26 retains measured TxFlow headroom', () => {
   assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
 });
 
-
 test('#3314 refreshed merge 9bb43250830d retains measured TxFlow reserve', () => {
   const measured = 2_147_684;
   const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
@@ -3644,7 +3615,6 @@ test('#3314 refreshed merge 9bb43250830d retains measured TxFlow reserve', () =>
   assert.equal(wasmBudgetError(cap, 'venue', 'txflow'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
 });
-
 
 test('#3314 refusal fix e959e2a7dc2e retains fresh optimized TxFlow reserve', () => {
   const measured = 2_147_758;
@@ -3657,7 +3627,6 @@ test('#3314 refusal fix e959e2a7dc2e retains fresh optimized TxFlow reserve', ()
   assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
 });
 
-
 test('#3314 composed WEEX f6830c3f2466 retains measured optimized reserve', () => {
   const measured = 2_028_105;
   const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
@@ -3668,7 +3637,6 @@ test('#3314 composed WEEX f6830c3f2466 retains measured optimized reserve', () =
   assert.equal(wasmBudgetError(cap, 'venue', 'weex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'weex'), /exceeds/);
 });
-
 
 test('#3314 recoverable authorization reads retain freshly measured TxFlow reserve', () => {
   const measured = 2_148_376;
@@ -3681,7 +3649,6 @@ test('#3314 recoverable authorization reads retain freshly measured TxFlow reser
   assert.match(wasmBudgetError(cap + 1, 'venue', 'txflow'), /exceeds/);
 });
 
-
 for (const [venue, measured, required] of [
   ['txflow', 2_148_377, 2_159_616],
   ['weex', 2_028_106, 2_038_784],
@@ -3693,7 +3660,6 @@ for (const [venue, measured, required] of [
   assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
 });
-
 
 test('#3314 serial placement source1c2a4f8232c4 retains measured TxFlow reserve', () => {
   const measured = 2_149_614;
@@ -3737,7 +3703,6 @@ for (const [venue, family, artifact, measured, minimumCap] of [
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   });
 }
-
 
 // #3226 c548d1eb3 fix + master b86a48664; head89f7496f69aca.
 // CI43598275562/job132457674114, source1108664e5141: optimized web/Node2344277B.
@@ -4152,3 +4117,18 @@ for (const venue of ['bitget', 'bitgetusdc']) {
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   });
 }
+
+// #3671 exact head 80e0a8fb9fa, run44344562850/artifact14444829191.
+// Rust1.99.0, bindgen0.2.129, Binaryen132, required -Oz; web/Node/replay agree.
+// SHA256 52beaef3ebde8cfaaf777516cb2c87f0235d34a243c077adfe173a9dd5ea8ae3.
+test('#3671 Binance paging retains fresh artifact reserve and historical floor', () => {
+  const measured = 2_282_595;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.binance;
+  assert.equal(required, 2_293_760);
+  assert.ok(cap >= Math.max(required, 2_290_688));
+  assert.ok(cap - measured >= 10 * 1024);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'binance'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'binance'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'binance'), /exceeds/);
+});

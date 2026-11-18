@@ -109,3 +109,13 @@ this routing correction does not change family caps or construction membership.
 BingX Spot replay tracks production decoder receipts alongside pending account reads.
 Bounded drains precede ticks, checkpoints and final capture; event-loop yields
 alone cannot establish completion of gzip decoding or its queued text messages.
+
+Binance saturated-history paging #3671 at exact source `80e0a8fb9fa` was
+measured in Rust SDK run `44344562850`, artifact `14444829191`. Optimized
+web/Node/replay modules agree at 2,282,595 bytes (SHA256
+`52beaef3ebde8cfaaf777516cb2c87f0235d34a243c077adfe173a9dd5ea8ae3`).
+The family floor is 2,293,760 bytes: measured + 10 KiB rounded up,
+retaining the prior 2,290,688-byte floor and 11,165 bytes of reserve.
+The combined artifact `14447356528` measures 17,685,652 bytes, leaving
+140,140 bytes under its unchanged cap. Pinned Rust1.99.0, bindgen0.2.129,
+Binaryen132 and required -Oz settings are unchanged.
