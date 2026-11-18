@@ -251,12 +251,18 @@ impl Notices {
     }
 
     pub fn deliver(&self, user: &str, account: &str, out: &Out) -> bool {
+        self.deliver_for(user, account, out, None)
+    }
+    pub(crate) fn deliver_waiting_for_key(&self, user: &str, account: &str, out: &Out) -> bool {
+        self.deliver_for(user, account, out, Some(Reason::WaitingForKey))
+    }
+    fn deliver_for(&self, user: &str, account: &str, out: &Out, reason: Option<Reason>) -> bool {
         let mut entries = self.users.lock().unwrap();
         prune(&mut entries);
         let Some(pending) = entries.get_mut(user).and_then(|user| user.marker.as_mut()) else {
             return false;
         };
-        if pending.sent {
+        if pending.sent || reason.is_some_and(|reason| pending.marker.reason != reason) {
             return false;
         }
         let display = self

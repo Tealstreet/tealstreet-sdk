@@ -164,8 +164,29 @@ routing fields receive a visible ordinary error rather than an oversized receipt
 version nibble 7 and RFC variant 8/9/a/b. Its first 48 bits encode immutable Unix
 creation time in milliseconds. Keys are bounded to 128 bytes. Bybit receives
 that exact UUIDv7 as `orderLinkId` (36 characters, lowercase hex and hyphens);
-`requestId` is the same intent ID. A conflicting caller clientOrderId refuses.
-Existing validation still requires one native order.
+`requestId` is always that original UUID. The SDK selects the venue ID from the
+admitted account, after checking the original payload fingerprint and any caller
+`params.clientOrderId` (which must still equal the UUID before derivation):
+
+| Admitted venue | Caller venue ID |
+| --- | --- |
+| Hyperliquid, Hyperliquid Spot | `0x` plus the UUID's 32 lowercase hex digits |
+| Bitget, Bitget inverse, Bitget USDC; OKX, OKX demo, OKX EU, OKX EU demo; BloFin; Binance PM | The UUID's 32 lowercase hex digits, without hyphens |
+| Bybit variants/HyroTrader; Binance USD-M, Spot, Options; BingX; Bitunix; KuCoin Futures/Spot; Coinbase Futures/Spot; Crypto.com; ApeX Omni; Paradex; Phemex | Original UUID |
+| Lighter, Lighter Robinhood; Binance inverse; AsterDEX; Kraken Futures; MEXC | No caller venue ID: those native adapters do not support one |
+| Backpack; WOO; GRVT | Numeric mapping is a separate follow-up; current native refusal is retained |
+
+Text/hex encodings preserve all 128 intent bits. They do not change the intent,
+request ID, fingerprint, age or durable router claim. SDK receipts retain the
+actual caller venue ID, including unknown outcomes; it is null when none was
+supplied. Native adapters may generate their own internal IDs in that case, but
+the SDK does not claim one from absent evidence. The router never derives a venue
+ID. Its UUID/fingerprint ledger is primary dedupe even when no caller venue ID is
+supported; replay and conflicting payloads never create another forward.
+
+Native order-shape, quantity/split, ownership and command guards remain unchanged.
+A venue ID is never discarded and retried after a native refusal. Multiple or
+missing native result IDs retain the existing unknown outcome, never a resend.
 
 The box checks the key's own timestamp against its current time: future
 timestamps refuse, and an initial submit at age 10,000 ms or more receives

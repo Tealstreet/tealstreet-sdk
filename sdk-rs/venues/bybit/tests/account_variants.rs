@@ -1285,3 +1285,134 @@ fn hyro_v1_optional_position_fields_still_reject_supplied_nonfinite_numbers() {
         assert_eq!(h.engine.store().positions()[0].contracts, 1.);
     }
 }
+
+#[test]
+fn hyro_explicit_handshake_refusal_is_typed_without_condemning_the_key() {
+    use safe_cex_engine::{Notice, log::Value};
+    for code in [serde_json::json!(10003), serde_json::json!("10003")] {
+        let op = "auth";
+        let mut h = startup(Variant::Hyrotrader);
+        let socket = h.socket("/v5/private").unwrap();
+        h.event(Event::WsOpened { socket });
+        let sent: serde_json::Value = serde_json::from_str(
+            h.sent_on("/v5/private")
+                .iter()
+                .rev()
+                .find(|text| text.contains(&format!("\"op\":\"{op}\"")))
+                .unwrap(),
+        )
+        .unwrap();
+        h.message(
+            "/v5/private",
+            &serde_json::json!({
+                "op":op, "req_id":sent["req_id"], "success":false,
+                "ret_code":code, "ret_msg":""
+            })
+            .to_string(),
+        );
+        let errors: Vec<_> = h
+            .notices
+            .iter()
+            .filter_map(|notice| match notice {
+                Notice::Event(event) if event.code == "stream.unavailable" => Some(event),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "one original refusal event");
+        assert!(
+            errors[0].fields.iter().any(|(name, value)| *name == "kind"
+                && matches!(value, Value::Str(text) if text == "rejected")),
+            "an explicit handshake refusal must settle the admission: {errors:?}"
+        );
+        assert!(
+            errors[0]
+                .fields
+                .iter()
+                .any(|(name, value)| *name == "venueCode"
+                    && matches!(value, Value::Str(text) if text == "10003"))
+        );
+        assert!(!h.deactivated, "a refusal does not diagnose the key or IP");
+        assert!(h.closed.contains(&socket));
+        assert!(!h.has_request("/v5/order/realtime"));
+        assert!(!h.engine.store().loaded().balance);
+        assert!(!h.engine.store().loaded().orders);
+        assert!(!h.engine.store().loaded().positions);
+    }
+}
+
+#[test]
+fn hyro_uncertain_or_foreign_handshake_frames_never_claim_typed_rejection() {
+    use safe_cex_engine::Notice;
+    for (success, foreign, op, code) in [
+        (None, false, "auth", serde_json::json!(10003)),
+        (
+            Some(serde_json::Value::Null),
+            false,
+            "auth",
+            serde_json::json!(10003),
+        ),
+        (
+            Some(serde_json::json!(false)),
+            true,
+            "auth",
+            serde_json::json!(10003),
+        ),
+        (
+            Some(serde_json::json!(false)),
+            false,
+            "auth",
+            serde_json::json!(10006),
+        ),
+        (
+            Some(serde_json::json!(false)),
+            false,
+            "auth",
+            serde_json::json!(10016),
+        ),
+        (
+            Some(serde_json::json!(false)),
+            false,
+            "auth",
+            serde_json::json!("10003junk"),
+        ),
+        (
+            Some(serde_json::json!(false)),
+            false,
+            "subscribe",
+            serde_json::json!(10003),
+        ),
+    ] {
+        let mut h = startup(Variant::Hyrotrader);
+        let socket = h.socket("/v5/private").unwrap();
+        h.event(Event::WsOpened { socket });
+        if op == "subscribe" {
+            ack(&mut h, "auth");
+        }
+        let sent: serde_json::Value = serde_json::from_str(
+            h.sent_on("/v5/private")
+                .iter()
+                .rev()
+                .find(|text| text.contains(&format!("\"op\":\"{op}\"")))
+                .unwrap(),
+        )
+        .unwrap();
+        let mut frame = serde_json::json!({
+            "op":op, "req_id":if foreign {serde_json::json!("retired-session")} else {sent["req_id"].clone()},
+            "ret_code":code
+        });
+        if let Some(success) = success {
+            frame["success"] = success;
+        }
+        h.message("/v5/private", &frame.to_string());
+        assert!(h.notices.iter().all(|notice| match notice {
+            Notice::Event(event) if event.code == "stream.unavailable" =>
+                event.fields.iter().all(|(name, _)| *name != "kind"),
+            _ => true,
+        }));
+        assert!(!h.deactivated);
+        assert!(!h.has_request("/v5/order/realtime"));
+        if foreign {
+            assert!(!h.closed.contains(&socket));
+        }
+    }
+}
