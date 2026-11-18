@@ -127,6 +127,32 @@ fn account_http_425_retains_only_present_valid_numeric_envelope_codes() {
 }
 
 #[test]
+fn account_http_425_requires_an_object_envelope_for_venue_codes() {
+    for (body, code) in [
+        (r#"{}"#, None),
+        (r#"{"code":600}"#, Some("600")),
+        (" \n\t{\"code\":\"600\"} \r\n", Some("600")),
+        ("[600]", None),
+        (r#"["600"]"#, None),
+        ("[0]", None),
+        ("[null]", None),
+        ("[]", None),
+        ("[[600]]", None),
+        ("null", None),
+        ("600", None),
+        (r#""600""#, None),
+        ("true", None),
+    ] {
+        let (mut e, _, reads, _) = support::private_started();
+        let request = reads
+            .iter()
+            .find(|r| r.url.contains("account/assets"))
+            .unwrap();
+        assert_diagnostic(&reply(&mut e, request, 425, body), "accountAssets", code);
+    }
+}
+
+#[test]
 fn identity_http_425_stays_scoped_to_its_command_and_retains_the_family() {
     let mut e = support::configured(Options {
         key: Some("scripted-key".into()),
