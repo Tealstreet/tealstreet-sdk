@@ -129,3 +129,7 @@ GitHub runner assignment metadata may lag started measurement steps: CI442484503
 returned runner_id=0 beyond the former 60-second window. Physical-job discovery
 now re-lists for at most five minutes; missing/duplicate identities, retries and
 nonpositive runner IDs still refuse, and replay/signing deadlines stay unchanged.
+
+The native workspace test row installs pinned Node and locked Yarn dependencies:
+store-frames' risk and ownership tests execute maintained TypeScript/FrameStore
+oracles. Missing tsx/TypeScript must fail setup rather than drop those cross-language tests.
