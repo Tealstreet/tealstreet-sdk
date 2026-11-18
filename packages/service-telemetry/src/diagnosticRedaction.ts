@@ -136,8 +136,60 @@ const safeSentryShapeTag = (key: string, value: unknown): boolean => {
   }
 };
 
+export type DiagnosticOmissionReason =
+  | 'serialized_depth'
+  | 'serialized_size'
+  | 'parser_budget'
+  | 'inspection_failure';
+
+export type DiagnosticOmission = {
+  reason: DiagnosticOmissionReason;
+  stage: 'parser_inspection' | 'copy';
+  inspectedStringBytes: number;
+  byteCountCapped: boolean;
+};
+
+export type DiagnosticRedactionOutcome<T> =
+  | { status: 'redacted'; value: T }
+  | { status: 'omitted'; value: '[unserializable diagnostic]'; omission: DiagnosticOmission };
+
+const parserDepthOmission = Symbol('serialized_depth');
+const parserSizeOmission = Symbol('serialized_size');
+const parserBudgetOmission = Symbol('parser_budget');
+const maxInspectedStringBytes = 1_048_576;
+
 /** Detached diagnostic copy. Never mutate the message still needed by trading. */
 export function redactDiagnosticData<T>(input: T): T {
+  return redactDiagnosticDataWithOutcome(input).value as T;
+}
+
+/** Closed failure metadata; never exposes input, property names or thrown values. */
+export function redactDiagnosticDataWithOutcome<T>(input: T): DiagnosticRedactionOutcome<T> {
+  let stage: DiagnosticOmission['stage'] = 'parser_inspection';
+  let inspectedStringBytes = 0;
+  let byteCountCapped = false;
+  // Count unique inspected string values (including decoded JSON), not payload size.
+  // Bounded UTF-8 accounting neither encodes whole strings nor reads objects again.
+  const countStringBytes = (value: string): void => {
+    if (byteCountCapped) return;
+    for (let index = 0; index < value.length; index++) {
+      const code = value.charCodeAt(index);
+      let width = code < 0x80 ? 1 : code < 0x800 ? 2 : 3;
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const next = value.charCodeAt(index + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          width = 4;
+          index++;
+        }
+      }
+      if (inspectedStringBytes + width > maxInspectedStringBytes) {
+        inspectedStringBytes = maxInspectedStringBytes;
+        byteCountCapped = true;
+        return;
+      }
+      inspectedStringBytes += width;
+    }
+  };
   const seen = new WeakMap<object, unknown>();
   const parserMessages = new Set<string>();
   const inspected = new WeakSet<object>();
@@ -153,14 +205,17 @@ export function redactDiagnosticData<T>(input: T): T {
     if (typeof value === 'string') {
       if (inspectedStrings.has(value)) return;
       inspectedStrings.add(value);
+      countStringBytes(value);
       for (const candidate of new Set([value, scrubUrlUserinfo(value)])) {
         let nextStart = 0;
         // Logger prefixes and suffixes can surround several complete JSON records.
         for (const match of candidate.matchAll(/[\[{]/g)) {
           const start = match.index;
           if (start === undefined || start < nextStart) continue;
-          if (serializedDepth >= 4 || candidate.length > 65_536 || parserStringBudget-- <= 0)
-            throw new Error('Diagnostic parser inspection limit exceeded');
+          // Preserve the original ordered limits and shared candidate budget.
+          if (serializedDepth >= 4) throw parserDepthOmission;
+          if (candidate.length > 65_536) throw parserSizeOmission;
+          if (parserStringBudget-- <= 0) throw parserBudgetOmission;
           const end = serializedFragmentEnd(candidate, start);
           if (end === undefined) continue;
           let parsed: unknown;
@@ -299,10 +354,18 @@ export function redactDiagnosticData<T>(input: T): T {
   };
   try {
     inspectParsers(input);
-    return visit(input) as T;
-  } catch {
-    // Logging a lazy/host object must not throw from an existing error handler.
-    return '[unserializable diagnostic]' as T;
+    stage = 'copy';
+    return { status: 'redacted', value: visit(input) as T };
+  } catch (failure) {
+    // Identity comparisons cannot invoke getters or coercion on a hostile throw.
+    const reason: DiagnosticOmissionReason = failure === parserDepthOmission ? 'serialized_depth'
+      : failure === parserSizeOmission ? 'serialized_size'
+        : failure === parserBudgetOmission ? 'parser_budget' : 'inspection_failure';
+    return {
+      status: 'omitted',
+      value: '[unserializable diagnostic]',
+      omission: { reason, stage, inspectedStringBytes, byteCountCapped },
+    };
   }
 }
 

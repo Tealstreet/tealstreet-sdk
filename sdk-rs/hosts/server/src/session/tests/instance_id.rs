@@ -179,7 +179,7 @@ async fn actual_snapshot_and_resnapshot_echo_instance_id() {
             let (account, mut session, mut sent) = fixture(Some("snapshot-registration")).await;
             for resnapshot in [false, true] {
                 if resnapshot {
-                    assert!(session.resnapshot("acct").await);
+                    assert!(session.resnapshot("acct", None).await);
                     ready().await;
                 }
                 let mut snapshots = Vec::new();
@@ -473,7 +473,7 @@ async fn deferred_read_drops_retired_generation_without_relabelling_registration
         session.socket = 7; // The held-load fixture's existing holder.
         // Keep the held-load fixture's original COSIGNED browser-signer admission.
         // join now requires that provenance explicitly.
-        session.join(old.clone(),session.out.account("acct").with_instance_id(Some("registration-A")), envelope::AccountSigningMode::Cosigned).await;
+        session.join(old.clone(),session.out.account("acct").with_instance_id(Some("registration-A")), envelope::AccountSigningMode::Cosigned, 0).await;
         session.handle(r#"{"t":"msg","d":{"op":"callMethod","accountName":"acct","data":{"requestId":"deferred-A","method":"fetchOrders","args":[]}}}"#).await.unwrap();
         assert_eq!(old.frame_reads.available_permits(),crate::accounts::MAX_FRAME_READS-1,
             "A's detached read is in flight before replacement");
@@ -1234,7 +1234,7 @@ async fn delegated_mode_refusal_reply(
                 // Keep the fixture's existing protected DELEGATED admission.
                 // Only the explicit provenance argument is new.
                 session
-                    .join(held, previous, envelope::AccountSigningMode::Delegated)
+                    .join(held, previous, envelope::AccountSigningMode::Delegated, 0)
                     .await;
                 assert!(session.joined.contains_key("acct"));
                 ready().await;
@@ -1351,7 +1351,7 @@ async fn queued_mode_refusal_retired_queue(
                     .unwrap_or_else(|_| panic!("same-mode hold succeeds"));
                 // Keep the fixture's existing protected DELEGATED admission.
                 // Only the explicit provenance argument is new.
-                session.join(held, previous, envelope::AccountSigningMode::Delegated).await;
+                session.join(held, previous, envelope::AccountSigningMode::Delegated, 0).await;
                 assert!(session.joined.contains_key("acct"));
                 ready().await;
                 while sent.try_recv().is_ok() {}

@@ -1,1 +1,11 @@
-export { diagnosticConsole, diagnosticText, redactDiagnosticData } from './src/diagnosticRedaction';
+export {
+  diagnosticConsole,
+  diagnosticText,
+  redactDiagnosticData,
+  redactDiagnosticDataWithOutcome,
+} from './src/diagnosticRedaction';
+export type {
+  DiagnosticOmission,
+  DiagnosticOmissionReason,
+  DiagnosticRedactionOutcome,
+} from './src/diagnosticRedaction';
