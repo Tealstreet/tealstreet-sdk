@@ -11,6 +11,11 @@ projections so standalone Workers consumers do not inherit browser SDK sources.
 `hosts/wasm/js/write-plan-contract.test.mjs` checks that boundary with strict
 NodeNext declarations and no skipped library checks.
 
+Completed market and ticker snapshots release unused parser growth capacity
+before the store builds lookup tables and native UI frames. Live recovery can
+still append an omitted ticker. Keeping the unused catalogue slots through frame
+projection raises the WASM memory high-water mark, which cannot shrink afterward.
+
 ## Crates
 
 ### Host ownership observation and teardown

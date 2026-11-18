@@ -241,6 +241,9 @@ impl Store {
             self.rejected_empty_catalogue = true;
             return;
         }
+        // Completed snapshots no longer need the streaming parser's growth room.
+        // Release it before allocating the retained lookup tables and UI frames.
+        markets.shrink_to_fit();
         let reindexed = self.markets.len() != markets.len()
             || self
                 .markets
@@ -414,7 +417,8 @@ impl Store {
             .map(|index| &self.tickers[index as usize])
     }
 
-    pub fn set_tickers(&mut self, tickers: Vec<Ticker>) {
+    pub fn set_tickers(&mut self, mut tickers: Vec<Ticker>) {
+        tickers.shrink_to_fit();
         self.ticker_revision = self.ticker_revision.wrapping_add(1);
         self.tickers = tickers;
         // Input-order insertion keeps the last duplicate as the lookup winner.
@@ -2730,6 +2734,31 @@ mod tests {
             assert_eq!(store.ensure_ticker("C"), Some(0));
             assert_eq!(store.ticker("C").unwrap().symbol, "C");
         }
+    }
+
+    #[test]
+    fn installed_catalogue_tables_release_parser_growth_capacity() {
+        let mut store = Store::default();
+        let mut markets = Vec::with_capacity(1024);
+        let mut tickers = Vec::with_capacity(1024);
+        for index in 0..750 {
+            let symbol = format!("ROW{index}");
+            markets.push(market(&symbol));
+            tickers.push(ticker(&symbol));
+        }
+        store.set_markets(markets);
+        store.set_tickers(tickers);
+        assert_eq!(
+            (store.markets.capacity(), store.tickers.capacity()),
+            (750, 750)
+        );
+        assert!(store.market("ROW749").is_some());
+        assert!(store.ticker("ROW749").is_some());
+
+        // Compaction must still allow live recovery of an omitted seed ticker.
+        store.set_tickers(vec![ticker("ROW0")]);
+        assert_eq!(store.ensure_ticker("ROW749"), Some(1));
+        assert_eq!(store.ticker("ROW749").unwrap().id, "ROW749");
     }
 
     #[test]
