@@ -841,6 +841,10 @@ pub struct WasmEngine {
     #[cfg(feature = "coinbase")]
     coinbase_binding: Option<String>,
     construction: String,
+    #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+    websocket_input: Vec<u8>,
+    #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+    websocket_memory: Option<js_sys::Uint8Array>,
     inner: Box<dyn AnyEngine>,
     #[cfg(feature = "hosted-signing")]
     hosted_identity: Option<(String, safe_cex_engine::signing::Identities)>,
@@ -1216,6 +1220,10 @@ impl WasmEngine {
         Ok(Self {
             inner,
             construction,
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_input: Vec::new(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_memory: None,
             dispatch_signing,
             external_signer,
             #[cfg(feature = "hosted-signing")]
@@ -1522,20 +1530,63 @@ impl WasmEngine {
         Ok((!actions.is_empty()).then_some(actions))
     }
 
-    /// A byte-input alternative that rejects invalid UTF-8 before handling any event.
-    #[cfg(feature = "text-ingress")]
+    /// Reuse bounded input storage without exposing a mutable WASM memory view.
+    #[cfg(all(feature = "bingx", target_arch = "wasm32"))]
     #[wasm_bindgen(js_name = wsMessageBytes)]
-    pub fn ws_message_bytes(
+    pub fn ws_message_byte_view(
+        &mut self,
+        socket: f64,
+        bytes: &js_sys::Uint8Array,
+        now: f64,
+    ) -> Result<Option<String>, js_sys::Error> {
+        use zeroize::Zeroize;
+        host_resource_id(socket)?;
+        let length = bytes.length() as usize;
+        let reusable = length <= 4096;
+        let mut input = zeroize::Zeroizing::new(if reusable {
+            std::mem::take(&mut self.websocket_input)
+        } else {
+            Vec::new()
+        });
+        input.reserve_exact(length);
+        input.resize(length, 0);
+        let offset = input.as_mut_ptr() as u32;
+        let end = u64::from(offset) + length as u64;
+        // Memory growth detaches old views. Refresh before copying into the
+        // current allocation; no mutable view escapes this engine.
+        if self
+            .websocket_memory
+            .as_ref()
+            .is_none_or(|view| u64::from(view.length()) < end)
+        {
+            let memory: js_sys::WebAssembly::Memory = wasm_bindgen::memory().unchecked_into();
+            self.websocket_memory = Some(js_sys::Uint8Array::new(&memory.buffer()));
+        }
+        self.websocket_memory
+            .as_ref()
+            .expect("WebSocket input memory view")
+            .set(bytes.as_ref(), offset);
+        let result = self.ws_message_bytes(socket, &input, now);
+        if reusable {
+            input.zeroize();
+            self.websocket_input = std::mem::take(&mut *input);
+        }
+        result
+    }
+
+    /// Other targets borrow bytes directly; validation and dispatch stay identical.
+    #[cfg(all(
+        feature = "text-ingress",
+        not(all(target_arch = "wasm32", feature = "bingx"))
+    ))]
+    #[wasm_bindgen(js_name = wsMessageBytes)]
+    pub fn ws_message_byte_slice(
         &mut self,
         socket: f64,
         bytes: &[u8],
         now: f64,
     ) -> Result<Option<String>, js_sys::Error> {
-        host_resource_id(socket)?;
-        let Ok(text) = std::str::from_utf8(bytes) else {
-            return Ok(None);
-        };
-        self.ws_message_actions(socket, text, now)
+        self.ws_message_bytes(socket, bytes, now)
     }
 
     #[wasm_bindgen(js_name = wsBinary)]
@@ -1744,6 +1795,23 @@ impl WasmEngine {
     }
 }
 
+#[cfg(feature = "text-ingress")]
+impl WasmEngine {
+    /// Reject invalid UTF-8 before handling an event or draining host actions.
+    pub fn ws_message_bytes(
+        &mut self,
+        socket: f64,
+        bytes: &[u8],
+        now: f64,
+    ) -> Result<Option<String>, js_sys::Error> {
+        host_resource_id(socket)?;
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return Ok(None);
+        };
+        self.ws_message_actions(socket, text, now)
+    }
+}
+
 #[cfg(feature = "algos")]
 mod algos;
 
@@ -1772,6 +1840,10 @@ impl WasmEngine {
             dispatch_signing: false,
             external_signer: false,
             construction: String::new(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_input: Vec::new(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_memory: None,
             inner,
             #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
@@ -2932,6 +3004,10 @@ mod tests {
             algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_input: Vec::new(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_memory: None,
             inner: Box::new(Commands {
                 events: Rc::clone(&events),
                 drains: Rc::clone(&drains),
@@ -3232,6 +3308,10 @@ mod tests {
                 algos: Default::default(),
                 external_signer: false,
                 construction: "{}".into(),
+                #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+                websocket_input: Vec::new(),
+                #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+                websocket_memory: None,
                 inner: Box::new(Counted),
             }
             .health(),
@@ -3268,6 +3348,10 @@ mod tests {
                 algos: Default::default(),
                 external_signer: false,
                 construction: "{}".into(),
+                #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+                websocket_input: Vec::new(),
+                #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+                websocket_memory: None,
                 inner: Box::<Messages>::default(),
             };
             let text = engine.ws_message(id as f64, "wide", 1.).unwrap();
@@ -3301,6 +3385,10 @@ mod tests {
             algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_input: Vec::new(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_memory: None,
             inner: Box::<Messages>::default(),
         };
         let mut legacy = engine();
@@ -3339,6 +3427,10 @@ mod tests {
             algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_input: Vec::new(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_memory: None,
             inner: Box::<Messages>::default(),
         };
         let mut bytes = WasmEngine {
@@ -3357,6 +3449,10 @@ mod tests {
             algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_input: Vec::new(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_memory: None,
             inner: Box::<Messages>::default(),
         };
         // A rejected byte message must neither handle an event nor drain existing actions.

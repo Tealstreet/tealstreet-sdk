@@ -133,6 +133,10 @@ pub fn origin(spot: bool, subject: String) -> Result<WasmEngine, JsError> {
         #[cfg(feature = "coinbase")]
         coinbase_binding: None,
         construction: "{}".into(),
+        #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+        websocket_input: Vec::new(),
+        #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+        websocket_memory: None,
         #[cfg(feature = "dispatch-signing")]
         hosted_identity: None,
         #[cfg(feature = "dispatch-signing")]

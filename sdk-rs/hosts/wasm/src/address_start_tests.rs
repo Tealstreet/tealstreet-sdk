@@ -28,6 +28,10 @@ fn wasm_start_initializes_real_local_provider_before_venue_start_once() {
             #[cfg(feature = "coinbase")]
             coinbase_binding: None,
             construction: "{}".into(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_input: Vec::new(),
+            #[cfg(all(target_arch = "wasm32", feature = "bingx"))]
+            websocket_memory: None,
             hosted_identity: None,
             #[cfg(feature = "hosted-join-proof")]
             join_proof_identity: None,
