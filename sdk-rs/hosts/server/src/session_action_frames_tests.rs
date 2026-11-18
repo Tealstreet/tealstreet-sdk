@@ -212,6 +212,7 @@ async fn nuke_checks_the_captured_owner_after_the_private_load_deferral() {
                 },
                 out.clone(),
             );
+            alice.order_frames_enabled = crate::order_contract::enabled();
             crate::accounts::tests::hold_live(&a, alice.socket, out.outbox());
             // Preserve this fixture's existing DELEGATED account admission.
             alice
@@ -224,7 +225,11 @@ async fn nuke_checks_the_captured_owner_after_the_private_load_deferral() {
                 .await;
             let capture = crate::state::log_capture::capture();
             action(&mut alice, json!({"kind":"nuke"}), 1, false).await;
-            action_frame(&mut a_sent, "order.actionAck").await;
+            assert_eq!(
+                action_frame(&mut a_sent, "order.actionAck").await["d"]["received"],
+                true,
+                "owner-fence control must first enter the admitted deferred nuke path"
+            );
             tokio::time::timeout(Duration::from_secs(2), async {
                 while tape.held_positions.lock().unwrap().is_empty() {
                     tokio::task::yield_now().await;
@@ -2425,7 +2430,7 @@ fn actor_refusal_audits(lines: Vec<String>, op: &str) -> Vec<Value> {
 #[tokio::test]
 async fn queued_actor_io_refusals_keep_existing_receipts_and_emit_bounded_audit() {
     tokio::task::LocalSet::new().run_until(async {
-        for kind in ["nuke", "algo"] {
+        for (kind, stage) in [("nuke", "pre_actor"), ("nuke", "actor"), ("algo", "actor")] {
             let registry = Arc::new(Registry::new(crate::threads::EngineThreads::start(1).unwrap(), Duration::from_millis(1), Duration::from_secs(60))
                 .with_router_lease(crate::router_lease::Config { enforce: true, box_id: Some("test-box".into()), ..Default::default() }));
             let grant = |owner_epoch| {
@@ -2437,23 +2442,39 @@ async fn queued_actor_io_refusals_keep_existing_receipts_and_emit_bounded_audit(
             };
             grant(1);
             let tape = Tape::default();
-            let (account, inbox) = delegated_account_with_algo_inbox(&registry, "A", "bybit", tape.clone());
+            let (account, mut inbox) = delegated_account_with_algo_inbox(&registry, "A", "bybit", tape.clone());
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
             let payload = if kind == "nuke" { json!({"kind":"nuke"}) } else {
                 json!({"kind":"algo","op":"exec","data":{"command":"buy $100","symbol":"BTCUSDT"}})
             };
             action(&mut session, payload, 1, false).await;
             assert_eq!(action_frame(&mut sent, "order.actionAck").await["d"]["received"], true);
+            if stage == "actor" {
+                // Observe the genuine Session handoff before fencing the lease.
+                // Requeue it unchanged; the actor still has not started.
+                let input = tokio::time::timeout(Duration::from_secs(3), async {
+                    loop {
+                        let input = inbox.recv().await.expect("live actor inbox");
+                        if matches!(&input, crate::algos::AlgoInput::Nuke { action: Some(_), .. }
+                            | crate::algos::AlgoInput::Op { action: Some(_), .. }) { break input; }
+                    }
+                }).await.expect("Session must hand off before the actor IO fence");
+                assert!(account.algos.as_ref().unwrap().send(input).is_ok());
+            }
             grant(2);
             assert!(!account.running.io_allowed());
+            assert!(session.account_out("synthetic-main").action_active());
             let capture = crate::state::log_capture::capture();
             let account = testing::run_algos(account, SignerLink::new(0, Arc::new(|_| false)), inbox);
             let outcome = action_frame(&mut sent, "order.actionOutcome").await;
             assert_eq!(outcome["d"]["outcome"], if kind == "nuke" {"refused"} else {"unknown"});
+            if stage == "pre_actor" {
+                assert_eq!(outcome["d"]["error"]["message"], "Action registration retired before dispatch");
+            }
             assert_eq!(outcome["d"]["error"]["outcome"], if kind == "nuke" {"notSent"} else {"unknown"});
             assert!(tape.writes.lock().unwrap().is_empty());
             let audits = actor_refusal_audits(capture.finish(), kind);
-            assert_eq!(audits.len(), 1, "{kind}: actor IO refusal needs one line");
+            assert_eq!(audits.len(), 1, "{kind}/{stage}: IO refusal needs one line");
             assert_eq!(audits[0]["reason_class"], "io_fenced");
             session.close(); registry.dispose(&account, Disposal::PageDisposed);
         }

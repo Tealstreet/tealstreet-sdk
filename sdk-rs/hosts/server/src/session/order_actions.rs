@@ -279,15 +279,17 @@ impl Session {
                 receipt.finish(Err(order_actions::expired_outcome()));
                 return;
             }
-            if !receipt.active()
-                || !account.running.io_allowed()
-                || !registry.holds(&account, socket)
-            {
-                crate::audit::pre_dispatch_refused(
-                    Some(&account.venue),
-                    kind,
-                    "Action registration retired; no further action command was sent",
-                );
+            let refusal = if !receipt.active() {
+                Some("Action registration retired; no further action command was sent")
+            } else if !account.running.io_allowed() {
+                Some("io_fenced")
+            } else if !registry.holds(&account, socket) {
+                Some("holder_changed")
+            } else {
+                None
+            };
+            if let Some(reason) = refusal {
+                crate::audit::pre_dispatch_refused(Some(&account.venue), kind, reason);
                 receipt.finish(Err(json!({"message":"Action registration retired before dispatch","outcome":"notSent"})));
                 return;
             }
