@@ -646,7 +646,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3579 CI43782227341/jobs133022239190+133022239183, head b323ddf25c4a (checkout b5dc3b07feaf): web/Node 2,305,365 B.
   // CI SHA256 fe93956d5b10bf917f6281f5dbee10b8f366c72a539dd4f29a984e0b251ab921; local 2,306,669 B, SHA256 6df619c9c1fb891e336cd42715164081e63a4d689f7f723e6d467a8d9e552075.
   // Rust1.99/bindgen0.2.129/Binaryen132 twice -Oz; max(current CI, local) + 10 KiB rounded up, retaining historical floors.
-  hyperliquid: 2_317_312,
+  // #3669 run 44325589048, artifact 14437511989: optimized family 2,309,206 B.
+  // Coordinator-approved +10 KiB rounded up; preserve this and any larger parent floor.
+  hyperliquid: 2_320_384,
   // #3438 merged-head local build.sh --venue hyperliquid: web/node 2,238,027 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3438 merge cf112c51b87c + 3f94ec11a27f: optimized web/node 2,238,644 B.
@@ -659,7 +661,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3513 shares the verified 2,268,301 B Hyperliquid module and its measured reserve floor.
   // #3579 shares the current CI/local measurements and hashes immediately above.
   // Both aliases retain the larger optimized measurement + 10 KiB rounded up.
-  hyperliquidspot: 2_317_312,
+  // #3669 shares the measured family and approved reserve immediately above.
+  hyperliquidspot: 2_320_384,
   // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
   // CI size plus 10 KiB rounded up to KiB; Kraken and Kraken Spot share the cap.
   // #3304 restage run 42558782819 at CI merge a068e6cb0876a3699d46fa843b9310887bd055f4:
