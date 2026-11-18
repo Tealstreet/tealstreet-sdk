@@ -20,6 +20,10 @@ use std::collections::HashMap;
 
 const PAGE: usize = 100;
 const RECENT_MS: f64 = 6.0 * 24.0 * 3_600_000.0;
+const ORDER_RECENT_MS: f64 = 7.0 * 24.0 * 3_600_000.0;
+const CANCELED_ORDER_RETENTION_MS: f64 = 2.0 * 3_600_000.0;
+const ORDERS_RECENT: &str = "/api/v5/trade/orders-history";
+const ORDERS_ARCHIVE: &str = "/api/v5/trade/orders-history-archive";
 
 #[derive(Default)]
 pub struct HistoryState {
@@ -36,6 +40,8 @@ pub struct Request {
     instrument: Option<String>,
     inst_type: &'static str,
     next_type: bool,
+    archive_orders: bool,
+    order_retention_gap: bool,
     order_id: Option<String>,
     income_kind: Option<String>,
     from: Option<f64>,
@@ -372,6 +378,12 @@ impl Request {
         }
     }
     fn finish(mut self, cx: &mut Cx<'_, Pending>) {
+        if self.order_retention_gap {
+            self.completion.incomplete(
+                safe_cex_engine::history::IncompleteReason::RetentionLimit,
+                "OKX order history is incomplete: unfilled canceled orders are retained for only two hours and are absent from the archive",
+            );
+        }
         let json = match &mut self.rows {
             Rows::Fills(rows) => {
                 rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
@@ -466,7 +478,7 @@ impl Okx {
                 to_ms,
                 limit,
             } => (
-                "/api/v5/trade/orders-history",
+                ORDERS_RECENT,
                 symbol,
                 None,
                 None,
@@ -575,6 +587,12 @@ impl Okx {
                 return;
             }
         };
+        // Freeze retention against the admitted query time, not later page clocks.
+        let now = cx.protocol_now();
+        let archive_orders = matches!(rows, Rows::Orders(_))
+            && from.is_some_and(|from| from < now - ORDER_RECENT_MS);
+        let order_retention_gap = matches!(rows, Rows::Orders(_))
+            && from.is_none_or(|from| from < now - CANCELED_ORDER_RETENTION_MS);
         self.history_request(
             cx,
             Request {
@@ -587,6 +605,8 @@ impl Okx {
                 instrument,
                 inst_type,
                 next_type,
+                archive_orders,
+                order_retention_gap,
                 order_id,
                 income_kind,
                 from,
@@ -711,6 +731,8 @@ impl Okx {
             instrument: Some(instrument),
             inst_type: "SWAP",
             next_type: false,
+            archive_orders: false,
+            order_retention_gap: false,
             order_id: None,
             income_kind: None,
             from: None,
@@ -1052,7 +1074,11 @@ impl Okx {
                     updated_time: positive(row.u_time),
                 };
                 if let Rows::Orders(rows) = &mut r.rows {
-                    Request::put(&mut r.indices, rows, row.ord_id.into(), order);
+                    // A duplicate archive row must not overwrite the recent endpoint's
+                    // authoritative state (especially an unfilled cancellation).
+                    if r.endpoint != ORDERS_ARCHIVE || !r.indices.contains_key(row.ord_id) {
+                        Request::put(&mut r.indices, rows, row.ord_id.into(), order);
+                    }
                 }
             }
             Rows::Income(_) => {
@@ -1207,6 +1233,24 @@ impl Okx {
                 r.pages = 0;
                 r.rows_seen = 0;
                 self.history_request(cx, r);
+                return;
+            }
+            if r.archive_orders {
+                r.archive_orders = false;
+                r.endpoint = ORDERS_ARCHIVE;
+                r.inst_type = r
+                    .instrument
+                    .as_deref()
+                    .map_or("SWAP", |id| self.instrument_type(id));
+                r.next_type = self.options.eea && r.instrument.is_none();
+                r.after = None;
+                r.oldest = None;
+                r.pages = 0;
+                r.rows_seen = 0;
+                // Both sources share the original root/deadline and the existing
+                // 100ms history continuation pacing.
+                let timer = cx.set_timer(100.0);
+                self.history.delayed.push((timer, r));
                 return;
             }
             r.finish(cx);
