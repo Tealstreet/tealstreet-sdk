@@ -2186,3 +2186,54 @@ async fn typed_place_rejects_shadowed_bbo_without_ack_job_or_write() {
 async fn typed_place_rejects_duplicate_bbo_level_without_ack_job_or_write() {
     duplicate_order_payload_is_unsupported("level").await;
 }
+
+#[tokio::test]
+async fn delegated_bybit_reduce_only_sell_limit_price_amend_reaches_native_once() {
+    tokio::task::LocalSet::new().run_until(async {
+        let registry = crate::accounts::tests::registry();
+        let tape = Tape { closing_limit: true, ..Default::default() };
+        let account = delegated_account(&registry, "A", "bybit", tape.clone());
+        let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+        let payload = json!({"kind":"amend","order":{"id":"resting-order","symbol":"BTCUSDT"},"update":{"price":51000}});
+        action(&mut session, payload, 1, false).await;
+        let result = action_frame(&mut sent, "order.actionOutcome").await;
+        assert_eq!(result["d"]["outcome"], "applied", "{result}");
+        assert_eq!(*tape.writes.lock().unwrap(), vec!["amend"]);
+        let requests = native_request_rows(&tape, "amend");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["orderId"], "resting-order");
+        assert_eq!(requests[0]["price"], "51000");
+        assert!(requests[0].get("qty").is_none());
+        assert!(requests[0].get("orderLinkId").is_none());
+        session.close(); registry.dispose(&account, Disposal::PageDisposed);
+    }).await;
+}
+
+#[tokio::test]
+async fn delegated_predispatch_refusals_have_closed_bounded_audit_lines() {
+    tokio::task::LocalSet::new().run_until(async {
+        for case in ["version", "fingerprint", "schema", "binding", "admission", "expiry"] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape { closing_limit: true, ..Default::default() };
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let mut payload = json!({"kind":"amend","order":{"id":"resting-order","symbol":"BTCUSDT"},"update":{"price":51000}});
+            if case == "schema" { payload["order"]["type"] = "limit".into(); }
+            if case == "admission" { session.order_frames_enabled = false; }
+            let id = if case == "expiry" { { let hex = format!("{:012x}", crate::accounts::now_ms() - 10_001); format!("{}-{}-7101-8101-010101010101", &hex[..8], &hex[8..]) } } else { action_key() };
+            let fp = crate::order_contract::action_wire_fingerprint("synthetic-main", &id, &payload, 1).unwrap();
+            let capture = crate::state::log_capture::capture();
+            session.handle(&json!({"t":"order.action","d":{"version":if case=="version"{2}else{1},
+                "accountName":"synthetic-main","instanceId":if case=="binding"{Some("foreign")}else{None},
+                "intentId":id,"seq":1,"ageMs":0,"fingerprint":if case=="fingerprint"{"0".repeat(64)}else{fp},"action":payload}}).to_string()).await.unwrap();
+            let lines: Vec<_> = capture.finish().into_iter().filter(|line|line.contains("order.pre_dispatch_refused")).collect();
+            let result = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(result["d"]["outcome"], "refused");
+            assert!(tape.writes.lock().unwrap().is_empty());
+            assert_eq!(lines.len(), 1, "{case}: missing bounded pre-dispatch audit");
+            assert!(lines[0].len() < 512);
+            assert!(!lines[0].contains("resting-order") && !lines[0].contains("synthetic-main") && !lines[0].contains(&id));
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
