@@ -11,7 +11,7 @@ fn hosted_replies(reads: &[(u32, &str, &str)], notices: &[Value]) -> Vec<Value> 
                 method: method.into(),
                 reply: methods::Reply::Result,
                 group: None,
-                incomplete: false,
+                incomplete: None,
                 audit: None,
             },
         );
@@ -212,18 +212,24 @@ fn hosted_history_unknown_owner_cannot_mark_a_complete_reply() {
         json!(-1),
         json!(1.5),
         json!(4_294_967_296_u64),
+        Value::Null,
+        json!(true),
+        json!({}),
+        json!([]),
     ] {
-        let replies = hosted_replies(
-            &[(1, "complete", "fetchHistoricalFills")],
-            &[
-                incomplete(json!({"command":command,"reason":"laterPageFailed",
-                    "historyOperation":"bybitFills","historyFailureKind":"network"})),
-                json!({"type":"done","command":1,"result":"[]"}),
-            ],
-        );
-        assert_eq!(
-            replies,
-            vec![json!({"requestId":"complete","success":true,"result":[]})]
-        );
+        for owner in [0_u32, 1] {
+            let replies = hosted_replies(
+                &[(owner, "complete", "fetchHistoricalFills")],
+                &[
+                    incomplete(json!({"command":command,"reason":"laterPageFailed",
+                        "historyOperation":"bybitFills","historyFailureKind":"network"})),
+                    json!({"type":"done","command":owner,"result":"[]"}),
+                ],
+            );
+            assert_eq!(
+                replies,
+                vec![json!({"requestId":"complete","success":true,"result":[]})]
+            );
+        }
     }
 }

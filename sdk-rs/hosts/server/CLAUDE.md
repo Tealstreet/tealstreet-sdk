@@ -5,6 +5,17 @@ changing server behavior. Validate scoped Rust changes with
 `cargo test -p safe-cex-exchange-server` and
 `cargo clippy -p safe-cex-exchange-server --all-targets` from `sdk-rs/`.
 
+## History reply completeness
+
+Command-owned `history.incomplete` notices retain a closed reason and optional
+later-page failure record in that command's pending reply. Successful hosted
+history rows carry it in `data.completeness`; unknown metadata falls back to the
+positive incomplete marker. No venue text or response values enter this record.
+Native floating-point and integer JSON command IDs must both name an exact u32;
+malformed or unrelated owners cannot mark another reply or become command zero.
+Replacement assertions clear previous failure detail. Read results, rejection,
+paging, retries, deadlines and write behavior retain their existing contracts.
+
 ## Connection-local public pacing
 
 The optional `publishIntervalMs` init field and `set-publish-interval` account op
