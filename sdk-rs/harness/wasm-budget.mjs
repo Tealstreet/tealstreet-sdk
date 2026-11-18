@@ -447,6 +447,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // SHA-256 70cd348f758b71303b71e47a7231223bd06078e79b1e56e095dcca7a7f8d2aa2.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; required -Oz build.
   // Current measured bytes + 10 KiB, rounded up; retain all larger parent floors.
+  // #3424 merge 2822bf8cd2cf: local optimized web/Node 2,332,681 B.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue bybit, twice -Oz.
+  // wasm-budget.mjs --venue bybit regenerated the report; measured +10 KiB rounded up.
   // #3317 throughput profile at 0c8e04fe5a: optimized local web/node 2,483,240 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue bybit.
   // #3317 run 43060399359, job 130665084604, artifact 13874660310:

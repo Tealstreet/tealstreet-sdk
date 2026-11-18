@@ -46,9 +46,13 @@ fn delegated_resident(f: &Fixture) -> Arc<Account> {
     inner.link = None;
     inner
         .signing
-        .set_test_resident(crate::delegated::ResidentCopy::test_provider(Arc::new(
-            safe_cex_crypto::signer::LocalSigner::new(),
-        )));
+        .set_test_resident(crate::delegated::ResidentCopy::test_protected_provider(
+            safe_cex_engine::signing::Signer::protect(Arc::new(
+                safe_cex_crypto::signer::LocalSigner::new(),
+            ))
+            .unwrap(),
+            Default::default(),
+        ));
     crate::accounts::testing::register(&f.registry, &account);
     account
 }
