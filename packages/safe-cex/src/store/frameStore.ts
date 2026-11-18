@@ -314,9 +314,20 @@ export class FrameStore {
       return;
     }
     this.state = next;
-    if (observationOnly) this.notifyAccountObservations();
+    // Queue accepted UI state before account callbacks can throw or reenter.
     this.notifications.push({ data: next, versions: this.versions });
-    if (this.notifying) return;
+    let observationError: unknown;
+    if (observationOnly) {
+      try {
+        this.notifyAccountObservations();
+      } catch (error) {
+        observationError = error;
+      }
+    }
+    if (this.notifying) {
+      if (observationError) throw observationError;
+      return;
+    }
     const errors: unknown[] = [];
     this.notifying = true;
     try {
@@ -332,7 +343,13 @@ export class FrameStore {
     } finally {
       this.notifying = false;
     }
-    if (errors.length) throw new AggregateError(errors, 'FrameStore subscriber failed');
+    if (errors.length)
+      throw new AggregateError(
+        observationError ? [observationError, ...errors] : errors,
+        'FrameStore subscriber failed',
+      );
+    // Preserve the existing caller diagnostic after every queued UI update drains.
+    if (observationError) throw observationError;
   }
 
   /** A transport snapshot establishes a new sequence domain; gaps refuse deltas. */

@@ -27,6 +27,10 @@ track stream receipts, including complete empty censuses; ACCOUNT_READ and
 recovery snapshots never advance those receipt counters.
 `subscribeAccountObservations` serves equal-census receipts to account logic
 without UI subscription notifications; chaser loss confirmation uses that path.
+Observation callbacks cannot suppress accepted UI updates: snapshots queue before
+callbacks run, and callback failures propagate through the existing subscriber
+diagnostic path after UI peers receive the queued changes. Reentrant updates
+retain snapshot/version order.
 
 ## Source ownership
 
