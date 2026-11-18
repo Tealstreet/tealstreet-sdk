@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 import { OrderSide } from '../types';
 import { buildFoldedPositionRecords } from './buildRecords';
 
-it('pages the saturated Binance lookback independently of the target window', async () => {
+it('folds the complete Binance lookback returned by one native range read', async () => {
   const day = 86_400_000;
   const from = 1_700_000_000_000;
   const to = from + day;
@@ -35,19 +35,21 @@ it('pages the saturated Binance lookback independently of the target window', as
   );
   const fetchHistoricalFills = vi.fn(async ({ from: a, to: b }: { from: number; to: number }) => {
     const rows = source.filter((row) => row.timestamp * 1000 >= a && row.timestamp * 1000 <= b);
-    return rows.length > 1000 ? Object.assign(rows.slice(0, 1000), { incomplete: true }) : rows;
+    // The native adapter drains physical pages before returning this range.
+    return rows;
   });
   const result = await buildFoldedPositionRecords(
     { fetchHistoricalFills, fetchIncomeHistoryRange: async () => [{ symbol: 'BTCUSDT' }] },
-    { account: 'main', from, to, symbolScoped: true, maxFillWindowMs: day, resolveSettleCurrency: () => 'USDT' },
+    { account: 'main', from, to, symbolScoped: true, resolveSettleCurrency: () => 'USDT' },
   );
   expect(result.totalFills).toBe(1602);
   expect(result.records).toHaveLength(1);
   expect(result.records[0].realizedPnl).toBe(10);
-  expect(fetchHistoricalFills.mock.calls.every(([range]) => range.to - range.from < day)).toBe(true);
+  expect(fetchHistoricalFills).toHaveBeenCalledTimes(1);
+  expect(fetchHistoricalFills).toHaveBeenCalledWith({ symbol: 'BTCUSDT', from: from - 14 * day, to, limit: 1000 });
 });
 
-it('reconstructs a position once after joining fills across lookback windows', async () => {
+it('reconstructs a straddling position from one complete lookback read', async () => {
   const day = 86_400_000;
   const from = 1_700_000_000_000;
   const source: Execution[] = [
@@ -73,7 +75,6 @@ it('reconstructs a position once after joining fills across lookback windows', a
       from,
       to: from + day,
       symbolScoped: true,
-      maxFillWindowMs: day,
       resolveSettleCurrency: () => 'USDT',
     },
   );

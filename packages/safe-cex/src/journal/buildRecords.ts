@@ -34,8 +34,6 @@ export type BuildRecordsOptions = {
    * Also decides whether a failed income read is fatal — see the throw below.
    */
   readonly symbolScoped?: boolean;
-  /** Bound each Binance lookback read independently of the target window. */
-  readonly maxFillWindowMs?: number;
   readonly resolveSettleCurrency: (symbol: string) => string;
 };
 
@@ -70,12 +68,6 @@ export const buildFoldedPositionRecords = async (
   options: BuildRecordsOptions,
 ): Promise<BuildRecordsResult> => {
   const lookbackFrom = options.from - STRADDLE_LOOKBACK_MS;
-  if (
-    options.maxFillWindowMs !== undefined &&
-    (!Number.isSafeInteger(options.maxFillWindowMs) || options.maxFillWindowMs < 1)
-  ) {
-    throw new Error('journal fold: invalid maximum fill window');
-  }
 
   const fundingRows: Array<{ symbol: string; timestamp: number; income: number }> = [];
   const symbols = new Set<string>();
@@ -130,42 +122,23 @@ export const buildFoldedPositionRecords = async (
     throw failure;
   }
 
-  const readFills = async (symbol?: string): Promise<Execution[]> => {
-    if (!options.maxFillWindowMs) {
-      return requireCompleteHistory(
-        await exchange.fetchHistoricalFills({
-          ...(symbol && { symbol }),
-          from: lookbackFrom,
-          to: options.to,
-          limit: 1000,
-        }),
-        'fills',
-      );
-    }
-    const rows: Execution[] = [];
-    for (let from = lookbackFrom; from <= options.to;) {
-      const to = Math.min(options.to, from + options.maxFillWindowMs - 1);
-      const page = requireCompleteHistory(
-        await exchange.fetchHistoricalFills({ ...(symbol && { symbol }), from, to, limit: 1000 }),
-        'fills',
-      );
-      for (const row of page) rows.push(row);
-      from = to + 1;
-    }
-    return rows;
-  };
-
   const intervals: PositionInterval[] = [];
   let totalFills = 0;
 
   if (options.symbolScoped) {
     for (const symbol of symbols) {
-      const fills = await readFills(symbol);
+      const fills = requireCompleteHistory(
+        await exchange.fetchHistoricalFills({ symbol, from: lookbackFrom, to: options.to, limit: 1000 }),
+        'fills',
+      );
       totalFills += fills.length;
       intervals.push(...reconstructPositionIntervals(fills));
     }
   } else {
-    const fills = await readFills();
+    const fills = requireCompleteHistory(
+      await exchange.fetchHistoricalFills({ from: lookbackFrom, to: options.to, limit: 1000 }),
+      'fills',
+    );
     totalFills = fills.length;
 
     // Split per symbol before folding: an interval reconstruction that mixed symbols would

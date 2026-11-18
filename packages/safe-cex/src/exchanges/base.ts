@@ -1376,7 +1376,6 @@ export class BaseExchange implements Exchange {
       from,
       to,
       symbolScoped: config.symbolScoped,
-      ...(this.name === 'binance' ? { maxFillWindowMs: 24 * 60 * 60 * 1000 } : {}),
       resolveSettleCurrency: (symbol) => this.store?.marketsBySymbol?.[symbol]?.quote || 'USDT',
     });
 

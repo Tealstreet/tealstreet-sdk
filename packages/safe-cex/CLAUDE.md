@@ -1079,11 +1079,12 @@ the companion allowlisted forwarding change after the SDK mirror import.
 
 ## Binance folded-position lookback
 
-Binance's 14-day straddle lookback is fetched in independent one-day fill
-windows, combined before interval reconstruction. Each bounded native fill
-request subdivides saturated pages under its own deadline. Any incomplete
-source still refuses the fold; a small target window cannot hide a saturated
-lookback. Other venues retain their existing read shape and limits.
+Binance's 14-day straddle lookback uses one native fill-range request per
+symbol, under its original read root and deadline. The native adapter keeps
+its existing seven-day windows and subdivides only saturated pages. Sparse
+accounts incur no extra reads from unconditional daily subdivision. Any
+incomplete source still refuses the fold; a small target window cannot hide
+a saturated lookback. Other venues retain their existing read shape and limits.
 
 ## Rust incomplete history
 

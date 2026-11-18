@@ -171,3 +171,38 @@ fn a_failed_child_page_preserves_the_parent_prefix_as_incomplete() {
     assert_eq!(result(&h, 4).len(), 1000);
     assert!(marked(&h, 4));
 }
+
+#[test]
+fn a_whole_lookback_adds_physical_reads_only_when_saturated() {
+    let day = 86_400_000.0;
+    let from = 1_700_000_000_000.0;
+    for busy in [false, true] {
+        let mut h = harness();
+        let mut source = Vec::new();
+        if busy {
+            source.extend((1..=1600).map(|id| {
+                let days_ago = if id <= 800 { 10.0 } else { 9.0 };
+                (id, from - days_ago * day + id as f64 * 1000.0)
+            }));
+        }
+        source.extend([(1601, from + 1000.0), (1602, from + 2000.0)]);
+        h.event(Event::Command(Command::Query {
+            command: 5,
+            query: query(false, from - 14.0 * day, from + 300_000.0),
+        }));
+        let requests = drive(&mut h, false, &source);
+        if busy {
+            assert!(
+                requests > 3,
+                "a saturated native week must drain its children"
+            );
+        } else {
+            assert_eq!(
+                requests, 3,
+                "sparse reads retain the original seven-day windows"
+            );
+        }
+        assert_eq!(result(&h, 5).len(), source.len());
+        assert!(!marked(&h, 5));
+    }
+}

@@ -114,7 +114,9 @@ under the caller's original read root and deadline. Unbounded requests and an
 indivisible saturated millisecond retain explicit incomplete markers; the
 latter needs an ID-cursor strategy before it can ever be called complete.
 
-The TypeScript Binance positions fold reads its 14-day straddle lookback in
-independent one-day fill requests, each of which uses this native paging.
-It combines those fills before reconstructing intervals and still refuses an
-incomplete source. Other venues retain their existing fill-read windows.
+The TypeScript Binance positions fold sends its whole 14-day straddle lookback
+through one native fill-range request per symbol. Existing seven-day windows
+are preserved, and additional reads occur only when a physical page saturates.
+All pages retain that request's original read root and deadline. The fold
+reconstructs intervals after native draining and refuses an incomplete source.
+Other venues retain their existing fill-read windows.
