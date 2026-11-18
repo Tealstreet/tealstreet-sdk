@@ -40,6 +40,11 @@ export type FrameListener = (data: StoreData, versions: FrameVersions) => void;
 
 export class FrameStore {
   private state: StoreData = { ...initialStoreData };
+  private accountObservations: StoreData['updateIds'] = { ...initialStoreData.updateIds };
+  /** Stream receipts are independent of UI mutation versions. */
+  get observationIds(): Readonly<StoreData['updateIds']> {
+    return this.accountObservations;
+  }
   get latency(): StoreData['latency'] {
     return this.state.latency;
   }
@@ -196,6 +201,26 @@ export class FrameStore {
   private publicStatsGroups = new Set<MessageHandlerStatsType>();
 
   private readonly listeners = new Set<FrameListener>();
+  private readonly observationListeners = new Set<(ids: Readonly<StoreData['updateIds']>) => void>();
+  /** Account logic can observe equal stream censuses without waking UI subscribers. */
+  subscribeAccountObservations(listener: (ids: Readonly<StoreData['updateIds']>) => void): () => void {
+    this.observationListeners.add(listener);
+    return () => {
+      this.observationListeners.delete(listener);
+    };
+  }
+  private notifyAccountObservations(): void {
+    const errors: unknown[] = [];
+    for (const listener of this.observationListeners) {
+      try {
+        listener(this.accountObservations);
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length) throw new AggregateError(errors, 'FrameStore observation subscriber failed');
+  }
+
   private readonly sectionVersions: Partial<Record<FrameSection, number>> = {};
   readonly recovery = new WorkerFrameRecoveryScopes();
   private sequence: number | undefined;
@@ -260,20 +285,36 @@ export class FrameStore {
       this.sectionVersions[key] = this.version(key) + 1;
     };
     for (const key of Object.keys(changes)) if (key !== 'updateIds') replace(key as FrameSection);
-    // Independent stream observations retain freshness even when their rows
-    // equal a prior ACCOUNT_READ. Financial section identities remain shared.
+    // Rule 5 / #3640 review: empty/equal censuses are receipts, not UI mutations.
     if (!accountRead && (changes.orders !== undefined || changes.positions !== undefined)) {
+      this.accountObservations = {
+        orders: this.accountObservations.orders + Number(changes.orders !== undefined),
+        positions: this.accountObservations.positions + Number(changes.positions !== undefined),
+      };
+    }
+    const ordersChanged = next.orders !== this.state.orders;
+    const positionsChanged = next.positions !== this.state.positions;
+    if (!accountRead && (ordersChanged || positionsChanged)) {
       next = {
         ...next,
         updateIds: {
-          orders: this.state.updateIds.orders + Number(changes.orders !== undefined),
-          positions: this.state.updateIds.positions + Number(changes.positions !== undefined),
+          orders: this.state.updateIds.orders + Number(ordersChanged),
+          positions: this.state.updateIds.positions + Number(positionsChanged),
         },
       };
       this.sectionVersions.updateIds = this.version('updateIds') + 1;
     }
-    if (next === this.state) return;
+    const observationOnly =
+      !accountRead &&
+      !ordersChanged &&
+      !positionsChanged &&
+      (changes.orders !== undefined || changes.positions !== undefined);
+    if (next === this.state) {
+      if (observationOnly) this.notifyAccountObservations();
+      return;
+    }
     this.state = next;
+    if (observationOnly) this.notifyAccountObservations();
     this.notifications.push({ data: next, versions: this.versions });
     if (this.notifying) return;
     const errors: unknown[] = [];

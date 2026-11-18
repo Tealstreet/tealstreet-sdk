@@ -32,6 +32,7 @@ describe('native FrameStore state through packed frames and serialization', () =
     const applier = store;
     applier.apply(frame(fixtures.empty));
     expect(store.latency).toBeNull();
+    // Rule 5 / #3640 review: empty STREAM receipts do not mutate order/position UI IDs.
     expect(store.updateIds).toEqual({ orders: 0, positions: 0 });
     applier.apply(frame(fixtures.ready));
     const snapshot: StoreData = store.data;

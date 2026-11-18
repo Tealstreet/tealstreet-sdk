@@ -658,8 +658,8 @@ describe.each(venues)('%s consumer conformance', (name) => {
         ),
       );
     })();
-    // Rule 5 / 6ab0b44f2f: the repeated stream is another observation; the ticker is not.
-    expect(main.store.updateIds.orders).toBe(beforeTags.orders + 2);
+    // Rule 5 / #3640 review: equal streams count as observations, never UI mutations.
+    expect(main.store.updateIds.orders).toBe(beforeTags.orders + 1);
     unsubscribe();
     main.off('update', exchangeUpdates);
     deliver({ orders: state(name).orders });

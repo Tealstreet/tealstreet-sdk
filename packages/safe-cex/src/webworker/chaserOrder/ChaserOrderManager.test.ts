@@ -135,6 +135,8 @@ const createMockExchange = () => {
   const order = createOrder('order-1', 100);
   const handlers: Record<string, Set<Handler>> = {};
   const store = {
+    observationIds: { orders: 0, positions: 0 },
+    subscribeAccountObservations: () => () => {},
     orders: [order],
     tickers: [ticker],
     markets: [market],

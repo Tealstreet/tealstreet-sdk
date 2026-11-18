@@ -50,7 +50,7 @@ describe('FrameStore native state', () => {
     expect(store.positions).toBe(before.positions);
     expect(store.markets).toBe(before.markets);
     expect(store.tickers).toBe(before.tickers);
-    expect(store.versions).toEqual({ ...versions, updateIds: (versions.updateIds ?? 0) + 1 });
+    expect(store.versions).toEqual(versions);
     expect(store.hasMarketIdentity).toBe(true);
     expect(store.hasAccountState).toBe(true);
     expect(store.latency).toBe(0);
@@ -238,10 +238,31 @@ it('counts independent empty stream observations after equal account reads witho
   const store = new FrameStore();
   store.apply(nativeFixture({ orders: [] }));
   const orders = store.orders;
-  const before = store.updateIds.orders;
+  const before = store.observationIds.orders;
   store.apply(new Frame(nativeStoreFrame({ orders: [] }, undefined, true)));
-  expect(store.updateIds.orders).toBe(before);
+  expect(store.observationIds.orders).toBe(before);
   store.apply(nativeFixture({ orders: [] }));
-  expect(store.updateIds.orders).toBe(before + 1);
+  expect(store.observationIds.orders).toBe(before + 1);
+  expect(store.updateIds.orders).toBe(0);
   expect(store.orders).toBe(orders);
+});
+
+it('keeps empty stream censuses out of UI update IDs and subscriptions', () => {
+  const store = new FrameStore();
+  let notifications = 0;
+  let receipts = 0;
+  store.subscribe(() => notifications++);
+  store.subscribeAccountObservations(() => receipts++);
+  const before = store.data;
+  const versions = store.versions;
+  store.apply(nativeFixture({ orders: [], positions: [] }));
+  expect(store.updateIds).toEqual({ orders: 0, positions: 0 });
+  expect(store.data).toBe(before);
+  expect(store.versions).toEqual(versions);
+  expect(notifications).toBe(0);
+  expect(receipts).toBe(1);
+  expect(store.observationIds).toEqual({ orders: 1, positions: 1 });
+  store.apply(nativeFixture({ latency: 1 }));
+  expect(receipts).toBe(1);
+  expect(store.updateIds).toEqual({ orders: 0, positions: 0 });
 });

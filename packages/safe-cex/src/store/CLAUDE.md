@@ -20,10 +20,13 @@ other sections remain shared. Reentrant notifications are delivered in order.
 A failing listener does not prevent peers from running or trigger recovery.
 
 `reset()` releases stream baselines and restores generated unloaded defaults.
-Defaults never establish decoded readiness. Generated `updateIds` track actual
-order/position stream observations, including repeated equal tables. ACCOUNT_READ
-and recovery snapshots do not advance those observation IDs. Equal financial
-sections still retain their identities; only the observation counters change.
+Defaults never establish decoded readiness. Generated `updateIds` advance only
+for actual order/position changes. Equal and empty stream sections retain IDs,
+versions, row identities and UI subscription silence. Separate `observationIds`
+track stream receipts, including complete empty censuses; ACCOUNT_READ and
+recovery snapshots never advance those receipt counters.
+`subscribeAccountObservations` serves equal-census receipts to account logic
+without UI subscription notifications; chaser loss confirmation uses that path.
 
 ## Source ownership
 

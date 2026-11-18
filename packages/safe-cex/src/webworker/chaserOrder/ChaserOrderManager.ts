@@ -449,7 +449,9 @@ export class ChaserOrderManager {
       let priceCheckTimeout: ReturnType<typeof setTimeout> | undefined;
       let queuedOrdersTimeout: ReturnType<typeof setTimeout> | undefined;
       let isCleanedUp = false;
-      let onUpdate: ((data: StoreData) => void | Promise<void>) | undefined;
+      let onUpdate:
+        ((data: StoreData, observed?: { orders: boolean; positions: boolean }) => void | Promise<void>) | undefined;
+      let stopObservations: (() => void) | undefined;
       let onFill: ((fill: OrderFillEvent) => void) | undefined;
       // Track whether the current order IDs have appeared in the store. This
       // is intentionally reset after each replace, because new order IDs can
@@ -467,6 +469,7 @@ export class ChaserOrderManager {
         }
 
         isCleanedUp = true;
+        stopObservations?.();
         if (priceCheckTimeout) {
           clearTimeout(priceCheckTimeout);
           priceCheckTimeout = undefined;
@@ -785,7 +788,7 @@ export class ChaserOrderManager {
         }, wait);
       };
 
-      onUpdate = async (data: StoreData) => {
+      onUpdate = async (data: StoreData, observed) => {
         try {
           if (instance.isStopped) {
             this.log('instance is stopped from outside, unsubbing', instance);
@@ -796,7 +799,8 @@ export class ChaserOrderManager {
           }
 
           const ordersUpdateId = data.updateIds?.orders;
-          const hasOrderUpdate = ordersUpdateId === undefined || ordersUpdateId !== lastOrdersUpdateId;
+          const hasOrderUpdate =
+            observed?.orders ?? (ordersUpdateId === undefined || ordersUpdateId !== lastOrdersUpdateId);
           if (ordersUpdateId !== undefined) {
             lastOrdersUpdateId = ordersUpdateId;
           }
@@ -805,7 +809,8 @@ export class ChaserOrderManager {
           // never arrive. `confirmMissingOrders` stays tied to order updates —
           // a position-only notify is not evidence an order vanished.
           const positionsUpdateId = data.updateIds?.positions;
-          const hasPositionUpdate = positionsUpdateId === undefined || positionsUpdateId !== lastPositionsUpdateId;
+          const hasPositionUpdate =
+            observed?.positions ?? (positionsUpdateId === undefined || positionsUpdateId !== lastPositionsUpdateId);
           if (positionsUpdateId !== undefined) {
             lastPositionsUpdateId = positionsUpdateId;
           }
@@ -864,6 +869,16 @@ export class ChaserOrderManager {
       };
 
       exchange.on('update', onUpdate);
+      // Equal native censuses prove disappearance without incrementing UI mutation IDs.
+      let observations = exchange.store.observationIds;
+      stopObservations = exchange.store.subscribeAccountObservations((ids) => {
+        const observed = {
+          orders: ids.orders !== observations.orders,
+          positions: ids.positions !== observations.positions,
+        };
+        observations = ids;
+        void onUpdate?.(exchange.store.data, observed);
+      });
       // Only subscribe to fill events for exchanges that use fill-based tracking
       if (useFillBasedTracking) {
         exchange.on('fill', onFill);

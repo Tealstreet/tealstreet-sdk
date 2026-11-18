@@ -353,9 +353,11 @@ describe('Rust native current-account reads', () => {
     expect(r.store.updateIds).toEqual(ids);
     expect(main.updateIds).toEqual(mainIds);
     await vi.advanceTimersByTimeAsync(250);
-    expect(r.store.updateIds.orders).toBe(ids.orders + 1);
-    expect(r.store.updateIds.positions).toBe(ids.positions + 1);
-    expect(main.updateIds.orders).toBe(mainIds.orders + 1);
+    // Rule 5 / #3640 review: the later equal stream is a receipt, not another UI change.
+    expect(r.store.updateIds).toEqual(ids);
+    expect(main.updateIds).toEqual(mainIds);
+    expect(r.store.observationIds.orders).toBeGreaterThan(0);
+    expect(r.store.observationIds.positions).toBeGreaterThan(0);
   });
 
   it('does not recursively snapshot when a store observer synchronously reads again', async () => {
