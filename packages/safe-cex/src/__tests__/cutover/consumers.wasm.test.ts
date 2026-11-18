@@ -252,14 +252,14 @@ async function consumer(name: ExchangeName) {
   const options = consumerOptions(name);
   const main = new BaseExchange(name, options, new FrameStore());
   exchanges.push(main);
-  const messages: Array<{ op: string; data: any }> = [];
+  const messages: Array<{ op: string; data: any; snapshot?: boolean }> = [];
   const ctx = {
-    postMessage(message: { op: string; data: any }, transfer?: Transferable[]) {
+    postMessage(message: { op: string; data: any; snapshot?: boolean }, transfer?: Transferable[]) {
       // Match a real postMessage: neither worker state nor its ArrayBuffer stays
       // shared with the receiving realm.
       const copy = structuredClone(message, { transfer });
       messages.push(copy);
-      if (copy.op === 'frame') main.applyWorkerFrame(copy.data);
+      if (copy.op === 'frame') main.applyWorkerFrame(copy.data, copy.snapshot === true);
     },
   } as unknown as Worker;
   const worker = new ExchangeWorker(ctx, 'conformance', name, options, {} as never, {} as never, 'fixture');
@@ -362,7 +362,9 @@ describe.each(venues)('%s consumer conformance', (name) => {
         roundtrip.markets.map((row) => row.symbol),
       ),
     );
-    expect(plain(roundtrip.data)).toEqual(plain(main.store.data));
+    // Rule 5 / 6ab0b44f2f: observation IDs belong to each receiver, not the wire snapshot.
+    expect(plain(roundtrip.data)).toEqual(plain({ ...main.store.data, updateIds: roundtrip.updateIds }));
+    expect(roundtrip.updateIds).toEqual({ orders: 1, positions: 1 });
     const counts = { ...main.store.updateIds };
     worker.sendSnapshot();
     expect(main.store.updateIds.orders).toBe(counts.orders);
@@ -656,7 +658,8 @@ describe.each(venues)('%s consumer conformance', (name) => {
         ),
       );
     })();
-    expect(main.store.updateIds.orders).toBe(beforeTags.orders + 1);
+    // Rule 5 / 6ab0b44f2f: the repeated stream is another observation; the ticker is not.
+    expect(main.store.updateIds.orders).toBe(beforeTags.orders + 2);
     unsubscribe();
     main.off('update', exchangeUpdates);
     deliver({ orders: state(name).orders });

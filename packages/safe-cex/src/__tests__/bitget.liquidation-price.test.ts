@@ -118,13 +118,14 @@ describe('Bitget liquidation price mapping', () => {
     expect(positions[0].liquidationPrice).toBe(45000);
   });
 
-  it('treats explicit zero liquidation price as authoritative', async () => {
+  it('clears a previous liquidation price when the venue reports zero', async () => {
     const { exchange, store } = createExchange();
     seedExistingPosition(store, 45000);
     stubClassicWithPositionResponse(exchange, [rawPosition('0')]);
 
     const positions = await exchange.fetchOpenPositions();
 
-    expect(positions[0].liquidationPrice).toBe(0);
+    // Rule 5 / native Position contract: a nonpositive liquidation price is unknown.
+    expect(positions[0].liquidationPrice).toBeNull();
   });
 });
