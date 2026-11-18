@@ -103,3 +103,18 @@ also pins an accepted batch followed by a mixed refused/accepted batch, then HTT
 503. The caller retains the complete 16-row journal and native accepted IDs,
 including five Unknown dispatched rows and the final unissued row. The engine's
 canonical unknown-after-refusal message remains unchanged.
+
+## Bounded fill and order history
+
+Bounded userTrades and allOrders reads treat limit as a physical page size.
+A full page subdivides its current range into disjoint inclusive millisecond
+windows and drains both before completing. Parent rows remain available on a
+later failure; native IDs deduplicate parent/child overlap. All requests stay
+under the caller's original read root and deadline. Unbounded requests and an
+indivisible saturated millisecond retain explicit incomplete markers; the
+latter needs an ID-cursor strategy before it can ever be called complete.
+
+The TypeScript Binance positions fold reads its 14-day straddle lookback in
+independent one-day fill requests, each of which uses this native paging.
+It combines those fills before reconstructing intervals and still refuses an
+incomplete source. Other venues retain their existing fill-read windows.
