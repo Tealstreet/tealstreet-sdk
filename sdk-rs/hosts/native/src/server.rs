@@ -93,6 +93,9 @@ pub struct ServerConfig {
     /// In-process facts from trusted local setup, never deserialized from account JSON.
     #[cfg(feature = "venues")]
     pub trusted_signer_state: Option<safe_cex_venues::TrustedSignerState>,
+    /// Original identity facts bound to the exact trusted provider and venue.
+    #[cfg(feature = "venues")]
+    pub trusted_signer_identities: Option<crate::TrustedSignerIdentities>,
 }
 
 impl Default for ServerConfig {
@@ -115,6 +118,8 @@ impl Default for ServerConfig {
             interest_observer: None,
             #[cfg(feature = "venues")]
             trusted_signer_state: None,
+            #[cfg(feature = "venues")]
+            trusted_signer_identities: None,
         }
     }
 }
@@ -509,6 +514,9 @@ pub fn spawn_venue_account<T: Transport + 'static>(
     }
     let mut options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    if let Some(identities) = &config.trusted_signer_identities {
+        identities.apply(venue, signer.as_ref(), &mut options)?;
+    }
     if let Some(state) = &config.trusted_signer_state {
         state
             .apply(venue, &mut options)

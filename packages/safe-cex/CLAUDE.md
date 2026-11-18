@@ -80,6 +80,14 @@ Hyperliquid, Hyperliquid Spot and Bitunix metadata explicitly declare
 Enforcement still wins over disabled user preferences; inconsistent declarations
 remain observable through the general account-construction warning.
 
+Hyperliquid `/info` admission falls back after bounded IndexedDB failures to
+half-rate memory admission per JavaScript realm (500 weight/minute; burst 500
+for critical/reconciliation, 400 for normal/bulk). Known debt and 429 pauses remain;
+the existing 30-second cooldown retries shared storage and max-merges local spend.
+Independent fallback realms can exceed the shared cap: the maintainer chose chart
+availability over a perfect shared cap. A realm that never opened IndexedDB keeps
+its existing local policy; request deadlines, cancellation and single-send guards remain.
+
 ## DELEGATED handover
 
 `sealDelegatedHandover` is an additive, synchronous, host-neutral sender for

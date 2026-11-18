@@ -230,6 +230,22 @@ pub fn algo_op(op: &str, data: &str) -> Map<String, Value> {
     fields
 }
 
+/// Closed native completion shape only; never retain values from the reply.
+pub fn result_shape(result: &Value) -> &'static str {
+    match result {
+        Value::Array(ids) if ids.is_empty() => "empty_array",
+        Value::Array(ids) if ids.len() == 1 && ids[0].is_string() => "single_id_array",
+        Value::Array(_) => "array",
+        Value::Object(fields) if fields.get("orderIds").is_some_and(Value::is_array) => {
+            "order_ids_object"
+        }
+        Value::Object(_) => "object",
+        Value::Null => "null",
+        Value::String(_) => "string",
+        Value::Bool(_) | Value::Number(_) => "scalar",
+    }
+}
+
 /// `ok`, or the error's kind, message and outcome from a hosted failure detail.
 pub fn result(outcome: &Result<Value, Value>) -> Value {
     match outcome {
@@ -272,6 +288,26 @@ pub fn log(who: &Who, origin: &str, fields: &Map<String, Value>, result: Value) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_result_shape_is_closed_and_does_not_retain_reply_values() {
+        for (value, expected) in [
+            (json!([]), "empty_array"),
+            (json!(["synthetic-private-order"]), "single_id_array"),
+            (json!(["first", "second"]), "array"),
+            (
+                json!({"orderIds":["private"],"secret":"never retain"}),
+                "order_ids_object",
+            ),
+            (json!({"secret":"never retain"}), "object"),
+            (Value::Null, "null"),
+            (json!("private"), "string"),
+            (json!(true), "scalar"),
+            (json!(5), "scalar"),
+        ] {
+            assert_eq!(super::result_shape(&value), expected);
+        }
+    }
+
     use super::*;
 
     #[test]

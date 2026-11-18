@@ -479,6 +479,7 @@ impl Registry {
             }
             let mut config = self.engine_config.clone();
             config.trusted_signer_state = None;
+            config.trusted_signer_identities = None;
             let (plan, options, provider, mode, resident) = match (candidate, link.as_ref()) {
                 (Some(candidate), None) if init.signing_mode.as_deref() == Some("delegated") => {
                     let prepared = prepare_delegated(init, candidate.pair())

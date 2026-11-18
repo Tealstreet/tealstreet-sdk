@@ -152,7 +152,7 @@ export const signHostedHttp = async (
   if (!request.config) return { id: request.id, error: 'Missing HTTP config for signing' };
   if (name === 'apexomni') {
     const xhr = axios.create({ paramsSerializer: { serialize: serializeApexOmni },
-      headers: { 'Content-Type': 'application/json, charset=utf-8' } });
+      headers: { 'Content-Type': 'application/json; charset=utf-8' } });
     xhr.interceptors.request.use(async (config) => {
       const clock = host.hostedSigningClock();
       const prepared = prepareApexOmniRequest(config, clock.stampMs);
@@ -331,11 +331,11 @@ export const signHostedHttp = async (
       'Content-Type': 'application/json',
     } : binance ? {
       'X-MBX-APIKEY': credential,
-      'Content-Type': 'application/json, charset=utf-8',
+      'Content-Type': 'application/json; charset=utf-8',
     } : {
       'X-Referer': BROKER_ID,
       'X-BAPI-RECV-WINDOW': options.extra?.recvWindow ?? RECV_WINDOW,
-      'Content-Type': 'application/json, charset=utf-8',
+      'Content-Type': 'application/json; charset=utf-8',
       ...siteHeaders,
     },
   });

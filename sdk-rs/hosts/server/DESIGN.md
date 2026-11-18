@@ -556,7 +556,7 @@ explicit user action; no speculative restore or automatic cross-box replay runs.
   [the host contract](../../../docs/plans/callers/cosigned-join-proof.md).
 - **Unauthenticated sockets:** they may only `init` the public pseudo-account `__pub_bybit`.
   - The validation is the same as `validateUnauthenticatedPublicInit`.
-  - Only `sendSnapshot` and the subscribe/unsubscribe book and OHLCV `msg` ops are allowed.
+  - Only `sendSnapshot`, the subscribe/unsubscribe book and OHLCV `msg` ops, and connection-local `set-publish-interval` for its admitted public holder are allowed.
   - They can never send `sign-res` or `verbose`, and either one closes the socket with 1008.
 
 ## Envelope
@@ -574,7 +574,7 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 | `echo-res` | `{id}` | Echo RTT sample |
 | `ping` | `{accounts?: string[], link?}` | Replies with `pong`. Then reconciles: when `accounts` is nonempty, any server account not in that list is disposed |
 | `dispose` | `{accountName}` | Disposes the account |
-| `perf` | `{level}` | Session performance level. The server maps it to the engine's `setPollScale` |
+| `perf` | `{level}` | Legacy compatibility message; use `publishIntervalMs` for connection-local output pacing |
 | `verbose` | `{enabled}` | Authenticated sockets only. Diagnostics |
 
 `msg` ops:
@@ -585,8 +585,38 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 | `subscribeOrderBook`, `unsubscribeOrderBook` | `data: {symbol}`. Becomes the engine book subscription |
 | `subscribeOHLCV`, `unsubscribeOHLCV` | `data: {symbol, interval}`. Becomes the engine candle subscription |
 | `sendSnapshot` | Sends a full `snapshot: true` frame to this socket |
+| `set-publish-interval` | `data: {publishIntervalMs}`. Changes public output cadence for this connection’s admitted `accountName` only |
 | `updatePositions` | Answered `updatePositions:done`. Positions are already engine-owned |
 | `exec`, `chaser:*`, `twap:*` | v1 replies `error` "not supported on the Rust exchange server". These are TS worker features; the post-cutover work is listed below |
+
+### Connection-local publication interval
+
+`init.d.publishIntervalMs` is optional. Absent means the existing full-rate
+stream; an integer is clamped to 50–5000 ms. Null, fractional, string, boolean,
+array and object values refuse the init before changing the live holder or proof.
+The live form is `{t:"msg",d:{op:"set-publish-interval",accountName,
+data:{publishIntervalMs}}}`. Missing or invalid live values refuse without
+changing the current rate. Refusals retain `op:"error"` and the usual
+`data:[message,options]`: `publishIntervalRefused:true` plus closed `kind`
+`invalid_publish_interval`, `not_admitted` or `auth_expired`. Invalid init also
+sets `initRefused:true` and `forceToast:true`. No submitted values are echoed.
+A valid update has no acknowledgement and cannot attach an account or change
+its engine settings, identity, transport, signer, proof or publication of other holders.
+
+Each connection/account pump coalesces ticker values, observation timestamps and
+books, retaining the latest value per field/level and encoding book deletions
+against its own last published baseline. It does not drop raw deltas or queue a
+history of frames. The first snapshot is immediate; a catalogue/readiness barrier
+publishes dependent public rows before announcing readiness. Output sequences
+stay contiguous and filtered frames keep their original string references.
+Cadence/deadline maintenance runs after each received item, before another
+receive, so a ready inbox cannot starve publication or live interval updates.
+Orders, positions, fills, balance, command outcomes, signer/control messages,
+settings and all other sections remain immediate for COSIGNED and DELEGATED.
+Re-snapshots and settings rebuilds retain this connection's interval; retired
+pumps only finish pending replies and cannot publish cached public state.
+A resumed socket starts at the absent/default rate until its own init or live
+update reapplies a preference. No preference is inherited from a shared account.
 
 ### Server to client
 
@@ -1284,7 +1314,11 @@ Amend/cancel/cancel-all use the existing method translator, native command
 completion and audit. Internal action dispatch carries the original deadline
 through cancel-all symbol reads and command translation. Each native command
 rechecks both expiry bounds and its captured registration after any startup wait and
-immediately before dispatch. Expiry stays unknown without a notSent proof.
+immediately before dispatch. The whole-action guards before translation/dispatch
+have no-send proof and return the real reason with `notSent`; per-leg expiry
+stays unknown when another leg may already have had effects. Expired-token new
+submits/actions receive correlated `notSent` receipts without extending grace;
+queue cancellation retains ordinary expiry errors, never an earlier-intent proof.
 Nuke uses the account's existing native algo-host nuke,
 awaiting cancellation and closing legs; a partial/interrupted action stays
 unknown. Actor-queued nuke work carries the original registration and rechecks

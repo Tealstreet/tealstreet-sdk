@@ -20,6 +20,39 @@ fn header<'a>(signed: &'a sign::Signed, name: &str) -> &'a str {
 }
 
 #[test]
+fn no_body_requests_use_valid_json_without_changing_signing_or_query() {
+    for method in [Method::Get, Method::Delete] {
+        for legacy in [false, true] {
+            let mut request = sign::Request::get("/v3/account", fields(&[("limit", "0")]));
+            request.method = method;
+            let signed = sign::request(&options(), 1700000000123.0, &request, legacy).unwrap();
+            assert_eq!(
+                header(&signed, "Content-Type"),
+                "application/json; charset=utf-8"
+            );
+            assert_eq!(signed.path, "/v3/account?limit=0");
+            assert_eq!(signed.body, None);
+            let stamp = if legacy {
+                "1700000000000"
+            } else {
+                "1700000000123"
+            };
+            assert_eq!(header(&signed, "APEX-TIMESTAMP"), stamp);
+            assert_eq!(header(&signed, "APEX-API-KEY"), "api-key");
+            assert_eq!(header(&signed, "APEX-PASSPHRASE"), "pass");
+            assert_eq!(
+                header(&signed, "APEX-SIGNATURE"),
+                safe_cex_crypto::hmac_sha256(
+                    b"bXlzZWNyZXQ=",
+                    format!("{stamp}{}/api/v3/account?limit=0", method.as_str()).as_bytes(),
+                    safe_cex_crypto::Encoding::Base64
+                )
+            );
+        }
+    }
+}
+
+#[test]
 fn canonical_query_keeps_string_zero_false_and_encodes_utf8() {
     assert_eq!(
         sign::query(&fields(&[

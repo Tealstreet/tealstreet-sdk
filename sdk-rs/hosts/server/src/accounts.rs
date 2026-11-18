@@ -1899,13 +1899,17 @@ impl Registry {
             let signer = remote.as_ref().map(|remote| remote.provider.clone());
             (link, plan, options, remote, signer, None)
         };
-        let identities = serde_json::from_str::<Value>(&options)
-            .ok()
-            .and_then(|options| options.get("signing").cloned())
-            .map(serde_json::from_value)
-            .transpose()
-            .map_err(|_| "Invalid signer identities".to_owned())?
-            .unwrap_or_default();
+        let identities = if let Some(resident) = &delegated {
+            resident.identities().clone()
+        } else {
+            serde_json::from_str::<Value>(&options)
+                .ok()
+                .and_then(|options| options.get("signing").cloned())
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|_| "Invalid signer identities".to_owned())?
+                .unwrap_or_default()
+        };
         let signing = AccountSigner::new_bound(
             signer.clone(),
             identities,
@@ -1937,6 +1941,7 @@ impl Registry {
         let tokens = proxy_token.provider();
         let mut config = self.engine_config.clone();
         config.trusted_signer_state = None;
+        config.trusted_signer_identities = None;
         if let Some(resident) = &delegated {
             resident.configure(&mut config);
         }
