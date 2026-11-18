@@ -10,7 +10,7 @@ import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { consumerFrame } from '../cutover/consumerFrame';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
@@ -29,6 +29,7 @@ const fixture = (
 ) => {
   const commands: Array<Record<string, unknown>> = [];
   const commandTimes: number[] = [];
+  const nativeLeverage: StoreData['fetchedLeverage'] = {};
   const started = vi.fn(() => '[]');
   const noActions = () => '[]';
   const replies: Record<string, unknown> = {
@@ -58,6 +59,10 @@ const fixture = (
       if (command.op === 'setTickerSymbols') return '[]';
       commands.push(command);
       commandTimes.push(now);
+      if (command.op === 'fetchLeverage') {
+        // The native command publishes SETTINGS as well as its method result.
+        nativeLeverage[command.symbol] = { buyLeverage: 20, sellLeverage: 50 };
+      }
       return JSON.stringify([
         { op: 'done', command: command.command, result: JSON.stringify(replies[command.op] ?? []) },
       ]);
@@ -83,13 +88,15 @@ const fixture = (
     }) as unknown as WasmEngineModule['WasmEngine'],
   }));
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+    store.markets.map((row) => row.symbol),
   );
-  installNativeStartupFrames(engine, store, native);
+  installNativeStartupFrames(engine, store, () => ({
+    ...native?.(),
+    fetchedLeverage: { ...nativeLeverage, ...native?.().fetchedLeverage },
+  }));
   // WEEX trusted signer setup requires its private passphrase.
   const credentials = { key: 'key', secret: 'secret', ...(name === 'weex' ? { passphrase: 'pass' } : {}) };
   const exchange = new RustEngineExchange(name, credentials, store);
@@ -432,22 +439,21 @@ describe('Rust bridge routes from the engine capability record', () => {
     const perSymbol = fixture({ cancelAll: 'eachOpenSymbol' });
     await perSymbol.exchange.start();
     // Cancel-all reads the native open orders; the fixture's native state mirrors the store.
-    perSymbol.exchange.store.apply(
-      nativeFixture(
-        {
-          markets: ['BTC', 'ETH'].map((symbol) => ({
-            id: symbol,
-            symbol,
-            base: symbol,
-            quote: 'USDT',
-            active: true,
-            precision: { amount: 0.1, price: 0.1 },
-            limits: { amount: { min: 0.1, max: 100 }, leverage: { min: 1, max: 100 } },
-          })),
-          orders: [order('a', 'BTC'), order('b', 'ETH'), order('c', 'BTC')],
-        },
-        perSymbol.exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      perSymbol.exchange.store,
+      {
+        markets: ['BTC', 'ETH'].map((symbol) => ({
+          id: symbol,
+          symbol,
+          base: symbol,
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 0.1, price: 0.1 },
+          limits: { amount: { min: 0.1, max: 100 }, leverage: { min: 1, max: 100 } },
+        })),
+        orders: [order('a', 'BTC'), order('b', 'ETH'), order('c', 'BTC')],
+      },
+      perSymbol.exchange.store.markets.map((row) => row.symbol),
     );
     await perSymbol.exchange.cancelAllOrders();
     expect(perSymbol.commands.filter((c) => c.op === 'cancelSymbolOrders').map((c) => c.symbol)).toEqual([
@@ -522,7 +528,11 @@ describe('Rust bridge routes from the engine capability record', () => {
     await exchange.start();
     await exchange.updateSymbolMetadata('BTCUSDT');
     expect(commands.filter((c) => c.op === 'fetchLeverage')).toEqual([expect.objectContaining({ symbol: 'BTCUSDT' })]);
-    expect(exchange.store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 20, sellLeverage: 50 });
+    expect(exchange.store.fetchedLeverage.BTCUSDT).toEqual({
+      buyLeverage: 20,
+      sellLeverage: 50,
+      positionMode: 'oneway',
+    });
   });
 
   it('keeps combined metadata refreshes and explicit reads fresh even with cached rails', async () => {

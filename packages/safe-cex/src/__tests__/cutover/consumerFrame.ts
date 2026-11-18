@@ -282,15 +282,16 @@ export function consumerFrame(
     }
     sections.push({ kind: 9, bytes });
   }
-  if (data.loaded)
+  // STATUS also owns position mode and latency; neither needs a loaded update.
+  if (data.loaded || data.options || data.latency !== undefined)
     table(
       10,
       [
-        Number(data.loaded.balance) |
-          (Number(data.loaded.orders) << 1) |
-          (Number(data.loaded.markets) << 2) |
-          (Number(data.loaded.tickers) << 3) |
-          (Number(data.loaded.positions) << 4),
+        Number(data.loaded?.balance ?? false) |
+          (Number(data.loaded?.orders ?? false) << 1) |
+          (Number(data.loaded?.markets ?? false) << 2) |
+          (Number(data.loaded?.tickers ?? false) << 3) |
+          (Number(data.loaded?.positions ?? false) << 4),
         Number(data.options?.isHedged) | (data.latency != null ? 2 : 0),
       ],
       [[data.latency ?? 0]],

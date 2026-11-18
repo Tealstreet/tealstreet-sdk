@@ -14,7 +14,7 @@ import {
 } from '../../exchanges/rust/rust.exchange';
 import { FrameStore } from '../../store/frameStore';
 import { virtualClock } from '../../utils/virtualClock';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
@@ -140,11 +140,10 @@ function fixture(name: ExchangeName, now: () => number, legacyClock?: boolean, h
   });
   setWasmEngineLoader(async () => ({ WasmEngine: constructed as unknown as WasmEngineModule['WasmEngine'] }));
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+    store.markets.map((row) => row.symbol),
   );
   installNativeStartupFrames(engine, store);
   const frame = engine.takeFrame!;
@@ -455,9 +454,11 @@ it.each([
   monotonic = 15_000;
   await vi.advanceTimersByTimeAsync(1);
   expect(source).toHaveBeenCalledTimes(3);
-  expect(virtualClock.getCurrentTimeMs()).toBe(EPOCH + monotonic);
+  // Fake Date can advance one timer tick after the async server sample.
+  const syncedTime = virtualClock.getCurrentTimeMs();
+  expect(Math.abs(syncedTime - (EPOCH + monotonic))).toBeLessThanOrEqual(1);
   await f.exchange.setLeverage('BTCUSDT', 2);
-  expect(signingTimes.at(-1)).toBe(EPOCH + monotonic);
+  expect(signingTimes.at(-1)).toBe(syncedTime);
   expect(transport.now()).toBe(EPOCH + monotonic);
 });
 

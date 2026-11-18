@@ -48,7 +48,11 @@ function nativeValue(value: unknown): Uint8Array {
 }
 
 /** Build real wire bytes; fixtures never restore the removed mutable store API. */
-export function nativeStoreFrame(data: Partial<StoreData>, symbols?: readonly string[]): ArrayBuffer {
+export function nativeStoreFrame(
+  data: Partial<StoreData>,
+  symbols?: readonly string[],
+  accountRead = false,
+): ArrayBuffer {
   const identities = symbols ?? [
     ...new Set([
       ...(data.markets?.map((row) => row.symbol) ?? []),
@@ -58,7 +62,7 @@ export function nativeStoreFrame(data: Partial<StoreData>, symbols?: readonly st
       ...Object.keys(data.fetchedLeverage ?? {}),
     ]),
   ];
-  const base = consumerFrame(data, undefined, false, identities);
+  const base = consumerFrame(data, undefined, false, identities, 0, accountRead);
   return withNativeSections(base, data);
 }
 
