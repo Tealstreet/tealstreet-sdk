@@ -1600,9 +1600,9 @@ describe('resolved Hyperliquid egress admission', () => {
     }, raw);
     const run = async (transport: ReturnType<typeof create>, publicRead: boolean, timeoutMs = 20_000) => {
       const packet = { request: 1, method: 'POST' as const, url: ORIGIN + '/info', headers: {},
-        body: JSON.stringify({ type: publicRead ? 'candleSnapshot' : 'frontendOpenOrders' }), timeoutMs };
-      const prepared = await transport.prepareHttp!({ ...packet, intent: publicRead ? 'public' : 'primary',
-        readClass: publicRead ? 'bulk' : 'reconciliation' });
+        body: JSON.stringify({ type: publicRead ? 'candleSnapshot' : 'frontendOpenOrders' }), timeoutMs,
+        readClass: publicRead ? 'bulk' as const : 'reconciliation' as const };
+      const prepared = await transport.prepareHttp!({ ...packet, intent: publicRead ? 'public' : 'primary' });
       return prepared.bind(packet).dispatch();
     };
     return { create, run, directSend, fleetSend, tunnel };
