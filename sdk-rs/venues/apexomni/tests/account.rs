@@ -244,6 +244,29 @@ fn unknown_status_warning_hashes_oversized_and_non_printable_input() {
     }
 }
 
+// #3649: status data must not be mistaken for an authentication refusal.
+#[test]
+fn unknown_status_warning_hashes_tokens_that_would_add_auth_advice() {
+    for (status, hash) in [
+        (
+            "IP not whitelisted",
+            "16c39b90dc569381efb400bfeb90de767c5cab8d8c7b9ef91ce9e1f8245b5b03",
+        ),
+        (
+            "Bad key or IP whitelist",
+            "e0115ea472863bfe63762f7de7f38aa0006e00d5c176c1ebb6c879b893e95064",
+        ),
+    ] {
+        assert_eq!(
+            rejected_status_warning(status),
+            format!(
+                "unknown order status: <bytes={} sha256={hash}>",
+                status.len()
+            )
+        );
+    }
+}
+
 #[test]
 fn documented_order_statuses_map_on_rest_snapshots_and_private_deltas() {
     // https://api-docs.omni.apex.exchange/#get-open-orders
@@ -1464,6 +1487,14 @@ fn an_answered_key_refusal_ends_the_start() {
         }
         assert_eq!(failures.len(), 1, "{status} {body}");
         assert_eq!(failures[0].kind, Some(kind), "{status} {body}");
+        // #3649: real authentication refusals keep the existing whitelist advice.
+        if kind == ErrorKind::AuthPermission {
+            assert!(
+                failures[0]
+                    .message
+                    .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT)
+            );
+        }
         assert!(
             failures[0].message.contains(text),
             "{}",

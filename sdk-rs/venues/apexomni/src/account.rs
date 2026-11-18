@@ -357,14 +357,17 @@ fn base_id(id: &str) -> &str {
 
 fn unknown_order_status(status: &str) -> String {
     if status.len() <= 32 && status.bytes().all(|byte| (b' '..=b'~').contains(&byte)) {
-        format!("unknown order status: {status:?}")
-    } else {
-        format!(
-            "unknown order status: <bytes={} sha256={}>",
-            status.len(),
-            safe_cex_crypto::hex(&safe_cex_crypto::sha256(status.as_bytes())),
-        )
+        let message = format!("unknown order status: {status:?}");
+        // #3649: status data must not acquire authentication advice in Cx::notice.
+        if safe_cex_engine::error::ip_whitelist_text(&message, None).is_none() {
+            return message;
+        }
     }
+    format!(
+        "unknown order status: <bytes={} sha256={}>",
+        status.len(),
+        safe_cex_crypto::hex(&safe_cex_crypto::sha256(status.as_bytes())),
+    )
 }
 
 pub(crate) fn map_order(
