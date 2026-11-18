@@ -486,13 +486,15 @@ impl ActionDeadline {
             return None;
         }
         let created = crate::order_contract::key_time(id)?;
-        let key_age = crate::accounts::now_ms().checked_sub(created)?;
+        let now = crate::accounts::now_ms();
+        let key_age = crate::order_contract::key_age(created, now).ok()?;
         let key_remaining = 10_000_u64.checked_sub(key_age).filter(|ms| *ms > 0)?;
         let remaining = std::time::Duration::from_secs_f64((10_000.0 - age_ms) / 1000.0)
             .min(std::time::Duration::from_millis(key_remaining));
         Some(Self {
             monotonic: arrived + remaining,
-            key_expires_at_ms: created + 10_000,
+            // Forward clock tolerance never adds time to an admitted action.
+            key_expires_at_ms: created.min(now) + 10_000,
         })
     }
     pub(crate) fn expired(self) -> bool {

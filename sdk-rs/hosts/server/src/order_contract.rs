@@ -118,16 +118,33 @@ pub fn key_time(id: &str) -> Option<u64> {
     u64::from_str_radix(&id[..13].replace('-', ""), 16).ok()
 }
 
-pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
-    let created = key_time(id).ok_or("not sent: invalid intent key")?;
-    let age = now
-        .checked_sub(created)
-        .ok_or("not sent: invalid key time")?;
+pub(crate) fn key_age(created: u64, now: u64) -> Result<u64, &'static str> {
+    if created.saturating_sub(now) > 5_000 {
+        return Err("not sent: invalid key time");
+    }
+    let age = now.saturating_sub(created);
     if age >= 10_000 {
         Err("not sent: expired")
     } else {
-        Ok(())
+        Ok(age)
     }
+}
+
+pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
+    let created = key_time(id).ok_or("not sent: invalid intent key")?;
+    key_age(created, now)?;
+    let skew = created.saturating_sub(now);
+    if skew > 0 {
+        let bucket = match skew {
+            1..=1_000 => "le_1s",
+            1_001..=3_000 => "gt_1s_le_3s",
+            _ => "gt_3s_le_5s",
+        };
+        crate::state::Log::info(
+            &json!({"event":"order.intent_clock_skew","skew_bucket":bucket}).to_string(),
+        );
+    }
+    Ok(())
 }
 
 /// #3630 audits native formats: keep all validated UUID bits in supported text
