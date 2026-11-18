@@ -48,6 +48,7 @@ pub struct Options {
 }
 
 pub enum Pending {
+    AuthClock(Context),
     Identity(Context),
     Leverage(leverage::Read),
     History(Box<history::Request>),
@@ -138,6 +139,7 @@ pub struct BitgetFutures {
     options: Options,
     discovery: PublicRetries,
     account: account::Account,
+    auth_clock: Option<account::AuthClock>,
     trading: trading::Trading,
     telemetry: telemetry::Telemetry,
     history: history::History,
@@ -266,6 +268,7 @@ impl BitgetFutures {
             options,
             discovery: Default::default(),
             account: account::Account::new(),
+            auth_clock: None,
             trading: trading::Trading::default(),
             telemetry: telemetry::Telemetry::default(),
             history: history::History::default(),
@@ -1153,7 +1156,7 @@ impl Venue for BitgetFutures {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Identity(_) | Pending::Leverage(_) => {}
+            Pending::AuthClock(_) | Pending::Identity(_) | Pending::Leverage(_) => {}
             Pending::History(request) => self.query_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::Account {
@@ -1249,6 +1252,9 @@ impl Venue for BitgetFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::AuthClock(context) = pending {
+            return self.settle_auth_clock(cx, context, Some(response));
+        }
         if let Pending::Identity(root) = pending {
             self.identity_response(cx, &root, response);
             return;
@@ -1444,6 +1450,7 @@ impl Venue for BitgetFutures {
         error: safe_cex_engine::VenueError,
     ) {
         cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
+            Pending::AuthClock(context) => self.settle_auth_clock(cx, context, None),
             Pending::Identity(root) | Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(&root, error);
             }
@@ -1497,6 +1504,7 @@ impl Venue for BitgetFutures {
             return;
         }
         match pending {
+            Pending::AuthClock(context) => self.settle_auth_clock(cx, context, None),
             Pending::History(mut request) => {
                 if request.delivered(cx) {
                     self.query_failed(cx, *request, error);

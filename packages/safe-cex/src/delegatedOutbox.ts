@@ -699,7 +699,15 @@ export class DelegatedOutbox {
         parsed.t === 'order.outcome' &&
         (data.outcome === 'placed' || data.outcome === 'refused' || data.outcome === 'unknown')
       ) {
-        if (data.clientOrderId !== null && data.clientOrderId !== row.intentId) return;
+        // SDK #3630 / NX #9945 preserve the same intent bits in native caller IDs.
+        // Accept only these lossless forms, never arbitrary or foreign IDs.
+        if (
+          data.clientOrderId !== null &&
+          data.clientOrderId !== row.intentId &&
+          data.clientOrderId !== row.intentId.replaceAll('-', '') &&
+          data.clientOrderId !== `0x${row.intentId.replaceAll('-', '')}`
+        )
+          return;
         // Router counters describe delivery on this captured socket, not the
         // business result. Another intent's live/replayed result is no fence.
         if (

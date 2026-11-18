@@ -16,6 +16,14 @@ retires the socket immediately. Repeated login failures retain their backoff;
 only stable authenticated traffic resets it. A delayed post-write recovery
 retains its recovery hint and waits for any pending authentication retry.
 
+An exact pre-login `30014` samples the unsigned `/api/v2/public/time` clock once
+per in-flight recovery. A reconnect waits at most five seconds for that sample;
+only a live successful reply with a valid integer timestamp calibrates protocol
+time. Failed or invalid samples retain the previous clock and existing backoff.
+Login is signed at dispatch, including after delayed reconnects; retired sockets
+receive no deferred login. Account refreshes, scheduling time and write retries
+are unchanged.
+
 Public subscribe and unsubscribe envelopes are packed by their actual serialized
 UTF-8 size, including JSON escaping and envelope overhead, within Classic V2's
 4096-byte limit. Catalogue order and the legacy three-socket ticker partition

@@ -127,15 +127,20 @@ impl Session {
             );
             return;
         }
-        // 116aeae12: native Bybit protection refuses caller IDs; omit only
-        // that unsupported venue field, retaining the intent/fingerprint ledger.
-        let method = if order_contract::bybit_protection(&self.joined[&name].account.venue, params)
-        {
+        let venue = &self.joined[&name].account.venue;
+        // Native Bybit protection omits caller IDs; other orders retain the
+        // admitted venue's lossless UUID representation or unsupported-ID omission.
+        let client_id = if order_contract::bybit_protection(venue, params) {
+            None
+        } else {
+            order_contract::client_order_id(venue, &submit.intent_id)
+        };
+        let method = if let Some(id) = client_id {
+            params.insert("clientOrderId".into(), id.into());
+            "placeOrderWithClientOrderId"
+        } else {
             params.remove("clientOrderId");
             "placeOrder"
-        } else {
-            params.insert("clientOrderId".into(), submit.intent_id.clone().into());
-            "placeOrderWithClientOrderId"
         };
         out.send(envelope::order_frame(
             "order.ack",
@@ -214,8 +219,15 @@ impl Session {
             crate::order_actions::refuse(&self.account_out(name), name, request_id, seq, message);
         } else if let Some(OrderReceipt::Placement(seq)) = order_frame {
             let message: String = message.chars().take(512).collect();
+            let venue = self
+                .joined
+                .get(name)
+                .map_or("", |joined| joined.account.venue.as_str());
+            let client_id = request_id
+                .as_str()
+                .and_then(|id| order_contract::client_order_id(venue, id));
             self.account_out(name).order_outcome(name, json!({"intentId":request_id,"seq":seq,"outcome":"refused",
-                "venueOrderId":null,"clientOrderId":request_id,"error":{"message":message,"outcome":"notSent"}}));
+                "venueOrderId":null,"clientOrderId":client_id,"error":{"message":message,"outcome":"notSent"}}));
         } else {
             self.reply_failure(name, request_id, kind, message, outcome);
         }

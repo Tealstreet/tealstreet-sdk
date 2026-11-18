@@ -132,3 +132,13 @@ fractional calibration, default query bounds and scheduling clocks are unchanged
 Caller deadlines, read-key selection, pacing, cursors and partial-row markers
 remain shared with the original walk. This does not recover terminal rows the
 venue no longer retains.
+
+## HyroTrader auth refusal during admission
+
+A current, correlated `auth` acknowledgement with explicit `success:false` and
+native `10003` reports a generic typed `rejected` event. Hosted admission can
+refuse that attempt promptly without guessing a key/IP cause, disabling the
+credential, changing resident ownership, or authorizing any write. The numeric
+code is retained without interpreting its cause; raw reply text is not copied.
+Missing/null success, other codes, subscription responses, stale request IDs and
+transport/handshake timeouts retain their existing uncertainty and retry behavior.
