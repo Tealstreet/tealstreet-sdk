@@ -12,6 +12,13 @@ pub(super) struct Retention {
     task: tokio::task::AbortHandle,
 }
 
+#[cfg(test)]
+impl Retention {
+    pub(super) fn abort_cleanup_for_test(&self) {
+        self.task.abort();
+    }
+}
+
 impl Holders {
     pub(super) fn cancel_retention(&mut self) {
         if let Some(retention) = self.retention.take() {

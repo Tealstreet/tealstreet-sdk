@@ -480,11 +480,35 @@ mod tests {
             ],
         }
     }
+    // This synchronous resident records synthetic requests and owns no keys.
+    // Original asynchronous Recording controls retain their existing behavior.
+    struct ProtectedRecording(Calls);
+    impl safe_cex_engine::signing::ProtectedSigner for ProtectedRecording {}
+    impl Signer for ProtectedRecording {
+        fn immediate(&self) -> bool {
+            true
+        }
+        fn can_sign(&self, _: &KeyRef, algorithm: Algorithm) -> Capability {
+            if algorithm == Algorithm::HmacSha256 {
+                Capability::Supported
+            } else {
+                Capability::Unsupported
+            }
+        }
+        fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+            self.0.lock().unwrap().push(request.clone());
+            Some(Err(SignError::Refused))
+        }
+        fn sign(&self, request: SignRequest) -> SignFuture {
+            Box::pin(std::future::ready(self.sign_ready(&request).unwrap()))
+        }
+    }
     fn resident(calls: Arc<Mutex<Vec<SignRequest>>>) -> Arc<ResidentCopy> {
-        ResidentCopy::test_provider_with_identities(
-            Arc::new(Recording { calls, wait: false }),
-            identities("new"),
-        )
+        let protected = safe_cex_engine::signing::ProtectedProvider::new(Arc::new(
+            ProtectedRecording(calls),
+        ))
+        .unwrap();
+        ResidentCopy::test_protected_provider(protected, identities("new"))
     }
     fn signer() -> (Arc<AccountSigner>, Calls, Arc<SignerLink>) {
         let calls: Calls = Arc::default();

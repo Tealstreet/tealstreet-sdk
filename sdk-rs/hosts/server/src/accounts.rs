@@ -438,6 +438,10 @@ impl Account {
         self.hold_label(id, live, &self.name)
     }
 
+    fn hold_before_publication(&self, id: u64, live: Live, label: &str) -> bool {
+        self.hold_label(id, live, label)
+    }
+
     fn hold_label(&self, id: u64, live: Live, label: &str) -> bool {
         let mut holders = self.holders.lock().unwrap();
         if self.delegated().as_ref().is_some_and(|resident| {
@@ -1770,7 +1774,7 @@ impl Registry {
             return Err("The user is draining; reconnecting".into());
         }
         *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
-        if !account.hold_label(holder, live, &init.account_name) {
+        if !account.hold_before_publication(holder, live, &init.account_name) {
             account.handle.dispose();
             return Err("account stopped".into());
         }
