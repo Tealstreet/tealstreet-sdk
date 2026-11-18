@@ -324,7 +324,7 @@ fn unknown_order_status_is_visible_and_preserves_the_live_order() {
         assert_eq!(e.store().order("parent").unwrap().filled, 0.25);
         assert!(e.prepared(100.0).any(|action| matches!(action,
             Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::ROW_SKIPPED
-                && event.message == "unknown order status"
+                && event.message == format!("unknown order status: {status:?}")
         )));
     }
 }
