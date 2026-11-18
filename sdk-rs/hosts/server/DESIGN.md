@@ -957,6 +957,21 @@ How FrameServer notices map onto `msg`:
 | `startupFailed` | `start-status` `{ok:false, detail}`, plus `error` |
 | `accountAuth` | `engine-event` with code `accountAuth`. The server always opts in |
 
+A command-owned `history.incomplete` event also records that pending read's
+positive assertion. A successful `callMethod:done` carries
+`data.completeness: {incomplete:true, reason?, failure?}` beside its retained
+rows. Native NoticeFields encodes command IDs as floating-point JSON numbers;
+only exact integral u32 values can identify a pending owner. String, fractional,
+negative, out-of-range or unrelated IDs cannot mark another reply.
+
+Reasons are the closed engine incompleteness codes. Only `laterPageFailed` can
+carry `failure: {operation, kind, venueCode?}`, with the same five Bybit operations,
+typed error kinds and allowlisted codes as the SDK history-failure validator.
+Unknown metadata retains the incomplete marker without inventing a failure;
+replacement assertions clear previous detail. No native message, URL, cursor,
+credential or response value enters the metadata. Existing rejected replies,
+read completion, request policy and account output ownership remain unchanged.
+
 ### Recovering a refused native startup
 
 FrameServer retains `StartupFailed` for late joins. Only a failure originating

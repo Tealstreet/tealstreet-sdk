@@ -133,6 +133,25 @@ Caller deadlines, read-key selection, pacing, cursors and partial-row markers
 remain shared with the original walk. This does not recover terminal rows the
 venue no longer retains.
 
+
+## Later-page history failure diagnostics
+
+Closed-PnL and query history capture their closed native operation when binding
+an owned read. If a later page fails after accepted rows, the original result
+remains incomplete with reason `laterPageFailed`. Its existing command-attributed
+marker also carries `historyOperation`, `historyFailureKind`, and an optional
+allowlisted `historyVenueCode`; unlisted native codes become `other`. Messages,
+URLs, cursor tokens, credentials and row values are not diagnostic metadata.
+The non-default engine feature `history-page-diagnostics` is enabled by Bybit;
+other families do not opt into these additional native fields.
+
+The browser host and SDK completeness helpers retain those facts as optional
+`failure: { operation, kind, venueCode? }` beside the positive incomplete marker,
+through mapping and worker/hosted JSON. This distinguishes a closed-PnL failure
+from an auxiliary order-history failure without treating a retained prefix as
+complete coverage. An earlier missing-coverage reason remains authoritative;
+first-page failures and serialization failures still reject. These diagnostics
+do not change requests, deadlines, retry policy, pacing or writes.
 ## HyroTrader auth refusal during admission
 
 A current, correlated `auth` acknowledgement with explicit `success:false` and

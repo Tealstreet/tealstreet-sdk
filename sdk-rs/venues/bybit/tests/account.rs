@@ -4676,3 +4676,56 @@ fn terminal_status_failure_uses_the_same_incomplete_diagnostic_as_default_histor
     }
     assert_eq!(observations[0], observations[1]);
 }
+
+#[test]
+fn owned_history_later_failure_identifies_each_native_read_operation() {
+    for (kind, operation) in [(0, "bybitFills"), (1, "bybitOrders"), (2, "bybitIncome")] {
+        let mut h = ready();
+        h.notices.clear();
+        let (query, path) = owned_history_query(kind, None);
+        h.command(Command::Query {
+            command: 980,
+            query,
+        });
+        h.respond(
+            path,
+            200,
+            &owned_history_page(&[owned_history_row(kind, "accepted")], "page2"),
+        );
+        let request = h.take(path);
+        h.reply(
+            request.id,
+            200,
+            r#"{"retCode":10006,"retMsg":"PRIVATE_CANARY","result":{}}"#,
+        );
+        assert!(h.result(980).unwrap().is_ok());
+        let event = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::Event(event)
+                    if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .unwrap();
+        for (key, value) in [
+            ("historyOperation", operation),
+            ("historyFailureKind", "rateLimited"),
+            ("historyVenueCode", "10006"),
+        ] {
+            assert_eq!(
+                event
+                    .fields
+                    .iter()
+                    .find(|(field, _)| *field == key)
+                    .map(|(_, value)| value),
+                Some(&safe_cex_engine::Value::Str(value.into()))
+            );
+        }
+        assert!(!format!("{:?}", event.fields).contains("PRIVATE_CANARY"));
+        assert!(!h.has_request(path));
+    }
+}

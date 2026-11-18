@@ -100,5 +100,9 @@ Hyperliquid pre-send `/info` admission diagnostics retain timeout/NotSent with t
 closed `info_admission` cause. The relay/post-handoff boundary is documented in
 `sdk-rs/README.md` under Browser request-failure diagnostics.
 
+Bybit's closed later-page read diagnostics and owning-result completeness bridge
+are documented in `sdk-rs/venues/bybit/README.md` under Later-page history failure
+diagnostics. They add no pagination, retry or write authority.
+
 BingX sent cancel/amend invalid-input diagnostics carry only closed request shape;
 its bounds and replacement-provenance semantics live in `sdk-rs/venues/bingx/README.md`.

@@ -437,7 +437,7 @@ async fn resnapshot_keeps_rate_and_stops_the_old_pending_publication() {
                         method: "fetchCandles".into(),
                         reply: methods::Reply::Result,
                         group: None,
-                        incomplete: false,
+                        incomplete: None,
                         audit: None,
                     },
                 );

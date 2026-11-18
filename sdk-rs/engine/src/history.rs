@@ -58,21 +58,54 @@ impl From<Stall> for IncompleteReason {
     }
 }
 
-fn incomplete_event<P>(
-    cx: &mut Cx<'_, P>,
-    command: CommandId,
+#[cfg(feature = "history-page-diagnostics")]
+#[path = "history_failure.rs"]
+mod failure;
+#[cfg(feature = "history-page-diagnostics")]
+pub use failure::HistoryOperation;
+
+/// The owning query's first missing-coverage fact; messages never cross as metadata.
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct Incomplete {
     reason: IncompleteReason,
     message: String,
-) {
-    cx.event(
-        Level::Warn,
-        code::HISTORY_INCOMPLETE,
-        message,
-        vec![
+    #[cfg(feature = "history-page-diagnostics")]
+    failure: Option<failure::HistoryFailure>,
+}
+
+impl Incomplete {
+    fn new(reason: IncompleteReason, message: String) -> Self {
+        Self {
+            reason,
+            message,
+            #[cfg(feature = "history-page-diagnostics")]
+            failure: None,
+        }
+    }
+
+    pub(crate) fn event(self, command: CommandId) -> crate::LogEvent {
+        #[allow(unused_mut)]
+        let mut fields = vec![
             ("command", Value::Num(f64::from(command))),
-            ("reason", Value::Str(reason.code().into())),
-        ],
-    );
+            ("reason", Value::Str(self.reason.code().into())),
+        ];
+        #[cfg(feature = "history-page-diagnostics")]
+        if let Some(failure) = self.failure {
+            failure.append_fields(&mut fields);
+        }
+        crate::LogEvent {
+            level: Level::Warn,
+            code: code::HISTORY_INCOMPLETE,
+            message: self.message,
+            fields,
+        }
+    }
+
+    fn emit<P>(self, cx: &mut Cx<'_, P>, command: CommandId) {
+        let event = self.event(command);
+        cx.event(event.level, event.code, event.message, event.fields);
+    }
 }
 
 /// Missing coverage in automatic account reconciliation, not a user query.
@@ -128,7 +161,7 @@ pub trait HistoryAuthority: authority_sealed::Sealed {
         self,
         cx: &mut Cx<'_, P>,
         command: CommandId,
-        incomplete: Option<(IncompleteReason, String)>,
+        incomplete: Option<Incomplete>,
         result: Result<String, VenueError>,
     ) -> Self::Terminal;
 }
@@ -144,13 +177,13 @@ impl HistoryAuthority for LegacyAuthority {
         self,
         cx: &mut Cx<'_, P>,
         command: CommandId,
-        incomplete: Option<(IncompleteReason, String)>,
+        incomplete: Option<Incomplete>,
         result: Result<String, VenueError>,
     ) {
         match result {
             Ok(result) => {
-                if let Some((reason, message)) = incomplete {
-                    incomplete_event(cx, command, reason, message);
+                if let Some(incomplete) = incomplete {
+                    incomplete.emit(cx, command);
                 }
                 cx.done(command, result);
             }
@@ -206,7 +239,7 @@ impl HistoryAuthority for ReadAuthority {
         self,
         cx: &mut Cx<'_, P>,
         command: CommandId,
-        incomplete: Option<(IncompleteReason, String)>,
+        incomplete: Option<Incomplete>,
         result: Result<String, VenueError>,
     ) -> Self::Terminal {
         // Both success and failure need the read companion check. Generic
@@ -214,8 +247,8 @@ impl HistoryAuthority for ReadAuthority {
         self.validate(cx)?;
         match result {
             Ok(result) => {
-                if let Some((reason, message)) = incomplete {
-                    incomplete_event(cx, command, reason, message);
+                if let Some(incomplete) = incomplete {
+                    incomplete.emit(cx, command);
                 }
                 cx.done_context(&self.root, result)
             }
@@ -270,8 +303,9 @@ pub type ReadRangeHistory<T> = RangeHistory<T, ReadAuthority>;
 #[must_use = "history must finish or fail through its owner"]
 pub struct Completion<A = LegacyAuthority> {
     command: CommandId,
-    incomplete: Option<String>,
-    incomplete_reason: Option<IncompleteReason>,
+    incomplete: Option<Incomplete>,
+    #[cfg(feature = "history-page-diagnostics")]
+    operation: Option<HistoryOperation>,
     authority: A,
 }
 
@@ -280,7 +314,8 @@ impl Completion<LegacyAuthority> {
         Self {
             command,
             incomplete: None,
-            incomplete_reason: None,
+            #[cfg(feature = "history-page-diagnostics")]
+            operation: None,
             authority: LegacyAuthority { _private: () },
         }
     }
@@ -294,21 +329,38 @@ impl<A: HistoryAuthority> Completion<A> {
     /// Retain the first missing-coverage cause across later successful pages.
     /// Nothing is published on terminal rejection or failed serialization.
     pub fn incomplete(&mut self, reason: IncompleteReason, message: impl Into<String>) {
-        if self.incomplete.is_none() {
-            self.incomplete = Some(message.into());
-            self.incomplete_reason = Some(reason);
+        self.incomplete
+            .get_or_insert_with(|| Incomplete::new(reason, message.into()));
+    }
+
+    /// Captured from the query kind, never inferred from native text or URLs.
+    #[cfg(feature = "history-page-diagnostics")]
+    pub fn with_operation(mut self, operation: HistoryOperation) -> Self {
+        self.operation = Some(operation);
+        self
+    }
+
+    fn later_failure(&mut self, error: &VenueError) {
+        if self.incomplete.is_some() {
+            return;
         }
+        #[allow(unused_mut)]
+        let mut incomplete = Incomplete::new(
+            IncompleteReason::LaterPageFailed,
+            format!("history is INCOMPLETE: {}", error.message),
+        );
+        #[cfg(feature = "history-page-diagnostics")]
+        if let Some(operation) = self.operation {
+            incomplete.failure = Some(failure::HistoryFailure::new(operation, error));
+        }
+        self.incomplete = Some(incomplete);
     }
 
     /// Serialization failures belong in `result` too, so they cannot publish
     /// retained rows or claim successful completion.
     pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<String, VenueError>) -> A::Terminal {
-        self.authority.finish(
-            cx,
-            self.command,
-            self.incomplete_reason.zip(self.incomplete),
-            result,
-        )
+        self.authority
+            .finish(cx, self.command, self.incomplete, result)
     }
 }
 
@@ -415,10 +467,7 @@ impl<T, A: HistoryAuthority> HistoryRows<T, A> {
             if self.accepted.is_empty() {
                 return self.completion.finish(cx, Err(error));
             }
-            self.completion.incomplete(
-                IncompleteReason::LaterPageFailed,
-                format!("history is INCOMPLETE: {}", error.message),
-            );
+            self.completion.later_failure(&error);
         } else if !self.pending.is_empty() {
             return self.completion.finish(
                 cx,
@@ -893,7 +942,8 @@ impl ReadCompletion {
         Ok(Self {
             command,
             incomplete: None,
-            incomplete_reason: None,
+            #[cfg(feature = "history-page-diagnostics")]
+            operation: None,
             authority: ReadAuthority {
                 root: Box::new(root),
                 page: None,
@@ -1149,14 +1199,24 @@ mod cursor_probe_tests {
         history.advance(page("a"));
         history.advance(page("b"));
         assert_eq!(
-            history.rows.completion.incomplete.as_deref(),
+            history
+                .rows
+                .completion
+                .incomplete
+                .as_ref()
+                .map(|detail| detail.message.as_str()),
             Some("PageBudget")
         );
         assert!(history.restart_stage());
         history.advance_probe(page("a"));
         history.advance_probe(page("b"));
         assert_eq!(
-            history.rows.completion.incomplete.as_deref(),
+            history
+                .rows
+                .completion
+                .incomplete
+                .as_ref()
+                .map(|detail| detail.message.as_str()),
             Some("PageBudget")
         );
     }
@@ -1169,7 +1229,12 @@ mod cursor_probe_tests {
             CursorStep::Stalled(Stall::RepeatedCursor)
         );
         assert_eq!(
-            history.rows.completion.incomplete.as_deref(),
+            history
+                .rows
+                .completion
+                .incomplete
+                .as_ref()
+                .map(|detail| detail.message.as_str()),
             Some("RepeatedCursor")
         );
         let mut early = owner();
@@ -1252,7 +1317,12 @@ mod range_stage_tests {
         assert!(history.restart_stage(RangeWalk::new(0., 10., 10., 200)));
         assert_eq!(history.command(), 71);
         assert_eq!(
-            history.rows.completion.incomplete.as_deref(),
+            history
+                .rows
+                .completion
+                .incomplete
+                .as_ref()
+                .map(|detail| detail.message.as_str()),
             Some("first gap")
         );
         next_fetch(&mut history);
@@ -1267,7 +1337,12 @@ mod range_stage_tests {
         finish_empty(&mut history);
         assert_eq!(history.rows.accepted, ["first currency", "second currency"]);
         assert_eq!(
-            history.rows.completion.incomplete.as_deref(),
+            history
+                .rows
+                .completion
+                .incomplete
+                .as_ref()
+                .map(|detail| detail.message.as_str()),
             Some("first gap")
         );
     }
@@ -1291,7 +1366,12 @@ mod range_stage_tests {
         assert_eq!(history.rows.pending, ["pending"]);
         assert_eq!(history.pending_facts.len(), 1);
         assert_eq!(
-            history.rows.completion.incomplete.as_deref(),
+            history
+                .rows
+                .completion
+                .incomplete
+                .as_ref()
+                .map(|detail| detail.message.as_str()),
             Some("existing gap")
         );
         assert_eq!(history.retired_requests, 0);
@@ -1341,7 +1421,12 @@ mod range_stage_tests {
         assert_eq!(history.step(), Step::Finished, "third fetch never issued");
         assert!(history.active.is_none());
         assert_eq!(
-            history.rows.completion.incomplete.as_deref(),
+            history
+                .rows
+                .completion
+                .incomplete
+                .as_ref()
+                .map(|detail| detail.message.as_str()),
             Some("shared budget")
         );
         assert!(history.restart_stage(RangeWalk::new(0., 10., 10., 200)));
