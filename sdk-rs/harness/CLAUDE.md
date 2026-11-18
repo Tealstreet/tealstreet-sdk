@@ -80,3 +80,8 @@ family artifacts. Their cap entries record fresh optimized web/Node byte counts
 and SHA-256 hashes from Rust 1.99.0, bindgen 0.2.129 and Binaryen 132 (two -Oz
 passes), with at least 10 KiB reserve rounded up to KiB. Historical floors and
 the combined ceiling remain unchanged.
+
+The retained Bybit and inverse TS replay oracles publish unknown/nonpositive
+liquidation prices as native null, including flat and option positions. Their
+SCXF fixtures must pass the same generated Position contract as the Rust engine;
+a zero/invalid liquidation sentinel cannot complete TS private replay startup.

@@ -1,8 +1,10 @@
+import type { Position } from '../types';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
 import { FrameStore } from '../store/frameStore';
-import { OrderSide, OrderTimeInForce, OrderType } from '../types';
+import { OrderSide, OrderTimeInForce, OrderType, PositionSide } from '../types';
 import { nativeFixture } from './cutover/nativeFixture';
 import { BybitExchange } from './reference/bybit/bybit.exchange';
 import { mapBybitOptionInstrument } from './reference/bybit/bybit.options';
@@ -116,7 +118,17 @@ describe('Bybit options on the bybit connection', () => {
 
   it('keeps option positions the store holds when one poll of them fails', async () => {
     const { exchange, store } = create(true);
-    const held = { id: 'p', symbol: OPTION, contracts: 0.01 } as any;
+    const held: Position = {
+      id: 'p',
+      symbol: OPTION,
+      side: PositionSide.Long,
+      contracts: 0.01,
+      entryPrice: 2900,
+      notional: 29,
+      leverage: 1,
+      unrealizedPnl: 0.5,
+      liquidationPrice: null,
+    };
     store.apply(
       nativeFixture(
         { positions: [held] },
@@ -219,7 +231,7 @@ describe('Bybit options on the bybit connection', () => {
       vega: '0.84',
       theta: '-0.64',
     });
-    expect(position).toMatchObject({ symbol: OPTION, contracts: 0.01, leverage: 1, liquidationPrice: 0 });
+    expect(position).toMatchObject({ symbol: OPTION, contracts: 0.01, leverage: 1, liquidationPrice: null });
     expect(position.option?.greeks).toMatchObject({ delta: 0.0051, vega: 0.84, theta: -0.64 });
   });
 

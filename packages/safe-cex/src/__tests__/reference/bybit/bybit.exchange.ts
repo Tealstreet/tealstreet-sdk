@@ -3782,6 +3782,10 @@ export class BybitExchange extends BaseExchange {
 
     const marginType = this.marginType;
     const positionIM = parseFloat(v(p, 'positionIM') || 0);
+    const rawLiquidationPrice = parseFloat(v(p, 'liqPrice'));
+    // The generated native contract uses null for absent/nonpositive prices.
+    const liquidationPrice =
+      Number.isFinite(rawLiquidationPrice) && rawLiquidationPrice > 0 ? rawLiquidationPrice : null;
     const position: Position = {
       id: createPositionId(p.symbol, side, positionMode),
       symbol: p.symbol,
@@ -3792,7 +3796,7 @@ export class BybitExchange extends BaseExchange {
       unrealizedPnl,
       realizedPnl: parseFloat(v(p, 'curRealisedPnl') || 0),
       contracts,
-      liquidationPrice: parseFloat(v(p, 'liqPrice') || 0),
+      liquidationPrice,
       marginSize: positionIM > 0 ? positionIM : undefined,
       positionMode,
       marginType,
@@ -3806,7 +3810,7 @@ export class BybitExchange extends BaseExchange {
     if (isBybitOptionSymbol(p.symbol)) {
       const greeks = mapBybitOptionGreeks(p);
       // Options carry no leverage; 1 (not 0) keeps notional / leverage finite for margin math.
-      return { ...position, leverage: 1, liquidationPrice: 0, option: greeks ? { greeks } : {} };
+      return { ...position, leverage: 1, liquidationPrice: null, option: greeks ? { greeks } : {} };
     }
 
     return position;

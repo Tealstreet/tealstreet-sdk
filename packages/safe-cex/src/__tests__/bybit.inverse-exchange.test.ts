@@ -1,9 +1,11 @@
+import type { Position } from '../types';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
 import { FrameStore } from '../store/frameStore';
 import { tealstreetTransport } from '../transport/tealstreet/tealstreetTransport';
-import { OrderSide, OrderType } from '../types';
+import { OrderSide, OrderType, PositionSide } from '../types';
 import { nativeFixture } from './cutover/nativeFixture';
 import { BybitExchange } from './reference/bybit/bybit.exchange';
 import { BybitDemoExchange } from './reference/bybit/bybitdemo.exchange';
@@ -67,6 +69,14 @@ const inversePosition = {
 };
 
 describe('Bybit inverse contracts on the bybit connection', () => {
+  it.each(['', '0', '-1', 'invalid'])('publishes unknown liquidation %s as native null', (liqPrice) => {
+    const { exchange, store } = create(true);
+    const position = exchange.mapPosition({ ...inversePosition, liqPrice });
+    expect(position.liquidationPrice).toBeNull();
+    store.apply(nativeFixture({ positions: [position] }, ['BTCUSD']));
+    expect(store.positions[0].liquidationPrice).toBeNull();
+  });
+
   it.each(['40', '2000000', '0', '-1', '', 'invalid', undefined])(
     'dedicated inverse reference publishes a conservative maximum with native market cap %s',
     async (marketCap) => {
@@ -153,7 +163,17 @@ describe('Bybit inverse contracts on the bybit connection', () => {
 
   it('keeps inverse positions the store holds when one poll of them fails', async () => {
     const { exchange, store } = create(true);
-    const held = { id: 'p', symbol: 'BTCUSD', contracts: 0.0125 } as any;
+    const held: Position = {
+      id: 'p',
+      symbol: 'BTCUSD',
+      side: PositionSide.Long,
+      contracts: 0.0125,
+      entryPrice: 80000,
+      notional: 1000,
+      leverage: 10,
+      unrealizedPnl: 0.0025,
+      liquidationPrice: null,
+    };
     store.apply(
       nativeFixture(
         { positions: [held] },
@@ -240,7 +260,21 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     const { exchange, store } = create(true);
     store.apply(
       nativeFixture(
-        { markets: [{ symbol: 'BTCUSD', id: 'BTCUSD', isInverse: true } as any] },
+        {
+          markets: [
+            {
+              symbol: 'BTCUSD',
+              id: 'BTCUSD',
+              base: 'BTC',
+              quote: 'USD',
+              active: true,
+              isInverse: true,
+              contractSize: 1,
+              precision: { amount: 1, price: 0.5 },
+              limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 100 } },
+            },
+          ],
+        },
         store.markets.map((row) => row.symbol),
       ),
     );

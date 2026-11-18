@@ -2610,6 +2610,10 @@ export class BybitInverseExchange extends BaseExchange {
 
     const marginType = this.marginType;
     const positionIM = parseFloat(v(p, 'positionIM') || 0);
+    const rawLiquidationPrice = parseFloat(v(p, 'liqPrice'));
+    // The generated native contract uses null for absent/nonpositive prices.
+    const liquidationPrice =
+      Number.isFinite(rawLiquidationPrice) && rawLiquidationPrice > 0 ? rawLiquidationPrice : null;
     const position: Position = {
       id: createPositionId(p.symbol, side, positionMode),
       symbol: p.symbol,
@@ -2620,7 +2624,7 @@ export class BybitInverseExchange extends BaseExchange {
       unrealizedPnl,
       realizedPnl: parseFloat(v(p, 'curRealisedPnl') || 0),
       contracts,
-      liquidationPrice: parseFloat(v(p, 'liqPrice') || 0),
+      liquidationPrice,
       marginSize: positionIM > 0 ? positionIM : undefined,
       positionMode,
       marginType,
