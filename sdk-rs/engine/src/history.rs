@@ -632,6 +632,23 @@ impl<T, A: HistoryAuthority> CursorHistory<T, A> {
         self.rows.reject(cx, error)
     }
 
+    /// Add a query-wide gap at successful completion, preserving an earlier
+    /// page's specific failure and all normal finalization/owner checks.
+    pub fn finish_with_coverage<P>(
+        mut self,
+        cx: &mut Cx<'_, P>,
+        result: Result<(), VenueError>,
+        gap: Option<(IncompleteReason, String)>,
+        encode: impl FnOnce(Vec<T>) -> Result<String, VenueError>,
+    ) -> A::Terminal {
+        if result.is_ok()
+            && let Some((reason, message)) = gap
+        {
+            self.rows.completion.incomplete(reason, message);
+        }
+        self.finish_with(cx, result, encode)
+    }
+
     pub fn finish_with<P>(
         self,
         cx: &mut Cx<'_, P>,
