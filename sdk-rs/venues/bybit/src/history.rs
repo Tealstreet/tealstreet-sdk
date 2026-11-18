@@ -257,6 +257,7 @@ struct Walk {
     order_statuses: VecDeque<&'static str>,
     original_windows: VecDeque<(Option<f64>, Option<f64>)>,
     terminal_windows: VecDeque<(Option<f64>, Option<f64>)>,
+    retention_from: Option<f64>,
 }
 
 impl Walk {
@@ -267,9 +268,13 @@ impl Walk {
     }
 
     fn finish(self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
+        let gap = self.retention_from
+            .filter(|from| *from < cx.protocol_now() - TERMINAL_RETENTION_MS)
+            .map(|_| (IncompleteReason::RetentionLimit,
+                "Bybit retains unfilled Cancelled/Rejected/Deactivated orders for only 24 hours; older terminal rows are unavailable".into()));
         let _ = self
             .history
-            .finish_with(cx, result, |rows| self.kind.encode(rows, self.cap));
+            .finish_with_coverage(cx, result, gap, |rows| self.kind.encode(rows, self.cap));
     }
 }
 
@@ -516,6 +521,7 @@ impl BybitLinear {
                     order_statuses: VecDeque::new(),
                     original_windows: VecDeque::new(),
                     terminal_windows: VecDeque::new(),
+                    retention_from: None,
                     axis_rows_start: 0,
                     path: "/v5/execution/list",
                     signed: true,
@@ -545,13 +551,6 @@ impl BybitLinear {
                 // With no start bound, V5 defaults to seven days before the end.
                 let requested_from =
                     from_ms.unwrap_or(to_ms.unwrap_or(now) - 7.0 * TERMINAL_RETENTION_MS);
-                let mut completion = completion;
-                if requested_from < now - TERMINAL_RETENTION_MS {
-                    completion.incomplete(
-                        IncompleteReason::RetentionLimit,
-                        "Bybit retains unfilled Cancelled/Rejected/Deactivated orders for only 24 hours; older terminal rows are unavailable",
-                    );
-                }
                 let mut params = vec![("category", self.paths.category.to_owned())];
                 params.extend(symbol.map(|s| ("symbol", s)));
                 Walk {
@@ -560,6 +559,7 @@ impl BybitLinear {
                     order_statuses: VecDeque::new(),
                     original_windows: VecDeque::new(),
                     terminal_windows: terminal_windows(from_ms, to_ms, now),
+                    retention_from: Some(requested_from),
                     axis_rows_start: 0,
                     path: "/v5/order/history",
                     signed: true,
@@ -611,6 +611,7 @@ impl BybitLinear {
                     order_statuses: VecDeque::new(),
                     original_windows: VecDeque::new(),
                     terminal_windows: VecDeque::new(),
+                    retention_from: None,
                     axis_rows_start: 0,
                     path: "/v5/account/transaction-log",
                     signed: true,
@@ -634,6 +635,7 @@ impl BybitLinear {
                 order_statuses: VecDeque::new(),
                 original_windows: VecDeque::new(),
                 terminal_windows: VecDeque::new(),
+                retention_from: None,
                 axis_rows_start: 0,
                 path: "/v5/market/recent-trade",
                 signed: false,

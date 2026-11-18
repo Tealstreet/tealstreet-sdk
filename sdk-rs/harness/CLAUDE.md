@@ -17,8 +17,9 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
-Bybit order-history retention now marks expired unfilled terminal populations
-incomplete; fresh family and combined artifacts must retain the 10 KiB reserve.
+Bybit order-history retention is decided at completion and preserves earlier
+page-failure causes. Fresh family and combined artifacts must retain the
+10 KiB reserve.
 
 MEXC's HTTP 425 read labels are diagnostics only; typed refusals, backoff,
 signing and write outcomes retain their existing controls. Exact source

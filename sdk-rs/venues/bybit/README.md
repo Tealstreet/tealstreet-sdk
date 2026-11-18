@@ -133,10 +133,13 @@ Caller deadlines, read-key selection, pacing, cursors and partial-row markers
 remain shared with the original walk.
 
 A successful order-history result whose effective start precedes that 24-hour
-boundary carries `incompleteReason: "retentionLimit"`, including an empty result.
+boundary at completion (including time spent fetching pages) carries
+`incompleteReason: "retentionLimit"`, including an empty result.
 The diagnostic names the unfilled `Cancelled`/`Rejected`/`Deactivated` population;
 older filled orders still return. Omitted starts use V5's seven-day default before
-the supplied end (or now). Recent-only ranges retain their usual completeness.
+the supplied end (or now). Ranges still inside retention at completion retain
+their usual completeness.
+A failed later page preserves its more specific incomplete reason.
 Frequent reads while an authenticated engine exists can collect those terminal
 rows before expiry. This does not recover expired rows or provide durable capture
 while no engine is running; deeper backfill cannot close that retention gap.
