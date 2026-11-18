@@ -557,6 +557,7 @@ mod tests {
         crate::candle_output::write(&mut w, &[(0, "1m", candle)]);
         let frame = w.finish();
 
+        // Rule 5: 7b723d8837 adds native requestStats section 35 to snapshots.
         assert_eq!(&frame[..4], b"SCXF");
         assert_eq!(u16::from_le_bytes([frame[4], frame[5]]), FORMAT);
         assert_eq!(f64::from_le_bytes(frame[8..16].try_into().unwrap()), 1234.0);
@@ -577,6 +578,7 @@ mod tests {
                 section::MARKETS,
                 section::TICKERS,
                 section::STATUS,
+                35,
                 section::CANDLES,
                 section::STRINGS
             ]

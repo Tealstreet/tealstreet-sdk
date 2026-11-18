@@ -2242,6 +2242,7 @@ mod tests {
         fn no_cover_writes_no_section() {
             let mut store = Store::default();
             store.upsert_order(row("a", "BTC"));
+            // Rule 5: 7b723d8837 adds native requestStats section 35 to snapshots.
             assert_eq!(
                 sections(&mut store),
                 [
@@ -2249,7 +2250,8 @@ mod tests {
                     section::POSITIONS,
                     section::BALANCE,
                     section::SETTINGS,
-                    section::STATUS
+                    section::STATUS,
+                    35
                 ]
             );
         }

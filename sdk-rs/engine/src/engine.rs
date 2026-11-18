@@ -9757,6 +9757,7 @@ mod streaming_tests {
         });
         let snapshot = engine.account_snapshot_frame(1.).to_vec();
         let sections = crate::wire::sections(&snapshot).collect::<Vec<_>>();
+        // Rule 5: 7b723d8837 adds native requestStats section 35 to snapshots.
         assert_eq!(
             sections.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
             [
@@ -9765,6 +9766,7 @@ mod streaming_tests {
                 section::BALANCE,
                 section::SETTINGS,
                 section::STATUS,
+                35,
                 section::ACCOUNT_READ
             ]
         );
