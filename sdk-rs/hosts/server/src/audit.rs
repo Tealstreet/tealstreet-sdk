@@ -105,6 +105,89 @@ fn pick(source: &Value, fields: &[&str]) -> Map<String, Value> {
         .collect()
 }
 
+/// Refusals before handoff are journal-only and contain no client values.
+pub(crate) fn pre_dispatch_refused(venue: Option<&str>, op: &str, message: &str) {
+    let op = if ORDER_METHODS.contains(&op)
+        || matches!(
+            op,
+            "order.submit"
+                | "order.action"
+                | "order.cancelQueued"
+                | "order.actionCancelQueued"
+                | "amend"
+                | "cancel"
+                | "cancelAll"
+                | "nuke"
+                | "place"
+                | "cancelSymbol"
+                | "setMarginType"
+                | "setPositionMode"
+                | "close"
+                | "closeAll"
+                | "stopAlgos"
+                | "cancelAccountOrders"
+                | "setStpMode"
+                | "setAccountTier"
+                | "algo"
+        ) {
+        op
+    } else {
+        "unknown"
+    };
+    let reason = match message {
+        "not sent: invalid action binding" | "not sent: invalid order binding" => "invalid_binding",
+        "not sent: unsupported action version" => "unsupported_version",
+        "not sent: account not admitted for actions"
+        | "not sent: account not admitted for order frames" => "not_admitted",
+        "not sent: invalid intent key" => "invalid_intent_key",
+        "not sent: invalid key time" => "future_intent_key",
+        "not sent: expired" => "expired_intent",
+        "not sent: action fingerprint differs" | "not sent: intent fingerprint differs" => {
+            "fingerprint_mismatch"
+        }
+        "unsupported action schema" => "invalid_action_schema",
+        "unsupported action" => "invalid_action",
+        "not sent: invalid amendment" => "invalid_amendment",
+        "Invalid action queue cancellation binding" => "invalid_binding",
+        "Invalid action queue cancellation" | "not sent: invalid queued cancellation" => {
+            "invalid_queue_cancellation"
+        }
+        "not sent: invalid parameters" => "invalid_parameters",
+        "not sent: client order id differs" => "client_order_id_mismatch",
+        "not sent: algo account differs" => "algo_account_mismatch",
+        "Algo host unavailable" | "Nuke is unavailable for this account" => "algo_unavailable",
+        "not sent: invalid order frame" => "invalid_envelope",
+        "not sent: action exceeds size limit"
+        | "not sent: submit exceeds size limit"
+        | "not sent: action queue cancellation exceeds size limit" => "frame_too_large",
+        "Unauthenticated order rejected" => "unauthenticated",
+        "Router lease expired; no new work was sent" => "lease_fenced",
+        "too many account reads in flight; retry shortly" => "capacity",
+        "command IDs exhausted" => "command_ids_exhausted",
+        "account is busy; command not sent" => "input_busy",
+        crate::auth::TOKEN_EXPIRED => "auth_expired",
+        "Action expired; no further action command was sent" => "action_expired",
+        "Action registration retired; no further action command was sent" => "registration_retired",
+        "runtime_disabled"
+        | "pending_verification"
+        | "account_missing"
+        | "wrong_signing_mode"
+        | "public_account"
+        | "venue_disabled"
+        | "io_fenced"
+        | "holder_changed"
+        | "registration_mismatch"
+        | "draining" => message,
+        _ => "pre_dispatch_refused",
+    };
+    let venue = venue.filter(|venue| safe_cex_venues::supported(venue));
+    crate::state::Log::info(
+        &json!({"event":"order.pre_dispatch_refused", "reason_class":reason,
+        "venue":venue,"op":op})
+        .to_string(),
+    );
+}
+
 /// The audited fields of an engine command (as JSON), or `None` for a read.
 pub fn command(command: &Value) -> Option<Map<String, Value>> {
     let op = command["op"]
@@ -288,6 +371,39 @@ pub fn log(who: &Who, origin: &str, fields: &Map<String, Value>, result: Value) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pre_dispatch_refusal_audit_drops_all_untrusted_text_and_is_bounded() {
+        let canary = "key-body-account-canary".repeat(1000);
+        let capture = crate::state::log_capture::capture();
+        super::pre_dispatch_refused(Some(&canary), &canary, &canary);
+        super::pre_dispatch_refused(
+            Some("bybit"),
+            "amend",
+            "not sent: action fingerprint differs",
+        );
+        let lines = capture.finish();
+        assert_eq!(lines.len(), 2);
+        for line in &lines {
+            assert!(line.len() < 512);
+            assert!(!line.contains("canary"));
+        }
+        let outer: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+        assert_eq!(outer["level"], "info");
+        let fields: serde_json::Value =
+            serde_json::from_str(outer["msg"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            fields,
+            json!({"event":"order.pre_dispatch_refused","venue":null,"op":"unknown","reason_class":"pre_dispatch_refused"})
+        );
+        let outer: serde_json::Value = serde_json::from_str(&lines[1]).unwrap();
+        let fields: serde_json::Value =
+            serde_json::from_str(outer["msg"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            fields,
+            json!({"event":"order.pre_dispatch_refused","venue":"bybit","op":"amend","reason_class":"fingerprint_mismatch"})
+        );
+    }
+
     #[test]
     fn native_result_shape_is_closed_and_does_not_retain_reply_values() {
         for (value, expected) in [

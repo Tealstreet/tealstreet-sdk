@@ -376,6 +376,13 @@ Retirement fences new legs and drops stale outcomes; already handed-off work
 remains uncertain. An aborted/abandoned nuke settles unknown on
 its captured output, never another owner's registration.
 
+Pre-dispatch order refusals emit journal-only INFO `order.pre_dispatch_refused`.
+Its closed reason class, catalog-validated venue (or null) and closed operation
+never include IDs, labels, credentials, payloads or raw error text. Admission
+reasons distinguish runtime, pending proof, mode, holder, registration and drain
+without changing those predicates. Normal amend targets remain id/symbol only;
+reduce-only LIMIT price amendments use the ordinary native amend path.
+
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
 Every raw typed-action payload checks recursive key uniqueness before `Value`

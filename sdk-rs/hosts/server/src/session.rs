@@ -1139,6 +1139,12 @@ impl Session {
                     account_name: Some(name),
                     data,
                 })) if op == "callMethod" => {
+                    if let Some(method) = data["method"]
+                        .as_str()
+                        .filter(|method| crate::audit::ORDER_METHODS.contains(method))
+                    {
+                        self.audit_order_refusal(&name, method, crate::auth::TOKEN_EXPIRED);
+                    }
                     self.reply_failure(
                         &name,
                         &data.get("requestId").cloned().unwrap_or(Value::Null),
@@ -1163,12 +1169,18 @@ impl Session {
                     .is_some_and(|kind| kind.starts_with("order."))
             {
                 if self.identity.user.is_none() {
+                    self.audit_order_refusal("", "order.action", "Unauthenticated order rejected");
                     return Err(Close::Policy("Unauthenticated order rejected"));
                 }
                 let name = frame["d"]["accountName"].as_str();
                 let out = name
                     .map(|name| self.handover_out(name))
                     .unwrap_or_else(|| self.out.clone());
+                self.audit_order_refusal(
+                    name.unwrap_or(""),
+                    "order.action",
+                    "not sent: invalid order frame",
+                );
                 out.send(envelope::error(name, "not sent: invalid order frame"));
             }
             Log::warn("invalid envelope");
@@ -1178,9 +1190,19 @@ impl Session {
         match message {
             Inbound::OrderAction(request) => {
                 if !authenticated {
+                    self.audit_order_refusal(
+                        &request.account_name,
+                        "order.action",
+                        "Unauthenticated order rejected",
+                    );
                     return Err(Close::Policy("Unauthenticated order rejected"));
                 }
                 if text.len() > crate::order_contract::SUBMIT_MAX {
+                    self.audit_order_refusal(
+                        &request.account_name,
+                        "order.action",
+                        "not sent: action exceeds size limit",
+                    );
                     self.handover_out(&request.account_name)
                         .send(envelope::error(
                             Some(&request.account_name),
@@ -1192,9 +1214,19 @@ impl Session {
             }
             Inbound::OrderActionCancelQueued(cancel) => {
                 if !authenticated {
+                    self.audit_order_refusal(
+                        &cancel.account_name,
+                        "order.actionCancelQueued",
+                        "Unauthenticated order rejected",
+                    );
                     return Err(Close::Policy("Unauthenticated order rejected"));
                 }
                 if text.len() > crate::order_contract::ACK_MAX {
+                    self.audit_order_refusal(
+                        &cancel.account_name,
+                        "order.actionCancelQueued",
+                        "not sent: action queue cancellation exceeds size limit",
+                    );
                     self.handover_out(&cancel.account_name)
                         .send(envelope::error(
                             Some(&cancel.account_name),
@@ -1206,9 +1238,19 @@ impl Session {
             }
             Inbound::OrderSubmit(submit) => {
                 if !authenticated {
+                    self.audit_order_refusal(
+                        &submit.account_name,
+                        "order.submit",
+                        "Unauthenticated order rejected",
+                    );
                     return Err(Close::Policy("Unauthenticated order rejected"));
                 }
                 if text.len() > crate::order_contract::SUBMIT_MAX {
+                    self.audit_order_refusal(
+                        &submit.account_name,
+                        "order.submit",
+                        "not sent: submit exceeds size limit",
+                    );
                     self.handover_out(&submit.account_name)
                         .send(envelope::error(
                             Some(&submit.account_name),
@@ -1220,6 +1262,11 @@ impl Session {
             }
             Inbound::OrderCancelQueued(cancel) => {
                 if !authenticated {
+                    self.audit_order_refusal(
+                        &cancel.account_name,
+                        "order.cancelQueued",
+                        "Unauthenticated order rejected",
+                    );
                     return Err(Close::Policy("Unauthenticated order rejected"));
                 }
                 self.order_cancel_queued(cancel);
@@ -2343,6 +2390,9 @@ impl Session {
             Ok(plans) => plans,
             Err(refused) => {
                 if crate::audit::ORDER_METHODS.contains(&method.as_str()) {
+                    if order_frame.is_none() {
+                        self.audit_order_refusal(name, &method, &refused.message);
+                    }
                     let who = audit_who(&account);
                     let origin = format!("socket:{}", self.socket);
                     let fields = crate::audit::refused_call(&method, &args);
@@ -2706,8 +2756,15 @@ impl Session {
         let (pending, out, name) = (joined.client.pending.clone(), out, name.to_owned());
         let waiter =
             after_load.then(|| (handle.clone(), pending.clone(), out.clone(), name.clone()));
+        let refusal_venue = joined.account.venue.clone();
+        let refusal_op = method.to_owned();
+        let audit_refusal = crate::audit::ORDER_METHODS.contains(&method);
+        let load_refusal = (refusal_venue.clone(), refusal_op.clone());
         let send = move || {
             if let Err(message) = crate::auth::Verifier::check_expiry(expires_at_ms, now_ms()) {
+                if audit_refusal {
+                    crate::audit::pre_dispatch_refused(Some(&refusal_venue), &refusal_op, message);
+                }
                 if let Some(entry) = pending.lock().unwrap().remove(&id) {
                     settle(
                         &out,
@@ -2723,6 +2780,9 @@ impl Session {
             if let Some(guard) = &action_guard
                 && let Err(message) = guard.check()
             {
+                if audit_refusal {
+                    crate::audit::pre_dispatch_refused(Some(&refusal_venue), &refusal_op, message);
+                }
                 if let Some(entry) = pending.lock().unwrap().remove(&id) {
                     settle(
                         &out,
@@ -2742,6 +2802,14 @@ impl Session {
             if let Some(message) = failure
                 && let Some(pending) = pending.lock().unwrap().remove(&id)
             {
+                if audit_refusal
+                    && !matches!(
+                        pending.reply,
+                        methods::Reply::Intent { .. } | methods::Reply::Action { .. }
+                    )
+                {
+                    crate::audit::pre_dispatch_refused(Some(&refusal_venue), &refusal_op, &message);
+                }
                 let mut detail = failure_detail("Error", &message, false);
                 if matches!(
                     pending.reply,
@@ -2760,6 +2828,13 @@ impl Session {
             match methods::until_account_loaded(&handle, methods::READ_WAIT).await {
                 Ok(()) => send(),
                 Err(refused) => {
+                    if audit_refusal {
+                        crate::audit::pre_dispatch_refused(
+                            Some(&load_refusal.0),
+                            &load_refusal.1,
+                            &refused.message,
+                        );
+                    }
                     if let Some(entry) = pending.lock().unwrap().remove(&id) {
                         settle(
                             &out,
@@ -2783,6 +2858,7 @@ impl Session {
         order_frame: Option<OrderReceipt>,
     ) {
         if pending.group.is_some() && matches!(pending.reply, methods::Reply::Action { .. }) {
+            self.audit_order_refusal(name, &pending.method, message);
             // This proves only one leg was not dispatched. Another leg may be
             // in flight: count every leg and let the group settle as unknown.
             settle(
@@ -2901,6 +2977,7 @@ const WRITE_METHODS: [&str; 9] = [
 ];
 
 fn audit_preflight(account: &Account, socket: u64, method: &str, args: &[Value], message: &str) {
+    crate::audit::pre_dispatch_refused(Some(&account.venue), method, message);
     let mut fields = crate::audit::refused_call(method, args);
     fields.insert("stage".into(), "preflight".into());
     crate::audit::log(
@@ -2933,6 +3010,15 @@ fn after_load_pool<'a>(
 
 fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>) {
     if let Some(audit) = &pending.audit {
+        if let Err(error) = &outcome
+            && error["outcome"] == "notSent"
+        {
+            crate::audit::pre_dispatch_refused(
+                Some(&audit.who.venue),
+                &pending.method,
+                error["message"].as_str().unwrap_or(""),
+            );
+        }
         let mut fields = audit.fields.clone();
         if matches!(
             pending.reply,

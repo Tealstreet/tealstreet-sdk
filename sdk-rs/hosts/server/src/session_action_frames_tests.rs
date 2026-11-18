@@ -2228,10 +2228,23 @@ async fn delegated_predispatch_refusals_have_closed_bounded_audit_lines() {
                 "intentId":id,"seq":1,"ageMs":0,"fingerprint":if case=="fingerprint"{"0".repeat(64)}else{fp},"action":payload}}).to_string()).await.unwrap();
             let lines: Vec<_> = capture.finish().into_iter().filter(|line|line.contains("order.pre_dispatch_refused")).collect();
             let result = action_frame(&mut sent, "order.actionOutcome").await;
-            assert_eq!(result["d"]["outcome"], "refused");
+            assert_eq!(result["d"]["outcome"], if case == "schema" { "unsupported" } else { "refused" });
             assert!(tape.writes.lock().unwrap().is_empty());
             assert_eq!(lines.len(), 1, "{case}: missing bounded pre-dispatch audit");
             assert!(lines[0].len() < 512);
+            let outer: Value = serde_json::from_str(&lines[0]).unwrap();
+            assert_eq!(outer["level"], "info");
+            let fields: Value = serde_json::from_str(outer["msg"].as_str().unwrap()).unwrap();
+            let reason = match case {
+                "version" => "unsupported_version",
+                "fingerprint" => "fingerprint_mismatch",
+                "schema" => "invalid_amendment",
+                "binding" => "registration_mismatch",
+                "admission" => "runtime_disabled",
+                "expiry" => "expired_intent",
+                _ => unreachable!(),
+            };
+            assert_eq!(fields, json!({"event":"order.pre_dispatch_refused","venue":"bybit","op":"amend","reason_class":reason}));
             assert!(!lines[0].contains("resting-order") && !lines[0].contains("synthetic-main") && !lines[0].contains(&id));
             session.close(); registry.dispose(&account, Disposal::PageDisposed);
         }
