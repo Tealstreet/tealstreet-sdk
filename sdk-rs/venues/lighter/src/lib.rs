@@ -1,6 +1,7 @@
 //! Lighter perpetuals: deterministic public streams and engine-owned recovery.
 use safe_cex_engine::ControlFrame;
 mod account;
+pub mod builder_exemption;
 mod history;
 mod identity;
 mod limits;
@@ -51,6 +52,9 @@ pub struct Options {
     pub application_id: Option<String>,
     pub api_key_index: Option<String>,
     pub integrator_account_index: Option<u64>,
+    /// A Tealstreet-signed builder-fee exemption for this account (see
+    /// `builder_exemption`). Ignored unless valid; never set from the terminal UI.
+    pub builder_exemption: Option<String>,
     pub stop_slippage_pct: f64,
     /// The host sends this account's sockets through Tealstreet's WS route, where
     /// read-only promotion does not apply: legacy promoted the direct route only.
@@ -71,6 +75,7 @@ impl Default for Options {
             application_id: None,
             api_key_index: None,
             integrator_account_index: None,
+            builder_exemption: None,
             stop_slippage_pct: 1.0,
             ws_routed: false,
         }

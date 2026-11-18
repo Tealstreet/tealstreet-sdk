@@ -36,3 +36,26 @@ version. See [protective edits](../../../../docs/plans/callers/lighter-protectiv
 A resolved frame receiver cannot rebind its account, including address selectors.
 Each protective edit retains its initiating account through the public read and
 final sends; foreign metadata retires pending edit bindings, even if A returns.
+
+## Builder-fee exemptions
+
+Attributed Lighter orders carry Tealstreet's builder fee (`builder()` in
+`src/trading.rs`). `Options::builder_exemption` can remove it for one approved
+account, and only with a Tealstreet-signed token (`src/builder_exemption.rs`):
+
+- Token `lbx1.<account>.<expires unix s>.<key id>.<signature>`; the Ed25519
+  signature covers a domain-separated payload naming the network (`mainnet` or
+  `robinhood`), the account index, the expiry and the key id.
+- Accepted public keys are the compiled-in `KEYS` list, empty until Tealstreet
+  adds its offline key; `shipped_keys_are_pinned` fails on any unreviewed change.
+- Honoured only when the token verifies, names the account being traded,
+  has not expired and expires within 400 days. Anything else keeps the fee, the
+  tier check and the approval flow unchanged (fail closed).
+- Plumbed as `lighterBuilderExemption` in the Rust registry options only; it is
+  not part of the public TS `ExchangeOptions` and is never set from the terminal.
+- Offline tooling: `cargo run -p safe-cex-venue-lighter --example builder_exemption -- keygen|sign|check`.
+  The seed file is the signing key and must stay offline.
+
+Note: `lighterIntegratorAccountIndex` (public, mutable) overrides the integrator
+on every network, matching the legacy TS resolver. Whether production should
+honour it on mainnet is a separate product decision.

@@ -2169,3 +2169,44 @@ fn unknown_exception_prior_group(observed: usize) {
         )));
     }
 }
+
+#[test]
+fn an_exemption_signed_by_an_unlisted_key_keeps_the_builder_fee() {
+    // No key is shipped yet, and a well-formed token signed by any other key must
+    // change nothing: the tier check, approval and attribution all still apply.
+    let seed = [7u8; 32];
+    let expires = NOW as u64 / 1000 + 86_400;
+    let payload =
+        safe_cex_venue_lighter::builder_exemption::payload("mainnet", 718_895, expires, 1);
+    let sig = safe_cex_crypto::ed25519::sign(payload.as_bytes(), &seed).unwrap();
+    let mut opts = options();
+    opts.builder_exemption = Some(safe_cex_venue_lighter::builder_exemption::token(
+        718_895, expires, 1, &sig,
+    ));
+    let (mut e, _) = ready_with(opts);
+    place(&mut e, vec![limit()]);
+    let tier = http(&mut e, "accountLimits");
+    reply(
+        &mut e,
+        &tier,
+        200,
+        r#"{"code":200,"user_tier_name":"plus"}"#,
+    );
+    let approval = http(&mut e, "/account?");
+    reply(
+        &mut e,
+        &approval,
+        200,
+        &format!(
+            r#"{{"code":200,"accounts":[{{"approved_integrators":[{{"account_index":"158385","approval_expiry":{},"max_perps_taker_fee":300,"max_perps_maker_fee":0}}]}}]}}"#,
+            NOW as u64 + 100_000
+        ),
+    );
+    let nonce = http(&mut e, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let r = http(&mut e, "sendTx");
+    assert_eq!(
+        wire(&r)["L2TxAttributes"],
+        json!({"1":158385,"2":250,"3":0})
+    );
+}
