@@ -87,7 +87,11 @@ export interface HttpPacket {
   /** Native admission hint; never sent as an HTTP header or payload field. */
   readClass?: 'normal' | 'critical' | 'reconciliation' | 'bulk';
   signal?: AbortSignal;
+  /** Host-only observation; never serialized or used for admission authority. */
+  onPreparationStage?(stage: HttpPreparationStage, route?: 'direct' | 'proxy' | 'tunnel'): void;
 }
+export type HttpPreparationStage = 'route_resolve' | 'proxy_token' | 'tunnel' | 'transport_prepare' | 'catalogue_wait' | 'budget_wait';
+
 export interface PreparedHttp {
   /** Optional absolute engine raw time. */
   expiresAt?: number;

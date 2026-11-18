@@ -109,3 +109,7 @@ this routing correction does not change family caps or construction membership.
 BingX Spot replay tracks production decoder receipts alongside pending account reads.
 Bounded drains precede ticks, checkpoints and final capture; event-loop yields
 alone cannot establish completion of gzip decoding or its queued text messages.
+
+Managed HTTP preparation observations change shipped host JS, so they move the
+beta input fingerprint and require a new release/pin. They do not change Rust
+sources or waive fresh combined-consumer/size evidence or any retained floor.

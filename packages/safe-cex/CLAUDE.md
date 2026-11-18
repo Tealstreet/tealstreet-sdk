@@ -617,7 +617,9 @@ See `docs/plans/callers/startup-incomplete-causes.md` for the field contract.
 
 Managed HTTP failures also emit the JS host's Debug `http.request_failed` event,
 with the actual SDK venue plus method, redacted path template, phase and closed
-failure kind. Queries, origins and request material are never diagnostic fields;
+failure kind. Closed preparation stage, route kind, encoded error class and capped
+prepare/budget-wait milliseconds remain passive observations of actual awaits.
+Queries, origins and request material are never diagnostic fields;
 this event does not emit another error or change retries/native deadlines.
 
 ## Rust public-feed ownership
