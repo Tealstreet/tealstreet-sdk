@@ -298,8 +298,10 @@ describe('Rust frame recovery callers', () => {
     expect(fills).toHaveBeenCalledTimes(4);
     await settle();
     expect(rpc).toHaveBeenCalledExactlyOnceWith('fetchEngineSnapshot');
+    const observations = store.observationIds;
     resolve(bundle(fixture({ fills: 0, total: 100 })));
     await settle();
+    expect(store.observationIds).toEqual(observations);
     expect(store.balance.total).toBe(100);
     expect(fills).toHaveBeenCalledTimes(4);
     exchange.dispose();

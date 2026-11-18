@@ -1940,7 +1940,8 @@ export class BaseExchange implements Exchange {
         const requestSnapshot: BaseExchange['callMethodInWorker'] = this.callMethodInWorker;
         const snapshot = await requestSnapshot('fetchEngineSnapshot');
         if (!this.isDisposed && revision === this.workerFrameRecoveryRevision) {
-          this.applyWorkerFrameBuffer(snapshot.frame, false);
+          // Rule 5 / #3640 review: recovery establishes a new snapshot sequence domain.
+          this.applyWorkerFrameBuffer(snapshot.frame, false, true);
         }
       })
       .catch((error) => diagnosticConsole.error('Engine frame recovery failed', error))
