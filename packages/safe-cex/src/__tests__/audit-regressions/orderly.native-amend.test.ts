@@ -72,6 +72,13 @@ const createExchange = (
     ),
   );
 
+  // This retained REST oracle requires the original venue row. SCXF deliberately
+  // carries normalized order facts, so keep raw REST evidence in this fixture's
+  // getter rather than claiming the native codec transports Order.info.
+  vi.spyOn(store, 'orders', 'get').mockImplementation(() =>
+    store.data.orders.map((row) => ({ ...row, info: order.info })),
+  );
+
   const put = vi.fn().mockResolvedValue({ data: response });
   exchange.xhr = { put } as unknown as Axios;
   const cancelOrders = vi.spyOn(exchange, 'cancelOrders');
