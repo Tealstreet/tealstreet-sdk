@@ -2295,14 +2295,22 @@ async fn expired_queue_cancellations_and_oversized_orders_keep_errors_and_emit_a
 async fn legacy_order_command_guards_without_typed_receipts_have_audit() {
     tokio::task::LocalSet::new().run_until(async {
         for (case, reason) in [("lease", "lease_fenced"), ("capacity", "capacity"), ("command_id", "command_ids_exhausted")] {
-            let registry = Arc::new(Registry::new(crate::threads::EngineThreads::start(1).unwrap(), Duration::from_millis(1), Duration::from_secs(60)).with_router_lease(crate::router_lease::Config { box_id: Some("test-box".into()), ..Default::default() }));
+            let registry = Arc::new(Registry::new(crate::threads::EngineThreads::start(1).unwrap(), Duration::from_millis(1), Duration::from_secs(60)).with_router_lease(crate::router_lease::Config { enforce: true, box_id: Some("test-box".into()), ..Default::default() }));
+            let grant = |owner_epoch| {
+                let now = crate::accounts::now_ms();
+                registry.router_leases.accept(&crate::router_lease::Heartbeat {
+                    r#box: "test-box".into(), issued_at: now,
+                    users: vec![crate::router_lease::Assertion { user_id: "A".into(), owner_epoch, sequence: 1, not_after: now + 45_000 }],
+                }).unwrap();
+            };
+            grant(1);
             let tape = Tape::default();
             let account = delegated_account(&registry, "A", "bybit", tape.clone());
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
             let _held = if case == "capacity" {
                 Some(account.reads.clone().acquire_many_owned(account.reads.available_permits() as u32).await.unwrap())
             } else { None };
-            if case == "lease" { registry.router_leases.enforce(true); assert!(!account.running.io_allowed()); }
+            if case == "lease" { grant(2); assert!(!account.running.io_allowed()); }
             if case == "command_id" { session.joined.get_mut("synthetic-main").unwrap().next_command = u32::MAX; }
             let capture = crate::state::log_capture::capture();
             session.send_command("synthetic-main", &json!("legacy-amend"), "updateOrder", &None,
