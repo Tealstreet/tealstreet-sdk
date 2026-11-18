@@ -106,3 +106,8 @@ diagnostics. They add no pagination, retry or write authority.
 
 BingX sent cancel/amend invalid-input diagnostics carry only closed request shape;
 its bounds and replacement-provenance semantics live in `sdk-rs/venues/bingx/README.md`.
+
+OKX ordinary historical orders retain native gross close PnL and signed aggregate
+fee/credit totals with their currencies. Unknown money remains absent; this does
+not promote the orders axis grade. The projection and limits are documented in
+[`sdk-rs/venues/okx/README.md`](sdk-rs/venues/okx/README.md#order-history-financial-projection).
