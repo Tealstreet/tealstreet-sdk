@@ -94,6 +94,9 @@ struct Income {
     position_after: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     execution_quantity: Option<String>,
+    /// Native cash flow excludes fees/funding and independently checks canonical gross.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trade_cash_flow: Option<String>,
     category: &'static str,
     /// Native row identity: equal for page repeats, distinct for hedge legs.
     #[serde(skip)]
@@ -397,6 +400,12 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
         }
         _ => None,
     };
+    let trade_cash_flow = execution_evidence.as_ref().and_then(|_| {
+        present(&row.currency)?;
+        present(&row.cash_flow)
+            .filter(|value| float(value).is_finite())
+            .map(str::to_owned)
+    });
     // Exactly TS's id, so pre/post-cutover rows key identically; same-instant
     // hedge legs share it there too; `source` tells them from page repeats.
     let base: Vec<&str> = [
@@ -426,6 +435,7 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
             trade_id: trade_id.map(str::to_owned),
             position_after: execution_evidence.as_ref().map(|(size, _)| size.clone()),
             execution_quantity: execution_evidence.as_ref().map(|(_, qty)| qty.clone()),
+            trade_cash_flow: trade_cash_flow.clone(),
             category,
             source: source.clone(),
         });
@@ -1003,7 +1013,7 @@ mod tests {
 
     #[test]
     fn transaction_position_evidence_survives_zero_cash_flow() {
-        let row: TransactionRow = serde_json::from_str(r#"{"id":"native-trade","symbol":"BTCUSDT","type":"TRADE","transactionTime":"2000","tradeId":"execution","qty":"1","size":"0","cashFlow":"0","funding":"0","fee":"0"}"#).unwrap();
+        let row: TransactionRow = serde_json::from_str(r#"{"id":"native-trade","symbol":"BTCUSDT","currency":"USDT","type":"TRADE","transactionTime":"2000","tradeId":"execution","qty":"1","size":"0","cashFlow":"0","funding":"0","fee":"0"}"#).unwrap();
         let mut rows = Vec::new();
         incomes(&row, &mut rows);
         assert_eq!(
@@ -1014,9 +1024,31 @@ mod tests {
         let value = serde_json::to_value(&rows[0]).unwrap();
         assert_eq!(value["positionAfter"], "0");
         assert_eq!(value["executionQuantity"], "1");
+        assert_eq!(value["tradeCashFlow"], "0");
         assert_eq!(value["tradeId"], "execution");
         assert_eq!(value["income"], 0.0);
         assert_eq!(value["category"], "other");
+    }
+
+    #[test]
+    fn cash_flow_evidence_requires_an_explicit_amount_and_currency() {
+        for extra in [
+            r#","currency":"USDT""#,
+            r#","currency":"USDT","cashFlow":null"#,
+            r#","currency":"USDT","cashFlow":"""#,
+            r#","currency":"USDT","cashFlow":"NaN""#,
+            r#","currency":"USDT","cashFlow":"invalid""#,
+            r#","cashFlow":"0""#,
+        ] {
+            let body = format!(
+                r#"{{"symbol":"BTCUSDT","type":"TRADE","transactionTime":"2000","tradeId":"execution","qty":"1","size":"0","fee":"0.1"{extra}}}"#
+            );
+            let row: TransactionRow = serde_json::from_str(&body).unwrap();
+            let mut rows = Vec::new();
+            incomes(&row, &mut rows);
+            assert!(!rows.is_empty());
+            assert!(rows.iter().all(|row| row.trade_cash_flow.is_none()));
+        }
     }
 
     #[test]
@@ -1028,7 +1060,7 @@ mod tests {
             ",\"size\":\"invalid\"",
         ] {
             let body = format!(
-                r#"{{"symbol":"BTCUSDT","type":"TRADE","transactionTime":"2000","tradeId":"execution","qty":"1","cashFlow":"4","fee":"0.1"{size}}}"#
+                r#"{{"symbol":"BTCUSDT","currency":"USDT","type":"TRADE","transactionTime":"2000","tradeId":"execution","qty":"1","cashFlow":"4","fee":"0.1"{size}}}"#
             );
             let row: TransactionRow = serde_json::from_str(&body).unwrap();
             let mut rows = Vec::new();
@@ -1041,7 +1073,7 @@ mod tests {
                     .is_none()
             }));
         }
-        let row: TransactionRow = serde_json::from_str(r#"{"symbol":"BTCUSDT","type":"TRADE","transactionTime":"2000","tradeId":"execution","qty":"1","size":"-2","cashFlow":"4","fee":"0.1"}"#).unwrap();
+        let row: TransactionRow = serde_json::from_str(r#"{"symbol":"BTCUSDT","currency":"USDT","type":"TRADE","transactionTime":"2000","tradeId":"execution","qty":"1","size":"-2","cashFlow":"4","fee":"0.1"}"#).unwrap();
         let mut rows = Vec::new();
         incomes(&row, &mut rows);
         assert_eq!(rows.len(), 2);
@@ -1050,6 +1082,10 @@ mod tests {
                 .all(|row| row.position_after.as_deref() == Some("-2"))
         );
         assert!((rows.iter().map(|row| row.income).sum::<f64>() - 3.9).abs() < 1e-12);
+        assert!(
+            rows.iter()
+                .all(|row| serde_json::to_value(row).unwrap()["tradeCashFlow"] == "4")
+        );
     }
 
     #[test]

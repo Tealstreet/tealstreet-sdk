@@ -1097,6 +1097,15 @@ available through `fetchClosedPositions`. Previously stored heuristic aggregates
 need a controlled replay before they can be combined with the new projection;
 the SDK does not delete persisted history or upgrade the venue's grade.
 
+Canonical Bybit also requires the lifecycle's native transaction cash-flow evidence
+and explicit closing-order fees before publishing financial context. Gross PnL
+excludes signed funding: `closedPnl + openFee + closeFee - funding` must agree
+with the independent native `tradeCashFlow` sum (bounded rounding tolerance of
+1e-8 per input term). Repeated flow/fee projections count each execution once.
+Missing or conflicting evidence, currency disagreement and funded hedge legs
+without source allocation stay incomplete; an absent field never proves zero.
+The existing grade is not a claim of fresh live reconciliation.
+
 A successful partial Rust history read returns the available rows with a
 command-attributed `history.incomplete` notice. The JS host marks
 that command's array with non-enumerable `incomplete: true`, independently of

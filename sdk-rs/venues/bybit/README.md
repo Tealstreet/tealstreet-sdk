@@ -130,6 +130,11 @@ and identities are unchanged.
 The SDK joins these facts to executions, validates their quantities using decimal
 arithmetic, and independently establishes the initial position size. This keeps
 an add and partial close of a pre-window position from becoming a round trip.
+When the source also explicitly supplies a currency and finite cash flow, the
+projection retains `tradeCashFlow` as a decimal string, including zero. The SDK
+uses this native fee/funding-exclusive amount as an independent gross-PnL check;
+missing cash flow or currency cannot establish that identity. Repeated financial
+components from one execution repeat its evidence, not its contribution.
 Income history retains its existing read-only cursor, owner and pacing path.
 The source contract is [Bybit's transaction log](https://bybit-exchange.github.io/docs/v5/account/transaction-log).
 

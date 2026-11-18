@@ -161,6 +161,18 @@ export type BybitLifecycleAdapterDeps = BybitPositionAdapterDeps & {
   readonly lifecycles: readonly BybitLifecycle[];
   readonly from?: number;
   readonly to?: number;
+  readonly resolveLifecycleContext?: (
+    lifecycle: BybitLifecycle,
+    rows: readonly Record<string, unknown>[],
+  ) => BybitLifecycleContext | undefined;
+};
+
+export type BybitLifecycleContext = {
+  readonly openedAt: number;
+  readonly realizedPnl: number;
+  readonly fees: number;
+  readonly funding: number;
+  readonly fundingAttributed: true;
 };
 
 /** Fold only complete, source-joined lifecycles. Native rows remain available
@@ -173,6 +185,7 @@ export const aggregateBybitClosedLifecycles = (
   const byOrder = new Map<string, Record<string, unknown>>();
   const conflicted = new Set<string>();
   let unresolved = false;
+  let unresolvedFinancialContext = false;
   const inWindow = (row: Record<string, unknown>) => {
     const at = num(row.updatedTime) || num(row.createdTime);
     return !(at > 0) || (at >= (deps.from ?? -Infinity) && at <= (deps.to ?? Infinity));
@@ -240,6 +253,11 @@ export const aggregateBybitClosedLifecycles = (
       record.closedAt > (deps.to ?? Infinity)
     )
       continue;
+    const context = deps.resolveLifecycleContext?.(lifecycle, run);
+    if (deps.resolveLifecycleContext && context === undefined) {
+      unresolvedFinancialContext = true;
+      continue;
+    }
     records.push({
       ...record,
       key: JSON.stringify([
@@ -250,13 +268,22 @@ export const aggregateBybitClosedLifecycles = (
         lifecycle.openingId,
         lifecycle.closingId,
       ]),
-      openedAt: record.openedAt ?? interval.openedAt,
+      openedAt: context?.openedAt ?? record.openedAt ?? interval.openedAt,
+      realizedPnl: context?.realizedPnl ?? record.realizedPnl,
+      fees: context?.fees ?? record.fees,
+      funding: context?.funding ?? record.funding,
+      fundingAttributed: context?.fundingAttributed ?? record.fundingAttributed,
       avgEntryPrice: run.reduce((sum, row) => sum + Math.abs(num(row.closedSize)) * num(row.avgEntryPrice), 0) / size,
     });
   }
   for (const [id, row] of byOrder) if (inWindow(row) && !assigned.has(id)) unresolved = true;
   records.sort((a, b) => (a.closedAt ?? 0) - (b.closedAt ?? 0));
-  return unresolved ? withHistoryCompleteness(records, { incomplete: true, reason: 'unresolvedLifecycle' }) : records;
+  return unresolved || unresolvedFinancialContext
+    ? withHistoryCompleteness(records, {
+        incomplete: true,
+        reason: unresolvedFinancialContext ? 'unresolvedFinancialContext' : 'unresolvedLifecycle',
+      })
+    : records;
 };
 
 const foldRun = (run: Array<Record<string, any>>, deps: BybitPositionAdapterDeps): PositionRecord | null => {

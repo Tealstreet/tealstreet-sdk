@@ -74,6 +74,7 @@ import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { copyHistoryCompleteness, historyCompletenessOf } from '../../historyCompleteness';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
 import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
+import { bybitFinancialContext } from '../../journal/bybit.funding';
 import { bybitExecutionEvidence, reconstructBybitLifecycles } from '../../journal/bybit.lifecycles';
 import { aggregateBybitClosedLifecycles, aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
@@ -4022,11 +4023,13 @@ export class RustEngineExchange extends BaseExchange {
     const fills = await this.fetchHistoricalFills({ from: lookbackFrom, to, limit: 1000 });
     const income = await this.fetchIncomeHistoryRange(lookbackFrom, to);
     const positionAfter = bybitExecutionEvidence(income);
+    const resolveSettleCurrency = (symbol: string) => this.store.marketsBySymbol[symbol]?.quote || 'USDT';
     const records = aggregateBybitClosedLifecycles(rows, {
       account: opts.account,
       from,
       to,
-      resolveSettleCurrency: (symbol: string) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
+      resolveSettleCurrency,
+      resolveLifecycleContext: bybitFinancialContext(income, resolveSettleCurrency),
       resolveLeg: (orderId: string) => legs.get(orderId),
       lifecycles:
         historyCompletenessOf(fills) ||

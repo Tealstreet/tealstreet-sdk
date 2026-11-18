@@ -17,6 +17,8 @@ const decimal = (value: unknown): BigNumber =>
     ? new BigNumber(value)
     : new BigNumber(NaN);
 
+export const parseBybitDecimal = decimal;
+
 /** The common income model stays unchanged; these are optional native Bybit facts. */
 export const bybitExecutionEvidence = (
   income: readonly IncomeRecord[],

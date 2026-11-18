@@ -15,6 +15,7 @@ import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { DefaultStore } from '../../store/store.base';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 import { PositionSide } from '../../types';
+import { historyCompletenessOf } from '../../historyCompleteness';
 
 type Command = (command: Record<string, unknown>, options?: { report?: boolean }) => Promise<unknown>;
 
@@ -97,12 +98,107 @@ describe('Rust journal paths follow the TS venue declarations', () => {
       executionQuantity: String(item.qty),
       symbol: 'BTCUSDT',
       timestamp: item.timestamp * 1000,
+      tradeCashFlow: String(cashFlows[index]),
       income: cashFlows[index],
       incomeType: cashFlows[index] === 0 ? 'OTHER' : 'REALIZED_PNL',
       category: cashFlows[index] === 0 ? 'other' : 'realized_pnl',
       asset: 'USDT',
       tranId: `${item.id}:source`,
     }));
+
+  it.each([5, -5, 0])('TEAL-7 Y2 removes signed funding %s from native net PnL', async (funding) => {
+    const fills = [
+      { ...fill('fund-open', 1000, 'buy', 'open'), commission: 0.4, commissionAsset: 'USDT' },
+      { ...fill('fund-close', 4000, 'sell', 'close'), commission: 0.6, commissionAsset: 'USDT' },
+    ];
+    const rows = [{ ...close('close', 4000), closedPnl: String(10 - 1 + funding), openFee: '0.4', closeFee: '0.6' }];
+    const [opened, closed] = positionEvidence(fills, [1, 0], [0, 10]);
+    const income = [
+      { ...opened, income: -0.4, incomeType: 'COMMISSION', category: 'commission', tradeCashFlow: '0' },
+      { ...closed, tradeCashFlow: '10' },
+      {
+        ...closed,
+        income: -0.6,
+        incomeType: 'COMMISSION',
+        category: 'commission',
+        tranId: 'fund-close:fee',
+        tradeCashFlow: '10',
+      },
+      ...(funding === 0
+        ? []
+        : [
+            {
+              symbol: 'BTCUSDT',
+              asset: 'USDT',
+              category: 'funding',
+              incomeType: 'FUNDING_FEE',
+              income: funding,
+              timestamp: 2000,
+              tranId: 'native-funding',
+            },
+          ]),
+    ];
+    const { exchange, command } = make('bybit', {
+      fetchClosedPositions: rows,
+      fetchOrderHistory: [
+        { id: 'open', positionSide: 'both' },
+        { id: 'close', positionSide: 'both' },
+      ],
+      fetchFills: fills,
+      fetchIncome: income,
+    });
+    const records = await exchange.fetchHistoricalPositions({ account: 'acct', from: 1000, to: 5000 });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ realizedPnl: 10, fees: 1, funding, fundingAttributed: true, openedAt: 1000 });
+    expect(command.mock.calls.every(([input]) => String(input.op).startsWith('fetch'))).toBe(true);
+  });
+
+  it.each([
+    'missing cash flow',
+    'conflicting cash flow',
+    'missing fee',
+    'empty fee',
+    'wrong currency',
+    'identity mismatch',
+    'funded hedge',
+  ])('TEAL-7 Y2 leaves %s incomplete instead of inventing financial context', async (problem) => {
+    const fills = [fill('open', 1000, 'buy'), fill('close', 4000, 'sell')];
+    const nativeClose: Record<string, unknown> = {
+      ...close('close', 4000),
+      closedPnl: '14',
+      openFee: '0.4',
+      closeFee: '0.6',
+    };
+    const income = positionEvidence(fills, [1, 0], [0, 10]);
+    if (problem === 'missing cash flow') income[1].tradeCashFlow = '';
+    if (problem === 'conflicting cash flow')
+      income.push({ ...income[1], tradeCashFlow: '11', tranId: 'conflicting-source' });
+    if (problem === 'missing fee') delete nativeClose.openFee;
+    if (problem === 'empty fee') nativeClose.openFee = '';
+    if (problem === 'wrong currency') income[1].asset = 'BTC';
+    if (problem === 'identity mismatch') nativeClose.closedPnl = '999';
+    const funding = {
+      symbol: 'BTCUSDT',
+      asset: 'USDT',
+      category: 'funding',
+      incomeType: 'FUNDING_FEE',
+      income: 5,
+      timestamp: 2000,
+      tranId: 'funding',
+    };
+    const { exchange } = make('bybit', {
+      fetchClosedPositions: [nativeClose],
+      fetchOrderHistory: [
+        { id: 'open', positionSide: problem === 'funded hedge' ? 'long' : 'both' },
+        { id: 'close', positionSide: problem === 'funded hedge' ? 'long' : 'both' },
+      ],
+      fetchFills: fills,
+      fetchIncome: [...income, funding],
+    });
+    const records = await exchange.fetchHistoricalPositions({ account: 'acct', from: 1000, to: 5000 });
+    expect(records).toEqual([]);
+    expect(historyCompletenessOf(records)?.incomplete).toBe(true);
+  });
 
   it('TEAL-7 Y1 keeps two real reopenings at the same entry price separate', async () => {
     const rows = [close('c1', 1200), close('c2', 1400)];
@@ -193,6 +289,8 @@ describe('Rust journal paths follow the TS venue declarations', () => {
         avgEntryPrice: '100',
         avgExitPrice: '110',
         closedPnl: '10',
+        openFee: '0',
+        closeFee: '0',
         createdTime: '1000',
         updatedTime: '1001',
       },
@@ -204,6 +302,8 @@ describe('Rust journal paths follow the TS venue declarations', () => {
         avgEntryPrice: '120',
         avgExitPrice: '115',
         closedPnl: '5',
+        openFee: '0',
+        closeFee: '0',
         createdTime: '2000',
         updatedTime: '2001',
       },
