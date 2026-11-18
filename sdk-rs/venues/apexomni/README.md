@@ -55,6 +55,17 @@ containing the UTF-8 byte count and SHA-256 hash. The complete warning is bounde
 to 128 printable ASCII bytes and includes no other row fields. Unknown statuses
 remain refused; this diagnostic does not add status mappings or change orders.
 
+## Order status mapping
+
+The [official open-order and history status catalogue](https://api-docs.omni.apex.exchange/#get-open-orders)
+uses `PENDING`, `OPEN` (including partial fills), `UNTRIGGERED`, `FILLED`,
+`EXPIRED` and `CANCELED`. The mapper accepts those exact values in REST snapshots
+and private stream rows. Cancellation uses one `L`; no documented `CANCELLED`
+alias is assumed. Canceled and expired rows retain their reported fill quantities.
+Unknown statuses produce `row.skipped` and preserve the existing live order;
+they cannot establish cancellation or another terminal outcome. A new mapping
+requires the actual venue value and evidence of its meaning.
+
 ## Socket supervision
 
 Private sockets use `safe_cex_engine::socket::Supervisor` with a ten-second
