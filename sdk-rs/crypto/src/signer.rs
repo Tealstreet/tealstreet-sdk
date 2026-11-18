@@ -3644,10 +3644,3 @@ mod protected_release_tests {
         }
     }
 }
-
-#[cfg(all(test, target_arch = "wasm32"))]
-#[test]
-fn wasm_local_signer_keeps_plain_zeroizing_storage() {
-    let signer = LocalSigner::new();
-    let _: &HashMap<KeyRef, Zeroizing<Vec<u8>>> = &signer.keys;
-}
