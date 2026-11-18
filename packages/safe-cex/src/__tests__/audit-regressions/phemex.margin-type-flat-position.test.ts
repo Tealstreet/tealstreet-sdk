@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { FrameStore } from '../../store/frameStore';
 import { MarginType, PositionMode, PositionSide } from '../../types';
 import { nativeMarket } from '../cutover/nativeMarket';
+import { nativePosition } from '../cutover/nativePosition';
 import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 
@@ -153,7 +154,7 @@ describe('audit regression: Phemex margin type on a flat symbol', () => {
     const { exchange } = buildExchange([flatIsolatedRow]);
     (() => {
       const incoming: StoreData['positions'] = [
-        {
+        nativePosition({
           id: 'ADAUSDT-long',
           symbol: 'ADAUSDT',
           side: PositionSide.Long,
@@ -161,7 +162,7 @@ describe('audit regression: Phemex margin type on a flat symbol', () => {
           leverage: 10,
           marginType: MarginType.Cross,
           positionMode: PositionMode.OneWay,
-        } as any,
+        }),
       ];
       return applyReferenceFixture(
         exchange.store,

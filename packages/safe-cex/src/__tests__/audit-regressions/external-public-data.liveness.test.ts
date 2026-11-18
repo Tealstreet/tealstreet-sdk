@@ -106,7 +106,7 @@ describe('ExternalPublicDataProvider liveness', () => {
     provider.dispose();
   });
 
-  test('reports gateway disconnects through the exchange public socket-health bridge', () => {
+  test('reports gateway liveness while native frames retain Store health authority', () => {
     const store = new FrameStore();
     const exchange = new BaseExchange('binance', { key: '', secret: '', publicDataOnly: true }, store);
     const provider = new ExternalPublicDataProvider(exchange, {
@@ -123,11 +123,15 @@ describe('ExternalPublicDataProvider liveness', () => {
 
     (provider as any).onOpen();
     exchange.syncSocketHealthToStore();
-    expect(store.socketHealth).toMatchObject({ publicInitialized: true, publicHealthy: true });
+    expect(provider.isInitialized).toBe(true);
+    expect(provider.isHealthy).toBe(true);
+    const nativeHealth = store.socketHealth;
 
     ws.readyState = WebSocket.CLOSED;
     exchange.syncSocketHealthToStore();
-    expect(store.socketHealth).toMatchObject({ publicInitialized: true, publicHealthy: false });
+    expect(provider.isInitialized).toBe(true);
+    expect(provider.isHealthy).toBe(false);
+    expect(store.socketHealth).toBe(nativeHealth);
 
     exchange.dispose();
   });

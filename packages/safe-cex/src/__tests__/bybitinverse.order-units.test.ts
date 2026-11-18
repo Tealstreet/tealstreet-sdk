@@ -30,8 +30,8 @@ describe('bybit inverse order units', () => {
 
     const order = store.orders[0];
     expect(order.remaining).toBeCloseTo(1000 / 2600, 8);
-    expect(order.extra.remainingNative).toBe(1000);
-    expect(order.extra.remainingNotional).toBe(1000);
+    expect(order.extra?.remainingNative).toBe(1000);
+    expect(order.extra?.remainingNotional).toBe(1000);
   });
 
   it('sizes an amount amend from contracts left after fills', () => {
@@ -49,7 +49,7 @@ describe('bybit inverse order units', () => {
     exchange.applyLocalOrderUpdateAfterRestWrite(order, { amount: 1500 });
 
     const updated = store.orders[0];
-    expect(updated.extra.remainingNative).toBe(1100);
+    expect(updated.extra?.remainingNative).toBe(1100);
     expect(updated.remaining).toBeCloseTo(1100 / 2600, 8);
   });
 
@@ -69,7 +69,7 @@ describe('bybit inverse order units', () => {
 
     const updated = store.orders[0];
     expect(updated.remaining).toBeCloseTo(600 / 2400, 8);
-    expect(updated.extra.remainingNative).toBe(600);
+    expect(updated.extra?.remainingNative).toBe(600);
   });
 
   it('keeps an amended local order in base units at its new price', () => {
@@ -88,7 +88,7 @@ describe('bybit inverse order units', () => {
 
     const updated = store.orders[0];
     expect(updated.remaining).toBeCloseTo(1000 / 2500, 8);
-    expect(updated.extra.remainingNative).toBe(1000);
+    expect(updated.extra?.remainingNative).toBe(1000);
   });
 
   it('sizes the row and its split stop-loss and take-profit from contracts left, in coin at each price', () => {
@@ -111,7 +111,7 @@ describe('bybit inverse order units', () => {
 
     expect(row.remaining).toBeCloseTo(400 / 2600, 8);
     expect(stopLoss.remaining).toBeCloseTo(400 / 2000, 8);
-    expect(stopLoss.extra.remainingNative).toBe(400);
+    expect(stopLoss.extra?.remainingNative).toBe(400);
     expect(takeProfit.remaining).toBeCloseTo(400 / 3200, 8);
   });
 });

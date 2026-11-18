@@ -745,7 +745,7 @@ export class LighterExchange extends BaseExchange {
         this.store,
         {
           balance,
-          loaded: { ...this.store.loaded, balance: true },
+          loaded: { balance: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -1010,7 +1010,7 @@ export class LighterExchange extends BaseExchange {
               fundingRate: 0,
               fundingTime: 0,
             })),
-            loaded: { ...this.store.loaded, markets: true, tickers: true },
+            loaded: { markets: true, tickers: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -1034,7 +1034,10 @@ export class LighterExchange extends BaseExchange {
       applyReferenceFixture(
         this.store,
         {
-          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          positions: [],
+          orders: [],
+          balance: { total: 0, free: 0, used: 0, upnl: 0 },
+          loaded: { balance: true, positions: true, orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -1069,7 +1072,7 @@ export class LighterExchange extends BaseExchange {
           applyReferenceFixture(
             this.store,
             {
-              loaded: { ...this.store.loaded, positions: true, orders: true },
+              loaded: { positions: true, orders: true },
             },
             this.store.markets.map((row) => row.symbol),
           );
@@ -1083,7 +1086,9 @@ export class LighterExchange extends BaseExchange {
         this.store,
         {
           balance,
-          loaded: { ...this.store.loaded, balance: true },
+          positions: this.store.positions,
+          orders: this.store.orders,
+          loaded: { balance: true, positions: true, orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -1143,7 +1148,7 @@ export class LighterExchange extends BaseExchange {
       applyReferenceFixture(
         this.store,
         {
-          loaded: { ...this.store.loaded, positions: true, orders: true },
+          loaded: { positions: true, orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -1155,7 +1160,7 @@ export class LighterExchange extends BaseExchange {
         this.store,
         {
           balance,
-          loaded: { ...this.store.loaded, balance: true },
+          loaded: { balance: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -1191,7 +1196,7 @@ export class LighterExchange extends BaseExchange {
       this.store,
       {
         balance,
-        loaded: { ...this.store.loaded, balance: true },
+        loaded: { balance: true },
       },
       this.store.markets.map((row) => row.symbol),
     );

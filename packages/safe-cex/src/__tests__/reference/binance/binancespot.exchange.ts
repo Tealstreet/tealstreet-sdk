@@ -109,7 +109,7 @@ export class BinanceSpotExchange extends BaseExchange {
         this.store,
         {
           markets,
-          loaded: { ...this.store.loaded, markets: true },
+          loaded: { markets: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -125,7 +125,7 @@ export class BinanceSpotExchange extends BaseExchange {
         this.store,
         {
           tickers,
-          loaded: { ...this.store.loaded, tickers: true },
+          loaded: { tickers: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -161,7 +161,7 @@ export class BinanceSpotExchange extends BaseExchange {
       this.store,
       {
         orders,
-        loaded: { ...this.store.loaded, orders: true },
+        loaded: { orders: true },
       },
       this.store.markets.map((row) => row.symbol),
     );
@@ -184,7 +184,7 @@ export class BinanceSpotExchange extends BaseExchange {
           upnl: 0,
         },
         positions: [],
-        loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
+        loaded: { orders: true, balance: true, positions: true },
       },
       this.store.markets.map((row) => row.symbol),
     );
@@ -201,11 +201,7 @@ export class BinanceSpotExchange extends BaseExchange {
           {
             balance,
             positions,
-            loaded: {
-              ...this.store.loaded,
-              balance: true,
-              positions: true,
-            },
+            loaded: { balance: true, positions: true },
           },
           this.store.markets.map((row) => row.symbol),
         );

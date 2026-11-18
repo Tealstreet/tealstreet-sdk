@@ -337,7 +337,7 @@ export class BitrueExchange extends BaseExchange {
       })();
       applyReferenceFixture(
         this.store,
-        { balance, loaded: { ...this.store.loaded, balance: true, positions: true } },
+        { balance, loaded: { balance: true, positions: true } },
         this.store.markets.map((row) => row.symbol),
       );
 
@@ -397,7 +397,7 @@ export class BitrueExchange extends BaseExchange {
         {
           markets,
           tickers,
-          loaded: { ...this.store.loaded, markets: true, tickers: true },
+          loaded: { markets: true, tickers: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -411,14 +411,14 @@ export class BitrueExchange extends BaseExchange {
       if (this.isDisposed) return;
       applyReferenceFixture(
         this.store,
-        { balance, positions, loaded: { ...this.store.loaded, balance: true, positions: true } },
+        { balance, positions, loaded: { balance: true, positions: true } },
         this.store.markets.map((row) => row.symbol),
       );
       const orders = await this.fetchOrders();
       if (this.isDisposed) return;
       applyReferenceFixture(
         this.store,
-        { orders, loaded: { ...this.store.loaded, orders: true } },
+        { orders, loaded: { orders: true } },
         this.store.markets.map((row) => row.symbol),
       );
       this.tick();
@@ -478,7 +478,7 @@ export class BitrueExchange extends BaseExchange {
         })();
         applyReferenceFixture(
           this.store,
-          { balance, loaded: { ...this.store.loaded, balance: true, positions: true } },
+          { balance, loaded: { balance: true, positions: true } },
           this.store.markets.map((row) => row.symbol),
         );
 

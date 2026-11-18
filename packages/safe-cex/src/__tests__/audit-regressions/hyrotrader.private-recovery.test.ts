@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { Order, OrderSide, OrderType, Position, PositionMode, PositionSide } from '../../types';
+import { nativeOrder } from '../cutover/nativeOrder';
+import { nativePosition } from '../cutover/nativePosition';
 import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
 
@@ -127,13 +129,13 @@ describe('HyroTrader authoritative private snapshots', () => {
   });
   it('rejects failed recovery without publishing any sibling snapshot', async () => {
     const { exchange, store } = setup();
-    const old = { id: 'old' } as Order;
+    const old = nativeOrder({ id: 'old', symbol: 'BTCUSDT' });
     applyReferenceFixture(
       store,
       { orders: [old] },
       store.markets.map((row) => row.symbol),
     );
-    vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([{ id: 'new' } as Order]);
+    vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([nativeOrder({ id: 'new', symbol: 'BTCUSDT' })]);
     vi.spyOn(exchange, 'fetchPositions').mockRejectedValue(new Error('positions unavailable'));
     vi.spyOn(exchange, 'fetchRawBalance').mockResolvedValue([
       { accountType: 'UNIFIED', totalEquity: '1000', coin: [] },
@@ -145,11 +147,13 @@ describe('HyroTrader authoritative private snapshots', () => {
     const { exchange, store } = setup();
     applyReferenceFixture(
       store,
-      { positions: [{ id: 'old', unrealizedPnl: 10 } as Position] },
+      { positions: [nativePosition({ id: 'old', symbol: 'BTCUSDT', unrealizedPnl: 10 })] },
       store.markets.map((row) => row.symbol),
     );
     vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
-    vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([{ id: 'new', unrealizedPnl: 20 } as Position]);
+    vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([
+      nativePosition({ id: 'new', symbol: 'BTCUSDT', unrealizedPnl: 20 }),
+    ]);
     vi.spyOn(exchange, 'fetchRawBalance').mockResolvedValue([
       { accountType: 'UNIFIED', totalEquity: '1000', coin: [] },
     ]);
@@ -179,10 +183,10 @@ describe('HyroTrader authoritative private snapshots', () => {
     exchange.privateWebsocket.stateRevision++;
     applyReferenceFixture(
       store,
-      { orders: [{ id: 'newer' } as Order] },
+      { orders: [nativeOrder({ id: 'newer', symbol: 'BTCUSDT' })] },
       store.markets.map((row) => row.symbol),
     );
-    resolve([{ id: 'stale' } as Order]);
+    resolve([nativeOrder({ id: 'stale', symbol: 'BTCUSDT' })]);
     expect(await pending).toBe(false);
     expect(store.orders.map(({ id }) => id)).toEqual(['newer']);
   });

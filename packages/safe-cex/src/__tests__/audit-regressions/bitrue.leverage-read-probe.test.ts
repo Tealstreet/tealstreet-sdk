@@ -243,10 +243,11 @@ describe('audit regression: Bitrue leverage read probe', () => {
       return positions;
     });
 
+    const published = store.positions;
     await exchange.tick();
-
-    expect(addOrUpdatePositionsFull).toHaveBeenCalledWith([currentPosition]);
-    expect(addOrUpdatePositionsFull).not.toHaveBeenCalledWith([]);
+    expect(store.positions).toBe(published);
+    expect(addOrUpdatePositionsFull).not.toHaveBeenCalled();
+    exchange.dispose();
   });
 
   it('keeps the current position snapshot when the account read fails', async () => {

@@ -58,7 +58,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
       this.store,
       {
         balance,
-        loaded: { ...this.store.loaded, balance: true, positions: true },
+        loaded: { balance: true, positions: true },
       },
       this.store.markets.map((row) => row.symbol),
     );
@@ -579,7 +579,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
           if (json?.type === 'snapshot') {
             applyReferenceFixture(
               this.store,
-              { orders: formattedOrders, loaded: { ...this.store.loaded, orders: true } },
+              { orders: formattedOrders, loaded: { orders: true } },
               this.store.markets.map((row) => row.symbol),
             );
           } else {

@@ -132,8 +132,8 @@ it('refuses absent or non-finite native rails without replacing confirmed levera
   const applier = store;
   applier.apply(withSettings(5, 3, 4));
   const previous = store.fetchedLeverage;
-  expect(() => applier.apply(withSettings(NaN))).toThrow('Native FrameStore leverage rails are required');
-  expect(() => applier.apply(withSettings(Infinity, 3, Infinity))).toThrow('Invalid native FrameStore leverage rails');
+  expect(() => applier.apply(withSettings(NaN))).toThrow('Native Store leverage rails are required');
+  expect(() => applier.apply(withSettings(Infinity, 3, Infinity))).toThrow('Invalid native Store leverage rails');
   expect(store.fetchedLeverage).toBe(previous);
 });
 

@@ -1291,7 +1291,7 @@ describe('MEXC futures audit regressions', () => {
             code: 0,
             data: {
               orders: [
-                nativeOrder({
+                {
                   id: '846983655908788224',
                   symbol: 'BTC_USDT',
                   leverage: 20,
@@ -1308,7 +1308,7 @@ describe('MEXC futures audit regressions', () => {
                   positionMode: 1,
                   reduceOnly: true,
                   updateTime: 1700000000000,
-                }),
+                },
               ],
             },
           },
@@ -1438,7 +1438,7 @@ describe('MEXC futures audit regressions', () => {
             code: 0,
             data: {
               orders: [
-                nativeOrder({
+                {
                   id: 'stop-position-1',
                   symbol: 'BTC_USDT',
                   positionId: 'native-position-1',
@@ -1450,7 +1450,7 @@ describe('MEXC futures audit regressions', () => {
                   vol: 10000,
                   volType: 2,
                   updateTime: 1700000000000,
-                }),
+                },
               ],
             },
           },

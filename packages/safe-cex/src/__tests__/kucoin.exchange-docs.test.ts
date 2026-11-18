@@ -1266,10 +1266,9 @@ describe('KucoinExchange current futures docs compatibility', () => {
       }),
     } as MessageEvent);
 
-    expect(updateTicker).toHaveBeenCalledWith(
-      expect.objectContaining({ symbol: 'BTCUSDT' }),
-      expect.objectContaining({ bid: 86454.5, ask: 86454.6 }),
-    );
+    expect(updateTicker).toHaveBeenCalledWith([
+      expect.objectContaining({ symbol: 'BTCUSDT', bid: 86454.5, ask: 86454.6 }),
+    ]);
     expect(candleCallback).toHaveBeenCalledWith({
       timestamp: 1731898200,
       open: 90638.6,
@@ -1371,10 +1370,9 @@ describe('KucoinExchange current futures docs compatibility', () => {
       data: { markPrice: 72176.3, indexPrice: 72172.81, granularity: 1000 },
     });
 
-    expect(updateTicker).toHaveBeenCalledWith(expect.objectContaining({ symbol: 'BTCUSDT' }), {
-      mark: 72176.3,
-      index: 72172.81,
-    });
+    expect(updateTicker).toHaveBeenCalledWith([
+      expect.objectContaining({ symbol: 'BTCUSDT', mark: 72176.3, index: 72172.81 }),
+    ]);
   });
 
   it('seeds futures websocket orderbook from REST snapshot and applies incremental changes', async () => {
@@ -1655,6 +1653,7 @@ describe('KucoinExchange current futures docs compatibility', () => {
   it('handles current futures private order event types', () => {
     const { exchange, store } = makeExchange();
     const ws = exchange.privateWebsocket;
+    applyReferenceFixture(store, { orders: [nativeOrder({ id: 'cancel-id', symbol: 'BTCUSDT' })] });
     const updateStatus = (() => {
       const observed = vi.fn<(value: typeof store.orders) => void>();
       store.subscribe('orders', (value) => observed(value));
@@ -1715,15 +1714,21 @@ describe('KucoinExchange current futures docs compatibility', () => {
       },
     });
 
-    expect(updateStatus).toHaveBeenCalledWith(expect.objectContaining({ id: 'cancel-id' }), OrderStatus.Canceled);
+    expect(updateStatus).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'cancel-id', status: OrderStatus.Canceled })]),
+    );
     expect(emit).toHaveBeenCalledWith(
       'fill',
       expect.objectContaining({ id: 'match-id', symbol: 'BTCUSDT', price: 91670, amount: 1 }),
     );
-    expect(addOrUpdateOrder).toHaveBeenCalledWith(expect.objectContaining({ id: 'match-id', symbol: 'BTCUSDT' }));
+    expect(addOrUpdateOrder).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'match-id', symbol: 'BTCUSDT' })]),
+    );
     // exactly one fill across the match + filled pair (no double-fire)
     expect((emit as any).mock.calls.filter((c: any[]) => c[0] === 'fill')).toHaveLength(1);
-    expect(updateStatus).toHaveBeenCalledWith(expect.objectContaining({ id: 'match-id' }), OrderStatus.Closed);
+    expect(updateStatus).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'match-id', status: OrderStatus.Closed })]),
+    );
   });
 
   it('maps current futures stop order websocket payloads', () => {

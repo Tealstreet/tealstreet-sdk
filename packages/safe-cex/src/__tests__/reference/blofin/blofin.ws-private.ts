@@ -271,7 +271,13 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
           (() => {
             const incoming: StoreData['orders'] = orders.filter((order) => {
               const existing = latest.get(order.id);
-              if (existing && order.filled < existing.filled) return false;
+              if (
+                existing &&
+                (existing.status === OrderStatus.Closed ||
+                  existing.status === OrderStatus.Canceled ||
+                  order.filled < existing.filled)
+              )
+                return false;
               latest.set(order.id, order);
               return true;
             });
@@ -347,10 +353,7 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
           this.store,
           {
             orders,
-            loaded: {
-              ...this.store.loaded,
-              orders: true,
-            },
+            loaded: { orders: true },
           },
           this.store.markets.map((row) => row.symbol),
         );

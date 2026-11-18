@@ -1285,12 +1285,7 @@ export class HyperliquidExchange extends BaseExchange {
         total: 0,
         upnl: 0,
       },
-      loaded: {
-        ...this.store.loaded,
-        orders: shouldMarkPrivateLoaded,
-        balance: shouldMarkPrivateLoaded,
-        positions: shouldMarkPrivateLoaded,
-      },
+      loaded: { orders: shouldMarkPrivateLoaded, balance: shouldMarkPrivateLoaded, positions: shouldMarkPrivateLoaded },
     };
 
     if (!useExternalPublicData) {
@@ -1361,7 +1356,7 @@ export class HyperliquidExchange extends BaseExchange {
       this.store,
       {
         orders,
-        loaded: { ...this.store.loaded, orders: true },
+        loaded: { orders: true },
       },
       this.store.markets.map((row) => row.symbol),
     );

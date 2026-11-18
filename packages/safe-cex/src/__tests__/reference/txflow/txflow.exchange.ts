@@ -134,14 +134,14 @@ export class TxFlowExchange extends BaseExchange {
       if (this.isDisposed) return;
       applyReferenceFixture(
         this.store,
-        { markets, loaded: { ...this.store.loaded, markets: true } },
+        { markets, loaded: { markets: true } },
         this.store.markets.map((row) => row.symbol),
       );
       const tickers = await this.fetchTickers();
       if (this.isDisposed) return;
       applyReferenceFixture(
         this.store,
-        { tickers, loaded: { ...this.store.loaded, tickers: true } },
+        { tickers, loaded: { tickers: true } },
         this.store.markets.map((row) => row.symbol),
       );
       this.apiSocket.connectAndSubscribe();
@@ -154,7 +154,7 @@ export class TxFlowExchange extends BaseExchange {
           orders: [],
           positions: [],
           balance: { free: 0, used: 0, total: 0, upnl: 0 },
-          loaded: { ...this.store.loaded, orders: true, positions: true, balance: true },
+          loaded: { orders: true, positions: true, balance: true },
         },
         this.store.markets.map((row) => row.symbol),
       );

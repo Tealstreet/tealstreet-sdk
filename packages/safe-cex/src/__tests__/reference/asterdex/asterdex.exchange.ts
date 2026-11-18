@@ -153,14 +153,14 @@ export class AsterDEXExchange extends BaseExchange {
 
       applyReferenceFixture(
         this.store,
-        { balance, loaded: { ...this.store.loaded, balance: true } },
+        { balance, loaded: { balance: true } },
         this.store.markets.map((row) => row.symbol),
       );
       // This retained oracle emits separate bootstrap tables. Publish the full
       // private readiness claim only once all three native tables decoded.
       if (this.store.hasAccountState)
         applyReferenceFixture(this.store, {
-          loaded: { ...this.store.loaded, balance: true, orders: true, positions: true },
+          loaded: { balance: true, orders: true, positions: true },
         });
       this.lastBalanceReconciliationAt = Date.now();
       return true;
@@ -221,7 +221,7 @@ export class AsterDEXExchange extends BaseExchange {
 
         applyReferenceFixture(
           this.store,
-          { markets, loaded: { ...this.store.loaded, markets: true } },
+          { markets, loaded: { markets: true } },
           this.store.markets.map((row) => row.symbol),
         );
 
@@ -231,7 +231,7 @@ export class AsterDEXExchange extends BaseExchange {
 
         applyReferenceFixture(
           this.store,
-          { tickers, loaded: { ...this.store.loaded, tickers: true } },
+          { tickers, loaded: { tickers: true } },
           this.store.markets.map((row) => row.symbol),
         );
 
@@ -245,7 +245,7 @@ export class AsterDEXExchange extends BaseExchange {
           const positions = await this.fetchPositions();
           applyReferenceFixture(
             this.store,
-            { positions, loaded: { ...this.store.loaded, positions: true } },
+            { positions, loaded: { positions: true } },
             this.store.markets.map((row) => row.symbol),
           );
           this.lastPositionSafetyReconciliationAt = Date.now();
@@ -259,7 +259,7 @@ export class AsterDEXExchange extends BaseExchange {
           const orders = await this.fetchOrders();
           applyReferenceFixture(
             this.store,
-            { orders, loaded: { ...this.store.loaded, orders: true } },
+            { orders, loaded: { orders: true } },
             this.store.markets.map((row) => row.symbol),
           );
           this.lastOrderSafetyReconciliationAt = Date.now();
@@ -331,7 +331,7 @@ export class AsterDEXExchange extends BaseExchange {
           })();
           applyReferenceFixture(
             this.store,
-            { loaded: { ...this.store.loaded, positions: true } },
+            { loaded: { positions: true } },
             this.store.markets.map((row) => row.symbol),
           );
         }
@@ -347,7 +347,7 @@ export class AsterDEXExchange extends BaseExchange {
         if (this.isDisposed) return;
         applyReferenceFixture(
           this.store,
-          { orders, loaded: { ...this.store.loaded, orders: true } },
+          { orders, loaded: { orders: true } },
           this.store.markets.map((row) => row.symbol),
         );
         this.lastOrderSafetyReconciliationAt = Date.now();

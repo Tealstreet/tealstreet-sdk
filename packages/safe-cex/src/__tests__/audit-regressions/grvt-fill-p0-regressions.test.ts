@@ -259,11 +259,11 @@ describe('GRVT fill-verification P0 regression', () => {
     Object.defineProperty(exchange, 'canSign', { value: true });
     exchange.grvtTradingAccountId = undefined;
     const markets = [
-      {
+      nativeMarket({
         id: 'BTC_USDT_Perp',
         symbol: 'BTC_USDT_PERP',
         limits: { leverage: { min: 1, max: 100 } },
-      },
+      }),
     ];
     const fetchMarkets = vi.fn().mockResolvedValue(markets);
     const updateLimits = vi.fn().mockImplementation(async (currentMarkets) =>

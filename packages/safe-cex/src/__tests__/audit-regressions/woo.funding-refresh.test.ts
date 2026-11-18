@@ -90,7 +90,8 @@ describe('WOO legacy funding refresh', () => {
 
     expect(get).toHaveBeenCalledOnce();
     expect(get).toHaveBeenCalledWith(ENDPOINTS.FUNDING_RATES);
-    expect(store.tickers[0]).toBe(originalTicker);
+    expect(store.tickers[0]).not.toBe(originalTicker);
+    expect(originalTicker).toEqual(originalTickerValues);
     expect(store.tickers[0]).toEqual({
       ...originalTickerValues,
       fundingRate: -0.00003125,
@@ -303,11 +304,13 @@ describe('WOO legacy funding refresh', () => {
 
     await fundingRuntime.refreshFundingRates();
 
-    expect(updateTicker).toHaveBeenCalledOnce();
-    expect(updateTicker).toHaveBeenCalledWith(expect.objectContaining({ symbol: 'BTCUSDT' }), {
-      fundingRate: -0.0001,
-      fundingTime: 1_800_000_000_000,
-    });
+    expect(updateTicker.mock.calls[0][0]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ symbol: 'BTCUSDT', fundingRate: -0.0001, fundingTime: 1_800_000_000_000 }),
+        expect.objectContaining({ symbol: 'ETHUSDT', fundingRate: 0.0001 }),
+      ]),
+    );
+    expect(exchange.isDisposed).toBe(true);
   });
 
   it('delegates disposal to the base lifecycle and disposes each socket only once', () => {

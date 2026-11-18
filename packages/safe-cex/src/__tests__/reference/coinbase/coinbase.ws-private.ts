@@ -213,7 +213,7 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
         this.store,
         {
           orders: snapshotOrders,
-          loaded: { ...this.store.loaded, orders: true },
+          loaded: { orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );

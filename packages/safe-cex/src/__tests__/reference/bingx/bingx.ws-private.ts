@@ -400,10 +400,7 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
       applyReferenceFixture(
         this.store,
         {
-          loaded: {
-            ...this.store.loaded,
-            positions: true,
-          },
+          loaded: { positions: true },
         },
         this.store.markets.map((row) => row.symbol),
       );

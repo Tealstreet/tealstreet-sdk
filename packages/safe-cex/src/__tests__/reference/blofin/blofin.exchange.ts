@@ -157,18 +157,18 @@ export class BlofinExchange extends BaseExchange {
     ].filter((candidate) => candidate.value !== undefined && Number.isFinite(candidate.value) && candidate.value > 0);
     const sequence = Math.max(...candidates.map((candidate) => candidate.sequence));
     const unresolved = this.ambiguousLeverage.get(id);
-    // Projecting NaN into the FrameStore must not erase a loaded conflict. Only a
+    // Publishing the native finite unknown marker must not erase a conflict. Only a
     // confirmation ordered after the conflict can make the fallback usable.
-    if (unresolved !== undefined && sequence <= unresolved) return Number.NaN;
+    if (unresolved !== undefined && sequence <= unresolved) return 0;
     const newest = candidates.filter((candidate) => candidate.sequence === sequence);
     // Missing provenance cannot establish an order between conflicting values.
-    if (!newest.length) return Number.NaN;
+    if (!newest.length) return 0;
     if (!newest.every((candidate) => candidate.value === newest[0].value)) {
       this.ambiguousLeverage.set(id, this.leverageSequence);
-      return Number.NaN;
+      return 0;
     }
     this.ambiguousLeverage.delete(id);
-    return newest[0].value ?? Number.NaN;
+    return newest[0].value ?? 0;
   };
 
   constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
@@ -228,7 +228,7 @@ export class BlofinExchange extends BaseExchange {
             this.store,
             {
               markets,
-              loaded: { ...this.store.loaded, markets: true },
+              loaded: { markets: true },
             },
             this.store.markets.map((row) => row.symbol),
           );
@@ -247,7 +247,7 @@ export class BlofinExchange extends BaseExchange {
         this.store,
         {
           tickers,
-          loaded: { ...this.store.loaded, tickers: true },
+          loaded: { tickers: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -265,7 +265,7 @@ export class BlofinExchange extends BaseExchange {
           {
             balance,
             positions,
-            loaded: { ...this.store.loaded, balance: true, positions: true },
+            loaded: { balance: true, positions: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -275,7 +275,7 @@ export class BlofinExchange extends BaseExchange {
           this.store,
           {
             orders,
-            loaded: { ...this.store.loaded, orders: true },
+            loaded: { orders: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -319,11 +319,7 @@ export class BlofinExchange extends BaseExchange {
           this.store,
           {
             balance,
-            loaded: {
-              ...this.store.loaded,
-              balance: true,
-              positions: true,
-            },
+            loaded: { balance: true, positions: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -695,6 +691,13 @@ export class BlofinExchange extends BaseExchange {
         positionMode: netRow ? PositionMode.OneWay : PositionMode.Hedged,
       };
 
+      // A newer wire position report remains authoritative over this delayed read.
+      if (
+        Object.values(this.store.positionSettings).some(
+          (setting) => setting.symbol === symbol && (this.reportedLeverage.get(setting.id)?.sequence ?? 0) > sequence,
+        )
+      )
+        return leverageObj;
       const newer = this.fetchedLeverageObservations.get(symbol);
       if (newer && newer.sequence > sequence) return this.store.fetchedLeverage[symbol] ?? null;
       this.fetchedLeverageObservations.set(symbol, { buyLeverage, sellLeverage, sequence });

@@ -196,7 +196,7 @@ describe('main-thread Rust trading routing', () => {
     expect(main.changeAccountTier).toBeUndefined();
     main.store.apply(
       nativeFixture(
-        { loaded: { ...main.store.loaded, markets: true } },
+        { markets: [], loaded: { ...main.store.loaded, markets: true } },
         main.store.markets.map((row) => row.symbol),
       ),
     );

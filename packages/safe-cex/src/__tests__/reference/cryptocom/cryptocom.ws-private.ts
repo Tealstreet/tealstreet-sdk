@@ -362,7 +362,7 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
           upnl: parseFloat(summary.total_session_unrealized_pnl) || 0,
           currencies,
         },
-        loaded: { ...this.store.loaded, balance: true },
+        loaded: { balance: true },
       },
       this.store.markets.map((row) => row.symbol),
     );

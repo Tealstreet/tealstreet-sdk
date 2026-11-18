@@ -196,8 +196,9 @@ describe('Hyperliquid terminal cancel misses after flatten', () => {
     );
     exchange.xhr = { post: vi.fn().mockRejectedValue(new Error('')) } as any;
 
+    const published = exchange.store.orders;
     await expect(exchange.cancelOrders(closeOrders)).rejects.toMatchObject({ message: '' });
-    expect(exchange.store.orders).toEqual(closeOrders);
+    expect(exchange.store.orders).toBe(published);
   });
 
   it('does not let a stale frontendOpenOrders response re-add a WS-cancelled positional stop', async () => {

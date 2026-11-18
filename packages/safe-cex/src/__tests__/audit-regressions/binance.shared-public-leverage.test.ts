@@ -1,8 +1,5 @@
-import type { PublicDataSource } from '../../types';
-
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { InProcessPublicDataProvider } from '../../exchanges/in-process-public-data';
 import { FrameStore } from '../../store/frameStore';
 import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
@@ -31,15 +28,17 @@ const sharedSourceWith = (markets: unknown[]) => {
   return sourceStore;
 };
 
+// Retained protocol producer: encode each account catalogue as SCXF before it
+// reaches FrameStore. The removed mutable InProcess provider has no writer role.
 const connectToSharedSource = (exchange: BinanceExchange | BinancePMExchange, sourceStore: FrameStore) => {
-  const source = {
-    store: sourceStore,
-    listenOrderBook: () => () => {},
-    listenOHLCV: () => () => {},
-  } as unknown as PublicDataSource;
-  const provider = new InProcessPublicDataProvider(exchange, source);
-  provider.connect();
-  return provider;
+  const publish = () => {
+    const overlay: unknown = Reflect.get(exchange, 'accountMarketOverlay');
+    const markets = typeof overlay === 'function' ? overlay(sourceStore.markets) : sourceStore.markets;
+    applyReferenceFixture(exchange.store, { markets, loaded: { markets: true } });
+  };
+  const dispose = sourceStore.subscribe('markets', publish);
+  publish();
+  return { publish, dispose };
 };
 
 const variants = [
@@ -70,9 +69,10 @@ describe.each(variants)('$name account on a shared public exchange', ({ create, 
     mockBrackets(exchange);
     const shared = sharedMarket();
     const sourceStore = sharedSourceWith([shared]);
-    connectToSharedSource(exchange, sourceStore);
+    const producer = connectToSharedSource(exchange, sourceStore);
 
     await (exchange as any).loadAccountMaxLeverage();
+    producer.publish();
 
     expect(exchange.store.markets[0].limits.leverage.max).toBe(20);
     expect(shared.limits.leverage.max).toBe(1);

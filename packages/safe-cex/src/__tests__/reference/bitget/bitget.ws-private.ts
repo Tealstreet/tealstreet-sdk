@@ -947,10 +947,7 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
           this.store,
           {
             balance,
-            loaded: {
-              ...this.store.loaded,
-              balance: true,
-            },
+            loaded: { balance: true },
           },
           this.store.markets.map((row) => row.symbol),
         );

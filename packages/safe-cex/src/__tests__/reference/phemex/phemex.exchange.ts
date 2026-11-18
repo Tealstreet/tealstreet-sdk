@@ -143,7 +143,7 @@ export class PhemexExchange extends BaseExchange {
             this.store,
             {
               markets,
-              loaded: { ...this.store.loaded, markets: true },
+              loaded: { markets: true },
             },
             this.store.markets.map((row) => row.symbol),
           );
@@ -162,7 +162,7 @@ export class PhemexExchange extends BaseExchange {
         this.store,
         {
           tickers,
-          loaded: { ...this.store.loaded, tickers: true },
+          loaded: { tickers: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -202,7 +202,7 @@ export class PhemexExchange extends BaseExchange {
     //
     // this.store.update({
     //   orders,
-    //   loaded: { ...this.store.loaded, orders: true },
+    //   loaded: { orders: true },
     // });
   };
 
@@ -223,7 +223,7 @@ export class PhemexExchange extends BaseExchange {
           upnl: 0,
         },
         positions: [],
-        loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
+        loaded: { orders: true, balance: true, positions: true },
       },
       this.store.markets.map((row) => row.symbol),
     );
@@ -945,6 +945,7 @@ export class PhemexExchange extends BaseExchange {
         applyReferenceFixture(
           this.store,
           {
+            options: { ...this.store.options, isHedged: context.positionMode === PositionMode.Hedged },
             fetchedLeverage: {
               ...this.store.fetchedLeverage,
               [symbol]: {
@@ -1156,6 +1157,7 @@ export class PhemexExchange extends BaseExchange {
     applyReferenceFixture(
       this.store,
       {
+        options: { ...this.store.options, isHedged: context.positionMode === PositionMode.Hedged },
         fetchedLeverage: {
           ...this.store.fetchedLeverage,
           [symbol]: {
@@ -1351,7 +1353,7 @@ export class PhemexExchange extends BaseExchange {
         this.store,
         {
           markets,
-          loaded: { ...this.store.loaded, markets: true },
+          loaded: { markets: true },
         },
         this.store.markets.map((row) => row.symbol),
       );

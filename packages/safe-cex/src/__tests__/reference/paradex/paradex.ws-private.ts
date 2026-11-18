@@ -160,6 +160,9 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
     }
   };
 
+  private terminalOrderIds = new Set<string>();
+  filterSnapshotOrders = (orders: Order[]) => orders.filter((order) => !this.terminalOrderIds.has(order.id));
+
   private handleOrderUpdate = (data: any) => {
     try {
       const order = data.data;
@@ -170,6 +173,13 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
             ? OrderStatus.Canceled
             : OrderStatus.Closed
           : this.mapOrderStatus(order.status);
+      if (status === OrderStatus.Closed || status === OrderStatus.Canceled) {
+        this.terminalOrderIds.add(order.id);
+        if (this.terminalOrderIds.size > 8192) {
+          const oldest = this.terminalOrderIds.values().next().value;
+          if (oldest !== undefined) this.terminalOrderIds.delete(oldest);
+        }
+      } else if (this.terminalOrderIds.has(order.id)) return;
       const reduceOnly =
         typeof order.reduce_only === 'boolean'
           ? order.reduce_only
@@ -652,10 +662,7 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
           this.parent.store,
           {
             orders,
-            loaded: {
-              ...this.parent.store.loaded,
-              orders: true,
-            },
+            loaded: { orders: true },
           },
           this.parent.store.markets.map((row) => row.symbol),
         );

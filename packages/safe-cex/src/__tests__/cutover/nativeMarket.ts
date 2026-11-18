@@ -1,7 +1,16 @@
 import type { Market } from '../../generated/Market';
 
 /** Synthetic native catalogue facts for tests focused on startup or one market field. */
-export function nativeMarket(row: Pick<Market, 'symbol'> & Partial<Market>): Market {
+export function nativeMarket(
+  row: Pick<Market, 'symbol'> &
+    Partial<Omit<Market, 'precision' | 'limits'>> & {
+      precision?: Partial<Market['precision']>;
+      limits?: Partial<Omit<Market['limits'], 'amount' | 'leverage'>> & {
+        amount?: Partial<Market['limits']['amount']>;
+        leverage?: Partial<Market['limits']['leverage']>;
+      };
+    },
+): Market {
   return {
     id: row.symbol,
     base: 'BASE',

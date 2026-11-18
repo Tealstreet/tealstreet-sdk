@@ -193,7 +193,7 @@ export class CoinbaseExchange extends BaseExchange {
         this.store,
         {
           markets,
-          loaded: { ...this.store.loaded, markets: true },
+          loaded: { markets: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -236,7 +236,7 @@ export class CoinbaseExchange extends BaseExchange {
     //
     // this.store.update({
     //   orders,
-    //   loaded: { ...this.store.loaded, orders: true },
+    //   loaded: { orders: true },
     // });
   };
 
@@ -263,7 +263,7 @@ export class CoinbaseExchange extends BaseExchange {
           upnl: 0,
         },
         positions: [],
-        loaded: { ...this.store.loaded, tickers: true, orders: true, balance: true, positions: true },
+        loaded: { tickers: true, orders: true, balance: true, positions: true },
       },
       this.store.markets.map((row) => row.symbol),
     );
@@ -279,10 +279,7 @@ export class CoinbaseExchange extends BaseExchange {
           this.store,
           {
             tickers,
-            loaded: {
-              ...this.store.loaded,
-              tickers: true,
-            },
+            loaded: { tickers: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -304,7 +301,7 @@ export class CoinbaseExchange extends BaseExchange {
           this.store,
           {
             balance,
-            loaded: { ...this.store.loaded, balance: true },
+            loaded: { balance: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -315,7 +312,7 @@ export class CoinbaseExchange extends BaseExchange {
           this.store,
           {
             positions,
-            loaded: { ...this.store.loaded, positions: true },
+            loaded: { positions: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -328,7 +325,7 @@ export class CoinbaseExchange extends BaseExchange {
               this.store,
               {
                 orders: this.mergeRestOrdersWithFreshWsState(orders),
-                loaded: { ...this.store.loaded, orders: true },
+                loaded: { orders: true },
               },
               this.store.markets.map((row) => row.symbol),
             );
@@ -428,7 +425,7 @@ export class CoinbaseExchange extends BaseExchange {
         this.store,
         {
           orders: this.mergeRestOrdersWithFreshWsState(orders),
-          loaded: { ...this.store.loaded, orders: true },
+          loaded: { orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -853,7 +850,7 @@ export class CoinbaseExchange extends BaseExchange {
       if (!this.isDisposed)
         applyReferenceFixture(
           this.store,
-          { tickers, loaded: { ...this.store.loaded, tickers: true } },
+          { tickers, loaded: { tickers: true } },
           this.store.markets.map((row) => row.symbol),
         );
     } finally {
@@ -1298,6 +1295,29 @@ export class CoinbaseExchange extends BaseExchange {
     } catch (err: any) {
       this.emitAndLogError(err, err?.response?.data?.message || err?.message);
       return this.store.positions;
+    }
+  };
+
+  // Test-only protocol producer: BaseExchange now expects native reads to
+  // publish frames. This retained REST oracle explicitly emits its snapshot.
+  fetchAndSetOrders = async (symbols?: string[]): Promise<Order[]> => {
+    const orders = await this.fetchOrders();
+    if (!this.isDisposed)
+      applyReferenceFixture(this.store, {
+        orders,
+        positions: this.store.positions,
+        balance: this.store.balance,
+        loaded: { orders: true },
+      });
+    return orders;
+  };
+
+  fetchAndSetPrivateSnapshot = async () => {
+    if (this.isDisposed || this.isPublicDataOnly) return;
+    try {
+      await this.fetchAndSetOrders();
+    } catch (error) {
+      this.emitAndLogError(error instanceof Error ? error : String(error));
     }
   };
 

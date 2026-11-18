@@ -159,7 +159,7 @@ export class KrakenExchange extends BaseExchange {
 
       applyReferenceFixture(
         this.store,
-        { markets, loaded: { ...this.store.loaded, markets: true } },
+        { markets, loaded: { markets: true } },
         this.store.markets.map((row) => row.symbol),
       );
 
@@ -168,7 +168,7 @@ export class KrakenExchange extends BaseExchange {
 
       applyReferenceFixture(
         this.store,
-        { tickers, loaded: { ...this.store.loaded, tickers: true } },
+        { tickers, loaded: { tickers: true } },
         this.store.markets.map((row) => row.symbol),
       );
 
@@ -187,7 +187,7 @@ export class KrakenExchange extends BaseExchange {
       applyReferenceFixture(
         this.store,
         {
-          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          loaded: { balance: true, positions: true, orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -1732,7 +1732,7 @@ export class KrakenExchange extends BaseExchange {
               })();
               applyReferenceFixture(
                 this.store,
-                { loaded: { ...this.store.loaded, orders: true } },
+                { loaded: { orders: true } },
                 this.store.markets.map((row) => row.symbol),
               );
             }),
@@ -1753,7 +1753,7 @@ export class KrakenExchange extends BaseExchange {
               })();
               applyReferenceFixture(
                 this.store,
-                { loaded: { ...this.store.loaded, positions: true } },
+                { loaded: { positions: true } },
                 this.store.markets.map((row) => row.symbol),
               );
             }),
@@ -1761,7 +1761,7 @@ export class KrakenExchange extends BaseExchange {
               if (balance) {
                 applyReferenceFixture(
                   this.store,
-                  { balance, loaded: { ...this.store.loaded, balance: true } },
+                  { balance, loaded: { balance: true } },
                   this.store.markets.map((row) => row.symbol),
                 );
               }

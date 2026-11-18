@@ -260,7 +260,7 @@ export class BinanceInverseExchange extends BaseExchange {
       if (this.isDisposed) return;
       applyReferenceFixture(
         this.store,
-        { markets, loaded: { ...this.store.loaded, markets: true } },
+        { markets, loaded: { markets: true } },
         this.store.markets.map((row) => row.symbol),
       );
 
@@ -269,7 +269,7 @@ export class BinanceInverseExchange extends BaseExchange {
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} Binance COIN-M markets`);
       applyReferenceFixture(
         this.store,
-        { tickers, loaded: { ...this.store.loaded, tickers: true } },
+        { tickers, loaded: { tickers: true } },
         this.store.markets.map((row) => row.symbol),
       );
       this.publicWebsocket.connectAndSubscribe();
@@ -295,7 +295,7 @@ export class BinanceInverseExchange extends BaseExchange {
     this.log(`Loaded Binance COIN-M orders`);
     applyReferenceFixture(
       this.store,
-      { orders, loaded: { ...this.store.loaded, orders: true } },
+      { orders, loaded: { orders: true } },
       this.store.markets.map((row) => row.symbol),
     );
   };
@@ -308,7 +308,7 @@ export class BinanceInverseExchange extends BaseExchange {
         orders: [],
         balance: { used: 0, free: 0, total: 0, upnl: 0 },
         positions: [],
-        loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
+        loaded: { orders: true, balance: true, positions: true },
       },
       this.store.markets.map((row) => row.symbol),
     );
@@ -321,7 +321,7 @@ export class BinanceInverseExchange extends BaseExchange {
     if (this.isDisposed || this.ordersSnapshotStale) return;
     applyReferenceFixture(
       this.store,
-      { orders, loaded: { ...this.store.loaded, orders: true } },
+      { orders, loaded: { orders: true } },
       this.store.markets.map((row) => row.symbol),
     );
   };
@@ -367,7 +367,7 @@ export class BinanceInverseExchange extends BaseExchange {
           {
             balance,
             ...(positionStateVersion === this.getPositionStateVersion() && { positions }),
-            loaded: { ...this.store.loaded, balance: true, positions: true },
+            loaded: { balance: true, positions: true },
           },
           this.store.markets.map((row) => row.symbol),
         );

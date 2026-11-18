@@ -126,7 +126,7 @@ const crossLeg = (side: PositionSide) =>
     notional: 0,
     leverage: 10,
     unrealizedPnl: 0,
-    liquidationPrice: 0,
+    liquidationPrice: null,
     marginType: MarginType.Cross,
     positionMode: PositionMode.Hedged,
   }) as Position;

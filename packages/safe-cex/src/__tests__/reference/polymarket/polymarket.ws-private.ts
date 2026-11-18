@@ -65,6 +65,8 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
   private getCredentials: () => PolymarketCredentials | null;
   private executionIds = new Set<string>();
   private matchedSizes = new Map<string, number>();
+  private terminalOrderIds = new Set<string>();
+  filterSnapshotOrders = (orders: Order[]) => orders.filter((order) => !this.terminalOrderIds.has(order.id));
   private orderTimes = new Map<string, number>();
 
   messageHandlers: MessageHandlers = {
@@ -226,6 +228,11 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
 
       const status = wire.status?.toUpperCase();
       if (wire.type === 'CANCELLATION' || status === 'CANCELED' || status === 'CANCELLED') {
+        this.terminalOrderIds.add(wire.id);
+        if (this.terminalOrderIds.size > 8192) {
+          const oldest = this.terminalOrderIds.values().next().value;
+          if (oldest !== undefined) this.terminalOrderIds.delete(oldest);
+        }
         this.orderTimes.set(wire.id, timestamp);
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: wire.id }];

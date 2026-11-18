@@ -643,11 +643,7 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
         {
           balance,
           positions,
-          loaded: {
-            ...this.parent.store.loaded,
-            balance: true,
-            positions: true,
-          },
+          loaded: { balance: true, positions: true },
         },
         this.parent.store.markets.map((row) => row.symbol),
       );
@@ -669,10 +665,7 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
         this.parent.store,
         {
           orders,
-          loaded: {
-            ...this.parent.store.loaded,
-            orders: true,
-          },
+          loaded: { orders: true },
         },
         this.parent.store.markets.map((row) => row.symbol),
       );
@@ -694,10 +687,7 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
         this.parent.store,
         {
           positions,
-          loaded: {
-            ...this.parent.store.loaded,
-            positions: true,
-          },
+          loaded: { positions: true },
         },
         this.parent.store.markets.map((row) => row.symbol),
       );

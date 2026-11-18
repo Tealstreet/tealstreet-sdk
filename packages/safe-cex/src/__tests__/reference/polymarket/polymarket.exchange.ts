@@ -250,7 +250,7 @@ export class PolymarketExchange extends BaseExchange {
         this.store,
         {
           markets,
-          loaded: { ...this.store.loaded, markets: true },
+          loaded: { markets: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -265,7 +265,7 @@ export class PolymarketExchange extends BaseExchange {
         this.store,
         {
           tickers,
-          loaded: { ...this.store.loaded, tickers: true },
+          loaded: { tickers: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -275,7 +275,7 @@ export class PolymarketExchange extends BaseExchange {
       applyReferenceFixture(
         this.store,
         {
-          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          loaded: { balance: true, positions: true, orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -301,7 +301,7 @@ export class PolymarketExchange extends BaseExchange {
         this.store,
         {
           orders,
-          loaded: { ...this.store.loaded, orders: true },
+          loaded: { orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -331,7 +331,7 @@ export class PolymarketExchange extends BaseExchange {
           this.store,
           {
             balance,
-            loaded: { ...this.store.loaded, balance: true },
+            loaded: { balance: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -344,7 +344,7 @@ export class PolymarketExchange extends BaseExchange {
           this.store,
           {
             orders,
-            loaded: { ...this.store.loaded, orders: true },
+            loaded: { orders: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -584,7 +584,7 @@ export class PolymarketExchange extends BaseExchange {
         this.store,
         {
           positions,
-          loaded: { ...this.store.loaded, positions: true },
+          loaded: { positions: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -599,7 +599,7 @@ export class PolymarketExchange extends BaseExchange {
     try {
       const apiOrders = await this.api.getOpenOrders();
 
-      return apiOrders.map((o) => this.mapOrder(o));
+      return this.privateWebsocket.filterSnapshotOrders(apiOrders.map((o) => this.mapOrder(o)));
     } catch (err) {
       this.log(`Error fetching orders: ${err}`, LogSeverity.Error);
       throw err;

@@ -163,12 +163,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
         total: 0,
         upnl: 0,
       },
-      loaded: {
-        ...this.store.loaded,
-        orders: true,
-        balance: true,
-        positions: true,
-      },
+      loaded: { orders: true, balance: true, positions: true },
     };
 
     if (!useExternalPublicData) {

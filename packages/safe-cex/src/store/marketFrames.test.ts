@@ -25,16 +25,11 @@ describe('native Market output through the real packed decoder', () => {
   it('retains native identity, zero limits, precision and optional metadata through FrameStore serialization', () => {
     const rows = readRows(fixture());
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        { markets: rows },
-        store.markets.map((row) => row.symbol),
-      ),
-    );
+    store.apply(fixture());
     const serialized = JSON.parse(JSON.stringify(store.data)).markets;
     expect(serialized).toEqual(JSON.parse(JSON.stringify(rows)));
-    expect(store.marketsById['native-spot']).toBe(rows[0]);
-    expect(store.marketsBySymbol.BTCUSDT).toBe(rows[0]);
+    expect(store.marketsById['native-spot']).toBe(store.markets[0]);
+    expect(store.marketsBySymbol.BTCUSDT).toBe(store.markets[0]);
     expect(rows[0]).toMatchObject({
       id: 'native-spot',
       symbol: 'BTCUSDT',

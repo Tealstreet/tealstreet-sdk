@@ -81,7 +81,7 @@ const createExchange = (markets: Market[] = [makeMarket()]) => {
   const store = new FrameStore();
   applyReferenceFixture(
     store,
-    { markets },
+    { markets, positions: [], balance: { total: 0, free: 0, used: 0, upnl: 0 } },
     store.markets.map((row) => row.symbol),
   );
   const exchange = new CoinbaseExchange(

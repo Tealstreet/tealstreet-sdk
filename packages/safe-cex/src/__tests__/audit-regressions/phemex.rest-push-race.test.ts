@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FrameStore } from '../../store/frameStore';
 import { PositionMode, PositionSide } from '../../types';
 import { nativeMarket } from '../cutover/nativeMarket';
+import { nativePosition } from '../cutover/nativePosition';
+import { nativeTicker } from '../cutover/nativeTicker';
 import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 
@@ -14,18 +16,19 @@ const deferred = <T>() => {
   return { promise, resolve };
 };
 
-const position = (contracts: number) => ({
-  id: `BTCUSDT:${PositionSide.Long}`,
-  symbol: 'BTCUSDT',
-  side: PositionSide.Long,
-  contracts,
-  entryPrice: 69000,
-  notional: contracts * 69000,
-  leverage: 10,
-  unrealizedPnl: contracts * 1000,
-  liquidationPrice: 0,
-  positionMode: PositionMode.Hedged,
-});
+const position = (contracts: number) =>
+  nativePosition({
+    id: `BTCUSDT:${PositionSide.Long}`,
+    symbol: 'BTCUSDT',
+    side: PositionSide.Long,
+    contracts,
+    entryPrice: 69000,
+    notional: contracts * 69000,
+    leverage: 10,
+    unrealizedPnl: contracts * 1000,
+    liquidationPrice: null,
+    positionMode: PositionMode.Hedged,
+  });
 const stale = () => ({
   balance: { used: 138, free: 1162, total: 1300, upnl: 20 },
   positions: [position(0.01)],
@@ -37,7 +40,7 @@ const setup = () => {
     store,
     {
       markets: [nativeMarket({ id: 'BTCUSDT', symbol: 'BTCUSDT', quote: 'USDT' })],
-      tickers: [{ symbol: 'BTCUSDT', last: 70000 }],
+      tickers: [nativeTicker({ id: 'BTCUSDT', symbol: 'BTCUSDT', last: 70000 })],
       positions: [position(0.01)],
       balance: {
         total: 1200,

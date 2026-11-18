@@ -113,24 +113,24 @@ describe('WOO legacy allocation-conscious list building', () => {
           success: true,
           data: {
             positions: [
-              nativePosition({ symbol: 'PERP_UNKNOWN_USDT', holding: 1, averageOpenPrice: 1 }),
-              nativePosition({ symbol: 'PERP_BTC_USDT', holding: 0, averageOpenPrice: 100 }),
-              nativePosition({
+              { symbol: 'PERP_UNKNOWN_USDT', holding: 1, averageOpenPrice: 1 },
+              { symbol: 'PERP_BTC_USDT', holding: 0, averageOpenPrice: 100 },
+              {
                 symbol: 'PERP_ETH_USDT',
                 holding: -2,
                 averageOpenPrice: 200,
                 leverage: 3,
                 estLiqPrice: 250,
                 marginMode: 'ISOLATED',
-              }),
-              nativePosition({
+              },
+              {
                 symbol: 'PERP_BTC_USDT',
                 holding: 1,
                 averageOpenPrice: 100,
                 leverage: 5,
                 estLiqPrice: 50,
                 marginMode: 'CROSS',
-              }),
+              },
             ],
           },
         },

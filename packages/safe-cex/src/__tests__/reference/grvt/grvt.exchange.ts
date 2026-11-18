@@ -281,7 +281,7 @@ export class GrvtExchange extends BaseExchange {
           this.store,
           {
             balance,
-            loaded: { ...this.store.loaded, balance: true },
+            loaded: { balance: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -685,7 +685,7 @@ export class GrvtExchange extends BaseExchange {
 
         applyReferenceFixture(
           this.store,
-          { markets, loaded: { ...this.store.loaded, markets: true } },
+          { markets, loaded: { markets: true } },
           this.store.markets.map((row) => row.symbol),
         );
 
@@ -697,7 +697,7 @@ export class GrvtExchange extends BaseExchange {
         const tickers = await this.fetchTickers();
         applyReferenceFixture(
           this.store,
-          { tickers, loaded: { ...this.store.loaded, tickers: true } },
+          { tickers, loaded: { tickers: true } },
           this.store.markets.map((row) => row.symbol),
         );
       }
@@ -706,7 +706,7 @@ export class GrvtExchange extends BaseExchange {
         applyReferenceFixture(
           this.store,
           {
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+            loaded: { balance: true, positions: true, orders: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -720,7 +720,7 @@ export class GrvtExchange extends BaseExchange {
         const balance = await this.fetchBalance();
         applyReferenceFixture(
           this.store,
-          { balance, loaded: { ...this.store.loaded, balance: true } },
+          { balance, loaded: { balance: true } },
           this.store.markets.map((row) => row.symbol),
         );
       } catch (err) {
@@ -728,7 +728,7 @@ export class GrvtExchange extends BaseExchange {
         // Set loaded flag even if fetch fails (empty balance)
         applyReferenceFixture(
           this.store,
-          { loaded: { ...this.store.loaded, balance: true } },
+          { loaded: { balance: true } },
           this.store.markets.map((row) => row.symbol),
         );
       }
@@ -742,7 +742,7 @@ export class GrvtExchange extends BaseExchange {
         const markets = await this.updateMarketLeverageLimits(this.store.markets);
         applyReferenceFixture(
           this.store,
-          { markets, loaded: { ...this.store.loaded, markets: true } },
+          { markets, loaded: { markets: true } },
           this.store.markets.map((row) => row.symbol),
         );
       }
@@ -770,7 +770,7 @@ export class GrvtExchange extends BaseExchange {
         const positions = await this.fetchPositions();
         applyReferenceFixture(
           this.store,
-          { positions, loaded: { ...this.store.loaded, positions: true } },
+          { positions, loaded: { positions: true } },
           this.store.markets.map((row) => row.symbol),
         );
         this.syncBalanceUpnlFromPositions(positions);
@@ -779,7 +779,7 @@ export class GrvtExchange extends BaseExchange {
         // Set loaded flag even if fetch fails (empty positions)
         applyReferenceFixture(
           this.store,
-          { loaded: { ...this.store.loaded, positions: true } },
+          { loaded: { positions: true } },
           this.store.markets.map((row) => row.symbol),
         );
       }
@@ -789,7 +789,7 @@ export class GrvtExchange extends BaseExchange {
         const orders = await this.fetchOpenOrders();
         applyReferenceFixture(
           this.store,
-          { orders, loaded: { ...this.store.loaded, orders: true } },
+          { orders, loaded: { orders: true } },
           this.store.markets.map((row) => row.symbol),
         );
       } catch (err) {
@@ -797,7 +797,7 @@ export class GrvtExchange extends BaseExchange {
         // Set loaded flag even if fetch fails (empty orders)
         applyReferenceFixture(
           this.store,
-          { loaded: { ...this.store.loaded, orders: true } },
+          { loaded: { orders: true } },
           this.store.markets.map((row) => row.symbol),
         );
       }

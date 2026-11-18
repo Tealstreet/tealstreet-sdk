@@ -251,7 +251,13 @@ it.each([SECTION.MARKETS, SECTION.ORDERS, SECTION.POSITIONS, SECTION.BALANCE])(
       () => {},
     );
     await vi.advanceTimersByTimeAsync(250);
-    expect(store.loaded).toMatchObject({ markets: true, balance: true, orders: true, positions: true, tickers: false });
+    expect(store.loaded).toEqual({
+      markets: section !== SECTION.MARKETS,
+      balance: false,
+      orders: false,
+      positions: false,
+      tickers: false,
+    });
     expect(started).toBe(false);
     if (section !== SECTION.BALANCE) expect(store.balance.total).toBe(1000);
     if (section !== SECTION.MARKETS && section !== SECTION.POSITIONS) expect(store.positions[0].contracts).toBe(2);

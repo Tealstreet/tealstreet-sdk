@@ -221,7 +221,7 @@ export class MexcExchange extends BaseExchange {
         this.store,
         {
           markets,
-          loaded: { ...this.store.loaded, markets: true },
+          loaded: { markets: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -232,7 +232,7 @@ export class MexcExchange extends BaseExchange {
         this.store,
         {
           tickers,
-          loaded: { ...this.store.loaded, tickers: true },
+          loaded: { tickers: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -245,7 +245,7 @@ export class MexcExchange extends BaseExchange {
       applyReferenceFixture(
         this.store,
         {
-          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          loaded: { balance: true, positions: true, orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -276,7 +276,7 @@ export class MexcExchange extends BaseExchange {
           {
             balance,
             positions,
-            loaded: { ...this.store.loaded, balance: true, positions: true },
+            loaded: { balance: true, positions: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -287,7 +287,7 @@ export class MexcExchange extends BaseExchange {
           this.store,
           {
             orders,
-            loaded: { ...this.store.loaded, orders: true },
+            loaded: { orders: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -318,7 +318,7 @@ export class MexcExchange extends BaseExchange {
         this.store,
         {
           balance,
-          loaded: { ...this.store.loaded, balance: true, positions: true },
+          loaded: { balance: true, positions: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -549,7 +549,7 @@ export class MexcExchange extends BaseExchange {
         this.store,
         {
           orders: uniqBy([...orders, ...shieldedStopLikeOrders], 'id'),
-          loaded: { ...this.store.loaded, orders: true },
+          loaded: { orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -637,7 +637,7 @@ export class MexcExchange extends BaseExchange {
         this.store,
         {
           orders: uniqBy([...stopLikeOrders, ...preservedRegularOrders, ...regularOrders], 'id'),
-          loaded: { ...this.store.loaded, orders: true },
+          loaded: { orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -1858,6 +1858,7 @@ export class MexcExchange extends BaseExchange {
         applyReferenceFixture(
           this.store,
           {
+            options: { ...this.store.options, isHedged: config.positionMode === PositionMode.Hedged },
             fetchedLeverage: {
               ...this.store.fetchedLeverage,
               [symbol]: fetchedLeverage,
@@ -1883,6 +1884,7 @@ export class MexcExchange extends BaseExchange {
     applyReferenceFixture(
       this.store,
       {
+        options: { ...this.store.options, isHedged: config.positionMode === PositionMode.Hedged },
         fetchedLeverage: {
           ...this.store.fetchedLeverage,
           [symbol]: fetchedLeverage,

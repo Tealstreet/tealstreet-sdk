@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide } from '../../types';
+import { nativeOrder } from '../cutover/nativeOrder';
+import { nativePosition } from '../cutover/nativePosition';
 import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { PolymarketExchange } from '../reference/polymarket/polymarket.exchange';
 
@@ -151,16 +153,13 @@ describe('Polymarket private execution attribution', () => {
   });
 
   it('fences pre-cancel REST snapshots even if the cancellation arrives before order details', () => {
-    const { store, send } = setup();
+    const { exchange, store, send } = setup();
     send({ event_type: 'order', type: 'CANCELLATION', id: 'own-order', timestamp: '1800000004000' });
     send({ ...order('0'), status: 'LIVE' });
     expect(store.orders).toEqual([]);
-    // A successful authoritative read can still have started before cancellation.
-    applyReferenceFixture(
-      store,
-      { orders: [{ id: 'own-order', status: 'open' } as any] },
-      store.markets.map((row) => row.symbol),
-    );
-    expect(store.orders).toEqual([]);
+    // Admission belongs to the source before it emits an authoritative frame.
+    expect(
+      exchange.privateWebsocket.filterSnapshotOrders([nativeOrder({ id: 'own-order', symbol: 'election-Yes' })]),
+    ).toEqual([]);
   });
 });

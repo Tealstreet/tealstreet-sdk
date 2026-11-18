@@ -409,7 +409,7 @@ export class BinanceInversePrivateWebsocket extends BaseWebSocket<BinanceInverse
       if (this.isDisposed || this.parent.ordersSnapshotStale) return;
       applyReferenceFixture(
         this.parent.store,
-        { orders, loaded: { ...this.parent.store.loaded, orders: true } },
+        { orders, loaded: { orders: true } },
         this.parent.store.markets.map((row) => row.symbol),
       );
     } catch {

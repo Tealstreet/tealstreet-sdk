@@ -33,14 +33,14 @@ const build = (workerMirror = false) => {
   return { exchange, store, command };
 };
 const stored = (side = PositionSide.Long) =>
-  ({
+  nativePosition({
     id: side,
     symbol: 'ADAUSDT',
     side,
     leverage: side === PositionSide.Long ? -3 : -5,
     marginType: MarginType.Isolated,
     positionMode: PositionMode.OneWay,
-  }) as Position;
+  });
 const resolve = (exchange: RustEngineExchange, symbol = 'ADAUSDT') => (exchange as any).resolveLeverageContext(symbol);
 
 describe('Rust Phemex leverage context contract', () => {
@@ -168,7 +168,7 @@ describe('Rust Phemex leverage context contract', () => {
       sellLeverage: 7,
     });
     expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'fetchLeverage', symbol: 'ADAUSDT' }, { report: false });
-    expect(store.fetchedLeverage.ADAUSDT).toEqual(cached);
+    expect(store.fetchedLeverage.ADAUSDT).toEqual({ ...cached, positionMode: PositionMode.OneWay });
   });
 
   it('drops owner A metadata delivered after the bridge has switched to owner B', async () => {
@@ -208,23 +208,23 @@ describe('Rust Phemex leverage context contract', () => {
           data: {
             data: {
               positions: [
-                nativePosition({ symbol: 'OTHERUSDT', leverageRr: '99' }),
-                nativePosition({
+                { symbol: 'OTHERUSDT', leverageRr: '99' },
+                {
                   symbol: 'ADAUSDT',
                   posSide: 'Short',
                   posMode: mode,
                   leverageRr: String(short),
                   crossMargin: cross,
                   size: '0',
-                }),
-                nativePosition({
+                },
+                {
                   symbol: 'ADAUSDT',
                   posSide: 'Long',
                   posMode: mode,
                   leverageRr: String(long),
                   crossMargin: cross,
                   size: '0',
-                }),
+                },
               ],
             },
           },

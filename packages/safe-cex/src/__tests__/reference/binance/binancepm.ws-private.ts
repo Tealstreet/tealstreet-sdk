@@ -782,10 +782,7 @@ export class BinancePMPrivateWebsocket extends BaseWebSocket<BinancePMExchange> 
           this.parent.store,
           {
             orders,
-            loaded: {
-              ...this.parent.store.loaded,
-              orders: true,
-            },
+            loaded: { orders: true },
           },
           this.parent.store.markets.map((row) => row.symbol),
         );

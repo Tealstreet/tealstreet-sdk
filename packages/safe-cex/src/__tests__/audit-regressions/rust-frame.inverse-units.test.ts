@@ -278,9 +278,7 @@ describe('OKX native contract count bridge', () => {
       ],
     });
     exchange.applyWorkerFrame(frame.buffer);
-    const workerApplier: unknown = Reflect.get(worker, 'applier');
-    if (!(workerApplier instanceof FrameStore)) throw new Error('Expected the worker frame applier');
-    workerApplier.apply(frame);
+    worker.applyWorkerFrame(frame.buffer);
     for (const receiver of [store, workerStore]) {
       expect(receiver.orders[0]).toMatchObject({
         amount: 10,

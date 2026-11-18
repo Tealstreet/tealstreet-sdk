@@ -852,7 +852,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
         })();
         applyReferenceFixture(
           this.parent.store,
-          { loaded: { ...this.parent.store.loaded, positions: true } },
+          { loaded: { positions: true } },
           this.parent.store.markets.map((row) => row.symbol),
         );
       } else {
@@ -941,10 +941,7 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
         this.parent.store,
         {
           orders,
-          loaded: {
-            ...this.parent.store.loaded,
-            orders: true,
-          },
+          loaded: { orders: true },
         },
         this.parent.store.markets.map((row) => row.symbol),
       );

@@ -234,7 +234,7 @@ export class ApexOmniExchange extends BaseExchange {
                 fundingRate: 0,
                 fundingTime: 0,
               })),
-              loaded: { ...this.store.loaded, markets: true, tickers: true },
+              loaded: { markets: true, tickers: true },
             },
             this.store.markets.map((row) => row.symbol),
           );
@@ -256,7 +256,7 @@ export class ApexOmniExchange extends BaseExchange {
       applyReferenceFixture(
         this.store,
         {
-          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          loaded: { balance: true, positions: true, orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -290,7 +290,7 @@ export class ApexOmniExchange extends BaseExchange {
           applyReferenceFixture(
             this.store,
             {
-              loaded: { ...this.store.loaded, positions: true, orders: true },
+              loaded: { positions: true, orders: true },
             },
             this.store.markets.map((row) => row.symbol),
           );
@@ -304,7 +304,7 @@ export class ApexOmniExchange extends BaseExchange {
         this.store,
         {
           balance,
-          loaded: { ...this.store.loaded, balance: true },
+          loaded: { balance: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -354,7 +354,7 @@ export class ApexOmniExchange extends BaseExchange {
       applyReferenceFixture(
         this.store,
         {
-          loaded: { ...this.store.loaded, positions: true, orders: true },
+          loaded: { positions: true, orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -366,7 +366,7 @@ export class ApexOmniExchange extends BaseExchange {
         this.store,
         {
           balance,
-          loaded: { ...this.store.loaded, balance: true },
+          loaded: { balance: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -2078,7 +2078,7 @@ export class ApexOmniExchange extends BaseExchange {
       !Number.isFinite(position.leverage) ||
       !Number.isFinite(position.unrealizedPnl) ||
       !Number.isFinite(position.realizedPnl) ||
-      !Number.isFinite(position.liquidationPrice)
+      (position.liquidationPrice !== null && !Number.isFinite(position.liquidationPrice))
     ) {
       throw new Error(`ApeX position snapshot carried invalid quantities for ${market.symbol}`);
     }

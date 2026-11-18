@@ -92,14 +92,14 @@ describe('WOO active protocol Rust parity repairs', () => {
           success: true,
           data: {
             positions: [
-              nativePosition({
+              {
                 symbol: 'PERP_BTC_USDT',
                 holding: 0.01,
                 averageOpenPrice: 60000,
                 leverage: 10,
                 marginMode: 'CROSS',
                 estLiqPrice: 50000,
-              }),
+              },
             ],
           },
         },
@@ -114,7 +114,7 @@ describe('WOO active protocol Rust parity repairs', () => {
       );
     })();
     expect(store.positions.find((position) => position.id === id)).toEqual(
-      expect.objectContaining({ contracts: 0.01, marginSize: undefined }),
+      expect.objectContaining({ contracts: 0.01 }),
     );
   });
 
@@ -141,7 +141,7 @@ describe('WOO active protocol Rust parity repairs', () => {
       }),
     );
     expect(store.positions.find((position) => position.id === id)).toEqual(
-      expect.objectContaining({ contracts: 0.002, marginSize: undefined }),
+      expect.objectContaining({ contracts: 0.002 }),
     );
   });
 

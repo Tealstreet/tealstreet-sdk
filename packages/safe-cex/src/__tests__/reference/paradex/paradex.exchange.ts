@@ -354,7 +354,7 @@ export class ParadexExchange extends BaseExchange {
           this.store,
           {
             markets,
-            loaded: { ...this.store.loaded, markets: true },
+            loaded: { markets: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -370,7 +370,7 @@ export class ParadexExchange extends BaseExchange {
           this.store,
           {
             tickers,
-            loaded: { ...this.store.loaded, tickers: true },
+            loaded: { tickers: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -383,7 +383,7 @@ export class ParadexExchange extends BaseExchange {
         applyReferenceFixture(
           this.store,
           {
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+            loaded: { balance: true, positions: true, orders: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -426,7 +426,7 @@ export class ParadexExchange extends BaseExchange {
         this.store,
         {
           orders,
-          loaded: { ...this.store.loaded, orders: true },
+          loaded: { orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -447,7 +447,7 @@ export class ParadexExchange extends BaseExchange {
         this.log(`Tick: Fetched ${positions.length} positions`, LogSeverity.Debug);
         applyReferenceFixture(
           this.store,
-          { positions, loaded: { ...this.store.loaded, positions: true } },
+          { positions, loaded: { positions: true } },
           this.store.markets.map((row) => row.symbol),
         );
 
@@ -463,7 +463,7 @@ export class ParadexExchange extends BaseExchange {
           this.store,
           {
             balance,
-            loaded: { ...this.store.loaded, balance: true },
+            loaded: { balance: true },
           },
           this.store.markets.map((row) => row.symbol),
         );
@@ -476,7 +476,7 @@ export class ParadexExchange extends BaseExchange {
         this.log(`Tick: Fetched ${orders.length} orders`, LogSeverity.Debug);
         applyReferenceFixture(
           this.store,
-          { orders, loaded: { ...this.store.loaded, orders: true } },
+          { orders, loaded: { orders: true } },
           this.store.markets.map((row) => row.symbol),
         );
 
@@ -889,7 +889,7 @@ export class ParadexExchange extends BaseExchange {
       const openOrders = data.results.filter((o) => ['NEW', 'OPEN', 'PENDING', 'UNTRIGGERED'].includes(o.status));
       this.log(`Open orders: ${openOrders.length}`, LogSeverity.Debug);
 
-      return openOrders.map(this.mapOrder);
+      return this.privateWebsocket.filterSnapshotOrders(openOrders.map(this.mapOrder));
     } catch (err) {
       this.log(`Error fetching orders: ${err}`, LogSeverity.Error);
       this.log(`Orders error details: ${describeError(err)}`, LogSeverity.Debug);

@@ -12,6 +12,7 @@ import {
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { FrameStore } from '../../store/frameStore';
 import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeMarket } from '../cutover/nativeMarket';
 
 const observationFrame = (times: number[]) => {
   const bytes = new ArrayBuffer(56);
@@ -31,7 +32,7 @@ it('a real observation-only frame reaches MessagePort consumers with source time
   store.apply(
     nativeFixture(
       {
-        markets: [{ id: 'BTC', symbol: 'BTC-PERP', contractSize: 1 }] as Market[],
+        markets: [nativeMarket({ id: 'BTC', symbol: 'BTC-PERP', contractSize: 1 })],
         tickers: [
           {
             id: 'BTC',
@@ -133,7 +134,8 @@ it('worker object snapshots retain observation provenance without dating their a
       store.markets.map((row) => row.symbol),
     ),
   );
-  expect(store.tickers[0]).toBe(identity);
+  expect(store.tickers[0]).not.toBe(identity);
+  expect(identity.observedAt).toEqual([1000, 8500, null]);
   expect(store.tickers[0].observedAt).toEqual([1000, 9000, null]);
   const { observedAt: _observedAt, ...legacy } = row;
   store.apply(

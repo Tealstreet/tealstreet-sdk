@@ -32,6 +32,7 @@ const fixture = (
   nativeVersion?: 'v1' | 'v3',
 ) => {
   const commands: Array<Record<string, unknown>> = [];
+  const nativeLeverage: FrameStore['fetchedLeverage'] = {};
   const nativeSettings = { isHedged: false };
   const noActions = () => '[]';
   const engine: WasmEngineLike = {
@@ -42,6 +43,7 @@ const fixture = (
       const command = JSON.parse(json);
       if (command.op === 'setTickerSymbols' || command.op === 'setPollScale') return '[]';
       commands.push(command);
+      if (command.op === 'fetchLeverage') nativeLeverage[command.symbol] = { buyLeverage: 10, sellLeverage: 10 };
       return JSON.stringify([
         {
           op: 'done',
@@ -83,7 +85,7 @@ const fixture = (
   });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
   const store = new FrameStore();
-  installNativeStartupFrames(engine, store, () => ({ options: nativeSettings }));
+  installNativeStartupFrames(engine, store, () => ({ options: nativeSettings, fetchedLeverage: nativeLeverage }));
   applyReferenceFixture(
     store,
     { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
@@ -333,11 +335,11 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
     expect(commands.slice(-2)).toMatchObject([
       {
         op: 'cancelOrdersWithSymbols',
-        orders: [nativeOrder({ id: 'newly-acked', symbol: 'BTCUSDT', type: OrderType.Limit })],
+        orders: [{ id: 'newly-acked', symbol: 'BTCUSDT', type: OrderType.Limit }],
       },
       {
         op: 'cancelOrdersWithSymbols',
-        orders: [nativeOrder({ id: 'external', symbol: 'ETHUSDT', type: OrderType.StopLoss })],
+        orders: [{ id: 'external', symbol: 'ETHUSDT', type: OrderType.StopLoss }],
       },
     ]);
     expect(store.orders).toEqual([]);
@@ -365,7 +367,7 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
     await exchange.start();
     expect(await exchange.fetchSymbolMaxLeverage('BTCUSDT')).toBe(125);
     expect(await exchange.fetchLeverageForSymbol('BTCUSDT')).toEqual({ buyLeverage: 10, sellLeverage: 10 });
-    expect(store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 10, sellLeverage: 10 });
+    expect(store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 10, sellLeverage: 10, positionMode: 'oneway' });
     expect(commands.at(-1)).toMatchObject({ op: 'fetchLeverage', symbol: 'BTCUSDT' });
   });
 

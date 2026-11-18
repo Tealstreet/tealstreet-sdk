@@ -361,6 +361,7 @@ describe('Rust native current-account reads', () => {
   it('does not recursively snapshot when a store observer synchronously reads again', async () => {
     const r = fixture();
     await r.start();
+    r.update({ balance: { total: 200, free: 190, used: 10, upnl: 0 } });
     let calls = 0;
     const off = r.store.subscribe(() => {
       if (++calls <= 2) r.exchange.syncAccountState();
@@ -535,6 +536,7 @@ describe('Rust native current-account reads', () => {
     expect(r.commands.filter((c) => c.command !== undefined).map(({ command: _id, ...c }) => c)).toEqual([
       { op: 'cancelSymbolOrders', symbol: 'BTCUSDT' },
       { op: 'setLeverage', symbol: 'BTCUSDT', leverage: 9, side: PositionSide.Long },
+      { op: 'setLeverage', symbol: 'ETHUSDT', leverage: 9 },
     ]);
   });
 

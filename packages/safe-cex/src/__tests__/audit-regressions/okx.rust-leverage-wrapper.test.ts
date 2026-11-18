@@ -15,6 +15,7 @@ const running: RustEngineExchange[] = [];
 
 const fixture = (name: ExchangeName) => {
   const commands: Array<Record<string, unknown>> = [];
+  const nativeLeverage: FrameStore['fetchedLeverage'] = {};
   const noActions = () => '[]';
   const engine: WasmEngineLike = {
     capabilities: () => engineCapabilities(name),
@@ -23,6 +24,7 @@ const fixture = (name: ExchangeName) => {
       const command = JSON.parse(json);
       if (command.op === 'setTickerSymbols') return '[]';
       commands.push(command);
+      if (command.op === 'fetchLeverage') nativeLeverage[command.symbol] = { buyLeverage: 25, sellLeverage: 25 };
       const result = command.op === 'fetchLeverage' ? { buyLeverage: 25, sellLeverage: 25 } : [];
       return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result) }]);
     },
@@ -48,7 +50,7 @@ const fixture = (name: ExchangeName) => {
     }) as unknown as WasmEngineModule['WasmEngine'],
   }));
   const store = new FrameStore();
-  installNativeStartupFrames(engine, store);
+  installNativeStartupFrames(engine, store, () => ({ fetchedLeverage: nativeLeverage }));
   store.apply(
     nativeFixture(
       { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
@@ -71,7 +73,7 @@ describe('OKX Rust leverage for flat symbols', () => {
     const { exchange, store, commands } = fixture(name);
     await exchange.start();
     expect(await exchange.fetchLeverageForSymbol('BTCUSDT')).toEqual({ buyLeverage: 25, sellLeverage: 25 });
-    expect(store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 25, sellLeverage: 25 });
+    expect(store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 25, sellLeverage: 25, positionMode: 'oneway' });
     expect(commands.at(-1)).toMatchObject({ op: 'fetchLeverage', symbol: 'BTCUSDT' });
   });
 });

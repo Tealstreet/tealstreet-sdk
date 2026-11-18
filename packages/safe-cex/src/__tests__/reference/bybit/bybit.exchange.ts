@@ -751,7 +751,7 @@ export class BybitExchange extends BaseExchange {
         this.store,
         {
           orders,
-          loaded: { ...this.store.loaded, orders: true },
+          loaded: { orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -1051,7 +1051,7 @@ export class BybitExchange extends BaseExchange {
             this.store,
             {
               markets,
-              loaded: { ...this.store.loaded, markets: true },
+              loaded: { markets: true },
             },
             this.store.markets.map((row) => row.symbol),
           );
@@ -1073,7 +1073,7 @@ export class BybitExchange extends BaseExchange {
         this.store,
         {
           tickers,
-          loaded: { ...this.store.loaded, tickers: true },
+          loaded: { tickers: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -1101,7 +1101,7 @@ export class BybitExchange extends BaseExchange {
       applyReferenceFixture(
         this.store,
         {
-          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          loaded: { balance: true, positions: true, orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -1131,7 +1131,7 @@ export class BybitExchange extends BaseExchange {
             this.store,
             {
               orders,
-              loaded: { ...this.store.loaded, orders: true },
+              loaded: { orders: true },
             },
             this.store.markets.map((row) => row.symbol),
           );
@@ -1161,7 +1161,7 @@ export class BybitExchange extends BaseExchange {
           applyReferenceFixture(
             this.store,
             {
-              loaded: { ...this.store.loaded, positions: true },
+              loaded: { positions: true },
             },
             this.store.markets.map((row) => row.symbol),
           );
@@ -1177,7 +1177,7 @@ export class BybitExchange extends BaseExchange {
         {
           balance,
           // All three source reads completed; partial consumer flags are clamped.
-          loaded: { ...this.store.loaded, balance: true, orders: true, positions: true },
+          loaded: { balance: true, orders: true, positions: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -1261,12 +1261,7 @@ export class BybitExchange extends BaseExchange {
           // FrameStore clamps account flags until every dataset has decoded.
           // Publish source completion together; copying partial clamped flags
           // would erase the orders/positions reads that already completed.
-          loaded: {
-            ...this.store.loaded,
-            balance: true,
-            positions: true,
-            orders: fetchOrders || this.store.loaded.orders,
-          },
+          loaded: { balance: true, positions: true, orders: fetchOrders || this.store.loaded.orders },
         },
         this.store.markets.map((row) => row.symbol),
       );

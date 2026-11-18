@@ -1003,7 +1003,7 @@ export class WOOXExchange extends BaseExchange {
             this.store,
             {
               markets,
-              loaded: { ...this.store.loaded, markets: true },
+              loaded: { markets: true },
             },
             this.store.markets.map((row) => row.symbol),
           );
@@ -1023,7 +1023,7 @@ export class WOOXExchange extends BaseExchange {
       const tickers = this.parseTickers(rawTickers);
       applyReferenceFixture(
         this.store,
-        { tickers, loaded: { ...this.store.loaded, tickers: true } },
+        { tickers, loaded: { tickers: true } },
         this.store.markets.map((row) => row.symbol),
       );
       this.startFundingRatesRefresh();
@@ -1033,7 +1033,7 @@ export class WOOXExchange extends BaseExchange {
       applyReferenceFixture(
         this.store,
         {
-          loaded: { ...this.store.loaded, orders: true, positions: true, balance: true },
+          loaded: { orders: true, positions: true, balance: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -1047,7 +1047,7 @@ export class WOOXExchange extends BaseExchange {
         if (this.isDisposed) return;
         applyReferenceFixture(
           this.store,
-          { balance, loaded: { ...this.store.loaded, balance: true } },
+          { balance, loaded: { balance: true } },
           this.store.markets.map((row) => row.symbol),
         );
         return balance;
@@ -1069,7 +1069,7 @@ export class WOOXExchange extends BaseExchange {
         })();
         applyReferenceFixture(
           this.store,
-          { loaded: { ...this.store.loaded, positions: true } },
+          { loaded: { positions: true } },
           this.store.markets.map((row) => row.symbol),
         );
         return positions;
@@ -1078,7 +1078,7 @@ export class WOOXExchange extends BaseExchange {
         if (this.isDisposed) return;
         applyReferenceFixture(
           this.store,
-          { orders, loaded: { ...this.store.loaded, orders: true } },
+          { orders, loaded: { orders: true } },
           this.store.markets.map((row) => row.symbol),
         );
         return orders;
@@ -1113,7 +1113,7 @@ export class WOOXExchange extends BaseExchange {
           })();
           applyReferenceFixture(
             this.store,
-            { balance, loaded: { ...this.store.loaded, balance: true, positions: true } },
+            { balance, loaded: { balance: true, positions: true } },
             this.store.markets.map((row) => row.symbol),
           );
         } else {
@@ -1139,7 +1139,7 @@ export class WOOXExchange extends BaseExchange {
           if (this.isDisposed) return;
           applyReferenceFixture(
             this.store,
-            { orders, loaded: { ...this.store.loaded, orders: true } },
+            { orders, loaded: { orders: true } },
             this.store.markets.map((row) => row.symbol),
           );
         }

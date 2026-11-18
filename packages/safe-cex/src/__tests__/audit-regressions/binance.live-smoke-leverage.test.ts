@@ -6,6 +6,7 @@ import { FrameStore } from '../../store/frameStore';
 import { PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
 import { nativeMarket } from '../cutover/nativeMarket';
+import { nativePosition } from '../cutover/nativePosition';
 import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 
@@ -15,16 +16,15 @@ const create = (mode: PositionMode) => {
     store,
     {
       markets: [nativeMarket({ symbol: 'BTCUSDT', limits: { leverage: { min: 1, max: 125 } } }) as Market],
-      positions: [PositionSide.Long, PositionSide.Short].slice(0, mode === PositionMode.OneWay ? 1 : 2).map(
-        (side) =>
-          ({
-            id: createPositionId('BTCUSDT', side, mode),
-            symbol: 'BTCUSDT',
-            side,
-            positionMode: mode,
-            leverage: 20,
-            contracts: 0,
-          }) as Position,
+      positions: [PositionSide.Long, PositionSide.Short].slice(0, mode === PositionMode.OneWay ? 1 : 2).map((side) =>
+        nativePosition({
+          id: createPositionId('BTCUSDT', side, mode),
+          symbol: 'BTCUSDT',
+          side,
+          positionMode: mode,
+          leverage: 20,
+          contracts: 0,
+        }),
       ),
     },
     store.markets.map((row) => row.symbol),

@@ -121,9 +121,7 @@ describe('ApeX Omni Rust parity corrections', () => {
         data: {
           data: {
             id: '1',
-            positions: [
-              nativePosition({ symbol: 'BTC-USDT', side: 'LONG', size: '2', entryPrice: '100', customImr: '0.1' }),
-            ],
+            positions: [{ symbol: 'BTC-USDT', side: 'LONG', size: '2', entryPrice: '100', customImr: '0.1' }],
           },
         },
       })),
@@ -158,7 +156,7 @@ describe('ApeX Omni Rust parity corrections', () => {
     exchange.xhr = {
       get: vi.fn(async () => ({
         data: {
-          data: { positions: [nativePosition({ symbol: 'BTC-USDT', side: 'LONG', size: 'NaN', entryPrice: '100' })] },
+          data: { positions: [{ symbol: 'BTC-USDT', side: 'LONG', size: 'NaN', entryPrice: '100' }] },
         },
       })),
     } as any;
@@ -366,14 +364,13 @@ describe('ApeX Omni Rust parity corrections', () => {
       );
     })();
     websocket.handleOrderTopic([row({ status: 'CANCELED' })] as any);
-    (() => {
-      const incoming: StoreData['orders'] = exchange.mapOrder(withLegs);
-      return applyReferenceFixture(
-        store,
-        { orders: incoming.map((row) => ({ ...store.orders.find((old) => old.id === row.id), ...row })) },
-        store.markets.map((row) => row.symbol),
-      );
-    })();
+    // The producer's terminal fence must reject the stale snapshot before
+    // emitting financial state to FrameStore.
+    websocket.onMessage(
+      new MessageEvent('message', {
+        data: JSON.stringify({ topic: 'ws_zk_accounts_v3', type: 'snapshot', contents: { orders: [withLegs] } }),
+      }),
+    );
     expect(store.orders).toHaveLength(0);
   });
 

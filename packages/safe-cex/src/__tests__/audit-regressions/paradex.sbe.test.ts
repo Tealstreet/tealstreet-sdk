@@ -176,11 +176,10 @@ it('handles CLOSED SBE orders as final and prevents an older snapshot reopening 
   exchange.privateWebsocket.onMessage({ data } as MessageEvent);
   const current = exchange.store.orders[0];
   expect(current).toMatchObject({ id: 'order-123', status: OrderStatus.Canceled, remaining: 0.5 });
-  applyReferenceFixture(
-    exchange.store,
-    { orders: [{ ...current, status: OrderStatus.Open }] },
-    exchange.store.markets.map((row) => row.symbol),
-  );
+  exchange.privateWebsocket.onMessage({
+    data: bytes(fixture.cases.find(({ name }) => name === 'order-v2')!.base64),
+  } as MessageEvent);
+  expect(exchange.privateWebsocket.filterSnapshotOrders([{ ...current, status: OrderStatus.Open }])).toEqual([]);
   expect(exchange.store.orders[0].status).toBe(OrderStatus.Canceled);
   exchange.dispose();
 });

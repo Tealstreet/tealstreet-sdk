@@ -3,6 +3,8 @@ import type { Balance, Order } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
+import { nativeOrder } from '../cutover/nativeOrder';
+import { nativePosition } from '../cutover/nativePosition';
 import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
 import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
@@ -10,7 +12,7 @@ import { LighterExchange } from '../reference/lighter/lighter.exchange';
 import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 
 const balance: Balance = { total: 100, free: 90, used: 10, upnl: 0, info: {} };
-const orders = [{ id: 'order-1' }] as Order[];
+const orders = [nativeOrder({ id: 'order-1', symbol: 'BTCUSDT' })] as Order[];
 
 const createApex = () =>
   new ApexOmniExchange(
@@ -56,7 +58,9 @@ describe('reconciliation fetch result ownership', () => {
       return observed;
     })();
     vi.spyOn(exchange, 'mapOrder').mockReturnValue(orders);
-    exchange.xhr = { get: vi.fn().mockResolvedValue({ data: { data: [{ id: 'order-1' }] } }) } as any;
+    exchange.xhr = {
+      get: vi.fn().mockResolvedValue({ data: { data: [nativeOrder({ id: 'order-1', symbol: 'BTCUSDT' })] } }),
+    } as any;
 
     await expect(exchange.fetchOrders()).resolves.toEqual(orders);
     expect(commitOrders).not.toHaveBeenCalled();
@@ -157,7 +161,7 @@ describe('reconciliation fetch result ownership', () => {
 
   it('commits Paradex WS-triggered position fetches only after a successful live response', async () => {
     const exchange = createParadex();
-    const positions = [{ id: 'BTC-USD-PERP-long' }] as any;
+    const positions = [nativePosition({ id: 'BTC-USD-PERP-long', symbol: 'BTC-USD-PERP' })] as any;
     const commitPositions = (() => {
       const observed = vi.fn<(value: typeof exchange.store.positions) => void>();
       exchange.store.subscribe('positions', (value) => observed(value));
@@ -179,7 +183,9 @@ describe('reconciliation fetch result ownership', () => {
       exchange.store.subscribe('positions', (value) => observed(value));
       return observed;
     })();
-    vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([{ id: 'BTC-USD-PERP-long' }] as any);
+    vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([
+      nativePosition({ id: 'BTC-USD-PERP-long', symbol: 'BTC-USD-PERP' }),
+    ] as any);
     exchange.isDisposed = true;
 
     await (exchange.privateWebsocket as any).executePositionFetch();

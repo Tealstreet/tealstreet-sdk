@@ -388,7 +388,7 @@ export class BinanceExchange extends BaseExchange {
         this.store,
         {
           markets,
-          loaded: { ...this.store.loaded, markets: true },
+          loaded: { markets: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -404,7 +404,7 @@ export class BinanceExchange extends BaseExchange {
         this.store,
         {
           tickers,
-          loaded: { ...this.store.loaded, tickers: true },
+          loaded: { tickers: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -433,7 +433,7 @@ export class BinanceExchange extends BaseExchange {
     if (this.isDisposed || this.ordersSnapshotStale) return;
     applyReferenceFixture(
       this.store,
-      { orders, loaded: { ...this.store.loaded, orders: true } },
+      { orders, loaded: { orders: true } },
       this.store.markets.map((row) => row.symbol),
     );
   };
@@ -469,7 +469,7 @@ export class BinanceExchange extends BaseExchange {
       this.store,
       {
         orders,
-        loaded: { ...this.store.loaded, orders: true },
+        loaded: { orders: true },
       },
       this.store.markets.map((row) => row.symbol),
     );
@@ -492,7 +492,7 @@ export class BinanceExchange extends BaseExchange {
           upnl: 0,
         },
         positions: [],
-        loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
+        loaded: { orders: true, balance: true, positions: true },
       },
       this.store.markets.map((row) => row.symbol),
     );
@@ -539,11 +539,7 @@ export class BinanceExchange extends BaseExchange {
             {
               balance,
               ...(positionStateVersion === this.getPositionStateVersion() && { positions }),
-              loaded: {
-                ...this.store.loaded,
-                balance: true,
-                positions: true,
-              },
+              loaded: { balance: true, positions: true },
             },
             this.store.markets.map((row) => row.symbol),
           );
@@ -927,6 +923,29 @@ export class BinanceExchange extends BaseExchange {
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return { balance: this.store.balance, positions: this.store.positions };
+    }
+  };
+
+  // Test-only protocol producer: BaseExchange now expects native reads to
+  // publish frames. This retained REST oracle explicitly emits its snapshot.
+  fetchAndSetOrders = async (symbols?: string[]): Promise<Order[]> => {
+    const orders = await this.fetchOrders();
+    if (!this.isDisposed)
+      applyReferenceFixture(this.store, {
+        orders,
+        positions: this.store.positions,
+        balance: this.store.balance,
+        loaded: { orders: true },
+      });
+    return orders;
+  };
+
+  fetchAndSetPrivateSnapshot = async () => {
+    if (this.isDisposed || this.isPublicDataOnly) return;
+    try {
+      await this.fetchAndSetOrders();
+    } catch (error) {
+      this.emitAndLogError(error instanceof Error ? error : String(error));
     }
   };
 

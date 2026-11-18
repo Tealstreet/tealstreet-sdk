@@ -89,7 +89,7 @@ export class BinanceOptionsExchange extends BaseExchange {
     if (this.isDisposed) return;
     applyReferenceFixture(
       this.store,
-      { markets, loaded: { ...this.store.loaded, markets: true } },
+      { markets, loaded: { markets: true } },
       this.store.markets.map((row) => row.symbol),
     );
 
@@ -97,7 +97,7 @@ export class BinanceOptionsExchange extends BaseExchange {
     if (this.isDisposed) return;
     applyReferenceFixture(
       this.store,
-      { tickers, loaded: { ...this.store.loaded, tickers: true } },
+      { tickers, loaded: { tickers: true } },
       this.store.markets.map((row) => row.symbol),
     );
     this.log(`Loaded ${markets.length} Binance option markets`);
@@ -109,7 +109,7 @@ export class BinanceOptionsExchange extends BaseExchange {
           orders: [],
           positions: [],
           balance: { used: 0, free: 0, total: 0, upnl: 0 },
-          loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
+          loaded: { orders: true, balance: true, positions: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -122,7 +122,7 @@ export class BinanceOptionsExchange extends BaseExchange {
     if (this.isDisposed) return;
     applyReferenceFixture(
       this.store,
-      { orders, loaded: { ...this.store.loaded, orders: true } },
+      { orders, loaded: { orders: true } },
       this.store.markets.map((row) => row.symbol),
     );
     this.log('Ready to trade on Binance Options');
@@ -144,7 +144,7 @@ export class BinanceOptionsExchange extends BaseExchange {
           balance,
           positions,
           tickers,
-          loaded: { ...this.store.loaded, balance: true, positions: true },
+          loaded: { balance: true, positions: true },
         },
         this.store.markets.map((row) => row.symbol),
       );

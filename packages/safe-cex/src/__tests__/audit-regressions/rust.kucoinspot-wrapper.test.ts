@@ -152,7 +152,7 @@ describe('KuCoin spot Rust SDK boundary', () => {
     expect(commands.map(({ command: _command, ...body }) => body)).toEqual([
       {
         op: 'cancelOrdersWithSymbols',
-        orders: [nativeOrder({ id: 'lost-ack-id', symbol: 'BTC-USDT', type: OrderType.Limit })],
+        orders: [{ id: 'lost-ack-id', symbol: 'BTC-USDT', type: OrderType.Limit }],
       },
       { op: 'amendOrderWithSymbol', id: 'lost-ack-id', symbol: 'BTC-USDT', price: 101 },
     ]);

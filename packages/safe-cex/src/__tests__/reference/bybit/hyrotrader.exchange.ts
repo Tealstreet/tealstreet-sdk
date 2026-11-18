@@ -191,10 +191,10 @@ export class HyrotraderExchange extends BybitExchange {
       position.leverage,
       position.unrealizedPnl,
       position.realizedPnl,
-      position.liquidationPrice,
     ];
     if (
       fields.some((value) => !Number.isFinite(value)) ||
+      (position.liquidationPrice !== null && !Number.isFinite(position.liquidationPrice)) ||
       (position.marginSize !== undefined && !Number.isFinite(position.marginSize))
     ) {
       this.fail('HyroTrader position mapping contains invalid numeric fields');
@@ -279,7 +279,7 @@ export class HyrotraderExchange extends BybitExchange {
           ...(orders ? { orders } : {}),
           positions,
           balance: { ...formatted, total: formatted.total + formatted.upnl - upnl, upnl },
-          loaded: { ...this.store.loaded, ...(orders ? { orders: true } : {}), positions: true, balance: true },
+          loaded: { ...(orders ? { orders: true } : {}), positions: true, balance: true },
         },
         this.store.markets.map((row) => row.symbol),
       );

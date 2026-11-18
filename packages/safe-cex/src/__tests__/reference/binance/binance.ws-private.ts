@@ -441,7 +441,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
             position?.leverage,
             side === PositionSide.Long ? confirmed?.buyLeverage : confirmed?.sellLeverage,
             closedSettings?.leverage,
-          ].find((value) => value !== undefined && Number.isFinite(value) && value > 0) ?? Number.NaN;
+          ].find((value) => value !== undefined && Number.isFinite(value) && value > 0) ?? 0;
 
         (() => {
           const incoming: StoreData['positions'] = [
@@ -600,10 +600,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
           this.parent.store,
           {
             orders,
-            loaded: {
-              ...this.parent.store.loaded,
-              orders: true,
-            },
+            loaded: { orders: true },
           },
           this.parent.store.markets.map((row) => row.symbol),
         );

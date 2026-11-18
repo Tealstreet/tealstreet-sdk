@@ -4,6 +4,7 @@ import { FrameStore } from '../../store/frameStore';
 import { nativeFixture } from './nativeFixture';
 
 type EvidenceField = 'markets' | 'orders' | 'positions';
+const producerLoaded = new WeakMap<FrameStore, StoreData['loaded']>();
 const evidence = new WeakMap<FrameStore, Record<EvidenceField, Map<string, unknown>>>();
 
 /** A real native consumer seeded by an explicit retained protocol fixture. */
@@ -16,7 +17,7 @@ export function referenceStore(data: Partial<StoreData> = {}): FrameStore {
 /** Retained TS protocol oracles read raw REST evidence absent from SCXF. */
 export function applyReferenceFixture(
   store: FrameStore,
-  data: Partial<StoreData>,
+  data: Partial<Omit<StoreData, 'loaded'>> & { loaded?: Partial<StoreData['loaded']> },
   symbols: readonly string[] = store.markets.map((row) => row.symbol),
 ): void {
   let retained = evidence.get(store);
@@ -49,16 +50,20 @@ export function applyReferenceFixture(
     }
   }
   // STATUS is one packed section. A mode/latency-only fixture must carry its
-  // previously observed completion flags and other unchanged STATUS fields.
+  // previously reported completion flags and other unchanged STATUS fields.
+  // Keep producer reports independently: consumer readiness is clamped until
+  // all account sections decode, and is not source completion authority.
+  const loaded = { ...(producerLoaded.get(store) ?? store.loaded), ...data.loaded };
+  if (data.loaded) producerLoaded.set(store, loaded);
   const status = data.loaded !== undefined || data.options !== undefined || data.latency !== undefined;
   const frameData = status
     ? {
         ...data,
-        loaded: { ...store.loaded, ...data.loaded },
+        loaded,
         options: { ...store.options, ...data.options },
         latency: data.latency === undefined ? store.latency : data.latency,
       }
-    : data;
+    : { ...data, loaded: undefined };
   store.apply(nativeFixture(frameData, symbols));
   for (const field of ['markets', 'orders', 'positions'] as const) {
     const rows = data[field];

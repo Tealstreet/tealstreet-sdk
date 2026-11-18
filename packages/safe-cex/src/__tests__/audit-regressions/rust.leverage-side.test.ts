@@ -24,13 +24,13 @@ describe('Rust leverage command side boundary', () => {
     async (live) => {
       const store = new FrameStore();
       const closed = [
-        { id: 'ETH-long', symbol: 'ETHUSDT', side: PositionSide.Long, leverage: 5 },
-        { id: 'ETH-short', symbol: 'ETHUSDT', side: PositionSide.Short, leverage: 7 },
+        nativePosition({ id: 'ETH-long', symbol: 'ETHUSDT', side: PositionSide.Long, leverage: 5 }),
+        nativePosition({ id: 'ETH-short', symbol: 'ETHUSDT', side: PositionSide.Short, leverage: 7 }),
       ] as Position[];
       const positions = live
         ? ([
-            { id: 'BTC-long', symbol: 'BTCUSDT', side: PositionSide.Long, leverage: 3 },
-            { id: 'BTC-short', symbol: 'BTCUSDT', side: PositionSide.Short, leverage: 4 },
+            nativePosition({ id: 'BTC-long', symbol: 'BTCUSDT', side: PositionSide.Long, leverage: 3 }),
+            nativePosition({ id: 'BTC-short', symbol: 'BTCUSDT', side: PositionSide.Short, leverage: 4 }),
           ] as Position[])
         : [];
       (() => {
@@ -67,7 +67,7 @@ describe('Rust leverage command side boundary', () => {
     const store = new FrameStore();
     (() => {
       const incoming: StoreData['positions'] = [
-        { id: 'ETH-long', symbol: 'ETHUSDT', side: PositionSide.Long, leverage: 5 },
+        nativePosition({ id: 'ETH-long', symbol: 'ETHUSDT', side: PositionSide.Long, leverage: 5 }),
       ] as Position[];
       return applyReferenceFixture(
         store,
@@ -100,8 +100,8 @@ describe('Rust leverage command side boundary', () => {
       const store = new FrameStore();
       (() => {
         const incoming: StoreData['positions'] = [
-          { id: 'ETH-long', symbol: 'ETHUSDT', side: PositionSide.Long, leverage: 5 },
-          { id: 'SOL-long', symbol: 'SOLUSDT', side: PositionSide.Long, leverage: 7 },
+          nativePosition({ id: 'ETH-long', symbol: 'ETHUSDT', side: PositionSide.Long, leverage: 5 }),
+          nativePosition({ id: 'SOL-long', symbol: 'SOLUSDT', side: PositionSide.Long, leverage: 7 }),
         ] as Position[];
         return applyReferenceFixture(
           store,
@@ -139,7 +139,7 @@ describe('Rust leverage command side boundary', () => {
       store.reset();
       (() => {
         const incoming: StoreData['positions'] = [
-          { id: 'XRP-long', symbol: 'XRPUSDT', side: PositionSide.Long, leverage: 3 },
+          nativePosition({ id: 'XRP-long', symbol: 'XRPUSDT', side: PositionSide.Long, leverage: 3 }),
         ] as Position[];
         return applyReferenceFixture(
           store,

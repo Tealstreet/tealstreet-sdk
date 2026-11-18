@@ -519,7 +519,7 @@ export class BitgetExchange extends BaseExchange {
         this.store,
         {
           markets,
-          loaded: { ...this.store.loaded, markets: true },
+          loaded: { markets: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -542,7 +542,7 @@ export class BitgetExchange extends BaseExchange {
         this.store,
         {
           tickers,
-          loaded: { ...this.store.loaded, tickers: true },
+          loaded: { tickers: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -556,7 +556,7 @@ export class BitgetExchange extends BaseExchange {
       applyReferenceFixture(
         this.store,
         {
-          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          loaded: { balance: true, positions: true, orders: true },
         },
         this.store.markets.map((row) => row.symbol),
       );
@@ -583,7 +583,7 @@ export class BitgetExchange extends BaseExchange {
       this.store,
       {
         orders,
-        loaded: { ...this.store.loaded, orders: true },
+        loaded: { orders: true },
       },
       this.store.markets.map((row) => row.symbol),
     );
@@ -636,12 +636,7 @@ export class BitgetExchange extends BaseExchange {
           {
             ...(balance && { balance }),
             ...(orders && { orders }),
-            loaded: {
-              ...this.store.loaded,
-              ...(balance && { balance: true }),
-              positions: true,
-              ...(orders && { orders: true }),
-            },
+            loaded: { ...(balance && { balance: true }), positions: true, ...(orders && { orders: true }) },
           },
           this.store.markets.map((row) => row.symbol),
         );

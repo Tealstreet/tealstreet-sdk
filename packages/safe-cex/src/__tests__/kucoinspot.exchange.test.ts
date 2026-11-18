@@ -205,10 +205,9 @@ describe('KucoinSpotExchange', () => {
       data: { bestBid: '51000', bestAsk: '51001', price: '51000.5' },
     });
 
-    expect(updateTicker).toHaveBeenCalledWith(
-      expect.objectContaining({ symbol: 'BTC-USDT' }),
-      expect.objectContaining({ bid: 51_000, ask: 51_001, last: 51_000.5 }),
-    );
+    expect(updateTicker).toHaveBeenCalledWith([
+      expect.objectContaining({ symbol: 'BTC-USDT', bid: 51_000, ask: 51_001, last: 51_000.5 }),
+    ]);
   });
 
   it('aggregates trade account balances with ticker-derived USD values', async () => {
@@ -458,11 +457,11 @@ describe('KucoinSpotExchange', () => {
     };
 
     ws.handleOrderTopic({ data: { ...base, type: 'open', status: 'open' } });
-    expect(addOrUpdate).toHaveBeenCalledWith(expect.objectContaining({ id: 'o1', status: OrderStatus.Open }));
+    expect(addOrUpdate).toHaveBeenCalledWith([expect.objectContaining({ id: 'o1', status: OrderStatus.Open })]);
 
     // Cancel arrives as type:canceled, status:done — MUST be Canceled, not Closed.
     ws.handleOrderTopic({ data: { ...base, type: 'canceled', status: 'done' } });
-    expect(updateStatus).toHaveBeenCalledWith(expect.objectContaining({ id: 'o1' }), OrderStatus.Canceled);
+    expect(updateStatus).toHaveBeenCalledWith([expect.objectContaining({ id: 'o1', status: OrderStatus.Canceled })]);
 
     // Match → one fill in base units.
     ws.handleOrderTopic({ data: { ...base, type: 'match', status: 'match', matchSize: '0.04', matchPrice: '50001' } });
@@ -470,7 +469,7 @@ describe('KucoinSpotExchange', () => {
 
     // Terminal filled arrives as type:filled, status:done → Closed.
     ws.handleOrderTopic({ data: { ...base, type: 'filled', status: 'done', filledSize: '0.1' } });
-    expect(updateStatus).toHaveBeenCalledWith(expect.objectContaining({ id: 'o1' }), OrderStatus.Closed);
+    expect(updateStatus).toHaveBeenCalledWith([expect.objectContaining({ id: 'o1', status: OrderStatus.Closed })]);
   });
 
   it('emits before throwing on unsupported spot orders (TP/SL)', async () => {

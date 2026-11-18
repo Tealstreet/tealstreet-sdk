@@ -43,7 +43,7 @@ describe('Bybit Brazil local order rows for inverse amends', () => {
     exchange.applyLocalOrderUpdateAfterRestWrite(inverseOrder, { amount: 1500 });
 
     const updated = store.orders[0];
-    expect(updated.extra.remainingNative).toBe(1100);
+    expect(updated.extra?.remainingNative).toBe(1100);
     expect(updated.remaining).toBeCloseTo(1100 / 2600, 8);
   });
 
@@ -52,7 +52,7 @@ describe('Bybit Brazil local order rows for inverse amends', () => {
     exchange.applyLocalOrderUpdateAfterRestWrite(inverseOrder, { price: 2400 });
 
     const updated = store.orders[0];
-    expect(updated.extra.remainingNative).toBe(600);
+    expect(updated.extra?.remainingNative).toBe(600);
     expect(updated.remaining).toBeCloseTo(600 / 2400, 8);
   });
 

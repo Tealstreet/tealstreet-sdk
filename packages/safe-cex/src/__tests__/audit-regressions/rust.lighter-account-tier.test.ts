@@ -47,7 +47,19 @@ it('the tier reaches balance.info.lighterAccountLimits in the TS shape the setti
     command: (input: unknown) => Promise<unknown>;
     syncLighterTier: () => Promise<void>;
   };
-  vi.spyOn(boundary, 'command').mockResolvedValueOnce('standard').mockResolvedValueOnce(null);
+  vi.spyOn(boundary, 'command')
+    .mockImplementationOnce(async () => {
+      applyReferenceFixture(store, {
+        balance: { ...store.balance, info: { lighterAccountLimits: { user_tier_name: 'standard' } } },
+      });
+      return 'standard';
+    })
+    .mockImplementationOnce(async () => {
+      applyReferenceFixture(store, {
+        balance: { ...store.balance, info: { lighterAccountLimits: { user_tier_name: 'plus' } } },
+      });
+      return null;
+    });
   try {
     applyReferenceFixture(
       store,
