@@ -17,6 +17,10 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
+HyroTrader correlated auth-refusal metadata changes a Bybit-family input.
+Keep its native admission/uncertainty controls and fresh optimized family evidence;
+server negative-join fixtures retain the protected-provider and zero-write guards.
+
 OKX empty-envelope diagnostics retain code-0 cancellation continuation, nonzero
 stop behavior and the original native outcomes. Its scoped ordered-write tests
 pin complete per-order cancellation reporting and the explicit unknown-diagnostic
