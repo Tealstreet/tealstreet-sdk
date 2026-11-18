@@ -277,6 +277,7 @@ const orderly = (alias) => {
     virtualPrivateClock: true,
     waitForAllStageWrites: true,
     orderlyProtocol: true,
+    compareAllOrderTimeInForce: true,
     subscriptionGenerations: true,
     publicTickers: (records) => {
       const seed = records.find((r) => r.type === 'http' && new URL(r.url).pathname === '/v1/public/info');

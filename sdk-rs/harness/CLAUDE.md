@@ -136,7 +136,8 @@ oracles. Missing tsx/TypeScript must fail setup rather than drop those cross-lan
 
 Orderly account settings preserve simultaneous Cross/Isolated leverage: a
 selected margin mode updates only that mode's positions. Unknown/global settings
-retain their existing behavior. Replay TIF projection represents absence as
-explicit null across order types while retaining every reported value; it must
-not manufacture a TIF or hide a non-limit order's reported TIF. Known-failure
-and accepted-difference manifests are unchanged by this correction.
+retain their existing behavior. Orderly opts into full-order TIF comparison, representing absence as explicit
+null across order types while retaining every reported value. Other families
+keep their established limit-only comparison scope. The projection never
+manufactures a compared TIF. Known-failure and accepted-difference manifests
+are unchanged by this correction.

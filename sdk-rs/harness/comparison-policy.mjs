@@ -120,8 +120,10 @@ export function normalizeAccount(account, venue, impl, venueName = venue.rust) {
     amount: o.amount ?? null,
     filled: o.filled ?? null,
     ...((venue.inverseNativeAmounts || venue.coinNativeAmounts) ? { remainingNative: o.extra?.remainingNative ?? (venue.coinNativeAmounts && impl === 'ts' ? o.remaining : null) ?? null } : {}),
-    // Optional absence is explicit across order types; reported TIF stays exact.
-    ...(comparesField(venueName, 'clientOrderId') ? { timeInForce: o.timeInForce ?? null } : {}),
+    // Orderly compares optional absence across types; other venues keep their
+    // established limit-only field scope. Every compared TIF value stays exact.
+    ...(comparesField(venueName, 'clientOrderId') && (o.type === 'limit' || venue.compareAllOrderTimeInForce)
+      ? { timeInForce: o.timeInForce ?? null } : {}),
     remaining: o.remaining ?? null,
     reduceOnly: Boolean(o.reduceOnly),
     close: Boolean(o.close),
