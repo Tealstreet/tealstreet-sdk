@@ -78,6 +78,28 @@ fn hosted_history_later_page_metadata_stays_with_its_interleaved_reply() {
 }
 
 #[test]
+fn hosted_history_native_float_command_keeps_its_owner_and_metadata() {
+    for command in [0_u32, 77, u32::MAX] {
+        // Native NoticeFields serializes engine Value::Num as an f64.
+        let wire_command = serde_json::to_value(f64::from(command)).unwrap();
+        assert!(wire_command.as_u64().is_none());
+        let replies = hosted_replies(
+            &[(command, "native-history", "fetchHistoricalOrders")],
+            &[
+                incomplete(json!({"command":wire_command,"reason":"laterPageFailed",
+                    "historyOperation":"bybitOrders","historyFailureKind":"timeout"})),
+                json!({"type":"done","command":command,"result":"[]"}),
+            ],
+        );
+        assert_eq!(
+            replies[0]["completeness"],
+            json!({"incomplete":true,"reason":"laterPageFailed",
+                "failure":{"operation":"bybitOrders","kind":"timeout"}})
+        );
+    }
+}
+
+#[test]
 fn hosted_history_closed_failure_categories_survive_native_json_reply() {
     for operation in [
         "bybitClosedPnl",
