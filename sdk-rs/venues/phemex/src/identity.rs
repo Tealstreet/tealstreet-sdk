@@ -1,4 +1,4 @@
-//! Rare account identity reads never commit live account state.
+//! Rare account identity and leverage reads never commit live account state.
 use crate::{Pending, PhemexPerpetuals};
 use safe_cex_engine::credential_selection::CredentialUnavailable;
 use safe_cex_engine::request_context::{Context, Error, Operation};
@@ -10,6 +10,11 @@ use safe_cex_engine::{CommandId, CommandWait, Cx, Method, Response, VenueError};
 pub struct Read {
     root: ReadRoot,
     leg: ReadLeg,
+    kind: Kind,
+}
+enum Kind {
+    Identity,
+    Leverage(String),
 }
 impl Read {
     pub(crate) fn validate_delivery(&self, cx: &Cx<'_, Pending>) -> Result<(), Error> {
@@ -77,12 +82,8 @@ fn parse(response: Response<'_>) -> Result<Identity, String> {
 fn finish(
     cx: &mut Cx<'_, Pending>,
     root: &Context,
-    result: Result<Identity, safe_cex_engine::VenueError>,
+    result: Result<String, safe_cex_engine::VenueError>,
 ) {
-    let result = result.and_then(|identity| {
-        serde_json::to_string(&identity)
-            .map_err(|error| safe_cex_engine::VenueError::new(error.to_string()))
-    });
     match result {
         Ok(data) => {
             let _ = cx.done_context(root, data);
@@ -95,6 +96,16 @@ fn finish(
 }
 impl PhemexPerpetuals {
     pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, _command: CommandId) {
+        self.fetch_account_read(cx, Kind::Identity);
+    }
+    pub(crate) fn fetch_leverage(&self, cx: &mut Cx<'_, Pending>, symbol: String) {
+        self.fetch_account_read(cx, Kind::Leverage(symbol));
+    }
+    fn fetch_account_read(&self, cx: &mut Cx<'_, Pending>, kind: Kind) {
+        let label = match &kind {
+            Kind::Identity => "account identity",
+            Kind::Leverage(_) => "leverage context",
+        };
         match cx.command_wait() {
             Some(CommandWait::Remaining(_)) => {}
             Some(CommandWait::Expired) => {
@@ -113,7 +124,7 @@ impl PhemexPerpetuals {
             .and_then(|read| read.validate().err().map(VenueError::from))
             .or_else(|| {
                 (self.options.public_data_only || self.credentials.is_none())
-                    .then(|| VenueError::new("Phemex account identity requires credentials"))
+                    .then(|| VenueError::new(format!("Phemex {label} requires credentials")))
             });
         let selected = if refusal.is_some() {
             Err(CredentialUnavailable::Missing)
@@ -121,7 +132,7 @@ impl PhemexPerpetuals {
             self.selected_read(ReadRole::Read { scope: None })
         };
         let error = refusal
-            .unwrap_or_else(|| VenueError::new("Phemex account identity requires credentials"));
+            .unwrap_or_else(|| VenueError::new(format!("Phemex {label} requires credentials")));
         let Ok(root) = SelectedRead::command_root(
             cx,
             selected,
@@ -146,7 +157,18 @@ impl PhemexPerpetuals {
             }
         };
         let path = "/g-accounts/accountPositions";
-        let query = "currency=USDT";
+        let query = match &kind {
+            Kind::Identity => "currency=USDT".to_owned(),
+            Kind::Leverage(symbol) => format!(
+                "currency={}&symbol={}",
+                if symbol.ends_with("USDC") {
+                    "USDC"
+                } else {
+                    "USDT"
+                },
+                crate::trading::encode(self.native_symbol(symbol))
+            ),
+        };
         let request = ReadRequest {
             method: Method::Get,
             url: format!("{}{path}?{query}", self.rest()),
@@ -162,11 +184,11 @@ impl PhemexPerpetuals {
                     self.options.testnet,
                     Method::Get,
                     path.into(),
-                    query.into(),
+                    query.clone(),
                     None,
                 ))
             },
-            |leg| Pending::Identity(Box::new(Read { root, leg })),
+            |leg| Pending::Identity(Box::new(Read { root, leg, kind })),
         );
         if let Err((Pending::Identity(read), error)) = queued {
             self.identity_failed(cx, read, error.read_venue_error());
@@ -179,7 +201,15 @@ impl PhemexPerpetuals {
         response: Response<'_>,
     ) {
         let _ = cx.finish_http_context(read.leg.context());
-        finish(cx, read.root.context(), parse(response).map_err(Into::into));
+        let result = match &read.kind {
+            Kind::Identity => parse(response).and_then(|identity| {
+                serde_json::to_string(&identity).map_err(|error| error.to_string())
+            }),
+            Kind::Leverage(symbol) => {
+                crate::leverage::parse(response.status, response.body, symbol)
+            }
+        };
+        finish(cx, read.root.context(), result.map_err(Into::into));
     }
     pub(crate) fn identity_failed(
         &self,

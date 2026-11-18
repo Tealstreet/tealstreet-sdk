@@ -4,8 +4,13 @@ pub mod dispatch;
 use safe_cex_crypto::{Encoding, hmac_sha256};
 #[cfg(test)]
 use safe_cex_engine::num;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url::encode;
 use std::collections::BTreeMap;
+
+// The broker header is outside the HMAC preimage on both MEXC APIs.
+// https://www.mexc.com/api-docs/broker/broker-faq
+const BROKER_CODE: &str = "TEAL";
 
 #[cfg(test)]
 pub struct Credentials {
@@ -46,6 +51,7 @@ impl Credentials {
             ("Signature", self.signature(now, payload)),
             ("Recv-Window", window.to_string()),
             ("Content-Type", "application/json".into()),
+            ("source", BROKER_CODE.into()),
         ]
     }
 }
@@ -56,7 +62,7 @@ pub fn query(params: impl IntoIterator<Item = (&'static str, String)>) -> String
         .into_iter()
         .map(|(k, v)| format!("{k}={}", encode(&v)))
         .collect::<Vec<_>>()
-        .join("&")
+        .join_with("&")
 }
 #[cfg(test)]
 mod tests {

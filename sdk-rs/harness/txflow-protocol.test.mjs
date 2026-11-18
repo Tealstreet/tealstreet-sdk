@@ -229,6 +229,17 @@ test('generated private tape addresses initial sockets and the explicit reconnec
     const records = readFileSync(output, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
     const reads = records.filter(record => record.type === 'http' && new URL(record.url).pathname === '/info')
       .map(record => JSON.parse(record.requestBody));
+    const authorization = records.filter(record => record.type === 'http' &&
+      JSON.parse(record.requestBody).type === 'approvedAgents');
+    assert.equal(authorization[0]?.impl, 'rust', 'the retained TS reference predates agent approval');
+    assert.equal(authorization.length, 1, 'each private write must be able to verify the disposable approved agent');
+    assert.deepEqual(JSON.parse(authorization[0].requestBody), { type: 'approvedAgents', user: ACCOUNT });
+    assert.deepEqual(JSON.parse(authorization[0].body), {
+      success: true, code: 0, data: { user: ACCOUNT, agents: [{ agentAddress: OFFICIAL_SIGNER, agentName: 'replay' }] },
+    });
+    const earlySettings = records.filter(record => record.beforeAck);
+    assert.deepEqual(earlySettings.map(record => record.afterCommand), [2, 3]);
+    assert.deepEqual(earlySettings.map(record => JSON.parse(record.text).channel), ['activeAssetData', 'activeAssetData']);
     const initialTickerCount = reads.filter(body => body.type === 'activeAssetCtx').length;
     assert.equal(initialTickerCount, 2);
     const accountFills = reads.filter(body => body.type === 'userFills' && body.limit === 500);
@@ -287,3 +298,12 @@ test('read and write Content-Type must identify JSON regardless of header casing
     assert.throws(() => createTxFlowRequestValidator(OPTIONS)({ ...req, headers: { ...req.headers, 'Content-Type': 'text/plain' } }), /content|json/i);
   }
 }));
+
+
+test('TxFlow replay canonicalizes only the documented default agent envelope chain', () => {
+  const identity = (body) => VENUES.txflow.requestKey('POST', `${ORIGIN}/exchange`, body, new Set());
+  const envelope = { action: { type: 'updatePositionMode', isOneway: true }, confirm: 'executed' };
+  assert.equal(identity({ ...envelope, signatureChainId: 2511 }), identity(envelope));
+  assert.notEqual(identity({ ...envelope, signatureChainId: 1 }), identity(envelope));
+  assert.notEqual(identity({ ...envelope, action: { ...envelope.action, isOneway: false } }), identity(envelope));
+});

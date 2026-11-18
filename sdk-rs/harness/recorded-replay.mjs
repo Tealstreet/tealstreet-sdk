@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { performanceOrder } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, performanceOrder } from './performance-policy.mjs';
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 export const readEvidenceText = (path) => new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(readFileSync(path));
 const key = (slot) => JSON.stringify([slot?.impl, slot?.mode, slot?.run]);
@@ -20,15 +20,15 @@ export function compareRecordedReport(original, rederived) {
 
 export function createRecordedReplay({ evidence, root = process.cwd(), venue, tape, books }) {
   const report = evidence?.report;
-  if (!report || report.schema !== 1 || report.private !== false || report.runs !== 9 || report.correctnessRuns !== 1 ||
+  if (!report || report.schema !== 1 || report.private !== false || report.runs !== PUBLIC_REPLAY_PAIRS || report.correctnessRuns !== 1 ||
       report.venue !== venue || report.tape !== tape || report.books !== books ||
-      !Array.isArray(evidence.raw) || evidence.raw.length !== 20 || !Array.isArray(report.artifacts) || report.artifacts.length !== 20)
+      !Array.isArray(evidence.raw) || evidence.raw.length !== (2 + 2 * PUBLIC_REPLAY_PAIRS) || !Array.isArray(report.artifacts) || report.artifacts.length !== (2 + 2 * PUBLIC_REPLAY_PAIRS))
     throw new Error('invalid recorded public case/inventory');
   const outputRoot = realpathSync(resolve(root, 'sdk-rs/harness/out'));
   const actualTape = readFileSync(resolve(root, tape));
   if (report.tapeSha256 !== sha256(actualTape)) throw new Error('recorded tape hash differs');
   const slots = [...['ts', 'rust'].map((impl) => ({ impl, mode: 'correctness', run: 0 })),
-    ...Array.from({ length: 9 }, (_, run) => performanceOrder(run).map((impl) => ({ impl, mode: 'performance', run }))).flat()];
+    ...Array.from({ length: PUBLIC_REPLAY_PAIRS }, (_, run) => performanceOrder(run).map((impl) => ({ impl, mode: 'performance', run }))).flat()];
   const paths = new Set(), inodes = new Set();
   const outputs = evidence.raw.map((slot, index) => {
     if (key(slot) !== key(slots[index]) || key(report.artifacts[index]) !== key(slots[index])) throw new Error('recorded slots are missing, reordered or duplicated');

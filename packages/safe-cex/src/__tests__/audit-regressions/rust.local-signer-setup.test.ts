@@ -105,8 +105,9 @@ describe('trusted local signer setup', () => {
       .construct(Engine as never, 'binance', '{}');
     expect(received).toMatchObject({ primary: { secretEncoding: encoding } });
   });
+  // #3314 migrates TxFlow; Polymarket retains the unmigrated provider-metadata refusal.
   it('refuses provider metadata on unmigrated Rust families before construction', () => {
-    expect(() => new RustEngineExchange('kraken', { ...options(), localSigner: {} }, new DefaultStore()))
+    expect(() => new RustEngineExchange('polymarket', { ...options(), localSigner: {} }, new DefaultStore()))
       .toThrow(/not supported/);
   });
   it('rejects malformed or unknown setup metadata before constructing an engine', () => {
@@ -477,5 +478,38 @@ describe('ApeX signer admission (RUST_APEXOMNI_SIGNER_ADMISSION.md)', () => {
     const remoteSigner = { sign: async () => ({}) } as unknown as ExchangeOptions['remoteSigner'];
     expect(runsOnRustEngine('apexomni', { engine: 'rust', secret: '', remoteSigner })).toBe(true);
     expect(runsOnRustEngine('apexomni', { engine: 'rust', secret: 'local' })).toBe(true);
+  });
+});
+
+
+describe('feature-independent provider capsule serialization', () => {
+  it('omits the trusted false default for both slots without changing policy or eligibility', () => {
+    const input = options();
+    const policy = { primary: { trimSigning: false }, secondary: { trimSigning: false } };
+    const setup = new LocalSignerSetup(input, policy);
+    expect(setup.primaryComplete).toBe(true);
+    let received: { primary: Record<string, unknown>; secondary: Record<string, unknown> } | undefined;
+    class Capture { constructor(_name: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+    setup.construct(Capture as never, 'binance', '{}');
+    expect(received?.primary).not.toHaveProperty('trimSigning');
+    expect(received?.secondary).not.toHaveProperty('trimSigning');
+    expect(received?.primary.secret).toBe(input.secret);
+    expect(received?.secondary.secret).toBe(input.secondary_secret);
+    expect(policy).toEqual({ primary: { trimSigning: false }, secondary: { trimSigning: false } });
+  });
+  it('keeps Bitunix trusted true in both slots', () => {
+    let received: { primary: Record<string, unknown>; secondary: Record<string, unknown> } | undefined;
+    class Capture { constructor(_name: string, _options: string, json?: string) { received = JSON.parse(json!); } }
+    new LocalSignerSetup(options(), deriveSignerSetupPolicy('bitunix')).construct(Capture as never, 'bitunix', '{}');
+    expect(received?.primary.trimSigning).toBe(true);
+    expect(received?.secondary.trimSigning).toBe(true);
+  });
+  it('still refuses caller trimming metadata at either value in either slot', () => {
+    for (const slot of ['primary', 'secondary']) {
+      for (const trimSigning of [false, true]) {
+        expect(() => new LocalSignerSetup({ ...options(), localSigner: { [slot]: { trimSigning } } }))
+          .toThrow('Invalid local signer setup metadata');
+      }
+    }
   });
 });

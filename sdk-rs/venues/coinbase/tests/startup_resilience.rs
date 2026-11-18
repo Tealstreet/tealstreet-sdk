@@ -1,3 +1,4 @@
+mod support;
 use safe_cex_engine::{Action, Event, Notice, Response};
 use safe_cex_venue_coinbase::{Coinbase, Options};
 
@@ -6,7 +7,7 @@ fn jittered(actual: f64, nominal: f64) -> bool {
     (0.75 * nominal..=nominal).contains(&actual)
 }
 
-// A transport failure must yield to the host clock; malformed individual rows
+// A rate limit must yield to the host clock; malformed individual rows
 // cannot discard valid neighbours from the subsequent successful catalogue.
 #[test]
 fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
@@ -18,8 +19,8 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         .unwrap(),
     );
     engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut request = support::actions(&mut engine)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -30,12 +31,18 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         let original_url = request.url.clone();
         engine.handle(
             now,
-            Event::HttpFailed {
+            Event::HttpResponse {
                 request: request.id,
-                error: "scripted public failure",
+                response: Response {
+                    status: 429,
+                    headers: "",
+                    body: "{}",
+                },
             },
         );
-        let actions = engine.drain_actions().collect::<Vec<_>>();
+        let actions = support::actions(&mut engine)
+            .into_iter()
+            .collect::<Vec<_>>();
         assert!(
             !actions.iter().any(|action| matches!(
                 action,
@@ -59,8 +66,8 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
             .expect("bounded public discovery backoff");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = support::actions(&mut engine)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -70,9 +77,28 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
     }
     // Skipped discovery rows log at Debug.
     engine.set_log_level(safe_cex_engine::Level::Debug);
-    engine.handle(now, Event::HttpResponse { request: request.id, response: Response { status: 200, headers: "", body: r###"[{"symbol":"BTC-PERP","type":"PERP","trading_state":"TRADING","base_asset_name":"BTC","quote_asset_name":"USDC","base_increment":"0.0001","quote_increment":"0.1","min_quantity":"0.0001","qty_24hr":"20","notional_24hr":"1200000","open_interest":"100","funding_interval":"3600000000","quote":{"best_bid_price":"59999","best_ask_price":"60001","trade_price":"60000","mark_price":"60002","index_price":"60003","predicted_funding":"0.0001"}},{"broken":{"unexpected":true}}]"### } });
+    let body = support::drb_response("public/get_instruments", &request);
+    let mut body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    body["result"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"broken": {"unexpected":true}}));
+    let body = body.to_string();
+    engine.handle(
+        now,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: &body,
+            },
+        },
+    );
     assert!(engine.store().loaded().markets);
-    assert_eq!(engine.store().markets().len(), 1);
-    let actions = engine.drain_actions().collect::<Vec<_>>();
+    assert!(engine.store().markets().len() >= 125);
+    let actions = support::actions(&mut engine)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }

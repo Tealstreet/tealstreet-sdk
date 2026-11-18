@@ -1,3 +1,4 @@
+import { getStorageDir, isRecord } from './storage-context';
 // File-based heartbeat written by the cross-trade daemon process and read
 // by any CLI listener process (REPL or otherwise). This is what makes the
 // daemon's running state visible to a web tab even when the daemon and the
@@ -13,13 +14,25 @@
 // and the broadcast reports running=false even if the file is still on
 // disk. The daemon deletes the file on graceful shutdown.
 
+// File-based heartbeat written by the cross-trade daemon process and read
+// by any CLI listener process (REPL or otherwise). This is what makes the
+// daemon's running state visible to a web tab even when the daemon and the
+// REPL are different processes.
+//
+// Shape lives at ~/.tealstreet/cross-trade-running.json:
+//   { pid: number, startedAt: number, configCount: number,
+//     lastHeartbeatAt: number, version: 1 }
+//
+// The daemon updates lastHeartbeatAt every HEARTBEAT_INTERVAL_MS. Readers
+// treat the heartbeat as stale if lastHeartbeatAt is older than STALE_MS,
+// at which point the daemon is presumed dead (likely a hard kill / OOM)
+// and the broadcast reports running=false even if the file is still on
+// disk. The daemon deletes the file on graceful shutdown.
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
 import { join } from 'path';
-import { BRAND, brandEnv } from './brand';
 
-const CONFIG_DIR = brandEnv('CONFIG_DIR') || join(homedir(), BRAND.configDirName);
-const HEARTBEAT_FILE = join(CONFIG_DIR, 'cross-trade-running.json');
+const CONFIG_DIR = () => getStorageDir();
+const HEARTBEAT_FILE = () => join(CONFIG_DIR(), 'cross-trade-running.json');
 
 export const HEARTBEAT_INTERVAL_MS = 5_000;
 // 3× the interval gives the watcher comfort room around fs latency.
@@ -34,12 +47,12 @@ export interface CrossTradeHeartbeat {
 }
 
 export function getHeartbeatFilePath(): string {
-  return HEARTBEAT_FILE;
+  return HEARTBEAT_FILE();
 }
 
 function ensureDir(): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
+  if (!existsSync(CONFIG_DIR())) {
+    mkdirSync(CONFIG_DIR(), { recursive: true });
   }
 }
 
@@ -52,13 +65,13 @@ export function writeHeartbeat(input: { startedAt: number; configCount: number }
     configCount: input.configCount,
     lastHeartbeatAt: Date.now(),
   };
-  writeFileSync(HEARTBEAT_FILE, JSON.stringify(data, null, 2));
+  writeFileSync(HEARTBEAT_FILE(), JSON.stringify(data, null, 2));
 }
 
 export function clearHeartbeat(): void {
   try {
-    if (existsSync(HEARTBEAT_FILE)) {
-      unlinkSync(HEARTBEAT_FILE);
+    if (existsSync(HEARTBEAT_FILE())) {
+      unlinkSync(HEARTBEAT_FILE());
     }
   } catch {
     // best effort — listener falls back to staleness check
@@ -66,12 +79,25 @@ export function clearHeartbeat(): void {
 }
 
 export function readHeartbeat(): CrossTradeHeartbeat | null {
-  if (!existsSync(HEARTBEAT_FILE)) return null;
+  if (!existsSync(HEARTBEAT_FILE())) return null;
   try {
-    const parsed = JSON.parse(readFileSync(HEARTBEAT_FILE, 'utf-8')) as CrossTradeHeartbeat;
-    if (parsed.version !== 1) return null;
-    if (typeof parsed.lastHeartbeatAt !== 'number') return null;
-    return parsed;
+    const parsed: unknown = JSON.parse(readFileSync(HEARTBEAT_FILE(), 'utf-8'));
+    if (
+      !isRecord(parsed) ||
+      parsed.version !== 1 ||
+      typeof parsed.lastHeartbeatAt !== 'number' ||
+      typeof parsed.pid !== 'number' ||
+      typeof parsed.startedAt !== 'number' ||
+      typeof parsed.configCount !== 'number'
+    )
+      return null;
+    return {
+      version: 1,
+      pid: parsed.pid,
+      startedAt: parsed.startedAt,
+      configCount: parsed.configCount,
+      lastHeartbeatAt: parsed.lastHeartbeatAt,
+    };
   } catch {
     return null;
   }

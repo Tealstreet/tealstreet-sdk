@@ -88,7 +88,7 @@ export const paradexStream = (data) => {
   }
   if (offset >= b.length || offset + 1 + b[offset] > b.length) throw new Error('Truncated Paradex SBE market');
   const market = new TextDecoder('utf-8', { fatal: true }).decode(b.subarray(offset + 1, offset + 1 + b[offset]));
-  return template === 4 ? 'markets_summary' : template === 3 ? `order_book.${market}.deltas` : `${template === 1 ? 'trades' : 'bbo'}.${market}`;
+  return template === 4 ? `markets_summary.${market}` : template === 3 ? `order_book.${market}.deltas` : `${template === 1 ? 'trades' : 'bbo'}.${market}`;
 };
 const createSocketAudit = (_impl, { isPrivate, books = [], tickers = [] }) => {
   const states = new Map();
@@ -100,10 +100,15 @@ const createSocketAudit = (_impl, { isPrivate, books = [], tickers = [] }) => {
     return sockets.get(key);
   };
   const requiredPrivate = ['orders.ALL', 'fills.ALL', 'positions', 'balance_events', 'account'];
-  const requiredPublic = [...tickers.flatMap((s) => [`bbo.${s}`, `trades.${s}`]), 'markets_summary', ...books.map((s) => `order_book.${s}.deltas`)];
+  const requiredPublic = [...tickers.map((s) => `bbo.${s}`), ...books.map((s) => `order_book.${s}.deltas`)];
   const check = () => {
     const all = [...states.values()].flatMap((sockets) => [...sockets.values()]);
     if (!requiredPublic.every((topic) => all.some((s) => s.channels.has(topic)))) return false;
+    // The TS oracle takes the global summary and every market's trades; the engine takes
+    // one summary per market and trades only for charted markets, under the 200 cap.
+    if (all.some((s) => s.channels.has('markets_summary'))) {
+      if (!tickers.every((t) => all.some((s) => s.channels.has(`trades.${t}`)))) return false;
+    } else if (!tickers.every((t) => all.some((s) => s.channels.has(`markets_summary.${t}`)))) return false;
     return !isPrivate || all.some((s) => s.auth && requiredPrivate.every((topic) => s.channels.has(topic)));
   };
   return {
@@ -128,7 +133,8 @@ const createSocketAudit = (_impl, { isPrivate, books = [], tickers = [] }) => {
         if (s.authId !== undefined && frame.id === s.authId && frame.result && !frame.error) s.auth = true;
       }
       const topic = paradexStream(data);
-      if (topic && !s.channels.has(topic)) failures.push(`Unsubscribed Paradex data: ${topic}`);
+      const global = topic?.startsWith('markets_summary.') && s.channels.has('markets_summary');
+      if (topic && !global && !s.channels.has(topic)) failures.push(`Unsubscribed Paradex data: ${topic}`);
     },
     ready: check,
     errors() { if (!check()) failures.push('Missing Paradex public/private subscription or authentication'); return failures; },
@@ -152,6 +158,9 @@ export const paradexProtocol = {
   compareClientIds: true, compareFillPrices: true, compareSubscriptions: true, compareWriteOrder: true,
   matchRequestBody: true, requestBody, generatedBodyId: (key) => key === 'client_id',
   subscriptionRouting: true, streamOf: paradexStream, socketMessage, createSocketAudit, verifyRequest,
+  // One summary subscription per market against the oracle's global one: the same feed.
+  subscriptionMessage: (message) => (message?.params?.channel?.startsWith?.('markets_summary.')
+    ? { ...message, params: { ...message.params, channel: 'markets_summary' } } : message),
   isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.startsWith('/v1/auth/'),
   socketReplies: (_url, message) => {
     if (['ping', 'pong'].includes(message?.type)) throw new Error('Unexpected Paradex application heartbeat');
@@ -161,6 +170,13 @@ export const paradexProtocol = {
     }
     if (['subscribe', 'unsubscribe'].includes(message?.method)) return [JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { channel: message.params.channel } })];
     return [];
+  },
+  // The tape recorded the global summary channel. The TS oracle subscribes to it and carries
+  // every frame, as it would live; the engine's per-market channels never receive option rows.
+  notDelivered: (record, impl) => {
+    if (impl !== 'rust' || record.type !== 'ws' || record.binary === undefined) return false;
+    const stream = paradexStream(Uint8Array.from(Buffer.from(record.binary, 'base64')));
+    return Boolean(stream?.startsWith('markets_summary.') && !stream.endsWith('-PERP'));
   },
   skipFrame: (record) => {
     if (record.type !== 'ws' || typeof record.text !== 'string') return false;

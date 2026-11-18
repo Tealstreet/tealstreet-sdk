@@ -325,7 +325,8 @@ fn native_primary_wire_is_integer_stamped_and_header_ordered() {
             "Request-Time",
             "Signature",
             "Recv-Window",
-            "Content-Type"
+            "Content-Type",
+            "source"
         ]
     );
     assert_eq!(request.headers[0].1, "replay-key");
@@ -340,6 +341,7 @@ fn native_primary_wire_is_integer_stamped_and_header_ordered() {
     );
     assert_eq!(request.headers[3].1, "20000");
     assert_eq!(request.headers[4].1, "application/json");
+    assert_eq!(request.headers[5].1, "TEAL");
     assert!(request.body.is_none());
 }
 
@@ -727,4 +729,233 @@ fn genuine_missing_key_mode_commands_terminalize_once_without_waiting() {
                 | Action::SetTimer { .. }
         )));
     }
+}
+
+#[test]
+fn managed_closing_stop_keeps_secondary_inspection_and_primary_mutation() {
+    fn release(
+        engine: &mut TestEngine,
+        at: f64,
+        intent: safe_cex_engine::request_context::RoutingIntent,
+    ) -> HttpRequest {
+        use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+        let (preparation, request, actual) = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        intent,
+                        ..
+                    } => Some((preparation, request, intent)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("actual managed preparation");
+        assert_eq!(actual, intent);
+        engine.http_prepared(
+            at,
+            preparation,
+            Prepared {
+                id: request.id.0,
+                expires_at: None,
+            },
+        );
+        let (permit, request) = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Bind {
+                        permit, request, ..
+                    } => Some((permit, request)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("actual signed binding");
+        assert!(matches!(
+            engine.claim_http(at, permit),
+            Ok(Claim::Released(_))
+        ));
+        request
+    }
+    let (mut engine, socket, reads) = private_started_with(secondary_options());
+    for request in reads {
+        let body = if request.url.contains("open_positions") {
+            r#"{"success":true,"code":0,"data":[{"positionId":"pos","symbol":"BTC_USDT","positionType":1,"holdVol":60,"holdAvgPrice":60000,"leverage":7,"openType":1}]}"#
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#
+        };
+        support::response(&mut engine, &request, body);
+    }
+    let row = r#"{"id":"closing","symbol":"BTC_USDT","side":4,"orderType":5,"vol":60,"dealVol":0,"price":0,"triggerPrice":55000,"triggerType":2,"trend":2,"state":1,"leverage":7,"openType":1,"executeCycle":2,"positionMode":1,"reduceOnly":true,"priceProtect":0,"stopLossPrice":0,"takeProfitPrice":0,"lossTrend":1,"profitTrend":1}"#;
+    support::ws(
+        &mut engine,
+        socket,
+        &format!(r#"{{"channel":"push.personal.plan.order","data":{row}}}"#),
+    );
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        300.,
+        Event::Command(Command::AmendOrder {
+            command: 104,
+            id: "closing".into(),
+            price: Some(54000.),
+            amount: None,
+        }),
+    );
+    let read = release(
+        &mut engine,
+        300.,
+        safe_cex_engine::request_context::RoutingIntent::Secondary,
+    );
+    assert!(
+        read.url
+            .starts_with("https://api.mexc.com/api/v1/private/planorder/list/orders?")
+    );
+    assert_eq!(header(&read, "ApiKey"), "read-key");
+    respond(
+        &mut engine,
+        &read,
+        310.,
+        &format!(r#"{{"success":true,"code":0,"data":[{row}]}}"#),
+    );
+    let native = release(
+        &mut engine,
+        310.,
+        safe_cex_engine::request_context::RoutingIntent::Primary,
+    );
+    assert!(native.url.ends_with("/planorder/change_price"));
+    assert_eq!(header(&native, "ApiKey"), "replay-key");
+    assert_eq!(header(&native, "Request-Time"), "310");
+    let body: serde_json::Value = serde_json::from_str(native.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["orderId"], "closing");
+    assert_eq!(body["triggerPrice"], "54000");
+}
+
+struct HeaderSigner {
+    provider: Provider,
+    headers: Vec<(String, String)>,
+}
+impl Signer for HeaderSigner {
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        let pending = self.provider.sign(request);
+        let headers = self.headers.clone();
+        Box::pin(async move {
+            let mut result = pending.await?;
+            result.headers = headers;
+            Ok(result)
+        })
+    }
+    fn sign_ready(
+        &self,
+        request: &SignRequest,
+    ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+    {
+        self.provider.sign_ready(request).map(|result| {
+            result.map(|mut result| {
+                result.headers = self.headers.clone();
+                result
+            })
+        })
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.provider.can_sign(key, algorithm)
+    }
+}
+
+#[test]
+fn http_dispatch_retains_permitted_callback_headers_without_shadowing_native_auth() {
+    let mut engine = callback_header_engine(
+        [
+            ("X-Trace", "first"),
+            ("x-trace", "retained"),
+            ("apikey", "shadow"),
+            ("signature", "shadow"),
+            ("request-time", "shadow"),
+            ("recv-window", "shadow"),
+            ("content-type", "text/plain"),
+            ("SoUrCe", "shadow"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.into(), value.into()))
+        .collect(),
+        true,
+    );
+    let request = first_http(&identity(&mut engine), "/api/v1/private/account/assets");
+    assert_eq!(
+        request.signer_headers,
+        vec![("X-Trace".into(), "retained".into())]
+    );
+    assert_eq!(request.headers[0].1, "replay-key");
+    assert_eq!(request.headers[1].1, "1700000000000");
+    assert_eq!(request.headers[3].1, "20000");
+    assert_eq!(request.headers[4].1, "application/json");
+}
+
+#[test]
+fn malformed_callback_headers_refuse_before_native_http_dispatch() {
+    for headers in [
+        vec![("X-Trace".into(), "value\r\ninjected: yes".into())],
+        vec![("Bad Name".into(), "value".into())],
+        vec![("Signature".into(), "invalid\0".into())],
+    ] {
+        let mut engine = callback_header_engine(headers, true);
+        assert!(
+            !identity(&mut engine)
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)))
+        );
+    }
+}
+
+fn callback_header_engine(headers: Vec<(String, String)>, declared: bool) -> TestEngine {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
+        primary: Some(LocalIdentity {
+            key: Secret::new("replay-key".into()),
+            secret: Secret::new("replay-secret".into()),
+            stable_id: Some("mexc:header-fixture".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+    .unwrap();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_mexc::MexcFutures::new(safe_cex_venue_mexc::Options {
+            identities: identities.clone(),
+            signing_policy: safe_cex_engine::signing_policy::RemoteSigningPolicy {
+                protected_headers: declared.then_some(&[
+                    "ApiKey",
+                    "Request-Time",
+                    "Signature",
+                    "Recv-Window",
+                    "Content-Type",
+                    "source",
+                ]),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    );
+    engine
+        .set_signer(Some(Arc::new(HeaderSigner {
+            provider: Arc::new(provider),
+            headers,
+        })))
+        .unwrap();
+    engine.set_identities(identities).unwrap();
+    engine.into()
+}
+
+#[test]
+fn undeclared_callback_headers_remain_refused_before_native_http_dispatch() {
+    let mut engine = callback_header_engine(vec![("X-Trace".into(), "retained".into())], false);
+    assert!(
+        !identity(&mut engine)
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
 }

@@ -128,6 +128,57 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
+    #[inline]
+    pub(in crate::engine) fn validate_preflight_ready_owner(
+        &self,
+        owner: Owner,
+    ) -> Result<(), Error> {
+        self.core_ref().validate_preflight_ready_owner(owner)
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
+    pub(in crate::engine) fn owned_http_admission(
+        &self,
+        context: &Context,
+    ) -> Result<Option<super::super::owned_call::Admission>, Error> {
+        self.validate_preflight_ready_owner(context.owner())?;
+        if self
+            .io
+            .core
+            .http_plan_ready
+            .as_ref()
+            .is_some_and(|ready| ready.owner() != context.owner())
+        {
+            return Err(Error::Revoked);
+        }
+        let admission = self
+            .io
+            .core
+            .request_contexts
+            .owned_admission(context, self.io.core.http_delivery.as_ref())?;
+        if admission.as_ref().is_some_and(|a| {
+            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
+        }) && let Some(plan) = self.io.core.request_contexts.plan_from_context(context)
+            && !self.io.core.request_contexts.initial_plan_custody(&plan)?
+            && !self
+                .io
+                .core
+                .http_plan_ready
+                .as_ref()
+                .is_some_and(|ready| ready.same_plan(&plan))
+        {
+            return Err(Error::Revoked);
+        }
+        if admission.as_ref().is_some_and(|a| {
+            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
+        }) && let Ok(handle) = self.io.core.request_contexts.owner_from_context(context)
+        {
+            self.validate_preflight_activation(&handle)?;
+        }
+        Ok(admission)
+    }
+
     pub(in crate::engine) fn validate_preflight_ready_owner(
         &self,
         owner: Owner,
@@ -152,23 +203,15 @@ impl<P> Cx<'_, P> {
             Ok(())
         }
     }
+}
 
+impl<P> Cx<'_, P> {
     #[inline]
     pub(in crate::engine) fn validate_preflight_activation(
         &self,
         handle: &Preflight,
     ) -> Result<(), Error> {
         self.core_ref().validate_preflight_activation(handle)
-    }
-
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "condition-waits", allow(dead_code))]
-    #[inline]
-    pub(in crate::engine) fn validate_preflight_failure_custody(
-        &self,
-        handle: &Preflight,
-    ) -> Result<(), Error> {
-        self.core_ref().validate_preflight_failure_custody(handle)
     }
 
     /// Relinquish this genuine initial callback without creating I/O or time.
@@ -259,16 +302,6 @@ impl<P> Cx<'_, P> {
 
     #[cfg(feature = "condition-waits")]
     #[inline]
-    pub(in crate::engine) fn seal_condition_preflight(
-        &mut self,
-        preflight: &Preflight,
-        error: VenueError,
-    ) -> Result<Seal, Error> {
-        self.core().seal_condition_preflight(preflight, error)
-    }
-
-    #[cfg(feature = "condition-waits")]
-    #[inline]
     // Only some feature combinations call this.
     #[cfg_attr(feature = "condition-waits", allow(dead_code))]
     pub(in crate::engine) fn clear_preflight_condition(&mut self, handle: &Preflight) {
@@ -288,45 +321,12 @@ impl<P> Cx<'_, P> {
         self.io.core.request_contexts.queue_preflight_ready(handle)
     }
 
+    #[inline]
     pub(in crate::engine) fn owned_http_admission(
         &self,
         context: &Context,
     ) -> Result<Option<super::super::owned_call::Admission>, Error> {
-        self.validate_preflight_ready_owner(context.owner())?;
-        if self
-            .io
-            .core
-            .http_plan_ready
-            .as_ref()
-            .is_some_and(|ready| ready.owner() != context.owner())
-        {
-            return Err(Error::Revoked);
-        }
-        let admission = self
-            .io
-            .core
-            .request_contexts
-            .owned_admission(context, self.io.core.http_delivery.as_ref())?;
-        if admission.as_ref().is_some_and(|a| {
-            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
-        }) && let Some(plan) = self.io.core.request_contexts.plan_from_context(context)
-            && !self.io.core.request_contexts.initial_plan_custody(&plan)?
-            && !self
-                .io
-                .core
-                .http_plan_ready
-                .as_ref()
-                .is_some_and(|ready| ready.same_plan(&plan))
-        {
-            return Err(Error::Revoked);
-        }
-        if admission.as_ref().is_some_and(|a| {
-            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
-        }) && let Ok(handle) = self.io.core.request_contexts.owner_from_context(context)
-        {
-            self.validate_preflight_activation(&handle)?;
-        }
-        Ok(admission)
+        self.core_ref().owned_http_admission(context)
     }
 }
 
@@ -597,7 +597,7 @@ impl<V: Venue> Engine<V> {
 
     #[inline]
     pub(in crate::engine) fn flush_preflight_readiness(&mut self, now: f64) {
-        if self.io.core.request_contexts.preflight_ready.is_empty() {
+        if !V::http_plans() || self.io.core.request_contexts.preflight_ready.is_empty() {
             return;
         }
         self.flush_live_preflight_readiness(now);

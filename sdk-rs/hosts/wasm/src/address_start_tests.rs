@@ -25,9 +25,17 @@ fn wasm_start_initializes_real_local_provider_before_venue_start_once() {
         let mut engine = WasmEngine {
             dispatch_signing: true,
             external_signer: false,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
             construction: "{}".into(),
             hosted_identity: None,
+            #[cfg(feature = "hosted-join-proof")]
+            join_proof_identity: None,
             hosted_captures: Default::default(),
+            #[cfg(feature = "hosted-wallet")]
+            hosted_wallet: None,
+            #[cfg(feature = "algos")]
+            algos: Default::default(),
             inner: Box::new(inner),
         };
         let output = engine.start(100.);

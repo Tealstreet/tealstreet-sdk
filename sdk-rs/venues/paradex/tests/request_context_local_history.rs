@@ -19,14 +19,18 @@ enum Local {
 const LOCALS: [Local; 4] = [Local::Public, Local::Client, Local::Bounds, Local::NoSymbol];
 
 fn engine(testnet: bool, private: bool) -> Engine<Paradex> {
-    let mut h = Harness::empty(Options {
+    let options = Options {
         testnet,
         public_data_only: !private,
-        key: private.then(|| "opaque-public-subkey".into()),
         paradex_address: private.then(|| "0x123".into()),
         subkey_address: private.then(|| "0x456".into()),
-        payload_signer: private,
-    });
+        ..Options::default()
+    };
+    let mut h = if private {
+        Harness::keyed(options, support::STARK_KEY)
+    } else {
+        Harness::empty(options)
+    };
     h.reply("/markets", MARKETS);
     h.reply("summary", TICKERS);
     if private {

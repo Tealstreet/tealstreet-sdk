@@ -28,23 +28,27 @@ vi.mock('../../utils/virtualClock', () => ({ virtualClock: { start: vi.fn(), set
 const expected = [
   'binance',
   'binancepm',
+  'binanceoptions',
   'binancespot',
   'binanceinverse',
   'bybit',
   'bybitspot',
   'bybitinverse',
   'bybitdemo',
+  'hyrotrader',
   'okx',
   'okxdemo',
   'okxeu',
   'okxeudemo',
   'bitget',
   'bitgetusdc',
+  'bitgetinverse',
   'kraken',
   'krakenspot',
   'hyperliquid',
   'hyperliquidspot',
   'lighter',
+  'lighter-robinhood',
   'paradex',
   'bitunix',
   'phemex',
@@ -53,6 +57,19 @@ const expected = [
   'blofin',
   'cryptocom',
   'asterdex',
+  'mexc',
+  'woo',
+  'kucoin',
+  'kucoinspot',
+  'coinbase',
+  'coinbasespot',
+  'grvt',
+  'kodiakfi',
+  'mode',
+  'what',
+  'woofi',
+  'backpack',
+  'bitrue',
 ];
 const out = Object.keys(exchangeMetadata).filter((name) => !expected.includes(name)) as ExchangeName[];
 const unsupported = { kind: 'unsupported', outcome: 'notSent' };
@@ -61,18 +78,29 @@ beforeEach(() => {
   vi.mocked(virtualClock.start).mockClear();
 });
 describe('Rust-only beta construction', () => {
+  it('admits the live Bitrue venue before loading an engine', () => {
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    expect(BETA_VENUES).toContain('bitrue');
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    expect(() => assertBetaAccount('bitrue', { key: '', secret: '', publicDataOnly: true })).not.toThrow();
+  });
   it('has exactly the declared IN names', () => {
     expect([...BETA_VENUES]).toEqual(expected);
     expect(getRegisteredExchangeNames()).toEqual(expected);
-    expect(new Set(BETA_VENUES).size).toBe(27);
-    expect(out).toEqual(expect.arrayContaining(['coinbase', 'hyrotrader', 'lighter-robinhood']));
+    // Robinhood now uses the same beta runtime as Lighter.
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    expect(new Set(BETA_VENUES).size).toBe(44);
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    expect(out).not.toContain('bitrue');
+    expect(out).toContain('polymarket');
   });
   it('constructs Rust for every IN name without an engine opt-in', async () => {
     for (const name of BETA_VENUES) {
       expect(await exchangeRegistry[name]()).toBe(state.Rust);
       expect(await createExchange(name, { key: '', secret: '', publicDataOnly: true })).toBeInstanceOf(state.Rust);
     }
-    expect(state.calls).toHaveLength(27);
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    expect(state.calls).toHaveLength(44);
     expect(state.calls.every(({ options }) => (options as { engine: string }).engine === 'rust')).toBe(true);
   });
   it('refuses OUT web/native loaders before loading a runtime', async () => {
@@ -119,7 +147,7 @@ describe('Rust-only beta construction', () => {
     const worker = new ExchangeWorker(
       { postMessage: (message: unknown) => messages.push(message) } as unknown as Worker,
       'saved-out-account',
-      'coinbase',
+      'polymarket',
       { key: '', secret: '' },
       {} as never,
       {} as never,
@@ -128,12 +156,59 @@ describe('Rust-only beta construction', () => {
     await expect(worker.start()).resolves.toBe(false);
     expect(virtualClock.start).not.toHaveBeenCalled();
     expect(state.calls).toEqual([]);
-    expect(JSON.stringify(messages)).toContain('coinbase is unsupported in this build');
+    expect(JSON.stringify(messages)).toContain('polymarket is unsupported in this build');
     worker.dispose();
   });
-  it('refuses unsupported delegated modes and Paradex callbacks without fallback', async () => {
+  it('admits Robinhood saved-account construction before key validation', async () => {
+    const account: ExchangeAccountConfig = {
+      exchange: 'lighter-robinhood',
+      name: 'robinhood',
+      apiKey: '1',
+      apiSecret: `0x${'22'.repeat(40)}`,
+    };
+    await expect(createExchangeFromAccount(account)).resolves.toBeInstanceOf(state.Rust);
+    expect(state.calls[0]?.name).toBe('lighter-robinhood');
+  });
+  it('admits Robinhood Hosted through the existing Lighter remote-signing policy', async () => {
     const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
-    const localOnly = ['kraken', 'krakenspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'paradex', 'phemex', 'bingx', 'apexomni', 'blofin', 'cryptocom', 'asterdex'] as const;
+    const options = { key: '1', secret: '', apiKeyIndex: '2', remoteSigner };
+    expect(deriveRemoteSigningPolicy('lighter-robinhood')?.enabled).toBe(true);
+    expect(() => assertBetaAccount('lighter-robinhood', options)).not.toThrow();
+    await expect(createExchange('lighter-robinhood', options)).resolves.toBeInstanceOf(state.Rust);
+  });
+  it.each(['remoteSigner', 'payloadSigner'] as const)(
+    'explains refused %s accounts before clock or constructor work',
+    async (signerKind) => {
+      const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
+      const payloadSigner = vi.fn();
+      const signing = signerKind === 'remoteSigner' ? { remoteSigner } : { payloadSigner };
+      for (const name of BETA_VENUES.filter((venue) => deriveRemoteSigningPolicy(venue)?.enabled !== true)) {
+        const prettyName = exchangeMetadata[name].prettyName;
+        const message = signerKind === 'remoteSigner'
+          ? `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`
+          : `${prettyName} delegated signing is unsupported in this build`;
+        await expect(createExchange(name, { key: 'public-key', secret: '', ...signing })).rejects.toMatchObject({
+          message,
+          kind: 'unsupported',
+          outcome: 'notSent',
+        });
+      }
+      await expect(createExchange('unknown' as ExchangeName, { key: '', secret: '' })).rejects.toMatchObject({
+        message: 'unknown is unsupported in this build',
+        kind: 'unsupported',
+        outcome: 'notSent',
+      });
+      expect(remoteSigner.sign).not.toHaveBeenCalled();
+      expect(payloadSigner).not.toHaveBeenCalled();
+      expect(virtualClock.start).not.toHaveBeenCalled();
+      expect(state.calls).toEqual([]);
+    },
+  );
+  it('refuses unsupported delegated modes without fallback', async () => {
+    const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
+    // Hyperliquid's, Lighter's and Paradex's structured remote signing is pinned in
+    // their rust.*-remote-signing.wasm.test.ts.
+    const localOnly = ['krakenspot'] as const;
     // #2262 enables Bitunix through the shared policy, without a beta override.
     const refused: readonly ExchangeName[] = deriveRemoteSigningPolicy('bitunix')?.enabled
       ? localOnly

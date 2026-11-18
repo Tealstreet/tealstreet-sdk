@@ -104,23 +104,10 @@ The `signRequest` method's approach (for reference only -- not used at runtime):
 
 With `options.payloadSigner` set, no Starknet private key enters the process. `key` carries the subkey PUBLIC key, and `initializeParadexSDK` returns an account stub holding only `paradexAddress`, before the 66-character private-key check. `signParadexTypedData()` passes the typed-data message hash (`starknet` `typedData.getMessageHash`, the same hash `Account.signMessage` signs) to the signer with `scheme: 'stark'`, and places its `signature` verbatim where the serialised `["r","s"]` goes. Any headers it returns go on the same request: the JWT auth fetch, the order POST, TP/SL POSTs and the amendment PUT. A batch of more than one order is refused, because a delegated signer produces one signature per request. `signRequest` signs only with a local key. Tests: `src/__tests__/paradex.payload-signer.test.ts`.
 
-The Rust engine supports the same payload signer contract. It emits a signing
-action containing the message hash and public key, then resumes the held HTTP
-request only after a signature event. Native hosts use
-`NetworkTransport::with_payload_signer`; JS hosts receive the account's
-`payloadSigner` callback. Signing and HTTP share one deadline; failures and late
-answers cannot send unsigned orders. JWT generation follows TS's direct raw
-fetch path. `remoteSigner` remains the TS API-client adapter contract: by itself
-it cannot replace JWT's StarkNet signing; use a local key or `payloadSigner` for
-that step. Signed protocol-relative URLs retain TS adapter semantics: browser
-HTTP inherits the page scheme, Node HTTP rejects them, and HOW concatenates the
-API base URL. The routing host exposes its cached `httpMode`; do not resolve
-routing a second time or treat all three adapters alike.
-
-The JS host validates signer header names and rejects CR/LF before encoding
-`name:value` lines for WASM. Values keep their exact bytes, including colons and
-surrounding whitespace; empty values and no headers are valid. The core also
-validates delegated headers for native callers before issuing HTTP.
+The Rust engine does not support this contract. Rust Paradex signs locally
+through its trusted Stark provider (`docs/plans/callers/rust-paradex-local-signer.md`),
+and a private Rust account with `payloadSigner` or `remoteSigner` refuses before
+construction (`unsupported`/`notSent`).
 
 **Order Signing** (`paradex.sdk.ts:242-340`):
 

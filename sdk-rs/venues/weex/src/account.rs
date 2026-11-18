@@ -2,6 +2,7 @@
 //! succeed. Private events and acknowledged writes invalidate older snapshots.
 use crate::account_wire::*;
 use crate::{Pending, Task, WeexFutures};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::credential_selection::CredentialRole;
@@ -54,6 +55,32 @@ pub struct Request {
 struct Skipped {
     ids: Vec<String>,
     unidentified: bool,
+}
+/// WEEX's documented key refusals, on a read answer.
+pub(crate) fn key_refusal(body: &str) -> Option<safe_cex_engine::VenueError> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Code {
+        Number(i64),
+        Text(String),
+    }
+    #[derive(Deserialize)]
+    struct Evidence {
+        #[serde(default)]
+        code: Option<Code>,
+        #[serde(default)]
+        msg: String,
+    }
+    let evidence: Evidence = serde_json::from_str(body).ok()?;
+    let code = match evidence.code.as_ref()? {
+        Code::Number(code) => *code,
+        Code::Text(text) => text.parse().ok()?,
+    };
+    matches!(code, 40006 | 40009 | 40012 | 40014 | 40018).then(|| {
+        safe_cex_engine::VenueError::new(format!("WEEX refused the API key: {}", evidence.msg))
+            .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+            .venue_code(code.to_string())
+    })
 }
 impl Skipped {
     fn covers(&self, id: &str) -> bool {
@@ -345,7 +372,10 @@ impl WeexFutures {
         self.account.next_id += 1;
         cx.send(
             socket,
-            format!(r#"{{"method":"PING","id":{}}}"#, self.account.next_id),
+            ControlFrame::heartbeat(format!(
+                r#"{{"method":"PING","id":{}}}"#,
+                self.account.next_id
+            )),
         );
     }
     fn account_cycle(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -605,7 +635,11 @@ impl WeexFutures {
             return;
         }
         if response.status >= 400 {
-            self.account_failed(cx, request, &format!("HTTP {}", response.status));
+            let detail = refusal_text(response.body).map_or_else(
+                || format!("HTTP {}", response.status),
+                |text| format!("HTTP {}: {text}", response.status),
+            );
+            self.account_failed(cx, request, &detail);
             return;
         }
         if matches!(request.kind, Kind::Normal | Kind::Algo) && request.page_rows == 100 {
@@ -897,7 +931,7 @@ impl WeexFutures {
             return false;
         }
         self.account.next_id += 1;
-        cx.send(socket,format!(r#"{{"method":"SUBSCRIBE","params":["account","positions","orders","fill"],"id":{}}}"#,self.account.next_id));
+        cx.send(socket,ControlFrame::subscription(format!(r#"{{"method":"SUBSCRIBE","params":["account","positions","orders","fill"],"id":{}}}"#,self.account.next_id)));
         self.refresh_account(cx);
         true
     }
@@ -928,7 +962,10 @@ impl WeexFutures {
             self.account.next_id += 1;
             cx.send(
                 socket,
-                format!(r#"{{"method":"PONG","id":{}}}"#, self.account.next_id),
+                ControlFrame::heartbeat(format!(
+                    r#"{{"method":"PONG","id":{}}}"#,
+                    self.account.next_id
+                )),
             );
             return true;
         }
@@ -943,6 +980,7 @@ impl WeexFutures {
         let Some(data) = event.d else {
             return true;
         };
+        cx.record_socket_topic(&[event.e]);
         match event.e {
             "positions" => {
                 self.account.revision += 1;
@@ -1174,6 +1212,37 @@ impl WeexFutures {
                 .is_ok()
                 .then_some(Accepted),
             _ => safe_cex_engine::AuthOutcome::accepted_list(response, ArrayAt::Root),
+        }
+    }
+}
+
+/// The venue's code and words from a refused read, never the rest of the body.
+fn refusal_text(body: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Refusal<'a> {
+        #[serde(borrow)]
+        code: Option<&'a serde_json::value::RawValue>,
+        #[serde(default)]
+        msg: String,
+    }
+    let refusal = serde_json::from_str::<Refusal<'_>>(body).ok()?;
+    if refusal.msg.is_empty() {
+        return None;
+    }
+    Some(match refusal.code {
+        Some(code) => format!("{} ({})", refusal.msg, code.get().trim_matches('"')),
+        None => refusal.msg,
+    })
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self.kind {
+            Kind::Balance => S::BALANCE,
+            Kind::Positions => S::POSITIONS,
+            Kind::Normal | Kind::Algo => S::ORDERS,
+            _ => S::NONE,
         }
     }
 }

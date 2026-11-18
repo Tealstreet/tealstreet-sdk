@@ -5,12 +5,18 @@ import chalk from 'chalk';
 import { setProxyToken } from '@tealstreet/safe-cex/src/accessToken';
 import { loadConfig, saveConfig } from './config';
 import { BRAND } from './brand';
+import { onStorageOwnerChange, authOwner, isRecord, legacyDataRequiresReentry } from './storage-context';
 
 /** Set by whichever path warns first; see `checkAndRefreshToken`. */
 export let warnedTokenExpiryThisProcess = false;
 export const markTokenExpiryWarned = (): void => {
   warnedTokenExpiryThisProcess = true;
 };
+
+onStorageOwnerChange(() => {
+  setProxyToken('');
+  warnedTokenExpiryThisProcess = false;
+});
 
 // Tealstreet web app handles OAuth with Auth0
 // Default to localhost:3000 for local development
@@ -154,7 +160,7 @@ function startCallbackServer(expectedState: string): Promise<CallbackResult> {
 /**
  * Decode JWT to get expiration
  */
-function decodeJwt(token: string): any {
+function decodeJwt(token: string): { exp?: number; sub?: string } | null {
   const parts = token.split('.');
   if (parts.length !== 3) return null;
   try {
@@ -164,7 +170,12 @@ function decodeJwt(token: string): any {
     while (payload.length % 4) {
       payload += '=';
     }
-    return JSON.parse(Buffer.from(payload, 'base64').toString());
+    const decoded: unknown = JSON.parse(Buffer.from(payload, 'base64').toString());
+    if (!isRecord(decoded)) return null;
+    return {
+      exp: typeof decoded.exp === 'number' ? decoded.exp : undefined,
+      sub: typeof decoded.sub === 'string' ? decoded.sub : undefined,
+    };
   } catch {
     return null;
   }
@@ -212,18 +223,23 @@ export async function login(): Promise<boolean> {
     config.auth = {
       accessToken: result.token,
       expiresAt,
-      userId: result.userId,
+      userId: result.userId || authOwner({ accessToken: result.token }) || undefined,
     };
+    if (!config.auth.userId) throw new Error('Login token has no user identity; sign in again.');
     saveConfig(config);
 
     // Prime safe-cex's in-memory cache so any in-flight HOW retry picks up the
     // new token without waiting for the next refresh cycle.
     setProxyToken(result.token);
+    if (legacyDataRequiresReentry())
+      console.log(
+        chalk.yellow('Some older CLI files could not be safely imported. Re-enter the accounts and settings you need.'),
+      );
 
     console.log(chalk.green(`Successfully logged in as ${result.email || result.userId || 'user'}`));
     return true;
-  } catch (error: any) {
-    console.log(chalk.red(`Authentication failed: ${error.message}`));
+  } catch (error) {
+    console.log(chalk.red(`Authentication failed: ${error instanceof Error ? error.message : 'unknown error'}`));
     return false;
   }
 }
@@ -332,6 +348,7 @@ export function getProxyTokenFromConfig(): string | null {
  * Logout - clear stored tokens
  */
 export function logout(): void {
+  setProxyToken('');
   const config = loadConfig();
   delete config.auth;
   saveConfig(config);
@@ -354,7 +371,7 @@ export function getAuthState(): AuthState {
     (value): value is number => typeof value === 'number',
   );
   const expiresAt = expiries.length ? Math.min(...expiries) : undefined;
-  const userId = config.auth.userId || tokenPayload?.sub;
+  const userId = authOwner(config.auth) || undefined;
   if (expiresAt !== undefined && expiresAt <= Date.now()) return { state: 'expired', userId };
   return {
     state: 'signed_in',
@@ -383,13 +400,10 @@ export function showAuthStatus(): void {
 
   // Check actual JWT expiry
   const jwtExpiresAt = tokenPayload?.exp ? tokenPayload.exp * 1000 : null;
-  const jwtExpiresIn = jwtExpiresAt
-    ? Math.max(0, Math.round((jwtExpiresAt - Date.now()) / 1000 / 60 / 60 / 24))
-    : null;
+  const jwtExpiresIn = jwtExpiresAt ? Math.max(0, Math.round((jwtExpiresAt - Date.now()) / 1000 / 60 / 60 / 24)) : null;
 
   // Detect mismatch between stored expiresAt and actual JWT exp
-  const hasMismatch =
-    jwtExpiresAt && config.auth.expiresAt && Math.abs(jwtExpiresAt - config.auth.expiresAt) > 60000; // More than 1 minute difference
+  const hasMismatch = jwtExpiresAt && config.auth.expiresAt && Math.abs(jwtExpiresAt - config.auth.expiresAt) > 60000; // More than 1 minute difference
 
   console.log(chalk.green('Logged in'));
   console.log(chalk.gray(`  User ID: ${config.auth.userId || tokenPayload?.sub || 'Unknown'}`));

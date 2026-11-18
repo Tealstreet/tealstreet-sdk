@@ -1,11 +1,68 @@
 # Native transport routing
 
 `NetworkTransport::new()` connects directly. Account-backed server callers must
-pass the same resolved routing plan as the JavaScript host. The TypeScript SDK
-owns the venue table, metadata defaults, proxy pools, region choice and feature
-flags; the native host applies a plan and never resolves venue names itself.
+pass the same resolved routing plan as the JavaScript host.
 
-Resolve once at the account boundary, after normalizing its `ExchangeOptions`:
+A native server resolves it with `resolve::account_transport` (the hosted
+account's proxy/tunnel/region defaults) and `resolve::resolve_routing_plan`, a
+port of the TS resolver for the Tealstreet and direct providers with the browser
+relay gate off. Its data is `src/routing/table.json`, generated from the TS tables
+by `packages/safe-cex/src/transport/engine.native-routing-port.test.ts`
+(`UPDATE_NATIVE_ROUTING_PORT=1`), which also writes the TS plans that
+`tests/routing_port.rs` holds it to. Secondary read keys are not routed natively yet.
+Hosted AsterDEX resolves `https://fapi.asterdex.com` on mainnet and
+`https://fapi.asterdex-testnet.com` on testnet. Its existing account defaults keep
+REST on the Japan HOW egress even with saved proxy/tunnel flags off. WebSocket
+routing and the COSIGNED private-startup proof catalog are unchanged.
+WOO routing inputs also carry the public `applicationId`, retaining its private
+stream suffix when using the fleet relay. Hosted WOO resolves the venue
+mainnet/staging REST origins before startup and passes that application ID from
+account init into the routing plan. Signing admission remains registry-owned.
+Hosted KuCoin Spot resolves its own `https://api.kucoin.com` REST origin,
+independently of Futures' `https://api-futures.kucoin.com`. Both exact names
+refuse testnet rather than falling through to a production origin.
+
+Native HyroTrader routing resolves the TS production/challenge default
+`https://sim-tealstreet.hyro.site`, independently of Bybit's REST hosts, and
+refuses hosted testnet with `NoBaseUrl`. The existing table keeps direct defaults,
+the opt-in regional REST proxy and Singapore HOW for a saved tunnel flag; native
+socket endpoint configuration is unchanged. This origin lookup does not provision
+the HyroTrader engine's endpoint map: the server's separate unhosted refusal
+remains in place, as does COSIGNED private-startup proof readiness.
+
+Hosted MEXC resolves its mainnet REST origin to `https://api.mexc.com` through
+the existing Japan proxy pool, including when the saved proxy flag is false.
+Saved MEXC tunnel flags are normalized off: MEXC cannot use HOW, and an old
+flag must not suppress the required REST proxy prefix.
+MEXC has no sandbox: hosted testnet refuses `NoBaseUrl`, never the live alias.
+Its direct WebSocket routing and COSIGNED private-startup proof catalog are unchanged.
+The deployment can replace the Tealstreet hosts: `PROXY_PRIVATE_URL` sets every
+whitelisted private pool and `PROXY_PUBLIC_URL` the public CORS proxy (https), and
+`PROXY_TUNNEL_URL` every tunnel egress and the table routes under it (wss). Each
+must name a `tealstreet.io` host, with no query; a trailing `/` is dropped. Unset
+keeps the table's hosts. The exchange server reads them once at startup
+(`resolve::route_bases`), refuses a malformed one, and logs the effective bases.
+
+Hosted Coinbase perpetuals resolve `https://drb.coinbase.com/api/v2`; Coinbase
+Spot resolves `https://api.coinbase.com`. Both retain the existing regional REST
+proxy and provider-owned JWT handling. Hosted testnet refuses rather than using
+live endpoints: the native engines do not implement the separate static Advanced
+Trade sandbox. Private-startup proof readiness is unchanged.
+
+Hosted Binance Options resolves `https://eapi.binance.com` with the existing
+Japan egress policy and saved transport preferences. Hosted testnet refuses
+`NoBaseUrl`; this prerequisite does not enable the engine/reference's legacy
+testnet endpoint or change the private-startup proof catalog.
+
+Hosted Kraken Futures resolves `https://futures.kraken.com`, retaining the native
+engine's full `/derivatives/api/v3`, `/api/history/v3` and `/api/charts/v1` paths.
+Its existing account defaults select Japan HOW even with saved proxy/tunnel flags
+off; the origin lookup changes no signing headers or request paths. Hosted testnet
+refuses `NoBaseUrl`: Kraken [retired the legacy demo](https://support.kraken.com/articles/360024809011-api-testing-environment-derivatives),
+and the native engine maps no supported replacement sandbox. Kraken Spot and the
+COSIGNED private-startup proof catalog are unchanged.
+
+A JavaScript launcher instead resolves once at the account boundary, after normalizing its `ExchangeOptions`:
 
 ```ts
 import { resolveEngineRoutingPlan } from '@tealstreet/safe-cex/src/transport/engine';
@@ -51,7 +108,11 @@ per operation, preserves original request bodies, and streams HTTP results in
 16 KiB chunks. A HOW request uses a dedicated tunnel connection with raw response
 negotiation, supports TSB1 gzip and older text encodings, and honors automatic
 IP-whitelist authentication. Token acquisition, authentication and response
-handling share one 20-second deadline. Transport recovery never replays a sent
+handling share one original per-class deadline (60 s discovery, 30 s history,
+20 s order reads/writes and other reads), capped by any explicit remaining
+engine/venue budget. Startup discovery keeps its existing 90 s total; tunnel
+readiness has a 30 s cap inside the original deadline. Timeout errors name the
+class, budget and elapsed milliseconds. Transport recovery never replays a sent
 HTTP write.
 
 Private socket relays hide tunnel authentication and report open only after the
@@ -63,27 +124,20 @@ feed identities isolate sockets that share a role and URL. Other decoded venue
 messages reset the silent streak. The native TLS WebSocket upgrade uses
 HTTP/1.1; Tealstreet upgrade and REST headers come from the resolved policy.
 
-Paradex delegated signing keeps the private subkey outside the engine. Set
-`Options.payload_signer = true` and configure the host callback alongside routing:
+Typed WebSocket writes reserve the writer and check socket readiness before
+claiming. Release hooks and IO-authority callbacks run outside the socket-state
+mutex. The synchronous handoff then checks the same socket epoch and readiness
+again. Retirement, replacement or lost authority during admission aborts the
+reservation as `NotSent`. Pacing, nonce release floors and write fences advance
+only with the physical handoff; signing-release observers run afterward with the
+socket mutex unlocked. Claims are never replayed. Callback panics propagate,
+while writer retirement and driver cleanup tolerate poisoned socket state.
 
-```rust,ignore
-use safe_cex_native::PayloadSigner;
-let signer: PayloadSigner = Arc::new(move |request| {
-    let account_context = account_context.clone();
-    Box::pin(async move {
-        // request carries exchangeName, the public key and the StarkNet message hash.
-        account_context.sign_payload(request).await
-    })
-});
-let transport = NetworkTransport::with_routing(plan, tokens).with_payload_signer(signer);
-```
-
-The host returns a signature event before the engine emits HTTP. Signer headers
-travel with that exact request; fixed venue authentication headers take precedence.
-Signing and HTTP share one 20-second deadline, and late signer answers cannot
-resume a failed request. An unconfigured callback fails before network I/O.
-Paradex JWT generation follows the TS raw-fetch path and always goes direct;
-ordinary order requests retain the resolved account route.
+Paradex signs through its trusted local Stark provider: `build` consumes the
+account key in trusted setup and seals the provider's public key. There is no
+delegated payload-signing callback; a private Paradex account with an external
+signer refuses. Paradex `/auth` always goes direct; ordinary requests retain the
+resolved account route.
 
 # Network frame server
 
@@ -200,6 +254,12 @@ Orphan IDs remain reserved until the venue finishes: disconnect never cancels or
 replays a potentially submitted trading write. A permanently stuck venue job
 therefore continues to occupy a bounded slot. Exhausted internal IDs fail closed
 rather than wrapping. The server never retries client trading commands.
+
+`AccountHandle::begin_disposal` binds the first disposal cause before host-owned
+algo cleanup, without stopping the actor's I/O. `dispose`, normal termination
+and actor drop record an ordinary stop when no cause is bound. Cloned handles
+share that one-time record: late releases cannot relabel a stopped actor as a
+planned move. `disposal_cause` reads the original cause after cleanup as well.
 
 Diagnostic codes are stable; messages are display data. Engine and host-origin
 warnings use the same event envelope. Warn+ is written to stderr without a

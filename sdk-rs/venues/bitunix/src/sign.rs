@@ -1,6 +1,7 @@
 //! Bitunix signs compact body bytes and sorted, delimiter-free query parameters.
 pub mod dispatch;
 use safe_cex_engine::num;
+use safe_cex_engine::text::JoinWith;
 #[derive(Default, Clone)]
 pub struct Params(Vec<(String, String)>);
 impl Params {
@@ -31,7 +32,7 @@ impl Params {
         rows.iter()
             .map(|(k, v)| format!("{k}={}", encode(v)))
             .collect::<Vec<_>>()
-            .join("&")
+            .join_with("&")
     }
     pub fn signing(&self) -> String {
         let mut rows = self.0.clone();

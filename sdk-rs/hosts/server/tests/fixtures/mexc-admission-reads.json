@@ -1,0 +1,82 @@
+{
+  "/api/v1/contract/detail": {
+    "success": true,
+    "code": 0,
+    "data": [
+      {
+        "symbol": "BTC_USDT",
+        "baseCoin": "BTC",
+        "quoteCoin": "USDT",
+        "settleCoin": "USDT",
+        "state": 0,
+        "apiAllowed": true,
+        "contractSize": 0.0001,
+        "volUnit": 1,
+        "priceUnit": 0.1,
+        "minVol": 1,
+        "maxVol": 400000,
+        "minLeverage": 1,
+        "maxLeverage": 500,
+        "makerFeeRate": 0,
+        "takerFeeRate": 0.0002
+      }
+    ]
+  },
+  "/api/v1/contract/ticker": {
+    "success": true,
+    "code": 0,
+    "data": [
+      {
+        "symbol": "BTC_USDT",
+        "lastPrice": 60000,
+        "fairPrice": 60001,
+        "indexPrice": 59999,
+        "bid1": 59999.9,
+        "ask1": 60000,
+        "riseFallRate": 0.01,
+        "holdVol": 10000,
+        "fundingRate": 0.0001,
+        "volume24": 50000,
+        "amount24": 300000
+      }
+    ]
+  },
+  "/api/v1/private/position/position_mode": {
+    "success": true,
+    "code": 0,
+    "data": 2
+  },
+  "/api/v1/private/account/assets": {
+    "success": true,
+    "code": 0,
+    "data": [
+      {
+        "currency": "USDT",
+        "availableBalance": 1000,
+        "equity": 1000,
+        "unrealized": 0,
+        "frozenBalance": 0
+      }
+    ]
+  },
+  "/api/v1/private/position/open_positions": {
+    "success": true,
+    "code": 0,
+    "data": []
+  },
+  "/api/v1/private/order/list/open_orders": {
+    "success": true,
+    "code": 0,
+    "data": []
+  },
+  "/api/v1/private/planorder/list/orders": {
+    "success": true,
+    "code": 0,
+    "data": []
+  },
+  "/api/v1/private/stoporder/list/orders": {
+    "success": true,
+    "code": 0,
+    "data": []
+  }
+}

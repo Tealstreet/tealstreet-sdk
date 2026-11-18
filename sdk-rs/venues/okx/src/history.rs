@@ -1,10 +1,8 @@
 //! Typed, streamed rare reads. Native derivative quantities are contract counts.
 use crate::{Okx, Pending, sign};
-use safe_cex_engine::Level;
 use safe_cex_engine::credential_selection::{PrimaryReason, SlotPolicy};
 use safe_cex_engine::history::ReadCompletion;
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Order, OrderExtra, OrderSide, OrderStatus, OrderType, TimeInForce};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::request_context::{
@@ -43,6 +41,8 @@ pub struct Request {
     from: Option<f64>,
     to: Option<f64>,
     limit: usize,
+    /// A window with no limit: a full fills page flags incomplete, nothing truncates.
+    open_window: bool,
     pages: usize,
     rows_seen: usize,
     /// Rows committed before the page in flight; a failed page rolls back to it.
@@ -375,7 +375,9 @@ impl Request {
         let json = match &mut self.rows {
             Rows::Fills(rows) => {
                 rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-                rows.truncate(self.limit);
+                if !self.open_window {
+                    rows.truncate(self.limit);
+                }
                 serde_json::to_string(rows)
             }
             Rows::Orders(rows) => {
@@ -424,6 +426,22 @@ impl Okx {
         let public = matches!(query, Query::PublicTrades { .. });
         let keyless = self.credentials.is_none() && !public;
         let empty_fills = matches!(&query, Query::Fills { symbol: None, .. });
+        let open_window = matches!(
+            &query,
+            Query::Fills {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            } | Query::OrderHistory {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            } | Query::Income {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            }
+        );
         let (endpoint, symbol, order_id, income_kind, from, to, limit, rows) = match query {
             Query::OrderByClientId { .. } => unreachable!(),
             Query::Fills {
@@ -464,7 +482,7 @@ impl Okx {
                 to_ms,
                 limit,
             } => (
-                if from_ms.is_some_and(|from| cx.now - from > RECENT_MS) {
+                if from_ms.is_some_and(|from| cx.protocol_now() - from > RECENT_MS) {
                     "/api/v5/account/bills-archive"
                 } else {
                     "/api/v5/account/bills"
@@ -574,6 +592,7 @@ impl Okx {
                 from,
                 to,
                 limit,
+                open_window: open_window && matches!(rows, Rows::Fills(_)),
                 rows,
                 pages: 0,
                 rows_seen: 0,
@@ -606,8 +625,11 @@ impl Okx {
         // Secondary GET snapshots may belong to another account. Their cached
         // client IDs cannot establish primary placement identity.
         else if self.options.read_credentials.is_none()
+            // A Creating row may be a send still in flight; only the venue can say it is placed.
             && let Some(order) = cx.store.orders().iter().find(|order| {
-                order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
+                order.symbol == symbol
+                    && order.status != OrderStatus::Creating
+                    && order.client_order_id.as_deref() == Some(&client_order_id)
             })
         {
             Some(found(order.clone(), None))
@@ -680,6 +702,7 @@ impl Okx {
         };
         let read = Request {
             lookup: Some(client_order_id),
+            open_window: false,
             completion,
             selected,
             leg: None,
@@ -768,6 +791,10 @@ impl Okx {
                 || filled_native > amount
             {
                 return Err("Invalid OKX lookup order".into());
+            }
+            // A post-only reject also reads canceled; with nothing filled it cannot say it was placed.
+            if status == OrderStatus::Canceled && filled_native == 0.0 {
+                return Ok(UNKNOWN.into());
             }
             let kind = match row.ord_type {
                 "market" | "optimal_limit_ioc" => OrderType::Market,
@@ -1151,6 +1178,13 @@ impl Okx {
                 r.endpoint = "/api/v5/trade/fills-history";
                 self.history_request(cx, r);
             } else {
+                // Each endpoint is read for one page; a full one may hide more rows.
+                if r.open_window && r.count >= r.limit {
+                    r.completion.incomplete(
+                        safe_cex_engine::history::IncompleteReason::PageFull,
+                        "history is INCOMPLETE: OKX fills read one page and it was full",
+                    );
+                }
                 r.finish(cx);
             }
             return;
@@ -1186,14 +1220,9 @@ impl Okx {
                 );
                 return;
             }
-            cx.event(
-                Level::Warn,
-                code::HISTORY_INCOMPLETE,
+            r.completion.incomplete(
+                safe_cex_engine::history::IncompleteReason::PageBudget,
                 format!("OKX history hit {cap}-page cap; older rows were not fetched"),
-                vec![(
-                    "command",
-                    safe_cex_engine::Value::Num(f64::from(r.completion.command())),
-                )],
             );
             r.finish(cx);
             return;
@@ -1211,14 +1240,9 @@ impl Okx {
                 );
                 return;
             }
-            cx.event(
-                Level::Warn,
-                code::HISTORY_INCOMPLETE,
+            r.completion.incomplete(
+                safe_cex_engine::history::IncompleteReason::CursorStalled,
                 "OKX history cursor did not advance; older rows were not fetched",
-                vec![(
-                    "command",
-                    safe_cex_engine::Value::Num(f64::from(r.completion.command())),
-                )],
             );
             r.finish(cx);
             return;
@@ -1251,8 +1275,10 @@ impl Okx {
             let _ = cx.fail_context(r.root(), error);
             return;
         }
-        r.completion
-            .incomplete(format!("history is INCOMPLETE: {}", error.message));
+        r.completion.incomplete(
+            safe_cex_engine::history::IncompleteReason::LaterPageFailed,
+            format!("history is INCOMPLETE: {}", error.message),
+        );
         r.finish(cx);
     }
     pub(crate) fn history_sign_failed(

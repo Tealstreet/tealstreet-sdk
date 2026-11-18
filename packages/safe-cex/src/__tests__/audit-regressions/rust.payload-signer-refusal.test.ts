@@ -9,6 +9,7 @@ import type { ExchangeName, ExchangeOptions } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import * as betaPolicy from '../../exchanges/rust/betaVenues';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import {
   runsOnRustEngine,
@@ -70,18 +71,12 @@ const start = (name: ExchangeName, options: Partial<ExchangeOptions>) => {
 // MCP signer mode supplies a payloadSigner and no secret. These venues skip the
 // generic local-credential guard, so before this refusal they started unsigned.
 it.each([
-  'hyperliquid',
   'txflow',
-  'coinbase',
-  'coinbasespot',
   'polymarket',
-  'lighter',
-  'lighter-robinhood',
   'binance',
   'bybit',
 ] as const)('keeps native payloadSigner refusal classification on private %s before I/O', async (name) => {
-  // Lighter signs locally, and a payload-only Lighter account starts public by contract.
-  for (const secret of name.startsWith('lighter') ? ['local-secret'] : ['', 'local-secret']) {
+  for (const secret of ['', 'local-secret']) {
     const { construct, transport, io } = recordEngine(name, true);
     const failure = await start(name, { secret, payloadSigner }).catch((error: unknown) => error);
     expect(failure).toMatchObject({
@@ -98,9 +93,8 @@ it.each([
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
-it('leaves Paradex and explicitly public-only payload signers to native construction policy', async () => {
+it('leaves explicitly public-only payload signers to native construction policy', async () => {
   for (const [name, options] of [
-    ['paradex', { payloadSigner, paradexAddress: '0x1', subkeyAddress: '0x2' }],
     ['bybit', { payloadSigner, publicDataOnly: true }],
   ] as const) {
     const { transport } = recordEngine(name);
@@ -111,28 +105,49 @@ it('leaves Paradex and explicitly public-only payload signers to native construc
   }
 });
 
-it('reports the structured refusal through start and validateAccount', async () => {
-  const { construct, transport, io } = recordEngine('hyperliquid', true);
-  const hyperliquid = new RustEngineExchange(
-    'hyperliquid',
-    { key: 'k', secret: '', payloadSigner } as ExchangeOptions,
-    new DefaultStore(),
-  );
-  running.push(hyperliquid);
-  await expect(hyperliquid.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+// Hyperliquid and Paradex declare remote signing, so their PayloadSigner refusal is
+// the shared delegated policy: refused at construction, before any engine or transport.
+it('refuses a private hyperliquid or paradex payloadSigner at construction before any engine', () => {
+  const { construct, transport, io } = recordEngine('hyperliquid');
+  for (const [name, options] of [
+    ['hyperliquid', {}], ['hyperliquidspot', {}], ['paradex', { paradexAddress: '0x1', subkeyAddress: '0x2' }],
+  ] as const) {
+    expect(() => new RustEngineExchange(name, { key: 'k', secret: '', payloadSigner, ...options } as ExchangeOptions, new DefaultStore()))
+      .toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
+  }
+  expect(construct).not.toHaveBeenCalled();
+  expect(transport).not.toHaveBeenCalled();
+  expect(io).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
 
-  const coinbase = new RustEngineExchange(
-    'coinbase',
+// Lighter declares remote signing too; its PayloadSigner has no REST-only lifecycle.
+it('refuses a private lighter payloadSigner at construction before any engine', () => {
+  const { construct, transport, io } = recordEngine('lighter');
+  for (const name of ['lighter', 'lighter-robinhood'] as const) {
+    for (const secret of ['', 'local-secret']) {
+      expect(() => new RustEngineExchange(name, { key: 'k', secret, apiKeyIndex: '2', payloadSigner } as ExchangeOptions, new DefaultStore()))
+        .toThrow(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }));
+    }
+  }
+  expect(construct).not.toHaveBeenCalled();
+  expect(transport).not.toHaveBeenCalled();
+  expect(io).not.toHaveBeenCalled();
+  expect(payloadSigner).not.toHaveBeenCalled();
+});
+
+it('reports the structured refusal through start and validateAccount', async () => {
+  const { construct, transport, io } = recordEngine('txflow', true);
+  const txflow = new RustEngineExchange(
+    'txflow',
     { key: 'k', secret: '', payloadSigner } as ExchangeOptions,
     new DefaultStore(),
   );
-  running.push(coinbase);
-  await expect(coinbase.validateAccount()).resolves.toMatchObject({
-    kind: 'unsupported',
-    error: expect.stringContaining('Rust coinbase delegated signing is unsupported in this build'),
-  });
-  expect(construct).toHaveBeenCalledTimes(2);
-  expect(transport).toHaveBeenCalledTimes(2);
+  running.push(txflow);
+  await expect(txflow.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+
+  expect(construct).toHaveBeenCalledTimes(1);
+  expect(transport).toHaveBeenCalledTimes(1);
   expect(io).not.toHaveBeenCalled();
 });
 
@@ -154,26 +169,37 @@ describe('factory and worker loaders', () => {
   const signed = (extra: Partial<ExchangeOptions> = {}): ExchangeOptions =>
     ({ key: 'k', secret: '', payloadSigner, engine: 'rust', ...extra }) as ExchangeOptions;
 
-  it('createExchange builds Rust venues for declared Bybit and Binance payload signers', async () => {
+  it('createExchange builds Rust venues for admitted Bybit and Binance payload signers', async () => {
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
     for (const name of ['bybit', 'binance'] as const) {
-      const exchange = await createExchange(name, signed());
-      try {
-        expect(exchange, name).toBeInstanceOf(RustEngineExchange);
-      } finally {
-        exchange.dispose();
+      for (const options of [signed(), signed({ engine: undefined })]) {
+        const exchange = await createExchange(name, options);
+        try {
+          expect(exchange, name).toBeInstanceOf(RustEngineExchange);
+        } finally {
+          exchange.dispose();
+        }
       }
     }
   }, 60_000);
 
   it('OUT names refuse without constructing a hosted TS class', async () => {
+    // This case exercises admission itself; the other cases exercise native codecs below it.
+    const actual = await vi.importActual<typeof import('../../exchanges/rust/betaVenues')>('../../exchanges/rust/betaVenues');
+    vi.spyOn(betaPolicy, 'assertBetaVenue').mockImplementation(actual.assertBetaVenue);
+    vi.spyOn(betaPolicy, 'assertBetaAccount').mockImplementation(actual.assertBetaAccount);
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
-    for (const name of ['coinbase', 'tealstreet-dex'] as const) {
+    // Codec support does not admit an OUT venue, regardless of signer mode.
+    // restored by #3502; #3317 dropped a live venue without a product decision.
+    for (const name of ['polymarket'] as const) {
       // The hosted loader serves keyless remote signing only.
       expect(isKeylessRemoteSigned(name, signed()), name).toBe(false);
       for (const options of [signed(), signed({ engine: undefined })]) {
-        recordEngine(name, true);
+        const { construct, transport, io } = recordEngine(name, true);
         await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+        expect(construct).not.toHaveBeenCalled();
+        expect(transport).not.toHaveBeenCalled();
+        expect(io).not.toHaveBeenCalled();
       }
     }
   }, 60_000);

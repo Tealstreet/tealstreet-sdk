@@ -1,4 +1,5 @@
 //! Local refusal admission through genuine Engine callbacks; private fallthrough stays native.
+mod support;
 #[cfg(feature = "spot")]
 use safe_cex_engine::model::StpMode;
 use safe_cex_engine::model::{
@@ -10,10 +11,11 @@ use safe_cex_engine::{
     Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, Method, Notice, Outcome, Response,
     SocketId, TimerId, Venue, VenueError,
 };
+use safe_cex_venue_kucoin::Kucoin;
 #[cfg(feature = "spot")]
 use safe_cex_venue_kucoin::spot::KucoinSpot;
-use safe_cex_venue_kucoin::{Kucoin, Options};
 use serde_json::json;
+use support::credentials::Options;
 
 const SYMBOL: &str = "BTC-USDT";
 const COMMAND: u32 = 71;
@@ -171,13 +173,20 @@ fn order() -> Order {
         extra: None,
     }
 }
-fn seeded<V: Venue>(inner: V) -> Engine<Probe<V>> {
+fn seeded<V: Venue>(
+    options: Options,
+    constructor: impl FnOnce(safe_cex_venue_kucoin::Options) -> V,
+) -> Engine<Probe<V>> {
+    let (options, provider, identities) = options.prepare();
+    let inner = constructor(options);
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
         inner,
         held: vec![],
         hold_next: false,
         original: None,
     });
+    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    e.set_identities(identities).unwrap();
     e.store_mut().set_markets(vec![Market {
         id: SYMBOL.into(),
         symbol: SYMBOL.into(),
@@ -220,7 +229,7 @@ fn seeded<V: Venue>(inner: V) -> Engine<Probe<V>> {
 }
 #[cfg(feature = "spot")]
 fn spot(keyed: bool) -> Engine<Probe<KucoinSpot>> {
-    seeded(KucoinSpot::new(options(keyed)))
+    seeded(options(keyed), KucoinSpot::new)
 }
 fn run<V: Venue>(e: &mut Engine<Probe<V>>, now: f64, command: Command) -> Vec<Action> {
     e.handle(now, Event::Command(command));
@@ -424,22 +433,22 @@ macro_rules! capacity_test {
 }
 capacity_test!(
     futures_candle_range_capacity,
-    seeded(Kucoin::new(options(false))),
+    seeded(options(false), Kucoin::new),
     CandleRange
 );
 capacity_test!(
     futures_candle_interval_capacity,
-    seeded(Kucoin::new(options(false))),
+    seeded(options(false), Kucoin::new),
     CandleInterval
 );
 capacity_test!(
     futures_validation_capacity,
-    seeded(Kucoin::new(options(false))),
+    seeded(options(false), Kucoin::new),
     FuturesValidation
 );
 capacity_test!(
     futures_missing_credentials_capacity,
-    seeded(Kucoin::new(options(false))),
+    seeded(options(false), Kucoin::new),
     FuturesCredentials
 );
 #[cfg(feature = "spot")]
@@ -473,7 +482,7 @@ capacity_test!(spot_builder_capacity, spot(true), SpotBuild);
 #[test]
 fn native_futures_errors_precede_credentials_and_preserve_store() {
     native(
-        seeded(Kucoin::new(options(false))),
+        seeded(options(false), Kucoin::new),
         &[
             Case::CandleRange,
             Case::CandleInterval,
@@ -482,7 +491,7 @@ fn native_futures_errors_precede_credentials_and_preserve_store() {
         ],
     );
     native(
-        seeded(Kucoin::new(options(true))),
+        seeded(options(true), Kucoin::new),
         &[Case::FuturesValidation],
     );
 }
@@ -576,7 +585,7 @@ fn native_spot_uuid_draws_precede_local_credentials_and_later_builder_failures()
 }
 #[test]
 fn valid_futures_candles_keep_public_wire_fallthrough() {
-    let mut e = seeded(Kucoin::new(options(false)));
+    let mut e = seeded(options(false), Kucoin::new);
     let actions = run(
         &mut e,
         101.,
@@ -648,7 +657,7 @@ fn owner_lifetime<V: Venue>(mut e: Engine<Probe<V>>, cases: &[Case]) {
 #[test]
 fn futures_duplicate_and_fixed_clock_reuse_keep_original_owner() {
     owner_lifetime(
-        seeded(Kucoin::new(options(false))),
+        seeded(options(false), Kucoin::new),
         &[
             Case::CandleRange,
             Case::CandleInterval,
@@ -721,7 +730,7 @@ fn private_fallthrough<V: Venue>(mut e: Engine<Probe<V>>, command: Command, path
 #[test]
 fn valid_futures_private_wire_ignores_local_refusal_capacity() {
     private_fallthrough(
-        seeded(Kucoin::new(options(true))),
+        seeded(options(true), Kucoin::new),
         Case::FuturesCredentials.command(),
         "/api/v1/orders/native-1?symbol=BTC-USDT",
     );

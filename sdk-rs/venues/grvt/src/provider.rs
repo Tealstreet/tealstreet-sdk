@@ -1,4 +1,4 @@
-//! Provider work over immutable GRVT orders. Installed construction is adopted separately.
+//! Dispatch-time GRVT login and immutable order signing, including hosted statements.
 use crate::account::{BUILDER_MAINNET, BUILDER_TESTNET};
 use crate::sign;
 use safe_cex_crypto::{ethereum, hex};
@@ -8,7 +8,7 @@ use safe_cex_engine::signing::{
     SignRequest, SignResult,
 };
 use safe_cex_engine::{Action, DispatchContext, Method, SignStep};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 const CREATE: &str = "/lite/v1/create_order";
@@ -39,12 +39,14 @@ pub struct OrderFields {
 }
 
 /// Materialized once after call admission; preparing a packet never changes these fields.
+#[derive(Clone)]
 pub struct FrozenOrder {
     fields: OrderFields,
     digest: [u8; 32],
     testnet: bool,
     time_in_force: &'static str,
     post_only: bool,
+    statement: String,
 }
 impl FrozenOrder {
     pub fn new(fields: OrderFields, testnet: bool) -> Result<Self, SignError> {
@@ -109,13 +111,39 @@ impl FrozenOrder {
             if testnet { 326 } else { 325 },
         )
         .map_err(|_| SignError::InvalidRequest)?;
+        let statement = serde_json::to_string(&Statement {
+            subaccount: sub_account_id.to_string(),
+            testnet,
+            asset_id: hex(&fields.asset_id),
+            amount: contract_size.to_string(),
+            price: limit_price.to_string(),
+            buying: fields.buying,
+            market: fields.limit_price.is_none(),
+            tif: code,
+            post_only,
+            reduce_only: fields.reduce_only,
+            nonce: fields.nonce,
+            expiration: fields.expiration_ns.to_string(),
+        })
+        .map_err(|_| SignError::InvalidRequest)?;
         Ok(Self {
             fields,
             digest,
+            statement,
             testnet,
             time_in_force,
             post_only,
         })
+    }
+    /// Preflight-only wire shape; never released to transport before signing.
+    pub(crate) fn preview(&self, signer: String) -> Result<String, SignError> {
+        self.render(signer, &[0; 65])
+    }
+    pub(crate) fn restore_client(&mut self, client: String) {
+        self.fields.client_id = client;
+    }
+    pub fn statement(&self) -> &str {
+        &self.statement
     }
     pub fn digest(&self) -> &[u8; 32] {
         &self.digest
@@ -173,6 +201,8 @@ pub struct CreateOrder {
     expected_address: [u8; 20],
     order: Arc<FrozenOrder>,
     prepared: Option<SignRequest>,
+    hosted: bool,
+    session_headers: Vec<(&'static str, String)>,
 }
 impl CreateOrder {
     pub fn new(
@@ -191,7 +221,14 @@ impl CreateOrder {
             expected_address,
             order,
             prepared: None,
+            hosted: false,
+            session_headers: vec![],
         })
+    }
+    pub fn hosted(mut self, headers: Vec<(&'static str, String)>) -> Self {
+        self.hosted = true;
+        self.session_headers = headers;
+        self
     }
     pub fn url(&self) -> String {
         format!(
@@ -217,7 +254,7 @@ impl SignStep for CreateOrder {
         if dispatch.now_ms >= self.order.expiry_ms() {
             return Err(SignError::TimedOut);
         }
-        let work = SignRequest {
+        let mut work = SignRequest {
             receipt: SignReceipt {
                 stamp_ms: None,
                 expiry_ms: Some(self.order.expiry_ms()),
@@ -237,6 +274,16 @@ impl SignStep for CreateOrder {
             ],
             context: context(&self.url(), CREATE),
         };
+        if self.hosted {
+            work.operations.insert(
+                0,
+                Operation::Sha256 {
+                    payload: vec![PayloadPart::Bytes {
+                        bytes: self.order.statement.as_bytes().to_vec(),
+                    }],
+                },
+            );
+        }
         work.validate()?;
         self.prepared = Some(work.clone());
         Ok(work)
@@ -245,18 +292,29 @@ impl SignStep for CreateOrder {
         let work = self.prepared.take().ok_or(SignError::InvalidResult)?;
         attest(outbound, &self.url(), ORDER_HEADERS)?;
         work.validate_result(result)?;
-        if result.values[0].as_slice() != self.expected_address
-            || !ethereum::signed_by(&self.order.digest, &result.values[1], &self.expected_signer)
+        if self.hosted
+            && result.values[0] != safe_cex_crypto::sha256(self.order.statement.as_bytes())
+        {
+            return Err(SignError::InvalidResult);
+        }
+        let offset = usize::from(self.hosted);
+        if result.values[offset].as_slice() != self.expected_address
+            || !ethereum::signed_by(
+                &self.order.digest,
+                &result.values[offset + 1],
+                &self.expected_signer,
+            )
         {
             return Err(SignError::InvalidResult);
         }
         let body = self
             .order
-            .render(self.expected_signer.clone(), &result.values[1])?;
+            .render(self.expected_signer.clone(), &result.values[offset + 1])?;
         let Action::Http(http) = outbound else {
             return Err(SignError::InvalidRequest);
         };
         http.body = Some(body);
+        http.headers.extend(self.session_headers.clone());
         Ok(())
     }
     fn freshness_ms(&self) -> f64 {
@@ -421,3 +479,97 @@ pub struct TriggerDetails {
 #[cfg(test)]
 #[path = "../tests/support/provider_recipes.rs"]
 mod tests;
+
+/// Public, closed order statement. The device derives the digest itself.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Statement {
+    subaccount: String,
+    testnet: bool,
+    asset_id: String,
+    amount: String,
+    price: String,
+    buying: bool,
+    market: bool,
+    tif: u8,
+    post_only: bool,
+    reduce_only: bool,
+    nonce: u32,
+    expiration: String,
+}
+
+pub fn hosted_digest(
+    text: &str,
+    subaccount: &str,
+    testnet: bool,
+    now: f64,
+) -> Result<[u8; 32], SignError> {
+    let input: Statement = serde_json::from_str(text).map_err(|_| SignError::InvalidRequest)?;
+    let invalid = || SignError::InvalidRequest;
+    let decimal = |s: &str| -> Result<u64, SignError> {
+        let n = s.parse::<u64>().map_err(|_| invalid())?;
+        if n.to_string() != s {
+            return Err(invalid());
+        }
+        Ok(n)
+    };
+    let expiration = decimal(&input.expiration)?;
+    if input.subaccount != subaccount
+        || input.testnet != testnet
+        || !now.is_finite()
+        || now < 0.
+        || expiration % 1_000_000 != 0
+        || expiration as f64 / 1_000_000. <= now
+        || expiration as f64 / 1_000_000. > now + 3_630_000.
+        || !matches!(input.tif, 1 | 3 | 4)
+        || (input.post_only && (input.market || input.tif != 1))
+        || input.asset_id.len() != 64
+    {
+        return Err(invalid());
+    }
+    let mut asset = [0; 32];
+    for (index, pair) in input
+        .asset_id
+        .as_bytes()
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .enumerate()
+    {
+        asset[index] = u8::from_str_radix(std::str::from_utf8(pair).map_err(|_| invalid())?, 16)
+            .map_err(|_| invalid())?;
+    }
+    let amount = decimal(&input.amount)?;
+    let price = decimal(&input.price)?;
+    if amount == 0 || (input.market && price != 0) || (!input.market && price == 0) {
+        return Err(invalid());
+    }
+    sign::digest(
+        &sign::Order {
+            sub_account_id: decimal(&input.subaccount)?,
+            is_market: input.market,
+            time_in_force: input.tif,
+            post_only: input.post_only,
+            reduce_only: input.reduce_only,
+            legs: &[sign::OrderLeg {
+                asset_id: asset,
+                contract_size: amount,
+                limit_price: price,
+                is_buying: input.buying,
+            }],
+            builder: Some(sign::BuilderFee {
+                address: sign::parse_address(if testnet {
+                    BUILDER_TESTNET
+                } else {
+                    BUILDER_MAINNET
+                })
+                .map_err(|_| invalid())?,
+                fee: 300,
+            }),
+            nonce: input.nonce,
+            expiration: i64::try_from(expiration).map_err(|_| invalid())?,
+        },
+        if testnet { 326 } else { 325 },
+    )
+    .map_err(|_| invalid())
+}

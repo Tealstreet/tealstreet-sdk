@@ -64,6 +64,8 @@ http('DELETE', '/api/v1/orders/replacement?symbol=XBTUSDTM', { cancelledOrderIds
 message(privateUrl, '/contractMarket/tradeOrders', { ...placed, orderId: 'replacement', type: 'canceled', status: 'canceled' });
 command({ op: 'cancelSymbolOrders', symbol: 'BTCUSDT' });
 http('DELETE', '/api/v3/orders?symbol=XBTUSDTM', { cancelledOrderIds: ['old-order'] });
+// Rust also clears untriggered stops; TS leaves them on a per-symbol cancel.
+http('DELETE', '/api/v1/stopOrders?symbol=XBTUSDTM', { cancelledOrderIds: [] }, undefined, { impl: 'rust' });
 message(privateUrl, '/contractMarket/tradeOrders', { ...resting, orderId: 'old-order', type: 'canceled', status: 'canceled' });
 // Read snapshots after the cancel command cannot resurrect the closed order.
 get('/api/v1/orders?status=active&currentPage=1&pageSize=100', page([]), { afterCommand: 4 });

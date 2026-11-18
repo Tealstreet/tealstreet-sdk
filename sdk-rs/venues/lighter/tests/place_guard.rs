@@ -187,6 +187,22 @@ fn place_after_unknown_placement_is_refused_until_reconciled() {
 }
 
 #[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let (mut e, mut t) = ready_eth();
+    let out = unknown_placement(&mut e, &mut t);
+    for read in &orders_reads(&out) {
+        reply(
+            &mut e,
+            read,
+            200,
+            r#"{"code":200,"orders":{"BTC":[{"order_index":"77"}]}}"#,
+        );
+    }
+    drain(&mut e, &mut t);
+    assert_place_admitted(&mut e, &mut t, NOW, 9);
+}
+
+#[test]
 fn a_fresh_complete_snapshot_releases_cancel_all_and_its_cancels_send() {
     // dazzy3: a stuck cancel-all fence is the worst failure on this path.
     let (mut e, mut t) = ready_eth();
@@ -401,6 +417,40 @@ fn a_proven_placement_and_a_later_cancel_all_still_proceed() {
     assert!(
         find(&out, "nextNonce").is_some() || find(&out, "sendTx").is_some(),
         "cancel-all proceeds to signing: {:?}",
+        http(&out)
+    );
+}
+
+/// Live: a snapshot dropped the placed row before the stream named its native
+/// id. Lighter cancels by client index, so the cancel goes out as asked.
+#[test]
+fn a_cancel_by_the_returned_index_before_its_row_arrives_is_sent() {
+    let (mut e, mut t) = ready_eth();
+    let send = submit(&mut e, &mut t, 7, 10);
+    reply(
+        &mut e,
+        &send,
+        200,
+        r#"{"code":200,"tx_hash":"transaction-hash"}"#,
+    );
+    let out = drain(&mut e, &mut t);
+    let [Notice::CommandDone { result, .. }] = &terminals(&out, 7)[..] else {
+        panic!("a proven placement completes");
+    };
+    let ids: Vec<String> = serde_json::from_str(result).unwrap();
+    e.store_mut().remove_orders(&[ids[0].as_str()]);
+    e.handle(
+        NOW,
+        Event::Command(Command::CancelOrders {
+            command: 8,
+            ids: vec![ids[0].clone()],
+        }),
+    );
+    let out = drain(&mut e, &mut t);
+    assert!(terminals(&out, 8).is_empty(), "{:?}", terminals(&out, 8));
+    assert!(
+        find(&out, "nextNonce").is_some() || find(&out, "sendTx").is_some(),
+        "the cancel proceeds to signing: {:?}",
         http(&out)
     );
 }

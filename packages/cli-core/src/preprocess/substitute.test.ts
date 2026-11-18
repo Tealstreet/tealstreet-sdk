@@ -18,8 +18,8 @@ function pos(partial: Partial<Position>): Position {
     positionMode: partial.positionMode ?? PositionMode.OneWay,
     unrealizedPnl: partial.unrealizedPnl ?? 0,
     contracts: partial.contracts ?? 1,
-    liquidationPrice: partial.liquidationPrice ?? 0,
-  } as Position;
+    liquidationPrice: partial.liquidationPrice === undefined ? 0 : partial.liquidationPrice,
+  };
 }
 
 function makeCtx(positions: Position[] = []): PreprocessContext {
@@ -271,9 +271,9 @@ describe('preprocessSegment', () => {
       expect(() => preprocessSegment('stop sell at $liq', ctx)).toThrow(/no position for BTCUSDT/);
     });
 
-    it('$liq throws when liquidation price is missing or zero', () => {
+    it.each([null, 0])('$liq throws when liquidation price is unavailable (%s)', (liquidationPrice) => {
       const ctx = makeCtx([
-        pos({ contracts: 1, entryPrice: 50_000, liquidationPrice: 0 }),
+        pos({ contracts: 1, entryPrice: 50_000, liquidationPrice }),
       ]);
       expect(() => preprocessSegment('stop sell at $liq', ctx)).toThrow(/not available/);
     });

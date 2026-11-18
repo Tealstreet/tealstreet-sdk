@@ -33,8 +33,12 @@ import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
 ## Connecting [Kraken Futures](https://pro.kraken.com) to Tealstreet
 
 :::::danger
-US customers are not eligible to trade on Kraken Derivatives (perpetual futures) and cannot use Tealstreet with Kraken Futures. Tealstreet’s integration supports only the Perpetual Futures API.
+US customers are not eligible to trade on Kraken Derivatives (perpetual futures) and cannot use Tealstreet with the Kraken Futures setup mode.
 :::::
+
+:::tip Supported Kraken markets
+Tealstreet supports Kraken Futures and Kraken Spot trading through separate Kraken setup modes. This page focuses on Kraken Futures. Choose **Kraken Spot** in Tealstreet when you want to connect spot markets.
+:::
 
 <IntroTealstreet exchangeName="Kraken Futures" />
 
@@ -61,8 +65,8 @@ You may need to accept derivatives/futures-specific terms or disclosures before 
 
 - Navigate to the API management section here: [Kraken Futures -> Connections & API Settings](https://pro.kraken.com/app/settings/api)
 
-:::warning
-Tealstreet does not support Kraken Spot trading.
+:::note
+If you are connecting Kraken Spot, choose the Kraken Spot setup mode in Tealstreet and create a Kraken API key with spot trading permissions. Do not enable withdrawal permissions.
 :::
 
 <div class="text--center">

@@ -1,4 +1,5 @@
 //! Preflighted sequential writes. A cancellation ACK alone never permits replacement.
+pub(crate) mod protection;
 use crate::account::{BUILDER_MAINNET, BUILDER_TESTNET, BuilderState, decode_order};
 use crate::provider::{Create, Leg, Metadata, Placement, Signature, Trigger, TriggerDetails};
 use crate::sign;
@@ -7,9 +8,11 @@ use crate::{Grvt, Job, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::write_plan::{Element, ElementResult, WritePlan};
 use safe_cex_engine::{
-    BuilderAuthorization, BuilderAuthorizationReason, Command, CommandId, Cx, ErrorKind, Outcome,
-    Response, VenueError,
+    BuilderAuthorization, BuilderAuthorizationReason, Command, CommandId, Cx, ErrorKind, Level,
+    Outcome, Response, VenueError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -21,6 +24,7 @@ const CANCEL_ALL: &str = "/lite/v1/cancel_all_orders";
 const GET: &str = "/lite/v1/order";
 const OPEN: &str = "/lite/v1/open_orders";
 const LEVERAGE: &str = "/lite/v1/set_initial_leverage";
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
 #[derive(Default)]
 pub(crate) struct Trading {
@@ -28,12 +32,32 @@ pub(crate) struct Trading {
     busy: bool,
     // A builder check finished after the queued front command started waiting on it.
     builder_checked: bool,
+    standalone: HashMap<String, String>,
 }
 pub struct Request {
     plan: Box<Plan>,
     step: Step,
 }
 impl Request {
+    pub(crate) fn signing(&self) -> Option<std::sync::Arc<crate::provider::FrozenOrder>> {
+        self.step.signing.clone()
+    }
+    pub(crate) fn is_protective(&self) -> bool {
+        self.plan.protection.is_some()
+    }
+    pub(crate) fn failed_outcome(&self, response: &Response<'_>) -> Outcome {
+        if !self.is_read() && matches!(response.status, 408 | 429 | 500..) {
+            Outcome::Unknown
+        } else {
+            crate::wire::write_outcome(response)
+        }
+    }
+    pub(crate) fn is_restore(&self) -> bool {
+        self.plan
+            .protection
+            .as_ref()
+            .is_some_and(|edit| edit.restoring)
+    }
     pub(crate) fn is_read(&self) -> bool {
         matches!(
             self.step.effect,
@@ -62,10 +86,16 @@ struct Plan {
     created: Vec<String>,
     affected: Vec<String>,
     guard: Option<Target>,
+    protection: Option<protection::Edit>,
     scope: Option<CancelScope>,
     cancel_attempts: Vec<String>,
     /// A write step took effect, so a later refusal cannot mean nothing happened.
     effective: bool,
+    create_report: Option<CreateReport>,
+}
+struct CreateReport {
+    journal: WritePlan,
+    next_index: usize,
 }
 impl Plan {
     fn new(command: CommandId) -> Self {
@@ -75,9 +105,11 @@ impl Plan {
             created: vec![],
             affected: vec![],
             guard: None,
+            protection: None,
             scope: None,
             cancel_attempts: vec![],
             effective: false,
+            create_report: None,
         }
     }
 }
@@ -85,6 +117,7 @@ struct Step {
     path: &'static str,
     body: String,
     effect: Effect,
+    signing: Option<std::sync::Arc<crate::provider::FrozenOrder>>,
 }
 enum Effect {
     Place(Box<Order>),
@@ -214,6 +247,8 @@ struct CancellationReply<'a> {
 }
 #[derive(Deserialize)]
 struct Created<'a> {
+    #[serde(borrow, rename = "s1", alias = "state", default)]
+    state: Option<Status<'a>>,
     #[serde(borrow, rename = "oi", alias = "order_id", default)]
     id: Text<'a>,
     #[serde(borrow, rename = "m", alias = "metadata", default)]
@@ -514,6 +549,7 @@ impl Grvt {
         for target in &read.targets {
             affected.push(target.id.clone());
             steps.push(Step {
+                signing: None,
                 path: CANCEL,
                 body: self.identity(target)?,
                 effect: Effect::CancelExact(target.clone()),
@@ -669,6 +705,24 @@ impl Grvt {
         cx: &Cx<'_, Pending>,
         request: &Request,
     ) -> Result<(), String> {
+        if let Effect::Cancel(_) = &request.step.effect
+            && let Some(edit) = &request.plan.protection
+        {
+            self.guard_amend(
+                cx,
+                request
+                    .plan
+                    .guard
+                    .as_ref()
+                    .expect("protective amend target"),
+            )?;
+            return self.guard_protective_cancel(cx, edit);
+        }
+        if let Some(edit) = &request.plan.protection
+            && edit.restoring
+        {
+            self.protective_reference(cx, &edit.original)?;
+        }
         match &request.step.effect {
             Effect::CancelExact(target) => self.guard_exact_cancel(cx, &request.plan, target),
             Effect::Inspect(amend) => self.guard_amend(cx, &amend.target),
@@ -700,6 +754,17 @@ impl Grvt {
         execution: Option<(bool, f64)>,
         used: &mut HashSet<String>,
     ) -> Result<Step, VenueError> {
+        self.placement_with_maximum_check(cx, opts, parent, execution, used, true)
+    }
+    fn placement_with_maximum_check(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+        parent: Option<&str>,
+        execution: Option<(bool, f64)>,
+        used: &mut HashSet<String>,
+        enforce_maximum: bool,
+    ) -> Result<Step, VenueError> {
         if opts.stp_mode.is_some() {
             return Err("Per-order self-trade prevention is unsupported on GRVT".into());
         }
@@ -724,12 +789,15 @@ impl Grvt {
         let subaccount_int = subaccount
             .parse::<u64>()
             .map_err(|_| "Invalid GRVT uint64 trading account")?;
-        let secret = self
-            .options
-            .secret
-            .as_deref()
-            .ok_or("GRVT private key is required for signing")?;
-        let signer = sign::signer_address(secret)?;
+        let secret = self.options.secret.as_deref();
+        let signer = if self.signing.is_some() {
+            self.options
+                .signer_address
+                .clone()
+                .ok_or("GRVT signer address is unavailable")?
+        } else {
+            sign::signer_address(secret.ok_or("GRVT private key is required for signing")?)?
+        };
         match self.account.builder {
             BuilderState::Authorized => {}
             BuilderState::CapTooLow(raw) => {
@@ -785,7 +853,9 @@ impl Grvt {
         let amount = safe_cex_engine::num::adjust(opts.amount, market.precision.amount);
         positive(amount, "rounded order amount")?;
         if amount < market.limits.amount.min
-            || (market.limits.amount.max > 0. && amount > market.limits.amount.max)
+            || (enforce_maximum
+                && market.limits.amount.max > 0.
+                && amount > market.limits.amount.max)
         {
             return Err("GRVT order amount is outside market limits".into());
         }
@@ -847,10 +917,13 @@ impl Grvt {
         {
             return Err("GRVT client order ID is already active or repeated in batch".into());
         }
-        if !cx.now.is_finite() || cx.now < 0. || cx.now > u64::MAX as f64 {
+        if !cx.protocol_now().is_finite()
+            || cx.protocol_now() < 0.
+            || cx.protocol_now() > u64::MAX as f64
+        {
             return Err("Invalid GRVT signing clock".into());
         }
-        let expiry = sign::expiration(cx.now as u64)?;
+        let expiry = sign::expiration(cx.protocol_now() as u64)?;
         let builder = if self.options.testnet {
             BUILDER_TESTNET
         } else {
@@ -862,24 +935,28 @@ impl Grvt {
             limit_price: native_price,
             is_buying: opts.side == OrderSide::Buy,
         }];
-        let signed = sign::sign_order(
-            &sign::Order {
-                sub_account_id: subaccount_int,
-                is_market,
-                time_in_force: tif_code,
-                post_only,
-                reduce_only: opts.reduce_only.unwrap_or(false),
-                legs: &signed_legs,
-                builder: Some(sign::BuilderFee {
-                    address: sign::parse_address(builder)?,
-                    fee: sign::builder_fee("0.03")?,
-                }),
-                nonce: n,
-                expiration: expiry,
-            },
-            secret,
-            self.options.testnet,
-        )?;
+        let signed = if self.signing.is_none() {
+            Some(sign::sign_order(
+                &sign::Order {
+                    sub_account_id: subaccount_int,
+                    is_market,
+                    time_in_force: tif_code,
+                    post_only,
+                    reduce_only: opts.reduce_only.unwrap_or(false),
+                    legs: &signed_legs,
+                    builder: Some(sign::BuilderFee {
+                        address: sign::parse_address(builder)?,
+                        fee: sign::builder_fee("0.03")?,
+                    }),
+                    nonce: n,
+                    expiration: expiry,
+                },
+                secret.ok_or("GRVT private key is required for signing")?,
+                self.options.testnet,
+            )?)
+        } else {
+            None
+        };
         let mut trigger_type = None;
         let mut trigger_price = price;
         let trigger = if conditional {
@@ -915,42 +992,77 @@ impl Grvt {
         } else {
             None
         };
-        let create_time = (cx.now as u64)
+        let create_time = (cx.protocol_now() as u64)
             .checked_mul(1_000_000)
             .ok_or("GRVT create time overflow")?;
-        let body = serde_json::to_string(&Create {
-            o: Placement {
-                sa: subaccount.to_owned(),
-                im: is_market,
-                ti,
-                po: post_only,
-                ro: opts.reduce_only.unwrap_or(false),
-                l: [Leg {
-                    i: market.id.clone(),
-                    s: amount.to_string(),
-                    lp: (!is_market).then(|| price.to_string()),
-                    ib: opts.side == OrderSide::Buy,
-                }],
-                s: Signature {
-                    s: signer,
-                    r: signed.r,
-                    s1: signed.s,
-                    v: signed.v,
-                    e: expiry.to_string(),
-                    n,
-                    ci: if self.options.testnet { "326" } else { "325" },
+        let signing = if self.signing.is_some() {
+            Some(std::sync::Arc::new(
+                crate::provider::FrozenOrder::new(
+                    crate::provider::OrderFields {
+                        subaccount: subaccount.to_owned(),
+                        instrument: market.id.clone(),
+                        asset_id: sign::parse_asset_id(&info.hash)?,
+                        base_decimals: decimals,
+                        amount: amount.to_string(),
+                        limit_price: (!is_market).then(|| price.to_string()),
+                        buying: opts.side == OrderSide::Buy,
+                        time_in_force: tif,
+                        reduce_only: opts.reduce_only.unwrap_or(false),
+                        nonce: n,
+                        expiration_ns: expiry,
+                        client_id: client.clone(),
+                        created_ns: create_time,
+                        trigger: trigger.clone(),
+                    },
+                    self.options.testnet,
+                )
+                .map_err(|_| "Invalid GRVT frozen order")?,
+            ))
+        } else {
+            None
+        };
+        let body = if let Some(signed) = signed {
+            serde_json::to_string(&Create {
+                o: Placement {
+                    sa: subaccount.to_owned(),
+                    im: is_market,
+                    ti,
+                    po: post_only,
+                    ro: opts.reduce_only.unwrap_or(false),
+                    l: [Leg {
+                        i: market.id.clone(),
+                        s: amount.to_string(),
+                        lp: (!is_market).then(|| price.to_string()),
+                        ib: opts.side == OrderSide::Buy,
+                    }],
+                    s: Signature {
+                        s: signer.clone(),
+                        r: signed.r,
+                        s1: signed.s,
+                        v: signed.v,
+                        e: expiry.to_string(),
+                        n,
+                        ci: if self.options.testnet { "326" } else { "325" },
+                    },
+                    m: Metadata {
+                        co: client.clone(),
+                        ct: create_time.to_string(),
+                        t: trigger,
+                    },
+                    b: builder,
+                    bf: "0.03",
                 },
-                m: Metadata {
-                    co: client.clone(),
-                    ct: create_time.to_string(),
-                    t: trigger,
-                },
-                b: builder,
-                bf: "0.03",
-            },
-        })
-        .map_err(|e| e.to_string())?;
+            })
+            .map_err(|e| e.to_string())?
+        } else {
+            signing
+                .as_ref()
+                .expect("installed frozen order")
+                .preview(signer)
+                .map_err(|_| "Invalid GRVT preview")?
+        };
         Ok(Step {
+            signing,
             path: CREATE,
             body,
             effect: Effect::Place(Box::new(Order {
@@ -988,7 +1100,16 @@ impl Grvt {
                     {
                         return Err("GRVT trigger orders cannot carry attached brackets".into());
                     }
-                    let entry = self.placement(cx, &opts, None, None, &mut used)?;
+                    // Legacy TS keeps the maximum guard for caller IDs;
+                    // replacement and put-back also stay bounded.
+                    let entry = self.placement_with_maximum_check(
+                        cx,
+                        &opts,
+                        None,
+                        None,
+                        &mut used,
+                        opts.client_order_id.is_some(),
+                    )?;
                     let Effect::Place(entry_order) = &entry.effect else {
                         unreachable!()
                     };
@@ -1030,16 +1151,37 @@ impl Grvt {
                                 bybit_slippage_tolerance_ticks: None,
                                 implied_volatility: None,
                             };
-                            plan.steps.push_back(self.placement(
+                            plan.steps.push_back(self.placement_with_maximum_check(
                                 cx,
                                 &child,
                                 Some(&parent),
                                 Some((true, 0.)),
                                 &mut used,
+                                false,
                             )?);
                         }
                     }
                 }
+                // Describe prepared native creates, including bracket children;
+                // reporting never controls the existing sequential dispatch.
+                plan.create_report = Some(CreateReport {
+                    journal: WritePlan::new(
+                        plan.steps
+                            .iter()
+                            .enumerate()
+                            .map(|(index, step)| {
+                                let Effect::Place(order) = &step.effect else {
+                                    unreachable!("new-order plans contain only creates")
+                                };
+                                Element {
+                                    index,
+                                    client_order_id: Some(order.id.clone()),
+                                }
+                            })
+                            .collect(),
+                    ),
+                    next_index: 0,
+                });
             }
             Command::CancelOrders { ids, .. } => {
                 let mut seen = HashSet::new();
@@ -1054,6 +1196,7 @@ impl Grvt {
                     let target = self.target(order)?;
                     plan.affected.push(id.clone());
                     plan.steps.push_back(Step {
+                        signing: None,
                         path: CANCEL,
                         body: self.identity(&target)?,
                         effect: Effect::Cancel(id),
@@ -1078,6 +1221,7 @@ impl Grvt {
                             .map(|o| o.id.clone()),
                     );
                     plan.steps.push_back(Step {
+                        signing: None,
                         path: CANCEL_ALL,
                         body,
                         effect: Effect::CancelSymbol(symbol),
@@ -1088,6 +1232,7 @@ impl Grvt {
                         .market(&symbol)
                         .ok_or("Unknown GRVT cancellation market")?;
                     plan.steps.push_back(Step {
+                        signing: None,
                         path: OPEN,
                         body,
                         effect: Effect::ReadSymbol(Box::new(CancelRead {
@@ -1135,6 +1280,7 @@ impl Grvt {
                 }
                 self.guard_amend(cx, &target)?;
                 plan.steps.push_back(Step {
+                    signing: None,
                     path: GET,
                     body: self.identity(&target)?,
                     effect: Effect::Inspect(Box::new(Amend {
@@ -1164,6 +1310,7 @@ impl Grvt {
                     l: String,
                 }
                 plan.steps.push_back(Step {
+                    signing: None,
                     path: LEVERAGE,
                     body: serde_json::to_string(&Set {
                         sa: self.trade_account()?,
@@ -1339,7 +1486,12 @@ impl Grvt {
             }),
         );
     }
-    fn trade_finish(&mut self, cx: &mut Cx<'_, Pending>, plan: Plan, error: Option<VenueError>) {
+    fn trade_finish(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut plan: Plan,
+        error: Option<VenueError>,
+    ) {
         for id in &plan.affected {
             if error.is_some()
                 && plan.scope.is_none()
@@ -1355,18 +1507,78 @@ impl Grvt {
         self.trading.busy = false;
         match error {
             Some(mut error) => {
+                if let Some(edit) = &plan.protection
+                    && edit.canceled
+                    && error.protection.is_none()
+                    && error.outcome != Some(Outcome::Unknown)
+                {
+                    error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
+                    error.message = format!(
+                        "{}: {}; re-place your protection",
+                        safe_cex_engine::error::stop_gone_text(
+                            &edit.original.symbol,
+                            edit.original.side,
+                            edit.original.kind,
+                            false
+                        ),
+                        error.message
+                    );
+                }
                 if !plan.created.is_empty() {
-                    let created = plan.created.join(",");
+                    let created = plan.created.join_with(",");
                     error.message = format!(
                         "{}; already created GRVT order IDs: {created}",
                         error.message
                     );
                 } else if !plan.cancel_attempts.is_empty() {
-                    let attempts = plan.cancel_attempts.join(",");
+                    let attempts = plan.cancel_attempts.join_with(",");
                     error.message = format!(
                         "{}; reconcile GRVT cancellation identities: {attempts}",
                         error.message
                     );
+                }
+                if let Some(report) = &mut plan.create_report {
+                    let rows = report.journal.outcomes();
+                    let result =
+                        if matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent)) {
+                            ElementResult::NotSent {
+                                error: Some(Box::new(error.clone())),
+                            }
+                        } else {
+                            error.venue_message = Some(error.message.clone().into_boxed_str());
+                            error.message = UNKNOWN_TEXT.into();
+                            error.outcome = Some(Outcome::Unknown);
+                            cx.event(
+                                Level::Warn,
+                                "order.outcome_unknown",
+                                UNKNOWN_TEXT,
+                                vec![
+                                    ("command", plan.command.into()),
+                                    ("elementIndex", report.next_index.to_string().into()),
+                                    (
+                                        "clientOrderId",
+                                        rows[report.next_index]
+                                            .element
+                                            .client_order_id
+                                            .clone()
+                                            .unwrap_or_default()
+                                            .into(),
+                                    ),
+                                ],
+                            );
+                            ElementResult::Unknown {
+                                error: Box::new(error.clone()),
+                            }
+                        };
+                    report
+                        .journal
+                        .record(report.next_index, result)
+                        .expect("prepared create element");
+                    error = report.journal.attach(error.partial(
+                        &plan.created,
+                        rows.len(),
+                        report.next_index,
+                    ));
                 }
                 // A later refusal after a write took effect cannot mean nothing happened.
                 let affected =
@@ -1402,6 +1614,41 @@ impl Grvt {
         mut error: VenueError,
         outcome: Outcome,
     ) {
+        let mut request = request;
+        if let Effect::Place(order) = &request.step.effect
+            && request.plan.protection.is_some()
+            && outcome == Outcome::Rejected
+            && cx
+                .store
+                .order(&order.id)
+                .is_some_and(|current| current.status == OrderStatus::Creating)
+        {
+            cx.store.set_order_status(&order.id, OrderStatus::Canceled);
+        }
+        if let Effect::Place(_) = &request.step.effect
+            && let Some(edit) = &request.plan.protection
+        {
+            if edit.canceled && !edit.restoring && outcome == Outcome::Rejected {
+                match self.protective_restore(cx, edit) {
+                    Ok(restore) => {
+                        let edit = request.plan.protection.as_mut().unwrap();
+                        edit.restoring = true;
+                        edit.refusal = Some(error.outcome(outcome));
+                        request.plan.steps.clear();
+                        request.plan.steps.push_back(restore);
+                        self.trade_step(cx, *request.plan);
+                        return;
+                    }
+                    Err(cause) => {
+                        error.message = format!("{error}; {cause}");
+                    }
+                }
+            }
+            if edit.canceled && outcome != Outcome::Unknown {
+                error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
+                error.message = format!("{}; re-place your protection", error.message);
+            }
+        }
         let message = if let Effect::Place(order) = &request.step.effect
             && outcome == Outcome::Unknown
         {
@@ -1412,7 +1659,26 @@ impl Grvt {
         } else {
             error.message.clone()
         };
-        error.message = message;
+        // Only an amend plans a guard: its replacement failed after the cancel landed.
+        error.message = if let Effect::Place(order) = &request.step.effect
+            && request.plan.guard.is_some()
+            && request.plan.created.is_empty()
+        {
+            let unknown = outcome == Outcome::Unknown;
+            let gone = if matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                safe_cex_engine::error::stop_gone_text(
+                    &order.symbol,
+                    order.side,
+                    order.kind,
+                    unknown,
+                )
+            } else {
+                safe_cex_engine::error::order_gone_text(&order.symbol, unknown)
+            };
+            format!("{gone}: {message}")
+        } else {
+            message
+        };
         self.trade_finish(cx, *request.plan, Some(error.outcome(outcome)));
     }
     pub(crate) fn trade_response(
@@ -1422,7 +1688,7 @@ impl Grvt {
         response: Response<'_>,
     ) {
         if let Err(error) = crate::wire::check(&response) {
-            let outcome = crate::wire::write_outcome(&response);
+            let outcome = request.failed_outcome(&response);
             self.trade_failed(cx, request, &error, outcome);
             return;
         }
@@ -1462,6 +1728,28 @@ impl Grvt {
                         .map_err(|_| "Malformed GRVT create response")?;
                     let created: Created<'_> = serde_json::from_str(reply.result.get())
                         .map_err(|_| "Malformed GRVT create identity")?;
+                    if request
+                        .plan
+                        .protection
+                        .as_ref()
+                        .is_some_and(|edit| edit.restoring)
+                    {
+                        match created.state.as_ref().map(|state| state.status.as_ref()) {
+                            Some("OPEN" | "PENDING") => {}
+                            Some("REJECTED" | "CANCELLED") => {
+                                return Err(VenueError::new(
+                                    "GRVT original stop put-back was refused",
+                                )
+                                .outcome(Outcome::Rejected));
+                            }
+                            _ => {
+                                return Err(VenueError::new(
+                                    "GRVT original stop put-back is unproven",
+                                )
+                                .outcome(Outcome::Unknown));
+                            }
+                        }
+                    }
                     if created.id.is_empty()
                         && created.metadata.as_ref().is_none_or(|m| m.id.is_empty())
                     {
@@ -1490,7 +1778,37 @@ impl Grvt {
                     {
                         cx.store.set_order_status(&order.id, OrderStatus::Open);
                     }
+                    if matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                        && order.parent_id.is_none()
+                        && (request.plan.guard.is_none()
+                            || request
+                                .plan
+                                .protection
+                                .as_ref()
+                                .is_some_and(|edit| edit.standalone))
+                        && !created.id.is_empty()
+                        && !matches!(&*created.id, "0" | "0x00" | "0x0")
+                    {
+                        self.trading.standalone.retain(|id, _| {
+                            cx.store.order(id).is_some_and(|o| !terminal(o.status))
+                        });
+                        self.trading
+                            .standalone
+                            .insert(order.id.clone(), created.id.to_string());
+                    }
                     request.plan.created.push(order.id.clone());
+                    if let Some(report) = &mut request.plan.create_report {
+                        report
+                            .journal
+                            .record(
+                                report.next_index,
+                                ElementResult::Placed {
+                                    order_ids: vec![order.id.clone()],
+                                },
+                            )
+                            .expect("prepared create element");
+                        report.next_index += 1;
+                    }
                 }
                 Effect::Cancel(_) => {
                     require_ack(response.body)?;
@@ -1602,19 +1920,49 @@ impl Grvt {
                         conditional.then_some((semantics.market, semantics.legs[0].price.0)),
                         &mut HashSet::new(),
                     )?;
+                    let standalone = source.close == Some(true)
+                        || decoded.native_id.as_ref().is_some_and(|native| {
+                            self.trading.standalone.get(&amend.target.id) == Some(native)
+                        });
                     let mut target = amend.target.clone();
                     target.inspected_updated_ns = decoded.updated_ns;
                     if decoded.native_id.is_some() {
                         target.native = decoded.native_id;
                     }
+                    if conditional {
+                        let observed = cx
+                            .store
+                            .order(&target.id)
+                            .ok_or("GRVT original stop disappeared")?
+                            .clone();
+                        let Effect::Place(order) = &replacement.effect else {
+                            unreachable!()
+                        };
+                        let mut original = source.clone();
+                        original.parent_id = amend.source.parent_id.clone();
+                        request.plan.protection = Some(protection::Edit {
+                            standalone,
+                            observed,
+                            replacement: *order.clone(),
+                            original,
+                            execution: (semantics.market, semantics.legs[0].price.0),
+                            native: raw.result.get().into(),
+                            inspected_updated_ns: decoded.updated_ns,
+                            canceled: false,
+                            restoring: false,
+                            refusal: None,
+                        });
+                    }
                     request.plan.guard = Some(target.clone());
                     request.plan.affected.push(target.id.clone());
                     request.plan.steps.push_back(Step {
+                        signing: None,
                         path: CANCEL,
                         body: self.identity(&target)?,
                         effect: Effect::Cancel(target.id.clone()),
                     });
                     request.plan.steps.push_back(Step {
+                        signing: None,
                         path: GET,
                         body: self.identity(&target)?,
                         effect: Effect::Verify(target),
@@ -1649,19 +1997,45 @@ impl Grvt {
                         return Err("GRVT cancellation is not final or execution advanced; replacement aborted".into());
                     }
                     cx.store.set_order_status(&target.id, OrderStatus::Canceled);
+                    if let Some(edit) = &mut request.plan.protection {
+                        edit.canceled = true;
+                    }
                 }
             }
             Ok(())
         })();
         match result {
             Ok(()) => {
+                if let Effect::Place(_) = &request.step.effect
+                    && request
+                        .plan
+                        .protection
+                        .as_ref()
+                        .is_some_and(|edit| edit.restoring)
+                {
+                    let edit = request.plan.protection.as_mut().unwrap();
+                    let mut error = edit
+                        .refusal
+                        .take()
+                        .expect("restore follows a definitive refusal");
+                    error.message = format!(
+                        "Your {} stop is unchanged: its replacement was refused, so the original stop was put back as a new order: {}",
+                        edit.original.symbol, error.message
+                    );
+                    error.protection = Some(safe_cex_engine::error::Protection::Restored);
+                    self.trade_finish(cx, *request.plan, Some(error));
+                    return;
+                }
                 if !request.is_read() {
                     self.account.orders_revision += 1;
                     request.plan.effective = true;
                 }
                 self.trade_step(cx, *request.plan);
             }
-            Err(error) => self.trade_failed_error(cx, request, error, Outcome::Unknown),
+            Err(error) => {
+                let outcome = error.outcome.unwrap_or(Outcome::Unknown);
+                self.trade_failed_error(cx, request, error, outcome);
+            }
         }
     }
 }

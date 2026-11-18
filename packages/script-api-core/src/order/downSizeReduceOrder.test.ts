@@ -11,7 +11,7 @@ import {
   type Order,
 } from '@tealstreet/safe-cex/src/types';
 
-import { downSizeReduceOrder } from './downSizeReduceOrder';
+import { downSizeReduceOrder, ReduceOrderLockedError } from './downSizeReduceOrder';
 
 /** Was `@/components/openOrders/OpenOrder.type` before this moved into the
  *  package; the function reads none of the `account` field, so the shape is
@@ -548,5 +548,122 @@ describe('downSizeReduceOrder', () => {
       const result = downSizeReduceOrder(mexcMarket, order, [position], [existingOrder], 50000);
       expect(result.amount).toBe(40);
     });
+  });
+});
+
+describe('a remainder that rounds to zero', () => {
+  // MEXC-style fractional lots: native contracts of 0.0001 BTC, base-step precision.
+  const mexcMarket: Market = { ...mockMarket, contractSize: 0.0001, precision: { amount: 0.0001, price: 0.1 } };
+
+  it('keeps the placed order instead of returning amount 0 when orders ahead cover the position', () => {
+    const order = createOrder({ type: OrderType.Market, side: OrderSide.Buy, amount: 200, price: undefined });
+    // 0.05 - 0.02 - 0.03 is 3.5e-18 in floating point, not 0.
+    const position = createPosition({ side: PositionSide.Short, contracts: 0.05 });
+    const ahead = [
+      createOpenOrder({ id: 'a', side: OrderSide.Buy, price: 60000, amount: 0.02 }),
+      createOpenOrder({ id: 'b', side: OrderSide.Buy, price: 60000, amount: 0.03 }),
+    ];
+    const result = downSizeReduceOrder(mexcMarket, order, [position], ahead, 50000);
+    expect(result.amount).toBe(200);
+  });
+
+  it('keeps the placed order when the reducible remainder is below half a lot', () => {
+    const order = createOrder({ type: OrderType.Market, side: OrderSide.Buy, amount: 200, price: undefined });
+    const position = createPosition({ side: PositionSide.Short, contracts: 0.00004 });
+    const result = downSizeReduceOrder(mexcMarket, order, [position], [], 50000);
+    expect(result.amount).toBe(200);
+  });
+});
+
+
+// Bitget classic: sized close plans and reduce-only limits hold position size; only the free part closes.
+describe('a venue whose resting close orders lock position size', () => {
+  const locks = { locksPositionSize: true };
+  const plan = (overrides: Partial<OpenOrder> = {}) =>
+    createOpenOrder({ type: OrderType.TakeProfit, price: 60000, amount: 0.1451, remaining: 0.1451, ...overrides });
+  const close = (amount: number) => createOrder({ type: OrderType.Market, amount, price: undefined });
+  const position = (contracts: number) => [createPosition({ contracts })];
+
+  it('caps a close to the free part when sized TP/SL plans hold the rest, and says so', () => {
+    const onLocked = vi.fn();
+    const plans = [plan({ id: 'tp' }), plan({ id: 'sl', type: OrderType.StopLoss, price: 40000 })];
+    const result = downSizeReduceOrder(mockMarket, close(0.4872), position(0.4872), plans, 50000, {
+      ...locks,
+      onLocked,
+    });
+    expect(result.amount).toBeCloseTo(0.197, 9);
+    expect(onLocked).toHaveBeenCalledOnce();
+    expect(onLocked.mock.calls[0][0]).toMatchObject({ symbol: 'BTCUSD', total: 0.4872, orders: 2 });
+    expect(onLocked.mock.calls[0][0].locked).toBeCloseTo(0.2902, 9);
+    expect(onLocked.mock.calls[0][0].sent).toBeCloseTo(0.197, 9);
+  });
+
+  it('does not count position-level TP/SL, which carry no size', () => {
+    const onLocked = vi.fn();
+    const positionLevel = [plan({ id: 'ptp', amount: 0, remaining: 0 }), plan({ id: 'psl', amount: 0, remaining: 0 })];
+    const result = downSizeReduceOrder(mockMarket, close(0.1), position(0.1), positionLevel, 50000, {
+      ...locks,
+      onLocked,
+    });
+    expect(result.amount).toBeCloseTo(0.1, 9);
+    expect(onLocked).not.toHaveBeenCalled();
+  });
+
+  it('counts a reduce-only limit at any price, behind the close as well as ahead of it', () => {
+    const behind = createOpenOrder({ id: 'far', price: 90000, amount: 0.04, remaining: 0.04 });
+    const result = downSizeReduceOrder(mockMarket, close(0.1), position(0.1), [behind], 50000, locks);
+    expect(result.amount).toBeCloseTo(0.06, 9);
+  });
+
+  it('counts only the unfilled part of a partially filled close order', () => {
+    const partly = plan({ id: 'tp', amount: 0.05, filled: 0.03, remaining: 0.02 });
+    const result = downSizeReduceOrder(mockMarket, close(0.1), position(0.1), [partly], 50000, locks);
+    expect(result.amount).toBeCloseTo(0.08, 9);
+  });
+
+  // 10-30 USELESSUSDT: a 20-order reduce-only ladder sized to the whole position froze it.
+  it('refuses a close when a ladder holds the whole position, naming how much and by how many orders', () => {
+    const market = { ...mockMarket, id: 'USELESSUSDT', symbol: 'USELESSUSDT', precision: { amount: 1, price: 0.0001 } };
+    const rung = 143916 / 20;
+    const ladder = Array.from({ length: 20 }, (_, i) =>
+      createOpenOrder({
+        id: `rung-${i}`,
+        symbol: 'USELESSUSDT',
+        price: 0.3 + i * 0.01,
+        amount: rung,
+        remaining: rung,
+      }),
+    );
+    const order = createOrder({ symbol: 'USELESSUSDT', type: OrderType.Market, amount: 143916, price: undefined });
+    const held = [createPosition({ symbol: 'USELESSUSDT', contracts: 143916 })];
+    const run = () => downSizeReduceOrder(market, order, held, ladder, 0.2, locks);
+    expect(run).toThrow(ReduceOrderLockedError);
+    expect(run).toThrow(
+      '143916 of your USELESSUSDT position is reserved by 20 open close orders; cancel them first',
+    );
+  });
+
+  it('never says more is reserved than the position holds', () => {
+    const oversized = [plan({ id: 'tp', amount: 0.15, remaining: 0.15 })];
+    expect(() => downSizeReduceOrder(mockMarket, close(0.1), position(0.1), oversized, 50000, locks)).toThrow(
+      '0.1 of your BTCUSD position is reserved by 1 open close order; cancel them first',
+    );
+  });
+
+  it('leaves an unflagged venue exactly as before for the same orders', () => {
+    const plans = [plan({ id: 'tp' }), plan({ id: 'sl', type: OrderType.StopLoss, price: 40000 })];
+    const behind = createOpenOrder({ id: 'far', price: 90000, amount: 0.04, remaining: 0.04 });
+    const onLocked = vi.fn();
+    // Today's result: the position cap at the market's precision, nothing held back for close orders.
+    for (const [amount, contracts, expected] of [
+      [0.4872, 0.4872, 0.487],
+      [0.1, 0.1, 0.1],
+    ] as const) {
+      const args = [mockMarket, close(amount), position(contracts), [...plans, behind], 50000] as const;
+      const unflagged = downSizeReduceOrder(...args, { onLocked });
+      expect(unflagged).toEqual(downSizeReduceOrder(...args));
+      expect(unflagged.amount).toBeCloseTo(expected, 9);
+    }
+    expect(onLocked).not.toHaveBeenCalled();
   });
 });

@@ -130,10 +130,18 @@ pub fn origin(spot: bool, subject: String) -> Result<WasmEngine, JsError> {
         inner: Box::new(engine),
         dispatch_signing: true,
         external_signer: true,
+        #[cfg(feature = "coinbase")]
+        coinbase_binding: None,
         construction: "{}".into(),
         #[cfg(feature = "dispatch-signing")]
         hosted_identity: None,
         #[cfg(feature = "dispatch-signing")]
+        #[cfg(feature = "hosted-join-proof")]
+        join_proof_identity: None,
         hosted_captures: Default::default(),
+        #[cfg(feature = "hosted-wallet")]
+        hosted_wallet: None,
+        #[cfg(feature = "algos")]
+        algos: Default::default(),
     })
 }

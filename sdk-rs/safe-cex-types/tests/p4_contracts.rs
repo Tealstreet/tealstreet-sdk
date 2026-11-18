@@ -61,6 +61,13 @@ fn fill_and_writable_store_preserve_their_own_projection() {
     projected.balance.total = 4.0;
     assert_eq!(projected.balance.total, 4.0);
     let encoded = serde_json::to_value(projected).unwrap();
+    let mut unknown = encoded.clone();
+    unknown["latency"] = Value::Null;
+    let store: WritableStoreData = serde_json::from_value(unknown.clone()).unwrap();
+    assert_eq!(store.latency, None);
+    assert_eq!(serde_json::to_value(store).unwrap()["latency"], Value::Null);
+    unknown.as_object_mut().unwrap().remove("latency");
+    assert!(serde_json::from_value::<WritableStoreData>(unknown).is_err());
     assert_eq!(encoded.as_object().unwrap().len(), 9);
     assert!(!encoded.as_object().unwrap().contains_key("updateIds"));
 }

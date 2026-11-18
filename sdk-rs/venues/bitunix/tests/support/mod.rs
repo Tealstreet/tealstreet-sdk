@@ -77,7 +77,7 @@ pub const PAIRS: &str = r#"{"code":0,"data":[{"symbol":"BTCUSDT","base":"BTC","q
 pub const TICKERS: &str = r#"{"code":0,"data":[{"symbol":"BTCUSDT","last":"96000","open":"95000","markPrice":"96001","baseVol":"1000","quoteVol":"96000000"}]}"#;
 pub const ACCOUNT: &str = r#"{"code":0,"data":[{"marginCoin":"BTC","available":"1"},{"marginCoin":"USDT","available":"900","margin":"100","frozen":"3","positionMode":"HEDGE","crossUnrealizedPNL":"10","isolationUnrealizedPNL":"2"}]}"#;
 pub const POSITIONS: &str = r#"{"code":0,"data":{"positionList":[{"symbol":"BTCUSDT","positionId":"position-1","qty":"0.01","maxQty":"0.015","side":"SELL","avgOpenPrice":"95000","entryPrice":"94000","entryValue":"950","leverage":20,"marginMode":"ISOLATION","positionMode":"HEDGE","unrealizedPNL":"10","realizedPNL":"-3.5","fee":"2","funding":"-1.5","liqPrice":"110000"}]}}"#;
-pub const ORDERS: &str = r#"{"code":0,"data":{"orderList":[{"symbol":"BTCUSDT","orderId":"one","side":"SELL","orderType":"LIMIT","qty":"3","tradeQty":"1","price":"100","clientId":"web","effect":"GTC","tpPrice":"80","slPrice":"110"}]}}"#;
+pub const ORDERS: &str = r#"{"code":0,"data":{"orderList":[{"symbol":"BTCUSDT","orderId":"one","side":"SELL","orderType":"LIMIT","qty":"3","tradeQty":"1","price":"100","clientId":"web","effect":"GTC","reduceOnly":false,"tpPrice":"80","slPrice":"110"}]}}"#;
 pub const TPSL: &str = r#"{"code":0,"data":[{"symbol":"BTCUSDT","id":"protect","positionId":"position-1","tpPrice":"90000","slPrice":"100000","tpQty":"0.01","slQty":"0.01","tpStopType":"LAST_PRICE","slStopType":"MARK_PRICE","tpOrderType":null,"slOrderType":"MARKET","tpOrderPrice":null,"slOrderPrice":null}]}"#;
 pub fn reply(e: &mut TestEngine, id: safe_cex_engine::RequestId, body: &str) {
     e.handle(
@@ -123,7 +123,23 @@ pub fn startup_with_engine(e: TestEngine) -> (TestEngine, SocketId) {
     startup_serving(e, PAIRS, TICKERS)
 }
 /// `startup_with_engine` over a caller's pairs and tickers.
-pub fn startup_serving(mut e: TestEngine, pairs: &str, tickers: &str) -> (TestEngine, SocketId) {
+pub fn startup_serving(e: TestEngine, pairs: &str, tickers: &str) -> (TestEngine, SocketId) {
+    let (e, socket, _, _) = startup_recording(e, pairs, tickers);
+    (e, socket)
+}
+/// Startup, also returning the socket frames sent and the timers still armed.
+pub fn startup_recording(
+    mut e: TestEngine,
+    pairs: &str,
+    tickers: &str,
+) -> (
+    TestEngine,
+    SocketId,
+    Vec<String>,
+    Vec<(safe_cex_engine::TimerId, f64)>,
+) {
+    let mut sent = Vec::new();
+    let mut armed = Vec::new();
     let mut now = -1000.0;
     e.start(now);
     let mut private = None;
@@ -173,7 +189,12 @@ pub fn startup_serving(mut e: TestEngine, pairs: &str, tickers: &str) -> (TestEn
                     );
                 }
                 Action::SetTimer { timer, at_ms } if at_ms == 0.0 => repairs.push((timer, at_ms)),
-                Action::ClearTimer { timer } => repairs.retain(|(pending, _)| *pending != timer),
+                Action::SetTimer { timer, at_ms } => armed.push((timer, at_ms)),
+                Action::ClearTimer { timer } => {
+                    repairs.retain(|(pending, _)| *pending != timer);
+                    armed.retain(|(pending, _)| *pending != timer);
+                }
+                Action::WsSend { text, .. } => sent.push(text),
                 _ => {}
             }
         }
@@ -182,5 +203,5 @@ pub fn startup_serving(mut e: TestEngine, pairs: &str, tickers: &str) -> (TestEn
         e.store().loaded().orders,
         "startup must settle both order endpoints"
     );
-    (e, private.unwrap())
+    (e, private.unwrap(), sent, armed)
 }

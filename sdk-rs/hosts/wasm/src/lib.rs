@@ -4,6 +4,8 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none. `wsMessageActions`
 //! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
+#[cfg(feature = "bingx-spot-replay")]
+mod bingx_spot_replay;
 #[cfg(feature = "hosted-operation-proof")]
 mod hosted_operation_proof;
 #[cfg(feature = "kraken")]
@@ -17,7 +19,6 @@ mod hosted_operations;
     feature = "binance",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -39,11 +40,11 @@ mod hosted_operations;
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::{
-    Action, Engine, Event, Health, Notice, RequestId, SocketId, TimerId, Value, Venue,
+    Action, CommandId, Engine, Event, Health, Notice, RequestId, SocketId, TimerId, Value, Venue,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -83,11 +84,14 @@ trait AnyEngine {
     fn failed(&self) -> bool {
         false
     }
-    #[cfg(feature = "dispatch-signing")]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         None
     }
-    #[cfg(feature = "dispatch-signing")]
+    #[cfg(any(
+        feature = "hosted-signing",
+        feature = "hosted-wallet",
+        feature = "hosted-join-proof"
+    ))]
     fn signing_clock(&self, now: f64) -> (f64, u64) {
         (now, 0)
     }
@@ -96,6 +100,9 @@ trait AnyEngine {
         &mut self,
         algorithms: Option<Vec<safe_cex_engine::signing::Algorithm>>,
     ) -> Result<(), safe_cex_engine::VenueError>;
+    fn sync_host_time(&mut self, _now: f64, _utc: f64) -> bool {
+        false
+    }
     fn prepare_dispatch(&mut self, now: f64);
     fn set_entropy(
         &mut self,
@@ -105,12 +112,17 @@ trait AnyEngine {
         Err(entropy_configuration_error())
     }
 
+    fn http_command_owner(&self, request: RequestId) -> Option<CommandId>;
     fn signing_pending(&self, _: RequestId) -> bool {
         false
     }
     #[cfg(feature = "sign-meta")]
     fn sign_meta(&self, _: RequestId) -> Option<safe_cex_engine::sign_meta::SignMeta> {
         None
+    }
+    #[cfg(feature = "hyperliquid")]
+    fn http_read_class(&self, _: RequestId) -> safe_cex_engine::HttpReadClass {
+        safe_cex_engine::HttpReadClass::Normal
     }
     fn http_preparation_pending(&self, _: safe_cex_engine::request_context::Preparation) -> bool {
         false
@@ -159,6 +171,12 @@ trait AnyEngine {
     ) -> Result<(), &'static str>;
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
+    /// The data source's clock offset for a frame-fed engine.
+    fn set_source_clock_offset(&mut self, _offset_ms: Option<f64>) {}
+    /// A data source's frame into a frame-fed engine (`Engine::apply_frame`).
+    fn apply_frame(&mut self, _now: f64, _frame: &[u8], _snapshot: bool) -> Result<(), String> {
+        Err("frame ingest requires a frameFed engine".into())
+    }
     /// A host command with the caller's wait (see `Engine::handle_command`).
     fn handle_command(
         &mut self,
@@ -176,6 +194,11 @@ trait AnyEngine {
     fn account_snapshot(&mut self, now: f64) -> &[u8];
     fn health(&self) -> Health {
         Health::default()
+    }
+    /// The engine store, projected for algos between engine calls.
+    #[cfg(feature = "algos")]
+    fn store(&self) -> Option<&safe_cex_engine::Store> {
+        None
     }
 }
 
@@ -216,11 +239,14 @@ impl<V: Venue> AnyEngine for Engine<V> {
         self.address_setup_retired_wire(token, now)
     }
 
-    #[cfg(feature = "dispatch-signing")]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         Engine::signer(self)
     }
-    #[cfg(feature = "dispatch-signing")]
+    #[cfg(any(
+        feature = "hosted-signing",
+        feature = "hosted-wallet",
+        feature = "hosted-join-proof"
+    ))]
     fn signing_clock(&self, now: f64) -> (f64, u64) {
         Engine::signing_clock(self, now)
     }
@@ -233,6 +259,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
     ) -> Result<(), safe_cex_engine::VenueError> {
         self.set_signer(None)?;
         self.set_host_algorithms(algorithms)
+    }
+    fn sync_host_time(&mut self, now: f64, utc: f64) -> bool {
+        Engine::sync_host_time(self, now, utc)
     }
     fn prepare_dispatch(&mut self, now: f64) {
         Engine::prepare_dispatch(self, now);
@@ -248,13 +277,19 @@ impl<V: Venue> AnyEngine for Engine<V> {
             Engine::set_entropy(self, fill)
         }
     }
-
+    fn http_command_owner(&self, request: RequestId) -> Option<CommandId> {
+        Engine::http_command_owner(self, request)
+    }
     fn signing_pending(&self, attempt: RequestId) -> bool {
         Engine::signing_pending(self, attempt)
     }
     #[cfg(feature = "sign-meta")]
     fn sign_meta(&self, task: RequestId) -> Option<safe_cex_engine::sign_meta::SignMeta> {
         Engine::sign_meta(self, task)
+    }
+    #[cfg(feature = "hyperliquid")]
+    fn http_read_class(&self, request: RequestId) -> safe_cex_engine::HttpReadClass {
+        Engine::http_read_class(self, request)
     }
     fn http_preparation_pending(
         &self,
@@ -300,7 +335,6 @@ impl<V: Venue> AnyEngine for Engine<V> {
     {
         Engine::claim_http(self, now, token)
     }
-
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         Engine::capabilities(self)
     }
@@ -314,11 +348,15 @@ impl<V: Venue> AnyEngine for Engine<V> {
     fn start(&mut self, now: f64) {
         Engine::start(self, now);
     }
-
+    fn apply_frame(&mut self, now: f64, frame: &[u8], snapshot: bool) -> Result<(), String> {
+        Engine::apply_frame(self, now, frame, snapshot).map_err(|error| error.0.to_owned())
+    }
+    fn set_source_clock_offset(&mut self, offset_ms: Option<f64>) {
+        Engine::set_source_clock_offset(self, offset_ms);
+    }
     fn handle(&mut self, now: f64, event: Event<'_>) {
         Engine::handle(self, now, event);
     }
-
     fn handle_command(
         &mut self,
         now: f64,
@@ -327,11 +365,9 @@ impl<V: Venue> AnyEngine for Engine<V> {
     ) -> Result<(), safe_cex_engine::request_context::Error> {
         Engine::handle_command(self, now, command, wait_ms)
     }
-
     fn drain(&mut self) -> Vec<Action> {
         self.drain_actions().collect()
     }
-
     fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]> {
         if market_only {
             self.take_market_frame(now)
@@ -339,16 +375,19 @@ impl<V: Venue> AnyEngine for Engine<V> {
             self.take_frame(now)
         }
     }
-
     fn snapshot(&mut self, now: f64) -> &[u8] {
         self.snapshot_frame(now)
     }
     fn account_snapshot(&mut self, now: f64) -> &[u8] {
         self.account_snapshot_frame(now)
     }
-
     fn health(&self) -> Health {
         Engine::health(self).clone()
+    }
+
+    #[cfg(feature = "algos")]
+    fn store(&self) -> Option<&safe_cex_engine::Store> {
+        Some(Engine::store(self))
     }
 }
 
@@ -409,6 +448,8 @@ enum ActionOut<'a> {
     WsConnect {
         #[serde(skip_serializing_if = "is_false")]
         binary: bool,
+        #[serde(rename = "publicTopics", skip_serializing_if = "is_false")]
+        public_topics: bool,
         socket: u64,
         url: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -436,12 +477,6 @@ enum ActionOut<'a> {
     Sign {
         attempt: u64,
         work: &'a safe_cex_engine::signing::SignRequest,
-        #[serde(rename = "timeoutMs")]
-        timeout_ms: u32,
-    },
-    SignPayload {
-        request: u64,
-        payload: &'a safe_cex_engine::PayloadSignRequest,
         #[serde(rename = "timeoutMs")]
         timeout_ms: u32,
     },
@@ -493,7 +528,8 @@ impl serde::Serialize for Fields<'_> {
         let mut map = serializer.serialize_map(Some(self.0.len()))?;
         for (key, value) in self.0 {
             match value {
-                Value::Str(text) => map.serialize_entry(key, text)?,
+                Value::Str(text) => map.serialize_entry(key, text.as_str())?,
+                Value::StaticStr(text) => map.serialize_entry(key, *text)?,
                 // JSON has no non-finite numbers.
                 Value::Num(number) if number.is_finite() => map.serialize_entry(key, number)?,
                 Value::Num(_) => map.serialize_entry(key, &())?,
@@ -528,6 +564,7 @@ fn encode(actions: &[Action]) -> String {
             #[cfg(not(feature = "address-nonce"))]
             Action::RetireAddressSetup { .. } => std::process::abort(),
             Action::WsConnect {
+                public_topics,
                 binary,
                 socket,
                 url,
@@ -535,6 +572,7 @@ fn encode(actions: &[Action]) -> String {
                 channel,
                 context,
             } => ActionOut::WsConnect {
+                public_topics: *public_topics,
                 binary: *binary,
                 socket: socket.0,
                 url,
@@ -565,15 +603,6 @@ fn encode(actions: &[Action]) -> String {
                 work,
                 timeout_ms: *timeout_ms,
             },
-            Action::SignPayload {
-                request,
-                payload,
-                timeout_ms,
-            } => ActionOut::SignPayload {
-                request: request.0,
-                payload,
-                timeout_ms: *timeout_ms,
-            },
             Action::SetTimer { timer, at_ms } => ActionOut::SetTimer {
                 timer: timer.0,
                 at: *at_ms,
@@ -593,7 +622,7 @@ fn encode(actions: &[Action]) -> String {
                 command: *command,
                 message,
             },
-            Action::Notice(Notice::StartupFailed { error }) => {
+            Action::Notice(Notice::StartupFailed { error, .. }) => {
                 ActionOut::StartupFailed { detail: error }
             }
             Action::Notice(Notice::Event(event)) => ActionOut::Event {
@@ -640,13 +669,16 @@ pub fn wasm_memory_bytes() -> f64 {
 
 /// Resolve construction choices without constructing an engine or performing I/O.
 #[wasm_bindgen(js_name = resolveConstruction)]
-pub fn resolve_construction(venue: &str, options_json: &str) -> Result<String, JsError> {
+pub fn resolve_construction(venue: &str, options_json: &str) -> Result<String, js_sys::Error> {
     if !safe_cex_venues::supported(venue) {
-        return Err(JsError::new(&format!("unsupported venue: {venue}")));
+        return Err(construction_error(safe_cex_venues::unsupported_venue(
+            venue,
+        )));
     }
-    let options: safe_cex_venues::EngineOptions =
-        serde_json::from_str(options_json).map_err(|_| JsError::new("Invalid engine options"))?;
-    Ok(serde_json::to_string(&options.construction(venue))?)
+    let options: safe_cex_venues::EngineOptions = serde_json::from_str(options_json)
+        .map_err(|_| js_sys::Error::new("Invalid engine options"))?;
+    serde_json::to_string(&options.construction(venue))
+        .map_err(|error| js_sys::Error::new(&error.to_string()))
 }
 
 fn entropy_configuration_error() -> safe_cex_engine::VenueError {
@@ -754,28 +786,95 @@ fn construction_error(detail: safe_cex_engine::VenueError) -> js_sys::Error {
     error
 }
 
+#[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
+enum HostedCapture {
+    #[cfg(feature = "hosted-signing")]
+    Signing(safe_cex_venues::hosted_signing::OutputKind),
+    #[cfg(feature = "hosted-join-proof")]
+    JoinProof(safe_cex_venues::hosted_join_proof::Pending),
+}
+
+#[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
+impl HostedCapture {
+    fn output(
+        self,
+        result: &safe_cex_engine::signing::SignResult,
+    ) -> Result<String, safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::SignError;
+        match self {
+            #[cfg(feature = "hosted-signing")]
+            Self::Signing(kind) => {
+                serde_json::to_string(&safe_cex_venues::hosted_signing::finish(kind, result)?)
+            }
+            #[cfg(feature = "hosted-join-proof")]
+            Self::JoinProof(pending) => serde_json::to_string(&pending.finish(result)?),
+        }
+        .map_err(|_| SignError::InvalidResult)
+    }
+}
+
+#[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
+fn prepared_signing_output(
+    prepared: safe_cex_engine::signing_capture::Prepared,
+) -> Result<String, js_sys::Error> {
+    #[derive(serde::Serialize)]
+    struct Prepared {
+        #[serde(rename = "deadlineMs")]
+        deadline_ms: f64,
+        id: u32,
+        work: serde_json::Value,
+    }
+    let work = serde_json::to_value(&prepared.work)
+        .map_err(|_| hosted_error(safe_cex_engine::signing::SignError::InvalidRequest))?;
+    serde_json::to_string(&Prepared {
+        deadline_ms: prepared.deadline_ms,
+        id: prepared.id.get(),
+        work,
+    })
+    .map_err(|_| hosted_error(safe_cex_engine::signing::SignError::InvalidRequest))
+}
+
 #[wasm_bindgen]
 pub struct WasmEngine {
     dispatch_signing: bool,
     external_signer: bool,
+    #[cfg(feature = "coinbase")]
+    coinbase_binding: Option<String>,
     construction: String,
     inner: Box<dyn AnyEngine>,
-    #[cfg(feature = "dispatch-signing")]
+    #[cfg(feature = "hosted-signing")]
     hosted_identity: Option<(String, safe_cex_engine::signing::Identities)>,
-    #[cfg(feature = "dispatch-signing")]
-    hosted_captures:
-        safe_cex_engine::signing_capture::Capture<safe_cex_venues::hosted_signing::OutputKind>,
+    #[cfg(feature = "hosted-join-proof")]
+    join_proof_identity: Option<safe_cex_venues::hosted_join_proof::Account>,
+    #[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
+    hosted_captures: safe_cex_engine::signing_capture::Capture<HostedCapture>,
+    #[cfg(feature = "hosted-wallet")]
+    hosted_wallet: Option<(
+        String,
+        safe_cex_engine::signing::Identities,
+        safe_cex_venues::hosted_wallet::Account,
+    )>,
+    #[cfg(feature = "algos")]
+    algos: algos::AlgoHost,
 }
 
-#[cfg(feature = "dispatch-signing")]
+#[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
 fn hosted_error(error: safe_cex_engine::signing::SignError) -> js_sys::Error {
     construction_error(error.venue_error())
 }
 
-#[cfg(feature = "dispatch-signing")]
+#[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
 #[wasm_bindgen]
 impl WasmEngine {
+    #[cfg(feature = "coinbase")]
+    #[wasm_bindgen(js_name = coinbaseSigningMetadata)]
+    pub fn coinbase_signing_metadata(&self) -> Result<String, js_sys::Error> {
+        self.coinbase_binding
+            .clone()
+            .ok_or_else(|| hosted_error(safe_cex_engine::signing::SignError::Unavailable))
+    }
     /// Clock capture only: does not start the venue or emit any action.
+    #[cfg(feature = "hosted-signing")]
     #[wasm_bindgen(js_name = hostedSigningClock)]
     pub fn hosted_signing_clock(&self, now: f64) -> Result<String, js_sys::Error> {
         use safe_cex_engine::signing::{SignError, SignReceipt};
@@ -805,6 +904,7 @@ impl WasmEngine {
         .map_err(|_| hosted_error(SignError::InvalidRequest))
     }
 
+    #[cfg(feature = "hosted-signing")]
     #[wasm_bindgen(js_name = prepareHostedSigning)]
     pub fn prepare_hosted_signing(
         &mut self,
@@ -838,34 +938,71 @@ impl WasmEngine {
         }
         let (work, kind) = safe_cex_venues::hosted_signing::prepare(venue, identities, input)
             .map_err(hosted_error)?;
+        #[cfg(feature = "coinbase")]
+        if matches!(kind, safe_cex_venues::hosted_signing::OutputKind::Coinbase) {
+            let age = protocol_now
+                - work
+                    .receipt
+                    .stamp_ms
+                    .ok_or_else(|| hosted_error(SignError::InvalidRequest))?;
+            if !age.is_finite() || !(-30_000. ..=30_000.).contains(&age) {
+                return Err(hosted_error(SignError::InvalidRequest));
+            }
+        }
         let prepared = self
             .hosted_captures
             .prepare_with_policy(
                 (work, kind.header_policy()),
-                kind,
+                HostedCapture::Signing(kind),
                 now,
                 protocol_now,
                 revision,
                 timeout,
             )
             .map_err(hosted_error)?;
-        // Fields in json!'s sorted-key order; `work` stays a sorted-key Value
-        // so the bytes handed to the signer are unchanged.
-        #[derive(serde::Serialize)]
-        struct Prepared {
-            #[serde(rename = "deadlineMs")]
-            deadline_ms: f64,
-            id: u32,
-            work: serde_json::Value,
+        prepared_signing_output(prepared)
+    }
+
+    #[cfg(feature = "hosted-join-proof")]
+    #[wasm_bindgen(js_name = prepareJoinProof)]
+    pub fn prepare_join_proof(&mut self, raw: &str, now: f64) -> Result<String, js_sys::Error> {
+        use safe_cex_engine::signing::SignError;
+        let account = self
+            .join_proof_identity
+            .as_ref()
+            .ok_or_else(|| hosted_error(SignError::Unsupported))?;
+        let (protocol_now, revision) = self.inner.signing_clock(now);
+        if !protocol_now.is_finite() || !(0. ..=9_007_199_254_740_991.).contains(&protocol_now) {
+            return Err(hosted_error(SignError::InvalidRequest));
         }
-        let work = serde_json::to_value(&prepared.work)
-            .map_err(|_| hosted_error(SignError::InvalidRequest))?;
-        serde_json::to_string(&Prepared {
-            deadline_ms: prepared.deadline_ms,
-            id: prepared.id.get(),
-            work,
-        })
-        .map_err(|_| hosted_error(SignError::InvalidRequest))
+        let mut entropy = [0; 32];
+        if account.needs_entropy() {
+            crypto_entropy().map_err(construction_error)?(&mut entropy)
+                .map_err(|_| hosted_error(SignError::Unavailable))?;
+        }
+        let (work, pending) = account
+            .prepare(raw, protocol_now.floor() as u64, &entropy)
+            .map_err(hosted_error)?;
+        let remaining = work
+            .receipt
+            .expiry_ms
+            .ok_or_else(|| hosted_error(SignError::InvalidRequest))?
+            - protocol_now;
+        let timeout = remaining
+            .min(f64::from(safe_cex_engine::signing_capture::MAX_TIMEOUT_MS))
+            .floor() as u32;
+        let prepared = self
+            .hosted_captures
+            .prepare(
+                work,
+                HostedCapture::JoinProof(pending),
+                now,
+                protocol_now,
+                revision,
+                timeout,
+            )
+            .map_err(hosted_error)?;
+        prepared_signing_output(prepared)
     }
 
     /// Executes only this account's already prepared work, never caller refs.
@@ -885,9 +1022,7 @@ impl WasmEngine {
                     .unwrap_or(Err(SignError::Unavailable))
             })
             .map_err(hosted_error)?;
-        let output =
-            safe_cex_venues::hosted_signing::finish(kind, &result).map_err(hosted_error)?;
-        serde_json::to_string(&output).map_err(|_| hosted_error(SignError::InvalidResult))
+        kind.output(&result).map_err(hosted_error)
     }
 
     #[wasm_bindgen(js_name = finishHostedSigning)]
@@ -910,9 +1045,7 @@ impl WasmEngine {
             .hosted_captures
             .finish(id, now, protocol_now, revision, result)
             .map_err(hosted_error)?;
-        let output =
-            safe_cex_venues::hosted_signing::finish(kind, &result).map_err(hosted_error)?;
-        serde_json::to_string(&output).map_err(|_| hosted_error(SignError::InvalidResult))
+        kind.output(&result).map_err(hosted_error)
     }
 
     #[wasm_bindgen(js_name = cancelHostedSigning)]
@@ -931,7 +1064,6 @@ impl WasmEngine {
         feature = "binance",
         feature = "apexomni",
         feature = "asterdex",
-        feature = "breakoutprop",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "polymarket",
@@ -970,7 +1102,10 @@ impl WasmEngine {
         let dispatch_signing = options.construction(venue).bridge.dispatch_signing;
         // A false read-key result outranks any provider setup failure, as natively.
         safe_cex_venues::read_key_preflight(venue, &options).map_err(construction_error)?;
-        let external_signer = options.signing.is_some() && signer_setup_json.is_none();
+        let external_setup = options.signing.is_some() && signer_setup_json.is_none();
+        let has_external_refs = options.signing.as_ref().is_some_and(|identities| {
+            identities.primary.is_some() || identities.secondary.is_some()
+        });
         #[cfg(feature = "dispatch-signing")]
         let signer = if let Some(mut input) = signer_setup_json {
             if !dispatch_signing {
@@ -978,15 +1113,15 @@ impl WasmEngine {
                     "Local signer setup is not supported for this venue yet",
                 ));
             }
-            let (signer, identities) = safe_cex_venues::local_signer_from_json_for_mode(
+            let (signer, identities) = safe_cex_venues::local_signer_from_capsule(
                 venue,
                 std::mem::take(&mut *input),
-                &options,
+                &mut options,
             )
             .map_err(construction_error)?;
             options.signing = Some(identities);
             Some(signer)
-        } else if external_signer {
+        } else if external_setup {
             Some(std::sync::Arc::new(ExternalSigner) as safe_cex_engine::signing::Provider)
         } else if dispatch_signing {
             let (signer, identities) =
@@ -1006,7 +1141,7 @@ impl WasmEngine {
             }
             None
         };
-        #[cfg(feature = "dispatch-signing")]
+        #[cfg(feature = "hosted-signing")]
         let hosted_identity = (dispatch_signing
             && safe_cex_venues::hosted_signing::admitted(venue, &options))
         .then(|| {
@@ -1016,9 +1151,58 @@ impl WasmEngine {
                 .map(|identities| (venue.to_owned(), identities))
         })
         .flatten();
+        #[cfg(feature = "hosted-join-proof")]
+        let join_proof_identity = if dispatch_signing {
+            options.signing.as_ref().and_then(|identities| {
+                safe_cex_venues::hosted_join_proof::Account::capture(venue, identities, &options)
+                    .ok()
+            })
+        } else {
+            None
+        };
+        #[cfg(feature = "hosted-wallet")]
+        let hosted_wallet = (dispatch_signing && safe_cex_venues::hosted_wallet::admitted(venue))
+            .then(|| {
+                options.signing.clone().map(|identities| {
+                    let account = safe_cex_venues::hosted_wallet::Account {
+                        key: options.key.clone(),
+                        vault: options.vault.clone(),
+                        testnet: options.testnet,
+                        application_id: options.application_id.clone(),
+                        // EngineOptions carries api_key_index only in Lighter builds.
+                        #[cfg(feature = "lighter")]
+                        api_key_index: options.api_key_index.clone(),
+                        #[cfg(not(feature = "lighter"))]
+                        api_key_index: None,
+                        paradex_address: options.paradex_address.clone(),
+                        #[cfg(feature = "grvt")]
+                        grvt_trading_account_id: options.grvt_trading_account_id.clone(),
+                        #[cfg(not(feature = "grvt"))]
+                        grvt_trading_account_id: None,
+                        #[cfg(feature = "asterdex")]
+                        asterdex_v3: matches!(options.asterdex.api_version, Some(version) if version.prefix() == "/fapi/v3"),
+                        #[cfg(not(feature = "asterdex"))]
+                        asterdex_v3: false,
+                        #[cfg(feature = "asterdex")]
+                        asterdex_user_address: options.asterdex.user_address.clone(),
+                        #[cfg(not(feature = "asterdex"))]
+                        asterdex_user_address: None,
+                    };
+                    (venue.to_owned(), identities, account)
+                })
+            })
+            .flatten();
+        #[cfg(feature = "coinbase")]
+        let coinbase_binding = options
+            .coinbase_signing
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|_| js_sys::Error::new("Invalid Coinbase public signing binding"))?;
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
-        let inner = safe_cex_venues::build_with_signer(
+        let inner = safe_cex_venues::build_with_signer_in_context(
+            safe_cex_venues::ConstructionContext::Client,
             venue,
             options,
             Some(production_entropy().map_err(construction_error)?),
@@ -1026,16 +1210,60 @@ impl WasmEngine {
             Boxed,
         )
         .map_err(construction_error)?;
+        // Public normalization may discard the provider. Otherwise the external
+        // refs still need a callback, including refs retained inside the venue.
+        let external_signer = external_setup && has_external_refs && inner.signer().is_some();
         Ok(Self {
             inner,
             construction,
             dispatch_signing,
             external_signer,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_identity,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-join-proof")]
+            join_proof_identity,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding,
+            #[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
             hosted_captures: Default::default(),
+            #[cfg(feature = "hosted-wallet")]
+            hosted_wallet,
+            #[cfg(feature = "algos")]
+            algos: algos::AlgoHost::new(venue),
         })
+    }
+
+    /// Device-side wallet answer for a keyless server's ws-auth request; the
+    /// local provider signs synchronously. Returns the `0x` hex result.
+    #[cfg(feature = "hosted-wallet")]
+    #[wasm_bindgen(js_name = hostedWalletSigning)]
+    pub fn hosted_wallet_signing(
+        &self,
+        to_sign: &str,
+        output_format: &str,
+        now: f64,
+    ) -> Result<String, js_sys::Error> {
+        use safe_cex_engine::signing::SignError;
+        let error = |error: SignError| construction_error(error.venue_error());
+        let (venue, identities, account) = self
+            .hosted_wallet
+            .as_ref()
+            .ok_or_else(|| error(SignError::Unsupported))?;
+        let provider = self
+            .inner
+            .signer()
+            .ok_or_else(|| error(SignError::Unavailable))?;
+        let (protocol_now, _) = self.inner.signing_clock(now);
+        safe_cex_venues::hosted_wallet::sign(
+            venue,
+            identities,
+            account,
+            &provider,
+            to_sign,
+            output_format,
+            protocol_now,
+        )
+        .map_err(error)
     }
 
     #[cfg(feature = "address-nonce")]
@@ -1177,8 +1405,45 @@ impl WasmEngine {
         self.construction.clone()
     }
 
+    /// Whether `venue` can be built with `frameFed: true`; check before
+    /// construction so an unconverted family keeps its existing path.
+    #[wasm_bindgen(js_name = frameFedSupported)]
+    pub fn frame_fed_supported(venue: &str) -> bool {
+        safe_cex_venues::frame_fed_supported(venue)
+    }
+
+    /// Apply a data source's SCXF frame to a frame-fed engine; `snapshot`
+    /// replaces the account sections. Returns the flushed actions, like `command`.
+    /// The data source's clock minus this page's, in ms: 0 for the LOCAL
+    /// worker, the measured server offset for COSIGNED/DELEGATED. Fences lift
+    /// on one clock once set; until then they wait 30 s.
+    #[wasm_bindgen(js_name = setSourceClockOffset)]
+    pub fn set_source_clock_offset(&mut self, offset_ms: Option<f64>) {
+        self.inner.set_source_clock_offset(offset_ms);
+    }
+
+    #[wasm_bindgen(js_name = applyFrame)]
+    pub fn apply_frame(
+        &mut self,
+        frame: &[u8],
+        snapshot: bool,
+        now: f64,
+    ) -> Result<String, JsError> {
+        self.inner
+            .apply_frame(now, frame, snapshot)
+            .map_err(|error| JsError::new(&error))?;
+        Ok(self.flush())
+    }
+
     fn flush(&mut self) -> String {
-        encode(&self.inner.drain())
+        let actions = self.inner.drain();
+        if actions.is_empty() {
+            return String::new();
+        }
+        #[cfg(feature = "algos")]
+        return encode(&self.algos.route(actions));
+        #[cfg(not(feature = "algos"))]
+        encode(&actions)
     }
 
     /// Health counters as JSON (`safe_cex_engine::Health`, camelCase).
@@ -1200,12 +1465,22 @@ impl WasmEngine {
         )
     }
 
+    /// Host UTC is protocol time only; every deadline keeps the stable host clock.
+    #[wasm_bindgen(js_name = syncHostTime)]
+    pub fn sync_host_time(&mut self, now: f64, utc: f64) -> bool {
+        self.inner.sync_host_time(now, utc)
+    }
+
     pub fn start(&mut self, now: f64) -> String {
         #[cfg(feature = "address-nonce")]
         if !self.inner.has_started()
             && let Err(error) = self.inner.initialize_address_setup(now, false)
         {
-            return encode(&[Action::Notice(Notice::StartupFailed { error })]);
+            return encode(&[Action::Notice(Notice::StartupFailed {
+                error,
+                #[cfg(not(target_arch = "wasm32"))]
+                read_refusal: false,
+            })]);
         }
         self.inner.start(now);
         self.flush()
@@ -1354,54 +1629,6 @@ impl WasmEngine {
         Ok(self.flush())
     }
 
-    #[wasm_bindgen(js_name = payloadSigned)]
-    pub fn payload_signed(
-        &mut self,
-        request: f64,
-        signature: &str,
-        headers: &str,
-        now: f64,
-    ) -> Result<String, js_sys::Error> {
-        let request = host_resource_id(request)?;
-        let request = RequestId(request);
-        match payload_headers(headers) {
-            Some(headers) => self.inner.handle(
-                now,
-                Event::PayloadSigned {
-                    request,
-                    signature,
-                    headers,
-                },
-            ),
-            None => self.inner.handle(
-                now,
-                Event::PayloadSignFailed {
-                    request,
-                    error: "Invalid payload signer headers",
-                },
-            ),
-        }
-        Ok(self.flush())
-    }
-
-    #[wasm_bindgen(js_name = payloadSignFailed)]
-    pub fn payload_sign_failed(
-        &mut self,
-        request: f64,
-        error: &str,
-        now: f64,
-    ) -> Result<String, js_sys::Error> {
-        let request = host_resource_id(request)?;
-        self.inner.handle(
-            now,
-            Event::PayloadSignFailed {
-                request: RequestId(request),
-                error,
-            },
-        );
-        Ok(self.flush())
-    }
-
     pub fn timer(&mut self, timer: f64, now: f64) -> Result<String, js_sys::Error> {
         let timer = host_resource_id(timer)?;
         let timer = TimerId(timer);
@@ -1441,6 +1668,7 @@ impl WasmEngine {
                         .handle(now, Event::PollCeilingChanged { ceiling_ms });
                     Event::PollScaleChanged { scale }
                 }
+                safe_cex_engine::command::HostInput::NetworkRestored => Event::NetworkRestored,
             };
             self.inner.handle(now, event);
             Ok(self.flush())
@@ -1473,6 +1701,7 @@ impl WasmEngine {
                     .handle(now, Event::PollCeilingChanged { ceiling_ms });
                 Event::PollScaleChanged { scale }
             }
+            safe_cex_engine::command::HostInput::NetworkRestored => Event::NetworkRestored,
         };
         self.inner.handle(now, event);
         Ok(self.flush())
@@ -1505,9 +1734,57 @@ impl WasmEngine {
     /// book cadence); store sections wait for the next full frame.
     #[wasm_bindgen(js_name = takeFrame)]
     pub fn take_frame(&mut self, now: f64, market_only: bool) -> Option<js_sys::Uint8Array> {
+        #[cfg(feature = "algos")]
+        if self.algos.is_running() {
+            return self.take_frame_with(now, market_only, |frame| js_sys::Uint8Array::from(frame));
+        }
         self.inner
             .frame(now, market_only)
             .map(js_sys::Uint8Array::from)
+    }
+}
+
+#[cfg(feature = "algos")]
+mod algos;
+
+#[cfg(feature = "algos")]
+impl WasmEngine {
+    /// A taken frame also reaches the algos: its fills and the store it left.
+    fn take_frame_with<T>(
+        &mut self,
+        now: f64,
+        market_only: bool,
+        copy: impl FnOnce(&[u8]) -> T,
+    ) -> Option<T> {
+        let frame = self.inner.frame(now, market_only)?;
+        let fills = safe_cex_engine::wire::fills(frame).unwrap_or_default();
+        let out = copy(frame);
+        self.algos.frame(self.inner.store(), fills);
+        Some(out)
+    }
+}
+
+#[cfg(all(test, feature = "algos"))]
+impl WasmEngine {
+    /// An engine over `inner`, for algo tests that drive a test venue.
+    fn for_algo_tests(venue: &str, inner: Box<dyn AnyEngine>) -> Self {
+        Self {
+            dispatch_signing: false,
+            external_signer: false,
+            construction: String::new(),
+            inner,
+            #[cfg(feature = "hosted-signing")]
+            hosted_identity: None,
+            #[cfg(feature = "hosted-join-proof")]
+            join_proof_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
+            #[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
+            hosted_captures: Default::default(),
+            #[cfg(feature = "hosted-wallet")]
+            hosted_wallet: None,
+            algos: algos::AlgoHost::new(venue),
+        }
     }
 }
 
@@ -1515,19 +1792,33 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
-fn payload_headers(text: &str) -> Option<Vec<(String, String)>> {
-    let mut headers = Vec::new();
-    if !text.is_empty() {
-        for line in text.split('\n') {
-            let (name, value) = line.split_once(':')?;
-            headers.push((name.into(), value.into()));
-        }
-    }
-    Some(headers)
-}
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "txflow"))]
+mod public_custody_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn socket_public_topics_are_optional_and_do_not_replace_the_primary_role() {
+        let mut action = safe_cex_engine::Action::WsConnect {
+            binary: false,
+            socket: safe_cex_engine::SocketId(1),
+            url: "wss://venue.test/ws".into(),
+            headers: vec![],
+            channel: Some(safe_cex_engine::SocketChannel::Private),
+            public_topics: false,
+            context: None,
+        };
+        let ordinary: serde_json::Value =
+            serde_json::from_str(&super::encode(&[action.clone()])).unwrap();
+        assert!(ordinary[0].get("publicTopics").is_none());
+        if let safe_cex_engine::Action::WsConnect { public_topics, .. } = &mut action {
+            *public_topics = true;
+        }
+        let shared: serde_json::Value = serde_json::from_str(&super::encode(&[action])).unwrap();
+        assert_eq!(shared[0]["channel"], "private");
+        assert_eq!(shared[0]["publicTopics"], true);
+    }
+
     #[cfg(feature = "asterdex")]
     #[test]
     fn hosted_signing_identity_exists_only_for_aster_v1_accounts() {
@@ -2005,17 +2296,13 @@ mod tests {
                 r#"{"status":"released"}"#
             );
             assert!(bound.iter().all(|action| {
-                !matches!(
-                    action.op.as_str(),
-                    "http" | "sign" | "signPayload" | "signedOutbound"
-                )
+                !matches!(action.op.as_str(), "http" | "sign" | "signedOutbound")
             }));
-            assert!(actions.iter().all(|action| {
-                !matches!(
-                    action.op.as_str(),
-                    "sign" | "signPayload" | "signedOutbound"
-                )
-            }));
+            assert!(
+                actions
+                    .iter()
+                    .all(|action| { !matches!(action.op.as_str(), "sign" | "signedOutbound") })
+            );
             assert!(!engine.requires_external_signer());
         }
     }
@@ -2032,7 +2319,6 @@ mod tests {
         feature = "bitrue",
         feature = "bitunix",
         feature = "blofin",
-        feature = "breakoutprop",
         feature = "bybit",
         feature = "coinbase",
         feature = "cryptocom",
@@ -2057,21 +2343,13 @@ mod tests {
         use safe_cex_engine::{
             AccountLookup, CancelAll, Capabilities, LeverageQuery, MaxLeverage, QuantityUnits,
         };
-        const ORDERLY: [&str; 6] = [
-            "tealstreet-dex",
-            "kodiakfi",
-            "mode",
-            "salsadex",
-            "what",
-            "woofi",
-        ];
+        const ORDERLY: [&str; 4] = ["kodiakfi", "mode", "what", "woofi"];
         const OKX: [&str; 4] = ["okx", "okxeu", "okxdemo", "okxeudemo"];
         let venues = [
             "coinbase",
             "coinbasespot",
             "apexomni",
             "asterdex",
-            "breakoutprop",
             "binance",
             "binancespot",
             "binanceinverse",
@@ -2114,8 +2392,6 @@ mod tests {
         let engine_options = |venue: &str, extra: &str| {
             let endpoints = if venue == "txflow" {
                 r#","testnet":true"#
-            } else if venue == "breakoutprop" {
-                r#","key":"user","secret":"password""#
             } else if venue == "hyrotrader" {
                 r#","endpoints":{"rest":"https://hyro.test","publicWs":"wss://hyro.test/public","privateWs":"wss://hyro.test/private"}"#
             } else {
@@ -2126,7 +2402,6 @@ mod tests {
         for venue in venues {
             let no_history = any(
                 &[
-                    "breakoutprop",
                     "hyperliquidspot",
                     "krakenspot",
                     "binancespot",
@@ -2189,6 +2464,38 @@ mod tests {
                 ) || any(&OKX, venue),
                 fill_history: !no_history,
                 order_history: !no_orders_or_income,
+                order_history_needs_symbol: any(&["binance", "binancepm", "phemex"], venue),
+                fresh_positions: any(
+                    &[
+                        "bybit",
+                        "bybitinverse",
+                        "bybitdemo",
+                        "hyrotrader",
+                        "bitget",
+                        "bitgetinverse",
+                        "bitgetusdc",
+                        "binance",
+                        "binancepm",
+                        "binanceinverse",
+                        "apexomni",
+                        "asterdex",
+                        "bingx",
+                        "bitunix",
+                        "blofin",
+                        "cryptocom",
+                        "hyperliquid",
+                        "kraken",
+                        "lighter",
+                        "lighter-robinhood",
+                        "okx",
+                        "okxdemo",
+                        "okxeu",
+                        "okxeudemo",
+                        "paradex",
+                        "phemex",
+                    ],
+                    venue,
+                ),
                 income_history: !no_orders_or_income
                     && !any(
                         &["bybitspot", "hyrotrader", "coinbase", "coinbasespot"],
@@ -2196,14 +2503,7 @@ mod tests {
                     ),
                 fills_by_order_id: venue == "grvt",
                 cancel_all: if any(
-                    &[
-                        "polymarket",
-                        "breakoutprop",
-                        "woo",
-                        "grvt",
-                        "kucoin",
-                        "kucoinspot",
-                    ],
+                    &["polymarket", "woo", "grvt", "kucoin", "kucoinspot"],
                     venue,
                 ) || any(&ORDERLY, venue)
                 {
@@ -2225,7 +2525,20 @@ mod tests {
                 } else {
                     CancelAll::EachOpenSymbol
                 },
-                leverage_query: if any(&["bingx", "weex"], venue) {
+                leverage_query: if any(
+                    &[
+                        "bingx",
+                        "weex",
+                        "bybit",
+                        "bybitinverse",
+                        "bybitdemo",
+                        "bitget",
+                        "bitgetinverse",
+                        "bitgetusdc",
+                        "kucoin",
+                    ],
+                    venue,
+                ) {
                     LeverageQuery::OnReadAndMetadata
                 } else if any(
                     &[
@@ -2244,7 +2557,7 @@ mod tests {
                     || any(&ORDERLY, venue)
                 {
                     LeverageQuery::OnRead
-                } else if any(&["mexc", "woo", "kraken"], venue) {
+                } else if any(&["mexc", "woo", "kraken", "hyperliquid"], venue) {
                     LeverageQuery::OnMetadata
                 } else {
                     LeverageQuery::Settings
@@ -2252,7 +2565,6 @@ mod tests {
                 max_leverage: match venue {
                     "bitrue" => MaxLeverage::Query,
                     "polymarket" => MaxLeverage::Rails,
-                    "breakoutprop" => MaxLeverage::Unsupported,
                     _ => MaxLeverage::Market,
                 },
                 account_leverage: any(&ORDERLY, venue),
@@ -2367,9 +2679,60 @@ mod tests {
                 finite_history_bounds: any(&["coinbase", "coinbasespot"], venue),
                 reject_order_history_filters: any(&["coinbase", "coinbasespot", "txflow"], venue)
                     || any(&ORDERLY, venue),
-                public_catalogue_validation: venue == "breakoutprop",
+                public_catalogue_validation: false,
                 isolated_book_subscriptions: venue == "asterdex",
                 inverse_closed_positions: venue == "bybitinverse",
+                nuke_account_cancel: any(
+                    &[
+                        "bitget",
+                        "bitgetinverse",
+                        "bitgetusdc",
+                        "krakenspot",
+                        "phemex",
+                    ],
+                    venue,
+                ),
+                symbol_cancel_misses_unseen: any(
+                    &[
+                        "bitget",
+                        "bitgetinverse",
+                        "bitgetusdc",
+                        "blofin",
+                        "hyperliquid",
+                        "hyperliquidspot",
+                        "hyrotrader",
+                        "krakenspot",
+                        "lighter",
+                        "lighter-robinhood",
+                        "paradex",
+                        "phemex",
+                    ],
+                    venue,
+                ) || any(&OKX, venue),
+                order_read_covers: any(
+                    &[
+                        "binance",
+                        "binancepm",
+                        "binanceinverse",
+                        "binancespot",
+                        "bingx",
+                        "bitget",
+                        "bitgetinverse",
+                        "bitgetusdc",
+                        "blofin",
+                        "bybit",
+                        "bybitdemo",
+                        "bybitinverse",
+                        "bybitspot",
+                        "hyperliquid",
+                        "hyperliquidspot",
+                        "lighter",
+                        "lighter-robinhood",
+                        "paradex",
+                        "phemex",
+                    ],
+                    venue,
+                ) || any(&OKX, venue),
             };
             let Ok(engine) = super::WasmEngine::new(venue, &engine_options(venue, ""), None) else {
                 panic!("{venue} engine constructs");
@@ -2498,6 +2861,9 @@ mod tests {
             drains: Rc<Cell<usize>>,
         }
         impl AnyEngine for Commands {
+            fn http_command_owner(&self, _: RequestId) -> Option<CommandId> {
+                None
+            }
             fn external_signer(
                 &mut self,
                 _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
@@ -2552,10 +2918,18 @@ mod tests {
         let drains = Rc::new(Cell::new(0));
         let mut engine = WasmEngine {
             dispatch_signing: false,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-join-proof")]
+            join_proof_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
+            #[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
             hosted_captures: Default::default(),
+            #[cfg(feature = "hosted-wallet")]
+            hosted_wallet: None,
+            #[cfg(feature = "algos")]
+            algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
             inner: Box::new(Commands {
@@ -2675,37 +3049,22 @@ mod tests {
 
     use super::*;
     use safe_cex_engine::Command;
-    #[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
+    #[cfg(any(feature = "asterdex", feature = "kucoinspot", feature = "bingx"))]
     use safe_cex_engine::model::CancelOrderRef;
     #[cfg(feature = "asterdex")]
     use safe_cex_engine::model::StpMode;
-
-    #[test]
-    fn delegated_header_lines_preserve_value_bytes_and_reject_malformed_lines() {
-        assert_eq!(payload_headers(""), Some(vec![]));
-        assert_eq!(
-            payload_headers("X-Empty:\nX-Exact:  a:b:c \t"),
-            Some(vec![
-                ("X-Empty".into(), String::new()),
-                ("X-Exact".into(), "  a:b:c \t".into()),
-            ])
-        );
-        for invalid in ["missing-colon", "\n", "X-Proof:a\n", "X-Proof:a\ninvalid"] {
-            assert_eq!(payload_headers(invalid), None);
-        }
-    }
 
     #[test]
     fn amendment_symbol_context_is_preserved_for_spot_builds() {
         let wire = safe_cex_engine::command::decode_command(
             r#"{"op":"amendOrderWithSymbol","command":19,"id":"unobserved","symbol":"BTC-USDT","price":100}"#,
         );
-        #[cfg(feature = "kucoinspot")]
+        #[cfg(any(feature = "kucoinspot", feature = "bingx"))]
         assert!(
             matches!(wire.unwrap(), Command::AmendOrderWithSymbol { command: 19, id, symbol, price: Some(100.0), amount: None }
             if id == "unobserved" && symbol == "BTC-USDT")
         );
-        #[cfg(not(feature = "kucoinspot"))]
+        #[cfg(not(any(feature = "kucoinspot", feature = "bingx")))]
         assert!(wire.is_err());
         let legacy = safe_cex_engine::command::decode_command(
             r#"{"op":"amendOrder","command":19,"id":"legacy","symbol":"ignored","price":100}"#,
@@ -2724,6 +3083,9 @@ mod tests {
 
     #[cfg(feature = "text-ingress")]
     impl AnyEngine for Messages {
+        fn http_command_owner(&self, _: RequestId) -> Option<CommandId> {
+            None
+        }
         fn external_signer(
             &mut self,
             _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
@@ -2770,6 +3132,21 @@ mod tests {
     }
 
     #[test]
+    fn static_startup_fields_encode_identically_to_owned_strings() {
+        let borrowed = [
+            ("state", Value::StaticStr("neverStarted")),
+            ("kind", Value::StaticStr("timeout")),
+        ];
+        let owned = [
+            ("state", Value::from("neverStarted")),
+            ("kind", Value::from("timeout")),
+        ];
+        let expected = r#"{"state":"neverStarted","kind":"timeout"}"#;
+        assert_eq!(serde_json::to_string(&Fields(&borrowed)).unwrap(), expected);
+        assert_eq!(serde_json::to_string(&Fields(&owned)).unwrap(), expected);
+    }
+
+    #[test]
     fn events_and_health_encode_as_the_documented_json() {
         let event = Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
             level: safe_cex_engine::Level::Warn,
@@ -2790,6 +3167,9 @@ mod tests {
 
         struct Counted;
         impl AnyEngine for Counted {
+            fn http_command_owner(&self, _: RequestId) -> Option<CommandId> {
+                None
+            }
             fn external_signer(
                 &mut self,
                 _: Option<Vec<safe_cex_engine::signing::Algorithm>>,
@@ -2838,10 +3218,18 @@ mod tests {
         let health: serde_json::Value = serde_json::from_str(
             &WasmEngine {
                 dispatch_signing: false,
-                #[cfg(feature = "dispatch-signing")]
+                #[cfg(feature = "hosted-signing")]
                 hosted_identity: None,
-                #[cfg(feature = "dispatch-signing")]
+                #[cfg(feature = "hosted-join-proof")]
+                join_proof_identity: None,
+                #[cfg(feature = "coinbase")]
+                coinbase_binding: None,
+                #[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
                 hosted_captures: Default::default(),
+                #[cfg(feature = "hosted-wallet")]
+                hosted_wallet: None,
+                #[cfg(feature = "algos")]
+                algos: Default::default(),
                 external_signer: false,
                 construction: "{}".into(),
                 inner: Box::new(Counted),
@@ -2866,10 +3254,18 @@ mod tests {
         ] {
             let mut engine = WasmEngine {
                 dispatch_signing: false,
-                #[cfg(feature = "dispatch-signing")]
+                #[cfg(feature = "hosted-signing")]
                 hosted_identity: None,
-                #[cfg(feature = "dispatch-signing")]
+                #[cfg(feature = "hosted-join-proof")]
+                join_proof_identity: None,
+                #[cfg(feature = "coinbase")]
+                coinbase_binding: None,
+                #[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
                 hosted_captures: Default::default(),
+                #[cfg(feature = "hosted-wallet")]
+                hosted_wallet: None,
+                #[cfg(feature = "algos")]
+                algos: Default::default(),
                 external_signer: false,
                 construction: "{}".into(),
                 inner: Box::<Messages>::default(),
@@ -2891,10 +3287,18 @@ mod tests {
     fn optional_websocket_actions_preserve_legacy_output_order_and_drain_once() {
         let engine = || WasmEngine {
             dispatch_signing: false,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-join-proof")]
+            join_proof_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
+            #[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
             hosted_captures: Default::default(),
+            #[cfg(feature = "hosted-wallet")]
+            hosted_wallet: None,
+            #[cfg(feature = "algos")]
+            algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
@@ -2921,20 +3325,36 @@ mod tests {
     fn byte_websocket_actions_validate_utf8_before_handling_or_draining() {
         let mut legacy = WasmEngine {
             dispatch_signing: false,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-join-proof")]
+            join_proof_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
+            #[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
             hosted_captures: Default::default(),
+            #[cfg(feature = "hosted-wallet")]
+            hosted_wallet: None,
+            #[cfg(feature = "algos")]
+            algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
         };
         let mut bytes = WasmEngine {
             dispatch_signing: false,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
-            #[cfg(feature = "dispatch-signing")]
+            #[cfg(feature = "hosted-join-proof")]
+            join_proof_identity: None,
+            #[cfg(feature = "coinbase")]
+            coinbase_binding: None,
+            #[cfg(any(feature = "hosted-signing", feature = "hosted-join-proof"))]
             hosted_captures: Default::default(),
+            #[cfg(feature = "hosted-wallet")]
+            hosted_wallet: None,
+            #[cfg(feature = "algos")]
+            algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
             inner: Box::<Messages>::default(),
@@ -2968,7 +3388,7 @@ mod tests {
         }
     }
 
-    #[cfg(any(feature = "asterdex", feature = "kucoinspot"))]
+    #[cfg(any(feature = "asterdex", feature = "kucoinspot", feature = "bingx"))]
     #[test]
     fn cancellation_with_symbols_preserves_caller_identity() {
         let wire = safe_cex_engine::command::decode_command(
@@ -2980,7 +3400,7 @@ mod tests {
         );
     }
 
-    // Compile command parsers only for venues that expose each SDK method.
+    // Decoder ingress follows the compiled family; venue capability guards stay separate.
     #[test]
     fn aster_commands_follow_the_compiled_venue_feature() {
         let commands = [
@@ -2994,7 +3414,11 @@ mod tests {
             if index == 0 {
                 assert_eq!(
                     safe_cex_engine::command::decode_command(json).is_ok(),
-                    cfg!(any(feature = "asterdex", feature = "kucoinspot"))
+                    cfg!(any(
+                        feature = "asterdex",
+                        feature = "kucoinspot",
+                        feature = "bingx"
+                    ))
                 );
                 continue;
             }
@@ -3043,7 +3467,7 @@ mod tests {
                 _ => panic!("Aster command {index} changed its wire mapping"),
             }
             #[cfg(not(feature = "asterdex"))]
-            if cfg!(feature = "polymarket") && matches!(index, 2 | 3) {
+            if cfg!(any(feature = "polymarket", feature = "bingx")) && matches!(index, 2 | 3) {
                 let command = parsed.unwrap();
                 assert!(matches!(
                     (index, command),

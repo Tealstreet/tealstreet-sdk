@@ -7,6 +7,9 @@ use safe_cex_engine::{
 use safe_cex_venue_mexc::{MexcFutures, Options};
 use support::{MARKETS, TICKERS, TestEngine, jittered};
 
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline; later reads keep 20 s.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
+const READ_DEADLINE_MS: f64 = 20_000.;
 const DEPTH: &str = r#"{"success":true,"code":0,"data":{"version":10,"bids":[[60000,10,1]],"asks":[[60001,40,1]]}}"#;
 
 fn new() -> TestEngine {
@@ -87,6 +90,12 @@ fn snapshot() -> (TestEngine, SocketId, HttpRequest) {
     (e, socket, r)
 }
 fn pending_route(e: &mut TestEngine, path: &str, now: f64) -> (Preparation, HttpRequest, TimerId) {
+    let loaded = e.store().loaded();
+    let bound = if loaded.markets && loaded.tickers {
+        READ_DEADLINE_MS
+    } else {
+        DISCOVERY_DEADLINE_MS
+    };
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(
         !actions
@@ -111,11 +120,11 @@ fn pending_route(e: &mut TestEngine, path: &str, now: f64) -> (Preparation, Http
             _ => None,
         })
         .expect("public preparation");
-    assert_eq!(request.timeout_ms, Some(20_000));
+    assert_eq!(request.timeout_ms, Some(bound as u32));
     let timer = actions
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == now + 20_000. => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == now + bound => Some(*timer),
             _ => None,
         })
         .expect("deadline starts before route readiness");
@@ -172,12 +181,12 @@ fn parked_catalogue_expiry_retries_once_and_late_readiness_cannot_release() {
     let mut e = new();
     e.start(0.);
     let (preparation, r, deadline) = pending_route(&mut e, "contract/detail", 0.);
-    e.handle(20_000., Event::TimerFired { timer: deadline });
+    e.handle(DISCOVERY_DEADLINE_MS, Event::TimerFired { timer: deadline });
     let a: Vec<_> = e.drain_actions().collect();
-    let _ = retry(&a, 20_000., 1000.);
+    let _ = retry(&a, DISCOVERY_DEADLINE_MS, 1000.);
     no_command_or_auth(&a);
     e.http_prepared(
-        20_001.,
+        DISCOVERY_DEADLINE_MS + 1.,
         preparation,
         Prepared {
             id: r.id.0,
@@ -188,7 +197,7 @@ fn parked_catalogue_expiry_retries_once_and_late_readiness_cannot_release() {
         !e.drain_actions()
             .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
     );
-    reply(&mut e, 20_002., &r, MARKETS);
+    reply(&mut e, DISCOVERY_DEADLINE_MS + 2., &r, MARKETS);
     assert!(!e.store().loaded().markets);
 }
 #[test]
@@ -217,22 +226,30 @@ fn preparation_refusal_keeps_native_startup_retry_without_auth_evidence() {
 #[test]
 fn catalogue_at_deadline_cannot_publish_before_timer_ingress() {
     let (mut e, r) = markets();
-    reply(&mut e, 20_000., &r, MARKETS);
+    reply(&mut e, DISCOVERY_DEADLINE_MS, &r, MARKETS);
     assert!(
         !e.store().loaded().markets,
         "expired catalogue must not publish DATA"
     );
-    let _ = retry(&e.drain_actions().collect::<Vec<_>>(), 20_000., 1000.);
+    let _ = retry(
+        &e.drain_actions().collect::<Vec<_>>(),
+        DISCOVERY_DEADLINE_MS,
+        1000.,
+    );
 }
 #[test]
 fn ticker_at_deadline_cannot_publish_before_timer_ingress() {
     let (mut e, r) = tickers();
-    reply(&mut e, 20_100., &r, TICKERS);
+    reply(&mut e, DISCOVERY_DEADLINE_MS + 100., &r, TICKERS);
     assert!(
         !e.store().loaded().tickers,
         "expired tickers must not publish DATA"
     );
-    let _ = retry(&e.drain_actions().collect::<Vec<_>>(), 20_100., 1000.);
+    let _ = retry(
+        &e.drain_actions().collect::<Vec<_>>(),
+        DISCOVERY_DEADLINE_MS + 100.,
+        1000.,
+    );
 }
 #[test]
 fn depth_at_deadline_cannot_publish_before_timer_ingress() {
@@ -263,7 +280,7 @@ fn live_catalogue_rows_do_not_publish_when_stream_end_is_expired() {
         },
     );
     assert!(!e.store().loaded().markets);
-    e.handle(20_000., Event::HttpEnd { request: r.id });
+    e.handle(DISCOVERY_DEADLINE_MS, Event::HttpEnd { request: r.id });
     assert!(
         !e.store().loaded().markets,
         "live prefix cannot authorize an expired stream end"

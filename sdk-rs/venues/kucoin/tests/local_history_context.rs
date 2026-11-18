@@ -1,11 +1,13 @@
 //! Genuine initial callbacks for local futures history terminals; private paging stays separate.
+mod support;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::request_context::{Context, Error, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::{
     Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, Method, Notice, Outcome, Query,
     Response, SocketId, TimerId, Venue, VenueError,
 };
-use safe_cex_venue_kucoin::{Kucoin, Options, Pending};
+use safe_cex_venue_kucoin::{Kucoin, Pending};
+use support::credentials::Options;
 
 fn policy() -> Policy {
     Policy {
@@ -78,16 +80,20 @@ impl Venue for Probe {
     }
 }
 fn seeded(keyed: bool) -> Engine<Probe> {
+    let (options, provider, identities) = Options {
+        key: keyed.then(|| "fixture-key".into()),
+        secret: keyed.then(|| "fixture-secret".into()),
+        passphrase: keyed.then(|| "fixture-passphrase".into()),
+        ..Options::default()
+    }
+    .prepare();
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
-        inner: Kucoin::new(Options {
-            key: keyed.then(|| "fixture-key".into()),
-            secret: keyed.then(|| "fixture-secret".into()),
-            passphrase: keyed.then(|| "fixture-passphrase".into()),
-            ..Options::default()
-        }),
+        inner: Kucoin::new(options),
         held: vec![],
     });
     // Like owned_history, exercise the real query callback without starting unrelated feeds.
+    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    e.set_identities(identities).unwrap();
     e.store_mut().set_markets(vec![Market {
         id: "XBTUSDTM".into(),
         symbol: "BTCUSDT".into(),
@@ -155,7 +161,7 @@ fn query(e: &mut Engine<Probe>, now: f64, q: Query) -> Vec<Action> {
             query: q,
         }),
     );
-    e.drain_actions().collect()
+    support::actions(e)
 }
 fn failure(a: &[Action]) -> &VenueError {
     assert_eq!(
@@ -456,7 +462,12 @@ fn valid_signed_history_and_funding_keep_native_requests_and_empty_results() {
                 },
             },
         );
-        empty(&e.drain_actions().collect::<Vec<_>>());
+        empty(
+            &support::actions(&mut e)
+                .into_iter()
+                .filter(|a| !matches!(a, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+                .collect::<Vec<_>>(),
+        );
     }
 }
 #[test]

@@ -83,7 +83,7 @@ const setup = async () => {
     setTimeout: () => 0,
     clearTimeout() {},
   }));
-  const account = (name: 'binance' | 'bybitspot' | 'tealstreet-dex' = 'binance') => {
+  const account = (name: 'binance' | 'bybitspot' | 'woofi' = 'binance') => {
     const store = new DefaultStore();
     store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
     const exchange = new sdk.RustEngineExchange(

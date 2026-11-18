@@ -1,0 +1,112 @@
+use std::cell::RefCell;
+use std::future::Future;
+use std::rc::Rc;
+
+use crate::AccountPort;
+use crate::executor::{self, TaskHandle};
+
+#[derive(Default)]
+struct ScopeState {
+    disposed: bool,
+    tasks: Vec<TaskHandle>,
+    children: Vec<Scope>,
+}
+
+/// Owns the tasks of an algo, a socket or an account. Disposing aborts every
+/// task in it and in its children; later spawns into it are dropped.
+#[derive(Clone, Default)]
+pub struct Scope(Rc<RefCell<ScopeState>>);
+
+impl Scope {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn child(&self) -> Scope {
+        let child = Scope::new();
+        let mut state = self.0.borrow_mut();
+        if state.disposed {
+            child.dispose();
+        } else {
+            state.tasks.retain(|task| !task.is_finished());
+            state.children.retain(|child| !child.is_disposed());
+            state.children.push(child.clone());
+        }
+        child
+    }
+
+    pub fn spawn(&self, task: impl Future<Output = ()> + 'static) {
+        if self.is_disposed() {
+            return;
+        }
+        let handle = executor::spawn(task);
+        let mut state = self.0.borrow_mut();
+        state.tasks.retain(|task| !task.is_finished());
+        state.tasks.push(handle);
+    }
+
+    /// Live children, for leak tests.
+    #[doc(hidden)]
+    pub fn child_count(&self) -> usize {
+        self.0.borrow().children.len()
+    }
+
+    pub fn is_disposed(&self) -> bool {
+        self.0.borrow().disposed
+    }
+
+    pub fn dispose(&self) {
+        let (tasks, children) = {
+            let mut state = self.0.borrow_mut();
+            if state.disposed {
+                return;
+            }
+            state.disposed = true;
+            (
+                std::mem::take(&mut state.tasks),
+                std::mem::take(&mut state.children),
+            )
+        };
+        for task in tasks {
+            task.abort();
+        }
+        for child in children {
+            child.dispose();
+        }
+    }
+}
+
+/// What an algo gets: its account and the scope its tasks live in.
+#[derive(Clone)]
+pub struct AlgoCx {
+    pub port: Rc<dyn AccountPort>,
+    pub scope: Scope,
+}
+
+impl AlgoCx {
+    pub fn new(port: Rc<dyn AccountPort>, scope: Scope) -> Self {
+        Self { port, scope }
+    }
+
+    /// A context for one algo instance, disposed with this one. The algo
+    /// disposes it when it finishes, so the parent can drop it.
+    pub fn child(&self) -> AlgoCx {
+        Self {
+            port: self.port.clone(),
+            scope: self.scope.child(),
+        }
+    }
+
+    pub fn spawn(&self, task: impl Future<Output = ()> + 'static) {
+        self.scope.spawn(task);
+    }
+
+    pub async fn sleep_ms(&self, ms: u64) {
+        executor::sleep_ms(ms).await;
+    }
+
+    /// Wall-clock epoch milliseconds.
+    pub fn now_ms(&self) -> f64 {
+        executor::now_ms()
+    }
+}

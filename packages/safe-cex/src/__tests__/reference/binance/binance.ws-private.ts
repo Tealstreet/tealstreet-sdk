@@ -3,7 +3,6 @@ import type { BinanceExchange } from './binance.exchange';
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import {
   LogSeverity,
-  MarginType,
   OrderRejectReason,
   OrderStatus,
   OrderType,
@@ -322,6 +321,9 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         const eventSide = POSITION_SIDE[p.ps] || (signedContracts >= 0 ? PositionSide.Long : PositionSide.Short);
         const id = createPositionId(symbol, eventSide, positionMode);
         const position = this.parent.store.positions.find((candidate) => candidate.id === id);
+        const closedSettings = position ? undefined : this.store.positionSettings?.[id];
+        const fetched = this.store.fetchedLeverage?.[symbol];
+        const confirmed = fetched && !fetched.isFetching ? fetched : undefined;
         const side = signedContracts === 0 && position ? position.side : eventSide;
 
         // WS updates omit leverage, margin type and liquidation price. Preserve
@@ -332,6 +334,14 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         const entryPrice = parseFloat(p.ep);
         const contracts = Math.abs(signedContracts);
         const upnl = parseFloat(p.up);
+        // Preserve real settings separately from exposure. A confirmed setting
+        // wins over the closed cache; missing leverage remains unavailable.
+        const leverage =
+          [
+            position?.leverage,
+            side === PositionSide.Long ? confirmed?.buyLeverage : confirmed?.sellLeverage,
+            closedSettings?.leverage,
+          ].find((value) => value !== undefined && Number.isFinite(value) && value > 0) ?? Number.NaN;
 
         this.store.addOrUpdatePosition({
           ...position,
@@ -342,9 +352,9 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
           contracts,
           notional: Math.abs(signedContracts * entryPrice + upnl),
           unrealizedPnl: upnl,
-          leverage: position?.leverage ?? 0,
-          liquidationPrice: position?.liquidationPrice ?? 0,
-          marginType: position?.marginType ?? MarginType.Cross,
+          leverage,
+          liquidationPrice: position?.liquidationPrice ?? null,
+          marginType: position?.marginType ?? confirmed?.marginType ?? closedSettings?.marginType,
           positionMode,
           info: {
             ...position?.info,

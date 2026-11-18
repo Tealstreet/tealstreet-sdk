@@ -1,5 +1,11 @@
 # Compile shared construction rules
 
+Current DELEGATED policy (2026-11-13): construction rules describe shared hosted
+support, not a separate DELEGATED venue list. DELEGATED and COSIGNED use the
+same hosted eligibility. Availability and per-user pins use the single runtime
+`DELEGATED` flag; `DELEGATED_BYBIT` is only its compatibility alias. Do not add
+`venues.<venue>.delegated.enabled` declarations or per-venue rollout flags.
+
 Generate the Rust construction-rule table from the existing shared JSON during
 Cargo builds. Preserve the TypeScript resolver, its JSON source and the existing
 parity test. Runtime evaluation must retain missing/null fallback, empty condition

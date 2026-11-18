@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_TIER_REQUIREMENT_MESSAGE } from '../exchanges/lighter/lighter.account-tier';
 import {
@@ -6,6 +6,7 @@ import {
   checkLighterBuilderApproved,
   createLighterL1SignatureHelperUrl,
   prepareLighterBuilderApprovalContext,
+  signLighterApproveIntegratorWithBrowserWallet,
 } from '../exchanges/lighter/lighter.builder-approval';
 
 const { lighterApiGetMock, lighterApiGetNextNonceMock, lighterApiInstances, txGetAuthTokenMock } = vi.hoisted(() => ({
@@ -42,6 +43,7 @@ vi.mock('@tealstreet/poseidon-crypto', () => ({
 }));
 
 describe('lighter.builder-approval utilities', () => {
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     vi.clearAllMocks();
     lighterApiInstances.length = 0;
@@ -330,5 +332,155 @@ describe('lighter.builder-approval utilities', () => {
 
     expect(result.approved).toBe(true);
     expect(result.approvalStatus).toBe('approved');
+  });
+
+  it.each([null, 1, 'row', []])(
+    'rejects a malformed approval row (%j) rather than reporting an approval result',
+    async (row) => {
+      lighterApiGetMock.mockResolvedValueOnce({ accounts: [{ approved_integrators: [row] }] });
+      await expect(checkLighterBuilderApproved({ accountIdentifier: '718895' })).rejects.toThrow();
+    },
+  );
+
+  it.each([null, {}, { accounts: [] }, { accounts: [null] }, { accounts: ['account'] }, { accounts: [[]] }])(
+    'retains the failed account-lookup path for malformed snapshots (%j)',
+    async (payload) => {
+      lighterApiGetMock.mockResolvedValueOnce(payload);
+      await expect(checkLighterBuilderApproved({ accountIdentifier: '718895' })).rejects.toThrow(
+        'Lighter account lookup returned no account',
+      );
+    },
+  );
+
+  it('preserves approval index fallback, numeric conversions, zero defaults and fee units', async () => {
+    const expiry = Date.now() + 60_000;
+    lighterApiGetMock.mockResolvedValueOnce({
+      accounts: [
+        {
+          l1_address: 'fixture-wallet',
+          approved_integrators: [
+            { account_index: '-1', max_perps_taker_fee: 999 },
+            {
+              index: '158385',
+              approval_expiry: String(expiry),
+              max_perps_taker_fee: '250',
+              max_spot_taker_fee: 250,
+              max_perps_maker_fee: null,
+              max_spot_maker_fee: 'not-a-number',
+            },
+          ],
+        },
+      ],
+    });
+    const result = await checkLighterBuilderApproved({ accountIdentifier: '718895' });
+    expect(result).toMatchObject({
+      approved: true,
+      approvalStatus: 'approved',
+      l1Address: 'fixture-wallet',
+      approvalExpiryMs: expiry,
+      maxPerpsTakerFee: 250,
+      maxSpotTakerFee: 250,
+      maxPerpsMakerFee: 0,
+      maxSpotMakerFee: 0,
+    });
+  });
+
+  it.each([undefined, null, {}, 'approvals'])(
+    'keeps a missing/non-array approval list (%j) as missing',
+    async (approvedIntegrators) => {
+      lighterApiGetMock.mockResolvedValueOnce({ accounts: [{ approved_integrators: approvedIntegrators }] });
+      expect(await checkLighterBuilderApproved({ accountIdentifier: '718895' })).toMatchObject({
+        approved: false,
+        approvalStatus: 'missing',
+      });
+    },
+  );
+
+  const walletParams = {
+    accountIndex: 718895n,
+    apiKeyIndex: 2,
+    approvalExpiryMs: 1777588355553,
+    chainId: 304,
+    expectedWalletAddress: '0xWallet',
+    integratorAccountIndex: 158385n,
+    maxPerpsMakerFee: 0,
+    maxPerpsTakerFee: 250,
+    maxSpotMakerFee: 0,
+    maxSpotTakerFee: 250,
+    nonce: 919n,
+  };
+
+  it.each([[], null, '0xWallet', [123], [{}]])(
+    'uses the no-account failure for malformed wallet results (%j)',
+    async (accounts) => {
+      const request = vi.fn().mockResolvedValueOnce(accounts);
+      vi.stubGlobal('window', { ethereum: { request } });
+      const result = await signLighterApproveIntegratorWithBrowserWallet(walletParams);
+      expect(result).toEqual({ success: false, message: 'No wallet account returned by provider' });
+      expect(request.mock.calls).toEqual([[{ method: 'eth_requestAccounts' }]]);
+    },
+  );
+
+  it('keeps the first account and refuses the wrong expected wallet without requesting a signature', async () => {
+    const request = vi.fn().mockResolvedValueOnce(['0xOther', '0xWallet']);
+    vi.stubGlobal('window', { ethereum: { request } });
+    expect(await signLighterApproveIntegratorWithBrowserWallet(walletParams)).toEqual({
+      success: false,
+      message: 'Wrong wallet connected. Expected 0xWallet, got 0xOther',
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('requests the unchanged approval message before the wallet address', async () => {
+    const request = vi.fn().mockResolvedValueOnce(['0xWALLET']).mockResolvedValueOnce('0xsignature');
+    vi.stubGlobal('window', { ethereum: { request } });
+    const result = await signLighterApproveIntegratorWithBrowserWallet(walletParams);
+    const message = buildLighterApproveIntegratorL1Message({
+      ...walletParams,
+      approvalExpiryMs: BigInt(walletParams.approvalExpiryMs),
+    });
+    expect(result).toMatchObject({ success: true, l1Signature: '0xsignature', signerAddress: '0xWALLET', message });
+    expect(request.mock.calls).toEqual([
+      [{ method: 'eth_requestAccounts' }],
+      [{ method: 'personal_sign', params: [message, '0xWALLET'] }],
+    ]);
+  });
+
+  it.each([123, 'invalid', null])(
+    'retains address-before-message fallback for an invalid first signature (%j)',
+    async (first) => {
+      const request = vi
+        .fn()
+        .mockResolvedValueOnce(['0xWallet'])
+        .mockResolvedValueOnce(first)
+        .mockResolvedValueOnce('0xfallback');
+      vi.stubGlobal('window', { ethereum: { request } });
+      const result = await signLighterApproveIntegratorWithBrowserWallet(walletParams);
+      const message = buildLighterApproveIntegratorL1Message({
+        ...walletParams,
+        approvalExpiryMs: BigInt(walletParams.approvalExpiryMs),
+      });
+      expect(result).toMatchObject({ success: true, l1Signature: '0xfallback' });
+      expect(request.mock.calls).toEqual([
+        [{ method: 'eth_requestAccounts' }],
+        [{ method: 'personal_sign', params: [message, '0xWallet'] }],
+        [{ method: 'personal_sign', params: ['0xWallet', message] }],
+      ]);
+    },
+  );
+
+  it('keeps invalid-signature and rejected-request failures without retrying a rejected wallet call', async () => {
+    const request = vi.fn().mockResolvedValueOnce(['0xWallet']).mockResolvedValueOnce(123).mockResolvedValueOnce({});
+    vi.stubGlobal('window', { ethereum: { request } });
+    expect(await signLighterApproveIntegratorWithBrowserWallet(walletParams)).toEqual({
+      success: false,
+      message: 'Wallet returned an invalid signature payload',
+    });
+    request.mockReset().mockResolvedValueOnce(['0xWallet']).mockRejectedValueOnce(new Error('wallet rejected'));
+    expect(await signLighterApproveIntegratorWithBrowserWallet(walletParams)).toEqual({
+      success: false,
+      message: 'wallet rejected',
+    });
+    expect(request).toHaveBeenCalledTimes(2);
   });
 });

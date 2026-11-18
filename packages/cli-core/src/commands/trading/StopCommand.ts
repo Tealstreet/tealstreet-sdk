@@ -15,17 +15,14 @@ export class StopCommand extends TradingBaseCommand {
     // `at` is optional; the bare form is listed first because it is what
     // people type before reading anything.
     'stop 18500',
-    'stop -1%',
     'stop at 0.1%',
     'stop at 0.1% ETHUSDT',
-    'stop at -100',
     'stop at 18500',
     'stop buy at +100',
     'stop sell at 1%',
     'stop $500 at 1%',
     'stop $500 at 1% ETHUSDT',
     'stop buy $500 at 1%',
-    'stop sell 0.01 at -100',
     // Limit stops: trigger keyword separates trigger from limit price.
     'stop at 0.1% trigger 18500',
     'stop buy at +100 trigger 19500',
@@ -45,9 +42,14 @@ export class StopCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
-    const targetSymbol = this.getTargetSymbol(ctx, ['buy', 'sell', 'at', 'trigger']);
+    const duplicate = this.refuseDuplicateModifiers(ctx, [['at'], ['trigger']]);
+    if (duplicate) return duplicate;
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
 
-    const isBuySellFirstArg = ['buy', 'sell'].includes(String(args[1]));
+    const sideWord = args[1]?.toLowerCase();
+    const side = sideWord === 'buy' ? OrderSide.Buy : sideWord === 'sell' ? OrderSide.Sell : undefined;
+    const isBuySellFirstArg = side !== undefined;
     const sizePosition = this.looksLikeSize(args[1]) ? 1 : isBuySellFirstArg && this.looksLikeSize(args[2]) ? 2 : -1;
 
     // `at` is OPTIONAL. The price is whatever follows it, or -- when it is
@@ -63,6 +65,44 @@ export class StopCommand extends TradingBaseCommand {
         ? atIdx + 1
         : args.findIndex((arg, index) => index > 0 && index !== sizePosition && this.looksLikePrice(arg));
 
+    // Only `$` sizes count, and an ignored size would stop the whole position.
+    const triggerOperand = this.findArgIndex(args, 'trigger') + 1;
+    const stray = args.find(
+      (arg, index) =>
+        index > 0 &&
+        index !== sizePosition &&
+        index !== pricePosition &&
+        index !== triggerOperand &&
+        (this.looksLikeSize(arg) || this.looksLikePrice(arg)),
+    );
+    const consumed = [sizePosition, pricePosition];
+    if (isBuySellFirstArg) consumed.push(1);
+    for (const keyword of ['at', 'trigger']) {
+      const index = args.indexOf(keyword);
+      if (index > 0) {
+        consumed.push(index);
+        if (keyword === 'trigger' && args[index + 1] !== undefined) consumed.push(index + 1);
+      }
+    }
+    const symbolIndex = args.findIndex((_, index) => index > 0 && !consumed.includes(index));
+    const invalid = this.refuseUnknownOrderArgs(ctx, consumed);
+    if (invalid && stray === undefined) {
+      if (pricePosition <= 0) {
+        return this.error(
+          `${invalid.error} stop: could not find a trigger price in "${ctx.raw}". Expected e.g. \`stop 18500\`.`,
+        );
+      }
+      return invalid;
+    }
+    if (stray !== undefined) {
+      const refusal = `stop: refusing "${stray}": it would be ignored and the stop would cover the whole position. A stop size needs a $, e.g. \`stop sell $500 at 1%\`; nothing was placed`;
+      this.printError(ctx, refusal);
+      return this.error(refusal);
+    }
+
+    if (symbolIndex > 0 && symbolIndex <= pricePosition) this.refuseAmbiguousOrderToken(args[symbolIndex]);
+    const targetSymbol = symbolIndex > 0 ? this.validateSymbols(exchange, [args[symbolIndex]])[0] : ctx.symbol;
+    if (targetSymbol === undefined) return this.error(this.unknownOrderArgument(args[symbolIndex]));
     if (pricePosition > 0 && args[pricePosition] !== undefined) {
       const ticker = exchange.store?.tickers?.find((ticker) => ticker.symbol === targetSymbol);
       const currentPrice = ticker?.last;
@@ -70,8 +110,7 @@ export class StopCommand extends TradingBaseCommand {
         return this.error(`Current price is not available for ticker ${targetSymbol}, try again.`);
       }
 
-      const side = this.hasArgValue(args, 'buy') ? OrderSide.Buy : this.hasArgValue(args, 'sell') ? OrderSide.Sell : undefined;
-      const limitPrice = parseFloat(this.processPrice(args[pricePosition], currentPrice));
+      const limitPrice = Number(this.processPrice(args[pricePosition], currentPrice));
 
       // Optional `trigger <abs>` keyword turns this into a true limit
       // stop. Without it, trigger == limit (market stop). Spec: trigprice
@@ -83,7 +122,7 @@ export class StopCommand extends TradingBaseCommand {
         if (!triggerArg) {
           return this.error('trigger: missing absolute price argument');
         }
-        const parsed = parseFloat(triggerArg);
+        const parsed = this.parseOrderNumber(triggerArg);
         if (!Number.isFinite(parsed) || parsed <= 0) {
           return this.error(`trigger: '${triggerArg}' must be an absolute positive price`);
         }
@@ -111,6 +150,18 @@ export class StopCommand extends TradingBaseCommand {
         return this.error(`No position found for ${targetSymbol}`);
       }
 
+      const hasExplicitSize = sizePosition !== -1 && sizePosition < args.length;
+      const amount = hasExplicitSize
+        ? this.notionalToSize(exchange, targetSymbol, this.parseUsdAmount(args[sizePosition]), limitPrice)
+        : 0;
+      // Zero is the Full/Infinity sentinel; an explicit sub-lot size must not
+      // silently become a stop for the entire position.
+      if (hasExplicitSize && (!Number.isFinite(amount) || amount <= 0)) {
+        return this.error(
+          `Size "${args[sizePosition]}" is below the lot step or invalid for ${targetSymbol} — stop not placed.`,
+        );
+      }
+
       for (const { side } of positionSides) {
         const isLong = side === PositionSide.Long;
         // TP vs SL is decided by trigger vs mark — that's when the
@@ -129,10 +180,7 @@ export class StopCommand extends TradingBaseCommand {
           reduceOnly: true,
           price: limitPrice,
           triggerPrice,
-          amount:
-            sizePosition !== -1 && sizePosition < args.length
-              ? this.parseSizeAndConvertIfUsd(exchange, targetSymbol, args[sizePosition])
-              : 0,
+          amount,
         };
         await exchange.placeOrder(prepareCliOrder(exchange, stopOrder));
       }
@@ -144,7 +192,7 @@ export class StopCommand extends TradingBaseCommand {
     // Naming the expected form matters more than it looks: the previous message
     // here was the bare string "Not implemented", which a user reasonably read
     // as "this command does not exist yet" and gave up on.
-    const usage = `stop: could not find a trigger price in "${ctx.raw}". Expected e.g. \`stop 18500\`, \`stop at -1%\`, \`stop sell $500 at 1%\`.`;
+    const usage = `stop: could not find a trigger price in "${ctx.raw}". Expected e.g. \`stop 18500\`, \`stop at 1%\`, \`stop sell $500 at 1%\`.`;
     this.printError(ctx, usage);
     return this.error(usage);
   }

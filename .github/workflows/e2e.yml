@@ -4,9 +4,6 @@
 name: E2E Tests
 
 on:
-  schedule:
-    - cron: '0 6 * * *' # Daily at 6am UTC
-
   workflow_dispatch:
     inputs:
       target:
@@ -51,6 +48,12 @@ on:
         default: false
         type: boolean
 
+# Runs share funded test credentials across branches and targets.
+# Let the active suite finish its cleanup before another run starts.
+concurrency:
+  group: e2e-shared-test-accounts
+  cancel-in-progress: false
+
 permissions:
   contents: read
   actions: read
@@ -77,6 +80,9 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '22'
+
+      - name: Verify account isolation
+        run: node --test apps/web/cypress/scripts/account-isolation.test.js
 
       - name: Resolve target URL
         id: url

@@ -41,7 +41,7 @@ const optionalNum = (value: unknown): number | undefined => {
 };
 
 export const mapKrakenFill = (
-  row: Record<string, any>,
+  row: Record<string, unknown>,
   resolveSymbol: (venueSymbol: string) => string | undefined,
 ): Execution | null => {
   const id = String(row?.fill_id ?? '');
@@ -71,7 +71,7 @@ export const mapKrakenFill = (
 };
 
 export const mapKrakenFills = (
-  rows: Array<Record<string, any>>,
+  rows: Array<Record<string, unknown>>,
   resolveSymbol: (venueSymbol: string) => string | undefined,
 ): Execution[] =>
   rows.map((row) => mapKrakenFill(row, resolveSymbol)).filter((fill): fill is Execution => fill !== null);

@@ -81,6 +81,13 @@ pub struct Status<'a> {
     pub ret_msg: Opt<'a>,
 }
 
+/// The envelope's own Bybit server stamp, Unix milliseconds.
+#[derive(Deserialize)]
+pub struct ServerStamp {
+    #[serde(default)]
+    pub time: Option<f64>,
+}
+
 /// A streamed list's envelope, its list emptied: status and the page cursor.
 #[derive(Deserialize)]
 pub struct PageEnvelope<'a> {
@@ -111,7 +118,11 @@ fn none<T>() -> Option<T> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListResult<T> {
-    #[serde(default = "Vec::new")]
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "null_is_empty",
+        bound(deserialize = "T: Deserialize<'de>")
+    )]
     pub list: Vec<T>,
     #[serde(default)]
     pub next_page_cursor: Option<String>,
@@ -183,6 +194,8 @@ pub struct LotSizeFilter<'a> {
     pub min_order_qty: Opt<'a>,
     #[serde(borrow, default)]
     pub max_order_qty: Opt<'a>,
+    #[serde(borrow, default)]
+    pub max_mkt_order_qty: Opt<'a>,
 }
 
 #[derive(Deserialize)]
@@ -247,6 +260,8 @@ pub struct TickerRow<'a> {
 
 #[derive(Deserialize)]
 pub struct TickerEvent<'a> {
+    #[serde(borrow, default, rename = "type")]
+    pub kind: Option<Cow<'a, str>>,
     #[serde(borrow)]
     pub data: TickerDelta<'a>,
 }
@@ -284,6 +299,22 @@ fn optional_decimal<'de, D: serde::Deserializer<'de>>(
         .map(Option::flatten)
 }
 
+/// Missing fields confirm a prior delta value; explicit unknowns do not.
+#[derive(Clone, Copy, Default)]
+pub struct ReferenceDelta {
+    pub present: bool,
+    pub value: Option<f64>,
+}
+
+impl<'de> Deserialize<'de> for ReferenceDelta {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            present: true,
+            value: optional_decimal(deserializer)?,
+        })
+    }
+}
+
 fn discard_optional_string<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<(), D::Error> {
@@ -297,16 +328,16 @@ fn discard_optional_string<'de, D: serde::Deserializer<'de>>(
 pub struct TickerDelta<'a> {
     #[serde(borrow, default)]
     pub symbol: Cow<'a, str>,
-    #[serde(default, deserialize_with = "optional_decimal")]
-    pub last_price: Option<f64>,
+    #[serde(default)]
+    pub last_price: ReferenceDelta,
     #[serde(default, deserialize_with = "optional_decimal")]
     pub bid1_price: Option<f64>,
     #[serde(default, deserialize_with = "optional_decimal")]
     pub ask1_price: Option<f64>,
-    #[serde(default, deserialize_with = "optional_decimal")]
-    pub mark_price: Option<f64>,
-    #[serde(default, deserialize_with = "optional_decimal")]
-    pub index_price: Option<f64>,
+    #[serde(default)]
+    pub mark_price: ReferenceDelta,
+    #[serde(default)]
+    pub index_price: ReferenceDelta,
     #[serde(default, deserialize_with = "optional_decimal")]
     pub price24h_pcnt: Option<f64>,
     /// Option frames spell quotes and change differently from derivatives.
@@ -629,6 +660,36 @@ pub struct OpFrame<'a> {
     pub success: Option<bool>,
     #[serde(borrow, default)]
     pub ret_msg: Opt<'a>,
+    #[serde(borrow, default)]
+    pub ret_code: Option<&'a serde_json::value::RawValue>,
+    #[serde(borrow, default, rename = "retCode")]
+    pub camel_ret_code: Option<&'a serde_json::value::RawValue>,
+}
+
+impl OpFrame<'_> {
+    /// Optional diagnostic metadata never decides whether authentication succeeded.
+    pub fn venue_code(&self) -> Option<String> {
+        // The row integer() helper truncates floats; diagnostic codes must be exact.
+        fn integer(raw: &serde_json::value::RawValue) -> Option<i64> {
+            if raw.get().starts_with('"') {
+                serde_json::from_str::<Cow<'_, str>>(raw.get())
+                    .ok()?
+                    .parse()
+                    .ok()
+            } else {
+                raw.get().parse().ok()
+            }
+        }
+        let code = match (self.ret_code, self.camel_ret_code) {
+            (Some(a), Some(b)) => {
+                let a = integer(a)?;
+                (integer(b)? == a).then_some(a)
+            }
+            (Some(raw), None) | (None, Some(raw)) => integer(raw),
+            _ => None,
+        };
+        code.map(|code| code.to_string())
+    }
 }
 
 /// A private topic frame.
@@ -1034,8 +1095,17 @@ pub struct WalletAccount<'a> {
     pub total_initial_margin: Opt<'a>,
     #[serde(borrow, default)]
     pub total_maintenance_margin: Opt<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "null_is_empty")]
     pub coin: Vec<WalletCoin<'a>>,
+}
+
+/// An account with no coins answers `coin: null`.
+fn null_is_empty<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Deserialize)]
@@ -1559,7 +1629,7 @@ mod tests {
         let event: TickerEvent<'_> = serde_json::from_str(
             r#"{"data":{"symbol":"BTCUSDT","lastPrice":"54321","volume24h":"1000","turnover24h":"54321000"}}"#,
         ).unwrap();
-        assert_eq!(event.data.last_price, Some(54321.0));
+        assert_eq!(event.data.last_price.value, Some(54321.0));
         assert_eq!(event.data.volume24h, Some(1000.0));
         assert!(
             matches!(event.data.symbol, Cow::Borrowed(_)),
@@ -1586,7 +1656,7 @@ mod tests {
         let event: TickerEvent<'_> = serde_json::from_str(
             r#"{"data":{"symbol":"BTC\u0055SDT","lastPrice":"\u00354321","bid1Price":null,"volume24h":""}}"#,
         ).unwrap();
-        assert_eq!(event.data.last_price, Some(54321.0));
+        assert_eq!(event.data.last_price.value, Some(54321.0));
         assert!(matches!(event.data.symbol, Cow::Owned(_)));
         assert_eq!(event.data.symbol, "BTCUSDT");
         assert!(event.data.bid1_price.is_none());
@@ -1630,11 +1700,11 @@ mod tests {
             ]
             .map(|value| present(value).map(float).map(f64::to_bits));
             let actual = [
-                delta.last_price,
+                delta.last_price.value,
                 delta.bid1_price,
                 delta.ask1_price,
-                delta.mark_price,
-                delta.index_price,
+                delta.mark_price.value,
+                delta.index_price.value,
                 delta.price24h_pcnt,
                 delta.open_interest,
                 delta.funding_rate,

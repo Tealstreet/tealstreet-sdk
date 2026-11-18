@@ -1,7 +1,9 @@
 use crate::{Coinbase, Pending, ProductKind, account_wire as wire};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowRepeat, RowReports, SnapshotBuilder};
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::execution::{Arithmetic, Cursor};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -15,6 +17,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const ROOT: &str = "/api/v3/brokerage";
 const STATUSES: [&str; 5] = ["PENDING", "OPEN", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"];
 const MAX_ROWS: usize = 10000;
+/// The crate's single private socket site: the legacy Advanced Trade user feed
+/// or the drb gateway. Each caller owns its own lifecycle for the returned socket.
+pub(crate) fn private_socket(cx: &mut Cx<'_, Pending>, url: &'static str) -> SocketId {
+    cx.connect(safe_cex_engine::SocketSpec::new(url).channel(SocketChannel::Private))
+}
 fn skip_level(kept: bool) -> Level {
     if kept { Level::Warn } else { Level::Error }
 }
@@ -102,6 +109,10 @@ struct Snapshot {
 }
 #[derive(Default)]
 pub(crate) struct Account {
+    /// Unit fixtures retain the old protocol's shared-code regression oracles.
+    /// This switch does not exist in production builds or public Options.
+    #[cfg(test)]
+    pub(crate) legacy_protocol_fixture: bool,
     pub kind: Option<ProductKind>,
     pub portfolio_id: Option<String>,
     pub socket: Option<SocketId>,
@@ -827,10 +838,10 @@ impl Coinbase {
         self.account_poll(cx, true);
     }
     pub(crate) fn private_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.credentials.is_none() {
+        if !self.signers.has_primary() {
             return;
         }
-        if self.read_credentials.is_some() {
+        if self.has_read_key() {
             self.account_read(
                 cx,
                 Request::KeyPermissions {
@@ -852,7 +863,7 @@ impl Coinbase {
             code::CONFIG_INVALID,
             format!("Coinbase read-only key {reason}; reads use the trading key"),
         );
-        self.read_credentials = None;
+        self.read_disabled = true;
     }
     fn account_read(&mut self, cx: &mut Cx<'_, Pending>, req: Request) {
         let id = self.account.portfolio_id.as_deref().unwrap_or("");
@@ -958,10 +969,23 @@ impl Coinbase {
         self.account.portfolio_id = Some(p.uuid);
         self.account.kind = Some(kind);
         self.account.startup_failures = 0;
-        self.private_ready(kind, cx);
+        #[cfg(test)]
+        if self.account.legacy_protocol_fixture {
+            self.private_ready(kind, cx);
+            return;
+        }
+        if kind == ProductKind::Intx {
+            self.drb_private_start(cx);
+        } else {
+            self.private_ready(kind, cx);
+        }
     }
     pub(crate) fn private_after_markets(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.credentials.is_none() || self.account.kind.is_none() || self.account.ready {
+        if self.private_drb.enabled {
+            self.drb_after_markets(cx);
+            return;
+        }
+        if !self.signers.has_primary() || self.account.kind.is_none() || self.account.ready {
             return;
         }
         self.account.ready = true;
@@ -999,12 +1023,10 @@ impl Coinbase {
         self.account.has_snapshot = false;
         self.account.wire_snapshot_complete = false;
         self.account.supervisor.connecting(cx);
-        self.account.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new("wss://advanced-trade-ws-user.coinbase.com")
-                    .channel(SocketChannel::Private),
-            ),
-        );
+        self.account.socket = Some(private_socket(
+            cx,
+            "wss://advanced-trade-ws-user.coinbase.com",
+        ));
     }
     pub(crate) fn private_on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
@@ -1024,20 +1046,40 @@ impl Coinbase {
             jwt: String,
         }
         for channel in ["user", "heartbeats"] {
-            let signed = self
-                .credentials
-                .as_ref()
+            let selected = self.signers.select(CredentialRole::SessionAuth).ok();
+            if let Some((_, c)) = selected
+                && let Some(identity) = c.identity()
+            {
+                cx.send_signed(
+                    socket,
+                    ControlFrame::authentication(String::new()),
+                    Box::new(crate::sign::WsSubscribe::new(
+                        identity.clone(),
+                        c.key(),
+                        c.algorithm(),
+                        channel,
+                    )),
+                );
+                continue;
+            }
+            let signed = selected
                 .ok_or("Coinbase credentials missing".to_string())
-                .and_then(|c| c.jwt(cx.now, None, |bytes| cx.fill_signing_entropy(bytes)));
+                .and_then(|(_, c)| {
+                    c.jwt(cx.protocol_now(), None, |bytes| {
+                        cx.fill_signing_entropy(bytes)
+                    })
+                });
             match signed {
                 Ok(jwt) => cx.send(
                     socket,
-                    serde_json::to_string(&Sub {
-                        kind: "subscribe",
-                        channel,
-                        jwt,
-                    })
-                    .unwrap(),
+                    ControlFrame::subscription(
+                        serde_json::to_string(&Sub {
+                            kind: "subscribe",
+                            channel,
+                            jwt,
+                        })
+                        .unwrap(),
+                    ),
                 ),
                 Err(e) => {
                     cx.notice(Level::Error, code::STREAM_UNAVAILABLE, e);
@@ -1074,6 +1116,10 @@ impl Coinbase {
         self.account_poll(cx, true);
     }
     fn account_poll(&mut self, cx: &mut Cx<'_, Pending>, orders: bool) {
+        if self.private_drb.enabled {
+            self.drb_poll(cx);
+            return;
+        }
         if cx.now < self.account.backoff_until {
             return;
         }
@@ -1520,17 +1566,17 @@ impl Coinbase {
             if response.status == 401 {
                 // The read-only key signed this read; keep trading on the trading key.
                 if read_signed {
-                    if self.read_credentials.is_some() {
+                    if self.has_read_key() {
                         self.drop_read_key(cx, "was rejected (HTTP 401)");
                     }
                     self.private_failed(cx, req, "Coinbase read-only key rejected");
                     return;
                 }
-                cx.notice(
-                    Level::Error,
-                    code::AUTH_REJECTED,
-                    "Coinbase credentials rejected",
-                );
+                let refused = safe_cex_engine::VenueError::new("Coinbase credentials rejected")
+                    .kind(safe_cex_engine::ErrorKind::AuthInvalid);
+                if !cx.startup_read_refused(&refused) {
+                    cx.notice(Level::Error, code::AUTH_REJECTED, &refused.message);
+                }
                 cx.deactivate();
                 return;
             }
@@ -1557,7 +1603,7 @@ impl Coinbase {
                     // A read key without portfolio scope says nothing about the trading key.
                     Request::Portfolios if read_signed => {
                         let reason = format!("cannot list portfolios (HTTP {})", response.status);
-                        if self.read_credentials.is_some() {
+                        if self.has_read_key() {
                             self.read_key_unverified(cx, &reason);
                         } else {
                             self.private_failed(cx, req, &reason);
@@ -1741,9 +1787,12 @@ impl Coinbase {
                     }
                 }
                 Request::DetectCfm { portfolio } => {
-                    let _: wire::CfmBalance =
-                        serde_json::from_str(response.body).map_err(|e| e.to_string())?;
-                    self.select_portfolio(cx, portfolio, ProductKind::Cfm)
+                    let kind = if wire::cfm_balance(response.body)?.is_some() {
+                        ProductKind::Cfm
+                    } else {
+                        ProductKind::Spot
+                    };
+                    self.select_portfolio(cx, portfolio, kind)
                 }
                 Request::Balance => {
                     self.account.inflight[0] = false;
@@ -1756,12 +1805,13 @@ impl Coinbase {
                             committed_upnl(cx.store),
                         )
                     } else {
-                        let r: wire::CfmBalance =
-                            serde_json::from_str(response.body).map_err(|e| e.to_string())?;
+                        let r = wire::cfm_balance(response.body)?.ok_or(
+                            "Coinbase unknown balance: path `/api/v3/brokerage/cfm/balance_summary`, field `balance_summary`",
+                        )?;
                         (
-                            r.balance_summary.total_usd_balance.value.0,
-                            r.balance_summary.available_margin.value.0,
-                            r.balance_summary.unrealized_pnl.map_or(0.0, |n| n.value.0),
+                            r.total_usd_balance.value.0,
+                            r.available_margin.value.0,
+                            r.unrealized_pnl.map_or(0.0, |n| n.value.0),
                         )
                     };
                     if total < 0.0 || free < 0.0 || !upnl.is_finite() || !(total - free).is_finite()
@@ -1777,13 +1827,38 @@ impl Coinbase {
                 }
                 Request::SpotBalance => {
                     self.account.inflight[1] = false;
-                    let r: wire::Breakdown =
+                    let r: wire::Breakdown<'_> =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
                     if r.breakdown.spot_positions.len() > 1000 {
-                        return Err("Coinbase spot balance limit".into());
+                        return Err(
+                            "Coinbase invalid field `spot_positions`: balance row limit".into()
+                        );
                     }
+                    let mut spot_rows = Vec::new();
+                    for raw in r.breakdown.spot_positions {
+                        let account: wire::SpotAccount =
+                            serde_json::from_str(raw.get()).map_err(|e| e.to_string())?;
+                        if !account.is_spot_wallet() {
+                            let kind = account.excluded_type();
+                            self.account.skip_logged.report(
+                                cx,
+                                format!("holding-type:{kind}"),
+                                Level::Info,
+                                format!("Coinbase excluded spot account type {kind}"),
+                            );
+                            continue;
+                        }
+                        spot_rows.push(
+                            serde_json::from_str::<wire::SpotBalance>(raw.get())
+                                .map_err(|e| e.to_string())?,
+                        );
+                    }
+                    let cash = (self.account.kind == Some(ProductKind::Spot))
+                        .then(|| wire::cash_balance(&spot_rows))
+                        .transpose()?;
                     let mut coins = SnapshotBuilder::default();
-                    let mut seen = HashSet::new();
+                    let mut sums = HashMap::<String, Balance>::new();
+                    let mut rejected = HashSet::new();
                     let held = |cx: &Cx<'_, Pending>, asset: Option<&str>| {
                         cx.store
                             .currency_balances()
@@ -1791,7 +1866,7 @@ impl Coinbase {
                             .iter()
                             .any(|c| asset.is_none_or(|a| c.currency == a))
                     };
-                    for b in r.breakdown.spot_positions {
+                    for b in spot_rows {
                         if b.asset.is_empty() {
                             self.account.skip_logged.report(
                                 cx,
@@ -1801,9 +1876,6 @@ impl Coinbase {
                             );
                             coins.reject(None);
                             continue;
-                        }
-                        if !seen.insert(b.asset.clone()) {
-                            return Err("Coinbase duplicate spot holding".into());
                         }
                         if b.total_balance_crypto.0 < 0.0
                             || b.available_to_trade_crypto.0 < 0.0
@@ -1815,18 +1887,22 @@ impl Coinbase {
                                 skip_level(held(cx, Some(&b.asset))),
                                 format!("Coinbase skipped invalid spot holding {}", b.asset),
                             );
+                            rejected.insert(b.asset.clone());
                             coins.reject(Some(b.asset));
                             continue;
                         }
-                        coins.push(CurrencyBalance {
-                            currency: b.asset,
-                            balance: Balance {
-                                total: b.total_balance_crypto.0,
-                                free: b.available_to_trade_crypto.0,
-                                used: b.total_balance_crypto.0 - b.available_to_trade_crypto.0,
-                                upnl: 0.0,
-                            },
-                        });
+                        let sum = sums.entry(b.asset).or_default();
+                        sum.total += b.total_balance_crypto.0;
+                        sum.free += b.available_to_trade_crypto.0;
+                        sum.used = sum.total - sum.free;
+                        if !sum.total.is_finite() || !sum.free.is_finite() {
+                            return Err("Coinbase invalid field `spot_positions.total_balance_crypto`: aggregate overflow".into());
+                        }
+                    }
+                    for (currency, balance) in sums {
+                        if !rejected.contains(&currency) {
+                            coins.push(CurrencyBalance { currency, balance });
+                        }
                     }
                     self.account.skip_logged.rearm_namespace(
                         "holding:",
@@ -1836,8 +1912,8 @@ impl Coinbase {
                     let current = cx.store.currency_balances().unwrap_or_default().to_vec();
                     cx.store
                         .set_currency_balances(coins.commit(current, |c| c.currency.clone()));
-                    if self.account.kind == Some(ProductKind::Spot) {
-                        cx.store.set_balance(Balance::default());
+                    if let Some(cash) = cash {
+                        cx.store.set_balance(cash);
                     }
                 }
                 Request::Positions {
@@ -2479,6 +2555,22 @@ impl Coinbase {
         }
     }
 }
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance => S::BALANCE,
+            Self::SpotBalance => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders(_) => S::ORDERS,
+            Self::Portfolios | Self::Probe { .. } => S::ACCOUNT,
+            Self::KeyPermissions { .. } => S::ACCOUNT,
+            Self::DetectCfm { .. } => S::ACCOUNT,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2544,3 +2636,19 @@ mod tests {
         }
     }
 }
+
+#[test]
+fn review_startup_prerequisite_has_a_section() {
+    let read = Request::Probe {
+        portfolios: vec![],
+        index: 0,
+    };
+    assert_eq!(
+        read.startup_sections(),
+        safe_cex_engine::startup::Sections::ACCOUNT
+    );
+}
+
+#[cfg(test)]
+#[path = "../tests/support/legacy_account.rs"]
+mod legacy_protocol_tests;

@@ -128,6 +128,38 @@ fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
 }
 
 #[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let mut h = Harness::new();
+    h.load();
+    let mut markets = h.engine.store().markets().to_vec();
+    let mut eth = markets[0].clone();
+    eth.id = "ETHUSD-PERP".into();
+    eth.symbol = "ETHUSD-PERP".into();
+    markets.push(eth);
+    h.engine.store_mut().set_markets(markets);
+    place(&mut h, 1, "first");
+    advance(&mut h, 50.0);
+    let write = h.http("private/create-order");
+    h.event(Event::HttpFailed {
+        request: write.id,
+        error: "response lost after acceptance",
+    });
+    advance(&mut h, 50.0);
+    h.reply("get-positions", EMPTY);
+    h.reply("user-balance", BALANCE);
+    h.reply(
+        "private/get-open-orders",
+        r#"{"code":0,"result":{"data":[{"order_id":"77","instrument_name":"ETHUSD-PERP"}]}}"#,
+    );
+    h.reply("advanced/get-open-orders", EMPTY);
+    h.failures.clear();
+    place(&mut h, 2, "retry");
+    advance(&mut h, 50.0);
+    assert!(!refused_uncertain(&h));
+    assert!(sent(&h, "private/create-order"));
+}
+
+#[test]
 fn engine_re_asks_join_the_fresh_read_in_flight_and_its_clean_answer_releases() {
     let mut h = Harness::new();
     h.load();

@@ -2,10 +2,15 @@
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
 use safe_cex_venue_coinbase::{Coinbase, Options};
 pub type Driver = Engine<Coinbase>;
-// Coinbase INTX instrument schema, https://docs.cdp.coinbase.com/api-reference/international-exchange-api/rest-api/instruments/list-instruments
-pub const INSTRUMENTS: &str = r#"[{"symbol":"BTC-PERP","type":"PERP","trading_state":"TRADING","base_asset_name":"BTC","quote_asset_name":"USDC","base_increment":"0.0001","quote_increment":"0.1","min_quantity":"0.0001","qty_24hr":"20","notional_24hr":"1200000","open_interest":"100","funding_interval":"3600000000","quote":{"best_bid_price":"59999","best_ask_price":"60001","trade_price":"60000","mark_price":"60002","index_price":"60003","predicted_funding":"0.0001"}}]"#;
+// Legacy Advanced Trade spot coverage remains alongside the drb perpetual gate.
+pub const PRODUCTS: &str = r#"{"products":[{"product_id":"BTC-USD","product_type":"SPOT","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.0001","price_increment":"0.1","base_min_size":"0.0001","base_max_size":"1000000000","price":"60000","volume_24h":"20","price_percentage_change_24h":"0"}]}"#;
+pub fn actions(e: &mut Driver) -> Vec<Action> {
+    let now = safe_cex_engine::test_support::dispatch_now(e);
+    safe_cex_engine::test_support::prepared_actions(e, now)
+}
 pub fn requests(e: &mut Driver) -> Vec<HttpRequest> {
-    e.drain_actions()
+    actions(e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -28,17 +33,30 @@ pub fn reply(e: &mut Driver, r: &HttpRequest, status: u16, body: &str) {
         },
     );
 }
+pub fn drb_response(method: &str, request: &HttpRequest) -> String {
+    let record = include_str!("../fixtures/drb-public.jsonl")
+        .lines()
+        .map(|s| serde_json::from_str::<serde_json::Value>(s).unwrap())
+        .find(|r| r["method"] == method)
+        .unwrap();
+    let sent: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    let mut body: serde_json::Value =
+        serde_json::from_str(record["body"].as_str().unwrap()).unwrap();
+    body["id"] = sent["id"].clone();
+    body.to_string()
+}
 pub fn ready() -> (Driver, SocketId) {
     let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
+            spot_only: true,
             ..Options::default()
         })
         .unwrap(),
     );
     e.start(1000.);
     let r = requests(&mut e).pop().unwrap();
-    reply(&mut e, &r, 200, INSTRUMENTS);
+    reply(&mut e, &r, 200, PRODUCTS);
     let socket = e
         .drain_actions()
         .find_map(|a| {

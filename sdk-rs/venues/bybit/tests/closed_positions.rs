@@ -111,7 +111,7 @@ fn account_wide_rows_walk_newest_window_first_and_pass_through_verbatim() {
 fn omitted_bounds_read_the_last_seven_days_like_ts() {
     let mut h = startup(Variant::Linear, true);
     fetch(&mut h, 2, None, None, None);
-    let now = h.now;
+    let now = h.engine.signing_clock(h.now).0;
     // Seven days is one millisecond wider than a Bybit window, so TS splits it too.
     let request = h.take("/v5/position/closed-pnl");
     assert!(
@@ -173,7 +173,7 @@ fn later_page_rejection_returns_accepted_rows_but_first_page_rejection_fails() {
     assert!(h.notices.iter().any(|notice| matches!(notice,
         safe_cex_engine::Notice::Event(event)
             if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
-            && event.fields == vec![("command", safe_cex_engine::Value::Num(5.0))]
+            && event.fields.first() == Some(&("command", safe_cex_engine::Value::Num(5.0))) && event.fields.get(1).is_some_and(|field| field.0 == "reason")
     )));
     // 10002 is Bybit's receive-window rejection: re-read once, then its text is
     // replaced so no signed payload reaches a notice (#1351).
@@ -231,9 +231,10 @@ fn the_page_cap_keeps_rows_and_warns() {
         .expect("owned semantic page-cap warning");
     assert_eq!(event.level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        event.fields,
-        vec![("command", safe_cex_engine::Value::Num(6.0))]
+        event.fields[..1],
+        [("command", safe_cex_engine::Value::Num(6.0))]
     );
+    assert_eq!(event.fields[1].0, "reason");
     let done = h
         .notices
         .iter()
@@ -341,7 +342,7 @@ fn capped_window_keeps_its_owner_and_rows_across_a_fresh_cursor_budget() {
             | safe_cex_engine::Notice::CommandFailed { command: 41, .. })).collect();
         assert_eq!(notices.len(), 2);
         assert!(matches!(notices[0], safe_cex_engine::Notice::Event(event)
-            if event.fields == vec![("command", safe_cex_engine::Value::Num(41.0))]
+            if event.fields.first() == Some(&("command", safe_cex_engine::Value::Num(41.0))) && event.fields.get(1).is_some_and(|field| field.0 == "reason")
             && event.message.contains("20-page cap")));
         assert!(matches!(
             notices[1],
@@ -367,7 +368,7 @@ fn repeated_cursor_stops_with_owned_incomplete_and_raw_duplicate_rows() {
         assert_eq!(rows.len(), cursors.len());
         assert!(h.notices.iter().any(|notice| matches!(notice,
         safe_cex_engine::Notice::Event(event) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
-            && event.fields == vec![("command", safe_cex_engine::Value::Num(42.0))]
+            && event.fields.first() == Some(&("command", safe_cex_engine::Value::Num(42.0))) && event.fields.get(1).is_some_and(|field| field.0 == "reason")
     )));
     }
 }

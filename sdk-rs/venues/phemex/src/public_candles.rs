@@ -35,7 +35,7 @@ impl PhemexPerpetuals {
             let _ = cx.fail_context(&context, interval.unsupported("Phemex"));
             return;
         };
-        let to = to_ms.unwrap_or(cx.now);
+        let to = to_ms.unwrap_or(cx.protocol_now());
         let requested_limit = limit.filter(|n| *n > 0);
         let default_from = to - n as f64 * 1000. * requested_limit.unwrap_or(500).min(1000) as f64;
         let from = if requested_limit.is_some() {

@@ -51,14 +51,25 @@ it does not decide the per-PR non-regression result. EPYC 7763's approximately
 
 ## Pinned cumulative anchor and job cost
 
-A0 is 518d3953c09daf63c1345ea465bbc55bd313f53a, the actual landing used by
-the counterbalanced study. Only an explicit auditor GO with evidence may move
+A0 is 38b69912e461e27198f5252c98cef73b7521b169, a post-#3091 master landing
+with the current public Bitget amount limits. Only an explicit auditor GO with evidence may move
 this source pin. There is no PR, CLI, workflow-input, report, or automatic
 advance path. The coordinator derives anchor authority from the issued tip
 comparison authority and the checked-in fixed pin; uploaded evidence cannot
 issue either authority.
 
-The old A0 source is checked out only for BUILD. Its own checked-in build.sh,
+The previous anchor was 518d3953c09daf63c1345ea465bbc55bd313f53a. Its TS output
+predated the conservative market cap, so its anchor preflight refused certification.
+The approved reset first measured Rust-only drift on one EPYC 7763 runner in
+[run 42125492893](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/42125492893):
+64 samples per arm, A/B/B/A then B/A/A/B, common tape and Node runtime.
+The old median was 449.9615 ms; the new median was 458.1105 ms, ratio 1.0181104383
+(+1.811%), below 1.023110. This is the **drift accepted at reset** baseline;
+correctness was known-changed, and that diagnostic does not certify CPU.
+The calibration freeze, tolerance, R0, and both normal authenticated witnesses
+remain unchanged. Fresh normal paired CI must qualify the new pin.
+
+The pinned A0 source is checked out for its TS preflight and BUILD. Its own checked-in build.sh,
 tool pins, family profile, size checker and ci-wasm archive producer build and
 seal its package. No current runtime source is copied into that checkout. The
 external driver retains source seals, raw/web/node artifacts, metadata bytes
@@ -144,3 +155,106 @@ reviewing the holdout, both detection controls and the explicit live ruling.
 
 Independent integrity review, one qualifying PR run, and the auditor's exact
 tree GO remain mandatory. The owner performs the guarded head-matched merge.
+
+
+## Changed TS oracle output
+
+Before either comparison builds or measures Rust, a bounded TS-only replay runs
+from each authenticated source checkout against the identical candidate tape,
+books and Node executable. The original outputs, source/tree and runtime seals,
+logs and tape digest are retained. The candidate checkout is restored on failure.
+Every published replay field is compared structurally, excluding only `metrics`.
+Source edits with identical output do not suppress the existing certification.
+
+If the outputs differ, `steady-assessment.json` records `NOT-CERTIFIED`,
+`certified: false` and `certificate: null`; the paired job exits nonzero. It grants
+neither PASS nor an unchanged-bytes exception. This CPU job remains non-required;
+required replay correctness, family sizes and coverage retain their own gates.
+A failed TS replay is a collection error, not an oracle-change disposition.
+
+The CPU planner has a separate Bitget-only reader for this failed producer.
+It requires the original same-run physical job and checkout, exactly the failed
+oracle step with its literal refusal, a successful sealed upload, and a matching
+receipt whose raw TS outputs actually differ outside metrics. Cancelled jobs,
+other failed steps, malformed evidence and metrics-only differences fail closed.
+An anchor refusal also revalidates the completed tip's original raw records.
+Successful artifact authentication remains unchanged for every other path.
+
+The planner still authenticates and revalidates Bitget's complete strict first
+measurement, including correctness and memory. With a valid oracle refusal it
+records `not-certified`, binds the refusal artifact, and schedules no second
+measurement. The certifier recomputes that plan and writes a refusal, never a
+Bitget certificate: `certified=false`, the Bitget replay gate remains
+NOT-CERTIFIED, and the other 31 suites can certify independently. A corruption
+or memory failure is not converted into an oracle refusal. The post-#3091 anchor
+reset removes the persistent historical mismatch; this remains defence in depth
+for a later legitimate published-output change.
+
+This guard prevents baseline Rust from being judged against changed candidate TS
+output. It does not establish arm-matched correctness: a future change must pair
+each Rust revision with its corresponding TS oracle before CPU comparisons of
+changed published output can certify. When TS output is unchanged, all existing
+strict baseline/candidate checks and frozen CPU thresholds still apply.
+
+## Frozen anchor decoder compatibility (2026-11-10)
+
+The cumulative source remains `38b69912e461e27198f5252c98cef73b7521b169`.
+No anchor was regenerated or advanced, and no CPU threshold, calibration,
+sample count, attempt rule or WASM budget changed.
+
+The Position revision-2 migration in `7a25d90ce57e6047da765834b8d08821da1c3af9`
+made the inherited frame reader reject revision 1, including empty sections.
+The frozen anchor's `Store::write_positions` emits revision 1 even on the public
+tape, where there are zero positions. Paired measurement builds each source's
+WASM but runs both arms through the candidate replay and decoder. Thus a
+byte-changing PR could pass all tip cohorts and then crash at the first anchor
+cohort before a report or certificate existed.
+
+Evidence is retained in [run 42759306820, paired job 129647202437](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/42759306820/job/129647202437):
+tip correctness was exact and pooled q was `1.0012688419761406`; anchor cohort 1
+produced no report. In its `bitget-paired-steady` artifact (ID `13738342461`),
+`anchor/records/01-baseline/gate.log` shows `Frame.positions()` throwing
+`unsupported POSITIONS revision; expected 2` from the inherited decoder.
+The artifact records anchor Node WASM SHA256
+`ca011944b1b29fb293635da4af0b1eb31dd04fe61cc4c318aef9077f3adf61a6`
+and candidate SHA256
+`7fa02a4654cbb5cfd042c2d56efe2f95bbf95df03fc53803b147ffe69f2b698e`
+(candidate checkout `d1c9dd6e85337a38cf0696ca7075287388bfae5a`).
+These identify existing CI builds, not newly regenerated anchors.
+
+[#3317's original attempt, job 129627843811](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/42755059348/job/129627843811),
+also completed the tip comparison then failed at anchor cohort 1 with no report.
+Its later rerun fails the separate original-attempt requirement; that requirement
+is unchanged, and validation after this fix requires a new workflow run.
+
+The [Bitget CPU gate, job 129664357479](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/42759306820/job/129664357479)
+then fails closed with `CPU cohort: missing exact refusal inside failed step`:
+a decoder crash cannot be authenticated as the distinct TS-oracle refusal.
+[Master run 42738292322, paired job 129573360013](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/42738292322/job/129573360013)
+at `2337705f81a4c9ef2e79c0082d510369202ab48b` reported
+`unchanged bytes, not measured`, which skips the anchor and masks the defect.
+
+The common replay protocol now recognizes only the canonical empty revision-1
+POSITIONS payload for a public Bitget tape: exactly eight bytes, a zero count,
+and zero alignment padding. It represents zero rows without decoding historical
+position values or modifying the frame/WASM bytes. Nonempty, truncated,
+noncanonical and other-revision payloads still use the strict decoder, as do
+all private tapes and other venues. Revision-2 decoding is unchanged.
+The helper and inherited wire decoder are included in the common measurement
+source seals, and the protocol digest records this compatibility rule. Both
+measured witnesses, exact audited outputs and every existing failure check
+remain required when the module bytes change.
+
+Regression coverage decodes both empty revisions before issuing a byte-changed
+build's combined tip/anchor certificate, and retains the existing slowdown and
+missing-witness refusal controls. A replay of the retained anchor WASM with this
+protocol completed 39,457 frames, 846 markets, 846 tickers and two books with no
+protocol errors. Every published field excluding metrics matched the retained
+byte-changed candidate's correctness output from the same CI artifact.
+
+The Bybit gate is independent: [job 129664357448](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/42759306820/job/129664357448)
+refused the Hyrotrader public case because Rust remained slower than TS after
+the in-job remeasurement. [Master job 129590732402](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/42738292322/job/129590732402)
+failed for that same case while Bitget passed. This supports a separate
+performance/runner-variation issue; it does not prove that every Bybit miss is
+noise. The Bybit gate and its CPU limit remain intact.

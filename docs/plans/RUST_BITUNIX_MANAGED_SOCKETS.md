@@ -1,85 +1,89 @@
 # Bitunix managed-socket adoption
 
-Owner: claude-4yjlw0. Assignment: claude-ddi2il (beta hardening, item 1). GO: claude-8x5tm1 (shared socket wiring and inventory). Review: claude-dazzy3. One PR into `master`: plan, originals, then source.
+Refresh owner: strix/codex-9ui18z for #2301, at claude-psmp2r's direction.
+The original implementation was by claude-4yjlw0. This refresh starts at its
+`a242fc5e9c2bad97b7ae5a7ebb73a753484473f9` head and normally merges mirror master
+`bdb7565ebde53e38266b00de9d52d4126c1a8f23`; no rebase or history rewrite.
+Fresh independent reviews are required; the October plan reviews do not approve
+this composition. The changed `sdk-rs` inputs wait for a release batch.
 
-Base: `origin/master` at `5c8e70c1726`. Templates: Phemex (signed private login, `AuthMode::Required` with same-socket retry) and OKX (sharded public feeds). This supersedes the parked Bitunix+Bitrue plan; Bitrue is out of the beta scope.
+## Scope
 
-## Why
+Move futures, public shards and the private socket from venue-owned Supervisor,
+queues and login-retry timers to engine-owned socket epochs and interests.
+Retain current master account/reconciliation/trading logic and the legacy TS wire
+reference. Remove only Bitunix's family and five sites from the socket inventories;
+all other families and inventory fingerprints remain as on merged master.
 
-`RUST_SOCKET_OKX_ONLY_VARIANT.md` left the Bitunix socket boundary legacy as a **remove-before-master obligation** (`RUST_MASTER_MERGE_BLOCKERS.md`). Done means Bitunix has no rows in `sdk-rs/scripts/socket-legacy-sites.json`, and the `bitunix` family has left `socket-legacy-families.json`.
+The engine owns connection/auth/idle deadlines, backoff, stale-event refusal,
+subscription release and the coalesced two-second private login retry. The venue
+still owns wire codecs, account reducers and feed-specific policy. No signing,
+credential, financial mapping, order-write or retry classification policy changes.
 
-The five legacy sites (`cx.connect` references):
-- `lib.rs:351`: the venue `connect` helper (`cx.connect(Self::socket_spec(..))`).
-- `lib.rs:908`: the futures feed connect.
-- `lib.rs:924`: the public shard connects.
-- `lib.rs:1136`: the supervisor reconnect.
-- `account.rs:331`: the private feed connect.
+## Feed policy
 
-## Change
+| Feed | Authentication | Receive evidence | Other policy |
+| --- | --- | --- | --- |
+| Futures (`ws-futures`) | None | Any text, 45s idle | 10s connect; 15s ping; clear books and notify `book_changed` on retirement. System topics precede book/candle topics. |
+| Public shards, one per 300 markets/channel | None | Any text, 45s idle | 10s connect; 15s ping; 20-symbol native batches spaced 250ms apart. A shard retirement does not clear futures books. |
+| Private (`/private/`) | Observe, with a 10s Supervisor login-answer bound | Text after the first actual pong, then 45s idle | 10s connect; 15s ping; 10s stable threshold after authentication; one 2s same-socket login retry. |
 
-Every Bitunix feed moves from the venue `Supervisor` and `cx.connect` to engine-managed sockets in one step. Once any feed registers, the engine admits only registered sockets.
-- **APIs and hooks.** Feeds use `register_socket_feed`, `connect_socket`, `set_socket_interests`, `retire_socket`, `socket_epoch` and `send`/`send_signed`. The venue implements `socket_control`, `on_socket_event` and `encode_socket_interests`, with `SocketCapabilities { handoff: false }`.
-- **Features.** Bitunix adds the engine feature `managed-sockets`.
-- **Inventory.** The `bitunix` family and its 5 sites leave the socket inventories. The venue `connect` helper and `Supervisor` go with them.
+All pings retain master's protocol clock. Private pings use its current
+`{op:"ping", ping:<seconds>}` codec; both `op:"pong"` and the real
+`{op:"ping", pong:..., ping:...}` response count as pong evidence. A private
+session without an actual pong keeps its idle gate disabled. A successful login
+still cancels its authentication bound; no-answer timeout warns `stream.unavailable`
+and reconnects, without asserting rejected credentials.
 
-| Feed | Auth | Traffic | Timings | Notes |
-| --- | --- | --- | --- | --- |
-| Futures (`ws-futures`) | None | AnyText | 10 s connect, 15 s ping, 45 s idle | `Invalidation::Required`: books clear and `book_changed` fires before retry. Book and candle interests are encoded as native `sub`/`unsub` frames. |
-| Public shards (`{channel}:{start}`, one per 300 markets) | None | AnyText | as Futures | One feed per shard. Native 20-symbol batches go out at `subscription_interval_ms: 250`, the legacy cadence: 20-symbol chunks and a 250 ms queue timer (`lib.rs` on_open and on_timer before this PR). Retiring a shard does not clear books. Pinned by `public_shards_send_twenty_symbol_frames_250_ms_apart_and_again_on_reopen`. |
-| Private (`/private/`) | Observe | TextAfterFirstPong | 10 s connect, 15 s ping, 45 s idle after the first pong | On `Ready`: `{"op":"ping"}`, then `send_signed(WsLogin)`. `socket_control`: `true` is Accepted, `false` is Rejected, and a missing, null or wrong-type result is Malformed. `recovery: RetrySameSocket { delay_ms: 2000 }` replaces the venue `login_retry`. |
+Timeout retirement carries `recover:true` to the replacement; an ordinary close
+carries `recover:false`. Existing explicit proxy routing remains engine-owned.
 
-The `recover` routing flag (true after a timeout, false after an ordinary close) comes from the retired epoch's reason and rides the reconnect's spec context, as today. The `WsLogin` recipe is unchanged.
+## Private authentication and account behavior
 
-## Behaviour kept exact
+The October branch used Observe without a login deadline. Current master added a
+10s login-answer bound, the private ping codec, a 10s private stability threshold
+and successful-login balance pacing. The refresh preserves those newer contracts.
+Observe allows account data before an answer, matching current legacy reduction;
+the Supervisor independently refuses expired ingress at the answer deadline.
+Required would instead gate pre-answer data and is not part of this migration.
 
-From `RUST_BITUNIX_SOCKET_LIFECYCLE.md` and `RUST_BITUNIX_LOGIN_CONTROLS.md`:
-- URLs, feed identities and routing, and the `recover` context.
-- Private bootstrap: ping, then login, then the balance, position and order re-reads when positions were already loaded.
-- The 2 s same-socket login retry, coalesced and bound to its socket.
-- A private socket is never idle-expired before its first real pong.
-- Failures reset only on real traffic.
-- Each open replays interests once.
-- The uncertain-placement fence (#2283) and the census serial floor are untouched; sockets are not part of them.
+| Evidence | Engine action | Venue action |
+| --- | --- | --- |
+| Accepted | Cancel authentication and pending retry | Mark login answered and private live; keep the current 5s balance-poll cadence. |
+| Explicitly rejected | Keep the original answer deadline and one latched 2s retry | Mark answered and emit the existing `auth.rejected` message. |
+| Malformed | Same bounded, latched retry | Mark answered and emit `stream.malformed`, without a bad-key claim. |
+| No answer | Retire at 10s, including ingress before timer delivery | Preserve the existing unanswered-login warning. |
+| Retirement | Cancel retry with its epoch | Clear private-live state, restoring ordinary balance polling. |
 
-The legacy suites stay green: `socket_lifecycle.rs`, `login_controls.rs`, `public.rs`, `routing.rs`, `order_rows.rs`, `trading_funnel.rs` and `closed_positions.rs`. Fixture edits only model a live stream (answering pings inside each idle window, following the latest socket); they change no assertions.
+Every private open sends ping then signed login and requests balance, positions
+and orders. Existing read serials, dirty-overlap handling and two-half readiness
+coalesce/reissue those reads exactly as on master. Positions still trigger TP/SL
+reads. Balance notifications retain their forced-read flag and first repair
+bound. Accepted private login slows ordinary balance polling to 5s; retirement
+restores the normal 500ms cadence. No old financial state is overwritten by the
+socket migration.
 
-## Stricter than legacy (originals: `tests/managed_socket.rs`)
+## Verification
 
-The managed lifecycle admits frames only on the open, current and unexpired epoch. These are production-binding: every test drives the real `BitunixFutures` through the engine.
+The production-binding `tests/managed_socket.rs` drives the real engine. Current
+master is the baseline, with only those new tests overlaid:
 
-REDs, failing on master `5c8e70c1726`:
-- `futures_frame_at_idle_equality_is_not_published`: a futures frame at the idle deadline, before the watchdog timer is delivered, is not published.
-- `private_frame_at_idle_equality_after_the_first_pong_is_not_reduced`: the same for the private feed after the first pong; the frame is not reduced.
+- An otherwise valid futures frame at the 45s idle boundary must not publish.
+- A private order frame at the 45s idle boundary after real pong must not reduce.
+- A private order at the 10s unanswered-login boundary must not reduce or revive
+  its epoch, even before the deadline timer is delivered.
+- Controls retain duplicate-open refusal, pre-open refusal, one-time replay,
+  ping-before-login, pre-answer account data before 10s and public-shard pacing.
 
-Controls, passing on both trees:
-- duplicate opens do not resubscribe or log in twice;
-- frames before open are neither published nor reduced;
-- each interest is subscribed once on open;
-- the private ping precedes the login.
+Run the full current Bitunix suite, including login controls, socket lifecycle,
+live balance pacing, routing, account-read progress, ordinary order reconciliation
+and trading/signing uncertainty tests. Retain all existing assertions; fixture
+updates must model live sibling feeds and actual current replacement sockets.
+Registry Bitunix tests, package format/strict lint, all configured bans and the
+socket checker's own tests remain required.
 
-## Decisions for review
-
-- **D1, private auth mode: `AuthMode::Observe` (changed from the plan's `Required`).** Observe opens straight to Ready: no login deadline and no gating of private frames, which is exactly the legacy session. Login evidence still drives `RetrySameSocket { delay_ms: 2000 }`, so the engine owns the retry. `Required` would add a 10 s login deadline and hold frames until acceptance, a tightening this PR does not claim. Each outcome:
-
-  | Outcome | Engine | Venue | Legacy |
-  | --- | --- | --- | --- |
-  | Accepted (`result: true`) | cancels a pending retry | nothing | same |
-  | Rejected (`result: false`) | one 2 s same-socket retry, latched | Error `AUTH_REJECTED` with the legacy text | same |
-  | Malformed (missing, null or wrong type) | one 2 s same-socket retry, latched | Warn `STREAM_MALFORMED`, no auth claim | same |
-  | No answer | no deadline; the socket stays current | nothing | same: legacy had no login deadline |
-  | Close or retire mid-login | the retry is dropped with its epoch (`socket_driver` cancels `login_retry` on retire) | the replacement logs in on its own Ready | same: legacy dropped `login_retry` in `retire` |
-
-  The pre-login ping is a plain `send` on a Ready epoch: under Observe, `opened` moves the feed to Ready, and `admit_checked` admits `Send` on Ready. The control `private_open_pings_then_logs_in` pins the order. Pinned by `login_controls.rs` (malformed, explicit refusal, latching, retired retry) and `private_login_has_no_deadline_and_frames_reduce_before_its_answer`.
-- **D2, the first-pong gate.** `TrafficPolicy::TextAfterFirstPong` with a 45 s idle reproduces "silent until the first pong, then 45 s". It is pinned by `private_heartbeat_preserves_legacy_silent_sessions` and `private_first_pong_gate_preserves_silence_but_expires_from_actual_traffic`.
-- **D3, books.** Every Bitunix depth frame is a full snapshot, so no snapshot barrier is registered; futures uses `Invalidation::Required`.
-
-## Inventory and size
-
-- Socket inventory: the `bitunix` family and its 5 site keys are removed. Request, signing and credential inventories are unchanged; the credential row is item 2 of the assignment, in its own PR.
-- WASM: CI measures the Bitunix family. Any cap raise is named in the PR with the measured number and gets 8x5tm1's GO. The combined budget must hold.
-
-## Order
-
-1. This plan and the originals (REDs fail, controls pass), on `5c8e70c1726`.
-2. On plan CLEAR and GO: the source, the inventory prunes, any fixture-only edits to legacy suites, and any budget line.
-3. After SDK #2300 lands, merge `origin/master` for working Rust CI. Then review (dazzy3), exact-tree GO (8x5tm1), green CI, and the guarded merge.
+Exact-head `ci`, required coverage, Bitunix replay correctness and actually
+executed combined consumers are required before requesting the two fresh
+reviewers. Retired CPU certification/gate jobs are not restored. Fresh optimized
+Bitunix and combined web/Node sizes must respect existing floors and the 10KiB
+reserve rule; this plan does not authorize a cap raise or release.

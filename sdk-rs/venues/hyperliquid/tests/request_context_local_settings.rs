@@ -303,7 +303,6 @@ fn no_io(actions: &[Action]) {
             | Action::SignedOutbound { .. }
             | Action::Sign { .. }
             | Action::ManagedHttp(_)
-            | Action::SignPayload { .. }
             | Action::WsSend { .. }
             | Action::WsConnect { .. }
     )));

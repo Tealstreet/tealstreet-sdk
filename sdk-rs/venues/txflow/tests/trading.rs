@@ -1,4 +1,5 @@
 //! Signed request/acknowledgement behavior, independent of a live account.
+use account_support::signer;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Outcome, Response};
 use safe_cex_venue_txflow::{Options, TxFlow};
@@ -7,14 +8,19 @@ use serde_json::{Value, json};
 mod account_support;
 use account_support::{Plain, failures};
 const NOW: f64 = 1_800_000_000_000.0;
+// Ordinary controls model an explicitly confirmed base-size market.
+// Missing metadata is exercised separately and must never imply this value.
 fn engine() -> Engine<TxFlow> {
+    engine_with_margin_mode(Some(json!(false)))
+}
+fn engine_with_margin_mode(mode: Option<Value>) -> Engine<TxFlow> {
     let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         application_id: Some("0x0000000000000000000000000000000000000001".into()),
-        secret: Some(format!("0x{}", "ab".repeat(32))),
+        credentials: signer::identity(),
         ..Default::default()
     }));
-    e.start(NOW);
+    signer::start(&mut e, NOW);
     let request = e
         .drain_plain()
         .find_map(|a| {
@@ -25,7 +31,11 @@ fn engine() -> Engine<TxFlow> {
             }
         })
         .unwrap();
-    let body = json!({"success":true,"code":0,"data":{"universe":[{"index":1,"name":"BTC-USDC","baseCurrency":"BTC","quoteCurrency":"USDC","currencyType":"usdc","delisted":false,"haltTrading":false,"basePrecision":0.001,"priceTick":0.1,"maxLeverage":50,"maxLimitOrderSize":100,"maxMarketOrderSize":50}]}}).to_string();
+    let mut body = json!({"success":true,"code":0,"data":{"universe":[{"index":1,"name":"BTC-USDC","baseCurrency":"BTC","quoteCurrency":"USDC","currencyType":"usdc","delisted":false,"haltTrading":false,"basePrecision":0.001,"priceTick":0.1,"maxLeverage":50,"maxLimitOrderSize":100,"maxMarketOrderSize":50}]}});
+    if let Some(mode) = mode {
+        body["data"]["universe"][0]["useNotionalMargin"] = mode;
+    }
+    let body = body.to_string();
     e.handle(
         NOW,
         Event::HttpResponse {
@@ -37,7 +47,7 @@ fn engine() -> Engine<TxFlow> {
             },
         },
     );
-    let mut startup = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    let mut startup = signer::prepared_actions(&mut e, NOW);
     let ticker = startup
         .iter()
         .find_map(|action| match action {
@@ -64,10 +74,7 @@ fn engine() -> Engine<TxFlow> {
         })
         .unwrap();
     e.handle(NOW + 25.0, Event::TimerFired { timer });
-    startup.extend(safe_cex_engine::test_support::prepared_actions(
-        &mut e,
-        NOW + 25.0,
-    ));
+    startup.extend(signer::prepared_actions(&mut e, NOW + 25.0));
     let initial = startup;
     let node = initial
         .iter()
@@ -133,6 +140,136 @@ fn ack(e: &mut Engine<TxFlow>, r: &HttpRequest, status: u16, body: &str) {
             },
         },
     );
+}
+fn resting_order(e: &mut Engine<TxFlow>) {
+    e.store_mut().upsert_order(Order {
+        id: "99".into(),
+        parent_id: None,
+        status: OrderStatus::Open,
+        symbol: "BTC-USDC".into(),
+        kind: OrderType::Limit,
+        side: OrderSide::Buy,
+        price: 50000.0,
+        amount: 0.01,
+        filled: 0.0,
+        remaining: 0.01,
+        reduce_only: false,
+        close: None,
+        client_order_id: Some("original".into()),
+        time_in_force: None,
+        last_update: NOW,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: Some(OrderExtra {
+            take_profit_known: true,
+            stop_loss_known: true,
+            ..Default::default()
+        }),
+    });
+}
+fn assert_no_sizing_write(actions: &[Action], command: u32) {
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::ManagedHttp(_) | Action::Sign { .. }
+    )));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command && error.outcome == Some(Outcome::NotSent) && error.message.contains("notional-margin"))));
+}
+fn refused_placements(mode: Option<Value>) {
+    for order in [
+        limit("margin-mode"),
+        opts(
+            json!({"symbol":"BTC-USDC","type":"market","side":"buy","amount":0.01,"clientOrderId":"margin-mode"}),
+        ),
+    ] {
+        let mut e = engine_with_margin_mode(mode.clone());
+        assert_eq!(e.store().markets().len(), 1);
+        place(&mut e, 701, vec![order]);
+        assert_no_sizing_write(&e.drain_actions().collect::<Vec<_>>(), 701);
+    }
+}
+#[test]
+fn missing_notional_margin_mode_keeps_public_market_but_refuses_placement() {
+    refused_placements(None);
+}
+#[test]
+fn null_notional_margin_mode_keeps_public_market_but_refuses_placement() {
+    refused_placements(Some(Value::Null));
+}
+#[test]
+fn notional_margin_true_refuses_placement_before_any_signing_or_http() {
+    refused_placements(Some(json!(true)));
+}
+fn refused_amendments(mode: Option<Value>) {
+    for amount in [None, Some(0.02)] {
+        let mut e = engine_with_margin_mode(mode.clone());
+        resting_order(&mut e);
+        e.handle(
+            NOW,
+            Event::Command(Command::AmendOrder {
+                command: 704,
+                id: "99".into(),
+                price: Some(50001.0),
+                amount,
+            }),
+        );
+        assert_no_sizing_write(&e.drain_actions().collect::<Vec<_>>(), 704);
+    }
+}
+#[test]
+fn missing_margin_mode_refuses_size_and_price_only_amendments() {
+    refused_amendments(None);
+}
+#[test]
+fn null_margin_mode_refuses_size_and_price_only_amendments() {
+    refused_amendments(Some(Value::Null));
+}
+#[test]
+fn notional_margin_true_refuses_size_and_price_only_amendments() {
+    refused_amendments(Some(json!(true)));
+}
+#[test]
+fn unknown_and_notional_margin_modes_still_allow_cancelling_native_ids() {
+    for mode in [None, Some(Value::Null), Some(json!(true))] {
+        let mut e = engine_with_margin_mode(mode);
+        resting_order(&mut e);
+        e.handle(
+            NOW,
+            Event::Command(Command::CancelOrders {
+                command: 707,
+                ids: vec!["99".into()],
+            }),
+        );
+        let body: Value = serde_json::from_str(write(&mut e).body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["action"]["type"], "cancel");
+        assert_eq!(body["action"]["cancels"][0]["o"], 99);
+    }
+}
+#[test]
+fn explicit_false_margin_mode_retains_placement_and_amendment() {
+    let mut e = engine();
+    place(&mut e, 705, vec![limit("base-size-control")]);
+    assert!(
+        write(&mut e)
+            .body
+            .as_deref()
+            .unwrap()
+            .contains("base-size-control")
+    );
+    let mut e = engine();
+    resting_order(&mut e);
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 706,
+            id: "99".into(),
+            price: Some(50001.0),
+            amount: Some(0.02),
+        }),
+    );
+    let body: Value = serde_json::from_str(write(&mut e).body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["action"]["type"], "modify2");
+    assert_eq!(body["action"]["order"]["s"], "0.02");
 }
 #[test]
 fn every_order_without_a_caller_id_gets_a_distinct_native_cloid() {
@@ -300,7 +437,224 @@ fn authoritative_read_resolves_native_ids_in_requested_order() {
     let order = |oid: u64, cloid: &str| json!({"asset":1,"oid":oid,"side":"B","orderType":"Limit","limitPx":"50000","origSz":"0.01","sz":"0.01","timestamp":NOW,"cloid":cloid,"state":"Open","tif":"GTC","children":null});
     let body = json!({"success":true,"code":0,"data":[order(22,"second"),order(11,"first")],"hasMore":false}).to_string();
     ack(&mut e, &read, 200, &body);
-    assert!(e.drain_plain().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:ids}) if ids == r#"["11","22"]"#)));
+    let observed = e.drain_plain().collect::<Vec<_>>();
+    assert!(observed.iter().any(|a| matches!(a,Action::Notice(Notice::CommandDone {command:7,result:ids}) if ids == r#"["11","22"]"#)), "{observed:?}");
+}
+
+fn placement_batch_boundary(count: usize) {
+    let mut e = engine();
+    let ids = (0..count).map(|i| format!("batch-{i}")).collect::<Vec<_>>();
+    place(&mut e, 71, ids.iter().map(|id| limit(id)).collect());
+    let mut request = write(&mut e);
+    let mut now = NOW;
+    let mut sizes = vec![];
+    for (batch, end) in [50.min(count), count].into_iter().enumerate() {
+        if batch == 1 && count <= 50 {
+            break;
+        }
+        let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        let orders = body["action"]["orders"].as_array().unwrap();
+        sizes.push(orders.len());
+        assert_eq!(
+            orders.len(),
+            if batch == 0 {
+                50.min(count)
+            } else {
+                count - 50
+            }
+        );
+        account_support::reply_at(
+            &mut e,
+            &request,
+            now,
+            200,
+            r#"{"status":"ok","confirm":"executed","code":0,"data":{"type":"PlaceOrder","data":{"statuses":["success"]}}}"#,
+        );
+        let mut observed = signer::prepared_actions(&mut e, now);
+        let read = observed
+            .iter()
+            .find_map(|action| match action {
+                Action::Http(read) if account_support::kind(read) == "frontendOpenOrders" => {
+                    Some(read.clone())
+                }
+                _ => None,
+            })
+            .expect("authoritative identity read");
+        // Each batch gets its own full reconciliation budget; no successor may
+        // issue while this batch's native identities remain unresolved.
+        for _ in 0..if batch == 0 { 3 } else { 6 } {
+            let at = now + 300.;
+            let timer = observed
+                .iter()
+                .rev()
+                .find_map(|action| match action {
+                    Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
+                    _ => None,
+                })
+                .expect("batch reconciliation timer");
+            e.handle(at, Event::TimerFired { timer });
+            now = at;
+            observed.extend(signer::prepared_actions(&mut e, now));
+            assert!(
+                !observed.iter().any(
+                    |action| matches!(action, Action::Http(r) if r.url.ends_with("/exchange"))
+                )
+            );
+            assert!(!observed.iter().any(|action| matches!(
+                action,
+                Action::Notice(
+                    Notice::CommandDone { command: 71, .. }
+                        | Notice::CommandFailed { command: 71, .. }
+                )
+            )));
+        }
+        let rows = (0..end)
+            .rev()
+            .map(|i| {
+                json!({"asset":1,"oid":10000+i,"side":"B","orderType":"Limit",
+            "limitPx":"50000","origSz":"0.01","sz":"0.01","timestamp":NOW,"cloid":ids[i],
+            "state":"Open","tif":"GTC","children":null})
+            })
+            .collect::<Vec<_>>();
+        account_support::reply_at(
+            &mut e,
+            &read,
+            now,
+            200,
+            &json!({"success":true,"code":0,"data":rows}).to_string(),
+        );
+        let observed = signer::prepared_actions(&mut e, now);
+        assert!(
+            !observed.iter().any(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandFailed { command: 71, .. })
+            )),
+            "{observed:?}"
+        );
+        if end < count {
+            assert!(!observed.iter().any(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandDone { command: 71, .. })
+            )));
+            request = observed
+                .into_iter()
+                .find_map(|action| match action {
+                    Action::Http(request) if request.url.ends_with("/exchange") => Some(request),
+                    _ => None,
+                })
+                .expect("successor only after first native identities");
+        } else {
+            let results = observed
+                .into_iter()
+                .filter_map(|action| match action {
+                    Action::Notice(Notice::CommandDone {
+                        command: 71,
+                        result,
+                    }) => Some(result),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let expected = (0..count)
+                .map(|i| (10000 + i).to_string())
+                .collect::<Vec<_>>();
+            assert_eq!(results, [serde_json::to_string(&expected).unwrap()]);
+        }
+    }
+    assert_eq!(sizes, if count == 50 { vec![50] } else { vec![50, 1] });
+}
+
+#[test]
+fn fifty_orders_resolve_as_one_bounded_native_batch() {
+    placement_batch_boundary(50);
+}
+
+#[test]
+fn fifty_one_orders_wait_for_each_batch_and_return_ordered_native_ids() {
+    placement_batch_boundary(51);
+}
+
+#[test]
+fn unknown_first_batch_never_releases_the_second_batch() {
+    for status in [None, Some(202), Some(200)] {
+        let mut e = engine();
+        place(
+            &mut e,
+            72,
+            (0..51).map(|i| limit(&format!("unknown-{i}"))).collect(),
+        );
+        let request = write(&mut e);
+        if let Some(status) = status {
+            ack(
+                &mut e,
+                &request,
+                status,
+                if status == 200 {
+                    r#"{"status":"ok","confirm":"executed","code":0,"data":{"type":"PlaceOrder","data":{"statuses":["success"]}}}"#
+                } else {
+                    r#"{"status":"ok","code":0}"#
+                },
+            );
+        } else {
+            e.handle(
+                NOW,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: "lost batch acknowledgement",
+                },
+            );
+        }
+        let mut observed = e.drain_plain().collect::<Vec<_>>();
+        if status == Some(200) {
+            for tick in 1..=8 {
+                let now = NOW + 300. * f64::from(tick);
+                let timer = observed
+                    .iter()
+                    .rev()
+                    .find_map(|action| match action {
+                        Action::SetTimer { timer, at_ms } if *at_ms == now => Some(*timer),
+                        _ => None,
+                    })
+                    .expect("bounded identity reconciliation");
+                e.handle(now, Event::TimerFired { timer });
+                observed.extend(signer::prepared_actions(&mut e, now));
+            }
+        }
+        assert!(
+            !observed
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+        );
+        let errors = observed
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 72, error }) => Some(error),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].outcome, Some(Outcome::Unknown));
+    }
+}
+
+#[test]
+fn duplicate_caller_ids_across_native_chunks_refuse_before_the_first_write() {
+    let mut e = engine();
+    let mut orders = (0..51)
+        .map(|i| limit(&format!("duplicate-{i}")))
+        .collect::<Vec<_>>();
+    orders[50].client_order_id = orders[0].client_order_id.clone();
+    place(&mut e, 73, orders);
+    let observed = e.drain_plain().collect::<Vec<_>>();
+    assert!(
+        !observed
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+    );
+    assert!(
+        observed
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 73, .. })))
+    );
 }
 #[test]
 fn pending_execution_never_retries_write_and_releases_command_as_uncertain() {
@@ -352,10 +706,7 @@ fn explicit_rejections_are_rejected_and_lost_responses_are_unknown() {
         r#"{"status":"err","message":"Insufficient margin"}"#,
     );
     let [error] = failures(&mut e).try_into().unwrap();
-    assert_eq!(
-        error.legacy_text(),
-        "Insufficient margin; reconcile before any resubmission"
-    );
+    assert_eq!(error.legacy_text(), "Insufficient margin");
     // A top-level `status: "err"` is TxFlow's explicit refusal.
     assert_eq!(error.outcome, Some(Outcome::Rejected));
 
@@ -370,10 +721,9 @@ fn explicit_rejections_are_rejected_and_lost_responses_are_unknown() {
         },
     );
     let [error] = failures(&mut e).try_into().unwrap();
-    assert_eq!(
-        error.message,
-        "connection reset; reconcile before any resubmission"
-    );
+    // The engine selects the physical transport error over the venue fallback.
+    // Reconciliation remains required by the Unknown outcome below.
+    assert_eq!(error.message, "connection reset");
     assert_eq!(
         (error.kind, error.outcome),
         (
@@ -393,31 +743,7 @@ fn duplicate_id_is_rejected_while_first_placement_is_inflight() {
 #[test]
 fn queued_amend_revalidates_children_before_signing_and_never_clears_new_protection() {
     let mut e = engine();
-    e.store_mut().upsert_order(Order {
-        id: "99".into(),
-        parent_id: None,
-        status: OrderStatus::Open,
-        symbol: "BTC-USDC".into(),
-        kind: OrderType::Limit,
-        side: OrderSide::Buy,
-        price: 50000.0,
-        amount: 0.01,
-        filled: 0.0,
-        remaining: 0.01,
-        reduce_only: false,
-        close: None,
-        client_order_id: Some("original".into()),
-        time_in_force: None,
-        last_update: NOW,
-        trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
-        extra: Some(OrderExtra {
-            take_profit_known: true,
-            stop_loss_known: true,
-            ..Default::default()
-        }),
-    });
+    resting_order(&mut e);
     place(&mut e, 7, vec![limit("blocking")]);
     let r = write(&mut e);
     e.handle(
@@ -597,10 +923,7 @@ fn a_single_action_error_status_is_a_rejection() {
         r#"{"status":"ok","confirm":"executed","code":0,"data":{"type":"PlaceOrder","data":{"statuses":[{"error":"Insufficient margin"}]}}}"#,
     );
     let [error] = failures(&mut e).try_into().unwrap();
-    assert_eq!(
-        error.legacy_text(),
-        "Insufficient margin; reconcile before any resubmission"
-    );
+    assert_eq!(error.legacy_text(), "Insufficient margin");
     assert_eq!(error.outcome, Some(Outcome::Rejected));
 }
 
@@ -615,4 +938,218 @@ fn separate_engines_with_the_same_signer_cannot_reuse_action_nonces() {
     let second: Value = serde_json::from_str(write(&mut b).body.as_deref().unwrap()).unwrap();
     let second = second["nonce"].as_u64().unwrap();
     assert!(second > first);
+}
+
+// A nuke must not leave a stop, and one stop must not keep the rest open.
+#[test]
+fn cancel_all_sends_stops_with_the_rest() {
+    use safe_cex_engine::model::{Order, OrderSide, OrderStatus};
+    let mut e = engine();
+    let symbol = limit("x").symbol;
+    let row = |id: &str, kind| Order {
+        id: id.into(),
+        parent_id: None,
+        status: OrderStatus::Open,
+        symbol: symbol.clone(),
+        kind,
+        side: OrderSide::Sell,
+        price: 100.0,
+        amount: 1.0,
+        filled: 0.0,
+        remaining: 1.0,
+        reduce_only: true,
+        close: None,
+        client_order_id: None,
+        time_in_force: None,
+        last_update: 0.0,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    };
+    e.store_mut().set_orders(vec![
+        row("11", OrderType::Limit),
+        row("22", OrderType::StopLoss),
+    ]);
+    e.handle(
+        1000.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 9,
+            symbol: symbol.clone(),
+        }),
+    );
+    let body = write(&mut e).body.unwrap();
+    assert!(body.contains("11") && body.contains("22"), "{body}");
+}
+
+#[test]
+fn unapproved_revoked_or_expired_agent_cannot_release_an_exchange_write() {
+    let mut e = engine();
+    place(&mut e, 771, vec![limit("not-approved")]);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 100.0);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+    );
+    let authorization = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r)
+                if r.body
+                    .as_deref()
+                    .is_some_and(|body| body.contains("approvedAgents")) =>
+            {
+                Some(r)
+            }
+            _ => None,
+        })
+        .expect("read current approval before any signing");
+    let owner =
+        serde_json::from_str::<Value>(authorization.body.as_deref().unwrap()).unwrap()["user"]
+            .clone();
+    let absent = json!({"success":true,"code":0,"data":{"user":owner,"agents":[]}}).to_string();
+    ack(&mut e, authorization, 200, &absent);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 100.0);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+    );
+    assert!(actions.iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 771, error })
+        if error.kind == Some(safe_cex_engine::ErrorKind::AuthInvalid))
+    ));
+}
+
+#[test]
+fn authorization_read_failures_are_recoverable_without_releasing_a_write() {
+    use safe_cex_engine::ErrorKind;
+    for (status, body, expected) in [
+        (None, "connection reset", ErrorKind::Network),
+        // Managed HTTP delivers a non-success read through HttpFailed.
+        (Some(503), "unavailable", ErrorKind::Network),
+        (Some(200), "malformed", ErrorKind::VenueUnavailable),
+        (
+            Some(200),
+            r#"{"success":true,"code":0,"data":{"user":"0x1111111111111111111111111111111111111111","agents":[]}}"#,
+            ErrorKind::VenueUnavailable,
+        ),
+    ] {
+        let mut e = engine();
+        place(&mut e, 881, vec![limit("authorization-read")]);
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 100.0);
+        let authorization = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Http(r)
+                    if r.body
+                        .as_deref()
+                        .is_some_and(|body| body.contains("approvedAgents")) =>
+                {
+                    Some(r)
+                }
+                _ => None,
+            })
+            .expect("authorization is checked before signing");
+        if let Some(status) = status {
+            ack(&mut e, authorization, status, body);
+        } else {
+            e.handle(
+                NOW + 100.0,
+                Event::HttpFailed {
+                    request: authorization.id,
+                    error: body,
+                },
+            );
+        }
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 100.0);
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+        );
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed {
+                    command: 881,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .expect("read failure terminates this attempt without an order");
+        assert_eq!(error.kind, Some(expected), "{status:?}");
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        place(&mut e, 882, vec![limit("fresh-after-read-failure")]);
+        assert!(write(&mut e).url.ends_with("/exchange"));
+    }
+}
+
+#[test]
+fn uncertain_second_batch_retains_exactly_the_first_batches_native_ids() {
+    let mut e = engine();
+    let ids = (0..51).map(|i| format!("partial-{i}")).collect::<Vec<_>>();
+    place(&mut e, 74, ids.iter().map(|id| limit(id)).collect());
+    let first = write(&mut e);
+    ack(
+        &mut e,
+        &first,
+        200,
+        r#"{"status":"ok","confirm":"executed","code":0,"data":{"type":"PlaceOrder","data":{"statuses":["success"]}}}"#,
+    );
+    let read = e
+        .drain_plain()
+        .find_map(|a| match a {
+            Action::Http(r) if account_support::kind(&r) == "frontendOpenOrders" => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    let rows = (0..50)
+        .rev()
+        .map(|i| {
+            json!({"asset":1,"oid":10000+i,"side":"B","orderType":"Limit",
+        "limitPx":"50000","origSz":"0.01","sz":"0.01","timestamp":NOW,"cloid":ids[i],
+        "state":"Open","tif":"GTC","children":null})
+        })
+        .collect::<Vec<_>>();
+    let now = NOW + 1000.;
+    account_support::reply_at(
+        &mut e,
+        &read,
+        now,
+        200,
+        &json!({"success":true,"code":0,"data":rows}).to_string(),
+    );
+    let second = signer::prepared_actions(&mut e, now)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("/exchange") => Some(r),
+            _ => None,
+        })
+        .expect("second physical batch after exact native proof");
+    e.handle(
+        now,
+        Event::HttpFailed {
+            request: second.id,
+            error: "lost second batch",
+        },
+    );
+    let observed = signer::prepared_actions(&mut e, now);
+    assert!(
+        !observed
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+    );
+    let errors = observed
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 74, error }) => Some(error),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].outcome, Some(Outcome::Unknown));
+    let expected = (0..50).map(|i| (10000 + i).to_string()).collect::<Vec<_>>();
+    assert_eq!(errors[0].partial.as_ref().unwrap().order_ids, expected);
 }

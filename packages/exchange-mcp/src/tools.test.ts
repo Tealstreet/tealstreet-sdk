@@ -49,8 +49,8 @@ describe('option tools', () => {
     for (const name of OPTION_TOOLS) expect(names(bybit, false)).not.toContain(name);
   });
 
-  it('refuses disabled options-only venues before runtime loading', async () => {
-    await expect(exchangeRegistry.binanceoptions()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+  it('loads the options-only beta venue through the Rust registry', async () => {
+    await expect(exchangeRegistry.binanceoptions()).resolves.toBe(RustEngineExchange);
   });
 
   it('does not advertise cold Rust option methods without native support', async () => {
@@ -220,3 +220,12 @@ it.each(['get_order_history', 'get_fills', 'get_closed_pnl', 'get_income'])(
     expect(rows).toEqual([{ timestamp: 1 }]);
   },
 );
+
+it('get_closed_pnl preserves null and zero without fabricating UTC dates or dropping rows', async () => {
+  const rows = [
+    { unrealizedPnl: null, fees: null, time: null, closedTime: null },
+    { unrealizedPnl: 0, fees: 0, time: 0, closedTime: 0 },
+  ];
+  const result = await run('get_closed_pnl', { fetchClosedPnl: async () => rows }, {});
+  expect(JSON.parse(JSON.stringify(result))).toEqual(rows);
+});

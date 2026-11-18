@@ -74,12 +74,12 @@ test('safe cache links preserve exact targets and runtime graph semantics', (t) 
   assert.equal(fs.readlinkSync(path.join(options.cache, 'relative')), 'nested/transform');
 });
 
-test('snapshot destinations are immutable per case and second-run snapshots stay distinct', (t) => {
+test('snapshot destinations are immutable per case and other cases stay distinct', (t) => {
   const options = fixture(t), first = api.captureCache(options), retained = bundle(options.destination);
   assert.throws(() => api.captureCache(options), /collision|exist/);
   assert.deepEqual(bundle(options.destination), retained);
   fs.writeFileSync(path.join(options.cache, 'later'), 'another case final cache');
-  const otherPrefix = `cpu-second/cache/${'b'.repeat(64)}`, destination = path.join(options.root, 'sdk-rs/harness/out', otherPrefix);
+  const otherPrefix = `cpu-collection/cache/${'b'.repeat(64)}`, destination = path.join(options.root, 'sdk-rs/harness/out', otherPrefix);
   const second = api.captureCache({ ...options, destination }); assert.notEqual(second.digest, first.digest);
   assert.equal(api.verifyCache({ entries: bundle(destination, otherPrefix), prefix: otherPrefix, expectedDigest: second.digest }).digest, second.digest);
   assert.equal(api.verifyCache({ entries: retained, prefix, expectedDigest: first.digest }).digest, first.digest);

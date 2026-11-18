@@ -154,3 +154,27 @@ Commit `6e689b35e25`, composed with tip `f8534cd0cb6` at `9bd1c38ddcc`.
 | Bitget family | 1,358,752 | 1,358,752 | +0 | unchanged |
 
 Both deltas fall inside the estimates (+6K to +25K for the family, +3K to +20K combined). Under the standing rule, Bybit and Bitget are byte-identical.
+
+## Timestamp refusal recovery
+
+Signed USD-M, COIN-M fills, and portfolio-margin history reads (including the
+read-only client-order lookup) recover from Binance `-1021` once per physical
+page. A live, exact response starts an unsigned GET to that market's public
+`/fapi/v1/time` or `/dapi/v1/time`, respecting the testnet base URL. Portfolio
+margin uses the USD-M public clock, not the `papi` account host.
+
+The probe is a 5-second Never child of the original caller root; its bound is
+also capped by the original receipt. A valid positive integer `serverTime`
+calibrates only the engine's protocol clock at the receipt time. Route and
+preparation latency are not added to the sample, avoiding an ahead-of-server
+signature. A fresh 20-second Never page leg then signs the identical URL/query
+with the immutable selected identity. Raw scheduling time, window geometry and
+accepted coverage do not change. A second `-1021` takes the existing native
+failure path. Probe failure is strict and cannot turn clock data into accepted
+history rows or a partial-success marker. Expired or stale probe deliveries
+cannot calibrate the clock or emit another page.
+
+Recovery is confined to these GET history/read-root consumers. Account polling,
+options reads, all mutations and order placements keep their existing behavior.
+This does not retry ambiguous network outcomes, extend a caller deadline, raise
+`recvWindow`, or change the host clock.

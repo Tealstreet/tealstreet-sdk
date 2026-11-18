@@ -7,6 +7,34 @@ bridges store snapshots back via `postMessage`. Entry point:
 instance plus its `DefaultStore`, and pushes throttled store
 snapshots to the main thread on every `store.notify()`.
 
+## Worker lifecycle logs
+
+`ExchangeWorker.log` sends the emitter argument array `[JSON text, severity]`,
+serializing its level, message and context. Global exception and promise rejection
+handlers redact a detached copy of the entire diagnostic packet before delivery
+through DedicatedWorker or SharedWorker ports, preserving the error event shape.
+A standalone object is coerced to `[object Object]` by existing main-thread log
+consumers; `warn` maps to `warning`.
+
+Startup retry explanations are diagnostic copies when cached, so a native read
+failure cannot bypass masking in the later retry warning. Deactivation refusal
+text uses the same text policy while its status flag remains unchanged.
+
+## Public-data frame rejection messages
+
+Book and candle subscription handlers forward typed rejection observers as
+`listenOrderBook:rejected` and `listenOHLCV:rejected`. Each message carries its
+`subId`, stream, symbol, candle interval where applicable, and the existing
+JSON-safe serialized error; receivers restore the error for the optional third
+observer. Rejections fan out to every current subscriber, cancel pending data
+throttles, and send no substitute data. Unsubscribe and handler disposal remove
+these observers. Registration is visible before calling the source, so a
+synchronous unsubscribe or disposal fences data and rejections immediately and
+releases the late handle exactly once. Cancelled registrations cannot overwrite
+a replacement subscription or trigger a candle repair; a thrown source
+registration releases its reservation so callers can retry.
+Worker owner/generation fences apply to these messages too.
+
 ## History result completeness
 
 Successful `callMethod:done` replies include optional `data.completeness:
@@ -15,6 +43,23 @@ has the host marker. Array properties do not survive clone/JSON transports.
 The matching BaseExchange receiver restores it before resolving or notifying
 result observers; senders and receivers must upgrade together. Never infer a
 complete window from missing metadata or attach a notice to another request.
+
+## Nuke flatness proof reads
+
+A frame-fed page closes positions locally, then forwards `readPositions` to the
+worker's engine for a fresh `{ skipped, open }` proof, even when its mirrored store
+is empty. Keep that RPC in both `WORKER_OPTIONAL_METHODS` and `WORKER_READ_METHODS`:
+a failed read cannot confirm flatness and is never an interrupted write.
+Unknown or unimplemented RPCs return a serialized `unsupported`/`notSent` error
+naming the venue and method; a failed reply without a cause becomes `Error('undefined')`.
+
+## Write timing marks
+
+User-write `callMethod` requests carry optional `data.timing` (write stage
+marks, epoch ms), and their `callMethod:done` reply returns the merged marks.
+The handler hands them to the exchange with `runWithWriteTiming`; the
+main-thread caller emits the one `write.timing` event. See
+`docs/plans/callers/rust-write-timing.md`.
 
 ## Time synchronization
 
@@ -25,6 +70,11 @@ Do not make each exchange worker call the public endpoint: one tab may have
 many accounts, and foreground/page-show handling already forces a fresh
 main-thread sync after sleep.
 
+The initial worker clock startup waits up to 30 s for that push. The engine
+then uses an epoch-shaped monotonic scheduling clock, while later pushes update
+protocol timestamps only. Worker startup elapsed telemetry also uses
+`performance.now()` at both ends, independent of system/venue clock corrections.
+
 ## The `exchangeWorkers` registry is keyed by accountName — single-tenant only
 
 `store.webworker.ts` keeps module-global `exchangeWorkers` /
@@ -34,19 +84,52 @@ the `init` payload into the handler closure and reused for
 `getMyExchangeWorker` / `deleteMyExchangeWorker` / dispose — so the key
 is whatever the `init` message carried.
 
-This is correct for the **browser** (one device = one tenant, account
-names unique, and the `ports`/`shared` machinery fans one worker out to
-multiple _tabs_ of the same user). It is **NOT safe for a multi-tenant
-host** that runs many clients through one process: two clients using the
-same account name collide — the second `init` overwrites the first, the
-first `ExchangeWorker`/exchange is orphaned (never disposed,
-`isDisposed` stays false), and its `tick` signs REST forever.
+Shared browser attachments capture the worker's `init.sessionKey`. Reusing a
+named account requires the same nonblank session key; a mismatched or missing
+identity gets a failed startup acknowledgement and warning before receiving a
+snapshot or joining the channel. Ports retained after failed startup keep that
+channel's session until they detach. Session keys are never logged or echoed.
+
+Each shared port is bound to the exact accepted worker and its own optional
+`instanceId`, so another tab's instance ID does not prevent same-session sharing.
+Unstamped inbound commands are accepted only on the initial binding. Changing
+the session, account, exchange or instance requires a nonempty instance ID never
+previously used on that port; subsequent commands must carry that exact ID.
+Missing or retired IDs refuse the rebind before disturbing the current worker.
+An identical accepted init retains its binding and generation, allowing pending
+exchange construction to finish starting its configured integration. Legacy
+callers can open a new port instead.
+Commands from detached or replaced bindings are dropped. A stale `dispose` may
+detach only its own port; it cannot dispose another session's worker. When the
+last port changes owner, the previous worker is disposed; other old-owner tabs
+keep their worker. Dedicated init generations fence continuations after startup
+awaits. Shared startup retains its original worker and requires that worker's
+registry entry and a surviving attachment, even if the creating port has moved.
+An old init never starts its integration on a new account.
+
+Account names still must be unique in a **multi-tenant host** that runs many
+clients through one process. The shared-session fence does not change dedicated
+contexts' registry keys: a second same-name init can overwrite the first and
+orphan an exchange whose tick continues signing REST.
 
 **Any multi-tenant consumer (e.g. the hosted `exchange-server`) MUST
 pass a connection-scoped `accountName` into the `init` payload** (it does:
 `${connId}:${accountName}`). Don't "fix" that back to a bare account
 name, and don't assume `accountName` is globally unique here. See
 `services/exchange-server/CLAUDE.md` → "Multi-tenant invariant".
+
+Each shared worker's outbound proxy captures its original routing key and exact
+registry instance. Rebinding its creating port must not redirect a surviving
+worker's updates; replacing that registry instance drops its stale output.
+Subscription-targeted delivery is restricted to ports attached to that routing key.
+
+Telegram starts once per exact `ExchangeWorker`, including identical same-port
+init, additional shared ports and startup retries. A replacement worker can start
+its own integration. Startup carries the original worker and init owner across
+the await, checking its original registry entry and exact remaining shared-port
+attachments before starting Telegram. If the creating port moves to B while Q
+still serves A, A's integration starts once on A. Rebound ports do not count as
+surviving attachments, and A's token cannot configure B's integration.
 
 ## Files
 
@@ -55,15 +138,18 @@ name, and don't assume `accountName` is globally unique here. See
   instantiates `ExchangeWorker`.
 - `StoreWorkerPayload.ts` — the wire-format union of every `op`
   the bridge speaks in either direction.
-- `commandExecutor.ts` — parses and dispatches worker CLI commands;
-  `handlers/CommandHandler.ts` owns the `exec` wire operation.
+- `commandExecutor.ts` — the cli-core executor port tealstreet-next still
+  registers; the worker no longer calls it (`exec` runs in the Rust algos).
+- `handlers/CommandHandler.ts` owns the `exec` wire operation.
 - `TelgramWorker.ts` — legacy Telegram worker bridge (filename spelling is
   load-bearing).
 - `handlers/` — worker-operation handlers; there is no directory-local
   `CLAUDE.md` and no `commands/` directory.
 - `chaserOrder/`, `postProcessors/` — documented subsystems with their own
-  `CLAUDE.md` files.
-- `twap/` — TWAP instance and manager lifecycle.
+  `CLAUDE.md` files. The TS chaser runs only for in-process CLI callers
+  (cli-core, `apps/cli`), never in the worker.
+- `twap/` — the worker's Rust TWAP ownership (`RustTwapOwnership`, its lock,
+  restore-refusal and in-flight helpers) and the TS TWAP the CLI still runs.
 
 The main-thread worker fallback is
 `apps/web/src/utils/shim/worker/WorkerShim.ts`; it is not part of this
@@ -75,9 +161,8 @@ directory.
 exchange-server sessions receive frames from browser workers across reconnects
 and version skew, and a missing `payload.data` used to throw while reading
 `payload.data.reqId`, surfacing as a process-level unhandled rejection. Treat a
-bad command payload as an `exec-log` failure instead of throwing; safe-cex does
-not own the CLI layer and should not make malformed command frames page the
-service.
+bad command payload as an `exec-log` failure (and a failed `exec-result` for a
+`reqId`) instead of throwing, before it reaches the Rust algos.
 
 ## Ticker delta packing is browser-worker-only
 
@@ -180,10 +265,11 @@ fix at `_sanitizeForPostMessage` restores the invariant.
 
 ## Market-load subscription buffering telemetry
 
-`handlers/BaseHandler.ts` buffers orderbook/OHLCV subscriptions while
-`exchange.store.markets` is empty. If markets still have not loaded after 30 s,
-it drops the pending subscriptions and posts an `op: 'error'` payload with
-`sendToSentry: true`. This is intentionally still app-neutral: safe-cex does
+`handlers/BaseHandler.ts` buffers subscriptions while `exchange.store.markets`
+is empty, and applies them whenever markets load, however late. If markets still
+have not loaded after 30 s, it keeps the queue and posts an `op: 'error'` payload
+with `sendToSentry: true`. A repeat replaces its earlier copy, and the queue keeps
+the newest 200; a late apply is logged with its count and wait. This is intentionally still app-neutral: safe-cex does
 not import Sentry, it only sends structured data for the web app to sanitize.
 
 The wait-for-markets check is a self-rescheduling `setTimeout`, not
@@ -235,9 +321,13 @@ either one loses it; bybit calls `connectAndSubscribe()` INSIDE
 `socket.ws?.readyState === OPEN`, and a socket whose `connectAndSubscribe` never
 ran has no `ws`.
 
-**The 30 s `START_TIMEOUT_MS` race rejects into the same catch**, so a timeout is
-tagged `worker_error_phase: 'startup'` with `worker_error_family: 'timeout'`.
-That pairing is the point, not conflation.
+**The start timeout race rejects into the same catch** (30 s, Rust engine 120 s), so
+a timeout is tagged `worker_error_phase: 'startup'` with `worker_error_family:
+'timeout'`. That pairing is the point, not conflation. A Rust timeout then starts
+over on the same worker (`retryTimedOutStart`, 10/20/40/60 s, then final). The
+web controller's `startup_failed` latch stops only its own automatic reloads, not
+this; a successful load clears it. Every request after a failed start is answered
+`notSent` (`failedWorker`), because the page's own timer is 121 s.
 
 **The `try` deliberately spans the WHOLE of `start()`, not just
 `_exchange.start()`.** Half of startup runs before the exchange exists — the
@@ -276,7 +366,9 @@ phase tag and never ship it. Counts from this tag are a floor, not a census.
   postMessaging `{op: '<event>', data: [...args]}` for a fixed
   set (`error`, `warning`, `log`, `exec-log`, `exec-result`,
   `chaser:complete`, `grafana-info`, `grafana-error`, `grafana-pws`, `grafana-pws-sub`,
-  `grafana-http-request`, `grafana-http-response`). Adding a new
+  `grafana-http-request`, `grafana-http-response`, `ws-diagnostic`). The latter
+  carries one sanitized `WsDiagnosticEvent` object and remains default-off via
+  `__workerConfig.wsDiagnosticsEnabled`. Adding a new
   bridged event requires adding it both to the worker-side
   forwarder in `_setupExchangeEventListeners` and the main-side
   `workerListener` switch in `exchangeAccountController.ts`, plus
@@ -329,8 +421,9 @@ cost is one boolean per outbound message.
 
 `engine-dead` is terminal for one native account. The worker owns recovery only
 once startup has completed: it invalidates the old callback generation, detaches
-its store listener, clears the trailing throttle/handlers, stops its own chasers
-and exact TWAP instances, and makes one fresh account/store after a 500 ms delay.
+its store listener, clears the trailing throttle/handlers, posts the dead
+engine's Rust TWAP state (its chasers and TWAPs died with it), and makes one
+fresh account/store after a 500 ms delay.
 A second panic or failed replacement stops recovery and warns the consumer.
 Every fatal event invalidates loaded flags and derived active-algorithm lists,
 including terminal shared-feed failures, while preserving last known main-thread
@@ -344,7 +437,7 @@ adds startup context as a warning log instead of reporting a duplicate error.
 Every generation fences frame callbacks, store notifications, event forwarding
 and handler state messages. A request already in flight may receive its one
 correlated result from the old generation, preserving known write IDs or typed
-unknown outcomes. A task fallback fails any interrupted executor that does not
+unknown outcomes. A task fallback fails any interrupted request that does not
 report, and later duplicate replies stay fenced. Fresh state resets the object/delta baselines
 and advances order/position freshness IDs; the adapter sends its native empty
 full snapshot before starting the replacement, clearing the main decoder's
@@ -366,10 +459,108 @@ direct public feeds or reusing the closed port. Shared-worker attachments during
 an existing recovery retain that owner and receive a failed startup acknowledgement
 and warning on the attaching port, without interrupting existing clients.
 
-TWAP instances are tracked by actual handler-created instance identity, never
-account name, so terminating one worker cannot stop another same-name account.
-`TwapInstance.start()` checks termination again after its awaited placement;
-otherwise a reply arriving after terminate could schedule another old slice.
+## Chasers, TWAPs and exec run only in the Rust algos
+
+Every worker account is a `RustEngineExchange`, and every shipped engine build
+(each family and the combined Node build) links the `algos` feature. The
+account's chaser, TWAP and `exec` ops (and Telegram `/cli`) run in the engine:
+`BaseHandler.runInRustAlgos` routes them through `RustEngineExchange.routeAlgoOp`.
+There is no TS fallback in the worker: a build without algos, an engine that
+stopped, or an account that is not a Rust engine refuses the op visibly (an
+`error` event; for `exec`, an `exec-log` plus a failed `exec-result`). An op that
+arrives before the engine host exists waits in the exchange (bounded) and is
+replayed in order once it starts; disposal reports any still waiting.
+Replies keep the worker's op names: `chaser:complete`, `error`, `warning`, `log`,
+`exec-log` and `exec-result` go through the exchange emitter, and the
+`activeChasers`/`activeTWAPs` rows land in the store from the engine. Disposal
+lets chases cancel their orders before the engine goes; a nuke stops every TWAP
+and chase through the engine's `algoStopAll`.
+
+The TS `ChaserOrderInstance`/`TwapInstance` and their managers remain only for
+in-process CLI callers (cli-core commands, `apps/cli`), whose nuke stops them
+through `stopAccountAlgos.ts`.
+
+## TWAP restore and the cross-tab owner lock
+
+Multi-user worker hosts supply `TwapWorkerContext.getTwapOwner()` before creating
+`ExchangeWorker`: `{ ownerId, generation }`, or `null` after revocation/logout.
+The generation must change for every owner/session transition, including A→B→A;
+it is a non-secret session counter, not an access token. Restore captures a copy
+before the engine-readiness queue, retains the original persisted `ownerId` and
+`ownerGeneration` in pending, published and forwarded rows,
+and rechecks identity and generation after the lock and in-flight lookup awaits,
+immediately before handing the row to the algos. Stale restores release their
+lock, are removed from persisted state and emit a `cancelled-for-owner-change` warning.
+Owned rows without a host owner check fail closed. A host with that API must
+also reject untagged rows: the current login never proves an old row's owner.
+Native `PersistedTwap` and `TwapBook::serialize_state` preserve both explicit
+top-level tags. Native restore requires a trusted bound owner matching both;
+missing, foreign or stale evidence stays rejected. The wrapper never fills in a
+missing generation from the current session or replaces an old generation.
+Without the host API, the wrapper still forwards untagged single-user rows
+unchanged; native ownership checks remain authoritative. Captured session
+snapshots remain private to the pending restore and are never persisted or
+forwarded to the engine.
+
+The local Rust engine receives the same provider before startup. The worker
+captures its owner at construction and refuses owned algo startup if that owner
+or generation changes during startup. Buffered messages keep that creation binding;
+both the early call drain and final startup drain recheck it before dispatch.
+Retired buffered work is refused, never treated as initially unowned work.
+The adapter keeps the construction binding separately from its live provider;
+startup and later worker entry retire a changed binding before accepting work.
+An initially unowned worker remains allowed only while its binding stays unowned.
+Calls already admitted into startup or preflight waits recheck that binding at
+native command handoff; retired calls refuse as `notSent` and retire the host
+without running stale algo cleanup cancels.
+`EngineHost.algoStart(accountName,
+twapOwner?, isOwnerCurrent?)` passes a present `{ ownerId: string, generation: number }` as JSON
+to the additive WASM `algoStartOwned(accountName, twapOwnerJson, now, wall)`.
+Absent providers use the existing `algoStart` ABI and its interim account-name
+restore behavior. Explicit null/invalid owners fail closed. The declaration in
+`hosts/wasm/js/host.d.mts` is authored API source, not generated wasm bindings.
+
+The adapter also supplies a live check against the copied startup binding.
+Cached routes, engine entries, action dispatch and deferred signer callbacks
+recheck it. A changed/unavailable owner retires the entire host, cancels its
+timers and transport preparations, releases its engine and refuses queued work;
+it never rebinds that engine to the new owner or runs stale cleanup cancels.
+Unchanged owners keep their schedules. New workers are required after a change.
+Automatic recovery checks the initiating binding before queueing reconstruction,
+at its delayed execution and after startup; changed owners cannot recover that worker.
+
+Once bound, legacy rows with neither top-level tag never resume. The wrapper
+posts a `warning` message `TWAP <symbol> restore cancelled-for-owner-change:
+persisted ownerId is missing` and removes the pending row. A direct native
+restore, or an owner-tagged row missing only generation, emits `error` with
+`TWAP <symbol> not restored: persisted TWAP owner or generation does not match`.
+The native server forwards this error with `forceToast: true`. No path fills in
+a missing generation from `getTwapOwner`.
+
+`twap/RustTwapOwnership.ts`, owned by `TwapHandler`, keeps these rules for the
+Rust TWAPs: it takes each running TWAP's Web Lock, holds a restored row until it
+has the lock and has settled the row's `inFlight` slice, and posts
+`twap:stateUpdate` as the algos' rows plus restores still waiting. On engine
+death the worker posts `{}` for them before teardown.
+
+`twap:state` replays one tab's `sessionStorage['twaps']`, and a duplicated tab
+copies it, so its own dedicated worker would run the same TWAP a second time.
+Every TWAP holds the Web Locks owner lock `tealstreet-twap:<account>:<id>`
+(`twap/twapLock.ts`) until it completes or stops. A restore sends a row to the
+algos only once it holds the lock, and otherwise drops it and toasts "running in
+another tab". It keeps asking for `TWAP_RESTORE_LOCK_WAIT_MS` (5 s) first: a reloaded
+tab's previous worker holds its locks until the browser tears it down, and a
+refusal on the first try would end a TWAP that no tab then runs. The browser
+releases a dead worker's locks, so another tab can then restore it. `twapRestoreRefusal.ts` refuses finished, empty, inflated or
+foreign-account rows and running rows whose schedule lapsed, mirroring the
+exchange server. A runtime without Web Locks gets a no-op lock.
+
+The Rust TWAP persists a slice as `state.inFlight` (its size and, for market and
+limit slices, the `clientOrderId` sent on the order) before its order goes out,
+and clears it when it is counted. A restore settles it before resuming: found by
+client id counts it; a definitive miss puts the size back; anything else (an
+uncertain lookup, a chaser slice, a venue without client ids) counts it with an
+error toast, because placing it again could double it.
 
 ## Interrupted command replies
 
@@ -388,7 +579,8 @@ The fallback knows only the RPC method and its arguments: dispatched
 `WORKER_WRITE_METHODS` (leverage/margin/mode, `scheduleCancel`, and the
 main-thread trading methods) are interrupted writes and carry the caller client
 IDs in their placement arguments, while reads receive no write-outcome marker.
-It must not parse CLI text or invent native IDs. `exec-result.error` and
+It must not parse CLI text or invent native IDs; an interrupted `exec` gets the
+unknown-outcome message only. `exec-result.error` and
 `updatePositions:done.reason` remain strings; optional `errorDetails` carries the
 original structured failure when it is still available.
 
@@ -412,3 +604,30 @@ Rust `engine-event` diagnostics use the existing generation-guarded event bridge
 with `data: [EngineEvent]`. Legacy `error` options and the third `log` argument
 retain the event for callers migrating in place. Consumers must choose one
 channel per diagnostic to avoid double counting/toasting.
+
+History failures preserve the native closed `causeCode` alongside `kind` and the
+independent `venueCode` through `commandOutcome.ts`. Reporting code may use these
+classifications without forwarding the free-form message or a signed request.
+
+`__workerConfig.connectionVisibility` accepts only `hidden` or `visible` from
+the owning page. It supplies dedicated workers' timer-lateness diagnostics;
+it changes no reconnect, throttle or account policy. A callback delivered after
+the page is visible is not counted as a hidden callback.
+
+## Protection-loss telemetry
+
+`workerErrorProtectionTags` derives only `worker_error_unprotected: true` from the
+closed native `protection: 'unprotected'` fact before diagnostic Error cloning.
+BaseExchange and direct worker error reporting attach it to plain metadata;
+custom Error properties disappear during `postMessage` structured cloning.
+Hosts may preserve this fixed safety fact through privacy projection; the SDK
+does not decide host reporting policy or add a telemetry client.
+
+## Closed history diagnostics
+
+`logError` projects only allowlisted native history causes and validated
+`historyDecode` schema/reason pairs into its detached error object. Shared
+`exchangeErrorTags` indexes them as `cause_code`, `history_schema` and
+`history_reason`, including when message text is redacted. Unknown causes,
+invalid pairs and extra row/request fields are dropped; the diagnostic packet
+still passes through the existing redactor and the web Sentry sanitizer.

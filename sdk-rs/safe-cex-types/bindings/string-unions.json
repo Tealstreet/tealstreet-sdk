@@ -31,6 +31,10 @@
       "value": "binanceinverse"
     },
     {
+      "name": "Binanceoptions",
+      "value": "binanceoptions"
+    },
+    {
       "name": "Binancespot",
       "value": "binancespot"
     },
@@ -41,6 +45,10 @@
     {
       "name": "Bingx",
       "value": "bingx"
+    },
+    {
+      "name": "Bingxspot",
+      "value": "bingxspot"
     },
     {
       "name": "Bitget",
@@ -65,10 +73,6 @@
     {
       "name": "Blofin",
       "value": "blofin"
-    },
-    {
-      "name": "Breakoutprop",
-      "value": "breakoutprop"
     },
     {
       "name": "Bybit",
@@ -161,14 +165,6 @@
     {
       "name": "Mode",
       "value": "mode"
-    },
-    {
-      "name": "Salsadex",
-      "value": "salsadex"
-    },
-    {
-      "name": "TealstreetDex",
-      "value": "tealstreet-dex"
     },
     {
       "name": "Txflow",

@@ -40,6 +40,31 @@ fn result(e: &mut Driver) -> Result<String, String> {
         .unwrap()
 }
 #[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let (mut e, _) = ready();
+    ask(
+        &mut e,
+        Query::Fills {
+            symbol: Some(SYMBOL.into()),
+            order_id: None,
+            from_ms: Some(1765805280000.0),
+            to_ms: Some(1765805340000.0),
+            limit: None,
+        },
+    );
+    let first = requests(&mut e).pop().unwrap();
+    assert!(first.url.contains("limit=1000"));
+    let rows = (0..1000)
+        .map(|n| format!(r#"{{"orderId":"123","symbol":"SOL_USDC_PERP","side":"Bid","price":"141","quantity":"2","fee":"-0.1","feeSymbol":"USDC","tradeId":{n},"timestamp":"2025-12-15T13:28:30.000Z","isMaker":false}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    reply(&mut e, &first, 200, &format!("[{rows}]"));
+    let second = requests(&mut e)
+        .pop()
+        .expect("a second page beyond the default");
+    assert!(second.url.contains("offset=1000"));
+}
+#[test]
 fn fills_stream_into_execution_shape_with_millisecond_filters_and_seconds_output() {
     let (mut e, _) = ready();
     ask(
@@ -296,7 +321,7 @@ fn invalid_order_side_fails_and_a_repeated_full_page_is_not_silently_truncated()
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(actions.iter().any(|a| matches!(a,
         Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
-            && matches!(event.fields.as_slice(), [("command", safe_cex_engine::Value::Num(1.0))]))));
+            && matches!(event.fields.as_slice(), [("command", safe_cex_engine::Value::Num(1.0)), ("reason", safe_cex_engine::Value::Str(_))]))));
     assert!(actions.iter().any(|a| matches!(a,
         Action::Notice(Notice::CommandDone { command: 1, result }) if result == "[]")));
     assert!(
@@ -515,7 +540,7 @@ mod owned_history {
         assert_eq!(notices.len(), 1, "exactly one owned marker: {actions:?}");
         assert_eq!(notices[0].level, Level::Warn);
         assert!(
-            matches!(notices[0].fields.as_slice(), [("command", Value::Num(id))] if *id == f64::from(command))
+            matches!(notices[0].fields.as_slice(), [("command", Value::Num(id)), ("reason", Value::Str(_))] if *id == f64::from(command))
         );
         let marker = actions.iter().position(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == code::HISTORY_INCOMPLETE)).unwrap();
         let done = actions.iter().position(|a| matches!(a, Action::Notice(Notice::CommandDone { command: id, .. }) if *id == command)).unwrap();

@@ -1,7 +1,17 @@
+import type { Candle, ExchangeName, Timeframe } from '../types';
+import type {
+  CandleCacheBackend,
+  CandleCacheBackendReadMode,
+  CandleCacheExchangeFetchRequest,
+  CandleCacheFetchRequest,
+  CandleCacheOptions,
+  CandleCacheRangeLookup,
+  CandleCacheSparseChunk,
+} from './types';
+
 import uniqBy from 'lodash/uniqBy';
 
 import { getExchangeMetadata } from '../exchangeMetadata';
-import type { ExchangeName, Timeframe } from '../types';
 import { timeframeToSeconds } from '../types';
 import {
   calendarPeriodForInterval,
@@ -11,15 +21,6 @@ import {
   nextChartCandleStartTime,
 } from '../utils/calendarCandles';
 import { normalizeEpochToSeconds } from '../utils/normalizeEpochToSeconds';
-import type {
-  CandleCacheBackendReadMode,
-  CandleCacheExchangeFetchRequest,
-  CandleCacheFetchRequest,
-  CandleCacheOptions,
-  CandleCacheRangeLookup,
-  CandleCacheSparseChunk,
-} from './types';
-import type { CandleCacheBackend } from './types';
 
 export const cleanCandles = <TCandle extends { timestamp: number }>(candles: TCandle[]): TCandle[] =>
   uniqBy(candles, (candle) => candle.timestamp).sort((a, b) => a.timestamp - b.timestamp);
@@ -32,7 +33,7 @@ export const cleanCandles = <TCandle extends { timestamp: number }>(candles: TCa
  * separate exchange. Without it, testnet candles and live candles collide in
  * one entry and the chart can render the wrong market's history. This affects
  * every venue offering the testnet checkbox (binance, binancepm, hyperliquid,
- * grvt, bitmex, paradex, asterdex, ...), not just one.
+ * grvt, paradex, asterdex, ...), not just one.
  *
  * Live keys keep their existing shape, so no cached entry is invalidated by
  * introducing this; only testnet accounts get a new namespace.
@@ -78,7 +79,7 @@ export const fetchOHLCVWithExchange = async (
     from: request.fromMs,
     to: request.toMs,
     limit: request.limit,
-  } as const;
+  };
   const shouldUseWorker = useWorker ?? getExchangeMetadata(exchange.name).fetchOHLCVInWorker;
 
   if (shouldUseWorker) {
@@ -91,12 +92,7 @@ export const fetchOHLCVWithExchange = async (
 export const createExchangeCandleFetcher = (
   request: Pick<CandleCacheExchangeFetchRequest, 'exchange' | 'symbol' | 'useWorker'>,
 ) => {
-  return (opts: {
-    interval: Timeframe;
-    from?: number;
-    to?: number;
-    limit?: number;
-  }) =>
+  return (opts: { interval: Timeframe; from?: number; to?: number; limit?: number }) =>
     fetchOHLCVWithExchange({
       ...request,
       interval: opts.interval,
@@ -105,6 +101,8 @@ export const createExchangeCandleFetcher = (
       limit: opts.limit ?? 0,
     });
 };
+
+const FORMING_BAR_MEMO_MS = 5_000;
 
 export class CandleCache {
   private readonly options: CandleCacheOptions;
@@ -116,6 +114,12 @@ export class CandleCache {
   private readonly chunkedCandleCache = new Map<string, Map<number, CandleCacheSparseChunk>>();
   private readonly hydrationQueue: Array<() => void> = [];
   private readonly hydratedCacheKeys = new Set<string>();
+  /**
+   * The forming bar is never cached, so every caller whose range ends now asked for it
+   * again (9 identical requests in 15 s). One fetch per cacheKey and start is shared
+   * until FORMING_BAR_MEMO_MS passes or the bar closes, whichever is first.
+   */
+  private readonly formingBarFetches = new Map<string, { expiresAtMs: number; candles: Promise<Candle[]> }>();
   private hydrationRunning = 0;
   private cacheVersion = 0;
 
@@ -138,9 +142,13 @@ export class CandleCache {
     if (cacheKey) {
       this.chunkedCandleCache.delete(cacheKey);
       this.hydratedCacheKeys.delete(cacheKey);
+      for (const key of this.formingBarFetches.keys()) {
+        if (key.startsWith(`${cacheKey}|`)) this.formingBarFetches.delete(key);
+      }
     } else {
       this.chunkedCandleCache.clear();
       this.hydratedCacheKeys.clear();
+      this.formingBarFetches.clear();
     }
 
     this.cacheVersion++;
@@ -257,15 +265,18 @@ export class CandleCache {
       nowMs,
     );
 
+    const formingBarStartMs = chartCandleStartTime(interval, nowMs / 1000) * 1000;
     const newCandles =
       limit <= 0 || from > to
         ? []
-        : await fetcher({
-            interval,
-            from,
-            to,
-            limit,
-          });
+        : from >= formingBarStartMs
+          ? await this.fetchFormingBar(cacheKey, interval, from, nowMs, () => fetcher({ interval, from, to, limit }))
+          : await fetcher({
+              interval,
+              from,
+              to,
+              limit,
+            });
 
     if (newCandles.length > 0) {
       const nowSeconds = nowMs / 1000;
@@ -313,6 +324,29 @@ export class CandleCache {
     }
 
     return cleanCandles([...contiguousBehindCandles, ...newCandles, ...contiguousForwardCandles]);
+  }
+
+  private fetchFormingBar(
+    cacheKey: string,
+    interval: Timeframe,
+    fromMs: number,
+    nowMs: number,
+    fetch: () => Promise<Candle[]>,
+  ): Promise<Candle[]> {
+    for (const [key, memo] of this.formingBarFetches) {
+      if (memo.expiresAtMs <= nowMs) this.formingBarFetches.delete(key);
+    }
+    const key = `${cacheKey}|${fromMs}`;
+    const memo = this.formingBarFetches.get(key);
+    if (memo) return memo.candles;
+    const closesAtMs = chartCandleCloseTime(interval, nowMs / 1000) * 1000;
+    const candles = fetch();
+    this.formingBarFetches.set(key, { expiresAtMs: Math.min(nowMs + FORMING_BAR_MEMO_MS, closesAtMs), candles });
+    // A failed read is not shared: the next caller asks again.
+    candles.catch(() => {
+      if (this.formingBarFetches.get(key)?.candles === candles) this.formingBarFetches.delete(key);
+    });
+    return candles;
   }
 
   async fetchWithExchange(request: CandleCacheExchangeFetchRequest) {
@@ -446,9 +480,9 @@ export class CandleCache {
         intervalSeconds,
       });
       return new Map(
-        chunkKeys.flatMap((chunkKey) => {
+        chunkKeys.flatMap<[number, CandleCacheSparseChunk]>((chunkKey) => {
           const chunk = allChunks.get(chunkKey);
-          return chunk ? [[chunkKey, chunk] as const] : [];
+          return chunk ? [[chunkKey, chunk]] : [];
         }),
       );
     }

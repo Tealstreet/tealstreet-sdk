@@ -1,5 +1,6 @@
 //! Phemex public wire projection; the engine owns epochs, interests and timers.
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
     AuthMode, AuthRecovery, ControlPolicy, FeedPolicy, Invalidation, TrafficPolicy,
@@ -13,12 +14,34 @@ enum Topic {
     Candle { symbol: String, resolution: u32 },
 }
 
+fn book_key(symbol: &str) -> String {
+    format!("1:book:{symbol}")
+}
+
+fn candle_key(symbol: &str, resolution: u32) -> String {
+    format!("2:candle:{symbol}:{resolution}")
+}
+
 impl PhemexPerpetuals {
+    /// The public feed and key `public_interests` streams `topic` under.
+    pub(super) fn topic_interest(
+        &self,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        let key = match topic {
+            safe_cex_engine::SubscriptionTopic::OrderBook { symbol } => book_key(symbol),
+            safe_cex_engine::SubscriptionTopic::Candles { symbol, interval } => {
+                candle_key(symbol, resolution(*interval)?)
+            }
+        };
+        Some((self.public.feed?, key))
+    }
+
     fn public_interests(&self) -> Vec<Interest> {
         let mut topics = vec![("0:tickers".to_owned(), Topic::Tickers)];
         for symbol in self.books.keys() {
             topics.push((
-                format!("1:book:{symbol}"),
+                book_key(symbol),
                 Topic::Book {
                     symbol: self.native_symbol(symbol).to_owned(),
                 },
@@ -27,7 +50,7 @@ impl PhemexPerpetuals {
         for (symbol, interval) in self.candles.keys() {
             if let Some(resolution) = resolution(*interval) {
                 topics.push((
-                    format!("2:candle:{symbol}:{resolution}"),
+                    candle_key(symbol, resolution),
                     Topic::Candle {
                         symbol: self.native_symbol(symbol).to_owned(),
                         resolution,
@@ -75,6 +98,8 @@ impl PhemexPerpetuals {
                     controls: ControlPolicy::None,
                     invalidation: Invalidation::Required,
                     subscription_interval_ms: 0.,
+                    close_floors: &[],
+                    data_silence: None,
                 })?;
                 self.public.feed = Some(feed);
                 feed
@@ -144,7 +169,7 @@ impl PhemexPerpetuals {
                 }
                 cx.send(
                     epoch.socket(),
-                    self.public_frame("server.ping", "[]".into())?,
+                    ControlFrame::heartbeat(self.public_frame("server.ping", "[]".into())?),
                 );
             }
             LifecycleEvent::Reconnect(feed) => {

@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:38:31.165Z",
+  "endpoint": "/api/v2/mix/market/contracts?productType=BADTYPE",
+  "http_status": 400,
+  "body": "{\"code\":\"40034\",\"msg\":\"Parameter BADTYPE does not exist\",\"requestTime\":1793155111130,\"data\":null}",
+  "expect": {
+    "kind": null,
+    "outcome": null,
+    "path": "read"
+  }
+}

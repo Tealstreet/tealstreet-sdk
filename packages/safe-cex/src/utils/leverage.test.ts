@@ -6,6 +6,22 @@ import {
 } from './leverage';
 
 describe('leverage', () => {
+  describe('unknown position notional after transport', () => {
+    it.each([null, NaN, Infinity, -Infinity])('keeps %s unknown in every calculation', (notional) => {
+      const rows: Array<{ notional: number | null }> = JSON.parse(JSON.stringify([{ notional }, { notional: 250 }]));
+      expect({
+        position: calculatePositionAccountLeverage(rows[0].notional, 1000),
+        total: calculateTotalNotional(rows),
+        leverage: calculateTotalAccountLeverage(rows, 1000),
+      }).toEqual({ position: null, total: null, leverage: null });
+    });
+
+    it('does not hide unknown notional behind a zero balance or an overflowing sum', () => {
+      expect(calculatePositionAccountLeverage(null, 0)).toBeNull();
+      expect(calculateTotalAccountLeverage([{ notional: null }], 0)).toBeNull();
+      expect(calculateTotalNotional([{ notional: Number.MAX_VALUE }, { notional: Number.MAX_VALUE }])).toBeNull();
+    });
+  });
   describe('calculatePositionAccountLeverage', () => {
     it('should calculate leverage for a single position', () => {
       // $10,000 notional with $1,000 balance = 10x leverage

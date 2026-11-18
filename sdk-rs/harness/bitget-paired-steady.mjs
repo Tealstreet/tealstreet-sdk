@@ -3,26 +3,42 @@ import { isDeepStrictEqual } from 'node:util';
 import { parseCohortJson } from './cpu-cohort.mjs';
 import { validatePublicEvidence } from './cpu-remeasure.mjs';
 import { assessGateReport, validateKnownFailures } from './known-failure-policy.mjs';
-import { median, performanceFailures, performanceObjectives, REQUIRED_IMPROVEMENT } from './performance-policy.mjs';
+import { CPU_FAIL_RATIO, PUBLIC_REPLAY_PAIRS, median, performanceFailures, performanceObjectives, REQUIRED_IMPROVEMENT } from './performance-policy.mjs';
 
 export const BITGET_PAIRED_TOLERANCE = 1.023110;
+// Sam, 2026-11-12: Rust must not be slower than TS beyond measured noise.
+// Same master dda0e1868f387c26c91e6155b78146b433c9b86a, public paired tip:
+// run 43273706928: 469.5715 / 469.6945 = 0.9997381276553164;
+// run 43281701341: 458.32 / 450.66 = 1.0169972928593618.
+// Use the observed full range (1.72591652040454 percentage points), not a
+// statistical confidence estimate from two runs. Fixed, never fitted to a PR.
+// Only Bitget public paired steady gets this allowance; q's creep bound stays.
+export const BITGET_STEADY_NOISE = (458.32 / 450.66) - (469.5715 / 469.6945);
+export const BITGET_STEADY_FAIL_RATIO = CPU_FAIL_RATIO + BITGET_STEADY_NOISE;
 export const BITGET_PAIRED_FREEZE_SHA256 = 'ee6b8fd762184969b2eacf7a5ef030bc8872acfbc474ca229377f1b181e99b62';
-export const BITGET_CUMULATIVE_ANCHOR = '518d3953c09daf63c1345ea465bbc55bd313f53a';
-export const BITGET_MEASUREMENT_FILES = Object.freeze(['sdk-rs/harness/gate.mjs', 'sdk-rs/harness/replay.mjs',
+// Post-#3091 oracle baseline; reset drift +1.811% in run 42125492893 was below 2.311%.
+export const BITGET_CUMULATIVE_ANCHOR = '38b69912e461e27198f5252c98cef73b7521b169';
+export const BITGET_MEASUREMENT_FILES = Object.freeze(['sdk-rs/harness/gate.mjs', 'sdk-rs/harness/replay.mjs', 'sdk-rs/harness/cpu-observation.mjs',
   'sdk-rs/harness/performance-policy.mjs', 'sdk-rs/harness/ci-wasm.mjs',
-  'sdk-rs/harness/bitget-paired-steady.mjs', 'sdk-rs/harness/cpu-ci.mjs', 'sdk-rs/harness/revalidate-gate.mjs']);
+  'sdk-rs/harness/bitget-paired-steady.mjs', 'sdk-rs/harness/bitget-paired-oracle.mjs',
+  'sdk-rs/harness/bitget-anchor-positions.mjs', 'sdk-rs/hosts/wasm/js/wire.mjs',
+  'sdk-rs/harness/bitget-oracle-refusal.mjs', 'sdk-rs/harness/cpu-ci.mjs', 'sdk-rs/harness/revalidate-gate.mjs']);
 export const BITGET_COHORT_ORDER = Object.freeze(['baseline', 'candidate', 'candidate', 'baseline',
   'candidate', 'baseline', 'baseline', 'candidate']);
 export const BITGET_PAIRED_PROTOCOL_SHA256 = createHash('sha256').update(JSON.stringify({
-  order: BITGET_COHORT_ORDER, pairsPerCohort: 9, correctnessPairsPerCohort: 1, attempt: 1,
-  statistic: '(median(B Rust36)/median(B TS36))/(median(A Rust36)/median(A TS36))',
+  order: BITGET_COHORT_ORDER, pairsPerCohort: PUBLIC_REPLAY_PAIRS, correctnessPairsPerCohort: 1, attempt: 1,
+  statistic: `(median(B Rust${4 * PUBLIC_REPLAY_PAIRS})/median(B TS${4 * PUBLIC_REPLAY_PAIRS}))/(median(A Rust${4 * PUBLIC_REPLAY_PAIRS})/median(A TS${4 * PUBLIC_REPLAY_PAIRS}))`,
   scope: 'bitget:public:steadyCpuMs', freezeSha256: BITGET_PAIRED_FREEZE_SHA256,
   comparisons: ['tip', 'anchor'], cumulativeAnchor: BITGET_CUMULATIVE_ANCHOR,
+  oraclePreflight: 'each source TS output excluding metrics; differences never certify',
+  positionsCompatibility: 'public Bitget only: canonical empty revision-1 payload; all rows require revision 2',
   measurementCheckout: 'candidate', measurementFiles: BITGET_MEASUREMENT_FILES,
+  steadyFailRatio: BITGET_STEADY_FAIL_RATIO, masterUnchangedBytes: 'measured',
 })).digest('hex');
 const authorities = new WeakSet();
 const certificates = new WeakSet();
 const combinedCertificates = new WeakSet();
+const unchangedCertificates = new WeakSet();
 const same = isDeepStrictEqual;
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const oid = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
@@ -43,7 +59,8 @@ export function bitgetPairedAuthority({ run, pull, landing, job, checkoutSha, ch
     run.run_attempt === 1 && ['pull_request', 'workflow_dispatch', 'push'].includes(run.event), 'original repository run required');
   insist(run.event !== 'push' || run.head_branch === 'master', 'push must be the Rust landing branch');
   let baseline, pullNumber = null;
-  if (run.event === 'push' && run.head_branch === 'master') {
+  // A dispatched master run (the nightly certification) measures the landed tip like a push.
+  if ((run.event === 'push' || run.event === 'workflow_dispatch') && run.head_branch === 'master') {
     insist(landing?.sha === run.head_sha && checkoutSha === landing.sha && landing.tree?.sha === checkoutTree &&
       oid(landing.parents?.[0]?.sha), 'landing baseline must be the authenticated actual first parent');
     baseline = landing.parents[0].sha;
@@ -149,7 +166,7 @@ function assessContent(authority, evidence, manifest) {
     }
     for (const impl of ['ts', 'rust']) {
       const samples = report.samples[impl].map(sample => sample.steadyCpuMs);
-      insist(samples.length === 9 && samples.every(sample => Number.isFinite(sample) && sample > 0),
+      insist(samples.length === PUBLIC_REPLAY_PAIRS && samples.every(sample => Number.isFinite(sample) && sample > 0),
         'invalid or incomplete steady samples');
       pooled[arm][impl].push(...samples);
     }
@@ -157,7 +174,7 @@ function assessContent(authority, evidence, manifest) {
       reportSha256: sha256(value.reportBytes), raw: value.raw.map(({ impl, mode, run, sha256 }) => ({ impl, mode, run, sha256 })) });
   }
   const summary = Object.fromEntries(Object.entries(pooled).map(([arm, samples]) => {
-    insist(samples.ts.length === 36 && samples.rust.length === 36, 'missing pooled samples');
+    insist(samples.ts.length === 4 * PUBLIC_REPLAY_PAIRS && samples.rust.length === 4 * PUBLIC_REPLAY_PAIRS, 'missing pooled samples');
     const ts = median(samples.ts), rust = median(samples.rust);
     return [arm, { tsMedianMs: ts, rustMedianMs: rust, rustTsRatio: rust / ts }];
   }));
@@ -170,7 +187,11 @@ function assessContent(authority, evidence, manifest) {
       imageVersion: evidence.imageVersion, nodeSha256: evidence.nodeSha256 },
     measurementWindow: { startedAt: evidence.cohorts[0].before.startedAt,
       completedAt: evidence.cohorts.at(-1).finishedAt },
-    steadyAccepted: q <= BITGET_PAIRED_TOLERANCE, q, tolerance: BITGET_PAIRED_TOLERANCE,
+    steadyAccepted: summary.candidate.rustTsRatio <= BITGET_STEADY_FAIL_RATIO && q <= BITGET_PAIRED_TOLERANCE,
+    notSlowerThanTs: summary.candidate.rustTsRatio <= CPU_FAIL_RATIO,
+    withinSteadyNoise: summary.candidate.rustTsRatio <= BITGET_STEADY_FAIL_RATIO,
+    steadyFailRatio: BITGET_STEADY_FAIL_RATIO, steadyNoise: BITGET_STEADY_NOISE,
+    q, tolerance: BITGET_PAIRED_TOLERANCE,
     freezeSha256: BITGET_PAIRED_FREEZE_SHA256, authority, pooled: summary,
     readiness: { cpuModel: evidence.cpuModel, rustTsRatio: summary.candidate.rustTsRatio,
       limit: 1 - REQUIRED_IMPROVEMENT, ready: summary.candidate.rustTsRatio <= 1 - REQUIRED_IMPROVEMENT },
@@ -190,8 +211,113 @@ export function assessBitgetPairedSteady({ authority, evidence, manifest }) {
   catch (error) { return { valid: false, errors: [error.message], certificate: null }; }
 }
 
+/** A distinct unmeasured disposition; archive seals come from independent bytes. */
+export function assessBitgetUnchangedBytes({ authority, evidence }) {
+  try {
+    insist(authorities.has(authority) && authority.witness === 'tip', 'unchanged bytes require issued tip authority');
+    insist(authority.pullNumber !== null, 'master baseline requires measured paired steady CPU even with unchanged bytes');
+    insist(evidence?.schema === 1 && evidence.disposition === 'unchanged-bytes' &&
+      evidence.attempt === 1 && evidence.runId === authority.runId && evidence.jobId === authority.jobId &&
+      evidence.runnerId === authority.runnerId, 'unchanged bytes belong to another original producer');
+    insist(evidence.freezeSha256 === BITGET_PAIRED_FREEZE_SHA256 && evidence.protocolSha256 === BITGET_PAIRED_PROTOCOL_SHA256 &&
+      same(evidence.order, BITGET_COHORT_ORDER) && same(evidence.cohorts, []), 'unchanged bytes cannot claim measured observations');
+    insist(evidence.refs?.baseline === authority.baseline && evidence.refs?.candidate === authority.candidate &&
+      evidence.candidateTree === authority.candidateTree && evidence.measurementSource === authority.candidate &&
+      evidence.measurementTree === authority.candidateTree && same(evidence.measurementFiles, authority.measurementFiles),
+    'unchanged bytes differ from authenticated source/composition');
+    insist(exactCase(evidence.case) && hash(evidence.tapeSha256), 'unchanged bytes require canonical Bitget public input');
+    for (const arm of ['baseline', 'candidate']) checkArchive(evidence.archives?.[arm], authority[arm], authority);
+    for (const name of ['safe_cex_wasm_bg.wasm', 'safe_cex_wasm.js']) {
+      const baseline = evidence.archives.baseline, candidate = evidence.archives.candidate;
+      insist(hash(baseline.files[name]) && baseline.metadata.hashes[name] === baseline.files[name] &&
+        candidate.metadata.hashes[name] === candidate.files[name] && baseline.files[name] === candidate.files[name],
+      `unchanged bytes require identical sealed ${name}`);
+    }
+    const certificate = freezeTree({ schema: 1, rule: 'bitget-public-steady-unchanged-bytes',
+      disposition: 'unchanged bytes, not measured', measured: false, steadyAccepted: true, authority,
+      tapeSha256: evidence.tapeSha256, moduleHashes: { ...evidence.archives.candidate.metadata.hashes },
+      noOverallSuiteCertification: true });
+    unchangedCertificates.add(certificate);
+    return { valid: true, errors: [], certificate };
+  } catch (error) { return { valid: false, errors: [error.message], certificate: null }; }
+}
+
+/** An observation is telemetry, never permission to certify the suite. */
+export function bitgetBaselineObservation(authority, tip) {
+  insist(authorities.has(authority) && authority.pullNumber === null && authority.witness === 'tip' &&
+    certificates.has(tip) && tip.authority === authority, 'baseline observation requires measured master tip');
+  return freezeTree({ schema: 1, runId: authority.runId, jobId: authority.jobId, runnerId: authority.runnerId,
+    masterSource: authority.candidate, baselineSource: authority.baseline,
+    masterRustTsRatio: tip.pooled.candidate.rustTsRatio, baselineRustTsRatio: tip.pooled.baseline.rustTsRatio,
+    steadyNoise: BITGET_STEADY_NOISE, steadyFailRatio: BITGET_STEADY_FAIL_RATIO,
+    runtimeIdentity: tip.runtimeIdentity, measurementWindow: tip.measurementWindow,
+    steadyAccepted: tip.steadyAccepted, certified: false });
+}
+
+export class BitgetTipRejected extends Error {
+  constructor(tip) {
+    super(`Bitget paired steady: complete tip rejected (Rust/TS=${tip.pooled.candidate.rustTsRatio}, q=${tip.q}); anchor cannot rescue it`);
+    this.disposition = 'REJECTED';
+    this.certificate = null;
+    this.tip = tip;
+  }
+}
+
+export class BitgetAnchorRejected extends Error {
+  constructor(combined) {
+    const { tip, anchor } = combined;
+    super(`Bitget paired steady: complete anchor rejected (Rust/TS=${anchor.pooled.candidate.rustTsRatio}, q=${anchor.q})`);
+    this.disposition = 'REJECTED';
+    this.certificate = null;
+    this.tip = tip;
+    this.anchor = anchor;
+  }
+}
+
+export function bitgetCpuRejectionRecord(error) {
+  insist(error instanceof BitgetTipRejected || error instanceof BitgetAnchorRejected, 'expected a complete CPU rejection');
+  return { valid: false, disposition: error.disposition, certified: false, certificate: null,
+    errors: [error.message], tip: error.tip, ...(error.anchor ? { anchor: error.anchor } : {}) };
+}
+
+/** Independently reconstruct the failed CPU verdict from all retained raw
+ * cohorts. A physical failed-job receipt alone cannot establish this verdict. */
+export async function revalidateBitgetCpuRejection({ record, message, ...options }) {
+  try { await readBitgetSteadyCertificate(options); }
+  catch (error) {
+    insist(error instanceof BitgetTipRejected || error instanceof BitgetAnchorRejected,
+      `failed CPU cohort did not reproduce a complete verdict: ${error.message}`);
+    insist(message === error.message && same(record, bitgetCpuRejectionRecord(error)),
+      'uploaded CPU verdict differs from recomputed raw cohorts');
+    return error;
+  }
+  throw new Error('Bitget paired steady: failed paired job recomputed as accepted');
+}
+
+/** Accepted changed builds need both witnesses; a complete failed tip cannot be rescued. */
+export async function readBitgetSteadyCertificate({ authority, readEvidence, manifest }) {
+  insist(authorities.has(authority) && authority.witness === 'tip', 'issued tip authority required');
+  const tipEvidence = await readEvidence('tip', authority);
+  insist(tipEvidence.disposition === undefined || tipEvidence.disposition === 'unchanged-bytes', 'unknown paired disposition');
+  if (tipEvidence.disposition === 'unchanged-bytes') {
+    const result = assessBitgetUnchangedBytes({ authority, evidence: tipEvidence });
+    insist(result.valid, result.errors.join('\n'));
+    return result.certificate;
+  }
+  const tip = assessBitgetPairedSteady({ authority, evidence: tipEvidence, manifest });
+  insist(tip.valid, tip.errors.join('\n'));
+  if (!tip.certificate.steadyAccepted) throw new BitgetTipRejected(tip.certificate);
+  const anchorAuthority = bitgetAnchorAuthority(authority);
+  const anchor = assessBitgetPairedSteady({ authority: anchorAuthority,
+    evidence: await readEvidence('anchor', anchorAuthority), manifest });
+  insist(anchor.valid, anchor.errors.join('\n'));
+  const combined = combineBitgetPairedCertificates(tip.certificate, anchor.certificate);
+  if (!combined.steadyAccepted) throw new BitgetAnchorRejected(combined);
+  return combined;
+}
+
 export function hasPairedBitgetSteady(certificate, report, source) {
-  return combinedCertificates.has(certificate) && certificate.steadyAccepted === true && exactCase(report) &&
+  return (combinedCertificates.has(certificate) || unchangedCertificates.has(certificate)) && certificate.steadyAccepted === true && exactCase(report) &&
     report.tapeSha256 === certificate.tapeSha256 && (report.ciWasm?.sourceHead ?? source) === certificate.authority.candidate;
 }
 
@@ -214,6 +340,13 @@ export function combineBitgetPairedCertificates(tip, anchor) {
       comparisons: { tip: tip.readiness, anchor: anchor.readiness } }, noOverallSuiteCertification: true });
   combinedCertificates.add(certificate);
   return certificate;
+}
+
+/** Bitget's 10%-faster readiness miss on an accepted steady certificate: a warning, never a failure. */
+export function bitgetSteadyWarning(certificate) {
+  const readiness = certificate?.readinessByCpuModel?.comparisons?.tip ?? certificate?.readiness;
+  if (!certificate?.steadyAccepted || !readiness || readiness.ready) return null;
+  return `bitget steady-state CPU (paired): missed the 10%-faster target (rust/ts=${readiness.rustTsRatio.toFixed(3)}x, target ${readiness.limit.toFixed(2)}x)`;
 }
 
 export function pairedSteadyAssessment(assessment, report, certificate, source) {

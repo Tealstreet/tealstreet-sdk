@@ -3,6 +3,7 @@ import { join } from 'path';
 import { execSync } from 'child_process';
 import chalk from 'chalk';
 import { getConfigDir } from './config';
+import { captureStorageSession, assertStorageSession } from './storage-context';
 import { swapInPlace, updatePaths } from './windows-update';
 import packageJson from '../package.json';
 import { BRAND, releaseAssetName } from './brand';
@@ -12,7 +13,7 @@ const PUBLIC_REPO = BRAND.releaseRepo;
 const GITHUB_API_URL = `https://api.github.com/repos/${PUBLIC_REPO}/releases/latest`;
 const GITHUB_RELEASES_URL = `https://github.com/${PUBLIC_REPO}/releases/download`;
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const UPDATE_CHECK_FILE = join(getConfigDir(), 'update-check.json');
+const UPDATE_CHECK_FILE = () => join(getConfigDir(), 'update-check.json');
 
 interface UpdateCheckState {
   lastCheck: number;
@@ -22,21 +23,23 @@ interface UpdateCheckState {
 }
 
 function getUpdateState(): UpdateCheckState {
+  assertStorageSession();
   try {
-    if (existsSync(UPDATE_CHECK_FILE)) {
-      return JSON.parse(readFileSync(UPDATE_CHECK_FILE, 'utf-8'));
+    if (existsSync(UPDATE_CHECK_FILE())) {
+      return JSON.parse(readFileSync(UPDATE_CHECK_FILE(), 'utf-8'));
     }
   } catch {}
   return { lastCheck: 0, latestVersion: null, notifiedVersion: null, releaseNotes: null };
 }
 
 function saveUpdateState(state: UpdateCheckState): void {
+  assertStorageSession();
   try {
     const dir = getConfigDir();
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    writeFileSync(UPDATE_CHECK_FILE, JSON.stringify(state, null, 2));
+    writeFileSync(UPDATE_CHECK_FILE(), JSON.stringify(state, null, 2));
   } catch {}
 }
 
@@ -129,8 +132,10 @@ async function fetchLatestVersion(): Promise<ReleaseInfo | null> {
  * Shows a notification if a new version is available
  */
 export function checkForUpdatesBackground(): void {
+  const ownerSession = captureStorageSession();
   // Run check in background without blocking
   setImmediate(async () => {
+    if (!ownerSession.isCurrent()) return;
     try {
       const state = getUpdateState();
       const now = Date.now();
@@ -156,6 +161,7 @@ export function checkForUpdatesBackground(): void {
       }
 
       const releaseInfo = await fetchLatestVersion();
+      if (!ownerSession.isCurrent()) return;
       state.lastCheck = now;
 
       if (releaseInfo) {
@@ -411,9 +417,11 @@ async function downloadLatestBinary(version: string): Promise<void> {
  * Force a version check (ignores cooldown)
  */
 export async function forceCheckForUpdates(): Promise<void> {
+  const ownerSession = captureStorageSession();
   console.log(chalk.cyan('Checking for updates...'));
 
   const releaseInfo = await fetchLatestVersion();
+  if (!ownerSession.isCurrent()) return;
   const currentVersion = getCurrentVersion();
 
   if (!releaseInfo) {

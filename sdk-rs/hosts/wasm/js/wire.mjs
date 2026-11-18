@@ -25,6 +25,8 @@ export const SECTION = {
   CAPABILITIES: 19,
   UNDERLYING_TOKENS: 20,
   ACCOUNT_READ: 21,
+  TICKER_OBSERVATIONS: 24,
+  MESSAGE_HANDLER_STATS: 25,
 };
 
 export const NONE = 0xffffffff;
@@ -42,6 +44,10 @@ export const MARKET_COLUMNS = [
   'precisionAmount', 'precisionPrice', 'minAmount', 'maxAmount', 'minLeverage',
   'maxLeverage', 'minPrice', 'contractSize', 'takerFee', 'makerFee',
 ];
+// ORDERS' per-row trigger word (crate::model::order_trigger_word): bits 0-7 take-profit
+// trigger, 8-15 stop-loss trigger, 16 the Rust-only native_algo routing flag. Each field
+// is masked, so a bit this decoder does not know is ignored.
+export const ORDER_TRIGGER_WORD = { TP_SHIFT: 0, SL_SHIFT: 8, TRIGGER_MASK: 0xff, NATIVE_ALGO: 1 << 16 };
 export const MARKET_FLAG = { ACTIVE: 1, INVERSE: 2, SPOT: 4, PERPETUAL: 8, EXPIRING: 16, READ_ONLY: 32 };
 // Bits 8..12 of a market's flags: how its order and position quantities are expressed.
 export const QUANTITY_UNITS = ['base', 'nativePlacement', 'inverseNative', 'contractCount', 'inverseContractSized'];
@@ -58,7 +64,8 @@ const CAPABILITY_FLAGS = [
   'closedPositions', 'balanceInfo', null, 'marketRefresh',
   'stpControls', 'bybitExecutionControls', 'rejectClientSlippage', 'finiteCommandNumbers',
   'finiteHistoryBounds', 'rejectOrderHistoryFilters', 'publicCatalogueValidation',
-  'isolatedBookSubscriptions', 'inverseClosedPositions', 'scheduleCancel',
+  'isolatedBookSubscriptions', 'inverseClosedPositions', 'scheduleCancel', 'orderHistoryNeedsSymbol',
+  'freshPositions', 'nukeAccountCancel', 'symbolCancelMissesUnseen', 'orderReadCovers',
 ];
 const CAPABILITY_ENUMS = [
   ['account', ['unsupported', 'query', 'afterLoad']],
@@ -71,7 +78,7 @@ const CAPABILITY_ENUMS = [
   ['fillHistoryTime', ['asProvided', 'secondsOrMilliseconds', 'nonnegativeSecondsOrMilliseconds']],
 ];
 export const LOADED_FLAG = { BALANCE: 1, ORDERS: 2, MARKETS: 4, TICKERS: 8, POSITIONS: 16 };
-export const STATUS_FLAG = { HEDGED: 1 };
+export const STATUS_FLAG = { HEDGED: 1, LATENCY_MEASURED: 2 };
 
 export const ORDER_COLUMNS = ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
 export const ORDER_STATUS = ['open', 'closed', 'canceled', 'creating', 'updating', 'canceling'];
@@ -83,7 +90,7 @@ export const REJECT_REASON = [undefined, 'PostOnly', 'InsufficientBalance', 'Red
 
 export const POSITION_COLUMNS = [
   'entryPrice', 'notional', 'leverage', 'unrealizedPnl', 'realizedPnl',
-  'contracts', 'liquidationPrice', 'marginSize', 'lastUpdate',
+  'contracts', 'liquidationPrice', 'marginSize', 'lastUpdate', 'contractsNative', 'unrealizedPnlNative',
 ];
 export const POSITION_SIDE = ['long', 'short'];
 export const MARGIN_TYPE = [undefined, 'isolated', 'cross'];
@@ -205,7 +212,7 @@ export class Frame {
       if (offset + 8 > buffer.byteLength) throw new Error('truncated frame section header');
       const kind = header.getUint16(offset, true);
       const revision = header.getUint16(offset + 2, true);
-      if (KNOWN_SECTIONS.has(kind) && revision > (kind === SECTION.FILLS ? 2 : REVISED_SECTIONS.has(kind) ? 1 : 0)) {
+      if (KNOWN_SECTIONS.has(kind) && revision > ((kind === SECTION.FILLS || kind === SECTION.POSITIONS) ? 2 : REVISED_SECTIONS.has(kind) ? 1 : 0)) {
         throw new Error(`unsupported section ${kind} revision ${revision}`);
       }
       const length = header.getUint32(offset + 4, true);
@@ -402,6 +409,44 @@ export class Frame {
     return values;
   }
 
+  /** Subscription snapshot or changed rows; ages use the engine clock. */
+  messageHandlerStats() {
+    const section = this.first(SECTION.MESSAGE_HANDLER_STATS);
+    if (!section) return undefined;
+    if (section.length < 8) throw new Error('truncated message handler stats');
+    const count = this.view.getUint32(section.offset, true);
+    const mode = this.view.getUint32(section.offset + 4, true);
+    if (mode > 1) throw new Error('invalid message handler stats mode');
+    if (count > 8192 * 512 || section.length !== 8 + count * 24) throw new Error('invalid message handler stats length');
+    const at = (i) => section.offset + 8 + i * 24;
+    const group = (i) => this.view.getUint32(at(i), true);
+    const flags = (i) => this.view.getUint32(at(i) + 8, true);
+    const ageMs = (i) => this.view.getFloat64(at(i) + 16, true);
+    for (let i = 0; i < count; i++) {
+      requiredString(this, this.view.getUint32(at(i) + 4, true));
+      const age = ageMs(i);
+      if (group(i) > 3 || flags(i) > 3 || (!Number.isNaN(age) && (!Number.isFinite(age) || age < 0)) ||
+          ((flags(i) & 2) && (!(flags(i) & 1) || Number.isNaN(age)))) throw new Error('invalid message handler stats row');
+    }
+    return { count, replace: Boolean(mode), group, topic: (i) => requiredString(this, this.view.getUint32(at(i) + 4, true)),
+      subscribed: (i) => Boolean(flags(i) & 1), active: (i) => Boolean(flags(i) & 2), ageMs };
+  }
+
+  /** Source receipt times, independent of price changes: [row, last, mark, index]. */
+  tickerObservations() {
+    const section = this.first(SECTION.TICKER_OBSERVATIONS);
+    if (!section) return undefined;
+    if (section.length % 32) throw new Error('invalid ticker observation length');
+    const values = new Float64Array(this.buffer, section.offset, section.length / 8);
+    for (let i = 0; i < values.length; i += 4) {
+      if (!Number.isInteger(values[i]) || values[i] < 0) throw new Error('invalid ticker observation row');
+      for (let j = 1; j < 4; j++) {
+        if (values[i + j] !== -Infinity && (!Number.isFinite(values[i + j]) || values[i + j] < 0)) throw new Error('invalid ticker observation time');
+      }
+    }
+    return values;
+  }
+
   /** Full books: `bids`/`asks` are rows of `[price, amount, total]`. */
   books() {
     return this.bookSections(SECTION.BOOK, 3);
@@ -466,8 +511,10 @@ export class Frame {
       ...(revised && {
         remainingNotional: new Float64Array(buffer, native + count * 16, count),
         conditionalOrderPrice: new Float64Array(buffer, native + count * 24, count),
-        tpTriggerType: (i) => TRIGGER_TYPE[brackets[i] & 0xff],
-        slTriggerType: (i) => TRIGGER_TYPE[(brackets[i] >>> 8) & 0xff],
+        tpTriggerType: (i) =>
+          TRIGGER_TYPE[(brackets[i] >>> ORDER_TRIGGER_WORD.TP_SHIFT) & ORDER_TRIGGER_WORD.TRIGGER_MASK],
+        slTriggerType: (i) =>
+          TRIGGER_TYPE[(brackets[i] >>> ORDER_TRIGGER_WORD.SL_SHIFT) & ORDER_TRIGGER_WORD.TRIGGER_MASK],
         symbol: (i) => requiredString(frame, symbols[i]),
       }),
       ...(count && native + count * 8 <= section.offset + section.length
@@ -485,19 +532,44 @@ export class Frame {
   positions() {
     const section = this.first(SECTION.POSITIONS);
     if (!section) return undefined;
+    if (section.revision !== 2) throw new Error('unsupported POSITIONS revision; expected 2');
     const { buffer } = this;
     const count = rowCount(this, section);
-    requireEnd(section, align8(section.offset + 4 + count * 8) + count * POSITION_COLUMNS.length * 8 + (section.revision === 1 ? count * 8 : 0));
-    const market = new Uint32Array(buffer, section.offset + 4, count);
-    const enums = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
     const data = align8(section.offset + 4 + count * 8);
     const idsAt = data + count * 8 * POSITION_COLUMNS.length;
-    const ids = idsAt + count * 4 <= section.offset + section.length
-      ? new Uint32Array(buffer, idsAt, count) : undefined;
-    const symbols = section.revision === 1 ? new Uint32Array(buffer, idsAt + count * 4, count) : undefined;
-    return { count, market, enums, ...columns(buffer, data, count, POSITION_COLUMNS),
-      ...(symbols && { symbol: (i) => requiredString(this, symbols[i]) }),
-      id: (i) => ids ? requiredString(this, ids[i]) : undefined };
+    requireEnd(section, idsAt + count * 8);
+    const market = new Uint32Array(buffer, section.offset + 4, count);
+    const enums = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
+    const ids = new Uint32Array(buffer, idsAt, count);
+    const symbols = new Uint32Array(buffer, idsAt + count * 4, count);
+    const values = columns(buffer, data, count, POSITION_COLUMNS);
+    // NaN is the packed encoding for a nullable/optional number. Display policy
+    // (finite/positive/zero) belongs to the native producer, not this decoder.
+    const optional = key => Array.from(values[key], value => {
+      if (Number.isNaN(value)) return undefined;
+      if (!Number.isFinite(value)) throw new Error(`invalid Position ${key}`);
+      return value;
+    });
+    const native = (key, bit) => Array.from(values[key], (value, i) => {
+      if (!(enums[i] & (1 << bit))) return undefined;
+      if (!Number.isFinite(value)) throw new Error(`invalid Position ${key}`);
+      return value;
+    });
+    for (const key of ['leverage', 'unrealizedPnl']) {
+      if (values[key].some(value => !Number.isFinite(value))) throw new Error(`invalid Position ${key}`);
+    }
+    const liquidationPrice = Array.from(values.liquidationPrice, value => {
+      if (Number.isNaN(value)) return null;
+      if (!Number.isFinite(value) || value <= 0) throw new Error('invalid Position liquidationPrice');
+      return value;
+    });
+    return { count, market, enums, ...values,
+      liquidationPrice,
+      realizedPnl: optional('realizedPnl'), marginSize: optional('marginSize'),
+      lastUpdate: optional('lastUpdate'), contractsNative: native('contractsNative', 24),
+      unrealizedPnlNative: native('unrealizedPnlNative', 25),
+      symbol: i => requiredString(this, symbols[i]),
+      id: i => requiredString(this, ids[i]) };
   }
 
   balance() {
@@ -564,7 +636,10 @@ export class Frame {
     requireEnd(section, section.offset + 16);
     const [loaded, flags] = new Uint32Array(this.buffer, section.offset, 2);
     const latency = new Float64Array(this.buffer, section.offset + 8, 1)[0];
-    return { loaded, hedged: (flags & STATUS_FLAG.HEDGED) !== 0, latency };
+    return {
+      loaded, hedged: (flags & STATUS_FLAG.HEDGED) !== 0,
+      latency: (flags & STATUS_FLAG.LATENCY_MEASURED) !== 0 || latency > 0 ? latency : null,
+    };
   }
 
   /** Per-market account settings, replacing any earlier table. */

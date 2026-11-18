@@ -111,11 +111,12 @@ describe('createApiWithSecondaryKey', () => {
       expect(secondCallOptions.secret).toBe('secondary-secret');
     });
 
-    it('routes the secondary read transport to the AWS public CORS proxy', () => {
+    it('routes the secondary read transport to the public CORS proxy', () => {
       createApiWithSecondaryKey(optionsWithSecondary, mockExchange, mockCreateApi);
 
       const secondCallOptions = mockCreateApi.mock.calls[1][0];
-      expect(secondCallOptions.overrideProxyUrl).toBe('https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy');
+      // Was AWS's exchange-proxy.jp; moved to the edge Worker's /api/public_proxy (AWS_EXIT.md 3d).
+      expect(secondCallOptions.overrideProxyUrl).toBe('https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy');
     });
 
     it('should use custom proxyUrl when provided', () => {

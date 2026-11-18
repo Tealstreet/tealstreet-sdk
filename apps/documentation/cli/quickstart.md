@@ -26,18 +26,19 @@ common follow-ups.
 ## 1. Bracket order — market entry with attached stop
 
 ```text
-buy $100 stop -1%
+buy $100 stop $last -1%
 ```
 
 A $100 notional market buy on the focused symbol, with a reduce-only stop
-**1% below the fill**. The stop attaches automatically — no separate
+**1% below the last price when you send it**. A bare `stop -1%` is
+[refused for now](./reference/sizing-and-prices.md#negative-offsets). The stop attaches automatically — no separate
 `stop` command needed.
 
 Variations:
 
 ```text
-buy $100 at $bid +0.1% stop -1%      # post-only entry, same stop
-buy 50% stop $entry -2%              # size by % balance, stop anchored to entry
+buy $100 at $bid +0.1% stop $last -1%   # entry above the bid, same stop
+buy 50% stop $last -2%                  # size by % balance
 ```
 
 → [Deep dive: Bracket order](./recipes/bracket-order.md)
@@ -91,10 +92,10 @@ twap chase sell $1k into 10 over 60 timeout 30% next fail next
 ## 4. Scale ladder — N limits between two prices
 
 ```text
-scale buy $1000 into 10 from -0.25% to -1%
+scale buy $1000 into 10 from $last -0.25% to $last -1%
 ```
 
-Ten limit orders spaced evenly between -0.25% and -1% from the last
+Ten limit orders spaced evenly between 0.25% and 1% below the last
 price, totalling $1000 notional.
 
 Variations:
@@ -112,7 +113,7 @@ scale buy 5 into 10 from 31000 to 32000 ETHUSDT       # raw size + explicit symb
 
 ```text
 track max @hi $last
-sets @stop @hi -1%
+sets @stop @hi-1
 wait @last < @stop
 close
 ```
@@ -174,7 +175,7 @@ put CLI commands in the alert message. The logged-in REPL receives them and
 runs them here:
 
 ```text
-buy $250 SOLUSDT at -0.5%
+buy $250 SOLUSDT at 150
 ```
 
 `webhook` shows which listener receives your webhooks; `webhook claim` moves

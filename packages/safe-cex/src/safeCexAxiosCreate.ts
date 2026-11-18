@@ -6,7 +6,9 @@ import axios, { AxiosInstance, CreateAxiosDefaults } from 'axios';
 import { BaseExchange } from './exchanges/base';
 import { createRemoteSigningAdapter } from './remoteSigningAdapter';
 import { getTransport } from './transport/registry';
+import { isTealstreetProxyAuthFailureBody } from './transport/tealstreet/tealstreetTransport';
 import { enhanceAxiosError } from './utils/axiosErrorEnhancer';
+import { diagnosticConsole } from './utils/diagnosticRedaction';
 import { isDevelopment } from './utils/isDevelopment';
 import { isSigningCaptureRequest } from './utils/signingCapture';
 import { markRestRequestStart, noteRestFailure, noteRestSuccess } from './utils/venueRestDiagnostics';
@@ -165,17 +167,6 @@ export const LAST_LOG_PERIODICY = 30 * 1_000;
 
 const stringifyResponseBody = (body: unknown): string =>
   typeof body === 'string' ? body : (JSON.stringify(body) ?? String(body));
-
-const isTealstreetProxyAuthFailureBody = (body: unknown): boolean => {
-  const message =
-    typeof body === 'string'
-      ? body
-      : body && typeof body === 'object' && 'message' in body && typeof body.message === 'string'
-        ? body.message
-        : '';
-
-  return message === 'Authorization header is missing' || message === 'Invalid JWT';
-};
 
 /**
  * Classify a REST outcome from the HTTP status alone, then record it on the
@@ -351,7 +342,7 @@ export const safeCexAxiosCreate = (
           'Request ' + config.method?.toUpperCase() + ' ' + config.url + ' ' + reqSummary,
         );
       } catch (e) {
-        console.error('Error emitting grafana-http-request', e);
+        diagnosticConsole.error('Error emitting grafana-http-request', e);
       }
     }
     return config;
@@ -406,7 +397,7 @@ export const safeCexAxiosCreate = (
               resSummary,
           );
         } catch (e) {
-          console.error('Error emitting grafana-http-response', e);
+          diagnosticConsole.error('Error emitting grafana-http-response', e);
         }
       }
       /* END of Logging */
@@ -431,11 +422,11 @@ export const safeCexAxiosCreate = (
             ? 'Tealstreet proxy auth failed'
             : 'Upstream exchange auth failed via proxy';
           const msg = `[${exchange.name}] ${authFailureSource} (${status}): ${bodyStr}`;
-          console.error(msg);
+          diagnosticConsole.error(msg);
           exchange.emitter.emit('error', msg);
         } else if (status >= 500) {
           const msg = `[${exchange.name}] Proxy server error (${status}): ${bodyStr}`;
-          console.error(msg);
+          diagnosticConsole.error(msg);
           exchange.emitter.emit('error', msg);
         }
       }
@@ -462,7 +453,7 @@ export const safeCexAxiosCreate = (
               }),
           );
         } catch (e) {
-          console.error('Error emitting grafana-error', e);
+          diagnosticConsole.error('Error emitting grafana-error', e);
         }
       }
 

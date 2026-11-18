@@ -1,7 +1,30 @@
 use crate::{Coinbase, Pending};
+use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::{Cx, Method, RequestRoute, TimerId, Venue};
+use safe_cex_engine::{CredentialSlot, Cx, Method, TimerId, Venue};
 use std::collections::VecDeque;
+
+/// Existing Coinbase REST HTTP emission boundary.
+pub(crate) fn emit<P>(
+    cx: &mut Cx<'_, P>,
+    method: Method,
+    url: String,
+    headers: Vec<(&'static str, String)>,
+    body: Option<String>,
+    pending: P,
+) -> safe_cex_engine::RequestId {
+    struct Packet<P> {
+        method: Method,
+        body: Option<String>,
+        pending: P,
+    }
+    let request = Packet {
+        method,
+        body,
+        pending,
+    };
+    cx.request(request.method, url, headers, request.body, request.pending)
+}
 
 struct Outbound {
     method: Method,
@@ -33,7 +56,7 @@ impl Coinbase {
         }
         let public = path == "https://api.international.coinbase.com/api/v1/instruments/"
             || path.starts_with("/api/v3/brokerage/market/");
-        if !public && (self.credentials.is_none() || !path.starts_with("/api/v3/brokerage/")) {
+        if !public && (!self.signers.has_primary() || !path.starts_with("/api/v3/brokerage/")) {
             return Err("Coinbase authenticated request is unavailable".into());
         }
         if path.len() > 4096 || path.chars().any(char::is_control) || path.contains('#') {
@@ -65,44 +88,66 @@ impl Coinbase {
             .path
             .starts_with("https://api.international.coinbase.com/")
             || request.path.starts_with("/api/v3/brokerage/market/");
-        let trading_key_check = matches!(
-            request.pending,
+        let role = match &request.pending {
             Pending::Account(
                 crate::account::Request::KeyPermissions {
-                    trading_portfolio: None
+                    trading_portfolio: None,
                 },
-                _
-            )
-        );
-        // Only account and history reads use the read-only key; catalogue and
-        // trading reads (the amend cancellation proof) keep the trading key.
-        let read = request.method == Method::Get
-            && !trading_key_check
-            && matches!(request.pending, Pending::Account(..) | Pending::History(_));
-        let primary_route = request.method == Method::Get
-            && !public
-            && self.read_supplied
-            && (!read || self.read_credentials.is_none());
-        let headers = if public {
+                _,
+            ) => CredentialRole::PrimaryRead {
+                reason: PrimaryReason::KeyPermissions,
+                scope: None,
+            },
+            Pending::Account(..) | Pending::History(_) => self.read_role(),
+            Pending::Public(_) => CredentialRole::PrimaryRead {
+                reason: PrimaryReason::Catalog,
+                scope: None,
+            },
+            Pending::Trading(pending) => pending.signing_role(),
+            Pending::TradingDrb(_) | Pending::PrivateDrb(_) => {
+                self.fail_unsent(
+                    cx,
+                    request.pending,
+                    "drb requests require managed transport",
+                );
+                self.dispatch(cx);
+                return;
+            }
+        };
+        let selected = self.signers.select(role).ok();
+        let recipe = if public {
+            None
+        } else {
+            selected.and_then(|(_, c)| {
+                c.identity().map(|identity| {
+                    crate::sign::Http::new(
+                        identity.clone(),
+                        c.key(),
+                        c.algorithm(),
+                        request.method,
+                        &request.path,
+                    )
+                })
+            })
+        };
+        let headers = if public || recipe.is_some() {
             Ok(vec![])
         } else {
-            let credentials = if read {
-                self.read_credentials.as_ref().or(self.credentials.as_ref())
-            } else {
-                self.credentials.as_ref()
-            };
-            credentials
+            selected
                 .ok_or_else(|| "Coinbase credentials unavailable".to_owned())
-                .and_then(|credentials| {
-                    credentials.headers(request.method, &request.path, cx.now, |bytes| {
+                .and_then(|(_, credentials)| {
+                    credentials.headers(request.method, &request.path, cx.protocol_now(), |bytes| {
                         cx.fill_signing_entropy(bytes)
                     })
                 })
         };
         let mut request = request;
         if let Pending::Account(_, signed) = &mut request.pending {
-            *signed = read && !public && self.read_credentials.is_some();
+            *signed = !public
+                && selected
+                    .is_some_and(|(selection, _)| selection.slot() == CredentialSlot::Secondary);
         }
+        let selection = selected.map(|(selection, _)| selection);
         let headers = match headers {
             Ok(headers) => headers,
             Err(error) => {
@@ -111,7 +156,7 @@ impl Coinbase {
                 return;
             }
         };
-        if let Pending::Trading(pending) = &request.pending
+        if let Pending::Trading(pending) = &mut request.pending
             && let Err(error) = self.trading_before_dispatch(cx, pending)
         {
             self.fail_unsent(cx, request.pending, &error);
@@ -123,9 +168,20 @@ impl Coinbase {
         } else {
             format!("https://api.coinbase.com{}", request.path)
         };
-        let id = cx.request(request.method, url, headers, request.body, request.pending);
-        if primary_route {
-            cx.route_request(id, RequestRoute::Primary);
+        let id = emit(
+            cx,
+            request.method,
+            url,
+            headers,
+            request.body,
+            request.pending,
+        );
+        if !public && let Some(selection) = selection {
+            if let Some(recipe) = recipe {
+                selection.sign(cx, id, Box::new(recipe));
+            } else {
+                selection.bind(cx, id);
+            }
         }
         if let Some(at) = request.at {
             cx.stream_response(id, at);
@@ -148,7 +204,7 @@ impl Coinbase {
 
 impl Coinbase {
     /// A request that failed before it was sent.
-    fn fail_unsent(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+    pub(crate) fn fail_unsent(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Trading(request) => self.trading_unsent(cx, request, error),
             Pending::History(request) => self.history_unsent(cx, request, error),

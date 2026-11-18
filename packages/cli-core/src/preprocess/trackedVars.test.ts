@@ -23,7 +23,7 @@ function pos(p: Partial<Position> = {}): Position {
     unrealizedPnl: p.unrealizedPnl ?? 0,
     contracts: p.contracts ?? 1,
     liquidationPrice: p.liquidationPrice ?? 0,
-  } as Position;
+  };
 }
 
 function makeCtx(opts: {
@@ -40,6 +40,12 @@ function makeCtx(opts: {
     },
   } as unknown as ExchangeLike;
   return { exchange, symbol: 'BTCUSDT', store };
+}
+
+function positionRows(ctx: PreprocessContext) {
+  const positions = ctx.exchange?.store?.positions;
+  if (positions === undefined) throw new Error('Expected positions in the test fixture');
+  return positions;
 }
 
 describe('resolveTrackedVar — high-water / low-water mark aggregator', () => {
@@ -62,7 +68,7 @@ describe('resolveTrackedVar — high-water / low-water mark aggregator', () => {
       resolveTrackedVar('hi', ctx.store.getTrackedVar('hi')!, ctx, new Set());
 
       // Source moves up.
-      ctx.exchange!.store!.positions![0].unrealizedPnl = 75;
+      positionRows(ctx)[0].unrealizedPnl = 75;
       const result = resolveTrackedVar('hi', ctx.store.getTrackedVar('hi')!, ctx, new Set());
       expect(result).toBe(75);
       expect(ctx.store.getTrackedVar('hi')!.value).toBe(75);
@@ -73,7 +79,7 @@ describe('resolveTrackedVar — high-water / low-water mark aggregator', () => {
       ctx.store.setTrackedVar('hi', 'max', '$pnl');
       resolveTrackedVar('hi', ctx.store.getTrackedVar('hi')!, ctx, new Set());
       // Source falls.
-      ctx.exchange!.store!.positions![0].unrealizedPnl = 50;
+      positionRows(ctx)[0].unrealizedPnl = 50;
       const result = resolveTrackedVar('hi', ctx.store.getTrackedVar('hi')!, ctx, new Set());
       expect(result).toBe(100); // the high-water mark, not the current 50
     });
@@ -84,7 +90,7 @@ describe('resolveTrackedVar — high-water / low-water mark aggregator', () => {
       const sequence = [10, 20, 15, 30, 25, 30, 50, 40];
       const observed: number[] = [];
       for (const v of sequence) {
-        ctx.exchange!.store!.positions![0].unrealizedPnl = v;
+        positionRows(ctx)[0].unrealizedPnl = v;
         observed.push(
           resolveTrackedVar('hi', ctx.store.getTrackedVar('hi')!, ctx, new Set()),
         );
@@ -100,10 +106,10 @@ describe('resolveTrackedVar — high-water / low-water mark aggregator', () => {
       // First read seeds with 100.
       expect(resolveTrackedVar('lo', ctx.store.getTrackedVar('lo')!, ctx, new Set())).toBe(100);
       // Source drops — new low.
-      ctx.exchange!.store!.positions![0].unrealizedPnl = 50;
+      positionRows(ctx)[0].unrealizedPnl = 50;
       expect(resolveTrackedVar('lo', ctx.store.getTrackedVar('lo')!, ctx, new Set())).toBe(50);
       // Source rises — stays at low.
-      ctx.exchange!.store!.positions![0].unrealizedPnl = 200;
+      positionRows(ctx)[0].unrealizedPnl = 200;
       expect(resolveTrackedVar('lo', ctx.store.getTrackedVar('lo')!, ctx, new Set())).toBe(50);
     });
 
@@ -113,7 +119,7 @@ describe('resolveTrackedVar — high-water / low-water mark aggregator', () => {
       const sequence = [-10, -25, -50, -30, -75, -40];
       const observed: number[] = [];
       for (const v of sequence) {
-        ctx.exchange!.store!.positions![0].unrealizedPnl = v;
+        positionRows(ctx)[0].unrealizedPnl = v;
         observed.push(
           resolveTrackedVar('lo', ctx.store.getTrackedVar('lo')!, ctx, new Set()),
         );

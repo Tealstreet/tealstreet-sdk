@@ -187,6 +187,34 @@ fn signature_rejections_retry_once_even_with_http_error_status() {
 }
 
 #[test]
+fn a_key_refusal_that_may_be_the_ip_whitelist_says_what_to_check() {
+    let mut h = Harness::new();
+    for _ in 0..2 {
+        let r = h.http("get-positions");
+        h.event(Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 401,
+                headers: "",
+                // The body the legacy runtime recorded for Crypto.com 40101.
+                body: r#"{"code":40101,"message":"Bad API key, API secret or incorrect IP whitelist."}"#,
+            },
+        });
+    }
+    assert!(
+        h.actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.level == safe_cex_engine::Level::Error
+                    && event.message.contains("incorrect IP whitelist")
+                    && event.message.ends_with(safe_cex_engine::error::IP_WHITELIST_MAYBE_HINT)
+        )),
+        "{:?}",
+        h.actions
+    );
+}
+
+#[test]
 fn closed_exposure_stays_closed_against_cached_rest_and_equal_time_frames() {
     let mut h = Harness::new();
     h.load();
@@ -1210,4 +1238,249 @@ fn snapshot_token_invalid_order_ack_does_not_invalidate_valid_identity_does() {
             "{body}"
         );
     }
+}
+
+#[test]
+fn a_refused_key_ends_the_start_after_its_one_retry() {
+    let mut h = Harness::new();
+    let mut failures = 0;
+    for _ in 0..2 {
+        let r = h.http("get-positions");
+        h.actions.clear();
+        h.event(Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 401,
+                headers: "",
+                body: r#"{"code":40101,"message":"Bad API key, API secret or incorrect IP whitelist."}"#,
+            },
+        });
+        failures += h
+            .actions
+            .iter()
+            .filter(|a| {
+                matches!(
+                    a,
+                    Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+                )
+            })
+            .count();
+    }
+    assert_eq!(failures, 1);
+}
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (
+            401,
+            r#"{"code":40101,"message":"Bad API key, API secret or incorrect IP whitelist"}"#,
+        ),
+        (
+            200,
+            r#"{"code":40101,"message":"Bad API key, API secret or incorrect IP whitelist"}"#,
+        ),
+    ] {
+        let mut h = Harness::new();
+        let mut failures = 0;
+        // Its 40101 is re-signed once before it counts.
+        for _ in 0..2 {
+            let r = h.http("get-positions");
+            h.actions.clear();
+            h.event(Event::HttpResponse {
+                request: r.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            });
+            failures += h
+                .actions
+                .iter()
+                .filter(|a| {
+                    matches!(
+                        a,
+                        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+                    )
+                })
+                .count();
+        }
+        assert_eq!(failures, 1, "{status} {body}");
+    }
+}
+
+#[test]
+fn socket_login_refusal_is_reported_even_after_rest_finishes_startup() {
+    for rest_first in [false, true] {
+        let mut h = Harness::new();
+        h.engine.set_account_startup(true);
+        if rest_first {
+            h.load();
+        }
+        let socket = h.socket(true);
+        h.event(Event::WsMessage {
+            socket,
+            text: r#"{"method":"public/auth","code":40101,"message":"key refused"}"#,
+        });
+        let failures = h
+            .actions
+            .iter()
+            .filter(|action| {
+                matches!(
+                    action,
+                    Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+                )
+            })
+            .count();
+        assert_eq!(
+            failures, 1,
+            "REST readiness must not suppress a definitive private-stream login refusal"
+        );
+        if !rest_first {
+            h.load();
+        }
+        let loaded = h.engine.store().loaded();
+        assert!(loaded.markets && loaded.balance && loaded.positions && loaded.orders);
+    }
+}
+
+fn startup_failures(h: &Harness) -> usize {
+    h.actions
+        .iter()
+        .filter(|action| {
+            matches!(
+                action,
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+            )
+        })
+        .count()
+}
+
+fn reconnect_private(
+    h: &mut Harness,
+    previous: safe_cex_engine::SocketId,
+) -> safe_cex_engine::SocketId {
+    let (timer, at) = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("private reconnect timer");
+    h.now = h.now.max(at);
+    h.event(Event::TimerFired { timer });
+    let socket = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|action| match action {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/user") => Some(*socket),
+            _ => None,
+        })
+        .expect("new private socket");
+    assert_ne!(
+        socket, previous,
+        "the reconnect must really replace the private socket"
+    );
+    socket
+}
+
+fn reject_private_login(h: &mut Harness, socket: safe_cex_engine::SocketId) {
+    h.event(Event::WsOpened { socket });
+    h.event(Event::WsMessage {
+        socket,
+        text: r#"{"method":"public/auth","code":40101,"message":"key refused"}"#,
+    });
+}
+
+#[test]
+fn repeated_reconnect_rejections_emit_one_startup_failure() {
+    let mut h = Harness::new();
+    h.engine.set_account_startup(true);
+    h.load();
+    let mut socket = h.socket(true);
+    for round in 0..4 {
+        reject_private_login(&mut h, socket);
+        assert_eq!(startup_failures(&h), 1, "rejected reconnect {round}");
+        socket = reconnect_private(&mut h, socket);
+    }
+}
+
+#[test]
+fn only_successful_private_auth_rearms_the_login_refusal_notice() {
+    let mut h = Harness::new();
+    h.load();
+    let first = h.socket(true);
+    reject_private_login(&mut h, first);
+    let next = reconnect_private(&mut h, first);
+    let public = h.socket(false);
+    h.event(Event::WsMessage {
+        socket: public,
+        text: r#"{"method":"public/auth","code":0}"#,
+    });
+    h.event(Event::WsOpened { socket: next });
+    h.event(Event::WsMessage {
+        socket: next,
+        text: r#"{"method":"public/auth","code":40102,"message":"INVALID_NONCE"}"#,
+    });
+    let still_refused = reconnect_private(&mut h, next);
+    reject_private_login(&mut h, still_refused);
+    assert_eq!(
+        startup_failures(&h),
+        1,
+        "public/transient answers must not reset the latch"
+    );
+    let healthy = reconnect_private(&mut h, still_refused);
+    h.event(Event::WsOpened { socket: healthy });
+    h.event(Event::WsMessage {
+        socket: healthy,
+        text: r#"{"method":"public/auth","code":0}"#,
+    });
+    h.event(Event::WsClosed {
+        socket: healthy,
+        code: 1006,
+    });
+    let later = reconnect_private(&mut h, healthy);
+    reject_private_login(&mut h, later);
+    assert_eq!(
+        startup_failures(&h),
+        2,
+        "successful private auth permits one new refusal notice"
+    );
+    let repeated = reconnect_private(&mut h, later);
+    reject_private_login(&mut h, repeated);
+    assert_eq!(startup_failures(&h), 2);
+}
+
+#[test]
+fn rest_polling_continues_without_resetting_a_socket_login_refusal() {
+    let mut h = Harness::new();
+    let socket = h.socket(true);
+    reject_private_login(&mut h, socket);
+    let next = reconnect_private(&mut h, socket);
+    h.load();
+    let (timer, at) = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + POLL_MS => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("normal REST account poll remains scheduled");
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    h.reply("get-positions", EMPTY);
+    h.reply("user-balance", BALANCE);
+    assert_eq!(startup_failures(&h), 1);
+    reject_private_login(&mut h, next);
+    assert_eq!(
+        startup_failures(&h),
+        1,
+        "successful REST polls must not reset the latch"
+    );
 }

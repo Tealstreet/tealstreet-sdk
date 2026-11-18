@@ -13,6 +13,7 @@ import type {
   OHLCVOptions,
   OrderBook,
   PositionSide,
+  NukeResult,
 } from '@tealstreet/safe-cex/src/types';
 
 // Re-export types from safe-cex
@@ -54,7 +55,7 @@ export interface ExchangeLike {
     balance?: Balance;
     loaded?: StoreDataLoaded;
     lastReceivedMessage?: LastReceivedMessage;
-    latency?: number;
+    latency?: number | null;
     /** WS health, set by BaseExchange. Read by the trading health gate
      *  to block exposure-increasing writes when the private stream is
      *  stale (TSBUG-106). */
@@ -83,9 +84,9 @@ export interface ExchangeLike {
   cancelOrders?: (orders: Order[]) => Promise<void>;
   cancelSymbolOrders?: (symbol: string) => Promise<void>;
   // Nuke methods
-  nuke?: (retries?: number) => Promise<void>;
-  nukePositions?: (retries?: number) => Promise<void>;
-  nukeOrders?: () => Promise<void>;
+  nuke?: (retries?: number) => Promise<void | NukeResult>;
+  nukePositions?: (retries?: number) => Promise<void | NukeResult>;
+  nukeOrders?: () => Promise<void | NukeResult>;
   // Leverage
   /** Third argument names one leg of a hedge-mode position; safe-cex accepts
    *  it and ignores it where the venue has no per-side leverage. */

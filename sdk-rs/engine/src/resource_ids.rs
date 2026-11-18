@@ -31,6 +31,10 @@ impl Default for ResourceIds {
     }
 }
 impl ResourceIds {
+    /// Read the issuance frontier without consuming or changing an identity.
+    pub(crate) fn next_unissued(&self) -> u64 {
+        self.next
+    }
     /// Pure preflight permits coordinated admission across separate namespaces.
     pub fn available(&self, count: u64) -> bool {
         !self.fatal
@@ -98,7 +102,6 @@ pub(crate) fn action_ids_safe(mut action: &crate::Action) -> bool {
             Action::Http(request) => safe(request.id.0),
             Action::Sign { attempt, .. } => safe(attempt.0),
             Action::RetireAddressSetup { task, .. } => safe(task.0),
-            Action::SignPayload { request, .. } => safe(request.0),
             Action::SetTimer { timer, .. } | Action::ClearTimer { timer } => safe(timer.0),
             Action::SignedOutbound { attempt, outbound } => {
                 if !safe(attempt.0) {

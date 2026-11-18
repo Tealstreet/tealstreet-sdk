@@ -1,22 +1,37 @@
+import { requestFailureFields, transportFailureMessage } from './request-failure.mjs';
 import { bindGroup } from './managed-http-group.mjs';
 
 /** Closed transport preparation errors; arbitrary provider text never crosses the wire. */
 export class HttpPreparationError extends Error {
-  constructor(reason) {
-    super(reason === 'timedOut' ? 'HTTP transport request timed out' : 'HTTP transport preparation failed');
+  constructor(reason, cause) {
+    const admission = reason === 'timedOut' && cause === 'info_admission';
+    super(admission ? 'HTTP admission deadline expired'
+      : reason === 'timedOut' ? 'Relay or network request timed out' : 'HTTP transport preparation failed');
+    if (admission) this.cause = 'info_admission';
     this.code = `HTTP_PREPARATION_${reason.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}`;
   }
 }
 function preparationReason(error, fallback) {
   switch (error?.code) {
     case 'HTTP_PREPARATION_UNSUPPORTED': return 'unsupported';
-    case 'HTTP_PREPARATION_TIMED_OUT': return 'timedOut';
+    case 'HTTP_PREPARATION_TIMED_OUT':
+      // Admission is explicit; phase/readiness alone cannot prove its cause.
+      try {
+        if (Object.getOwnPropertyDescriptor(error, 'cause')?.value === 'info_admission') return 'infoAdmissionTimedOut';
+      } catch { /* Foreign descriptor traps disclose no cause. */ }
+      return 'timedOut';
     case 'HTTP_PREPARATION_STALE': return 'stale';
     case 'HTTP_PREPARATION_INVALID': return 'invalid';
     case 'HTTP_PREPARATION_NETWORK': return 'network';
     default: return fallback;
   }
 }
+
+// Numeric ABI follows the engine's repr(u8) RequestClass. Strings and formatting
+// stay in the host; labels grant no release, credential or retry authority.
+// #3106 admission ABI: keep these codes independent of deadline classes.
+const readClasses = Object.freeze(['normal', 'critical', 'bulk', 'reconciliation']);
+const requestClasses = Object.freeze(['discovery', 'orderRead', 'orderWrite', 'history', 'read']);
 
 // Host-owned route resources. Engine tokens remain strings through every hop.
 // No asynchronous work is allowed between claim and bound.dispatch().
@@ -31,11 +46,24 @@ export class ManagedHttp {
     return !this.host.disposed && this.resources.get(token) === resource;
   }
 
+  assertCurrent(resource) {
+    const check = resource.assertCurrent;
+    if (!check) return;
+    try {
+      if (this.host.commandAdmissions.get(resource.command) !== check) throw new Error('Retired command');
+      if (check() !== undefined) throw new Error('Invalid owner check');
+    } catch {
+      // Owner retirement is terminal, not a stale-route reprepare permission.
+      throw new HttpPreparationError('invalid');
+    }
+  }
+
   cancel(token) {
     if (this.groupHandoff) throw new Error('HTTP group handoff cannot be interrupted');
     const resource = this.resources.get(token);
     if (!resource) return;
     this.resources.delete(token);
+    this.host.stageCauses.delete(`prepare:${token}`);
     resource.controller.abort();
     if (resource.wake !== undefined) this.host.transport.clearTimeout(resource.wake);
     try { resource.bound?.cancel?.(); } catch { /* Keep releasing the preparation. */ }
@@ -49,8 +77,31 @@ export class ManagedHttp {
     }
   }
 
+  timeoutFacts(resource) {
+    return { requestClass: resource.requestClass, budgetMs: resource.budgetMs,
+      elapsedMs: Math.max(0, Math.floor(this.host.transport.now() - resource.startedAt)) };
+  }
+
+  timeoutMessage(resource) {
+    const facts = this.timeoutFacts(resource);
+    return `class=${facts.requestClass} budget=${facts.budgetMs}ms elapsed=${facts.elapsedMs}ms`;
+  }
+
+  failure(resource, kind, cause) {
+    if (resource.failureReported || this.host.disposed) return;
+    resource.failureReported = true;
+    try {
+      this.host.handlers.onEvent?.({ level: 'debug', code: 'http.request_failed',
+        message: cause === 'info_admission' ? 'HTTP admission deadline expired'
+          : kind === 'timeout' ? `HTTP request timed out (${this.timeoutMessage(resource)})` : 'HTTP request failed',
+        fields: { ...resource.diagnostic, kind, phase: resource.phase, ...(cause ? { cause } : {}), ...(kind === 'timeout' ? this.timeoutFacts(resource) : {}) } });
+    } catch { /* Diagnostic consumers cannot change request settlement or cleanup. */ }
+  }
+
   fail(token, resource, code) {
     if (!this.live(token, resource)) return;
+    const admission = code === 'infoAdmissionTimedOut';
+    this.failure(resource, admission || code === 'timedOut' ? 'timeout' : code, admission ? 'info_admission' : undefined);
     this.cancel(token);
     const { host } = this;
     host.run(host.invoke(host.engine.httpPreparationFailed, token, code, host.transport.now()));
@@ -72,14 +123,17 @@ export class ManagedHttp {
       }
       this.cancel(token); return;
     }
-    if (action.phase === 'prepare') { void this.prepare(action); return; }
+    if (action.phase === 'prepare') { this.host.ownStage(`prepare:${token}`); void this.prepare(action); return; }
     if (action.phase !== 'bind') throw new Error('Invalid managed HTTP phase');
     const resource = this.resources.get(token);
     if (!resource || resource.phase !== 'prepared') return;
     const { host } = this;
+    const cause = host.stageCauses.get(`prepare:${token}`) ?? host.stageCause;
+    if (cause !== undefined && host.commands.get(cause)?.onStage) host.stageCauses.set(`http:${action.packet.request}`, cause);
     try {
       if (typeof action.permit !== 'string') throw new Error('Invalid HTTP permit');
-      resource.bound = resource.prepared.bind({ ...action.packet, headers: Object.fromEntries(action.packet.headers), signal: resource.controller.signal });
+      resource.diagnostic = requestFailureFields(action.packet);
+      resource.bound = resource.prepared.bind({ ...action.packet, readClass: resource.readClass, headers: Object.fromEntries(action.packet.headers), signal: resource.controller.signal });
       if (!resource.bound || typeof resource.bound.ready !== 'function' || typeof resource.bound.dispatch !== 'function') throw new Error('Invalid bound HTTP resource');
       resource.phase = 'bound';
     } catch (error) { this.fail(token, resource, preparationReason(error, 'invalid')); return; }
@@ -92,32 +146,59 @@ export class ManagedHttp {
     const token = action.preparation;
     if (this.resources.has(token) || host.disposed
       || !host.invoke(host.engine.httpPreparationPending, token)) return;
-    const resource = { controller: new AbortController(), phase: 'preparing' };
+    const resource = { readClass: 'normal', controller: new AbortController(), phase: 'preparing',
+      diagnostic: requestFailureFields(action.packet), request: action.packet.request,
+      startedAt: host.transport.now(), budgetMs: action.packet.timeoutMs,
+      requestClass: action.packet.method.toUpperCase() === 'GET' ? 'read' : 'orderWrite' };
     this.resources.set(token, resource);
     if (typeof host.transport.prepareHttp !== 'function') { this.fail(token, resource, 'unsupported'); return; }
     try {
-      const prepared = await host.transport.prepareHttp({ ...action.packet, headers: Object.fromEntries(action.packet.headers), intent: action.intent, signal: resource.controller.signal });
+      resource.command = host.commandAdmissions?.size && typeof host.engine.httpCommandOwner === 'function'
+        ? host.invoke(host.engine.httpCommandOwner, action.packet.request) : undefined;
+      if (resource.command !== undefined && (!Number.isSafeInteger(resource.command) || resource.command < 0)) {
+        throw new HttpPreparationError('invalid');
+      }
+      resource.assertCurrent = host.commandAdmissions?.get(resource.command);
+      this.assertCurrent(resource);
+      const nativeReadClass = typeof host.engine.httpReadClass === 'function'
+        ? host.invoke(host.engine.httpReadClass, action.packet.request) : 0;
+      const readClass = Number.isInteger(nativeReadClass) ? readClasses[nativeReadClass] ?? 'normal' : 'normal';
+      resource.readClass = readClass;
+      const classCode = action.requestClass;
+      const requestClass = Number.isInteger(classCode) ? requestClasses[classCode] : undefined;
+      if (requestClass) resource.requestClass = requestClass;
+      const prepared = await host.transport.prepareHttp({ ...action.packet, readClass, headers: Object.fromEntries(action.packet.headers), intent: action.intent, ...(requestClass ? { requestClass } : {}), signal: resource.controller.signal });
       if (!this.live(token, resource) || !host.invoke(host.engine.httpPreparationPending, token)) {
         prepared?.cancel?.();
         if (this.live(token, resource)) this.cancel(token);
         return;
       }
       resource.prepared = prepared;
+      this.assertCurrent(resource);
       if (!prepared || typeof prepared.bind !== 'function') { this.fail(token, resource, 'invalid'); return; }
       if (this.next === 0xffff_ffff_ffff_ffffn) { this.fail(token, resource, 'invalid'); return; }
       resource.phase = 'prepared';
       const id = String(++this.next);
-      host.run(host.invoke(host.engine.httpPrepared, token, id, prepared.expiresAt, host.transport.now()));
+      host.runFor(host.stageCauses.get(`prepare:${token}`), host.invoke(host.engine.httpPrepared, token, id, prepared.expiresAt, host.transport.now()));
     } catch (error) { this.fail(token, resource, preparationReason(error, 'network')); }
   }
 
-  claim(token, resource, permit, request) {
+  claim(token, resource, permit, request, admitted = false) {
     if (!this.live(token, resource)) return;
+    if (!admitted && resource.bound.admitDispatch) {
+      try {
+        void Promise.resolve(resource.bound.admitDispatch(() => this.claim(token, resource, permit, request, true)))
+          .catch((error) => this.fail(token, resource, preparationReason(error, 'invalid')));
+      } catch (error) { this.fail(token, resource, preparationReason(error, 'invalid')); }
+      return;
+    }
     const { host } = this;
     let response;
     try {
       if (!resource.bound.ready()) { this.fail(token, resource, 'timedOut'); return; }
-      const result = JSON.parse(host.invoke(host.engine.httpClaim, permit, host.transport.now()));
+      const now = host.transport.now();
+      this.assertCurrent(resource);
+      const result = JSON.parse(host.invoke(host.engine.httpClaim, permit, now));
       if (result.status === 'wait' && Number.isFinite(result.until)) {
         resource.wake = host.transport.setTimeout(() => {
           resource.wake = undefined;
@@ -134,10 +215,15 @@ export class ManagedHttp {
         return;
       }
       resource.phase = 'released';
+      this.assertCurrent(resource);
       response = resource.bound.dispatch(); // Synchronous transport API handoff.
+      host.stage(host.stageCauses.get(`http:${request}`), 'sent');
     } catch (error) {
       if (resource.phase === 'released' && this.live(token, resource)) {
-        this.post(() => host.run(host.invoke(host.engine.httpFailed, request, 'HTTP transport request failed', host.transport.now())));
+        const message = transportFailureMessage(error);
+        if (!this.live(token, resource)) return;
+        this.failure(resource, 'network');
+        this.post(() => host.run(host.invoke(host.engine.httpFailed, request, message, host.transport.now())));
         this.cancel(token);
       } else this.fail(token, resource, preparationReason(error, 'invalid'));
       return;
@@ -160,9 +246,17 @@ export class ManagedHttp {
     const { host } = this;
     try {
       const value = await response;
-      if (this.live(token, resource)) await host.receive(request, value, () => this.live(token, resource));
-    } catch {
-      if (this.live(token, resource)) this.post(() => host.run(host.invoke(host.engine.httpFailed, request, 'HTTP transport request failed', host.transport.now())));
+      if (this.live(token, resource)) await host.receive(request, value, () => {
+        this.assertCurrent(resource);
+        return this.live(token, resource);
+      });
+    } catch (error) {
+      if (this.live(token, resource)) {
+        const message = transportFailureMessage(error);
+        if (!this.live(token, resource)) return;
+        this.failure(resource, 'network');
+        this.post(() => host.run(host.invoke(host.engine.httpFailed, request, message, host.transport.now())));
+      }
     } finally {
       if (this.live(token, resource)) this.cancel(token);
     }

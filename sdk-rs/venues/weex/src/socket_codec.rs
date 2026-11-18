@@ -1,5 +1,6 @@
 //! Native wire codecs attached to the engine's two independent socket epochs.
 use crate::{Pending, WeexFutures};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
     AuthMode, AuthRecovery, ControlPolicy, EncodedBatch, Epoch, FeedId, FeedPolicy, Interest,
@@ -50,9 +51,32 @@ fn policy(role: SocketChannel) -> FeedPolicy {
         controls: ControlPolicy::Native,
         invalidation: Invalidation::Required,
         subscription_interval_ms: 0.,
+        close_floors: &[],
+        data_silence: None,
     }
 }
+/// The interest key, and wire param, of a symbol's depth stream.
+pub(crate) fn book_topic(symbol: &str) -> String {
+    format!("{symbol}@depth200")
+}
+/// The interest key, and wire param, of a symbol's candle stream.
+pub(crate) fn candle_topic(symbol: &str, interval: safe_cex_engine::model::Interval) -> String {
+    format!("{symbol}@kline_{interval}_LAST_PRICE")
+}
 impl WeexFutures {
+    /// The public feed and key `reconcile_topics` streams `topic` under.
+    pub(crate) fn topic_interest(
+        &self,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        let key = match topic {
+            safe_cex_engine::SubscriptionTopic::OrderBook { symbol } => book_topic(symbol),
+            safe_cex_engine::SubscriptionTopic::Candles { symbol, interval } => {
+                candle_topic(symbol, *interval)
+            }
+        };
+        Some((self.sockets.public?, key))
+    }
     pub(crate) fn register_feeds(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
         if self.sockets.failed || !cx.now.is_finite() {
             return false;
@@ -294,7 +318,10 @@ impl WeexFutures {
                 if Some(epoch.feed()) == self.sockets.public {
                     let id = self.public.next_id;
                     self.public.next_id += 1;
-                    cx.send(epoch.socket(), format!(r#"{{"method":"PING","id":{id}}}"#));
+                    cx.send(
+                        epoch.socket(),
+                        ControlFrame::heartbeat(format!(r#"{{"method":"PING","id":{id}}}"#)),
+                    );
                 } else if Some(epoch.feed()) == self.sockets.private {
                     self.account_ping(cx, epoch.socket());
                 }
@@ -348,27 +375,34 @@ impl WeexFutures {
                     }
                     self.propose_public_interests(cx, false);
                 } else {
-                    self.sockets.staged.get_mut().take();
+                    // The engine encodes each proposal just before its commit, so
+                    // this is a repair's frames: their ids and quota were spent.
+                    self.commit_encoding();
                 }
             }
-            LifecycleEvent::InterestsRefused { feed, proposal, .. }
-                if Some(feed) == self.sockets.public =>
-            {
+            LifecycleEvent::InterestsRefused {
+                feed,
+                proposal,
+                error,
+            } if Some(feed) == self.sockets.public => {
                 self.sockets.staged.get_mut().take();
-                if self
+                let own = self
                     .sockets
                     .pending
                     .as_ref()
-                    .is_some_and(|p| p.0 == proposal)
+                    .is_some_and(|p| p.0 == proposal);
+                // A repair the quota refused reports the limit too; only ours retries.
+                if (own || error == SocketError::Capacity)
+                    && self.sockets.quota_not_before.get().is_some()
                 {
+                    cx.notice(
+                        safe_cex_engine::Level::Warn,
+                        safe_cex_engine::log::code::SUBSCRIPTION_REJECTED,
+                        "WEEX subscription operation limit reached",
+                    );
+                }
+                if own {
                     self.sockets.pending = None;
-                    if self.sockets.quota_not_before.get().is_some() {
-                        cx.notice(
-                            safe_cex_engine::Level::Warn,
-                            safe_cex_engine::log::code::SUBSCRIPTION_REJECTED,
-                            "WEEX subscription operation limit reached",
-                        );
-                    }
                     self.defer_interests(cx);
                 }
             }

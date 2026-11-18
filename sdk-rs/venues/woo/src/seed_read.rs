@@ -58,7 +58,13 @@ impl Woo {
         if !cx.now.is_finite() {
             return;
         }
-        let context = match cx.http_context_with_egress(
+        let issue = if !matches!(kind, Kind::Markets) {
+            Cx::http_live_context_with_egress
+        } else {
+            Cx::http_context_with_egress
+        };
+        let context = match issue(
+            cx,
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -339,11 +345,12 @@ impl Woo {
                     self.malformed_rows,
                 );
                 let private = !self.options.public_data_only
-                    && self
-                        .options
-                        .key
-                        .as_deref()
-                        .is_some_and(|key| !key.is_empty());
+                    && (self.options.credentials.is_some()
+                        || self
+                            .options
+                            .key
+                            .as_deref()
+                            .is_some_and(|key| !key.is_empty()));
                 if !refresh && !private {
                     cx.store.set_balance(Default::default());
                     cx.store.set_positions(Vec::new());
@@ -461,6 +468,16 @@ impl Woo {
                 Kind::Tickers => self.seed_backoff.failed(cx, true),
                 Kind::Funding => (),
             }
+        }
+    }
+}
+
+impl Read {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self.payload.kind() {
+            Kind::Markets => S::MARKETS,
+            Kind::Tickers | Kind::Funding => S::TICKERS,
         }
     }
 }

@@ -1,7 +1,12 @@
 // Generated direct native field expectations from independent live TS property keys.
-use safe_cex_types::exchange_metadata::{ExchangeFeatures, ExchangeMetadata};
+use safe_cex_types::exchange_metadata::{
+    ExchangeFeatures, ExchangeMetadata, ExchangeMetadataOrderAmendment,
+};
 use safe_cex_types::object_map::JsObjectMap;
-use safe_cex_types::{ExchangeName, MarginType, OrderStopTriggerType, PositionMode};
+use safe_cex_types::{
+    AnyTimeframe, ExchangeName, MarginType, OrderStopTriggerType, OrderTimeInForce, OrderType,
+    PositionMode,
+};
 pub fn assert_exchange_features_native(native: &ExchangeFeatures, source: &serde_json::Value) {
     assert_eq!(
         native.kline,
@@ -248,6 +253,17 @@ pub fn assert_exchange_metadata_native(native: &ExchangeMetadata, source: &serde
         "native ExchangeMetadata.supportsOptionsToggle"
     );
     assert_eq!(
+        native.options_only,
+        serde_json::from_value::<Option<bool>>(
+            source
+                .get("optionsOnly")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        )
+        .expect("source field optionsOnly"),
+        "native ExchangeMetadata.optionsOnly"
+    );
+    assert_eq!(
         native.supports_inverse_toggle,
         serde_json::from_value::<Option<bool>>(
             source
@@ -356,6 +372,17 @@ pub fn assert_exchange_metadata_native(native: &ExchangeMetadata, source: &serde
         )
         .expect("source field candleApiCountLimit"),
         "native ExchangeMetadata.candleApiCountLimit"
+    );
+    assert_eq!(
+        native.supported_candle_intervals,
+        serde_json::from_value::<Option<Vec<AnyTimeframe>>>(
+            source
+                .get("supportedCandleIntervals")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        )
+        .expect("source field supportedCandleIntervals"),
+        "native ExchangeMetadata.supportedCandleIntervals"
     );
     assert_eq!(
         native.default_quote,
@@ -644,6 +671,17 @@ pub fn assert_exchange_metadata_native(native: &ExchangeMetadata, source: &serde
         "native ExchangeMetadata.autoDownSizeReduceOrders"
     );
     assert_eq!(
+        native.reduce_orders_lock_position_size,
+        serde_json::from_value::<bool>(
+            source
+                .get("reduceOrdersLockPositionSize")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        )
+        .expect("source field reduceOrdersLockPositionSize"),
+        "native ExchangeMetadata.reduceOrdersLockPositionSize"
+    );
+    assert_eq!(
         native.supports_chaser,
         serde_json::from_value::<bool>(
             source
@@ -808,6 +846,20 @@ pub fn assert_exchange_metadata_native(native: &ExchangeMetadata, source: &serde
         .expect("source field supportsKlineSeconds"),
         "native ExchangeMetadata.supportsKlineSeconds"
     );
+    assert_eq!(
+        native.order_amendment,
+        serde_json::from_value::<Option<ExchangeMetadataOrderAmendment>>(
+            source
+                .get("orderAmendment")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        )
+        .expect("source field orderAmendment"),
+        "native ExchangeMetadata.orderAmendment"
+    );
+    if let Some(value) = &native.order_amendment {
+        assert_exchange_metadata_order_amendment_native(value, &source["orderAmendment"]);
+    }
     assert_eq!(
         native.default_symbol,
         serde_json::from_value::<Option<String>>(
@@ -1006,5 +1058,54 @@ pub fn assert_exchange_metadata_native(native: &ExchangeMetadata, source: &serde
         )
         .expect("source field supportsPublicOnly"),
         "native ExchangeMetadata.supportsPublicOnly"
+    );
+}
+pub fn assert_exchange_metadata_order_amendment_native(
+    native: &ExchangeMetadataOrderAmendment,
+    source: &serde_json::Value,
+) {
+    assert_eq!(
+        native.limit_time_in_force,
+        serde_json::from_value::<Vec<OrderTimeInForce>>(
+            source
+                .get("limitTimeInForce")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        )
+        .expect("source field limitTimeInForce"),
+        "native ExchangeMetadataOrderAmendment.limitTimeInForce"
+    );
+    assert_eq!(
+        native.trigger_price_types,
+        serde_json::from_value::<Vec<OrderType>>(
+            source
+                .get("triggerPriceTypes")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        )
+        .expect("source field triggerPriceTypes"),
+        "native ExchangeMetadataOrderAmendment.triggerPriceTypes"
+    );
+    assert_eq!(
+        native.unfilled_only,
+        serde_json::from_value::<bool>(
+            source
+                .get("unfilledOnly")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        )
+        .expect("source field unfilledOnly"),
+        "native ExchangeMetadataOrderAmendment.unfilledOnly"
+    );
+    assert_eq!(
+        native.preserve_attached_limit_protection,
+        serde_json::from_value::<bool>(
+            source
+                .get("preserveAttachedLimitProtection")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        )
+        .expect("source field preserveAttachedLimitProtection"),
+        "native ExchangeMetadataOrderAmendment.preserveAttachedLimitProtection"
     );
 }

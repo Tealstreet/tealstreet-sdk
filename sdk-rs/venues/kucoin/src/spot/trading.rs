@@ -1,6 +1,6 @@
 use super::*;
 use crate::wire::not_sent;
-use safe_cex_engine::num::{adjust, format};
+use safe_cex_engine::num::{self, adjust};
 use safe_cex_engine::{ErrorKind, Outcome, VenueError};
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,14 +100,14 @@ impl KucoinSpot {
             return Err("invalid KuCoin Spot order amount or price".into());
         }
         let amount = adjust(o.amount, m.precision.amount);
-        if amount <= 0.0 || amount > m.limits.amount.max {
+        if amount <= 0.0 {
             return Err("KuCoin Spot order exceeds native size limits".into());
         }
         let client_oid = client_oid(o.client_order_id.as_deref(), || {
             safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
         })?;
         let price = if o.kind == OrderType::Limit {
-            Some(format(adjust(
+            Some(num::format(adjust(
                 o.price.ok_or("KuCoin Spot limit order needs a price")?,
                 m.precision.price,
             )))
@@ -128,7 +128,7 @@ impl KucoinSpot {
                 "buy"
             },
             price,
-            size: format(amount),
+            size: num::format(amount),
             time_in_force: (o.kind == OrderType::Limit).then_some(match o.time_in_force {
                 Some(TimeInForce::ImmediateOrCancel) => "IOC",
                 Some(TimeInForce::FillOrKill) => "FOK",
@@ -148,7 +148,7 @@ impl KucoinSpot {
             kind: WriteKind::Place,
         })
     }
-    fn next_write(&self, cx: &mut Cx<'_, Pending>, mut job: Job) {
+    fn next_write(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job) {
         if let Some(w) = job.requests.pop_front() {
             if let Some(receipt) = w.receipt {
                 cx.command_progress(job.command, vec![receipt]);
@@ -206,7 +206,23 @@ impl KucoinSpot {
                     return;
                 }
             },
-            WriteKind::Cancel => {}
+            WriteKind::Cancel => {
+                // cancelAll answers per symbol; a failed one kept its orders.
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct PerSymbol {
+                    #[serde(default)]
+                    failed_symbols: Vec<serde::de::IgnoredAny>,
+                }
+                if serde_json::from_str::<PerSymbol>(data.get())
+                    .is_ok_and(|reply| !reply.failed_symbols.is_empty())
+                {
+                    let error = VenueError::new("KuCoin Spot cancel-all failed for some symbols");
+                    job.effective = true;
+                    self.write_failed(cx, job, error.outcome(Outcome::Unknown));
+                    return;
+                }
+            }
         }
         job.effective = true;
         self.revision += 1;
@@ -220,11 +236,27 @@ impl KucoinSpot {
         job: Job,
         mut error: VenueError,
     ) {
+        if error.outcome == Some(Outcome::Unknown) {
+            error.message = "The outcome is unknown. Check Open Orders".into();
+            error.presents = true;
+        }
         if (job.effective || !job.ids.is_empty())
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
         {
             error.outcome = None;
         }
+        if !job.ids.is_empty() {
+            let mut ids = job.ids;
+            if let Some(partial) = &error.partial {
+                for id in &partial.order_ids {
+                    if !ids.contains(id) {
+                        ids.push(id.clone());
+                    }
+                }
+            }
+            error = error.partial_ids(&ids);
+        }
+        cx.command_error(job.command, &error.message);
         cx.fail(job.command, error);
     }
     pub(super) fn trade(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -354,8 +386,8 @@ impl KucoinSpot {
                     let body = serde_json::to_string(&Alter {
                         symbol: &market.id,
                         order_id: &id,
-                        new_price: price.map(|n| format(adjust(n, market.precision.price))),
-                        new_size: amount.map(|n| format(adjust(n, market.precision.amount))),
+                        new_price: price.map(|n| num::format(adjust(n, market.precision.price))),
+                        new_size: amount.map(|n| num::format(adjust(n, market.precision.amount))),
                     })
                     .unwrap();
                     Ok((
@@ -411,13 +443,14 @@ impl KucoinSpot {
                         not_sent("KuCoin Spot requires credentials").kind(ErrorKind::InvalidInput),
                     );
                 } else {
-                    self.request(
+                    let Ok(root) = cx.admit_caller_read_root(None, None) else {
+                        return;
+                    };
+                    self.send_read(
                         cx,
-                        Method::Get,
+                        root.clone(),
                         "/api/v2/user-info",
-                        None,
-                        true,
-                        Pending::Account(command),
+                        Pending::Account { command, root },
                     );
                 }
                 return;

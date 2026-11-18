@@ -1,5 +1,10 @@
 //! Precision helpers for venue numbers.
 
+pub use safe_cex_position_math::{
+    NativeSizeInputs, NativeSizeMarket, calculate_position_account_leverage,
+    calculate_total_account_leverage, calculate_total_notional, native_position_size,
+};
+
 /// Venue metadata is untrusted; `f64::clamp` panics on unordered bounds.
 pub fn clamp_leverage(value: f64, min: f64, max: f64) -> Result<f64, &'static str> {
     if !value.is_finite() || value <= 0.0 {
@@ -127,9 +132,27 @@ pub fn format(value: f64) -> String {
     }
 }
 
+/// An amend's size is the order's new total; a replacement order carries what is
+/// left of it. The page sends filled plus the edited remaining.
+pub fn left_of_total(total: f64, filled: f64) -> Result<f64, String> {
+    if filled > 0.0 && total <= filled {
+        return Err(format!(
+            "Amended size must exceed the {filled} already filled"
+        ));
+    }
+    Ok((total - filled.max(0.0)).max(0.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_amended_total_leaves_what_is_unfilled() {
+        assert_eq!(left_of_total(10.0, 4.0), Ok(6.0));
+        assert_eq!(left_of_total(3.0, 0.0), Ok(3.0));
+        assert!(left_of_total(4.0, 4.0).is_err());
+    }
 
     #[test]
     fn leverage_bounds_cannot_panic_or_produce_invalid_writes() {

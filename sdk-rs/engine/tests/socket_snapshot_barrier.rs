@@ -1,5 +1,6 @@
 //! Assertion-first controls for independent login and native snapshot facts.
 #![cfg(feature = "managed-sockets")]
+use safe_cex_engine::ControlFrame;
 mod support;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
@@ -64,6 +65,8 @@ impl Venue for Native {
             controls: ControlPolicy::Native,
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
+            close_floors: &[],
+            data_silence: None,
         };
         let feed = if self.snapshot_policy {
             cx.register_socket_feed_with_snapshot(policy)
@@ -96,11 +99,13 @@ impl Venue for Native {
     ) -> Result<(), SocketError> {
         assert_eq!(cx.complete_socket_snapshot(), Err(SocketError::Stale));
         match event {
-            LifecycleEvent::Opened(epoch) => cx.send(epoch.socket(), "login"),
+            LifecycleEvent::Opened(epoch) => {
+                cx.send(epoch.socket(), ControlFrame::authentication("login"))
+            }
             LifecycleEvent::Authenticated { epoch, first: true } => {
                 cx.set_socket_interests(epoch.feed(), vec![Interest::from_wire_args("aop")])?;
             }
-            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), "ping"),
+            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), ControlFrame::heartbeat("ping")),
             LifecycleEvent::Reconnect(feed) => {
                 cx.connect_socket(feed, "wss://snapshot.test")?;
             }

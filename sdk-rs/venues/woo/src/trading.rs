@@ -4,6 +4,7 @@ use crate::{
     wire::{Envelope, id, number},
 };
 use safe_cex_engine::model::*;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -15,6 +16,7 @@ enum Accepted {
     Regular(Option<OrderIdentityReceipt>),
     Algo,
     Ids(Vec<String>),
+    Canceled(String),
     CancelAll,
     Leverage {
         symbol: String,
@@ -50,6 +52,7 @@ enum Step {
         hedged: bool,
         revision: u64,
         attempt: u8,
+        unconfirmed_write: Option<Box<VenueError>>,
     },
 }
 pub struct Request {
@@ -61,11 +64,10 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     touches: HashMap<(String, OrderSide), f64>,
-    errors: Vec<String>,
-    /// A failed cancel family's outcome is not known.
-    errors_unknown: bool,
+    errors: Vec<VenueError>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    split_report: Option<crate::split_report::SplitReport>,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -173,6 +175,8 @@ fn quantities(amount: f64, market: &Market) -> Result<Vec<f64>, String> {
     if !positive(amount) || !positive(step) || !positive(market.limits.amount.max) {
         return Err("Invalid WOO quantity or lot limits".into());
     }
+    // TS woo.exchange.ts:2244/2390 adjusts the amount before splitWooQuantity.
+    let amount = num::adjust(amount, step);
     let ticks = (amount / step).round();
     let max = (market.limits.amount.max / step).floor();
     let min = (market.limits.amount.min / step).ceil().max(1.0);
@@ -620,7 +624,9 @@ impl Woo {
                         ),
                         vec![],
                         None,
-                        Accepted::Ids(vec![]),
+                        Accepted::Canceled(
+                            sibling.parent_id.as_ref().unwrap_or(&sibling.id).clone(),
+                        ),
                     ));
                 }
                 steps.push_back(self.positional(cx, &o, sl, tp, sl_trigger, tp_trigger)?);
@@ -951,8 +957,8 @@ impl Woo {
             _ => return,
         };
         if self.options.public_data_only
-            || self.options.key.is_none()
-            || self.options.secret.is_none()
+            || (self.options.credentials.is_none()
+                && (self.options.key.is_none() || self.options.secret.is_none()))
         {
             cx.fail(
                 command,
@@ -968,8 +974,8 @@ impl Woo {
                     ids: Vec::new(),
                     touches: HashMap::new(),
                     errors: Vec::new(),
-                    errors_unknown: false,
                     effective: false,
+                    split_report: None,
                 });
                 self.trade_pump(cx);
             }
@@ -988,17 +994,30 @@ impl Woo {
                 return;
             };
             let Some(step) = job.steps.pop_front() else {
-                let job = self.trading.active.take().unwrap();
+                let mut job = self.trading.active.take().unwrap();
                 if job.errors.is_empty() {
                     cx.done(job.command, json(&job.ids).unwrap());
                 } else {
-                    // The cancel families are independent; only an unknown one is worth stating.
-                    let error = VenueError::new(job.errors.join("; "));
-                    let error = if job.errors_unknown {
-                        error.outcome(Outcome::Unknown)
-                    } else {
-                        error
-                    };
+                    let unknown = job
+                        .errors
+                        .iter()
+                        .any(|e| e.outcome == Some(Outcome::Unknown));
+                    let message = job
+                        .errors
+                        .iter()
+                        .map(|e| e.message.as_str())
+                        .collect::<Vec<_>>()
+                        .join_with("; ");
+                    // Keep the rate-limit fact even when another family failed first.
+                    let index = job
+                        .errors
+                        .iter()
+                        .position(|e| e.kind == Some(ErrorKind::RateLimited))
+                        .unwrap_or(0);
+                    let mut error = job.errors.swap_remove(index);
+                    error.message = message;
+                    // Independent legs cannot prove that the whole command was refused.
+                    error.outcome = unknown.then_some(Outcome::Unknown);
                     cx.fail(job.command, error);
                 }
                 continue;
@@ -1009,7 +1028,30 @@ impl Woo {
                     let touches =
                         std::mem::take(&mut self.trading.active.as_mut().unwrap().touches);
                     match self.build_places(cx, orders, &touches) {
-                        Ok(steps) => self.trading.active.as_mut().unwrap().steps.extend(steps),
+                        Ok(steps) => {
+                            let elements = steps
+                                .iter()
+                                .filter_map(|step| match step {
+                                    Step::Write { accepted, .. } => Some(match accepted {
+                                        Accepted::Regular(receipt) => {
+                                            receipt.as_ref().map(|r| r.identity.clone())
+                                        }
+                                        _ => None,
+                                    }),
+                                    _ => None,
+                                })
+                                .enumerate()
+                                .map(|(index, client_order_id)| {
+                                    safe_cex_engine::write_plan::Element {
+                                        index,
+                                        client_order_id,
+                                    }
+                                })
+                                .collect();
+                            let job = self.trading.active.as_mut().unwrap();
+                            job.split_report = crate::split_report::SplitReport::new(elements);
+                            job.steps.extend(steps);
+                        }
                         Err(error) => {
                             self.trade_abort(cx, not_sent(error));
                         }
@@ -1066,6 +1108,12 @@ impl Woo {
                     {
                         cx.command_progress(command, vec![receipt.clone()]);
                     }
+                    if let Some(report) =
+                        self.trading.active.as_mut().unwrap().split_report.as_mut()
+                    {
+                        report.request_id = None;
+                        report.status = None;
+                    }
                     let result = self.signed(
                         cx,
                         method,
@@ -1077,9 +1125,17 @@ impl Woo {
                             step: outbound.clone(),
                         }),
                     );
-                    if let Err(error) = result {
-                        self.trade_write_failed(cx, &outbound, not_sent(error));
-                        continue;
+                    let request = match result {
+                        Ok(request) => request,
+                        Err(error) => {
+                            self.trade_write_failed(cx, &outbound, not_sent(error));
+                            continue;
+                        }
+                    };
+                    if let Some(report) =
+                        self.trading.active.as_mut().unwrap().split_report.as_mut()
+                    {
+                        report.request_id = Some(request);
                     }
                     self.trading.next_write =
                         cx.now + if method == Method::Put { 200.0 } else { 100.0 };
@@ -1135,24 +1191,47 @@ impl Woo {
         }
     }
     fn trade_abort(&mut self, cx: &mut Cx<'_, Pending>, mut error: VenueError) {
-        if let Some(job) = self.trading.active.take() {
+        if let Some(mut job) = self.trading.active.take() {
+            if let Some(report) = job.split_report.as_mut() {
+                if error.outcome == Some(Outcome::Unknown)
+                    && !error
+                        .message
+                        .contains(safe_cex_engine::UNKNOWN_OUTCOME_TEXT)
+                {
+                    error.message = format!(
+                        "{}; {}",
+                        error.message,
+                        safe_cex_engine::UNKNOWN_OUTCOME_TEXT
+                    );
+                }
+                report.failed(&error);
+            }
             if !job.ids.is_empty() {
                 error.message = format!(
                     "{}; accepted native IDs: {}",
                     error.message,
                     json(&job.ids).unwrap()
                 );
+                error = error.partial_ids(&job.ids);
             }
             if (job.effective || !job.ids.is_empty())
                 && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             {
                 error.outcome = None;
             }
+            if let Some(report) = job.split_report.as_ref() {
+                if error.outcome == Some(Outcome::Unknown) {
+                    cx.command_error(job.command, error.message.clone());
+                    let event = report.unknown_event(job.command, &job.ids);
+                    cx.event(event.level, event.code, event.message, event.fields);
+                }
+                error = report.attach(error);
+            }
             cx.fail(job.command, error);
         }
         self.trading.waiting = false;
     }
-    fn trade_write_failed(&mut self, cx: &mut Cx<'_, Pending>, step: &Step, error: VenueError) {
+    fn trade_write_failed(&mut self, cx: &mut Cx<'_, Pending>, step: &Step, mut error: VenueError) {
         if let Step::Write {
             accepted: Accepted::CancelAll,
             path,
@@ -1161,8 +1240,8 @@ impl Woo {
         {
             // The two cancel families are independent; neither ambiguous write is retried.
             let job = self.trading.active.as_mut().unwrap();
-            job.errors_unknown |= error.outcome == Some(Outcome::Unknown);
-            job.errors.push(format!("{path}: {}", error.message));
+            error.message = format!("{path}: {}", error.message);
+            job.errors.push(error);
         } else {
             self.trade_config_finished(step);
             self.trade_abort(cx, error);
@@ -1187,10 +1266,12 @@ impl Woo {
                 hedged,
                 revision,
                 attempt,
+                unconfirmed_write,
             } if attempt < 2 => Some(Step::Mode {
                 hedged,
                 revision,
                 attempt: attempt + 1,
+                unconfirmed_write,
             }),
             _ => None,
         };
@@ -1199,19 +1280,24 @@ impl Woo {
             self.trading.timer = Some(cx.set_timer(250.0));
         } else {
             self.trade_config_finished(&original);
-            let error = if matches!(
-                original,
-                Step::Leverage {
-                    expected: Some(_),
+            let error = match original {
+                Step::Mode {
+                    unconfirmed_write: Some(mut failure),
                     ..
+                } => {
+                    failure.message = format!(
+                        "{}; mode readback remains unconfirmed: {error}",
+                        failure.message
+                    );
+                    *failure
                 }
-            ) {
-                VenueError::new(format!(
+                Step::Leverage {
+                    expected: Some(_), ..
+                } => VenueError::new(format!(
                     "WOO leverage write was accepted, but readback remains unconfirmed: {error}"
                 ))
-                .outcome(Outcome::Unknown)
-            } else {
-                not_sent(error)
+                .outcome(Outcome::Unknown),
+                _ => not_sent(error),
             };
             self.trade_abort(cx, error);
             self.trade_pump(cx);
@@ -1252,6 +1338,12 @@ impl Woo {
             return;
         }
         self.trading.waiting = false;
+        let accepted_ids = self.trading.active.as_ref().unwrap().ids.len();
+        if let Step::Write { .. } = request.step
+            && let Some(report) = self.trading.active.as_mut().unwrap().split_report.as_mut()
+        {
+            report.status = Some(response.status);
+        }
         if let Step::Touch { ref symbol, side } = request.step {
             #[derive(Deserialize)]
             struct Touch {
@@ -1294,11 +1386,17 @@ impl Woo {
         let envelope = match checked {
             Ok(e) => e,
             Err(error) => {
+                if matches!(request.step, Step::Mode { .. } | Step::Leverage { .. }) {
+                    self.trade_retry_read(cx, request.step, &error);
+                    return;
+                }
+                let error = answer_failure(&response, error);
                 if let Step::Write {
                     accepted: Accepted::Mode { hedged, revision },
                     ..
                 } = request.step
                     && error
+                        .message
                         .to_lowercase()
                         .contains("position mode remains unchanged")
                 {
@@ -1311,17 +1409,14 @@ impl Woo {
                             hedged,
                             revision,
                             attempt: 0,
+                            unconfirmed_write: (error.outcome == Some(Outcome::Unknown))
+                                .then(|| Box::new(error)),
                         });
                     self.trade_pump(cx);
                     return;
                 }
-                if matches!(request.step, Step::Mode { .. } | Step::Leverage { .. }) {
-                    self.trade_retry_read(cx, request.step, &error);
-                } else {
-                    let error = answer_failure(&response, error);
-                    self.trade_write_failed(cx, &request.step, error);
-                    self.trade_pump(cx);
-                }
+                self.trade_write_failed(cx, &request.step, error);
+                self.trade_pump(cx);
                 return;
             }
         };
@@ -1384,7 +1479,7 @@ impl Woo {
                                 .ids
                                 .extend(rows.rows.into_iter().map(|r| r.order_id));
                         }
-                        Accepted::CancelAll => (),
+                        Accepted::CancelAll | Accepted::Canceled(_) => (),
                         Accepted::Ids(ids) => self
                             .trading
                             .active
@@ -1419,6 +1514,7 @@ impl Woo {
                                 hedged: *hedged,
                                 revision: *revision,
                                 attempt: 0,
+                                unconfirmed_write: None,
                             }),
                     }
                     if !matches!(accepted, Accepted::Leverage { .. } | Accepted::Mode { .. }) {
@@ -1435,7 +1531,7 @@ impl Woo {
                     #[derive(Deserialize)]
                     struct Leverage {
                         symbol: String,
-                        margin_mode: String,
+                        margin_mode: Option<String>,
                         position_mode: String,
                         details: Vec<Detail>,
                     }
@@ -1449,7 +1545,10 @@ impl Woo {
                         serde_json::from_str(envelope.payload()?).map_err(|e| e.to_string())?;
                     let m = cx.store.market(symbol).unwrap();
                     if data.symbol != native(m)
-                        || data.margin_mode != "CROSS"
+                        || data
+                            .margin_mode
+                            .as_deref()
+                            .is_some_and(|mode| mode != "CROSS")
                         || data.position_mode != "ONE_WAY"
                         || data.details.len() != 1
                         || data.details[0].position_side != "BOTH"
@@ -1461,7 +1560,13 @@ impl Woo {
                             "WOO leverage readback did not match the requested scope/value".into(),
                         );
                     }
-                    self.account_leverage_applied(cx, symbol, data.details[0].leverage, *revision);
+                    self.account_leverage_applied(
+                        cx,
+                        symbol,
+                        data.details[0].leverage,
+                        data.margin_mode.as_ref().map(|_| MarginType::Cross),
+                        *revision,
+                    );
                 }
                 Step::Mode {
                     hedged, revision, ..
@@ -1490,10 +1595,16 @@ impl Woo {
         })();
         match outcome {
             Ok(()) => {
-                if matches!(request.step, Step::Write { .. })
+                if let Step::Write { accepted, .. } = &request.step
                     && let Some(job) = self.trading.active.as_mut()
                 {
                     job.effective = true;
+                    if let Some(report) = job.split_report.as_mut() {
+                        match accepted {
+                            Accepted::Canceled(target) => report.canceled(target),
+                            _ => report.placed(&job.ids[accepted_ids..]),
+                        }
+                    }
                 }
             }
             Err(error) => {
@@ -1510,6 +1621,51 @@ impl Woo {
                 self.trade_write_failed(cx, &request.step, error);
             }
         }
+        self.trade_pump(cx);
+    }
+    /// Signing/preparation failed before this physical write. Keep earlier job evidence.
+    pub(crate) fn trade_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        mut error: VenueError,
+    ) {
+        if !matches!(request.step, Step::Write { .. }) {
+            self.trade_failed(cx, request, &error.message);
+            return;
+        }
+        let Some(job) = self
+            .trading
+            .active
+            .as_ref()
+            .filter(|job| job.command == request.command)
+        else {
+            return;
+        };
+        error.outcome = Some(Outcome::NotSent);
+        if !job.errors.is_empty() {
+            let message = job
+                .errors
+                .iter()
+                .map(|e| e.message.as_str())
+                .collect::<Vec<_>>()
+                .join_with("; ");
+            let signing_failure = error.message;
+            error = job
+                .errors
+                .iter()
+                .find(|e| e.kind == Some(ErrorKind::RateLimited))
+                .unwrap_or(&job.errors[0])
+                .clone();
+            error.message = format!("{message}; {signing_failure}");
+            error.outcome = job
+                .errors
+                .iter()
+                .any(|e| e.outcome == Some(Outcome::Unknown))
+                .then_some(Outcome::Unknown);
+        }
+        self.trade_config_finished(&request.step);
+        self.trade_abort(cx, error);
         self.trade_pump(cx);
     }
     pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
@@ -1553,8 +1709,8 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 }
 
 /// A refused write answer, classified by HTTP status and WOO's documented
-/// error codes. 408/5xx and malformed answers do not prove a refusal.
-fn answer_failure(response: &Response<'_>, message: String) -> VenueError {
+/// error codes. Rate limits, 408/5xx and malformed answers do not prove a refusal.
+pub(crate) fn answer_failure(response: &Response<'_>, message: String) -> VenueError {
     #[derive(Deserialize)]
     struct Code {
         code: Option<i64>,
@@ -1569,9 +1725,9 @@ fn answer_failure(response: &Response<'_>, message: String) -> VenueError {
         None => error,
     };
     match (response.status, code) {
+        (429, _) | (_, Some(-1003)) => error.kind(ErrorKind::RateLimited).outcome(Outcome::Unknown),
         (408 | 500.., _) => error.outcome(Outcome::Unknown),
         (_, Some(-1001 | -1002)) | (401, _) => rejected(error, ErrorKind::AuthInvalid),
-        (_, Some(-1003)) | (429, _) => rejected(error, ErrorKind::RateLimited),
         (403, _) => rejected(error, ErrorKind::AuthPermission),
         (_, Some(-1000 | -1011 | -1012)) => error.outcome(Outcome::Unknown),
         (_, Some(-1004 | -1005 | -1006 | -1008 | -1101 | -1102 | -1103)) => {

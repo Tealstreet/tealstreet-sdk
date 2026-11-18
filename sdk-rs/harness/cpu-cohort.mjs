@@ -1,6 +1,7 @@
 // Same-workflow physical evidence only. No lifetime history scan or retry API.
 import { createHash } from 'node:crypto';
-export const CPU_COHORT_STEPS = Object.freeze({ first: 'Retain CPU runtime capsule', second: 'Retain CPU remeasurement results', plan: 'Retain CPU remeasurement plan', final: 'Retain CPU certificate', strict: 'Retain strict gate reports and artifact budgets', runtime: 'Retain the eligible original runtime bytes' });
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
+export const CPU_COHORT_STEPS = Object.freeze({ first: 'Retain CPU runtime capsule', plan: 'Retain CPU remeasurement plan', final: 'Retain CPU certificate', strict: 'Retain strict gate reports and artifact budgets' });
 const CPU_WORKFLOW_ID = 386369161;
 const WORKFLOW_PATH = '.github/workflows/rust.yml';
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -52,7 +53,7 @@ function caseIdentity(value) {
   check(value && !Array.isArray(value) && typeof value === 'object', 'invalid public case');
   const keys = ['venue', 'tape', 'tapeSha256', 'books', 'private', 'correctnessRuns', 'runs'];
   check(Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key)), 'incomplete/extra case fields');
-  check(typeof value.venue === 'string' && /^[a-z0-9-]+$/.test(value.venue) && safePath(value.tape) && hash(value.tapeSha256) && typeof value.books === 'string' && value.private === false && value.correctnessRuns === 1 && value.runs === 9, 'invalid public case identity');
+  check(typeof value.venue === 'string' && /^[a-z0-9-]+$/.test(value.venue) && safePath(value.tape) && hash(value.tapeSha256) && typeof value.books === 'string' && value.private === false && value.correctnessRuns === 1 && value.runs === PUBLIC_REPLAY_PAIRS, 'invalid public case identity');
   return Object.fromEntries(keys.map((key) => [key, value[key]]));
 }
 
@@ -165,15 +166,13 @@ export function authenticateArtifactMetadata({ artifact, run, job, logBytes, ste
   } else if (jobName === 'Rust / CPU certification audit') {
     throw new Error('CPU cohort: no all-suite audit in this rollout');
   } else {
-    const match = /^Rust \/ (replay measurement|CPU remeasurement|replay gate) \(([a-z0-9-]+)\)$/.exec(jobName);
+    const match = /^Rust \/ (replay measurement|CPU gate) \(([a-z0-9-]+)\)$/.exec(jobName);
     check(match, 'unknown artifact authority job name');
-    const kind = match[1] === 'replay measurement' ? 'first' : match[1] === 'CPU remeasurement' ? 'second' : 'final';
-    expectedArtifact = `${kind === 'first' ? 'cpu-cohort' : kind === 'second' ? 'cpu-second' : 'cpu-cert'}-${match[2]}`;
+    const kind = match[1] === 'replay measurement' ? 'first' : 'final';
+    expectedArtifact = `${kind === 'first' ? 'cpu-cohort' : 'cpu-cert'}-${match[2]}`;
     expectedStep = CPU_COHORT_STEPS[kind];
     if (kind === 'first' && artifact?.name === `strict-replay-${match[2]}`) {
       expectedArtifact = artifact.name; expectedStep = CPU_COHORT_STEPS.strict;
-    } else if (kind === 'first' && artifact?.name === `cpu-runtime-${match[2]}`) {
-      expectedArtifact = artifact.name; expectedStep = CPU_COHORT_STEPS.runtime;
     }
   }
   check(stepName === expectedStep, 'unknown artifact authority upload step');
@@ -185,11 +184,58 @@ export function authenticateArtifactMetadata({ artifact, run, job, logBytes, ste
   return { schema: 1, artifactId: artifact.id, artifactSha256: artifact.digest.slice(7), runId: run.id, attempt: 1, jobId: job.id, runnerId: job.runner_id, measuredCheckoutSha, logSha256: sha(bytes(logBytes)) };
 }
 
-/** Downloaded bundles additionally require the exact archive bytes. Metadata-only
- * runtime refs are useful after a successful second producer verified restoration. */
+/** Downloaded bundles additionally require the exact archive bytes. */
 export function authenticateArtifactExecution(input) {
   const receipt = authenticateArtifactMetadata(input), raw = bytes(input.artifactBytes);
   check(raw.length === input.artifact.size_in_bytes && `sha256:${sha(raw)}` === input.artifact.digest, 'artifact ZIP digest/length mismatch');
+  return receipt;
+}
+
+const bitgetFailedUploads = new WeakSet();
+const oracleRefusalMessage = 'NOT-CERTIFIED: Bitget TS oracle output changed between baseline and candidate; arm-matched correctness is not available';
+function bitgetFailureKind(message) {
+  if (message === oracleRefusalMessage) return 'oracle';
+  const tip = /^Bitget paired steady: complete tip rejected \(Rust\/TS=([^,]+), q=([^)]+)\); anchor cannot rescue it$/.exec(message);
+  const anchor = /^Bitget paired steady: complete anchor rejected \(Rust\/TS=([^,]+), q=([^)]+)\)$/.exec(message);
+  const match = tip ?? anchor;
+  return match && match.slice(1).every(value => Number.isFinite(Number(value)) && Number(value) > 0 && String(Number(value)) === value) ? 'cpu' : null;
+}
+
+/** Authenticate a failure upload, never permission to certify. CPU payloads
+ * still require full raw-cohort revalidation and a recomputed rejection. */
+export function authenticateBitgetPairedFailureArtifact({ artifact, artifactBytes, run, job, logBytes, expectedCheckoutSha }) {
+  const name = 'Rust / Bitget counterbalanced steady CPU';
+  const stepName = 'Retain counterbalanced Bitget steady evidence';
+  validateRun(run, CPU_WORKFLOW_ID);
+  validateJob(job, run, name);
+  check(run.run_attempt === 1 && job.run_attempt === 1 && job.conclusion === 'failure', 'paired verdict requires failed original Bitget job');
+  artifactIdentity(artifact, run, 'bitget-paired-steady');
+  uploaded(artifact, job, logBytes, stepName);
+  const failed = job.steps?.filter(step => step.conclusion === 'failure');
+  const measured = job.steps?.filter(step => step.name === 'Public counterbalanced Bitget steady CPU');
+  check(failed?.length === 1 && measured?.length === 1 && failed[0] === measured[0] &&
+    job.steps.every(step => step.status === 'completed' && ['success', 'failure', 'skipped'].includes(step.conclusion)),
+  'paired verdict must be the only failed terminal step');
+  const start = instant(failed[0].started_at), end = instant(failed[0].completed_at) + 1000;
+  check(instant(job.started_at) <= start && start < end && end <= instant(job.completed_at) + 1000, 'paired verdict step outside physical job');
+  const lines = logLines(logBytes).filter(line => bitgetFailureKind(line.text) !== null);
+  check(lines.length === 1 && lines[0].at !== null && lines[0].at >= start && lines[0].at < end, 'missing exact refusal inside failed step');
+  const checkout = loggedCheckout(job, logBytes);
+  check(gitId(expectedCheckoutSha) && checkout === expectedCheckoutSha &&
+    (run.event === 'pull_request' || checkout === run.head_sha), 'paired verdict checkout differs');
+  const raw = bytes(artifactBytes);
+  check(raw.length === artifact.size_in_bytes && `sha256:${sha(raw)}` === artifact.digest, 'paired verdict ZIP digest/length mismatch');
+  const receipt = Object.freeze({ schema: 1, artifactId: artifact.id, artifactSha256: artifact.digest.slice(7), runId: run.id,
+    attempt: 1, jobId: job.id, runnerId: job.runner_id, measuredCheckoutSha: checkout, logSha256: sha(bytes(logBytes)),
+    kind: bitgetFailureKind(lines[0].text), message: lines[0].text });
+  bitgetFailedUploads.add(receipt);
+  return receipt;
+}
+
+/** The existing oracle path must never accept a CPU rejection as its refusal. */
+export function authenticateBitgetOracleRefusalArtifact(input) {
+  const receipt = authenticateBitgetPairedFailureArtifact(input);
+  check(receipt.kind === 'oracle', 'expected exact oracle refusal');
   return receipt;
 }
 
@@ -200,10 +246,13 @@ export function formatMeasurementMarker(kind, key, at) {
 }
 
 /** Bind a case's payload clock window to literal markers in its physical log. */
-export function authenticateMeasurementWindow({ execution, key, job, logBytes }) {
+export function authenticateMeasurementWindow({ execution, key, job, logBytes, failureReceipt }) {
   check(hash(key) && execution && job && (/^Rust \/ (?:replay measurement|CPU remeasurement) \([a-z0-9-]+\)$/.test(job.name) ||
     job.name === 'Rust / Bitget counterbalanced steady CPU'), 'invalid physical measurement job/key');
-  check(integer(job.id) && integer(job.run_id) && integer(job.runner_id) && job.run_attempt === 1 && job.status === 'completed' && job.conclusion === 'success' && execution.attempt === 1 && execution.runId === String(job.run_id) && execution.jobId === String(job.id) && execution.runnerId === String(job.runner_id), 'measurement execution identity differs from API job');
+  const rejected = bitgetFailedUploads.has(failureReceipt) && failureReceipt.kind === 'cpu' &&
+    failureReceipt.jobId === job.id && failureReceipt.runId === job.run_id && failureReceipt.runnerId === job.runner_id &&
+    failureReceipt.measuredCheckoutSha === execution.measuredCheckoutSha && failureReceipt.logSha256 === sha(bytes(logBytes));
+  check(integer(job.id) && integer(job.run_id) && integer(job.runner_id) && job.run_attempt === 1 && job.status === 'completed' && (job.conclusion === 'success' || (job.conclusion === 'failure' && rejected)) && execution.attempt === 1 && execution.runId === String(job.run_id) && execution.jobId === String(job.id) && execution.runnerId === String(job.runner_id), 'measurement execution identity differs from API job');
   const start = instant(execution.startedAt), end = instant(execution.completedAt);
   check(start < end && execution.measuredCheckoutSha === loggedCheckout(job, logBytes), 'measurement time/source differs from physical checkout');
   const lines = logLines(logBytes), markers = ['BEGIN', 'END'].map((kind) => lines.map((line, index) => ({ ...line, index })).filter((line) => line.text === `CPU_CASE_${kind} ${key} ${kind === 'BEGIN' ? execution.startedAt : execution.completedAt}`));
@@ -211,9 +260,15 @@ export function authenticateMeasurementWindow({ execution, key, job, logBytes })
   // Also reject extra markers for this key with a substituted payload clock.
   check(lines.filter((line) => line.text.startsWith(`CPU_CASE_BEGIN ${key} `) || line.text.startsWith(`CPU_CASE_END ${key} `)).length === 2, 'substituted/duplicate case marker payload');
   const begin = markers[0][0], finish = markers[1][0];
-  check(begin.index < finish.index && begin.at !== null && finish.at !== null && start <= begin.at && begin.at <= end && end <= finish.at, 'public case marker ordering/time differs');
-  const candidates = (job.steps ?? []).filter((step) => /public/i.test(step.name ?? '') && step.status === 'completed' && step.conclusion === 'success').filter((step) => {
-    const window = successfulStep(job, step.name);
+  // Actions may buffer BEGIN until after execution ends; receipt clocks bound
+  // delivery, while the exact payload timestamps above order the execution.
+  check(begin.index < finish.index && begin.at !== null && finish.at !== null && start <= begin.at && begin.at <= finish.at && end <= finish.at, 'public case marker ordering/time differs');
+  const candidates = (job.steps ?? []).filter((step) => /public/i.test(step.name ?? '') && step.status === 'completed' &&
+    (step.conclusion === 'success' || (rejected && step.conclusion === 'failure' && step.name === 'Public counterbalanced Bitget steady CPU'))).filter((step) => {
+    const window = step.conclusion === 'success' ? successfulStep(job, step.name)
+      : { start: instant(step.started_at), end: instant(step.completed_at) + 1000 };
+    check(instant(job.started_at) <= window.start && window.start < window.end && window.end <= instant(job.completed_at) + 1000,
+      'measurement step outside physical job');
     return [start, end, begin.at, finish.at].every((at) => at >= window.start && at < window.end);
   });
   check(candidates.length === 1, 'case markers are outside one unique successful public step');
@@ -221,12 +276,13 @@ export function authenticateMeasurementWindow({ execution, key, job, logBytes })
 }
 
 export function requireGithubResponseSize(length, kind = 'metadata') {
-  check(['metadata', 'log', 'artifact', 'runtime-artifact'].includes(kind), 'invalid GitHub response kind');
-  const limit = kind === 'runtime-artifact' ? 4 * 1024 ** 3 : 512 * 1024 ** 2;
+  check(['metadata', 'log', 'artifact'].includes(kind), 'invalid GitHub response kind');
+  const limit = 512 * 1024 ** 2;
   check(integer(length) && length <= limit, 'empty/oversized GitHub response');
 }
 
 const GITHUB_TRANSPORT_ATTEMPTS = 3;
+const PAGINATION_PASSES = 3;
 const NETWORK_CODES = new Set(['EPIPE', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN',
   'ENOTFOUND', 'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',
   'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT']);
@@ -265,7 +321,7 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
         } else {
           check(response.status === 200, `GitHub evidence unavailable (${response.status})`);
           raw = Buffer.from(await response.arrayBuffer());
-          if (!raw.length && immutable && ['artifact', 'runtime-artifact'].includes(kind) && attempt === 0) {
+          if (!raw.length && immutable && kind === 'artifact' && attempt === 0) {
             retryReason = 'empty immutable artifact HTTP 200';
           } else {
             requireGithubResponseSize(raw.length, kind);
@@ -287,19 +343,27 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
     if (immutable) immutableResponses.set(path, Buffer.from(raw));
     return binary ? raw : parseCohortJson(raw);
   };
+  // A live run can still add jobs (runtime matrices) between page reads, so a
+  // changed total discards the pass and re-lists from page 1, at most three passes.
   const list = async (base, field, extra = '', maxPages = 128) => {
-    const result = [], seen = new Set(); let total;
-    for (let page = 1; page <= maxPages; page++) {
-      const data = await get(`${base}?${extra}per_page=100&page=${page}`);
-      check(Number.isSafeInteger(data.total_count) && data.total_count >= 0 && Array.isArray(data[field]) && data[field].length <= 100, 'invalid paginated response');
-      if (total === undefined) total = data.total_count;
-      check(total === data.total_count && total <= maxPages * 100, 'pagination changed/exceeds hard limit');
-      for (const row of data[field]) { check(integer(row.id) && !seen.has(row.id), 'duplicate paginated identity'); seen.add(row.id); result.push(row); }
-      check(result.length <= total, 'pagination count mismatch');
-      if (result.length === total) return result;
-      check(data[field].length === 100, 'truncated pagination');
+    for (let pass = 1; pass <= PAGINATION_PASSES; pass++) {
+      if (pass > 1) await sleep((pass - 1) * 2000);
+      const result = [], seen = new Set(); let total, changed = false;
+      for (let page = 1; page <= maxPages && !changed; page++) {
+        const data = await get(`${base}?${extra}per_page=100&page=${page}`);
+        check(Number.isSafeInteger(data.total_count) && data.total_count >= 0 && Array.isArray(data[field]) && data[field].length <= 100, 'invalid paginated response');
+        if (total === undefined) total = data.total_count;
+        check(data.total_count <= maxPages * 100, 'pagination exceeds hard limit');
+        if (total !== data.total_count) { changed = true; break; }
+        for (const row of data[field]) { check(integer(row.id) && !seen.has(row.id), 'duplicate paginated identity'); seen.add(row.id); result.push(row); }
+        check(result.length <= total, 'pagination count mismatch');
+        if (result.length === total) return result;
+        check(data[field].length === 100, 'truncated pagination');
+      }
+      if (!changed) throw new Error('CPU cohort: pagination hard limit');
+      if (pass < PAGINATION_PASSES) console.warn(`Re-listing ${base} from page 1 (pass ${pass + 1}/${PAGINATION_PASSES}): its total changed between pages`);
     }
-    throw new Error('CPU cohort: pagination hard limit');
+    throw new Error(`CPU cohort: pagination unstable after ${PAGINATION_PASSES} passes`);
   };
   const noteJobs = (jobs) => {
     for (const job of jobs) {

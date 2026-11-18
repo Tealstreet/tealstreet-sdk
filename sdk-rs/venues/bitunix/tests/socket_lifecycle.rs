@@ -42,8 +42,18 @@ fn ready() -> (TestEngine, Vec<(String, SocketId)>) {
                     context: Some(context),
                     ..
                 } => {
+                    let private = context.feed == "private";
                     sockets.push((context.feed, socket));
                     e.handle(0.0, Event::WsOpened { socket });
+                    if private {
+                        e.handle(
+                            0.0,
+                            Event::WsMessage {
+                                socket,
+                                text: r#"{"op":"login","data":{"result":true}}"#,
+                            },
+                        );
+                    }
                 }
                 Action::Http(r) if r.url.ends_with("/tickers") => {
                     e.handle(0.0, Event::HttpResponse { request: r.id, response: Response { status: 200, headers: "", body: r#"{"code":0,"data":[{"symbol":"T0USDT","last":"1","open":"1","markPrice":"1","baseVol":"1","quoteVol":"1"}]}"# } });
@@ -147,7 +157,7 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
                 now,
                 Event::WsMessage {
                     socket,
-                    text: r#"{"op":"pong"}"#,
+                    text: r#"{"op":"ping","pong":1793559951,"ping":1793559951}"#,
                 },
             );
             assert!(
@@ -174,6 +184,15 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
             now += 1.0;
         }
         sockets[index].1 = socket;
+        if feed == "private" {
+            e.handle(
+                now,
+                Event::WsMessage {
+                    socket,
+                    text: r#"{"op":"login","data":{"result":true}}"#,
+                },
+            );
+        }
         // Real traffic after a stable epoch resets only this feed.
         now += 31_000.0;
         keep_alive(&mut e, &sockets, index, now);
@@ -181,7 +200,7 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
             now,
             Event::WsMessage {
                 socket,
-                text: r#"{"op":"pong"}"#,
+                text: r#"{"op":"ping","pong":1793559951,"ping":1793559951}"#,
             },
         );
         safe_cex_engine::test_support::prepared_now(&mut e)
@@ -320,8 +339,23 @@ fn private_first_pong_gate_preserves_silence_but_expires_from_actual_traffic() {
     let (mut e, sockets) = ready();
     let original = sockets.iter().find(|(f, _)| f == "private").unwrap().1;
     let mut now = 1.0;
-    let (socket, mut watch) = reopen(&mut e, original, "private", &mut now);
+    let (socket, _) = reopen(&mut e, original, "private", &mut now);
     let opened = now;
+    e.handle(
+        now,
+        Event::WsMessage {
+            socket,
+            text: r#"{"op":"login","data":{"result":true}}"#,
+        },
+    );
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
+    let mut watch = timers(&actions)
+        .into_iter()
+        .find(|(_, at)| *at == now + 5000.0)
+        .unwrap()
+        .0;
     let mut pings = 0;
     // More than 45 seconds without any pong must remain compatible and ping.
     for elapsed in (5000..=60_000).step_by(5000) {
@@ -332,14 +366,14 @@ fn private_first_pong_gate_preserves_silence_but_expires_from_actual_traffic() {
                 .iter()
                 .any(|a| matches!(a, Action::WsClose { .. } | Action::WsConnect { .. }))
         );
-        pings += actions.iter().filter(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text == r#"{"op":"ping"}"#)).count();
+        pings += actions.iter().filter(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text.starts_with(r#"{"op":"ping","ping":"#))).count();
     }
     assert_eq!(pings, 4);
     e.handle(
         opened + 60_000.0,
         Event::WsMessage {
             socket,
-            text: r#"{"op":"pong"}"#,
+            text: r#"{"op":"ping","pong":1793559951,"ping":1793559951}"#,
         },
     );
     safe_cex_engine::test_support::prepared_now(&mut e)
@@ -364,14 +398,21 @@ fn private_first_pong_gate_preserves_silence_but_expires_from_actual_traffic() {
     let deadline = timers(&actions)[0].1;
     let fresh = reconnect(&mut e, timer, deadline, "private", true);
     e.handle(deadline, Event::WsOpened { socket: fresh });
+    e.handle(
+        deadline,
+        Event::WsMessage {
+            socket: fresh,
+            text: r#"{"op":"login","data":{"result":true}}"#,
+        },
+    );
     let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
         .into_iter()
         .collect();
-    watch = timers(&actions)[0].0;
+    watch = timers(&actions).last().unwrap().0;
     // A replacement epoch resets the pong gate without resetting retry state.
     let (_, actions) = fire_watch(&mut e, watch, deadline + 60_000.0);
     assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
-    assert!(actions.iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == fresh && text == r#"{"op":"ping"}"#)));
+    assert!(actions.iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == fresh && text.starts_with(r#"{"op":"ping","ping":"#))));
 }
 
 #[test]

@@ -39,6 +39,8 @@ pub struct Harness {
     pub progress_at_request: Vec<(RequestId, usize)>,
     pub startup_failures: Vec<VenueError>,
     pub deactivated: bool,
+    pub prepared_routes:
+        std::collections::HashMap<RequestId, (safe_cex_engine::request_context::Preparation, u64)>,
 }
 
 impl Harness {
@@ -77,6 +79,7 @@ impl Harness {
             progress_at_request: Vec::new(),
             startup_failures: Vec::new(),
             deactivated: false,
+            prepared_routes: std::collections::HashMap::new(),
         };
         harness.engine.start(harness.now);
         harness.collect();
@@ -84,9 +87,18 @@ impl Harness {
     }
 
     pub fn load_public(&mut self) {
-        self.respond("status=PreLaunch", 200, PRELAUNCH);
-        self.respond("/v5/market/instruments-info", 200, INSTRUMENTS);
-        self.respond("/v5/market/tickers", 200, TICKERS);
+        self.load_public_mapped(str::to_owned);
+    }
+
+    /// Public startup on the host's own clock: no envelope `time` calibrates it.
+    pub fn load_public_untimed(&mut self) {
+        self.load_public_mapped(untimed);
+    }
+
+    fn load_public_mapped(&mut self, answer: fn(&str) -> String) {
+        self.respond("status=PreLaunch", 200, &answer(PRELAUNCH));
+        self.respond("/v5/market/instruments-info", 200, &answer(INSTRUMENTS));
+        self.respond("/v5/market/tickers", 200, &answer(TICKERS));
         let socket = self.socket("/v5/public/linear").expect("public socket");
         self.event(Event::WsOpened { socket });
         self.flush_subscriptions();
@@ -98,7 +110,7 @@ impl Harness {
     }
 
     pub fn collect(&mut self) {
-        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
+        for action in prepared_actions(&mut self.engine, self.now, &mut self.prepared_routes) {
             if let Action::Notice(notice) = &action {
                 self.notices.push(notice.clone());
             }
@@ -114,9 +126,7 @@ impl Harness {
                 Action::RetireAddressSetup { .. } => {
                     panic!("unexpected address setup retirement")
                 }
-                Action::Sign { .. }
-                | Action::SignedOutbound { .. }
-                | Action::SignPayload { .. } => {
+                Action::Sign { .. } | Action::SignedOutbound { .. } => {
                     panic!("immediate fixture provider must materialize signing")
                 }
                 Action::WsConnect { headers, .. } if !headers.is_empty() => {
@@ -157,7 +167,7 @@ impl Harness {
                     self.done.push((command, Err(error.legacy_text())))
                 }
                 Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
-                Action::Notice(Notice::StartupFailed { error }) => {
+                Action::Notice(Notice::StartupFailed { error, .. }) => {
                     self.startup_failures.push(error)
                 }
                 Action::Notice(Notice::Deactivate) => {
@@ -205,7 +215,45 @@ impl Harness {
         self.requests.iter().any(|r| r.url.contains(path))
     }
 
+    pub fn await_request(&mut self, path: &str) {
+        for _ in 0..6 {
+            if self.has_request(path) {
+                break;
+            }
+            self.advance(200.0);
+        }
+    }
+
     pub fn take(&mut self, path: &str) -> HttpRequest {
+        // Existing response fixtures await the real pacing timer before taking a page.
+        if path.contains("order/history") || path.contains("orderStatus=") {
+            for _ in 0..4 {
+                if self.has_request(path) {
+                    break;
+                }
+                self.advance(250.0);
+            }
+        }
+        // Positive response fixtures await the production release clock; timing
+        // regressions use has_request before take, so early writes still fail.
+        let mutation = [
+            "/v5/order/create",
+            "/v5/order/create-batch",
+            "/v5/order/cancel",
+            "/v5/order/cancel-batch",
+            "/v5/order/cancel-all",
+            "/v5/order/amend",
+            "/v5/position/trading-stop",
+            "/v5/position/set-leverage",
+            "/v5/position/switch-isolated",
+            "/v5/account/set-margin-mode",
+            "/v5/position/switch-mode",
+        ]
+        .iter()
+        .any(|endpoint| endpoint.contains(path));
+        if mutation {
+            self.await_request(path);
+        }
         let index = self
             .requests
             .iter()
@@ -316,6 +364,22 @@ impl Harness {
     }
 }
 
+/// The fixture without its trailing envelope `time`, which would calibrate
+/// the protocol clock to the documented example's date.
+pub fn untimed(body: &str) -> String {
+    match body.rfind(r#","time":"#) {
+        Some(at)
+            if body[at + 8..]
+                .trim_end_matches('}')
+                .bytes()
+                .all(|b| b.is_ascii_digit()) =>
+        {
+            format!("{}}}", &body[..at])
+        }
+        _ => body.to_owned(),
+    }
+}
+
 pub fn order() -> safe_cex_engine::model::PlaceOrderOpts {
     safe_cex_engine::model::PlaceOrderOpts {
         symbol: "BTCUSDT".into(),
@@ -355,4 +419,145 @@ pub fn park_owners(h: &mut Harness) -> Vec<HttpRequest> {
         }
     }
     reads
+}
+
+/// Retain real prepared routes across engine-owned pacing waits, then Bind/Claim.
+fn prepared_actions(
+    engine: &mut Engine<BybitLinear>,
+    now: f64,
+    routes: &mut std::collections::HashMap<
+        RequestId,
+        (safe_cex_engine::request_context::Preparation, u64),
+    >,
+) -> Vec<Action> {
+    use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+    engine.prepare_dispatch(now);
+    let mut queue = std::collections::VecDeque::from(engine.drain_actions().collect::<Vec<_>>());
+    let mut output = Vec::new();
+    let mut visits = 0;
+    while let Some(action) = queue.pop_front() {
+        visits += 1;
+        assert!(visits <= 65_536, "prepared fixture did not settle");
+        match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => {
+                    if engine.http_preparation_pending(preparation) {
+                        assert_eq!(preparation.attempt().request, request.id);
+                        assert!(
+                            routes
+                                .insert(request.id, (preparation, request.id.0))
+                                .is_none()
+                        );
+                        engine.http_prepared(
+                            now,
+                            preparation,
+                            Prepared {
+                                id: request.id.0,
+                                expires_at: None,
+                            },
+                        );
+                    }
+                }
+                HttpAction::Bind {
+                    preparation,
+                    permit,
+                    request,
+                } => {
+                    assert_eq!(
+                        routes.remove(&request.id),
+                        Some((preparation, permit.prepared_id()))
+                    );
+                    match engine.claim_http(now, permit) {
+                        Ok(Claim::Released(_)) => output.push(Action::Http(request)),
+                        Ok(Claim::WaitUntil(_)) => panic!("fixture does not hold a transport Bind"),
+                        Err(_) => {}
+                    }
+                }
+                HttpAction::Cancel { preparation, .. } => {
+                    let request = preparation.attempt().request;
+                    if routes
+                        .get(&request)
+                        .is_some_and(|(token, _)| *token == preparation)
+                    {
+                        routes.remove(&request);
+                    }
+                }
+                HttpAction::BindGroup { .. } => panic!("Bybit has no atomic HTTP group"),
+            },
+            action => output.push(action),
+        }
+        for action in engine.drain_actions().collect::<Vec<_>>().into_iter().rev() {
+            queue.push_front(action);
+        }
+    }
+    output
+}
+
+pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+
+pub const ENGINE_UNKNOWN_AFTER_REFUSAL_TEXT: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+
+pub fn assert_unknown_pin(
+    h: &mut Harness,
+    command: u32,
+    placed: &[&str],
+    unknown: usize,
+    count: usize,
+) {
+    assert_unknown_pin_with_text(h, command, placed, unknown, count, ENGINE_UNKNOWN_TEXT);
+}
+
+pub fn assert_unknown_pin_with_text(
+    h: &mut Harness,
+    command: u32,
+    placed: &[&str],
+    unknown: usize,
+    count: usize,
+    expected_text: &str,
+) {
+    use safe_cex_engine::write_plan::ElementResult;
+    h.advance(1_201.0);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.method == safe_cex_engine::Method::Post),
+        "unknown released a suffix/fallback/retry"
+    );
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            Notice::CommandFailed { command: id, error } if *id == command => Some(error),
+            _ => None,
+        })
+        .expect("unknown telemetry event");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(error.message.contains(expected_text), "{error:?}");
+    let elements = error.elements.as_ref().expect("unknown journal");
+    assert_eq!(elements.len(), count);
+    assert!(matches!(
+        &elements[unknown].result,
+        ElementResult::Unknown { .. }
+    ));
+    let ids: Vec<_> = elements
+        .iter()
+        .flat_map(|row| match &row.result {
+            ElementResult::Placed { order_ids } => order_ids.iter().map(String::as_str).collect(),
+            _ => Vec::new(),
+        })
+        .collect();
+    assert_eq!(ids, placed);
+    for row in elements.iter().skip(unknown + 1) {
+        if !matches!(
+            row.result,
+            ElementResult::Placed { .. } | ElementResult::Unknown { .. }
+        ) {
+            assert!(matches!(row.result, ElementResult::NotSent { .. }));
+        }
+    }
+    assert!(h.unknown.contains(&command));
 }

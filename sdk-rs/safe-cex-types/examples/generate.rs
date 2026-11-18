@@ -347,6 +347,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     AccountGreeks::export_all(&config)?;
     Candle::export_all(&config)?;
     Execution::export_all(&config)?;
+    OrderFillEvent::export_all(&config)?;
     OrderBookOrders::export_all(&config)?;
     OrderBook::export_all(&config)?;
     PlaceOrderOpts::export_all(&config)?;
@@ -456,7 +457,6 @@ mod tests {
             ("HTTPError", "HttpError"),
             ("rate__limit", "RateLimit"),
             ("lighter-robinhood", "LighterRobinhood"),
-            ("tealstreet-dex", "TealstreetDex"),
             ("in-process", "InProcess"),
             ("-rate__--limit_", "RateLimit"),
             // Keyword-shaped literals derive legal Pascal identifiers.

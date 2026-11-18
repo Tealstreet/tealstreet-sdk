@@ -1,4 +1,4 @@
-//! Host-only packet paths resolved by safe-cex's TypeScript routing resolver.
+//! Host-only packet paths: applied here, resolved by `resolve` (a port of safe-cex's TS resolver).
 use crate::{Events, HostEvent};
 use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
+
+pub mod resolve;
 
 pub type ProxyTokenFuture = Pin<Box<dyn Future<Output = Result<String, String>> + Send>>;
 /// Resolve a current account-context token for each operation; never put JWTs in a plan.
@@ -125,6 +127,11 @@ pub struct PublicWsRoute {
     pub route: WsRoute,
 }
 
+/// The one method read routing makes: a GET may take a read or public-read egress.
+fn is_get(request: &HttpRequest) -> bool {
+    request.method == safe_cex_engine::Method::Get
+}
+
 /// Serializable output of TS resolution. This host has no venue routing table.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,6 +143,9 @@ pub struct RoutingPlan {
     pub read_http: Option<HttpRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_public_http: Option<HttpRoute>,
+    /// A bypassed read key's egress: managed public GETs only, never a signed request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_read_http: Option<HttpRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_header: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -160,6 +170,8 @@ pub(crate) struct RoutingState {
     pub plan: RoutingPlan,
     pub tokens: ProxyTokenProvider,
     sockets: Mutex<HashMap<String, SocketAttempts>>,
+    /// The account's HOW tunnel sockets, one per route, shared by its requests.
+    pub how: crate::how_pool::HowPool,
 }
 
 #[derive(Default)]
@@ -186,6 +198,7 @@ impl RoutingState {
             plan,
             tokens,
             sockets: Mutex::new(HashMap::new()),
+            how: crate::how_pool::HowPool::default(),
         }
     }
 
@@ -199,7 +212,7 @@ impl RoutingState {
                 .iter()
                 .any(|(name, value)| name.eq_ignore_ascii_case(header) && !value.is_empty())
         });
-        let read = request.method == safe_cex_engine::Method::Get
+        let read = is_get(request)
             && (self.plan.read_public
                 || self
                     .plan
@@ -251,6 +264,12 @@ impl RoutingState {
             .filter(|_| request.route != Some(safe_cex_engine::RequestRoute::Secondary))
         {
             return Ok(route);
+        }
+        if intent == RoutingIntent::Public
+            && is_get(request)
+            && let Some(route) = &self.plan.public_read_http
+        {
+            return Ok(route.clone());
         }
         match intent {
             RoutingIntent::Primary => Ok(self.plan.http.clone()),
@@ -457,11 +476,11 @@ pub(crate) fn insert_header(headers: &mut Vec<(String, String)>, name: String, v
 pub(crate) type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 #[derive(Deserialize)]
-struct TunnelMessage {
+pub(crate) struct TunnelMessage {
     #[serde(rename = "type")]
-    kind: String,
+    pub(crate) kind: String,
     #[serde(default)]
-    nonce: Option<String>,
+    pub(crate) nonce: Option<String>,
     #[serde(default)]
     status: Option<String>,
     #[serde(default)]
@@ -574,12 +593,15 @@ struct HttpArgument<'a> {
     data: Box<RawValue>,
 }
 
+/// One tunnel write may take this long; a stalled one is a failed write.
+const SOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
 async fn send(socket: &mut Socket, message: &impl Serialize) -> Result<(), String> {
     let text = serde_json::to_string(message).map_err(|error| error.to_string())?;
-    socket
-        .send(Message::text(text))
-        .await
-        .map_err(|error| error.to_string())
+    match tokio::time::timeout(SOCKET_WRITE_TIMEOUT, socket.send(Message::text(text))).await {
+        Ok(sent) => sent.map_err(|error| error.to_string()),
+        Err(_) => Err("tunnel write timed out".into()),
+    }
 }
 
 /// Return only protocol data; websocket ping frames are answered while waiting.
@@ -593,7 +615,10 @@ async fn receive(socket: &mut Socket) -> Result<(TunnelMessage, Option<Vec<u8>>)
             }
             Some(Ok(Message::Binary(bytes))) => return decode_binary(&bytes),
             Some(Ok(Message::Ping(_))) => {
-                socket.flush().await.map_err(|error| error.to_string())?
+                match tokio::time::timeout(SOCKET_WRITE_TIMEOUT, socket.flush()).await {
+                    Ok(flushed) => flushed.map_err(|error| error.to_string())?,
+                    Err(_) => return Err("tunnel write timed out".into()),
+                }
             }
             Some(Ok(Message::Close(_))) | None => return Err("tunnel closed".into()),
             Some(Err(error)) => return Err(error.to_string()),
@@ -602,7 +627,7 @@ async fn receive(socket: &mut Socket) -> Result<(TunnelMessage, Option<Vec<u8>>)
     }
 }
 
-fn decode_binary(bytes: &[u8]) -> Result<(TunnelMessage, Option<Vec<u8>>), String> {
+pub(crate) fn decode_binary(bytes: &[u8]) -> Result<(TunnelMessage, Option<Vec<u8>>), String> {
     if bytes.len() < 8 || &bytes[..4] != b"TSB1" {
         return Err("invalid tunnel binary prefix".into());
     }
@@ -624,7 +649,7 @@ fn decode_binary(bytes: &[u8]) -> Result<(TunnelMessage, Option<Vec<u8>>), Strin
     Ok((message, Some(bytes[8 + header_len..].to_vec())))
 }
 
-async fn ping(socket: &mut Socket) -> Result<(), String> {
+pub(crate) async fn ping(socket: &mut Socket) -> Result<(), String> {
     send(
         socket,
         &Ping {
@@ -775,52 +800,51 @@ pub(crate) fn http_packet(
     .map_err(|_| "Invalid HTTP tunnel packet".into())
 }
 
-pub(crate) async fn receive_http(
-    socket: &mut Socket,
-    request: RequestId,
-    events: &Events,
-) -> Result<(), String> {
-    let nonce = format!("native-{}", request.0);
-    loop {
-        let (message, binary) = receive(socket).await?;
-        if message.kind == "heartbeat" {
-            ping(socket).await?;
-        }
-        if message.kind != "rpc.http" || message.nonce.as_deref() != Some(&nonce) {
-            continue;
-        }
-        let response = message.data.ok_or("tunnel response missing data")?;
-        if response.error.is_some() {
-            return Err("tunnel request failed".into());
-        }
-        let status = response.status.ok_or("tunnel response missing status")?;
-        let mut response_headers = Vec::new();
-        for (name, value) in response.headers {
-            response_headers.push(format!("{name}: {}", value.js_string()));
-        }
-        let body = if let Some(binary) = binary {
-            gunzip(&binary)?
-        } else if response.data_encoding.as_deref() == Some("gzip+base64") {
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(
-                    response
-                        .data_encoded
-                        .ok_or("tunnel response missing encoded body")?,
-                )
-                .map_err(|error| error.to_string())?;
-            gunzip(&bytes)?
-        } else if let Some(raw) = response.data_raw {
-            raw.into_bytes()
-        } else if let Some(data) = response.data {
-            serde_json::from_str::<String>(data.get())
-                .map(String::into_bytes)
-                .map_err(|_| "tunnel response has no raw body".to_owned())?
-        } else {
-            return Err("tunnel response has no raw body".into());
-        };
-        report_response(request, status, response_headers.join("\n"), &body, events);
-        return Ok(());
+/// The tunnel's own words: a JSON string as text, anything else as sent, bounded.
+fn tunnel_error_text(error: &RawValue) -> String {
+    let text =
+        serde_json::from_str::<String>(error.get()).unwrap_or_else(|_| error.get().to_owned());
+    text.chars().take(200).collect()
+}
+
+/// An `rpc.http` answer's status, header block and body, or the tunnel's error.
+pub(crate) fn http_response(
+    message: TunnelMessage,
+    binary: Option<Vec<u8>>,
+) -> Result<(u16, String, Vec<u8>), String> {
+    let response = message.data.ok_or("tunnel response missing data")?;
+    if let Some(error) = response.error {
+        return Err(format!(
+            "tunnel request failed: {}",
+            tunnel_error_text(&error)
+        ));
     }
+    let status = response.status.ok_or("tunnel response missing status")?;
+    let mut response_headers = Vec::new();
+    for (name, value) in response.headers {
+        response_headers.push(format!("{name}: {}", value.js_string()));
+    }
+    let body = if let Some(binary) = binary {
+        gunzip(&binary)?
+    } else if response.data_encoding.as_deref() == Some("gzip+base64") {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(
+                response
+                    .data_encoded
+                    .ok_or("tunnel response missing encoded body")?,
+            )
+            .map_err(|error| error.to_string())?;
+        gunzip(&bytes)?
+    } else if let Some(raw) = response.data_raw {
+        raw.into_bytes()
+    } else if let Some(data) = response.data {
+        serde_json::from_str::<String>(data.get())
+            .map(String::into_bytes)
+            .map_err(|_| "tunnel response has no raw body".to_owned())?
+    } else {
+        return Err("tunnel response has no raw body".into());
+    };
+    Ok((status, response_headers.join("\n"), body))
 }
 
 fn gunzip(bytes: &[u8]) -> Result<Vec<u8>, String> {
@@ -831,7 +855,13 @@ fn gunzip(bytes: &[u8]) -> Result<Vec<u8>, String> {
     Ok(body)
 }
 
-fn report_response(request: RequestId, status: u16, headers: String, body: &[u8], events: &Events) {
+pub(crate) fn report_response(
+    request: RequestId,
+    status: u16,
+    headers: String,
+    body: &[u8],
+    events: &Events,
+) {
     let _ = events.send(HostEvent::HttpStart {
         request,
         status,
@@ -845,6 +875,16 @@ fn report_response(request: RequestId, status: u16, headers: String, body: &[u8]
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_tunnel_error_keeps_its_text() {
+        let text = |json: &str| {
+            let raw: Box<serde_json::value::RawValue> = serde_json::from_str(json).unwrap();
+            super::tunnel_error_text(&raw)
+        };
+        assert_eq!(text(r#""upstream refused""#), "upstream refused");
+        assert_eq!(text(r#"{"code":5}"#), r#"{"code":5}"#);
+    }
+
     use super::*;
     use safe_cex_engine::{Method, RequestId};
 
@@ -951,6 +991,41 @@ mod tests {
                 .managed_http(&packet, RoutingIntent::Secondary)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn a_bypassed_read_egress_carries_only_managed_public_gets() {
+        use safe_cex_engine::request_context::RoutingIntent;
+        let route = |prefix: &str| HttpRoute {
+            prefix: prefix.into(),
+            ..HttpRoute::default()
+        };
+        let state = state(RoutingPlan {
+            http: route("account"),
+            public_read_http: Some(route("read-egress")),
+            ..RoutingPlan::default()
+        });
+        let request = |method| HttpRequest {
+            id: RequestId(0),
+            method,
+            route: None,
+            timeout_ms: None,
+            url: "https://venue.invalid/public".into(),
+            headers: vec![],
+            signer_headers: vec![],
+            body: None,
+        };
+        let prefix = |method, intent| state.managed_http(&request(method), intent).unwrap().prefix;
+        assert_eq!(prefix(Method::Get, RoutingIntent::Public), "read-egress");
+        assert_eq!(prefix(Method::Post, RoutingIntent::Public), "account");
+        assert_eq!(prefix(Method::Get, RoutingIntent::Primary), "account");
+        assert!(
+            state
+                .managed_http(&request(Method::Get), RoutingIntent::Secondary)
+                .is_err()
+        );
+        // Header-inferred requests never take it.
+        assert_eq!(state.http(&request(Method::Get)).unwrap().prefix, "account");
     }
 
     #[test]
@@ -1354,7 +1429,7 @@ mod tests {
 
         let examples: Vec<Example<'static>> =
             serde_json::from_str(include_str!("../tests/fixtures/routing-plans.json")).unwrap();
-        assert_eq!(examples.len(), 76);
+        assert_eq!(examples.len(), 72);
         for example in examples {
             let state = state(example.plan);
             for http in example.http {

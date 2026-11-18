@@ -2,10 +2,22 @@ import type { EngineEvent } from '@tealstreet/safe-cex-wasm/host';
 import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/wire';
 import type { Axios, AxiosInstance } from 'axios';
 import type { TinyEmitter } from 'tiny-emitter';
+import type { JoinProofResponse } from '../joinProof.types';
 import type { PositionRecord } from '../journal/position.types';
 import type { Store } from '../store/store.interface';
+import type { WorkerFrameRejection } from '../store/workerFrameRecoveryScopes';
 import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';
 import type { HttpFailureRecord } from '../utils/httpFailureContext';
+import type {
+  StoreWorkerOHLCVFrameRejection,
+  StoreWorkerOrderBookFrameRejection,
+} from '../webworker/StoreWorkerPayload';
+import type {
+  ClientOrderIdPlaceOrderOpts,
+  ClientOrderIdRule,
+  ClientOrderLookup,
+  PlacedOrderRef,
+} from './clientOrderId';
 
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
@@ -14,13 +26,17 @@ import uniq from 'lodash/uniq';
 import { nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
+import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { sleep } from '@tealstreet/sleep/src/sleep';
-import { classifiedError, deserializeCommandError, exchangeErrorTags } from '../commandOutcome';
+import { classifiedError, deserializeCommandError, exchangeErrorTags, markErrorReported } from '../commandOutcome';
+import { workerErrorProtectionTags } from '../utils/workerErrorProtectionTags';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
-import { chaserOrderUpdates } from '../webworker/postProcessors/ChaserOrderEnrichmentPostprocessor';
-import { buildFoldedPositionRecords } from '../journal/buildRecords';
 import { withHistoryCompleteness } from '../historyCompleteness';
+import { buildFoldedPositionRecords } from '../journal/buildRecords';
+import { FrameApplier, FrameApplyError } from '../store/frameApplier';
+import { WorkerFrameRecoveryScopes } from '../store/workerFrameRecoveryScopes';
+import { reportException } from '../telemetry';
 import {
   AccountGreeks,
   Candle,
@@ -37,6 +53,7 @@ import {
   IncomeRecord,
   LogSeverity,
   Market,
+  NukeResult,
   OHLCVOptions,
   OHLCVSOptions,
   OptionChainQuery,
@@ -45,6 +62,7 @@ import {
   OrderBook,
   OrderHistoryOptions,
   OrderSide,
+  OrderStatus,
   OrderType,
   PlaceOrderOpts,
   Position,
@@ -59,10 +77,13 @@ import {
   ValidateAccountResult,
 } from '../types';
 import { formatErrorForSentry } from '../utils/axiosErrorEnhancer';
+import { diagnosticConsole } from '../utils/diagnosticRedaction';
 import { readHttpFailureContext, recordHttpFailure } from '../utils/httpFailureContext';
 import { adjust } from '../utils/safe-math';
-import { getTickIntervalMultiplier } from '../utils/tickIntervalOverride';
 import { signHttpCapture } from '../utils/signHttpCapture';
+import { getTickIntervalMultiplier } from '../utils/tickIntervalOverride';
+import { chaserOrderUpdates } from '../webworker/postProcessors/ChaserOrderEnrichmentPostprocessor';
+import { claimWriteTiming, emitWriteTiming, TIMED_WRITE_METHODS } from '../writeTiming';
 import { BaseWebSocket } from './base.ws';
 import {
   clientOrderIdShapeMessage,
@@ -70,17 +91,11 @@ import {
   defaultMintCandidates,
   isRegularClientOrderShape,
   orderCarriesClientOrderId,
-  type ClientOrderIdPlaceOrderOpts,
-  type ClientOrderLookup,
-  type ClientOrderIdRule,
-  type PlacedOrderRef,
 } from './clientOrderId';
-import { ExternalPublicDataProvider } from './external-public-data';
-import { reportException } from '../telemetry';
-import { InProcessPublicDataProvider } from './in-process-public-data';
-import { Frame } from '@tealstreet/safe-cex-wasm/wire';
-import { FrameApplier, FrameApplyError } from '../store/frameApplier';
 import { ExchangeEmitter } from './exchangeEmitter';
+import { ExternalPublicDataProvider } from './external-public-data';
+import { InProcessPublicDataProvider } from './in-process-public-data';
+import { startupDiagnosticTags } from './rust/startupDiagnostics';
 
 const normalizeSymbols = (symbols: string[]): string[] => {
   const deduped = new Set<string>();
@@ -177,7 +192,8 @@ export const summarizeSocketHealth = (
   const privateHealthy =
     privateSockets.every((socket) => socket.isRecoveryComplete !== false) &&
     (initializedPrivateSockets.length === 0 || initializedPrivateSockets.some((s) => s.isHealthy));
-  const privateTimestamps = initializedPrivateSockets.map((s) => s.lastMessageTimestamp || 0);
+  // Reconnect resets initialization, not the last message's page-clock timestamp.
+  const privateTimestamps = privateSockets.map((s) => s.lastMessageTimestamp || 0);
   const privateLastMessage = privateTimestamps.length > 0 ? Math.max(...privateTimestamps) || undefined : undefined;
 
   return {
@@ -301,7 +317,10 @@ export const CAPABILITY_METHODS = {
 } as const satisfies Record<string, BaseCapabilityMethod>;
 
 /** What this venue can answer. The only supported way to ask; never inspect the methods. */
-export type ExchangeCapabilities = Record<keyof typeof CAPABILITY_METHODS, boolean>;
+export type ExchangeCapabilities = Record<keyof typeof CAPABILITY_METHODS, boolean> & Partial<EngineCapabilities>;
+
+export type OrderBookFrameRejection = { stream: 'orderBook'; symbol: string; error: unknown };
+export type OHLCVFrameRejection = { stream: 'ohlcv'; symbol: string; interval: string; error: unknown };
 
 export type EngineSnapshot = {
   frame: ArrayBuffer;
@@ -328,6 +347,15 @@ export const WORKER_FORWARDED_METHODS = [
   'fetchHistoricalOrders',
   'fetchIncomeHistory',
   'fetchIncomeHistoryRange',
+  // Account settings and engine reads: a keyless mirror has neither the engine nor the key.
+  'setLeverage',
+  'setAllLeverage',
+  'changeMarginType',
+  'changePositionMode',
+  'updateSymbolMetadata',
+  'fetchOptionChain',
+  'fetchOptionExpiries',
+  'fetchAccountGreeks',
 ] as const;
 
 export type WorkerForwardedMethod = (typeof WORKER_FORWARDED_METHODS)[number];
@@ -338,18 +366,39 @@ export type WorkerForwardedMethod = (typeof WORKER_FORWARDED_METHODS)[number];
  */
 export const WORKER_OPTIONAL_METHODS = [
   'fetchHistoricalPositions',
+  // Rust raw closed-position rows, which a main-thread mirror maps into its journal.
+  'fetchClosedPositions',
   'changeAccountTier',
   'fetchAccountTier',
   'fetchEngineCapabilities',
   // Rust native account reads; a main-thread mirror asks the worker's engine.
+  'getAccount',
   'fetchPositions',
+  'readPositions',
   'fetchBalance',
   'fetchPositionMode',
+  // Rust-only engine methods a mirror forwards whole.
+  'fetchStpMode',
+  'changeStpMode',
+  'fetchOrderBook',
+  // A mirror answers these from its frame-fed rails and asks the worker only for a venue read.
+  'fetchSymbolMaxLeverage',
+  'fetchLeverageForSymbol',
+  // A frame-fed main engine runs a nuke's legs itself, after the data source stops its algos.
+  'stopAccountAlgos',
+  // ...and asks it to re-read the settings that engine just changed.
+  'refreshAccountSettings',
+  // ...and, while it holds an uncertain write, for orders from a fresh read.
+  'refreshAccountOrders',
 ] as const;
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'refreshMarkets',
+  // Refresh RPCs re-read venue state; reconciliation does not authorize a venue write.
+  'refreshAccountSettings',
+  'refreshAccountOrders',
   'fetchPositions',
+  'readPositions',
   'fetchBalance',
   'fetchPositionMode',
   'findOrderByClientOrderId',
@@ -360,16 +409,24 @@ const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'fetchIncomeHistory',
   'fetchIncomeHistoryRange',
   'fetchHistoricalPositions',
+  'fetchClosedPositions',
   'fetchAccountTier',
   'fetchEngineCapabilities',
+  'getAccount',
+  'fetchStpMode',
+  'fetchLeverageForSymbol',
+  'fetchSymbolMaxLeverage',
+  'updateSymbolMetadata',
+  'fetchOrderBook',
+  'fetchOptionChain',
+  'fetchOptionExpiries',
+  'fetchAccountGreeks',
 ]);
 
 /** Worker RPCs that dispatch venue writes: an interrupted one has an unknown outcome. */
 export const WORKER_WRITE_METHODS: ReadonlySet<string> = new Set<string>([
-  'setLeverage',
+  // Routed by its own method after validating the time; see RustEngineExchange.scheduleCancel.
   'scheduleCancel',
-  'changePositionMode',
-  'changeMarginType',
   ...[...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].filter((method) => !WORKER_READ_METHODS.has(method)),
 ]);
 
@@ -387,10 +444,7 @@ export const workerCallClientOrderIds = (method: unknown, args: unknown): string
 
 export type CallableMethodsInWorker =
   | WorkerForwardedMethod
-  | 'setLeverage'
   | 'scheduleCancel'
-  | 'changePositionMode'
-  | 'changeMarginType'
   | 'fetchAndSetPrivateSnapshot'
   | 'fetchEngineSnapshot'
   | 'reconnect'
@@ -399,13 +453,14 @@ export type CallableMethodsInWorker =
   | 'fetchHistoricalFills'
   | 'fetchOrders'
   | 'fetchAndSetOrders'
-  | 'updateSymbolMetadata'
   | 'fetchLastLogsFromWebsockets'
   | 'removeOrders'
   | 'fetchIncomeHistory'
   | 'fetchIncomeHistoryRange'
   | 'fetchHistoricalOrders'
   | 'fetchClosedPnl';
+
+export type OHLCVWebworkerOptions = Pick<OHLCVOptions, 'symbol' | 'interval'> & { reset?: boolean };
 
 export interface Exchange {
   // udf endpoints for TV, if supported
@@ -464,9 +519,10 @@ export interface Exchange {
   fetchOrders: (symbols?: string[]) => Promise<Order[]>;
   syncAccountState: () => void;
   start: () => Promise<void>;
-  nuke: (tries?: number) => Promise<void>;
-  nukePositions: (tries?: number) => Promise<void>;
-  nukeOrders: () => Promise<void>;
+  // Rust accounts resolve with the algos the nuke stopped first.
+  nuke: (tries?: number) => Promise<void | NukeResult>;
+  nukePositions: (tries?: number) => Promise<void | NukeResult>;
+  nukeOrders: () => Promise<void | NukeResult>;
   changePositionMode: (hedged: boolean, symbol?: string) => Promise<void>;
   changeMarginType: (isolated: boolean, symbol?: string) => Promise<void>;
   setLeverage: (symbol: string, leverage: number, side?: PositionSide) => Promise<void>;
@@ -500,11 +556,30 @@ export interface Exchange {
   fetchPublicTrades: (symbol: string, limit?: number) => Promise<PublicTrade[]>;
   getActiveTickerSymbols: () => string[];
   setActiveTickerSymbols: (symbols: string[]) => void;
-  listenOHLCV: (o: OHLCVOptions, c: (c: Candle) => void) => () => void;
+  listenOHLCV: (
+    o: OHLCVOptions,
+    c: (c: Candle) => void,
+    onRejection?: (signal: OHLCVFrameRejection) => void,
+  ) => () => void;
   listenOHLCVs: (o: OHLCVSOptions, c: (c: Candle & { symbol: string; interval: Timeframe }) => void) => void;
-  listenOrderBook: (s: string, c: (o: OrderBook) => void) => () => void;
-  listenOHLCVWebworker: (o: Pick<OHLCVOptions, 'symbol' | 'interval'>, c: (c: Candle) => void) => () => void;
-  listenOrderBookWebworker: (s: string, c: (o: OrderBook) => void) => () => void;
+  listenOrderBook: (
+    s: string,
+    c: (o: OrderBook) => void,
+    onRejection?: (signal: OrderBookFrameRejection) => void,
+  ) => () => void;
+  /** `reset`: a forced resubscribe; the venue re-sends its subscribe for a stream gone dead. */
+  listenOHLCVWebworker: (
+    o: OHLCVWebworkerOptions,
+    c: (c: Candle) => void,
+    onRejection?: (signal: OHLCVFrameRejection) => void,
+  ) => () => void;
+  /** Re-sends the venue's native subscribe for a live candle stream, where the venue can. */
+  repairOHLCV?: (o: Pick<OHLCVOptions, 'symbol' | 'interval'>) => void;
+  listenOrderBookWebworker: (
+    s: string,
+    c: (o: OrderBook) => void,
+    onRejection?: (signal: OrderBookFrameRejection) => void,
+  ) => () => void;
   updatePositionsInWebworker: (symbols?: string[]) => Promise<void>;
   callMethodInWorker: <M extends CallableMethodsInWorker>(
     method: M,
@@ -538,6 +613,9 @@ export interface Exchange {
    * Returns the signature string for WebSocket authentication.
    */
   signWsAuth: (request: RemoteSignerRequest) => Promise<RemoteSignerResponse>;
+
+  /** Sign only the closed server admission challenge, preserving its raw JSON. */
+  signJoinProof?: (requestJson: string) => Promise<JoinProofResponse>;
 }
 
 export type AccountMarketOverlay = (markets: Market[]) => Market[];
@@ -629,7 +707,12 @@ export class BaseExchange implements Exchange {
 
     this.on = this.emitter.on.bind(this.emitter);
     this.once = this.emitter.once.bind(this.emitter);
-    this.off = this.emitter.off.bind(this.emitter);
+    this.off = (event, handler) => {
+      this.emitter.off(event, handler);
+      // A kept page engine outlives its worker: nothing can answer what that worker held.
+      if (event === 'callMethod' && !this.emitter.hasListeners('callMethod')) this.abandonWorkerCalls();
+      return this.emitter;
+    };
 
     this.unsubscribeFromStore = this.store.subscribe((data) => {
       // Frames carry native orders; chaser tags arrive independently with the
@@ -763,7 +846,7 @@ export class BaseExchange implements Exchange {
   get capabilities(): ExchangeCapabilities {
     const answers = {} as ExchangeCapabilities;
     for (const [capability, method] of Object.entries(CAPABILITY_METHODS) as Array<
-      [keyof ExchangeCapabilities, BaseCapabilityMethod]
+      [keyof typeof CAPABILITY_METHODS, BaseCapabilityMethod]
     >)
       answers[capability] = !isInertCapability(this[method], method);
     return answers;
@@ -997,7 +1080,7 @@ export class BaseExchange implements Exchange {
 
   log = (message: string, severity: LogSeverity = LogSeverity.Info, engineEvent?: EngineEvent) => {
     if (this.options.tuning?.consoleLogging !== false) {
-      console.log(message, severity);
+      diagnosticConsole.log(message, severity);
     }
     if (engineEvent) this.emitter.emit('log', `[${this.name}] ${message}`, severity, engineEvent);
     else this.emitter.emit('log', `[${this.name}] ${message}`, severity);
@@ -1049,9 +1132,13 @@ export class BaseExchange implements Exchange {
   };
 
   setAllLeverage = async (inputLeverage: number) => {
-    await forEachSeries(this.store.positions, async (position) => {
+    const symbols = new Set([
+      ...this.store.positions.map((position) => position.symbol),
+      ...Object.values(this.store.positionSettings ?? {}).map((settings) => settings.symbol),
+    ]);
+    await forEachSeries([...symbols], async (symbol) => {
       if (!this.isDisposed) {
-        await this.setLeverage(position.symbol, inputLeverage);
+        await this.setLeverage(symbol, inputLeverage);
       }
     });
   };
@@ -1107,7 +1194,11 @@ export class BaseExchange implements Exchange {
     const notFound: ClientOrderLookup = { found: false, definitive: false };
     // A venue that refuses caller IDs never sent one; some (Hyperliquid) also write the store while fetching.
     if (!this.clientOrderIdRule) return notFound;
-    const matches = (order: Order) => order.symbol === symbol && orderCarriesClientOrderId(order, clientOrderId);
+    // A Creating row can be this app's own placeholder for a send still in flight; found means the venue has it.
+    const matches = (order: Order) =>
+      order.symbol === symbol &&
+      order.status !== OrderStatus.Creating &&
+      orderCarriesClientOrderId(order, clientOrderId);
     const inStore = this.store.orders.find(matches);
     if (inStore) return { found: true, order: inStore };
     const order = (await this.fetchOrders([symbol])).find(matches);
@@ -1145,7 +1236,9 @@ export class BaseExchange implements Exchange {
       const clientOrderId = this.resolveCallerClientOrderId(order);
       if (clientOrderId === undefined) continue;
       if (seen.has(clientOrderId)) {
-        this.rejectPreflight(`${this.clientOrderIdRule!.label} clientOrderId ${clientOrderId} is duplicated in one batch`);
+        this.rejectPreflight(
+          `${this.clientOrderIdRule!.label} clientOrderId ${clientOrderId} is duplicated in one batch`,
+        );
       }
       seen.add(clientOrderId);
     }
@@ -1207,8 +1300,8 @@ export class BaseExchange implements Exchange {
     await Promise.reject(new Error('Not implemented'));
   };
 
-  fetchOHLCV = async (_opts: OHLCVOptions) => {
-    return await Promise.resolve([] as Candle[]);
+  fetchOHLCV = async (_opts: OHLCVOptions): Promise<Candle[]> => {
+    return await Promise.resolve([]);
   };
 
   fetchHistoricalFills = markBaseCapabilityFallback('fetchHistoricalFills', async (_opts: ExecutionsOptions) => {
@@ -1363,8 +1456,14 @@ export class BaseExchange implements Exchange {
    * Exchanges should override this method and check usesExternalPublicData
    * to use direct WebSocket if not using gateway.
    */
-  listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
+  listenOHLCV = (
+    opts: OHLCVOptions,
+    callback: (candle: Candle) => void,
+    onRejection?: (signal: OHLCVFrameRejection) => void,
+  ) => {
     // If using external public data provider, route through it
+    if (this.externalPublicDataProvider instanceof InProcessPublicDataProvider)
+      return this.externalPublicDataProvider.subscribeCandle(opts, callback, onRejection);
     if (this.externalPublicDataProvider) {
       return this.externalPublicDataProvider.subscribeCandle(opts, callback);
     }
@@ -1385,8 +1484,14 @@ export class BaseExchange implements Exchange {
    * Exchanges should override this method and check usesExternalPublicData
    * to use direct WebSocket if not using gateway.
    */
-  listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
+  listenOrderBook = (
+    symbol: string,
+    callback: (orderBook: OrderBook) => void,
+    onRejection?: (signal: OrderBookFrameRejection) => void,
+  ) => {
     // If using external public data provider, route through it
+    if (this.externalPublicDataProvider instanceof InProcessPublicDataProvider)
+      return this.externalPublicDataProvider.subscribeOrderbook(symbol, callback, onRejection);
     if (this.externalPublicDataProvider) {
       return this.externalPublicDataProvider.subscribeOrderbook(symbol, callback);
     }
@@ -1430,7 +1535,7 @@ export class BaseExchange implements Exchange {
     return result;
   };
 
-  nuke = async (tries = 0) => {
+  nuke = async (tries = 0): Promise<void | NukeResult> => {
     if (!this.isDisposed && !this.isNuking) {
       this.isNuking = true;
 
@@ -1468,7 +1573,7 @@ export class BaseExchange implements Exchange {
     }
   };
 
-  nukePositions = async (tries = 0) => {
+  nukePositions = async (tries = 0): Promise<void | NukeResult> => {
     if (!this.isDisposed && !this.isNuking) {
       this.isNuking = true;
 
@@ -1503,7 +1608,7 @@ export class BaseExchange implements Exchange {
     }
   };
 
-  nukeOrders = async () => {
+  nukeOrders = async (): Promise<void | NukeResult> => {
     if (!this.isDisposed && !this.isNuking) {
       this.isNuking = true;
       try {
@@ -1559,6 +1664,10 @@ export class BaseExchange implements Exchange {
 
   dispose() {
     this.isDisposed = true;
+    clearTimeout(this.workerFrameRecoveryTimer);
+    this.workerFrameRecoveryTimer = undefined;
+    this.workerFrameRecoveryQueued = false;
+    this.abandonWorkerCalls();
     this.unsubscribeFromStore();
     this.remoteSignerAvailabilityCleanups.forEach((cleanup) => cleanup());
     this.remoteSignerAvailabilityCleanups.clear();
@@ -1585,10 +1694,14 @@ export class BaseExchange implements Exchange {
     this.off('error');
 
     this.off('listenOHLCV');
+    this.off('workerCandleFrameRejected');
+    this.off('listenOHLCV:rejected');
     this.off('subscribeOHLCV');
     this.off('unsubscribeOHLCV');
 
     this.off('listenOrderBook');
+    this.off('workerBookFrameRejected');
+    this.off('listenOrderBook:rejected');
     this.off('subscribeOrderBook');
     this.off('unsubscribeOrderBook');
 
@@ -1610,21 +1723,55 @@ export class BaseExchange implements Exchange {
     this.off('grafana-info');
     this.off('grafana-pws');
     this.off('grafana-pws-sub');
+    this.off('ws-diagnostic');
 
     this.store.reset();
   }
 
-  listenOHLCVWebworker(o: Pick<OHLCVOptions, 'symbol' | 'interval'>, c: (c: Candle) => void) {
+  listenOHLCVWebworker(
+    o: OHLCVWebworkerOptions,
+    c: (c: Candle) => void,
+    onRejection?: (signal: OHLCVFrameRejection) => void,
+  ) {
     const subId = nanoid();
-    this.emitter.emit('subscribeOHLCV', { symbol: o.symbol, interval: o.interval, subId });
-    const handler = (event: any) => {
+    let active = true;
+    const handler = (event: { symbol: string; interval: string; candle: Candle }) => {
       if (event.symbol === o.symbol && event.interval === o.interval) {
         c(event.candle);
       }
     };
+    const stopRejections = this.observeOHLCVFrameRejections(o, onRejection);
+    const rejected = (signal: StoreWorkerOHLCVFrameRejection) => {
+      if (
+        active &&
+        !this.isDisposed &&
+        signal.subId === subId &&
+        signal.stream === 'ohlcv' &&
+        signal.symbol === o.symbol &&
+        signal.interval === o.interval
+      )
+        this.dispatchFrameEvent(() =>
+          onRejection?.({
+            stream: 'ohlcv',
+            symbol: o.symbol,
+            interval: o.interval,
+            error: deserializeCommandError(signal.error),
+          }),
+        );
+    };
     this.emitter.on('listenOHLCV', handler);
+    if (onRejection) this.emitter.on('listenOHLCV:rejected', rejected);
+    this.emitter.emit('subscribeOHLCV', {
+      symbol: o.symbol,
+      interval: o.interval,
+      subId,
+      ...(o.reset && { reset: true }),
+    });
     return () => {
+      active = false;
       this.emitter.off('listenOHLCV', handler);
+      stopRejections();
+      this.emitter.off('listenOHLCV:rejected', rejected);
       this.emitter.emit('unsubscribeOHLCV', { symbol: o.symbol, interval: o.interval, subId });
     };
   }
@@ -1634,16 +1781,54 @@ export class BaseExchange implements Exchange {
   /** Engine-backed venues take the record a snapshot frame carries; others have none. */
   protected adoptEngineCapabilities(_capabilities: EngineCapabilities): void {}
   private workerFrameRecoveryPending = false;
+  private workerFrameRecoveryQueued = false;
+  private workerFrameRecoveryTimer?: ReturnType<typeof setTimeout>;
+  private workerFrameRecoveryAttempts = 0;
+  private workerFrameRecoveryAt = 0;
+  private workerFrameRecoveryRevision = 0;
+  private readonly workerFrameRejectedSections = new WorkerFrameRecoveryScopes();
 
   fetchEngineSnapshot = async (): Promise<EngineSnapshot> => {
     throw new Error('Engine snapshots are unavailable for this exchange');
   };
 
+  protected observeOrderBookFrameRejections(symbol: string, observer?: (signal: OrderBookFrameRejection) => void) {
+    let active = Boolean(observer) && !this.isDisposed;
+    const rejected = (signal: WorkerFrameRejection) => {
+      if (!active || this.isDisposed) return;
+      if (signal.books === undefined || signal.books.includes(symbol))
+        this.dispatchFrameEvent(() => observer?.({ stream: 'orderBook', symbol, error: signal.error }));
+    };
+    if (active) this.emitter.on('workerBookFrameRejected', rejected);
+    return () => {
+      active = false;
+      this.emitter.off('workerBookFrameRejected', rejected);
+    };
+  }
+
+  protected observeOHLCVFrameRejections(opts: OHLCVOptions, observer?: (signal: OHLCVFrameRejection) => void) {
+    const { symbol, interval } = opts;
+    let active = Boolean(observer) && !this.isDisposed;
+    const rejected = (signal: WorkerFrameRejection) => {
+      if (!active || this.isDisposed) return;
+      if (
+        signal.candles === undefined ||
+        signal.candles.some((stream) => stream.symbol === symbol && stream.interval === interval)
+      )
+        this.dispatchFrameEvent(() => observer?.({ stream: 'ohlcv', symbol, interval, error: signal.error }));
+    };
+    if (active) this.emitter.on('workerCandleFrameRejected', rejected);
+    return () => {
+      active = false;
+      this.emitter.off('workerCandleFrameRejected', rejected);
+    };
+  }
+
   protected dispatchFrameEvent(callback: () => void) {
     try {
       callback();
     } catch (error) {
-      console.error('Engine frame listener failed', error);
+      diagnosticConsole.error('Engine frame listener failed', error);
     }
   }
 
@@ -1657,71 +1842,171 @@ export class BaseExchange implements Exchange {
   }
 
   private applyWorkerFrameBuffer(buffer: ArrayBuffer, recover: boolean) {
-    this.workerFrameApplier ??= new FrameApplier(this.store);
+    const applier = (this.workerFrameApplier ??= new FrameApplier(this.store));
     let frame: Frame | undefined;
     let needsSnapshot = false;
+    const recovering = this.workerFrameRejectedSections.size > 0;
+    const notified = new Set<string>();
+    const rejected = (section: 'frame' | 'books' | 'candles' | 'fills', error: unknown) => {
+      needsSnapshot = true;
+      const signal = this.workerFrameRejectedSections.reject(
+        section,
+        error,
+        frame,
+        frame ? applier.marketSymbolsFor(frame) : [],
+      );
+      if (notified.has(section)) return;
+      notified.add(section);
+      if (section === 'frame' || section === 'books')
+        this.dispatchFrameEvent(() => this.emitter.emit('workerBookFrameRejected', signal));
+      if (section === 'frame' || section === 'candles')
+        this.dispatchFrameEvent(() => this.emitter.emit('workerCandleFrameRejected', signal));
+    };
     try {
       frame = new Frame(buffer);
     } catch (error) {
-      this.workerFrameApplier.invalidateMarketIdentity();
-      needsSnapshot = true;
-      console.error('Invalid engine frame', error);
+      applier.invalidateMarketIdentity();
+      rejected('frame', error);
+      diagnosticConsole.error('Invalid engine frame', error);
     }
     if (frame) {
+      const decoded = frame;
       try {
-        const capabilities = frame.capabilities();
+        const capabilities = decoded.capabilities();
         if (capabilities) this.adoptEngineCapabilities(capabilities);
       } catch (error) {
-        console.error('Engine capabilities section failed', error);
+        diagnosticConsole.error('Engine capabilities section failed', error);
       }
       try {
-        this.workerFrameApplier.apply(frame);
+        applier.apply(decoded);
+        if (applier.hasMarketIdentity && decoded.markets()) this.workerFrameRejectedSections.acceptMarketSnapshot();
       } catch (error) {
-        needsSnapshot = error instanceof FrameApplyError;
-        console.error('Engine frame apply failed', error);
+        if (error instanceof FrameApplyError) {
+          needsSnapshot = true;
+          if (error.bookRejected) rejected('books', error);
+          if (error.otherRejected) this.workerFrameRejectedSections.reject('frame', error);
+        }
+        diagnosticConsole.error('Engine frame apply failed', error);
       }
-      const deliver = <T>(read: () => T[], event: string) => {
+      const deliver = <T>(
+        read: () => T[],
+        event: string,
+        section: 'books' | 'candles' | 'fills',
+        accept: (rows: T[]) => void,
+      ) => {
         let rows: T[];
         try {
           rows = read();
+          if (applier.hasMarketIdentity) accept(rows);
         } catch (error) {
-          needsSnapshot = true;
-          console.error('Engine frame section failed', error);
+          rejected(section, error);
+          diagnosticConsole.error('Engine frame section failed', error);
           return;
         }
         for (const row of rows) this.dispatchFrameEvent(() => this.emitter.emit(event, row));
       };
-      deliver(() => this.workerFrameApplier!.books(frame!), 'listenOrderBook');
-      deliver(() => this.workerFrameApplier!.candles(frame!), 'listenOHLCV');
-      deliver(() => this.workerFrameApplier!.fills(frame!), 'fill');
+      deliver(
+        () => applier.books(decoded),
+        'listenOrderBook',
+        'books',
+        (rows) => this.workerFrameRejectedSections.acceptBooks(rows),
+      );
+      deliver(
+        () => applier.candles(decoded),
+        'listenOHLCV',
+        'candles',
+        (rows) => this.workerFrameRejectedSections.acceptCandles(rows),
+      );
+      deliver(
+        () => applier.fills(decoded),
+        'fill',
+        'fills',
+        (rows) => this.workerFrameRejectedSections.acceptFills(rows.length > 0),
+      );
+      if (recovering && !needsSnapshot && this.workerFrameRejectedSections.size === 0) {
+        clearTimeout(this.workerFrameRecoveryTimer);
+        this.workerFrameRecoveryTimer = undefined;
+        this.workerFrameRecoveryQueued = false;
+        this.workerFrameRecoveryAttempts = 0;
+        this.workerFrameRecoveryAt = 0;
+        this.workerFrameRecoveryRevision++;
+      }
     }
-    if (!needsSnapshot || !recover || this.workerFrameRecoveryPending || this.isDisposed) return;
+    if (needsSnapshot && recover) this.requestWorkerFrameRecovery();
+  }
+
+  private requestWorkerFrameRecovery() {
+    if (this.isDisposed || this.workerFrameRejectedSections.size === 0) return;
+    if (this.workerFrameRecoveryPending) {
+      this.workerFrameRecoveryQueued = true;
+      return;
+    }
+    if (this.workerFrameRecoveryTimer !== undefined) return;
+    const now = performance.now();
+    if (now < this.workerFrameRecoveryAt) {
+      this.workerFrameRecoveryTimer = setTimeout(
+        () => {
+          this.workerFrameRecoveryTimer = undefined;
+          this.requestWorkerFrameRecovery();
+        },
+        Math.ceil(this.workerFrameRecoveryAt - now),
+      );
+      return;
+    }
+    const applier = this.workerFrameApplier;
+    if (!applier) return;
+    const ceiling = Math.min(30_000, 500 * 2 ** this.workerFrameRecoveryAttempts);
+    this.workerFrameRecoveryAt = now + ceiling * (0.5 + Math.random() * 0.5);
+    this.workerFrameRecoveryAttempts = Math.min(7, this.workerFrameRecoveryAttempts + 1);
+    const revision = this.workerFrameRecoveryRevision;
     this.workerFrameRecoveryPending = true;
     void Promise.resolve()
       .then(async () => {
-        const snapshot = await (this as Exchange).callMethodInWorker('fetchEngineSnapshot');
-        if (!this.isDisposed) {
+        if (this.isDisposed || revision !== this.workerFrameRecoveryRevision) return;
+        const requestSnapshot: BaseExchange['callMethodInWorker'] = this.callMethodInWorker;
+        const snapshot = await requestSnapshot('fetchEngineSnapshot');
+        if (!this.isDisposed && revision === this.workerFrameRecoveryRevision) {
           this.applyWorkerFrameBuffer(snapshot.frame, false);
-          this.dispatchFrameEvent(() => this.workerFrameApplier!.applyLeverageSnapshot(snapshot.fetchedLeverage));
+          this.dispatchFrameEvent(() => applier.applyLeverageSnapshot(snapshot.fetchedLeverage));
         }
       })
-      .catch((error) => console.error('Engine frame recovery failed', error))
+      .catch((error) => diagnosticConsole.error('Engine frame recovery failed', error))
       .finally(() => {
         this.workerFrameRecoveryPending = false;
+        if (this.workerFrameRecoveryQueued) {
+          this.workerFrameRecoveryQueued = false;
+          this.requestWorkerFrameRecovery();
+        }
       });
   }
 
-  listenOrderBookWebworker(s: string, c: (o: OrderBook) => void) {
+  listenOrderBookWebworker(
+    s: string,
+    c: (o: OrderBook) => void,
+    onRejection?: (signal: OrderBookFrameRejection) => void,
+  ) {
     const subId = nanoid();
-    this.emitter.emit('subscribeOrderBook', { symbol: s, subId });
-    const handler = (event: any) => {
+    let active = true;
+    const handler = (event: { symbol: string; orderbook: OrderBook }) => {
       if (event.symbol === s) {
         c(event.orderbook);
       }
     };
+    const stopRejections = this.observeOrderBookFrameRejections(s, onRejection);
+    const rejected = (signal: StoreWorkerOrderBookFrameRejection) => {
+      if (active && !this.isDisposed && signal.subId === subId && signal.stream === 'orderBook' && signal.symbol === s)
+        this.dispatchFrameEvent(() =>
+          onRejection?.({ stream: 'orderBook', symbol: s, error: deserializeCommandError(signal.error) }),
+        );
+    };
     this.emitter.on('listenOrderBook', handler);
+    if (onRejection) this.emitter.on('listenOrderBook:rejected', rejected);
+    this.emitter.emit('subscribeOrderBook', { symbol: s, subId });
     return () => {
+      active = false;
       this.emitter.off('listenOrderBook', handler);
+      stopRejections();
+      this.emitter.off('listenOrderBook:rejected', rejected);
       this.emitter.emit('unsubscribeOrderBook', { symbol: s, subId });
     };
   }
@@ -1765,7 +2050,7 @@ export class BaseExchange implements Exchange {
           } else {
             // Only log actual errors, not expected states like retry_too_soon
             if (event.reason && event.reason !== 'retry_too_soon') {
-              console.error('reject in updatePositionsInWebworker', event.reason);
+              diagnosticConsole.error('reject in updatePositionsInWebworker', event.reason);
             }
             reject(new Error(event.reason || 'Unknown error in updatePositionsInWebworker'));
           }
@@ -1780,23 +2065,52 @@ export class BaseExchange implements Exchange {
   protected workerCommandTimeoutError = (_method: CallableMethodsInWorker, _args: unknown[]): Error =>
     new Error('Timeout callMethodInWorker');
 
+  private readonly pendingWorkerCalls = new Set<() => void>();
+
+  private abandonWorkerCalls() {
+    for (const abandon of [...this.pendingWorkerCalls]) abandon();
+  }
+
   callMethodInWorker = async <M extends CallableMethodsInWorker>(
     method: M,
     ...args: Parameters<this[M]>
   ): Promise<ReturnType<this[M]>> => {
     const requestId = nanoid();
+    const timing = TIMED_WRITE_METHODS.has(method) ? claimWriteTiming(method).timing : undefined;
 
     return new Promise<ReturnType<this[M]>>((resolve, reject) => {
+      const abandon = () => {
+        clearTimeout(timeout);
+        this.pendingWorkerCalls.delete(abandon);
+        this.emitter.off('callMethod:done', handleDone);
+        if (timing) emitWriteTiming(this, timing, 'error');
+        reject(
+          Object.assign(this.workerCommandTimeoutError(method, args), {
+            ...(!WORKER_WRITE_METHODS.has(method) ? { code: 'WORKER_STOPPED' } : {}),
+            message: WORKER_WRITE_METHODS.has(method)
+              ? 'The account worker stopped before answering; reconcile interrupted writes before retrying'
+              : 'The account worker stopped before answering this read; retry after it reconnects',
+          }),
+        );
+      };
+      this.pendingWorkerCalls.add(abandon);
       const timeout = setTimeout(() => {
+        this.pendingWorkerCalls.delete(abandon);
         // Timeout path must also remove the listener, otherwise every timed-out
         // call leaks a handleDone closure permanently attached to the emitter.
         this.emitter.off('callMethod:done', handleDone);
+        if (timing) emitWriteTiming(this, timing, 'error');
         reject(this.workerCommandTimeoutError(method, args));
       }, this.workerCommandTimeoutMs(method));
       const handleDone = (event: any) => {
         if (event.requestId === requestId) {
           clearTimeout(timeout);
+          this.pendingWorkerCalls.delete(abandon);
           this.emitter.off('callMethod:done', handleDone);
+          if (timing) {
+            Object.assign(timing.marks, event.timing);
+            emitWriteTiming(this, timing, event.success ? 'ok' : 'error');
+          }
           if (event.success) {
             const result = withHistoryCompleteness(event.result, event.completeness);
             resolve(result);
@@ -1808,9 +2122,10 @@ export class BaseExchange implements Exchange {
       };
       this.emitter.on('callMethod:done', handleDone);
       try {
-        this.emitter.dispatch('callMethod', { method, args, requestId });
+        this.emitter.dispatch('callMethod', { method, args, requestId, ...(timing ? { timing: timing.marks } : {}) });
       } catch (error) {
         clearTimeout(timeout);
+        this.pendingWorkerCalls.delete(abandon);
         this.emitter.off('callMethod:done', handleDone);
         reject(error);
       }
@@ -1882,7 +2197,7 @@ export class BaseExchange implements Exchange {
       if (!this.store.loaded.positions) {
         return [];
       }
-      console.warn(`No positions found for ${symbol} on ${this.name}, fetching...`);
+      diagnosticConsole.warn(`No positions found for ${symbol} on ${this.name}, fetching...`);
       const newPromise = this.fetchPositions([symbol]);
       this._fetchPositionForSymbolPromise[symbol] = newPromise;
       foundPositions = await newPromise;
@@ -1951,7 +2266,7 @@ export class BaseExchange implements Exchange {
 
   emitAndLogError(err: string | Error | undefined | null, msg?: string, extraData?: Record<string, any>) {
     if (this.isDisposed) {
-      console.warn('exchange error (disposed, suppressing)', err);
+      diagnosticConsole.warn('exchange error (disposed, suppressing)', err);
       return;
     }
 
@@ -1960,24 +2275,34 @@ export class BaseExchange implements Exchange {
     const suppressConsoleLog = structuredExtraData.suppressConsoleLog === true;
 
     if (!suppressConsoleLog) {
-      console.error('exchange error', err);
-      console.trace();
+      diagnosticConsole.error('exchange error', err);
+      diagnosticConsole.trace();
     }
 
     let formattedMsg;
     let errorObject: Error | undefined;
     let sentryContext: any = {};
-    const sentryTags =
-      structuredExtraData.sentryTags && typeof structuredExtraData.sentryTags === 'object'
+    const sentryTags = {
+      ...(structuredExtraData.sentryTags && typeof structuredExtraData.sentryTags === 'object'
         ? structuredExtraData.sentryTags
-        : {};
+        : {}),
+      ...(structuredExtraData.engineEvent?.code === 'startup.incomplete'
+        ? startupDiagnosticTags(structuredExtraData.engineEvent)
+        : {}),
+      ...workerErrorProtectionTags(err),
+    };
     const sentryExtra =
       structuredExtraData.sentryExtra && typeof structuredExtraData.sentryExtra === 'object'
         ? structuredExtraData.sentryExtra
         : {};
     const legacyExtraData = Object.fromEntries(
       Object.entries(structuredExtraData).filter(
-        ([key]) => key !== 'sentryTags' && key !== 'sentryExtra' && key !== 'suppressConsoleLog' && key !== 'engineEvent',
+        ([key]) =>
+          key !== 'sentryTags' &&
+          key !== 'sentryExtra' &&
+          key !== 'suppressConsoleLog' &&
+          key !== 'engineEvent' &&
+          key !== 'classified',
       ),
     );
 
@@ -2050,9 +2375,11 @@ export class BaseExchange implements Exchange {
       this._lastHttpFailure = undefined;
     }
 
+    // A diagnostic's own classification (engine events) wins over the error value's.
+    const classified = classifiedError(structuredExtraData.classified) ?? classifiedError(err);
     // Typed engine errors (kind/outcome/venueCode) as closed-set tags; explicit tags still win.
     const typedTags = {
-      ...exchangeErrorTags(err),
+      ...exchangeErrorTags(classified),
       ...(structuredExtraData.engineEvent ? { event_code: structuredExtraData.engineEvent.code } : {}),
     };
 
@@ -2089,7 +2416,7 @@ export class BaseExchange implements Exchange {
         // Pass enhanced error context for better toast messages
         enhancedContext: enhancedError?.context,
         engineEvent: structuredExtraData.engineEvent,
-        classified: classifiedError(err),
+        classified,
         suppressConsoleLog,
       });
     } else {
@@ -2124,7 +2451,7 @@ export class BaseExchange implements Exchange {
         enhancedContext: enhancedError?.context,
         // Typed engine errors: kind/outcome/venueCode, so listeners need not match text.
         engineEvent: structuredExtraData.engineEvent,
-        classified: classifiedError(err),
+        classified,
         suppressConsoleLog,
       });
     }
@@ -2133,7 +2460,10 @@ export class BaseExchange implements Exchange {
   /** Pre-flight reject: emit first (toast pipeline), then throw. See src/exchanges/CLAUDE.md. */
   protected rejectPreflight(message: string): never {
     this.emitAndLogError(message);
-    throw new Error(message);
+    // Marked so a page forwarding this call to its worker does not report it again.
+    const error = new Error(message);
+    markErrorReported(error);
+    throw error;
   }
 
   // if multiple child WS they will all send reconnect messages, try and only emit once...
@@ -2368,6 +2698,25 @@ export class BaseExchange implements Exchange {
       }
       case 'kraken-challenge':
         return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };
+      case 'coinbase-jws':
+      case 'backpack-ed25519':
+      case 'asterdex-address':
+      case 'asterdex-hmac':
+      case 'asterdex-wallet':
+      case 'apexomni-batch':
+      case 'kraken-sha512':
+      case 'orderly-ed25519':
+      case 'grvt-order':
+      case 'grvt-address':
+      case 'kucoin-batch':
+      case 'hyperliquid-l1':
+      case 'hyperliquid-address':
+      case 'txflow-agent':
+      case 'txflow-address':
+      case 'lighter-tx':
+      case 'paradex-stark':
+      case 'paradex-public':
+        return { id: request.id, error: `${outputFormat} requires the Rust engine signer` };
       case 'coinbase-jwt':
         return { id: request.id, error: 'coinbase-jwt requires the CoinbaseExchange signWsAuth override' };
       default: {

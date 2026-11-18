@@ -78,7 +78,7 @@ describe('Bybit fill events', () => {
   it('reports each partial once, so the partials sum to the order', () => {
     const store = new DefaultStore();
     store.update({ markets: [MARKET] });
-    const exchange = new BybitExchange('bybit' as any, { key: 'k', secret: 's' } as any, store);
+    const exchange = new BybitExchange('bybit', { key: 'k', secret: 's' }, store);
     exchanges.push(exchange);
     const fills: OrderFillEvent[] = [];
     exchange.on('fill', (fill: OrderFillEvent) => fills.push(fill));
@@ -99,7 +99,7 @@ describe('Bybit fill events', () => {
   it('reports price and size without float noise', () => {
     const store = new DefaultStore();
     store.update({ markets: [MARKET] });
-    const exchange = new BybitExchange('bybit' as any, { key: 'k', secret: 's' } as any, store);
+    const exchange = new BybitExchange('bybit', { key: 'k', secret: 's' }, store);
     exchanges.push(exchange);
     const fills: OrderFillEvent[] = [];
     exchange.on('fill', (fill: OrderFillEvent) => fills.push(fill));
@@ -121,8 +121,8 @@ describe('Bybit inverse fill events', () => {
   // Inverse value is base coin, quantity is USD contracts: price = qty / value.
   it('prices each execution as contracts over coin, not its reciprocal', () => {
     const store = new DefaultStore();
-    store.update({ markets: [{ ...MARKET, id: 'BTCUSD', symbol: 'BTCUSD', quote: 'USD', isInverse: true } as Market] });
-    const exchange = new BybitInverseExchange('bybitinverse' as any, { key: 'k', secret: 's' } as any, store);
+    store.update({ markets: [{ ...MARKET, id: 'BTCUSD', symbol: 'BTCUSD', quote: 'USD', isInverse: true }] });
+    const exchange = new BybitInverseExchange('bybitinverse', { key: 'k', secret: 's' }, store);
     exchanges.push(exchange);
     const fills: OrderFillEvent[] = [];
     exchange.on('fill', (fill: OrderFillEvent) => fills.push(fill));
@@ -156,7 +156,7 @@ describe('AsterDEX fill events', () => {
   it('carry the contract fields, so consumers do not read amount as NaN', () => {
     const store = new DefaultStore();
     store.update({ markets: [MARKET] });
-    const exchange = new AsterDEXExchange('asterdex' as any, { key: 'k', secret: 's' } as any, store);
+    const exchange = new AsterDEXExchange('asterdex', { key: 'k', secret: 's' }, store);
     exchanges.push(exchange as any);
     const fills: OrderFillEvent[] = [];
     exchange.on('fill', (fill: OrderFillEvent) => fills.push(fill));
@@ -187,7 +187,7 @@ describe('AsterDEX fill events', () => {
   it('emits nothing for a frame on a filled order that executed nothing', () => {
     const store = new DefaultStore();
     store.update({ markets: [MARKET] });
-    const exchange = new AsterDEXExchange('asterdex' as any, { key: 'k', secret: 's' } as any, store);
+    const exchange = new AsterDEXExchange('asterdex', { key: 'k', secret: 's' }, store);
     exchanges.push(exchange as any);
     const fills: OrderFillEvent[] = [];
     exchange.on('fill', (fill: OrderFillEvent) => fills.push(fill));

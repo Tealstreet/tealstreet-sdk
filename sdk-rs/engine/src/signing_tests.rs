@@ -1,4 +1,5 @@
 use super::*;
+use crate::ControlFrame;
 use crate::signing::{
     Algorithm, Context, KeyRef, Operation, PayloadPart, SignError, SignRequest, SignResult,
 };
@@ -169,6 +170,63 @@ fn staged(engine: &mut Engine<TestVenue>) -> (RequestId, TimerId) {
 fn result() -> Result<SignResult, SignError> {
     Ok(SignResult::new(vec![vec![0; 32]], Default::default()))
 }
+#[test]
+fn completion_preserves_timer_retirement_before_outbound_and_retry_actions() {
+    for stale in [false, true] {
+        let mut engine = engine();
+        let (attempt, timer) = staged(&mut engine);
+        engine.sign_completed(if stale { 6000. } else { 1001. }, attempt, result());
+        let actions = engine.io.core.actions.as_slice();
+        assert_eq!(actions.len(), 2);
+        assert!(matches!(actions[0], Action::ClearTimer { timer: id } if id == timer));
+        if stale {
+            let Action::Sign {
+                attempt: next,
+                work,
+                timeout_ms,
+            } = &actions[1]
+            else {
+                panic!("a stale completion queues exactly one reprepare");
+            };
+            assert_ne!(*next, attempt);
+            assert_eq!(*timeout_ms, 0);
+            assert!(work.operations.is_empty());
+            assert_eq!(work.receipt, Default::default());
+        } else {
+            let Action::SignedOutbound {
+                attempt: current,
+                outbound,
+            } = &actions[1]
+            else {
+                panic!("a current completion queues exactly one sealed outbound");
+            };
+            assert_eq!(*current, attempt);
+            let Action::Http(request) = outbound.as_ref() else {
+                panic!("the original HTTP target is retained");
+            };
+            assert_eq!(request.id, RequestId(1));
+            assert_eq!(request.url, "https://venue.test/private?timestamp=1000");
+            assert_eq!(request.headers, [("signature", "completed".into())]);
+            assert_eq!(request.route, Some(RequestRoute::Primary));
+        }
+        assert_eq!(engine.venue.failed, 0);
+    }
+}
+
+#[test]
+fn refused_completion_clears_its_timer_and_delivers_one_failure_without_outbound() {
+    let mut engine = engine();
+    let (attempt, timer) = staged(&mut engine);
+    engine.sign_completed(1001., attempt, Err(SignError::Refused));
+    assert!(
+        matches!(engine.io.core.actions.as_slice(), [Action::ClearTimer { timer: id }] if *id == timer)
+    );
+    assert_eq!(engine.venue.failed, 1);
+    engine.sign_completed(1002., attempt, result());
+    assert_eq!(engine.venue.failed, 1);
+    assert_eq!(engine.io.core.actions.len(), 1);
+}
+
 #[test]
 fn delayed_dispatch_stamps_current_time_and_preserves_route() {
     let mut engine = engine();
@@ -419,9 +477,13 @@ fn full_pending_queue_rejects_dependent_ws_message_instead_of_dropping_it() {
         io: &mut engine.io,
     };
     for _ in 0..256 {
-        cx.send_signed(SocketId(42), "auth".into(), Box::new(Step));
+        cx.send_signed(
+            SocketId(42),
+            ControlFrame::authentication("auth"),
+            Box::new(Step),
+        );
     }
-    cx.send(SocketId(42), "dependent");
+    cx.send(SocketId(42), ControlFrame::subscription("dependent"));
     assert_eq!(engine.io.core.signing_admission.len(), 1);
     let actions: Vec<_> = engine.drain_actions().collect();
     assert!(actions.iter().any(|a| matches!(
@@ -531,7 +593,11 @@ fn explicit_close_revokes_auth_without_waiting_for_host_callback() {
         store: &mut engine.store,
         io: &mut engine.io,
     };
-    cx.send_signed(socket, "unsigned".into(), Box::new(Step));
+    cx.send_signed(
+        socket,
+        ControlFrame::authentication("unsigned"),
+        Box::new(Step),
+    );
     engine.prepare_dispatch(1000.);
     let (attempt, _) = staged(&mut engine);
     let mut cx = Cx {
@@ -562,8 +628,8 @@ fn dependent_ws_message_waits_for_authentication_dispatch() {
         store: &mut engine.store,
         io: &mut engine.io,
     };
-    cx.send_signed(socket, "auth".into(), Box::new(Step));
-    cx.send(socket, "dependent");
+    cx.send_signed(socket, ControlFrame::authentication("auth"), Box::new(Step));
+    cx.send(socket, ControlFrame::subscription("dependent"));
     engine.prepare_dispatch(1000.);
     let (attempt, _) = staged(&mut engine);
     engine.handle(
@@ -594,7 +660,11 @@ fn socket_close_revokes_pending_auth_completion() {
         store: &mut engine.store,
         io: &mut engine.io,
     };
-    cx.send_signed(socket, "unsigned".into(), Box::new(Step));
+    cx.send_signed(
+        socket,
+        ControlFrame::authentication("unsigned"),
+        Box::new(Step),
+    );
     engine.prepare_dispatch(1000.);
     let (attempt, _) = staged(&mut engine);
     engine.handle(1001., Event::WsClosed { socket, code: 1006 });
@@ -1303,6 +1373,7 @@ fn signing_context_uses_only_signing_stream_and_redraws_after_clock_revision() {
                 channel,
                 context,
                 binary,
+                ..
             } => Some((id, url, headers, channel, context, binary)),
             _ => None,
         })
@@ -2048,6 +2119,7 @@ fn l1_wallet_role_is_primary_only_for_injected_refs_and_policies() {
             key: ExtraKey::L1Wallet,
             field: ExtraFieldPolicy::RequiredForPrivate,
             encoding: None,
+            trim: false,
         }),
         ..Default::default()
     });
@@ -2208,7 +2280,11 @@ fn a_socket_login_missing_its_key_latches_and_blocks_its_role() {
         io: &mut engine.io,
     };
     let socket = cx.connect(private());
-    cx.send_signed(socket, "auth".into(), Box::new(MissingKeyStep));
+    cx.send_signed(
+        socket,
+        ControlFrame::authentication("auth"),
+        Box::new(MissingKeyStep),
+    );
     engine.prepare_dispatch(1000.);
     let actions: Vec<_> = engine.drain_actions().collect();
     assert!(actions.iter().any(|action| {
@@ -2290,7 +2366,11 @@ fn c4s_a_credential_only_socket_login_latches_through_signing_ref() {
         io: &mut engine.io,
     };
     let socket = cx.connect(private());
-    cx.send_signed(socket, "auth".into(), Box::new(IdentityStep(identity)));
+    cx.send_signed(
+        socket,
+        ControlFrame::authentication("auth"),
+        Box::new(IdentityStep(identity)),
+    );
     engine.prepare_dispatch(1000.);
     let actions: Vec<_> = engine.drain_actions().collect();
     let config_invalid = actions
@@ -2304,7 +2384,7 @@ fn c4s_a_credential_only_socket_login_latches_through_signing_ref() {
     let startup_failed: Vec<_> = actions
         .iter()
         .filter_map(|action| match action {
-            Action::Notice(Notice::StartupFailed { error }) => Some(error.clone()),
+            Action::Notice(Notice::StartupFailed { error, .. }) => Some(error.clone()),
             _ => None,
         })
         .collect();
@@ -2382,7 +2462,11 @@ fn a_socket_login_with_an_invalid_shape_never_latches() {
         io: &mut engine.io,
     };
     let socket = cx.connect(private());
-    cx.send_signed(socket, "auth".into(), Box::new(InvalidStep));
+    cx.send_signed(
+        socket,
+        ControlFrame::authentication("auth"),
+        Box::new(InvalidStep),
+    );
     engine.prepare_dispatch(1000.);
     assert!(!engine.drain_actions().any(|action| {
         matches!(action, Action::Notice(Notice::Event(LogEvent { code, .. }))
@@ -2423,7 +2507,7 @@ fn a_latch_never_refuses_an_unsigned_frame_held_behind_a_login() {
     cx.sign_http(request, Box::new(MissingKeyStep));
     cx.route_request(request, RequestRoute::Primary);
     let socket = cx.connect(private());
-    cx.send_signed(socket, "auth".into(), Box::new(Step));
+    cx.send_signed(socket, ControlFrame::authentication("auth"), Box::new(Step));
     engine.prepare_dispatch(1000.);
     assert!(latched(
         engine.drain_actions().collect::<Vec<_>>().into_iter()
@@ -2433,7 +2517,7 @@ fn a_latch_never_refuses_an_unsigned_frame_held_behind_a_login() {
         store: &mut engine.store,
         io: &mut engine.io,
     };
-    cx.send(socket, "subscribe");
+    cx.send(socket, ControlFrame::subscription("subscribe"));
     engine.prepare_dispatch(1002.);
     assert!(
         !engine
@@ -2476,4 +2560,35 @@ fn schnorr_public_key_requests_validate_with_a_forty_byte_answer() {
             Err(SignError::InvalidResult)
         );
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn private_startup_completion_never_masks_a_signing_refusal() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine.set_account_startup(true);
+    engine.start(1000.);
+    engine.store.set_loaded(|loaded| loaded.markets = true);
+    engine.store.set_balance(crate::model::Balance::default());
+    engine.store.set_positions(vec![]);
+    engine.store.set_orders(vec![]);
+    assert!(engine.private_startup_complete());
+    assert!(engine.io.core.signing.refuse());
+    assert!(!engine.private_startup_complete());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn non_opt_in_startup_recheck_never_enters_an_engine_turn() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine.set_account_startup(true);
+    engine.start(1000.);
+    assert!(engine.private_startup_pending());
+    engine.io.core.auth_failure_counted = true;
+    let dispatch_now = engine.io.core.dispatch_now;
+    let actions = engine.io.core.actions.len();
+    assert!(!engine.recheck_startup_reads(9000.));
+    assert_eq!(engine.io.core.dispatch_now, dispatch_now);
+    assert!(engine.io.core.auth_failure_counted);
+    assert_eq!(engine.io.core.actions.len(), actions);
 }

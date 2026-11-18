@@ -46,9 +46,23 @@ fn subscriptions(texts: &[String]) -> usize {
         .count()
 }
 
+fn connected_url(actions: &[Action]) -> Option<String> {
+    actions.iter().find_map(|a| match a {
+        Action::WsConnect {
+            url,
+            channel: Some(SocketChannel::Private),
+            ..
+        } => Some(url.clone()),
+        _ => None,
+    })
+}
+
 impl Rig {
     fn new() -> Self {
-        let (engine, socket, timers) = ready_tracked(options());
+        Self::with(options())
+    }
+    fn with(options: Options) -> Self {
+        let (engine, socket, timers) = ready_tracked(options);
         Self {
             engine,
             timers,
@@ -213,4 +227,83 @@ fn stable_private_traffic_resets_backoff() {
         rig.message(socket, PAYLOAD);
     }
     assert!((750.0..=1_000.0).contains(&rig.close_and_retry_delay(1006)));
+}
+
+impl Rig {
+    /// Closes the socket before it opens and returns the reconnect's URL.
+    fn fail_before_open(&mut self, code: u16) -> String {
+        let delay = self.close_and_retry_delay(code);
+        let actions = self.advance(self.now + delay);
+        self.socket = connected(&actions).expect("one reconnect per close");
+        connected_url(&actions).unwrap()
+    }
+}
+
+/// Legacy pinged a read-only private socket every 20 s; a direct one every 10 s.
+#[test]
+fn a_read_only_private_socket_pings_every_twenty_seconds() {
+    for (failures, expected) in [(0, 6), (3, 3)] {
+        let mut rig = Rig::new();
+        for _ in 0..failures {
+            rig.fail_before_open(1006);
+        }
+        let socket = rig.socket;
+        rig.open();
+        let actions = rig.advance(rig.now + 60_500.0);
+        let pings = sent(&actions, socket)
+            .iter()
+            .filter(|t| t.contains(r#""type":"ping""#))
+            .count();
+        assert_eq!(pings, expected, "after {failures} failures");
+    }
+}
+
+/// Legacy lighter.ws-private.ts: three early 1006/1008 failures on the direct route.
+#[test]
+fn three_early_failures_on_the_direct_route_reconnect_read_only() {
+    for code in [1006, 1008] {
+        let mut rig = Rig::new();
+        assert!(!rig.fail_before_open(code).contains("readonly"));
+        assert!(!rig.fail_before_open(code).contains("readonly"));
+        let url = rig.fail_before_open(code);
+        assert!(url.ends_with("/stream?readonly=true"), "{code}: {url}");
+        // It stays read-only for this account.
+        assert!(rig.fail_before_open(code).ends_with("?readonly=true"));
+    }
+}
+
+#[test]
+fn a_routed_private_socket_never_goes_read_only() {
+    let mut rig = Rig::with(Options {
+        ws_routed: true,
+        ..options()
+    });
+    for _ in 0..5 {
+        assert!(!rig.fail_before_open(1006).contains("readonly"));
+    }
+}
+
+#[test]
+fn account_traffic_resets_the_read_only_count() {
+    let mut rig = Rig::new();
+    rig.fail_before_open(1006);
+    rig.fail_before_open(1006);
+    rig.open();
+    let socket = rig.socket;
+    rig.message(socket, PAYLOAD);
+    rig.advance(rig.now + 60_000.0);
+    assert!(!rig.fail_before_open(1006).contains("readonly"));
+    assert!(!rig.fail_before_open(1006).contains("readonly"));
+}
+
+#[test]
+fn a_late_or_clean_close_does_not_count_toward_read_only() {
+    let mut rig = Rig::new();
+    for _ in 0..4 {
+        rig.open();
+        let socket = rig.socket;
+        rig.message(socket, PAYLOAD);
+        rig.advance(rig.now + 30_000.0);
+        assert!(!rig.fail_before_open(1006).contains("readonly"));
+    }
 }

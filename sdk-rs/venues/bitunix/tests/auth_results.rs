@@ -175,11 +175,19 @@ fn private_missing_list_diagnostics_never_copy_the_raw_account_body() {
         "",
         r#"{"code":10004,"msg":"IP whitelist refused","privateAccount":"DO-NOT-LOG-ACCOUNT-PAYLOAD"}"#,
     );
+    let mut named = false;
     for action in result {
         if let Action::Notice(Notice::Event(event)) = action {
             assert!(!event.message.contains("DO-NOT-LOG-ACCOUNT-PAYLOAD"));
+            // 10004 is the IP whitelist refusal: the venue's words and what to do.
+            named |= event.level == safe_cex_engine::Level::Error
+                && event.message.contains("IP whitelist refused")
+                && event
+                    .message
+                    .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT);
         }
     }
+    assert!(named, "the read failure names the IP whitelist");
 }
 #[test]
 fn a_private_rate_pause_cannot_be_bypassed_by_the_balance_tick() {
@@ -561,6 +569,17 @@ fn host_pause_blocks_healthy_keys_initial_continuations_ticks_and_lost_read_repa
 #[test]
 fn retries_back_off_per_key_to_the_cap_and_only_current_success_resets_them() {
     let (mut e, initial) = started(true);
+    // Settle startup before opening: an in-flight overlap would correctly arm
+    // a separate dirty-read repair, which is not this key's refusal backoff.
+    let initial_positions = http(&initial, "get_pending_positions");
+    answer(
+        &mut e,
+        &initial_positions,
+        0.0,
+        200,
+        "",
+        r#"{"code":0,"data":{"positionList":[]}}"#,
+    );
     // A live private session: opened promptly, then silent until its first pong.
     let socket = initial
         .iter()
@@ -570,10 +589,17 @@ fn retries_back_off_per_key_to_the_cap_and_only_current_success_resets_them() {
         })
         .unwrap();
     e.handle(0.0, Event::WsOpened { socket });
-    safe_cex_engine::test_support::prepared_now(&mut e)
+    e.handle(
+        0.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"op":"login","data":{"result":true}}"#,
+        },
+    );
+    let opened: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
         .into_iter()
-        .for_each(drop);
-    let mut r = http(&initial, "get_pending_positions");
+        .collect();
+    let mut r = http(&opened, "get_pending_positions");
     let mut now = 100.0;
     for nominal in [1000.0, 2000.0, 4000.0, 8000.0, 16000.0, 30000.0, 30000.0] {
         let failure = answer(&mut e, &r, now, 200, "", r#"{"code":10004}"#);
@@ -989,6 +1015,64 @@ fn valid_empty_lists_and_bad_financial_rows_accept_credentials_without_false_rea
         assert!(
             !e.store().loaded().orders,
             "one empty/partial half cannot authorize both initial endpoints"
+        );
+    }
+}
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let (mut e, actions) = started(false);
+    let r = http(&actions, "get_pending_positions");
+    let failed = answer(
+        &mut e,
+        &r,
+        100.0,
+        200,
+        "",
+        r#"{"code":10004,"msg":"IP refused"}"#,
+    );
+    assert!(failed.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}
+
+#[test]
+fn a_refused_read_key_does_not_end_the_start() {
+    let (mut e, actions) = started(true);
+    let r = http(&actions, "get_pending_positions");
+    let failed = answer(
+        &mut e,
+        &r,
+        100.0,
+        200,
+        "",
+        r#"{"code":10004,"msg":"IP refused"}"#,
+    );
+    assert!(!failed.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (200, r#"{"code":10004,"msg":"IP not in whitelist"}"#),
+        (403, r#"{"code":10004,"msg":"IP not in whitelist"}"#),
+        (200, r#"{"code":10003,"msg":"Invalid api key"}"#),
+        (403, "Forbidden"),
+        (401, "Unauthorized"),
+    ] {
+        let (mut e, all) = started(false);
+        let read = http(&all, "/account");
+        let actions = answer(&mut e, &read, 0.0, status, "", body);
+        assert!(
+            actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+            )),
+            "{status} {body}"
         );
     }
 }

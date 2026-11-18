@@ -23,6 +23,8 @@ pub struct Request {
     from: Option<f64>,
     to: Option<f64>,
     limit: usize,
+    /// A window with no limit: the single full page cannot prove coverage.
+    open_window: bool,
     quote: String,
     count: usize,
     current: Vec<Entry>,
@@ -410,6 +412,7 @@ impl ApexOmni {
                     order_id,
                     from: from_ms.filter(|n| n.is_finite()),
                     to: to_ms.filter(|n| n.is_finite()),
+                    open_window: from_ms.is_some() && limit.is_none(),
                     limit: limit.unwrap_or(100).clamp(1, 100) as usize,
                     quote,
                     count: 0,
@@ -585,6 +588,7 @@ impl ApexOmni {
         request
             .current
             .sort_by(|a, b| b.timestamp_ms.total_cmp(&a.timestamp_ms));
+        let full_page = request.open_window && request.count >= request.limit;
         request.current.truncate(request.limit);
         // Rows enter coverage only under this exact delivery of the original root.
         let admitted = request.owner.admit(cx, leg).map(|mut page| {
@@ -594,6 +598,11 @@ impl ApexOmni {
             page.accept_page();
         });
         let _ = match admitted {
+            // Accepted rows plus an error finish as rows with one incomplete marker.
+            Ok(()) if full_page => request.owner.finish(
+                cx,
+                Err(VenueError::new("ApeX Omni fills read one full page")),
+            ),
             Ok(()) => request.owner.finish(cx, Ok(())),
             Err(error) => request.owner.reject(cx, error.read_venue_error()),
         };

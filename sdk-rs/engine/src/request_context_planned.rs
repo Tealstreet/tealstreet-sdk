@@ -20,6 +20,8 @@ pub(super) struct State {
 
 struct Body {
     handle: Plan,
+    #[cfg(feature = "plan-element-reports")]
+    idle_elements: Option<Box<crate::write_plan::ElementOutcomes>>,
     receipt_cap: Option<(u64, f64)>,
     policy: PlanPolicy,
     timer: TimerId,
@@ -34,6 +36,8 @@ struct Body {
     history_latest_release: Option<Attempt>,
     #[cfg(feature = "serial-plans")]
     serial: Option<Box<serial::Serial>>,
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    session: Option<Box<session_plan::SessionLegs>>,
 }
 
 struct Entry {
@@ -59,6 +63,8 @@ struct PreparedAdmission {
     has_barriers: bool,
     #[cfg(feature = "http-mutation-barriers")]
     barriers: Result<Vec<Range<usize>>, Error>,
+    #[cfg(feature = "session-bearer")]
+    session: Option<session_plan::SessionLegs>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -81,7 +87,11 @@ fn take(ids: &mut Range<u64>, count: u64) -> Range<u64> {
 impl State {
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
     pub(super) fn session_root(&self) -> Option<&crate::request_context::Session> {
-        self.body.first()?.serial.as_ref()?.session_root.as_ref()
+        let body = self.body.first()?;
+        match body.session.as_ref() {
+            Some(session) => Some(&session.root),
+            None => body.serial.as_ref()?.session_root.as_ref(),
+        }
     }
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
     pub(in crate::engine) fn session_write(&self) -> Option<&crate::request_context::Credential> {
@@ -89,11 +99,19 @@ impl State {
     }
 
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-    pub(in crate::engine) fn session_call(&self) -> bool {
-        self.body
-            .first()
-            .and_then(|body| body.serial.as_ref())
-            .is_some_and(|serial| serial.session_call())
+    pub(in crate::engine) fn session_call(&self, context: &Context) -> bool {
+        let Some(body) = self.body.first() else {
+            return false;
+        };
+        match body.session.as_ref() {
+            Some(session) => body
+                .entry_of(context)
+                .is_some_and(|index| session.session_call(index)),
+            None => body
+                .serial
+                .as_ref()
+                .is_some_and(|serial| serial.session_call()),
+        }
     }
 
     /// A Mutation Plan's admitted credential, for repair mint custody.
@@ -196,6 +214,15 @@ impl ContextRegistry {
         let mut reports = Vec::new();
         let (journal, legacy) = if let Some(writes) = owner.writes.as_ref() {
             let prepared = writes.prepare_seal(error, note)?;
+            #[cfg(feature = "plan-element-reports")]
+            let prepared = {
+                let mut prepared = prepared;
+                let body = self.plan_body(plan)?;
+                if body.entries.iter().all(|entry| entry.call.is_none()) {
+                    prepared.retain_missing_elements(body.idle_elements.as_deref());
+                }
+                prepared
+            };
             if prepared.is_failure() {
                 for message in writes.reports() {
                     reports.try_reserve(1).map_err(|_| Error::Capacity)?;
@@ -439,44 +466,63 @@ impl<P> Cx<'_, P> {
         }
         #[cfg(feature = "serial-plans")]
         {
-            let AdmissionDeclaration {
-                steps,
-                policy,
-                terminals,
-                barriers,
-            } = declaration;
-            // Effective domain pacing first, so barrier validation sees it.
-            #[cfg(feature = "release-domains")]
-            let policy = PlanPolicy {
-                pacing: self
-                    .io
-                    .core
-                    .domain_pacing(policy.operation, policy.pacing)?,
-                ..policy
-            };
-            // An atomic group releases together, so it cannot take one FIFO
-            // turn per member; refused before any Plan ID is spent.
-            #[cfg(all(feature = "release-domains", feature = "http-mutation-barriers"))]
-            if !barriers.is_empty() && self.io.core.domain_member(policy.operation).is_some() {
-                return Err(Error::Invalid);
-            }
-            let prepared = PreparedAdmission {
-                schedule: Schedule::from_steps(steps),
-                terminals: terminal_ordinals(steps, &policy, terminals),
-                has_barriers: !barriers.is_empty(),
-                #[cfg(feature = "http-mutation-barriers")]
-                barriers: mutation_group::normalize(
-                    steps,
-                    &policy,
-                    barriers,
-                    &self.io.core.http_pacing,
-                ),
-                policy,
-            };
-            self.admit_plan_root(preflight, prepared, physical, None)
+            let prepared = self.core().prepare_admission(declaration)?;
+            self.core()
+                .admit_plan_root(preflight, prepared, physical, None)
         }
         #[cfg(not(feature = "serial-plans"))]
-        self.admit_plan_root(preflight, declaration, physical)
+        self.core()
+            .admit_plan_root(preflight, declaration, physical)
+    }
+
+    #[inline]
+    pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
+        self.core_ref().plan_slots(plan)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    #[cfg(feature = "serial-plans")]
+    fn prepare_admission(
+        &self,
+        declaration: AdmissionDeclaration<'_, '_, '_>,
+    ) -> Result<PreparedAdmission, Error> {
+        let AdmissionDeclaration {
+            steps,
+            policy,
+            terminals,
+            barriers,
+        } = declaration;
+        // Effective domain pacing first, so barrier validation sees it.
+        #[cfg(feature = "release-domains")]
+        let policy = PlanPolicy {
+            pacing: self
+                .io
+                .core
+                .domain_pacing(policy.operation, policy.pacing)?,
+            ..policy
+        };
+        // An atomic group releases together, so it cannot take one FIFO
+        // turn per member; refused before any Plan ID is spent.
+        #[cfg(all(feature = "release-domains", feature = "http-mutation-barriers"))]
+        if !barriers.is_empty() && self.io.core.domain_member(policy.operation).is_some() {
+            return Err(Error::Invalid);
+        }
+        Ok(PreparedAdmission {
+            schedule: Schedule::from_steps(steps),
+            terminals: terminal_ordinals(steps, &policy, terminals),
+            has_barriers: !barriers.is_empty(),
+            #[cfg(feature = "http-mutation-barriers")]
+            barriers: mutation_group::normalize(
+                steps,
+                &policy,
+                barriers,
+                &self.io.core.http_pacing,
+            ),
+            policy,
+            #[cfg(feature = "session-bearer")]
+            session: None,
+        })
     }
 
     /// A serial Plan shares the whole declared admission transaction, with its
@@ -498,6 +544,8 @@ impl<P> Cx<'_, P> {
             has_barriers,
             #[cfg(feature = "http-mutation-barriers")]
             barriers,
+            #[cfg(feature = "session-bearer")]
+            session,
         } = prepared;
         #[cfg(not(feature = "serial-plans"))]
         let AdmissionDeclaration {
@@ -521,6 +569,7 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .keyless_session(preflight.owner())
             .is_some()
+            && session.is_none()
             && serial
                 .as_ref()
                 .is_none_or(|serial| serial.session_root.is_none())
@@ -693,9 +742,24 @@ impl<P> Cx<'_, P> {
             .try_reserve(1)
             .map_err(|_| Error::Capacity)?;
         let io_count = 1 + count as u64 + 3 * attempts as u64 + extra as u64;
-        let signed = policy.credential.is_some();
+        // A Session entry carries no signing reservation.
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let signs = |index: usize| {
+            session
+                .as_ref()
+                .is_none_or(|legs| !legs.session_call(index))
+        };
+        #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
+        let signs = |_: usize| true;
+        let signed_attempts: u64 = entries
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| signs(*index))
+            .map(|(_, entry)| u64::from(entry.terms.attempts))
+            .sum();
+        let signed = policy.credential.is_some() && signed_attempts > 0;
         if !self.io.core.next_id.available(io_count)
-            || (signed && !self.io.core.signing.available_ids(attempts as u64))
+            || (signed && !self.io.core.signing.available_ids(signed_attempts))
         {
             return Err(Error::Capacity);
         }
@@ -710,7 +774,7 @@ impl<P> Cx<'_, P> {
             self.io
                 .core
                 .signing
-                .reserve_ids(attempts as u64)
+                .reserve_ids(signed_attempts)
                 .expect("preflighted whole signing plan")
         });
         for (index, entry) in entries.iter_mut().enumerate() {
@@ -718,6 +782,7 @@ impl<P> Cx<'_, P> {
             entry.ids = take(&mut ids, 3 * u64::from(entry.terms.attempts));
             entry.signing = signing
                 .as_mut()
+                .filter(|_| signs(index))
                 .map(|ids| take(ids, u64::from(entry.terms.attempts)));
         }
         // The execution identity and the founder's observer root leg.
@@ -749,6 +814,8 @@ impl<P> Cx<'_, P> {
         });
         body.push(Body {
             handle: handle.clone(),
+            #[cfg(feature = "plan-element-reports")]
+            idle_elements: None,
             receipt_cap,
             policy,
             timer,
@@ -764,6 +831,8 @@ impl<P> Cx<'_, P> {
             history_latest_release: None,
             #[cfg(feature = "serial-plans")]
             serial: serial.map(Box::new),
+            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+            session: session.map(Box::new),
         });
         if let Some(context) = old_read {
             self.io.retire_http_leg(&context);
@@ -782,6 +851,8 @@ impl<P> Cx<'_, P> {
         let execution = match (moved, founder_root) {
             (Some((identity, _)), Some(root)) => {
                 let physical = CommandOwner {
+                    engine_unknown: None,
+                    request_class: owner.request_class,
                     generation: identity,
                     phase: CommandPhase::Planned(State { body }),
                     last_deadline: deadline,
@@ -827,13 +898,6 @@ impl<P> Cx<'_, P> {
         Ok((handle, execution))
     }
 
-    #[inline]
-    pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
-        self.core_ref().plan_slots(plan)
-    }
-}
-
-impl crate::engine::CoreCx<'_> {
     // Only some feature combinations call this.
     #[cfg_attr(feature = "http-plans", allow(dead_code))]
     #[inline]
@@ -1084,7 +1148,9 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: Option<crate::classify::Intent>,
     ) -> Result<Context, Error> {
-        let leg = self.make_plan_leg_context(plan, slot, intent, false, true)?;
+        let leg = self
+            .core()
+            .make_plan_leg_context(plan, slot, intent, false, true)?;
         self.note_session_resume(plan, &leg);
         Ok(leg)
     }
@@ -1095,7 +1161,8 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn plan_leg_context(&mut self, plan: &Plan, slot: &Slot) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, None, false, false)
+        self.core()
+            .make_plan_leg_context(plan, slot, None, false, false)
     }
 
     /// Narrow a write leg using the common engine intent rules before its first
@@ -1106,7 +1173,8 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: crate::classify::Intent,
     ) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, Some(intent), false, false)
+        self.core()
+            .make_plan_leg_context(plan, slot, Some(intent), false, false)
     }
 
     /// The Plan form of `http_write_protection_cancel_leg`: an amend's cancel
@@ -1117,7 +1185,7 @@ impl<P> Cx<'_, P> {
         plan: &Plan,
         slot: &Slot,
     ) -> Result<Context, Error> {
-        self.make_plan_leg_context(
+        self.core().make_plan_leg_context(
             plan,
             slot,
             Some(crate::classify::Intent::Cancel),
@@ -1126,6 +1194,13 @@ impl<P> Cx<'_, P> {
         )
     }
 
+    #[inline]
+    fn plan_issue_custody(&self, plan: &Plan, body: &Body) -> bool {
+        self.core_ref().plan_issue_custody(plan, body)
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
     /// Handoff, initial or ready custody over this Plan's next issue.
     fn plan_issue_custody(&self, plan: &Plan, body: &Body) -> bool {
         self.io
@@ -1146,7 +1221,9 @@ impl<P> Cx<'_, P> {
                     .as_ref()
                     .is_some_and(|ready| ready.same_plan(plan)))
     }
+}
 
+impl crate::engine::CoreCx<'_> {
     /// A parked Slot's resume stands in for Plan custody; nothing else may
     /// issue a parked Slot.
     fn make_plan_leg_context(
@@ -1181,19 +1258,30 @@ impl<P> Cx<'_, P> {
                 .available()
                 .any(|candidate| body.schedule.ordinal(&candidate) == Ok(index))
             || !entry.eligible_at.is_some_and(|at| at <= self.now)
-            || !(resumed || self.plan_issue_custody(plan, body))
+            || !(resumed || self.core_ref().plan_issue_custody(plan, body))
         {
             return Err(Error::Revoked);
         }
         let window = entry.terms.window(self.now, plan.deadline())?;
+        // Which entry rides the login Session is declared per call.
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let session_leg = match body.session.as_ref() {
+            Some(session) => session.session_call(index),
+            None => body
+                .serial
+                .as_ref()
+                .is_some_and(|serial| serial.session_call()),
+        };
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let session_egress = session_egress.filter(|_| session_leg);
         #[cfg(feature = "serial-plans")]
         let (operation, retry, credential) = body.serial.as_ref().map_or_else(
             || {
-                (
-                    body.policy.operation,
-                    body.policy.retry,
-                    body.policy.credential.clone(),
-                )
+                #[cfg(feature = "session-bearer")]
+                let credential = body.policy.credential.clone().filter(|_| !session_leg);
+                #[cfg(not(feature = "session-bearer"))]
+                let credential = body.policy.credential.clone();
+                (body.policy.operation, body.policy.retry, credential)
             },
             |serial| serial.terms(&body.policy.credential),
         );
@@ -1241,6 +1329,17 @@ impl<P> Cx<'_, P> {
         {
             context = context.with_egress(session_egress)?;
         }
+        let class = if context.operation() == Operation::Mutation {
+            crate::request_budget::RequestClass::OrderWrite
+        } else {
+            self.io
+                .core
+                .request_contexts
+                .owner_entry(plan.owner())
+                .ok_or(Error::Revoked)?
+                .request_class
+        };
+        context.set_request_class(class);
         context.bind_issuer(&self.io.core.request_contexts.issuer);
         let call = Call::open(
             context.clone(),
@@ -1294,7 +1393,9 @@ impl<P> Cx<'_, P> {
             .insert(context.leg(), context.clone());
         Ok(context)
     }
+}
 
+impl<P> Cx<'_, P> {
     #[inline]
     pub fn validate_plan_delivery(&self, plan: &Plan, context: &Context) -> Result<(), Error> {
         self.core_ref().validate_plan_delivery(plan, context)
@@ -1519,6 +1620,8 @@ impl<P> Cx<'_, P> {
     }
 
     /// Failure-only retirement; expired authority never creates fresh sends.
+    /// Expiry cleanup retains passive element reports for the eventual seal;
+    /// its error kind, outcome and completion timing remain engine-owned.
     pub fn fail_plan(&mut self, plan: &Plan, error: impl Into<VenueError>) -> Result<(), Error> {
         self.fail_plan_checked(plan, error.into(), None)
     }
@@ -1534,6 +1637,53 @@ impl<P> Cx<'_, P> {
         self.fail_plan_checked(plan, error.into(), Some(note))
     }
 
+    #[inline]
+    fn fail_plan_checked(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+        note: Option<&str>,
+    ) -> Result<(), Error> {
+        self.core().fail_plan_checked(plan, error, note)
+    }
+
+    #[inline]
+    pub(in crate::engine) fn fail_plan_owned(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+    ) -> Result<(), Error> {
+        self.core().fail_plan_owned(plan, error)
+    }
+
+    #[inline]
+    fn seal_plan(
+        &mut self,
+        plan: &Plan,
+        result: Option<String>,
+        error: Option<VenueError>,
+        note: Option<&str>,
+    ) -> Result<(), Error> {
+        self.core().seal_plan(plan, result, error, note)
+    }
+
+    #[inline]
+    fn commit_plan_terminal(
+        &mut self,
+        plan: &Plan,
+        result: Option<String>,
+        prepared: conditional::PreparedPlanSeal,
+    ) -> Result<(), Error> {
+        self.core().commit_plan_terminal(plan, result, prepared)
+    }
+
+    #[inline]
+    fn rearm_plan(&mut self, plan: &Plan) {
+        self.core().rearm_plan(plan)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     fn fail_plan_checked(
         &mut self,
         plan: &Plan,
@@ -1578,6 +1728,25 @@ impl<P> Cx<'_, P> {
                 self.now,
                 self.io.core.http_delivery.as_ref(),
             )?;
+            // Cleanup cannot seal early, but its passive report must survive the final seal.
+            #[cfg(feature = "plan-element-reports")]
+            if let Some(elements) = error.elements {
+                let request = self
+                    .io
+                    .core
+                    .http_delivery
+                    .as_ref()
+                    .ok_or(Error::Revoked)?
+                    .attempt
+                    .request;
+                self.io
+                    .core
+                    .request_contexts
+                    .owner_entry_mut(plan.owner())
+                    .and_then(|owner| owner.writes.as_mut())
+                    .ok_or(Error::State)?
+                    .retain_failed_attempt_elements(request, elements)?;
+            }
             return Ok(());
         }
         self.seal_plan(plan, None, Some(error), note)
@@ -1594,86 +1763,6 @@ impl<P> Cx<'_, P> {
         self.commit_plan_terminal(plan, result, prepared)
     }
 
-    fn prepare_plan_terminal(
-        &mut self,
-        plan: &Plan,
-        error: Option<VenueError>,
-        note: Option<&str>,
-        result: Option<&str>,
-    ) -> Result<conditional::PreparedPlanSeal, Error> {
-        // Ready-loop custody first: no effect before the owner is confirmed.
-        self.validate_preflight_ready_owner(plan.owner())?;
-        let physical = matches!(plan.owner(), Owner::Execution { .. });
-        // Observers already past their own bound expire against the live
-        // journal before any terminal preparation (host callbacks seal first).
-        if physical {
-            self.sweep_executions();
-        }
-        let mut prepared = self.io.core.request_contexts.prepare_plan_seal(
-            plan,
-            self.now,
-            self.io.core.http_delivery.as_ref(),
-            error,
-            note,
-        )?;
-        if physical {
-            // Every observer's terminal and reports, cloned before the seal.
-            let projection = match (&prepared.journal, &prepared.legacy) {
-                (Some(journal), _) => journal
-                    .failure()
-                    .cloned()
-                    .map_or_else(|| Ok(result.unwrap_or_default().to_owned()), Err),
-                (None, Some(error)) => Err(error.clone()),
-                (None, None) => Ok(result.unwrap_or_default().to_owned()),
-            };
-            let observers = self.io.core.request_contexts.planned_observer_count(plan);
-            prepared
-                .fanout
-                .try_reserve_exact(observers)
-                .map_err(|_| Error::Capacity)?;
-            prepared
-                .sealed
-                .try_reserve_exact(observers)
-                .map_err(|_| Error::Capacity)?;
-            // Each observer's reports and terminal notice, plus the
-            // execution timer rearm (clear and set).
-            let notices = observers
-                .checked_mul(prepared.reports.len() + 1)
-                .and_then(|n| n.checked_add(2))
-                .ok_or(Error::Capacity)?;
-            // One reservation covers the notices and the owner's cleanup.
-            prepared.retired = self.io.prepare_owner_retirement(plan.owner(), notices)?;
-            for _ in 0..observers {
-                let mut reports = Vec::new();
-                if projection.is_err() {
-                    reports
-                        .try_reserve_exact(prepared.reports.len())
-                        .map_err(|_| Error::Capacity)?;
-                    reports.extend(prepared.reports.iter().cloned());
-                }
-                prepared.fanout.push((projection.clone(), reports));
-            }
-        }
-        Ok(prepared)
-    }
-
-    #[inline]
-    fn commit_plan_terminal(
-        &mut self,
-        plan: &Plan,
-        result: Option<String>,
-        prepared: conditional::PreparedPlanSeal,
-    ) -> Result<(), Error> {
-        self.core().commit_plan_terminal(plan, result, prepared)
-    }
-
-    #[inline]
-    fn rearm_plan(&mut self, plan: &Plan) {
-        self.core().rearm_plan(plan)
-    }
-}
-
-impl crate::engine::CoreCx<'_> {
     /// A resume drained with no delivery is the resumed attempt's custody for
     /// the rest of this event only.
     fn note_session_resume(&mut self, plan: &Plan, leg: &Context) {
@@ -1839,6 +1928,16 @@ impl crate::engine::CoreRef<'_> {
 }
 
 impl Body {
+    /// The entry whose current call is this leg.
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    fn entry_of(&self, context: &Context) -> Option<usize> {
+        self.entries.iter().position(|entry| {
+            entry
+                .call
+                .as_ref()
+                .is_some_and(|call| call.context == *context)
+        })
+    }
     fn refresh_availability(&mut self, now: f64) {
         for slot in self.schedule.available() {
             let index = self.schedule.ordinal(&slot).expect("own available slot");
@@ -1914,6 +2013,35 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
+    /// Retain passive outcomes for failures between calls under this exact live Plan.
+    /// Active calls and existing terminal reports win; no execution authority changes.
+    #[cfg(feature = "plan-element-reports")]
+    pub fn retain_idle_plan_elements(
+        &mut self,
+        plan: &Plan,
+        report: &crate::write_plan::WritePlan,
+    ) -> Result<(), Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        if body.policy.operation != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        if body.entries.iter().any(|entry| entry.call.is_some()) {
+            return Err(Error::State);
+        }
+        self.io
+            .core
+            .request_contexts
+            .plan_body_mut(plan)?
+            .idle_elements = Some(Box::new(crate::write_plan::ElementOutcomes(
+            report.outcomes(),
+        )));
+        Ok(())
+    }
+
     pub(in super::super) fn finish_failed_plan_call(
         &mut self,
         delivery: &Delivery,
@@ -2207,7 +2335,8 @@ impl<P> Cx<'_, P> {
     /// Raise a live Mutation Plan's failure projection to Unknown, for an
     /// effect the venue can no longer prove (such as a failed protective
     /// census after an accepted placement). Monotonic; it grants no send,
-    /// retry or success authority and records no write fact.
+    /// retry or success authority and records no write fact. Legacy HTTP command
+    /// roots use `inherit_http_uncertainty` with the same failure-only contract.
     pub fn inherit_plan_uncertainty(&mut self, plan: &Plan) -> Result<(), Error> {
         let body = self
             .io
@@ -2230,6 +2359,65 @@ impl<P> Cx<'_, P> {
             .inherit_uncertain();
         owner.inherited_uncertain = true;
         Ok(())
+    }
+
+    /// Words for a live Mutation Plan's failure when its terminal brings no
+    /// presented text of its own, as when the engine seals an unproven reply
+    /// the venue never sees. Only the message: outcome and protection stay
+    /// projected. The latest call replaces any earlier words.
+    pub fn present_plan_failure(
+        &mut self,
+        plan: &Plan,
+        message: impl Into<String>,
+    ) -> Result<(), Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        if body.policy.operation != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        self.io
+            .core
+            .request_contexts
+            .owner_entry_mut(plan.owner())
+            .ok_or(Error::Revoked)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .present_failure(message.into())
+    }
+
+    /// Replace the projected venue text for a live Mutation Plan's failure
+    /// on any outcome, including definite `Rejected`/`NotSent`. Use this where
+    /// the venue path has already composed the correct user-facing message
+    /// (protective put-back after a cancel, batch-unknown summary, locally
+    /// re-presented reason) and the venue's raw text would be strictly less
+    /// informative. Only the message: outcome and protection stay projected.
+    /// The latest call replaces any earlier words.
+    pub fn override_plan_failure_message(
+        &mut self,
+        plan: &Plan,
+        message: impl Into<String>,
+    ) -> Result<(), Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        if body.policy.operation != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        self.io
+            .core
+            .request_contexts
+            .owner_entry_mut(plan.owner())
+            .ok_or(Error::Revoked)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .force_present_failure(message.into())
     }
 
     /// Retire the current unissued call of an independent complete Plan that
@@ -2415,6 +2603,10 @@ mod history;
 #[path = "request_context_serial_plan.rs"]
 mod serial;
 
+#[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+#[path = "request_context_session_plan.rs"]
+mod session_plan;
+
 #[cfg(feature = "condition-waits")]
 #[path = "request_context_condition_wait.rs"]
 mod condition_wait;
@@ -2444,29 +2636,122 @@ impl ContextRegistry {
             return Ok(None);
         };
         let current = self.plan_body(&plan)?;
-        let Some(serial) = current.serial.as_ref().filter(|s| s.session_call()) else {
-            return Ok(None);
+        // A complete Plan freezes each Session entry's wire on its own.
+        let frozen = match current.session.as_ref() {
+            Some(session) => {
+                let index = current.entry_of(context).ok_or(Error::Revoked)?;
+                if !session.session_call(index) {
+                    return Ok(None);
+                }
+                session.wire[index]
+            }
+            None => match current.serial.as_ref().filter(|s| s.session_call()) {
+                Some(serial) => serial.wire_fingerprint,
+                None => return Ok(None),
+            },
         };
         let fingerprint = super::keyless_session::wire_fingerprint(method, url, headers, body);
-        if serial
-            .wire_fingerprint
-            .is_some_and(|expected| expected != fingerprint)
-        {
+        if frozen.is_some_and(|expected| expected != fingerprint) {
             return Err(Error::Invalid);
         }
         Ok(Some(fingerprint))
     }
 
-    pub(in crate::engine) fn commit_keyless_wire(&mut self, owner: Owner, fingerprint: [u8; 32]) {
+    pub(in crate::engine) fn commit_keyless_wire(
+        &mut self,
+        owner: Owner,
+        leg: u64,
+        fingerprint: [u8; 32],
+    ) {
         let CommandPhase::Planned(state) =
             &mut self.owner_entry_mut(owner).expect("queued owner").phase
         else {
             unreachable!("queued serial Plan");
         };
-        state.body[0]
-            .serial
+        let body = &mut state.body[0];
+        if let Some(session) = body.session.as_mut() {
+            let index = body
+                .entries
+                .iter()
+                .position(|entry| {
+                    entry
+                        .call
+                        .as_ref()
+                        .is_some_and(|call| call.context.leg() == leg)
+                })
+                .expect("queued Session entry");
+            session.wire[index] = Some(fingerprint);
+            return;
+        }
+        body.serial
             .as_mut()
             .expect("queued keyless serial")
             .wire_fingerprint = Some(fingerprint);
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    fn prepare_plan_terminal(
+        &mut self,
+        plan: &Plan,
+        error: Option<VenueError>,
+        note: Option<&str>,
+        result: Option<&str>,
+    ) -> Result<conditional::PreparedPlanSeal, Error> {
+        // Ready-loop custody first: no effect before the owner is confirmed.
+        self.core_ref()
+            .validate_preflight_ready_owner(plan.owner())?;
+        let physical = matches!(plan.owner(), Owner::Execution { .. });
+        // Observers already past their own bound expire against the live
+        // journal before any terminal preparation (host callbacks seal first).
+        if physical {
+            self.sweep_executions();
+        }
+        let mut prepared = self.io.core.request_contexts.prepare_plan_seal(
+            plan,
+            self.now,
+            self.io.core.http_delivery.as_ref(),
+            error,
+            note,
+        )?;
+        if physical {
+            // Every observer's terminal and reports, cloned before the seal.
+            let projection = match (&prepared.journal, &prepared.legacy) {
+                (Some(journal), _) => journal
+                    .failure()
+                    .cloned()
+                    .map_or_else(|| Ok(result.unwrap_or_default().to_owned()), Err),
+                (None, Some(error)) => Err(error.clone()),
+                (None, None) => Ok(result.unwrap_or_default().to_owned()),
+            };
+            let observers = self.io.core.request_contexts.planned_observer_count(plan);
+            prepared
+                .fanout
+                .try_reserve_exact(observers)
+                .map_err(|_| Error::Capacity)?;
+            prepared
+                .sealed
+                .try_reserve_exact(observers)
+                .map_err(|_| Error::Capacity)?;
+            // Each observer's reports and terminal notice, plus the
+            // execution timer rearm (clear and set).
+            let notices = observers
+                .checked_mul(prepared.reports.len() + 1)
+                .and_then(|n| n.checked_add(2))
+                .ok_or(Error::Capacity)?;
+            // One reservation covers the notices and the owner's cleanup.
+            prepared.retired = self.io.prepare_owner_retirement(plan.owner(), notices)?;
+            for _ in 0..observers {
+                let mut reports = Vec::new();
+                if projection.is_err() {
+                    reports
+                        .try_reserve_exact(prepared.reports.len())
+                        .map_err(|_| Error::Capacity)?;
+                    reports.extend(prepared.reports.iter().cloned());
+                }
+                prepared.fanout.push((projection.clone(), reports));
+            }
+        }
+        Ok(prepared)
     }
 }

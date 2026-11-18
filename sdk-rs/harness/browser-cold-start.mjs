@@ -2,7 +2,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { arch, cpus, platform, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,8 +74,10 @@ export function browserServer(assets, root = process.cwd()) {
   const add = (path, data, type) => routes.set(path, { data, type, sha256: hash(data) });
   add('/', Buffer.from('<!doctype html><title>WASM measurement</title>'), 'text/html');
   add('/browser-worker.mjs', readFileSync(join(root, 'sdk-rs/harness/browser-cold-start-worker.mjs')), 'text/javascript');
-  for (const name of ['engine.web.mjs', 'family-loader.mjs', 'venues.mjs'])
-    add(`/sdk-rs/hosts/wasm/js/${name}`, readFileSync(join(root, 'sdk-rs/hosts/wasm/js', name)), 'text/javascript');
+  // Serve every host module so a new static import (e.g. venues.mjs -> host.mjs) cannot 404 the engine.
+  const hostJs = join(root, 'sdk-rs/hosts/wasm/js');
+  for (const name of readdirSync(hostJs).filter((file) => file.endsWith('.mjs') && !file.endsWith('.test.mjs')))
+    add(`/sdk-rs/hosts/wasm/js/${name}`, readFileSync(join(hostJs, name)), 'text/javascript');
   for (const asset of assets) for (const extension of ['.js', '_bg.wasm'])
     add(`/sdk-rs/hosts/wasm/pkg/${asset.stem}${extension}`, asset.files[extension].data, extension === '.js' ? 'text/javascript' : 'application/wasm');
   const requests = [];

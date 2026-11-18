@@ -21,6 +21,7 @@ struct H {
     requests: Vec<HttpRequest>,
     sockets: Vec<(SocketId, String)>,
     sent: Vec<(SocketId, String)>,
+    closed: Vec<SocketId>,
     timers: Vec<(TimerId, f64)>,
 }
 
@@ -41,6 +42,7 @@ impl H {
             requests: vec![],
             sockets: vec![],
             sent: vec![],
+            closed: vec![],
             timers: vec![],
         };
         h.engine.start(h.now);
@@ -71,6 +73,7 @@ impl H {
         let mut h = Self::account_unopened();
         let socket = h.private();
         h.open(socket);
+        h.message(socket, r#"{"op":"login","data":{"result":true}}"#);
         h
     }
     fn futures(&self) -> SocketId {
@@ -98,6 +101,7 @@ impl H {
             match action {
                 Action::Http(request) => self.requests.push(request),
                 Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
+                Action::WsClose { socket } => self.closed.push(socket),
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
@@ -329,21 +333,38 @@ fn public_shards_send_twenty_symbol_frames_250_ms_apart_and_again_on_reopen() {
     paced(&mut h, replacement);
 }
 
-/// D1 under `AuthMode::Observe`, as legacy: there is no login deadline, and a
-/// private frame is reduced before any login answer arrives.
+/// Observe preserves private-data delivery before an answer, within master's
+/// independent ten-second login deadline.
 #[test]
-fn private_login_has_no_deadline_and_frames_reduce_before_its_answer() {
-    let mut h = H::account();
+fn private_frames_reduce_before_the_login_answer_within_its_deadline() {
+    let mut h = H::account_unopened();
     let socket = h.private();
-    let private_connects = |h: &H| {
-        h.sockets
-            .iter()
-            .filter(|(_, url)| url.contains("/private/"))
-            .count()
-    };
-    // Past any login bound (Config's connect deadline is 10 s), still current.
-    h.now += 30_000.0;
+    h.open(socket);
+    h.now += 9_999.0;
     h.message(socket, &order("before-login"));
     assert!(h.engine.store().order("before-login").is_some());
-    assert_eq!(private_connects(&h), 1, "no login timeout reconnect");
+    assert!(!h.closed.contains(&socket));
+}
+
+#[test]
+fn private_frame_at_login_deadline_is_not_reduced_before_its_timer() {
+    let mut h = H::account_unopened();
+    let socket = h.private();
+    h.open(socket);
+    h.now += 10_000.0;
+    h.message(socket, &order("after-login-deadline"));
+    assert!(h.engine.store().order("after-login-deadline").is_none());
+    assert!(h.closed.contains(&socket));
+}
+
+#[test]
+fn login_answer_at_its_deadline_cannot_revive_the_private_epoch() {
+    let mut h = H::account_unopened();
+    let socket = h.private();
+    h.open(socket);
+    h.now += 10_000.0;
+    h.message(socket, r#"{"op":"login","data":{"result":true}}"#);
+    h.message(socket, &order("after-late-login"));
+    assert!(h.engine.store().order("after-late-login").is_none());
+    assert!(h.closed.contains(&socket));
 }

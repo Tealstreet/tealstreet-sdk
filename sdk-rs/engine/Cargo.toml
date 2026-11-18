@@ -5,12 +5,18 @@ edition.workspace = true
 publish.workspace = true
 
 [features]
+# Only Bitget, Kraken and BingX serialize closed history row-validation detail.
+history-row-diagnostics = []
 # Only counter-nonce families link send-time reservation and release repair.
 dispatch-nonce = []
+# Owned legacy-to-stable takeover, enabled only by a reviewed activation.
+nonce-handoff = ["dispatch-nonce"]
 # Trusted signer-address setup and address-bound dispatch claims.
 address-nonce = ["dispatch-nonce", "sign-meta"]
 # Whole-plan HTTP admission is linked only by adopting venue families.
 http-plans = []
+# Passive element reports across Plan calls and expiry cleanup; adopters only.
+plan-element-reports = ["http-plans"]
 # Adopters explicitly include parallel Mutation prepare/sign/release custody.
 http-mutation-barriers = ["http-plans"]
 # Streamed serial Plans are linked only by adopting families.
@@ -26,9 +32,14 @@ write-preflight-wait = ["http-plans"]
 session-bearer = []
 # Temporary migration boundary; remove after all legacy socket families adopt.
 managed-sockets = []
+# Only Hyperliquid, Kraken and TxFlow use JSON subscription aliases for diagnostics.
+socket-topic-aliases = ["managed-sockets"]
 # Opt-in native receive, initial-payload and stability timing.
 socket-native-timing = ["managed-sockets"]
 order-locks = []
+# Frame-fed ingest applies the source's MARKETS leverage limits; only venues
+# whose limits are private metadata (Binance brackets) link it.
+source-leverage = []
 # Read-only signing-task metadata for hosted signing; only Kraken and Paradex link it.
 sign-meta = []
 # Engine-issued repair cancel/replace authority; only Phemex and Backpack link it.
@@ -49,6 +60,8 @@ command-asterdex = ["command-order-book"]
 command-apexomni = []
 command-polymarket = ["command-order-book"]
 command-kucoinspot = []
+# Bitget source-side native cancel confirmation registration (read-only).
+command-bitget = []
 # Bitunix opts in; other single-venue WASM builds omit the versioned-envelope selector.
 any-field-envelope = []
 # Bybit opts in through its dependency so unrelated single-venue WASM builds
@@ -62,6 +75,7 @@ underlying-tokens = []
 test-support = []
 
 [dependencies]
+safe-cex-position-math.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -69,3 +83,7 @@ zeroize.workspace = true
 
 [lints]
 workspace = true
+
+[[example]]
+name = "managed_frame_profile"
+required-features = ["managed-sockets"]

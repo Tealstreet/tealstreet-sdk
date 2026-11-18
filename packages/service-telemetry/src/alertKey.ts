@@ -1,3 +1,5 @@
+import { redactDiagnosticData } from './diagnosticRedaction';
+
 /**
  * The throttle key for a process-level alert.
  *
@@ -45,7 +47,7 @@ function describe(err: unknown): string {
 export function alertKey(prefix: string, err: unknown): string {
   const signature = VOLATILE_TOKENS.reduce(
     (acc, [re, sub]) => acc.replace(re, sub),
-    describe(err).replace(/\s+/g, ' '),
+    describe(redactDiagnosticData(err)).replace(/\s+/g, ' '),
   );
   return `${prefix}:${signature.slice(0, 160)}`;
 }

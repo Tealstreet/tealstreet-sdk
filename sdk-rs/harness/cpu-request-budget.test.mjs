@@ -5,6 +5,8 @@ import { GATE_SUITES } from './ci-gate-suites.mjs';
 import { createGithubReader, CPU_COHORT_STEPS } from './cpu-cohort.mjs';
 import { authenticatedBundle, currentPhysical, evidenceEndCheck } from './cpu-ci.mjs';
 
+// Measured for the 31-suite cohort without second runners or the retired venue.
+const REQUESTS = 262;
 const sha = value => createHash('sha256').update(value).digest('hex');
 const at = second => new Date(Date.UTC(2026, 9, 23, 0, 0, second)).toISOString();
 function cohort() {
@@ -32,10 +34,8 @@ function cohort() {
     jobs.push(job); logs.set(job.id, Buffer.from(log));
   }
   for (const suite of GATE_SUITES) producer(`Rust / replay measurement (${suite})`, [
-    [`strict-replay-${suite}`, CPU_COHORT_STEPS.strict], [`cpu-cohort-${suite}`, CPU_COHORT_STEPS.first],
-    [`cpu-runtime-${suite}`, CPU_COHORT_STEPS.runtime] ]);
+    [`strict-replay-${suite}`, CPU_COHORT_STEPS.strict], [`cpu-cohort-${suite}`, CPU_COHORT_STEPS.first] ]);
   producer('Rust / CPU remeasurement plan', [['cpu-plan', CPU_COHORT_STEPS.plan]]);
-  for (const suite of GATE_SUITES) producer(`Rust / CPU remeasurement (${suite})`, [[`cpu-second-${suite}`, CPU_COHORT_STEPS.second]]);
   // Include all final wrappers, native/host checks and matching package uploads
   // so both original and fresh inventories cross the 100-row page boundary.
   for (let index = 0; index < 50; index++) jobs.push({ id: jobs.length + 1, name: `unrelated-${index}` });
@@ -53,7 +53,7 @@ function cohort() {
     if (/^actions\/artifacts\/\d+\/zip$/.test(path)) return new Response(archive);
     throw new Error(`Unexpected unbudgeted API request ${path}`);
   } }) });
-  const bundle = (ctx, name, jobName, stepName, metadataOnly = false) => authenticatedBundle(ctx, run.id, name, jobName, stepName, run.head_sha, metadataOnly);
+  const bundle = (ctx, name, jobName, stepName) => authenticatedBundle(ctx, run.id, name, jobName, stepName, run.head_sha);
   const first = async (ctx, suite) => {
     for (const [name, step] of [[`strict-replay-${suite}`, CPU_COHORT_STEPS.strict], [`cpu-cohort-${suite}`, CPU_COHORT_STEPS.first]])
       await bundle(ctx, name, `Rust / replay measurement (${suite})`, step);
@@ -62,53 +62,31 @@ function cohort() {
   return { context, bundle, first, plan, counters, jobs, artifacts, run };
 }
 
-async function exercise(allSecond) {
-  const value = cohort(), { context, bundle, first, plan, counters } = value;
+async function exercise() {
+  const value = cohort(), { context, first, plan, counters } = value;
   for (const suite of GATE_SUITES) await currentPhysical(context(), `Rust / replay measurement (${suite})`);
   const planner = context();
   for (const suite of GATE_SUITES) await first(planner, suite);
   await evidenceEndCheck(planner);
-  if (allSecond) for (const suite of GATE_SUITES) {
-    const second = context(); await plan(second); await first(second, suite);
-    await bundle(second, `cpu-runtime-${suite}`, `Rust / replay measurement (${suite})`, CPU_COHORT_STEPS.runtime);
-    await evidenceEndCheck(second);
-  }
   const certifier = context(); await plan(certifier);
   for (const suite of GATE_SUITES) {
     await first(certifier, suite); await first(certifier, suite); // repeated source recomputation shares immutable bundles
-    if (allSecond) {
-      await bundle(certifier, `cpu-second-${suite}`, `Rust / CPU remeasurement (${suite})`, CPU_COHORT_STEPS.second);
-      await bundle(certifier, `cpu-runtime-${suite}`, `Rust / replay measurement (${suite})`, CPU_COHORT_STEPS.runtime, true);
-    }
   }
   await evidenceEndCheck(certifier);
   return { ...value, certifier, requests: counters.requests };
 }
 
-test('actual paginated authority adapter stays bounded for all-PASS and worst all-second cohorts', async () => {
-  const ordinary = await exercise(false), worst = await exercise(true);
-  assert.equal(ordinary.requests, 310);
-  assert.equal(worst.requests, 886);
-  assert(worst.requests < 1000, 'one complete cohort must fit the ordinary repository token budget before concurrent activity');
-  assert.equal(worst.certifier.bindings.length, 129);
+test('actual paginated authority adapter stays bounded for a complete cohort', async () => {
+  const cohortRun = await exercise();
+  assert.equal(cohortRun.requests, REQUESTS);
+  assert(cohortRun.requests < 1000, 'one complete cohort must fit the ordinary repository token budget before concurrent activity');
+  assert.equal(cohortRun.certifier.bindings.length, 1 + 2 * GATE_SUITES.length);
 });
 
 test('batching still freshly rejects late duplicate artifacts/jobs and run-attempt drift', async () => {
   for (const mutation of [value => value.artifacts.push({ ...value.artifacts[0], id: 9999 }),
     value => value.jobs.push({ ...value.jobs[0], id: 9999 }), value => { value.run.run_attempt = 2; }]) {
-    const value = await exercise(false); mutation(value);
+    const value = await exercise(); mutation(value);
     await assert.rejects(evidenceEndCheck(value.certifier), /duplicate\/changed|attempt changed/);
   }
-});
-
-
-test('fresh exit inventory also protects the absence of unissued second runners', async () => {
-  const value = cohort(), ctx = value.context();
-  const secondName = 'Rust / CPU remeasurement (bitget)';
-  const index = value.jobs.findIndex(job => job.name === secondName);
-  const removed = value.jobs.splice(index, 1)[0];
-  ctx.secondDispositions = new Map([['bitget', [{ decision: 'first' }]]]);
-  await evidenceEndCheck(ctx);
-  value.jobs.push(removed);
-  await assert.rejects(evidenceEndCheck(ctx), /without a first miss/);
 });

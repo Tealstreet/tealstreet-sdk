@@ -1608,3 +1608,14 @@ fn unidentified_malformed_children_keep_cached_protection_while_valid_peers_comm
         );
     }
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let mut h = Harness::new();
+    let snapshot = h.take("/account");
+    h.respond(snapshot, r#"{"code":-2015,"msg":"Invalid API-key"}"#);
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}

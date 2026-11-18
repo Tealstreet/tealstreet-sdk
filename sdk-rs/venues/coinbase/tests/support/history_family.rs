@@ -92,9 +92,10 @@ fn cfm_to_spot_keeps_accepted_rows_and_per_family_limits() {
         assert_eq!(gaps.len(), usize::from(later_failure));
         if later_failure {
             assert_eq!(
-                gaps[0].fields,
-                vec![("command", safe_cex_engine::Value::Num(77.))]
+                gaps[0].fields[..1],
+                [("command", safe_cex_engine::Value::Num(77.))]
             );
+            assert_eq!(gaps[0].fields[1].0, "reason");
         }
     }
 }

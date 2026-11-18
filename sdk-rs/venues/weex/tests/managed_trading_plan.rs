@@ -773,3 +773,67 @@ fn malformed_batch_rows_do_not_erase_other_correlated_identity_evidence() {
     );
     assert!(engine.store().orders().is_empty());
 }
+
+#[test]
+fn engine_ambiguity_429_auth_body_cannot_change_unknown() {
+    let mut e = engine();
+    place(&mut e, 1);
+    let request = packet(&collect(&mut e, START));
+    let actions = respond(
+        &mut e,
+        &request,
+        START + 1.,
+        429,
+        r#"{"code":"40006","msg":"Invalid ACCESS_KEY"}"#,
+    );
+    assert!(writes(&actions).is_empty());
+    let errors = failures(&actions);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].outcome, Some(Outcome::Unknown));
+}
+
+#[test]
+fn date_retry_after_uses_protocol_utc_before_the_unknown_seal() {
+    for headers in [
+        "Retry-After: Sun, 06 Nov 1994 08:49:37 GMT",
+        "Retry-After: 5",
+    ] {
+        let mut engine = engine();
+        assert!(engine.sync_host_time(START, 784_111_772_000.));
+        place(&mut engine, 1);
+        let request = packet(&collect(&mut engine, START));
+        engine.handle(
+            START + 1.,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status: 429,
+                    headers,
+                    body: r#"{"code":429}"#,
+                },
+            },
+        );
+        let actions = collect(&mut engine, START + 1.);
+        assert_eq!(failures(&actions).len(), 1);
+        let mut later = Vec::new();
+        // Date headers currently use the engine's ten-second default; numeric
+        // headers carry five seconds. Both must have expired by this point.
+        for timer in actions.iter().filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms <= START + 10_001. => Some(*timer),
+            _ => None,
+        }) {
+            engine.handle(START + 10_001., Event::TimerFired { timer });
+            later.extend(collect(&mut engine, START + 10_001.));
+        }
+        assert!(
+            later.iter().any(|a| matches!(a, Action::Http(_))),
+            "expired cooldown must permit reconciliation: {headers}"
+        );
+        assert!(
+            later.iter().all(|a| !matches!(a,
+                Action::Http(request) if request.method == Method::Post
+            )),
+            "never resend the write"
+        );
+    }
+}

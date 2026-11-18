@@ -12,12 +12,12 @@ import { ChaserOrderManager } from './ChaserOrderManager';
 
 type Handler = (...args: any[]) => void;
 
-// Encode revision-zero rows independently so the real binary reader and fill
+// Encode revision-two rows independently so the real binary reader and fill
 // bridge participate in the chaser regression without requiring a WASM build.
 const createFillFrame = (fills: Array<{ orderId: string; market: number; amount: number }>): Frame => {
   const align8 = (value: number) => Math.ceil(value / 8) * 8;
   const strings = ['BTCUSDT', 'ETHUSDT', 'BTC', 'ETH', 'USDT', ...fills.map((fill) => fill.orderId)];
-  const sections: Array<{ kind: number; bytes: Uint8Array }> = [];
+  const sections: Array<{ kind: number; bytes: Uint8Array; revision?: number }> = [];
   const table = (kind: number, words: number[], numbers: number[]) => {
     const bytes = new Uint8Array(align8(words.length * 4) + numbers.length * 8);
     const view = new DataView(bytes.buffer);
@@ -35,6 +35,18 @@ const createFillFrame = (fills: Array<{ orderId: string; market: number; amount:
     [fills.length, ...fills.map((_, i) => 5 + i), ...fills.map((fill) => fill.market), ...fills.map(() => 0)],
     fills.flatMap((fill) => [100, fill.amount]),
   );
+  const fillSection = sections[sections.length - 1];
+  const fillBytes = new Uint8Array(fillSection.bytes.length + fills.length * 24);
+  fillBytes.set(fillSection.bytes);
+  const fillView = new DataView(fillBytes.buffer);
+  fills.forEach((fill, i) => {
+    fillView.setUint32(fillSection.bytes.length + i * 4, fill.market, true);
+    fillView.setUint32(fillSection.bytes.length + (fills.length + i) * 4, 5 + i, true);
+    fillView.setFloat64(fillSection.bytes.length + fills.length * 8 + i * 8, NaN, true);
+    fillView.setFloat64(fillSection.bytes.length + fills.length * 16 + i * 8, NaN, true);
+  });
+  fillSection.bytes = fillBytes;
+  fillSection.revision = 2;
   const encoded = strings.map((value) => new TextEncoder().encode(value));
   const stringBytes = new Uint8Array(
     align8(4 + (strings.length + 1) * 4 + encoded.reduce((size, value) => size + value.length, 0)),
@@ -57,6 +69,7 @@ const createFillFrame = (fills: Array<{ orderId: string; market: number; amount:
   let offset = 16;
   for (const section of sections) {
     view.setUint16(offset, section.kind, true);
+    view.setUint16(offset + 2, section.revision ?? 0, true);
     view.setUint32(offset + 4, section.bytes.length, true);
     new Uint8Array(buffer, offset + 8, section.bytes.length).set(section.bytes);
     offset += 8 + section.bytes.length;
@@ -755,6 +768,27 @@ describe('ChaserOrderManager', () => {
     expect(manager.instances).not.toContain(instance);
   });
 
+  it.each([{ notional: null, mode: 'direct' }, { notional: NaN, mode: 'direct' }, { notional: null, mode: 'update' }, { notional: NaN, mode: 'update' }])('uses flat quantity with unknown notional $notional via $mode', async ({notional, mode}) => {
+    const { emit, exchange, store } = createMockExchange();
+    Object.assign(store, { positions: [{
+      id: 'p', symbol: 'BTCUSDT', side: PositionSide.Short, contracts: 1,
+      entryPrice: 100, notional, leverage: 1, unrealizedPnl: 0, liquidationPrice: null,
+    }] });
+    const manager = new ChaserOrderManager();
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT', size: 1, side: OrderSide.Buy, reduceOnly: true, maxAttempts: 10, delay: 250,
+    });
+    manager.add(instance);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(instance.isStopped).toBe(false);
+    Object.assign(store, { positions: [{ ...store.positions[0], contracts: 0 }] });
+    if (mode === 'direct') manager.checkAndMarkIfComplete(instance);
+    else await emit('update', store);
+    expect(instance.isStopped).toBe(true);
+    await emit('update', store);
+    expect(manager.instances).not.toContain(instance);
+  });
+
   it('stops non-reduce chasers when the target position size is reached', async () => {
     const { emit, exchange, store } = createMockExchange();
     (exchange as any).name = 'bybitdemo';
@@ -1136,9 +1170,7 @@ describe('ChaserOrderManager', () => {
       manager.add(instance);
       await vi.advanceTimersByTimeAsync(1000);
 
-      (store as any).positions = [
-        { id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 1 },
-      ];
+      (store as any).positions = [{ id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 1 }];
       store.updateIds.positions += 1;
       await emit('update', store);
       await vi.advanceTimersByTimeAsync(0);
@@ -1221,9 +1253,7 @@ describe('ChaserOrderManager', () => {
       manager.add(instance);
       await vi.advanceTimersByTimeAsync(1000);
       // A separate market buy grew the long; this chase filled nothing.
-      (store as any).positions = [
-        { id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0.5 },
-      ];
+      (store as any).positions = [{ id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0.5 }];
 
       manager.remove(instance.id);
       await vi.advanceTimersByTimeAsync(0);
@@ -1308,7 +1338,9 @@ describe('ChaserOrderManager lost placement', () => {
     expect(exchange.placeOrder).toHaveBeenCalledTimes(1);
     expect(instance.isStopped).toBe(true);
     expect(exchange.emitter.emit).toHaveBeenCalledWith('error', expect.stringContaining('check open orders'));
-    const completions = (exchange.emitter.emit as any).mock.calls.filter(([event]: [string]) => event === 'chaser:complete');
+    const completions = (exchange.emitter.emit as any).mock.calls.filter(
+      ([event]: [string]) => event === 'chaser:complete',
+    );
     expect(completions).toHaveLength(1);
     expect(completions[0][1]).toMatchObject({ stopReason: 'Could not confirm order placement' });
   });
@@ -1355,4 +1387,46 @@ describe('ChaserOrderManager lost placement', () => {
     expect(exchange.findOrderByClientOrderId).not.toHaveBeenCalled();
     expect(exchange.placeOrder).toHaveBeenCalledTimes(2);
   });
+
+  const venueError = (message: string, kind: string, outcome: string) =>
+    Object.assign(new Error(message), { kind, outcome });
+
+  it('a reduce-only refused for position ends the chase on its first placement, saying so once', async () => {
+    const { exchange } = withLostResponse();
+    exchange.placeOrder = vi
+      .fn()
+      .mockRejectedValue(venueError('Not enough position is available', 'invalidInput', 'rejected'));
+
+    const instance = startChase(exchange);
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(exchange.placeOrder).toHaveBeenCalledTimes(1);
+    expect(instance.isStopped).toBe(true);
+    const errors = (exchange.emitter.emit as any).mock.calls.filter(([event]: [string]) => event === 'error');
+    expect(errors).toEqual([
+      ['error', 'Chaser for BTCUSDT stopped: the venue refused the order: Not enough position is available'],
+    ]);
+    const completions = (exchange.emitter.emit as any).mock.calls.filter(
+      ([event]: [string]) => event === 'chaser:complete',
+    );
+    expect(completions).toHaveLength(1);
+    expect(completions[0][1]).toMatchObject({ stopReason: 'The venue refused the order' });
+  });
+
+  it.each(['rateLimited', 'timeout', 'network', 'rejected'])(
+    'a %s placement failure that sent nothing still retries',
+    async (kind) => {
+      const { exchange } = withLostResponse();
+      exchange.placeOrder = vi
+        .fn()
+        .mockRejectedValueOnce(venueError('try again', kind, 'notSent'))
+        .mockResolvedValueOnce(['order-1']);
+
+      const instance = startChase(exchange);
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(exchange.placeOrder).toHaveBeenCalledTimes(2);
+      expect(instance.currentOrderIds).toEqual(['order-1']);
+    },
+  );
 });

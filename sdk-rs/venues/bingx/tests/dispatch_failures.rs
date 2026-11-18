@@ -304,7 +304,19 @@ fn first_write_provider_refusal_is_typed_not_sent() {
     let mut h = Harness::new();
     h.place(1);
     h.refuse(SignError::Refused);
-    assert_eq!(h.error(), &SignError::Refused.venue_error());
+    assert_unsent_write_refusal(h.error());
+}
+
+fn assert_unsent_write_refusal(error: &VenueError) {
+    let mut actual = error.clone();
+    let expected = SignError::Refused.venue_error();
+    let elements = actual.elements.take().expect("unsent write outcome");
+    assert_eq!(elements.len(), 1);
+    assert_eq!(elements[0].element.index, 0);
+    assert!(matches!(&elements[0].result,
+        safe_cex_engine::write_plan::ElementResult::NotSent { error: Some(error) }
+        if error.as_ref() == &expected));
+    assert_eq!(actual, expected);
 }
 #[test]
 fn signature_retry_provider_refusal_keeps_prior_sent_unknown() {
@@ -404,13 +416,20 @@ fn unclassified_native_response_after_or_before_unsent_cancel_is_unknown() {
                 },
             );
             if !provider_first {
-                h.refuse(SignError::Refused);
+                assert!(
+                    h.preparing
+                        .values()
+                        .all(|request| request.method == safe_cex_engine::Method::Get),
+                    "Unknown must not prepare a later cancellation"
+                );
             }
             assert_eq!(
                 h.error().outcome,
                 Some(Outcome::Unknown),
                 "status {status}, provider first {provider_first}"
             );
+            const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+            assert!(h.error().message.contains(ENGINE_UNKNOWN_TEXT));
         }
     }
 }
@@ -472,7 +491,7 @@ fn refused_setting_releases_publication_fence_for_the_next_metadata_read() {
         side: None,
     });
     h.refuse(SignError::Refused);
-    assert_eq!(h.error(), &SignError::Refused.venue_error());
+    assert_unsent_write_refusal(h.error());
     h.errors.clear();
     h.command(Command::FetchLeverage {
         command: 42,

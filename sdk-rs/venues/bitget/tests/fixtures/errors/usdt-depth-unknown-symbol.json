@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:38:26.385Z",
+  "endpoint": "/api/v2/mix/market/merge-depth?symbol=NOPEUSDT&productType=USDT-FUTURES",
+  "http_status": 400,
+  "body": "{\"code\":\"40034\",\"msg\":\"Parameter NOPEUSDT does not exist\",\"requestTime\":1793155106357,\"data\":null}",
+  "expect": {
+    "kind": null,
+    "outcome": null,
+    "path": "read"
+  }
+}

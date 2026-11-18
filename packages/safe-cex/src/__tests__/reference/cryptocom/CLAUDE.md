@@ -10,6 +10,22 @@
   per-order `ISOLATED_MARGIN` / `isolation_id` creation is implemented.
 - **Status**: Disabled in production (`enabled: false`), enabled in dev (`enabledInDev: true`), enabled on preview (`enableInPreview: true`)
 
+## US Perpetual Futures Watchpoint
+
+Crypto.com publicly advertises a US perpetual futures product at
+<https://crypto.com/us/perpetual-futures>, with Foris DAX Inc. introducing
+customers to Foris DAX FCM, LLC for CFTC-regulated perpetual futures on CDNA.
+The page mentions up to 5x leverage, isolated risk per trade, TradingView, and
+API access.
+
+This reference does **not** support that US rail today. The current adapter is
+for the existing Crypto.com Exchange v1 API under `/exchange/v1` and should not
+be assumed to cover US FCM accounts, onboarding state, credentials, endpoints,
+instrument ids, margin semantics, funding schedule, or order behavior. Treat US
+perpetuals as a considered future support path only, likely requiring a fresh
+endpoint/account audit and possibly a separate metadata variant if the rail is
+not wire-compatible with the existing Exchange v1 integration.
+
 ## API Documentation
 
 - **Exchange API v1**: <https://exchange-developer.crypto.com/exchange/v1/>
@@ -693,7 +709,6 @@ History reads use exact nanosecond cursors, overlap/deduplicate boundaries and
 walk ranged income to exhaustion. Settlement PnL uses `realized_pnl`; historical
 requested limit prices stay separate from triggers. The replay harness records
 these corrections under `KNOWN_TS_FIXES`.
-
 
 Native REST `fetchOrderBook` uses unsigned GET `/public/get-book` with the raw
 URL-encoded instrument name and fixed depth50 on live/UAT; caller limit is ignored

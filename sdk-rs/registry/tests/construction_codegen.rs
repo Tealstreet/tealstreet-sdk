@@ -2,6 +2,36 @@
 mod build_support;
 
 #[test]
+fn mexc_broker_header_does_not_gate_other_protected_headers() {
+    let output = build_support::generate_fixture(
+        r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+        "mexc":{"setupMapping":"mexc","remoteSigning":{"protectedHeaders":["ApiKey","source"]}},
+        "other":{"remoteSigning":{"protectedHeaders":["source"]}}}}"#,
+    )
+    .unwrap();
+    assert!(output.contains(r#"Some(&["ApiKey",#[cfg(feature = "mexc")] "source"])"#));
+    assert!(output.contains(r#"protected_headers: Some(&["source"])"#));
+    assert_eq!(output.matches(r#"#[cfg(feature = "mexc")]"#).count(), 1);
+}
+
+#[test]
+fn kucoin_broker_setup_declaration_does_not_enable_dispatch_or_hosted_signing() {
+    let output = build_support::generate_fixture(
+        r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+        "kucoin":{"signerSetup":{
+            "primary":{"extra":{"key":"kucoinBroker","encoding":"utf8","trim":true}},
+            "secondary":{"extra":{"key":"kucoinBroker","field":"aliasPrimary"}}}}
+    }}"#,
+    )
+    .unwrap();
+    assert!(output.contains("ExtraKey::KucoinBroker"));
+    assert!(output.contains("ExtraFieldPolicy::AliasPrimary"));
+    assert!(output.contains("trim: true"));
+    assert!(output.contains("dispatch_signing: false"));
+    assert!(output.contains("enabled: false"));
+}
+
+#[test]
 fn two_families_declare_owned_presentation_without_enabling_runtime_admission() {
     for (name, header) in [
         ("okx", "OK-ACCESS-PASSPHRASE"),
@@ -10,13 +40,19 @@ fn two_families_declare_owned_presentation_without_enabling_runtime_admission() 
         let json = format!(
             r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"{name}":{{"remoteSigning":{{"signatureEncoding":"base64","passphraseHeader":"{header}"}}}}}}}}"#
         );
-        let output = build_support::generate(&json).unwrap();
+        let output = build_support::generate_fixture(&json).unwrap();
         assert!(output.contains("enabled: false"));
         assert!(output.contains("signature_encoding: SignatureEncoding::Base64"));
         assert!(output.contains(&format!("passphrase_header: Some(\"{header}\")")));
     }
+    let blofin = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"blofin":{"remoteSigning":{"signatureEncoding":"hex-base64","passphraseHeader":"ACCESS-PASSPHRASE"}}}}"#;
+    assert!(
+        build_support::generate_fixture(blofin)
+            .unwrap()
+            .contains("signature_encoding: SignatureEncoding::Base64Hex")
+    );
     for declaration in [
-        r#"{"signatureEncoding":"hex-base64"}"#,
+        r#"{"signatureEncoding":"base64-hex"}"#,
         r#"{"signatureEncoding":true}"#,
         r#"{"passphraseHeader":""}"#,
         r#"{"passphraseHeader":"Bad Name"}"#,
@@ -26,15 +62,18 @@ fn two_families_declare_owned_presentation_without_enabling_runtime_admission() 
         let json = format!(
             r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"remoteSigning":{declaration}}}}}}}"#
         );
-        assert!(build_support::generate(&json).is_err(), "{declaration}");
+        assert!(
+            build_support::generate_fixture(&json).is_err(),
+            "{declaration}"
+        );
     }
     let long = "x".repeat(257);
-    assert!(build_support::generate(&format!(r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"remoteSigning":{{"passphraseHeader":"{long}"}}}}}}}}"#)).is_err());
+    assert!(build_support::generate_fixture(&format!(r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"remoteSigning":{{"passphraseHeader":"{long}"}}}}}}}}"#)).is_err());
 }
 
 #[test]
 fn distinguishes_fallback_from_empty_conditions_and_escapes_strings() {
-    let output = build_support::generate(
+    let output = build_support::generate_fixture(
         r#"{"default":{"canSign":[["key"]],"privateEligible":[["canSign"]]},"venues":{
         "z":{"canSign":null,"privateEligible":[],"explicitPrivateError":"quote\"\nline"},
         "a":{"canSign":[[]]}}}"#,
@@ -55,13 +94,13 @@ fn invalid_or_incomplete_shared_rules_fail_the_build() {
         r#"{"default":{"canSign":[["unknown"]],"privateEligible":[]},"venues":{}}"#,
         r#"{"default":{"canSign":[],"privateEligible":[],"typo":true},"venues":{}}"#,
     ] {
-        assert!(build_support::generate(json).is_err(), "{json}");
+        assert!(build_support::generate_fixture(json).is_err(), "{json}");
     }
 }
 
 #[test]
 fn delegated_policy_is_declared_once_and_invalid_headers_fail_the_build() {
-    let output = build_support::generate(
+    let output = build_support::generate_fixture(
         r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
         "v":{"remoteSigning":{"payloadRestOnly":true,"protectedHeaders":[]}},
         "protected":{"remoteSigning":{"payloadRestOnly":true,"protectedHeaders":["X-Fixed"]}}
@@ -90,7 +129,7 @@ fn delegated_policy_is_declared_once_and_invalid_headers_fail_the_build() {
         let json = format!(
             r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"remoteSigning":{declaration}}}}}}}"#
         );
-        assert!(build_support::generate(&json).is_err());
+        assert!(build_support::generate_fixture(&json).is_err());
     }
 }
 
@@ -144,7 +183,7 @@ fn all_nine_aliases_share_rest_only_payload_policy_with_declared_precedence() {
 #[test]
 fn runtime_admission_requires_dispatch_and_complete_shared_policy() {
     let generate = |bridge: &str, declaration: &str| {
-        build_support::generate(&format!(
+        build_support::generate_fixture(&format!(
             r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"bridge":{bridge},"remoteSigning":{declaration}}}}}}}"#
         ))
     };
@@ -175,7 +214,7 @@ fn remote_wire_policy_rejects_unknown_codecs_labels_and_unbound_fixed_ids() {
         let json = format!(
             r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"remoteSigning":{{"wire":{wire}}}}}}}}}"#
         );
-        assert!(build_support::generate(&json).is_err(), "{wire}");
+        assert!(build_support::generate_fixture(&json).is_err(), "{wire}");
     }
     build_support::generate(include_str!(
         "../../../packages/safe-cex/src/exchanges/rust/construction-rules.json"
@@ -191,7 +230,7 @@ fn seconds_timestamp_wire_requires_exactly_one_declared_method_path_suffix() {
         )
     };
     for family in ["/users/self/verify", "/user/verify"] {
-        build_support::generate(&rules(&format!(
+        build_support::generate_fixture(&rules(&format!(
             r#"{{"exchangeName":"v","extraData":"secondsTimestamp","secondsSuffix":{{"method":"GET","path":"{family}"}}}}"#
         )))
         .unwrap();
@@ -208,6 +247,59 @@ fn seconds_timestamp_wire_requires_exactly_one_declared_method_path_suffix() {
         r#"{"exchangeName":"v","extraData":"secondsTimestamp","secondsSuffix":{"method":"GET","path":"/user/verify","typo":1}}"#,
         r#"{"exchangeName":"v","extraData":"okxTimestamp"}"#,
     ] {
-        assert!(build_support::generate(&rules(wire)).is_err(), "{wire}");
+        assert!(
+            build_support::generate_fixture(&rules(wire)).is_err(),
+            "{wire}"
+        );
     }
+}
+
+#[test]
+#[cfg(any(feature = "phemex", feature = "okx"))]
+fn helper_capabilities_compile_as_one_typed_shared_declaration() {
+    for (key, field) in [
+        ("resolveLeverageContext", "resolve_leverage_context"),
+        ("fetchAlgoOrders", "fetch_algo_orders"),
+    ] {
+        let json = serde_json::json!({"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"bridge":{"helpers":{(key):true}}}}}).to_string();
+        let output = build_support::generate_fixture(&json).unwrap();
+        assert!(output.contains("helpers: Some(HelperCapabilities"));
+        assert!(output.contains(&format!("{field}: Some(true)")));
+    }
+}
+
+#[test]
+fn helper_capability_typos_and_non_boolean_values_fail_closed() {
+    for declaration in [
+        r#"{"resolveLeverageContex":true}"#,
+        r#"{"resolveLeverageContext":"true"}"#,
+        r#"{"fetchAlgoOrders":1}"#,
+        r#"["fetchAlgoOrders"]"#,
+    ] {
+        let helpers: serde_json::Value = serde_json::from_str(declaration).unwrap();
+        let json = serde_json::json!({"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"bridge":{"helpers":helpers}}}}).to_string();
+        assert!(build_support::generate_fixture(&json).is_err());
+    }
+}
+
+#[test]
+#[cfg(not(any(feature = "phemex", feature = "okx")))]
+fn helper_metadata_is_omitted_without_helper_families() {
+    let json = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"bridge":{"helpers":{"resolveLeverageContext":true}}}}}"#;
+    let output = build_support::generate_fixture(json).unwrap();
+    assert!(
+        !output.contains("helpers:"),
+        "helper storage changes unrelated families"
+    );
+    assert!(!output.contains("HelperCapabilities"));
+}
+
+#[test]
+fn complete_production_census_preserves_renderer_bytes() {
+    let policy =
+        include_str!("../../../packages/safe-cex/src/exchanges/rust/construction-rules.json");
+    assert_eq!(
+        build_support::generate(policy).unwrap(),
+        build_support::generate_fixture(policy).unwrap()
+    );
 }

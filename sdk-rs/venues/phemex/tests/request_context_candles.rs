@@ -485,3 +485,48 @@ fn expired_rate_limit_reply_cannot_pause_a_new_read() {
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 16, .. })))
     );
 }
+
+/// Live REST rows carry the symbol as a tenth column; socket `kline_p` rows stop at nine.
+#[test]
+fn rows_with_and_without_the_symbol_column_decode_on_both_read_paths() {
+    let body = r#"{"code":0,"msg":"OK","data":{"total":-1,"rows":[[1793399940,60,"76923.7","76915.6","76915.8","76915.6","76915.7","0.144","11075.8629","BTCUSDT"],[1793399880,60,"76900","76901","76902","76899","76900.5","0.2","15380"]]}}"#;
+    for signed in [false, true] {
+        let mut e = engine(Options {
+            public_data_only: true,
+            key: signed.then(|| "primary".into()),
+            secret: signed.then(|| "replay-secret".into()),
+            ..Options::default()
+        });
+        let packet = released(&mut e, 1_000., 15);
+        e.handle(
+            1_001.,
+            Event::HttpResponse {
+                request: packet.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        let result = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandDone {
+                    command: 15,
+                    result,
+                }) => Some(result),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("signed={signed}: no candles"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(result).unwrap(),
+            serde_json::json!([
+                {"timestamp":1793399880.0,"open":76901.0,"high":76902.0,"low":76899.0,"close":76900.5,"volume":0.2},
+                {"timestamp":1793399940.0,"open":76915.6,"high":76915.8,"low":76915.6,"close":76915.7,"volume":0.144}
+            ]),
+            "signed={signed}"
+        );
+    }
+}

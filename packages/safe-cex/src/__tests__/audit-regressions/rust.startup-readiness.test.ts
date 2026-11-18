@@ -25,16 +25,17 @@ const align8 = (n: number) => Math.ceil(n / 8) * 8;
 // flags, with no ticker table until the scripted native ticker seed succeeds.
 function nativeFrame(loaded: number, includeEth = false, malformed?: number, emptyTables = false, options: { omit?: number[]; workingOrder?: boolean } = {}): Uint8Array<ArrayBuffer> {
   const sections: Array<{ kind: number; bytes: Uint8Array }> = [];
-  const table = (kind: number, words: number[], values: number[]) => {
-    const bytes = new Uint8Array(align8(words.length * 4) + values.length * 8);
+  const table = (kind: number, words: number[], values: number[], tail: number[] = []) => {
+    const bytes = new Uint8Array(align8(words.length * 4) + values.length * 8 + tail.length * 4);
     const view = new DataView(bytes.buffer);
     words.forEach((value, i) => view.setUint32(i * 4, value, true));
     values.forEach((value, i) => view.setFloat64(align8(words.length * 4) + i * 8, value, true));
+    tail.forEach((value, i) => view.setUint32(align8(words.length * 4) + values.length * 8 + i * 4, value, true));
     sections.push({ kind, bytes });
   };
   const marketValues = [0.001, 0.1, 0.001, 1000, 1, 50, NaN, 1, NaN, NaN];
   table(SECTION.MARKETS, includeEth ? [2, 0, 0, 1, 2, 3, 3, 4, 2, 9, 9] : [1, 0, 0, 1, 2, 9], includeEth ? marketValues.flatMap((value) => [value, value]) : marketValues);
-  table(SECTION.POSITIONS, [1, 0, 0x20200], [100, 200, 10, 0, NaN, 2, 50, 20, 1000]);
+  table(SECTION.POSITIONS, [1, 0, 0x20200], [100, 200, 10, 0, NaN, 2, 50, 20, 1000, NaN, NaN], [0, 0]);
   if (options.workingOrder)
     table(SECTION.ORDERS, [1, 5, 0xffffffff, 0xffffffff, 0, 1 << 8], [100, 3, 0, 3, 1000, NaN, NaN]);
   else table(SECTION.ORDERS, [0], []);
@@ -77,6 +78,7 @@ function nativeFrame(loaded: number, includeEth = false, malformed?: number, emp
   let at = 16;
   for (const section of sections) {
     header.setUint16(at, section.kind, true);
+    header.setUint16(at + 2, section.kind === SECTION.POSITIONS ? 2 : 0, true);
     header.setUint32(at + 4, section.bytes.length, true);
     new Uint8Array(buffer, at + 8, section.bytes.length).set(section.bytes);
     at += 8 + section.bytes.length;
@@ -464,4 +466,32 @@ it('rejects a newly incompatible shared catalogue before private completion can 
   expect(exchange.isDisposed).toBe(true);
   expect(requests.filter((request) => request.op === 'snapshot')).toHaveLength(1);
   await startup;
+});
+
+it('a chart repair on a shared-feed account goes to its source, never to its own engine', async () => {
+  const listeners = new Set<(event: { data: unknown }) => void>();
+  const send = (data: unknown) => listeners.forEach((listener) => listener({ data }));
+  const requests: Array<{ op: string; symbol?: string; interval?: string }> = [];
+  const market = (symbol: string) => ({ id: symbol, symbol, contractSize: 1, isSpot: false, isPerpetual: true, isInverse: false, isExpiring: false });
+  const port = {
+    addEventListener: (name: string, listener: (event: { data: unknown }) => void) => { if (name === 'message') listeners.add(listener); },
+    removeEventListener: (_name: string, listener: (event: { data: unknown }) => void) => listeners.delete(listener),
+    start() {}, close() {},
+    postMessage(message: { op: string }) {
+      requests.push(message);
+      if (message.op === 'hello') queueMicrotask(() => send({ op: 'ready', markets: [market('BTCUSDT')] }));
+      if (message.op === 'ping') queueMicrotask(() => send({ op: 'pong' }));
+      if (message.op === 'snapshot') queueMicrotask(() => send({ op: 'publicFeedUpdate', tickers: [{ symbol: 'BTCUSDT', last: 100 }] }));
+    },
+  } as unknown as MessagePort;
+  const { exchange } = setup({ publicFeed: { mode: 'shared', port } });
+  const startup = exchange.start();
+  await vi.advanceTimersByTimeAsync(250);
+  await startup;
+  exchange.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, vi.fn());
+  await vi.advanceTimersByTimeAsync(0);
+  exchange.repairOHLCV({ symbol: 'BTCUSDT', interval: '1m' });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(requests.filter((request) => request.op === 'repair')).toEqual([{ op: 'repair', symbol: 'BTCUSDT', interval: '1m' }]);
+  expect(ScriptedEngine.instances[0].commands.filter((command) => command.op === 'repairSubscription')).toEqual([]);
 });

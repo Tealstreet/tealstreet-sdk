@@ -1,0 +1,183 @@
+{
+  "cancel": {
+    "body": "{\"contractName\":\"E-BTC-USDT\",\"orderId\":\"2334151155877155281\",\"conditionOrder\":false}",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "X-Referer",
+        "Tealstreet"
+      ],
+      [
+        "X-CH-APIKEY",
+        "replay-key"
+      ],
+      [
+        "X-CH-TS",
+        "100"
+      ],
+      [
+        "recvWindow",
+        "20000"
+      ],
+      [
+        "X-CH-SIGN",
+        "ca30c2dfe5a3e6f7c7f0bcec6c915f8dbbaf6ba7a773e037bd6e3a39d910e7e0"
+      ]
+    ],
+    "url": "https://fapi.bitrue.com/fapi/v2/cancel"
+  },
+  "create": {
+    "body": "{\"contractName\":\"E-BTC-USDT\",\"clientOrderId\":\"pqV3rlMxg4abZkEOJ6Sr\",\"leverage\":20.0,\"price\":1990.0,\"volume\":\"0.01\",\"type\":\"LIMIT\",\"side\":\"BUY\",\"open\":\"OPEN\",\"positionType\":1,\"futureModel\":\"normal\"}",
+    "headers": [
+      [
+        "Content-Type",
+        "application/json"
+      ],
+      [
+        "X-Referer",
+        "Tealstreet"
+      ],
+      [
+        "X-CH-APIKEY",
+        "replay-key"
+      ],
+      [
+        "X-CH-TS",
+        "100"
+      ],
+      [
+        "recvWindow",
+        "20000"
+      ],
+      [
+        "X-CH-SIGN",
+        "6567044dbe5224300a71bbeec7f4d4ef4d4b71731b7ef404175458966aecafed"
+      ]
+    ],
+    "url": "https://fapi.bitrue.com/fapi/v2/order"
+  },
+  "cases": [
+    {
+      "additionalOrderPosts": 0,
+      "code": -1111,
+      "error": {
+        "kind": "internal",
+        "message": "Bitrue -1111: ordinary pin; Your E-BTC-USDT order is gone: it was canceled and its replacement refused",
+        "outcome": "unknown",
+        "partial": {
+          "orderIds": [
+            "2334151155877155281"
+          ]
+        }
+      },
+      "status": 200
+    },
+    {
+      "additionalOrderPosts": 0,
+      "code": -1136,
+      "error": {
+        "kind": "internal",
+        "message": "Bitrue -1136: ordinary pin; Your E-BTC-USDT order is gone: it was canceled and its replacement refused",
+        "outcome": "unknown",
+        "partial": {
+          "orderIds": [
+            "2334151155877155281"
+          ]
+        }
+      },
+      "status": 200
+    },
+    {
+      "additionalOrderPosts": 0,
+      "code": -1155,
+      "error": {
+        "message": "Bitrue HTTP 400: {\"code\":\"-1155\",\"msg\":\"ordinary pin\"}; Your E-BTC-USDT order is gone: it was canceled and its replacement refused",
+        "outcome": "unknown",
+        "partial": {
+          "orderIds": [
+            "2334151155877155281"
+          ]
+        }
+      },
+      "status": 400
+    },
+    {
+      "additionalOrderPosts": 0,
+      "code": -2017,
+      "error": {
+        "kind": "rejected",
+        "message": "Bitrue -2017: ordinary pin; Your E-BTC-USDT order is gone: it was canceled and its replacement refused",
+        "partial": {
+          "orderIds": [
+            "2334151155877155281"
+          ]
+        },
+        "venueCode": "-2017"
+      },
+      "status": 200
+    },
+    {
+      "additionalOrderPosts": 0,
+      "code": -1111,
+      "error": {
+        "kind": "rateLimited",
+        "message": "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders",
+        "outcome": "unknown",
+        "partial": {
+          "orderIds": [
+            "2334151155877155281"
+          ]
+        }
+      },
+      "status": 429
+    },
+    {
+      "additionalOrderPosts": 0,
+      "code": -1111,
+      "error": {
+        "kind": "venueUnavailable",
+        "message": "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders",
+        "outcome": "unknown",
+        "partial": {
+          "orderIds": [
+            "2334151155877155281"
+          ]
+        }
+      },
+      "status": 503
+    },
+    {
+      "additionalOrderPosts": 0,
+      "code": -5999,
+      "error": {
+        "kind": "internal",
+        "message": "Bitrue -5999: ordinary pin; Your E-BTC-USDT order is gone: it was canceled and its replacement refused",
+        "outcome": "unknown",
+        "partial": {
+          "orderIds": [
+            "2334151155877155281"
+          ]
+        }
+      },
+      "status": 200
+    },
+    {
+      "additionalOrderPosts": 0,
+      "code": -1003,
+      "error": {
+        "kind": "internal",
+        "message": "Bitrue -1003: ordinary pin; Your E-BTC-USDT order is gone: it was canceled and its replacement refused",
+        "outcome": "unknown",
+        "partial": {
+          "orderIds": [
+            "2334151155877155281"
+          ]
+        }
+      },
+      "status": 200
+    }
+  ]
+}

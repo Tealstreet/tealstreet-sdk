@@ -20,7 +20,6 @@ import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
 import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
 import { BlofinExchange } from '../reference/blofin/blofin.exchange';
-import { BreakoutpropExchange } from '../reference/breakoutprop/breakoutprop.exchange';
 import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 import { BybitSpotExchange } from '../reference/bybit/bybitspot.exchange';
@@ -91,7 +90,6 @@ const HONORING: Array<[string, ExchangeCtor]> = [
   ['kucoin', KucoinExchange],
   ['kucoinspot', KucoinSpotExchange],
   ['okx', OKXExchange],
-  ['salsadex', OrderlyExchange],
   ['paradex', ParadexExchange],
   ['phemex', PhemexExchange],
   ['weex', WeexExchange],
@@ -112,7 +110,6 @@ const HYPERLIQUID_CLOID = '0x0123456789abcdef0123456789abcdef';
 
 const NOT_HONORING: Array<[string, ExchangeCtor]> = [
   ['asterdex', AsterDEXExchange],
-  ['breakoutprop', BreakoutpropExchange],
   // hyperliquid and hyperliquidspot moved to HONORING_EVERY_SHAPE when every
   // placement started carrying a cloid (feat(hyperliquid): cloid on every order).
   ['hyrotrader', HyrotraderExchange],
@@ -418,6 +415,40 @@ describe('mintClientOrderId', () => {
     expect(exchange.mintClientOrderId(order({ amount: 11 }))).toBeUndefined();
     expect(exchange.mintClientOrderId(order({ symbol: 'UNKNOWN' }))).toBeUndefined();
     expect(emitted).toEqual([]);
+  });
+});
+
+describe('findOrderByClientOrderId answered from open orders', () => {
+  // Bitunix writes a Creating row with the caller's ID while its send is in flight.
+  it('never reads a Creating row as placed, from the store or a fetch', async () => {
+    const store = new DefaultStore();
+    store.update({ markets: [MARKET] });
+    const exchange = new RustEngineExchange('bitunix' as any, { key: 'key', secret: 'secret' }, store);
+    adoptEngineCapabilities(exchange);
+    const opts = order({ clientOrderId: 'caller-1' });
+    const row = {
+      ...opts,
+      id: 'creating:7:0',
+      price: 50_000,
+      status: OrderStatus.Creating,
+      filled: 0,
+      remaining: 1,
+      reduceOnly: false,
+      lastUpdate: 1,
+    };
+    exchange.store.update({ orders: [row] });
+    vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([row]);
+    await expect(exchange.findOrderByClientOrderId(opts.symbol, 'caller-1')).resolves.toEqual({
+      found: false,
+      definitive: false,
+    });
+    const acknowledged = { ...row, id: 'venue-9', status: OrderStatus.Open };
+    exchange.store.update({ orders: [acknowledged] });
+    await expect(exchange.findOrderByClientOrderId(opts.symbol, 'caller-1')).resolves.toEqual({
+      found: true,
+      order: acknowledged,
+    });
+    exchange.dispose();
   });
 });
 

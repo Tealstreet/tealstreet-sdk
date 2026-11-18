@@ -12,6 +12,7 @@ import type {
 export type PackedTickerDelta = [index: number, mask: number, ...values: number[]];
 export type StoreUpdate = Partial<StoreData> & {
   tickerDeltas?: PackedTickerDelta[];
+  tickerObservations?: Array<[number, NonNullable<Ticker['observedAt']>]>;
 };
 
 export interface Store {
@@ -68,6 +69,7 @@ export interface Store {
   get ordersRisk(): Record<string, OrderRiskProfile[]>;
 
   get positions(): StoreData['positions'];
+  get positionSettings(): StoreData['positionSettings'];
 
   get displayedPositions(): StoreData['displayedPositions'];
 

@@ -5,6 +5,9 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_kraken::{Kraken, KrakenSpot, Options};
 
+// Startup public reads before markets and tickers load get the engine's discovery deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
+
 fn public_options() -> Options {
     Options {
         public_data_only: true,
@@ -47,7 +50,7 @@ fn invalid_clock_refusal<V: Venue>(e: &mut Engine<V>, command: Command) {
 }
 #[test]
 fn futures_expired_catalogue_cannot_publish_but_live_catalogue_does() {
-    for (age, expected) in [(1., true), (20_000., false)] {
+    for (age, expected) in [(1., true), (DISCOVERY_DEADLINE_MS, false)] {
         let mut e = safe_cex_engine::test_support::seeded_engine(Kraken::new(public_options()));
         e.start(support::NOW);
         let r = request(&mut e, support::NOW, "/instruments");
@@ -59,7 +62,7 @@ fn futures_expired_catalogue_cannot_publish_but_live_catalogue_does() {
 }
 #[test]
 fn futures_expired_tickers_cannot_publish_but_live_tickers_do() {
-    for (age, expected) in [(1., true), (20_000., false)] {
+    for (age, expected) in [(1., true), (DISCOVERY_DEADLINE_MS, false)] {
         let mut e = safe_cex_engine::test_support::seeded_engine(Kraken::new(public_options()));
         e.start(support::NOW);
         let r = request(&mut e, support::NOW, "/instruments");
@@ -74,7 +77,7 @@ fn futures_expired_tickers_cannot_publish_but_live_tickers_do() {
 }
 #[test]
 fn spot_expired_catalogue_cannot_publish_but_live_catalogue_does() {
-    for (age, expected) in [(1., true), (20_000., false)] {
+    for (age, expected) in [(1., true), (DISCOVERY_DEADLINE_MS, false)] {
         let mut e = safe_cex_engine::test_support::seeded_engine(KrakenSpot::new(public_options()));
         e.start(spot_support::NOW);
         let r = request(&mut e, spot_support::NOW, "/AssetPairs");
@@ -86,7 +89,7 @@ fn spot_expired_catalogue_cannot_publish_but_live_catalogue_does() {
 }
 #[test]
 fn spot_expired_tickers_cannot_publish_but_live_tickers_do() {
-    for (age, expected) in [(1., true), (20_000., false)] {
+    for (age, expected) in [(1., true), (DISCOVERY_DEADLINE_MS, false)] {
         let mut e = safe_cex_engine::test_support::seeded_engine(KrakenSpot::new(public_options()));
         e.start(spot_support::NOW);
         let r = request(&mut e, spot_support::NOW, "/AssetPairs");
@@ -188,35 +191,38 @@ fn recover_catalogue<V: Venue>(venue: V, suffix: &str, body: &str) {
     let mut e = safe_cex_engine::test_support::seeded_engine(venue);
     e.start(0.);
     let old = request(&mut e, 0., suffix);
-    answer(&mut e, 20_000., &old, body);
+    answer(&mut e, DISCOVERY_DEADLINE_MS, &old, body);
     assert!(!e.store().loaded().markets);
-    let a = actions(&mut e, 20_000.);
+    let a = actions(&mut e, DISCOVERY_DEADLINE_MS);
     let timer = a
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if (20_750. ..=21_000.).contains(at_ms) => {
+            Action::SetTimer { timer, at_ms }
+                if (DISCOVERY_DEADLINE_MS + 750. ..=DISCOVERY_DEADLINE_MS + 1_000.)
+                    .contains(at_ms) =>
+            {
                 Some(*timer)
             }
             _ => None,
         })
         .expect("native first discovery backoff");
-    e.handle(21_000., Event::TimerFired { timer });
-    let current = request(&mut e, 21_000., suffix);
+    e.handle(DISCOVERY_DEADLINE_MS + 1_000., Event::TimerFired { timer });
+    let current = request(&mut e, DISCOVERY_DEADLINE_MS + 1_000., suffix);
     assert_ne!(old.id, current.id);
-    answer(&mut e, 21_001., &old, body);
+    answer(&mut e, DISCOVERY_DEADLINE_MS + 1_001., &old, body);
     assert!(!e.store().loaded().markets);
     assert!(
-        !actions(&mut e, 21_001.)
+        !actions(&mut e, DISCOVERY_DEADLINE_MS + 1_001.)
             .iter()
             .any(|a| matches!(a, Action::Http(_)))
     );
-    answer(&mut e, 21_002., &current, body);
+    answer(&mut e, DISCOVERY_DEADLINE_MS + 1_002., &current, body);
     assert!(e.store().loaded().markets);
-    actions(&mut e, 21_002.);
-    answer(&mut e, 21_003., &old, "{}");
+    actions(&mut e, DISCOVERY_DEADLINE_MS + 1_002.);
+    answer(&mut e, DISCOVERY_DEADLINE_MS + 1_003., &old, "{}");
     assert!(e.store().loaded().markets);
     assert!(
-        !actions(&mut e, 21_003.)
+        !actions(&mut e, DISCOVERY_DEADLINE_MS + 1_003.)
             .iter()
             .any(|a| matches!(a, Action::Http(_)))
     );
@@ -244,12 +250,12 @@ fn held_prepare_recovers<V: Venue>(venue: V, suffix: &str, body: &str) {
     let timer = a
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 20_000. => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == DISCOVERY_DEADLINE_MS => Some(*timer),
             _ => None,
         })
         .expect("preparation is deadline bounded");
-    e.handle(20_000., Event::TimerFired { timer });
-    let a = actions(&mut e, 20_000.);
+    e.handle(DISCOVERY_DEADLINE_MS, Event::TimerFired { timer });
+    let a = actions(&mut e, DISCOVERY_DEADLINE_MS);
     assert!(!a.iter().any(|a| matches!(
         a,
         Action::Http(_) | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
@@ -257,15 +263,18 @@ fn held_prepare_recovers<V: Venue>(venue: V, suffix: &str, body: &str) {
     let timer = a
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if (20_750. ..=21_000.).contains(at_ms) => {
+            Action::SetTimer { timer, at_ms }
+                if (DISCOVERY_DEADLINE_MS + 750. ..=DISCOVERY_DEADLINE_MS + 1_000.)
+                    .contains(at_ms) =>
+            {
                 Some(*timer)
             }
             _ => None,
         })
         .expect("stalled preparation releases native discovery busy state");
-    e.handle(21_000., Event::TimerFired { timer });
-    let current = request(&mut e, 21_000., suffix);
-    answer(&mut e, 21_001., &current, body);
+    e.handle(DISCOVERY_DEADLINE_MS + 1_000., Event::TimerFired { timer });
+    let current = request(&mut e, DISCOVERY_DEADLINE_MS + 1_000., suffix);
+    answer(&mut e, DISCOVERY_DEADLINE_MS + 1_001., &current, body);
     assert!(e.store().loaded().markets);
 }
 

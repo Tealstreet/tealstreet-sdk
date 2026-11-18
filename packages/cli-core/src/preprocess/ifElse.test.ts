@@ -19,7 +19,7 @@ function pos(p: Partial<Position> = {}): Position {
     unrealizedPnl: p.unrealizedPnl ?? 0,
     contracts: p.contracts ?? 1,
     liquidationPrice: p.liquidationPrice ?? 0,
-  } as Position;
+  };
 }
 
 function makeCtx(
@@ -42,6 +42,12 @@ function makeCtx(
 }
 
 const cmds = (input: string, ctx: PreprocessContext) => preprocessCommand(input, ctx).steps.map((s) => s.command);
+
+function positionRows(ctx: PreprocessContext) {
+  const positions = ctx.exchange?.store?.positions;
+  if (positions === undefined) throw new Error('Expected positions in the test fixture');
+  return positions;
+}
 
 describe('if (<cond>) (<then>) [else (<else>)]', () => {
   describe('condition evaluation', () => {
@@ -378,7 +384,7 @@ describe('if (<cond>) (<then>) [else (<else>)]', () => {
       });
       ctx.store.setLiveVar('floor', '$last'); // = 60
       expect(cmds('if (pnl < @floor) (close) else (sleep)', ctx)).toEqual(['close']);
-      ctx.exchange!.store!.positions![0].unrealizedPnl = 100;
+      positionRows(ctx)[0].unrealizedPnl = 100;
       expect(cmds('if (pnl < @floor) (close) else (sleep)', ctx)).toEqual(['sleep']);
     });
 
@@ -393,10 +399,10 @@ describe('if (<cond>) (<then>) [else (<else>)]', () => {
       // First check: pnl=100. @hi seeds to 100, @stop = 99. 100 < 99 → false.
       expect(cmds('if (pnl < @stop) (close) else (sleep)', ctx)).toEqual(['sleep']);
       // PnL climbs to 200 → @hi ratchets, @stop = 199.
-      ctx.exchange!.store!.positions![0].unrealizedPnl = 200;
+      positionRows(ctx)[0].unrealizedPnl = 200;
       expect(cmds('if (pnl < @stop) (close) else (sleep)', ctx)).toEqual(['sleep']);
       // PnL falls to 150 — @hi sticks at 200, @stop = 199. 150 < 199 → close.
-      ctx.exchange!.store!.positions![0].unrealizedPnl = 150;
+      positionRows(ctx)[0].unrealizedPnl = 150;
       expect(cmds('if (pnl < @stop) (close) else (sleep)', ctx)).toEqual(['close']);
     });
 

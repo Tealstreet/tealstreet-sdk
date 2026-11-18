@@ -42,7 +42,8 @@ http('GET', '/positions', { results: [] });
 http('GET', '/account', { total_collateral: '1000', free_collateral: '900', initial_margin_requirement: '100', account_value: '1000' });
 snapshot([initial], 0);
 ws(`bbo.${BTC}`, { market: BTC, bid_price: '49999', ask_price: '50001' });
-ws(`trades.${BTC}`, { market: BTC, price: '50000', size: '0.01', created_at: epoch });
+// Trades subscribe only for charted markets; the summary carries last and mark.
+ws(`markets_summary.${BTC}`, { symbol: BTC, last_traded_price: '50000', mark_price: '50000' });
 command({ op: 'placeOrders', orders: [{ symbol: BTC, side: 'buy', type: 'limit', amount: 0.01, price: 50000, clientOrderId: 'caller-paradex-1' }] });
 http('POST', '/orders/batch', { orders: [{ id: '1001', client_id: '$request:0.client_id' }], errors: [] }, [payload({ client_id: 'caller-paradex-1' })]);
 const placed = order('1001', { client_id: 'caller-paradex-1' });

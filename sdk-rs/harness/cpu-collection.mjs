@@ -7,9 +7,9 @@ import { spawnSync } from 'node:child_process';
 import { gunzipSync } from 'node:zlib';
 import { parseArgs, isDeepStrictEqual } from 'node:util';
 import { expectedGateCases, gateCaseKey } from './ci-gate-suites.mjs';
-import { venueOf } from './venues.mjs';
+import { replayVenueOf } from './venues.mjs';
 import { captureCache } from './cpu-cache.mjs';
-import { performanceOrder } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, performanceOrder } from './performance-policy.mjs';
 import { cohortKey, parseCohortJson, selectRuntimeInputs, sourceInputFingerprint } from './cpu-cohort.mjs';
 import { sealRuntime, verifyRuntime, cacheDigest } from './cpu-runtime.mjs';
 
@@ -97,7 +97,7 @@ function tapeInfo(root, item) {
   const raw = read(root, item.tape);
   const records = (item.tape.endsWith('.gz') ? gunzipSync(raw) : raw).toString('utf8').trim().split('\n').map(line => parseCohortJson(line));
   check(records.length > 0 && records.every(row => row && typeof row === 'object' && !Array.isArray(row)), 'invalid fixture records');
-  const venue = venueOf(item.venue);
+  const venue = replayVenueOf(item.venue);
   const privateValue = records.find(row => row.type === 'config')?.private ?? records.find(row => row.type === 'meta')?.private ?? records.some(row => venue.isPrivateRecord ? venue.isPrivateRecord(row) : Boolean(venue.privateSocket && row.url?.includes(venue.privateSocket)));
   check(typeof privateValue === 'boolean', 'ambiguous fixture privacy');
   return { private: privateValue, tapeSha256: sha(raw) };
@@ -112,7 +112,7 @@ function publicCases(root, suite) {
       continue;
     }
     const info = tapeInfo(root, item);
-    if (!info.private) result.push({ ...item, ...info, correctnessRuns: 1, runs: 9 });
+    if (!info.private) result.push({ ...item, ...info, correctnessRuns: 1, runs: PUBLIC_REPLAY_PAIRS });
   }
   check(result.length > 0 && new Set(result.map(gateCaseKey)).size === result.length, 'empty/duplicate public roster');
   return result;
@@ -247,7 +247,7 @@ export function beforeCpuCase({ state: stateValue, args, root }) {
   const info = tapeInfo(state.root, values);
   if (info.private) return null;
   const claim = state.claims.find(item => gateCaseKey(item.case) === gateCaseKey(values));
-  check(claim && claim.case.tapeSha256 === info.tapeSha256 && String(values.runs) === '9' && !values['recorded-evidence'], 'public case/hash/runs differ from premeasurement claim');
+  check(claim && claim.case.tapeSha256 === info.tapeSha256 && String(values.runs) === String(PUBLIC_REPLAY_PAIRS) && !values['recorded-evidence'], 'public case/hash/runs differ from premeasurement claim');
   check(!state.active && !state.records.some(item => item.key === claim.key), 'public measurement already started/consumed');
   if (values['ci-wasm'] !== undefined) fail('collection uses sealed actual pkg/node; ci-wasm override is not permitted');
   const runtime = resetCollectionCache(state), initialCacheSha256 = runtime.initialCacheSha256;
@@ -260,7 +260,7 @@ export function beforeCpuCase({ state: stateValue, args, root }) {
 export function capturePublicRaw({ root, report }) {
   rootIdentity(root);
   const outputRoot = path.join(root, 'sdk-rs/harness/out');
-  const slots = [...['ts', 'rust'].map(impl => ({ impl, mode: 'correctness', run: 0 })), ...Array.from({ length: 9 }, (_, run) => performanceOrder(run).map(impl => ({ impl, mode: 'performance', run }))).flat()];
+  const slots = [...['ts', 'rust'].map(impl => ({ impl, mode: 'correctness', run: 0 })), ...Array.from({ length: PUBLIC_REPLAY_PAIRS }, (_, run) => performanceOrder(run).map(impl => ({ impl, mode: 'performance', run }))).flat()];
   check(Array.isArray(report.artifacts) && report.artifacts.length === slots.length, 'missing full public raw inventory');
   const names = new Set(), inodes = new Set();
   return report.artifacts.map((slot, index) => {
@@ -288,7 +288,7 @@ export function afterCpuCase({ context, reportPath, exitCode }) {
   check(cache.digest === finalCacheSha256, 'final cache changed before snapshot'); verify(state);
   const outputRoot = path.join(state.root, 'sdk-rs/harness/out'), reportRaw = read(state.root, reportPath, outputRoot), report = parseCohortJson(reportRaw);
   const caseValue = marker.claim.case;
-  check(report.schema === 1 && report.private === false && report.venue === caseValue.venue && report.tape === caseValue.tape && report.books === caseValue.books && report.tapeSha256 === caseValue.tapeSha256 && report.runs === 9 && report.correctnessRuns === 1 && ['PASS', 'FAIL'].includes(report.status) && (report.status === 'PASS') === (exitCode === 0), 'strict report differs from measured case/exit');
+  check(report.schema === 1 && report.private === false && report.venue === caseValue.venue && report.tape === caseValue.tape && report.books === caseValue.books && report.tapeSha256 === caseValue.tapeSha256 && report.runs === PUBLIC_REPLAY_PAIRS && report.correctnessRuns === 1 && ['PASS', 'FAIL'].includes(report.status) && (report.status === 'PASS') === (exitCode === 0), 'strict report differs from measured case/exit');
   const raw = capturePublicRaw({ root: state.root, report });
   const manifest = verify(state).manifest;
   const evidence = { schema: 1, key: context.key, claim: marker.claim, cache: { prefix, digest: cache.digest, manifestSha256: cache.manifestSha256 }, report, reportBytes: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(reportRaw), reportSha256: sha(reportRaw), exitCode, raw,

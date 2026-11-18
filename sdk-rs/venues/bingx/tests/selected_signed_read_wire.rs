@@ -150,14 +150,14 @@ fn expected(primary: bool, read: bool) -> Vec<String> {
             ]
             .map(|url| {
                 format!(
-                    r#"Get {url} [("X-SOURCE-KEY", "Tealstreet"), ("Content-Type", "application/json, charset=utf-8")] Public -> unsigned"#
+                    r#"Get {url} [("X-SOURCE-KEY", "Tealstreet"), ("Content-Type", "application/json; charset=utf-8")] Public -> unsigned"#
                 )
             })
             .into();
         }
     };
     let headers =
-        r#"[("X-SOURCE-KEY", "Tealstreet"), ("Content-Type", "application/json, charset=utf-8")]"#;
+        r#"[("X-SOURCE-KEY", "Tealstreet"), ("Content-Type", "application/json; charset=utf-8")]"#;
     [
         "https://open-api.bingx.com/openApi/swap/v2/quote/contracts",
         "https://open-api.bingx.com/openApi/swap/v3/user/balance",

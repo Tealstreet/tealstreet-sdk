@@ -1,0 +1,150 @@
+[
+  {
+    "label": "leverage",
+    "path": "/v3/set-initial-margin-rate",
+    "kind": "multipart",
+    "fields": [
+      [
+        "symbol",
+        "BTC-USDT"
+      ],
+      [
+        "token",
+        "USDT"
+      ],
+      [
+        "initialMarginRate",
+        "0.10000"
+      ]
+    ],
+    "canonical": "initialMarginRate=0.10000&symbol=BTC-USDT&token=USDT",
+    "preimage": "1700000000123POST/api/v3/set-initial-margin-rateinitialMarginRate=0.10000&symbol=BTC-USDT&token=USDT",
+    "signature": "yL0mbeTyF7zU7awU7XzFeeKJ1FGtY943N/aEmt5+JCA=",
+    "body": "--safe-cex-apexomni\r\nContent-Disposition: form-data; name=\"symbol\"\r\n\r\nBTC-USDT\r\n--safe-cex-apexomni\r\nContent-Disposition: form-data; name=\"token\"\r\n\r\nUSDT\r\n--safe-cex-apexomni\r\nContent-Disposition: form-data; name=\"initialMarginRate\"\r\n\r\n0.10000\r\n--safe-cex-apexomni--\r\n",
+    "contentType": "multipart/form-data; boundary=safe-cex-apexomni"
+  },
+  {
+    "label": "ordinary-order",
+    "path": "/v3/order",
+    "kind": "raw",
+    "fields": [
+      [
+        "symbol",
+        "BTC-USDT"
+      ],
+      [
+        "size",
+        "0.001"
+      ],
+      [
+        "signature",
+        "01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101"
+      ],
+      [
+        "side",
+        "BUY"
+      ],
+      [
+        "reduceOnly",
+        "false"
+      ],
+      [
+        "price",
+        "60000"
+      ],
+      [
+        "clientOrderId",
+        "one"
+      ]
+    ],
+    "canonical": "clientOrderId=one&price=60000&reduceOnly=false&side=BUY&signature=01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101&size=0.001&symbol=BTC-USDT",
+    "preimage": "1700000000123POST/api/v3/orderclientOrderId=one&price=60000&reduceOnly=false&side=BUY&signature=01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101&size=0.001&symbol=BTC-USDT",
+    "signature": "FrDRCo6KwPlE7X7z7tdBrOu1FRnRpyZJ0a7ffoTIIdg=",
+    "body": "clientOrderId=one&price=60000&reduceOnly=false&side=BUY&signature=01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101&size=0.001&symbol=BTC-USDT",
+    "contentType": "application/x-www-form-urlencoded; charset=UTF-8"
+  },
+  {
+    "label": "protective-order",
+    "path": "/v3/order",
+    "kind": "raw",
+    "fields": [
+      [
+        "tpTriggerPrice",
+        "61000"
+      ],
+      [
+        "tpSize",
+        "0.001"
+      ],
+      [
+        "tpSignature",
+        "02020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202"
+      ],
+      [
+        "symbol",
+        "BTC-USDT"
+      ],
+      [
+        "size",
+        "0.001"
+      ],
+      [
+        "signature",
+        "01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101"
+      ],
+      [
+        "price",
+        "60000"
+      ],
+      [
+        "clientOrderId",
+        "parent"
+      ]
+    ],
+    "canonical": "clientOrderId=parent&price=60000&signature=01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101&size=0.001&symbol=BTC-USDT&tpSignature=02020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202&tpSize=0.001&tpTriggerPrice=61000",
+    "preimage": "1700000000123POST/api/v3/orderclientOrderId=parent&price=60000&signature=01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101&size=0.001&symbol=BTC-USDT&tpSignature=02020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202&tpSize=0.001&tpTriggerPrice=61000",
+    "signature": "/vWcyiT8/ZVudXqROF1G8Rn7OjrBSVq+DbPKSN7MENQ=",
+    "body": "clientOrderId=parent&price=60000&signature=01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101&size=0.001&symbol=BTC-USDT&tpSignature=02020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202&tpSize=0.001&tpTriggerPrice=61000",
+    "contentType": "application/x-www-form-urlencoded; charset=UTF-8"
+  },
+  {
+    "label": "cancel",
+    "path": "/v3/delete-order",
+    "kind": "form",
+    "fields": [
+      [
+        "id",
+        "cancel/+ é"
+      ],
+      [
+        "clientOrderId",
+        "0"
+      ]
+    ],
+    "canonical": "clientOrderId=0&id=cancel%2F%2B%20%C3%A9",
+    "preimage": "1700000000123POST/api/v3/delete-orderclientOrderId=0&id=cancel%2F%2B%20%C3%A9",
+    "signature": "Y+ClImFQYiDIVrSZOZyd3/Lv3WubW9MGyKt1ON2t8hw=",
+    "body": "clientOrderId=0&id=cancel%2F%2B%20%C3%A9",
+    "contentType": "application/x-www-form-urlencoded; charset=UTF-8"
+  },
+  {
+    "label": "cancel-all",
+    "path": "/v3/delete-open-orders",
+    "kind": "form",
+    "fields": [
+      [
+        "symbol",
+        "BTC-USDT"
+      ],
+      [
+        "token",
+        "USDT"
+      ]
+    ],
+    "canonical": "symbol=BTC-USDT&token=USDT",
+    "preimage": "1700000000123POST/api/v3/delete-open-orderssymbol=BTC-USDT&token=USDT",
+    "signature": "hwllgl1NXtyKKlYqh+RZ9lnHbveOhlZXc3H7WW99Z5M=",
+    "body": "symbol=BTC-USDT&token=USDT",
+    "contentType": "application/x-www-form-urlencoded; charset=UTF-8"
+  }
+]

@@ -38,7 +38,7 @@ fn ready(variant: Variant) -> Harness {
     );
     h.respond(
         if pm {
-            "/papi/v1/um/conditional/openOrders"
+            "/papi/v1/um/algo/openAlgoOrders"
         } else {
             "/fapi/v1/openAlgoOrders"
         },
@@ -65,14 +65,14 @@ fn regular(symbol: &str, native: u64, status: &str, trade: bool) -> String {
 
 fn strategy(symbol: &str, native: u64, status: &str) -> String {
     format!(
-        r#"{{"e":"CONDITIONAL_ORDER_TRADE_UPDATE","so":{{"s":"{symbol}","c":"shared","si":{native},"S":"SELL","st":"STOP_MARKET","os":"{status}","q":"3","p":"0","sp":"90","R":true}}}}"#
+        r#"{{"e":"ALGO_UPDATE","ao":{{"s":"{symbol}","caid":"shared","aid":{native},"S":"SELL","o":"STOP_MARKET","X":"{status}","q":"3","p":"0","tp":"90","R":true,"aq":"0"}}}}"#
     )
 }
 
 fn snapshot(h: &mut Harness, regular: &str, strategy: &str) {
     h.advance(15_000.0);
     h.respond("/papi/v1/um/openOrders", 200, regular);
-    h.respond("/papi/v1/um/conditional/openOrders", 200, strategy);
+    h.respond("/papi/v1/um/algo/openAlgoOrders", 200, strategy);
 }
 fn regular_rows(symbol: &str, native: u64) -> String {
     format!(
@@ -81,7 +81,7 @@ fn regular_rows(symbol: &str, native: u64) -> String {
 }
 fn strategy_rows(symbol: &str, native: u64) -> String {
     format!(
-        r#"[{{"symbol":"{symbol}","strategyId":{native},"newClientStrategyId":"shared","price":"0","origQty":"3","strategyType":"STOP_MARKET","side":"SELL","stopPrice":"90"}}]"#
+        r#"[{{"symbol":"{symbol}","algoId":{native},"clientAlgoId":"shared","price":"0","quantity":"3","orderType":"STOP_MARKET","side":"SELL","triggerPrice":"90"}}]"#
     )
 }
 fn fills(h: &mut Harness) -> Vec<(f64, f64)> {
@@ -304,9 +304,9 @@ fn captured_cancel_replies_preserve_a_cross_family_owner() {
                     });
                     let strategy_cancel = (strategy_first || bulk).then(|| {
                         h.take(if bulk {
-                            "/papi/v1/um/conditional/allOpenOrders"
+                            "/papi/v1/um/algo/allOpenOrders"
                         } else {
-                            "/papi/v1/um/conditional/order?"
+                            "/papi/v1/um/algo/order?"
                         })
                     });
                     h.message(
@@ -327,11 +327,14 @@ fn captured_cancel_replies_preserve_a_cross_family_owner() {
                             } else if bulk {
                                 r#"{"code":200,"msg":"success"}"#
                             } else if strategy_reply {
-                                r#"{"symbol":"BTCUSDT","strategyId":42,"newClientStrategyId":"shared","strategyStatus":"CANCELED"}"#
+                                r#"{"complete":true}"#
                             } else {
                                 r#"{"symbol":"BTCUSDT","orderId":42,"clientOrderId":"shared","origQty":"9","executedQty":"0","status":"CANCELED"}"#
                             };
                             h.reply(cancel.id, if unknown { 400 } else { 200 }, "", body);
+                            if strategy_reply && !unknown && !bulk {
+                                h.pm_cancel_proof(42, "shared", "BTCUSDT");
+                            }
                             assert_eq!(h.engine.store().order("shared"), Some(&current));
                         }
                     }
@@ -373,7 +376,7 @@ fn old_amend_cancellation_cannot_authorize_cross_family_replacement() {
             amount: None,
         }));
         let cancel = h.take(if strategy_first {
-            "/papi/v1/um/conditional/order?"
+            "/papi/v1/um/algo/order?"
         } else {
             "/papi/v1/um/order?"
         });
@@ -386,7 +389,10 @@ fn old_amend_cancellation_cannot_authorize_cross_family_replacement() {
             },
         );
         let current = h.engine.store().order("shared").unwrap().clone();
-        h.reply(cancel.id, 200, "", if strategy_first { r#"{"symbol":"BTCUSDT","strategyId":42,"newClientStrategyId":"shared","strategyStatus":"CANCELED"}"# } else { r#"{"symbol":"BTCUSDT","orderId":42,"clientOrderId":"shared","origQty":"9","executedQty":"0","status":"CANCELED"}"# });
+        h.reply(cancel.id, 200, "", if strategy_first { r#"{"complete":true}"# } else { r#"{"symbol":"BTCUSDT","orderId":42,"clientOrderId":"shared","origQty":"9","executedQty":"0","status":"CANCELED"}"# });
+        if strategy_first {
+            h.pm_cancel_proof(42, "shared", "BTCUSDT");
+        }
         assert_eq!(h.engine.store().order("shared"), Some(&current));
         assert!(h.result(92).unwrap().is_err());
         assert!(
@@ -407,7 +413,7 @@ fn missing_native_strategy_identity_cannot_retire_a_regular_owner() {
     assert!(!missing.contains("\"si\""));
     h.message("/pm/ws", &missing);
     assert_eq!(h.engine.store().order("shared"), Some(&current));
-    let rows = strategy_rows("BTCUSDT", 99).replace(",\"strategyId\":99", "");
+    let rows = strategy_rows("BTCUSDT", 99).replace(",\"algoId\":99", "");
     snapshot(&mut h, "[]", &rows);
     assert_eq!(h.engine.store().order("shared"), Some(&current));
 }
@@ -424,7 +430,7 @@ fn ambiguous_or_in_flight_snapshot_cannot_partially_change_ownership() {
         let current = h.engine.store().order("shared").unwrap().clone();
         h.respond("/papi/v1/um/openOrders", 200, &regular_rows("BTCUSDT", 80));
         h.respond(
-            "/papi/v1/um/conditional/openOrders",
+            "/papi/v1/um/algo/openAlgoOrders",
             200,
             &strategy_rows("BTCUSDT", 43),
         );
@@ -465,7 +471,7 @@ fn trigger_trade_before_new_is_delivered_and_snapshot_establishes_regular_owners
         symbol: "BTCUSDT".into(),
     }));
     let regular_cancel = h.take("/papi/v1/um/allOpenOrders");
-    let strategy_cancel = h.take("/papi/v1/um/conditional/allOpenOrders");
+    let strategy_cancel = h.take("/papi/v1/um/algo/allOpenOrders");
     h.reply(strategy_cancel.id, 200, "", r#"{"code":200}"#);
     assert_eq!(h.engine.store().order("shared"), Some(&current));
     h.reply(regular_cancel.id, 200, "", r#"{"code":200}"#);
@@ -597,9 +603,14 @@ fn invalid_handoff_preserves_owner(strategy_first: bool, field: &str, invalid: &
         (false, "sp") => "90",
         _ => panic!("unsupported handoff field"),
     };
+    let wire_field = if !strategy_first && field == "sp" {
+        "tp"
+    } else {
+        field
+    };
     let invalid = valid.replace(
-        &format!(r#""{field}":"{original}""#),
-        &format!(r#""{field}":"{invalid}""#),
+        &format!(r#""{wire_field}":"{original}""#),
+        &format!(r#""{wire_field}":"{invalid}""#),
     );
     assert_ne!(invalid, valid);
     h.message("/pm/ws", &invalid);
@@ -680,9 +691,14 @@ fn invalid_snapshot_handoff_cannot_retire_the_current_owner() {
             } else {
                 strategy_rows("BTCUSDT", 78)
             };
+            let wire_field = if !strategy_first && field == "origQty" {
+                "quantity"
+            } else {
+                field
+            };
             let malformed = valid.replace(
-                &format!(r#""{field}":"{original}""#),
-                &format!(r#""{field}":"{invalid}""#),
+                &format!(r#""{wire_field}":"{original}""#),
+                &format!(r#""{wire_field}":"{invalid}""#),
             );
             assert_ne!(malformed, valid);
             snapshot(
@@ -725,7 +741,7 @@ fn one_unmappable_pm_order_row_keeps_its_stored_copy_while_valid_peers_commit() 
     };
     let strategy = |client: &str, native: u64, kind: &str, stop: &str| {
         format!(
-            r#"{{"symbol":"BTCUSDT","strategyId":{native},"newClientStrategyId":"{client}","price":"0","origQty":"3","strategyType":"{kind}","side":"SELL","stopPrice":"{stop}"}}"#
+            r#"{{"symbol":"BTCUSDT","algoId":{native},"clientAlgoId":"{client}","price":"0","quantity":"3","orderType":"{kind}","side":"SELL","triggerPrice":"{stop}"}}"#
         )
     };
     let read = |h: &mut Harness, poke: u64, orders: &[String], strategies: &[String]| {

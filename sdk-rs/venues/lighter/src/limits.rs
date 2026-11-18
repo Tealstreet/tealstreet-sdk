@@ -134,7 +134,8 @@ impl Payload<'_> {
 }
 impl Lighter {
     pub(crate) fn refresh_limits(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
-        if cx.now < self.limits.next_fetch_at {
+        // Frame-fed: the tier arrives in VENUE_STATE; the venue refuses the rest.
+        if cx.frame_fed() || cx.now < self.limits.next_fetch_at {
             return true;
         }
         if self.limits.in_flight {
@@ -331,6 +332,24 @@ impl Lighter {
     }
     pub(crate) fn limits_standard(&self) -> bool {
         self.limits.tier == Some(Tier::Standard)
+    }
+    /// VENUE_STATE's tier code: 0 unknown, 1 standard, 2 premium, 3 plus.
+    pub(crate) fn limits_tier_code(&self) -> u8 {
+        match self.limits.tier {
+            None => 0,
+            Some(Tier::Standard) => 1,
+            Some(Tier::Premium) => 2,
+            Some(Tier::Plus) => 3,
+        }
+    }
+    /// A data source's known tier replaces ours; its unknown keeps ours.
+    pub(crate) fn apply_limits_tier_code(&mut self, code: u8) {
+        self.limits.tier = match code {
+            1 => Some(Tier::Standard),
+            2 => Some(Tier::Premium),
+            3 => Some(Tier::Plus),
+            _ => self.limits.tier,
+        };
     }
     pub(crate) fn limits_response(
         &mut self,

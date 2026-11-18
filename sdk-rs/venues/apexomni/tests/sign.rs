@@ -20,6 +20,39 @@ fn header<'a>(signed: &'a sign::Signed, name: &str) -> &'a str {
 }
 
 #[test]
+fn no_body_requests_use_valid_json_without_changing_signing_or_query() {
+    for method in [Method::Get, Method::Delete] {
+        for legacy in [false, true] {
+            let mut request = sign::Request::get("/v3/account", fields(&[("limit", "0")]));
+            request.method = method;
+            let signed = sign::request(&options(), 1700000000123.0, &request, legacy).unwrap();
+            assert_eq!(
+                header(&signed, "Content-Type"),
+                "application/json; charset=utf-8"
+            );
+            assert_eq!(signed.path, "/v3/account?limit=0");
+            assert_eq!(signed.body, None);
+            let stamp = if legacy {
+                "1700000000000"
+            } else {
+                "1700000000123"
+            };
+            assert_eq!(header(&signed, "APEX-TIMESTAMP"), stamp);
+            assert_eq!(header(&signed, "APEX-API-KEY"), "api-key");
+            assert_eq!(header(&signed, "APEX-PASSPHRASE"), "pass");
+            assert_eq!(
+                header(&signed, "APEX-SIGNATURE"),
+                safe_cex_crypto::hmac_sha256(
+                    b"bXlzZWNyZXQ=",
+                    format!("{stamp}{}/api/v3/account?limit=0", method.as_str()).as_bytes(),
+                    safe_cex_crypto::Encoding::Base64
+                )
+            );
+        }
+    }
+}
+
+#[test]
 fn canonical_query_keeps_string_zero_false_and_encodes_utf8() {
     assert_eq!(
         sign::query(&fields(&[
@@ -128,6 +161,41 @@ fn leverage_signs_canonical_fields_and_sends_real_multipart() {
             .unwrap()
             .contains("name=\"initialMarginRate\"\r\n\r\n0.1\r\n")
     );
+}
+
+#[test]
+fn every_post_endpoint_matches_the_shared_hosted_semantic_goldens() {
+    let vectors: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../packages/safe-cex/src/__tests__/fixtures/apexomni-post-signing.golden.json"
+    ))
+    .unwrap();
+    let credentials = LegacyCredentials {
+        key: Some("fixture-public".into()),
+        secret: Some("fixture-material".into()),
+        passphrase: Some("fixture-pass".into()),
+    };
+    for vector in vectors.as_array().unwrap() {
+        let fields: Vec<(String, String)> =
+            serde_json::from_value(vector["fields"].clone()).unwrap();
+        assert_eq!(sign::query(&fields), vector["canonical"].as_str().unwrap());
+        let path = vector["path"].as_str().unwrap();
+        let request = match vector["kind"].as_str().unwrap() {
+            "multipart" => sign::Request::multipart(path, fields),
+            "raw" => sign::Request::raw(path, sign::query(&fields)),
+            "form" => sign::Request::form(path, fields),
+            _ => panic!("unknown native body kind"),
+        };
+        let signed = sign::request(&credentials, 1700000000123., &request, false).unwrap();
+        assert_eq!(signed.body.as_deref(), vector["body"].as_str());
+        assert_eq!(
+            header(&signed, "Content-Type"),
+            vector["contentType"].as_str().unwrap()
+        );
+        assert_eq!(
+            header(&signed, "APEX-SIGNATURE"),
+            vector["signature"].as_str().unwrap()
+        );
+    }
 }
 
 #[test]

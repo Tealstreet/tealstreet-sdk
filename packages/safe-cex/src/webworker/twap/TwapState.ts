@@ -19,4 +19,10 @@ export interface TwapState {
   createdAt?: number;
   /** Timestamp when the TWAP started executing */
   startedAt?: number;
+  /**
+   * The slice being placed, persisted (already shifted out of `ordersSizes`)
+   * before its order goes out and cleared once it settles. A restore that finds
+   * it looks the order up by `clientOrderId` instead of placing it again.
+   */
+  inFlight?: { size: number; clientOrderId?: string };
 }

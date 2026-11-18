@@ -112,6 +112,19 @@
     "requiresOmniKeySeed": false,
     "supportsVault": false,
     "supportsTestnet": false,
+    "enabled": true,
+    "requiresCors": true,
+    "defaultProxyRegion": "JA"
+  },
+  "binanceoptions": {
+    "prettyName": "Binance Options",
+    "requiresNoSecret": false,
+    "requiresPassphrase": false,
+    "requiresApplicationId": false,
+    "requiresApiKeyIndex": false,
+    "requiresOmniKeySeed": false,
+    "supportsVault": false,
+    "supportsTestnet": true,
     "enabled": false,
     "requiresCors": false,
     "defaultProxyRegion": "SG"
@@ -286,8 +299,8 @@
     "requiresCors": true,
     "defaultProxyRegion": "SG"
   },
-  "bitrue": {
-    "prettyName": "Bitrue",
+  "bingxspot": {
+    "prettyName": "BingX Spot",
     "requiresNoSecret": false,
     "requiresPassphrase": false,
     "requiresApplicationId": false,
@@ -299,18 +312,17 @@
     "requiresCors": true,
     "defaultProxyRegion": "SG"
   },
-  "breakoutprop": {
-    "prettyName": "Breakout",
+  "bitrue": {
+    "prettyName": "Bitrue",
     "requiresNoSecret": false,
     "requiresPassphrase": false,
     "requiresApplicationId": false,
     "requiresApiKeyIndex": false,
     "requiresOmniKeySeed": false,
     "supportsVault": false,
-    "supportsSubaccount": true,
     "supportsTestnet": false,
     "enabled": false,
-    "requiresCors": false,
+    "requiresCors": true,
     "defaultProxyRegion": "SG"
   },
   "blofin": {
@@ -466,33 +478,6 @@
     "supportsVault": false,
     "supportsTestnet": false,
     "enabled": true,
-    "requiresCors": false,
-    "defaultProxyRegion": "SG"
-  },
-  "salsadex": {
-    "prettyName": "SalsaDEX",
-    "requiresNoSecret": false,
-    "requiresPassphrase": false,
-    "requiresApplicationId": true,
-    "requiresApiKeyIndex": false,
-    "requiresOmniKeySeed": false,
-    "supportsVault": false,
-    "supportsTestnet": false,
-    "enabled": false,
-    "requiresCors": false,
-    "defaultProxyRegion": "SG"
-  },
-  "tealstreet-dex": {
-    "prettyName": "TSDEX",
-    "requiresNoSecret": false,
-    "requiresPassphrase": false,
-    "requiresApplicationId": true,
-    "requiresApiKeyIndex": false,
-    "requiresOmniKeySeed": false,
-    "supportsVault": false,
-    "supportsTestnet": false,
-    "enabled": true,
-    "hiddenFromNewAccountPicker": true,
     "requiresCors": false,
     "defaultProxyRegion": "SG"
   },

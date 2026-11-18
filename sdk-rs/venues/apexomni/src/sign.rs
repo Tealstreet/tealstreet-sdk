@@ -20,6 +20,7 @@ use safe_cex_engine::signing::{
     Algorithm, Context, Encoding as PartEncoding, ExtraKey, Identity, KeyUse, Need, Operation,
     PayloadPart, SignError, SignReceipt, SignRequest, SignResult,
 };
+use safe_cex_engine::text::JoinWith;
 pub use safe_cex_engine::url::encode;
 use safe_cex_engine::{Action, DispatchContext, Method, SignStep, num};
 
@@ -102,7 +103,7 @@ pub fn query(params: &[(String, String)]) -> String {
         .into_iter()
         .map(|(key, value)| format!("{}={}", encode(key), encode(value)))
         .collect::<Vec<_>>()
-        .join("&")
+        .join_with("&")
 }
 
 pub fn form(params: &[(String, String)]) -> String {
@@ -245,7 +246,7 @@ fn canonical_text(request: &Request, legacy: bool, timestamp: &str) -> String {
 /// Transport bytes and content type. Multipart differs from the signed text.
 fn transport(body: &Body) -> Result<(String, Option<String>), String> {
     Ok(match body {
-        Body::None => ("application/json, charset=utf-8".into(), None),
+        Body::None => ("application/json; charset=utf-8".into(), None),
         Body::Raw(raw) => (
             "application/x-www-form-urlencoded; charset=UTF-8".into(),
             Some(raw.clone()),

@@ -312,7 +312,7 @@ const CASES: Case[] = [
     'caller-orderly-1',
     'clientOrderId',
     async (id) => {
-      const exchange = create(OrderlyExchange, 'salsadex');
+      const exchange = create(OrderlyExchange, 'woofi');
       adoptEngineCapabilities(exchange);
       const command = vi.fn(async (_command: { orders: PlaceOrderOpts[] }) => ['99']);
       exchange.host = { command };

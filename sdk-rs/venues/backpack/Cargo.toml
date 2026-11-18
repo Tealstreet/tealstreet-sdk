@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-safe-cex-engine = { workspace = true, features = ["order-locks", "command-order-book", "http-plans", "managed-sockets", "repair-mutations"] }
+safe-cex-engine = { workspace = true, features = ["order-locks", "command-order-book", "http-plans", "managed-sockets", "repair-mutations", "serial-plans"] }
 safe-cex-crypto = { workspace = true, features = ["ed25519"] }
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
@@ -16,4 +16,5 @@ zeroize.workspace = true
 workspace = true
 
 [dev-dependencies]
+safe-cex-venues = { path = "../../registry", default-features = false, features = ["backpack"] }
 safe-cex-engine = { workspace = true, features = ["test-support"] }

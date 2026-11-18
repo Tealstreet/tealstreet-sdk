@@ -1,0 +1,22 @@
+[
+  {
+    "body": null,
+    "headers": [
+      [
+        "X-MBX-APIKEY",
+        "fixture-key"
+      ]
+    ],
+    "url": "https://papi.binance.com/papi/v1/um/order?symbol=BTCUSDT&positionSide=BOTH&side=BUY&type=LIMIT&quantity=0.01&price=100&timeInForce=GTC&newClientOrderId=ordinary&timestamp=1000&recvWindow=20000&signature=7ab41a5c08b5f26c75f8a02b188e99fb249bd2cbd877651ae96a84edc784f48e"
+  },
+  {
+    "body": null,
+    "headers": [
+      [
+        "X-MBX-APIKEY",
+        "fixture-key"
+      ]
+    ],
+    "url": "https://papi.binance.com/papi/v1/um/order?symbol=BTCUSDT&positionSide=BOTH&side=BUY&type=MARKET&quantity=0.01&newClientOrderId=ordinary&timestamp=1000&recvWindow=20000&signature=26ec6cbe1d1faae721cdd84fc5ddd6a66624d7bd3c3e0b45a88d935b52b98191"
+  }
+]

@@ -174,7 +174,7 @@ impl SignedRequest {
         !self.public && self.method == Method::Get && !self.listen_key() && !self.plan_write()
     }
 
-    fn plan_write(&self) -> bool {
+    pub(crate) fn plan_write(&self) -> bool {
         matches!(&self.pending, Pending::Trade(trade) if trade.plan().is_some())
     }
 
@@ -499,7 +499,7 @@ impl AsterDex {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut request: Box<SignedRequest>,
-        response: Result<Response<'_>, &str>,
+        response: Result<Response<'_>, VenueError>,
     ) {
         let leg = request.read.clone();
         let mut reported = false;
@@ -609,10 +609,21 @@ impl AsterDex {
         policy: Policy,
         recipe: Option<Box<dyn safe_cex_engine::SignStep>>,
     ) -> bool {
+        let issue = if matches!(
+            &unsent.pending,
+            Pending::Daily { .. }
+                | Pending::OpenInterest { .. }
+                | Pending::Klines { .. }
+                | Pending::DepthRead { .. }
+        ) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
         let read = match (unsent.read.clone(), &unsent.root) {
             (Some(read), _) => Ok(read),
             (None, Some(root)) => cx.http_leg_context(root, policy),
-            (None, None) => cx.http_context(Scope::Background, policy),
+            (None, None) => issue(cx, Scope::Background, policy),
         };
         let read = match read {
             Ok(read) => read,
@@ -739,7 +750,13 @@ impl AsterDex {
             let _ = cx.finish_http_context(&context);
         }
         if request.plan_write() {
-            self.on_plan_reply(cx, request, response);
+            self.on_plan_reply(
+                cx,
+                request,
+                response.map_err(|message| {
+                    VenueError::new(message).outcome(safe_cex_engine::Outcome::Unknown)
+                }),
+            );
             return;
         }
         if let (Some(read), Ok(_)) = (&request.read, &response) {
@@ -775,6 +792,18 @@ impl AsterDex {
                     self.dispatch_signed(cx, request);
                 }
                 return;
+            }
+            if !request.public
+                && request.version == Version::V1
+                && request.method == Method::Get
+                && code == Some(-1022.0)
+            {
+                cx.startup_read_refused(
+                    &VenueError::new(message)
+                        .kind(ErrorKind::AuthInvalid)
+                        .venue_code("-1022")
+                        .venue_message(message),
+                );
             }
             if !request.public
                 && code == Some(-1021.0)
@@ -838,7 +867,7 @@ impl AsterDex {
         error: VenueError,
     ) {
         if request.plan_write() {
-            self.on_plan_reply(cx, request, Err(&error.message));
+            self.on_plan_reply(cx, request, Err(error));
             return;
         }
         if request.read.is_none() {
@@ -1065,6 +1094,9 @@ mod tests {
             _ => CredentialRole::Mutation,
         }
     }
+
+    /// Startup discovery gets 60 s for the read plus 30 s for transport readiness.
+    const DISCOVERY_DEADLINE_MS: u32 = 90_000;
 
     /// Retry delays are jittered into `[0.75, 1.0] * nominal`.
     fn jittered(actual: f64, nominal: f64) -> bool {
@@ -1645,8 +1677,8 @@ mod tests {
         let mut h = PublicHarness::new();
         let request = h.take("/exchangeInfo");
         assert!(request.headers.is_empty());
-        // The managed read's own bound.
-        assert_eq!(request.timeout_ms, Some(READ_TIMEOUT_MS));
+        // An unsigned startup catalogue read carries the discovery bound.
+        assert_eq!(request.timeout_ms, Some(DISCOVERY_DEADLINE_MS));
         h.event(Event::HttpStart {
             request: request.id,
             status: 200,

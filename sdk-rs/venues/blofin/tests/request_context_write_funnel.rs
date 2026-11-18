@@ -247,6 +247,7 @@ fn leverage(id: u32) -> Command {
 
 fn seeded() -> Harness {
     let mut h = Harness::new();
+    h.open_private();
     h.seed();
     h
 }
@@ -258,11 +259,12 @@ fn seed_order(h: &mut Harness, id: &str, extra: &str) {
 /// A flat account switched to isolated margin and hedge mode.
 fn hedged_isolated() -> Harness {
     let mut h = Harness::new();
+    h.open_private();
     h.modes();
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+        r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
     );
     for path in [
         "orders-pending",
@@ -290,7 +292,7 @@ fn hedged_isolated() -> Harness {
             &mut h,
             "balances",
             200,
-            r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+            r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
         );
     }
     command(&mut h, mode(81, true));
@@ -366,6 +368,7 @@ fn cancels_and_settings_are_primary_managed_mutations() {
 #[test]
 fn verify_is_a_secondary_managed_read_after_one_native_pause() {
     let mut h = Harness::with_secondary();
+    h.open_private();
     h.seed();
     seed_order(&mut h, "12", "");
     let intents = command(&mut h, amend(7));
@@ -885,6 +888,7 @@ fn a_new_uncertain_amend_requires_a_census_started_after_its_mark() {
     eth["baseCurrency"] = "ETH".into();
     instruments["data"].as_array_mut().unwrap().push(eth);
     let mut h = Harness::with_instruments(&instruments.to_string());
+    h.open_private();
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"ETH-USDT","orderCategory":"normal","orderId":"22","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","price":"60000","state":"live"}]}"#);
 
@@ -1109,10 +1113,11 @@ fn a_text_only_gone_row_is_classified_by_its_code_and_stops() {
     let error = failure(&h, 7);
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(
-        error.message.contains("cancellation rejected"),
+        error.message.contains("unknown") && error.message.contains("Check Open Orders"),
         "{}",
         error.message
     );
+    assert!(!error.message.contains("rejected"));
     assert!(
         h.e.store().order(&ids[3]).is_some(),
         "an unproven row is not removed"
@@ -1122,6 +1127,7 @@ fn a_text_only_gone_row_is_classified_by_its_code_and_stops() {
 #[test]
 fn the_reconcile_snapshot_is_primary_signed_with_a_secondary_configured() {
     let mut h = Harness::with_secondary();
+    h.open_private();
     h.seed();
     seed_order(&mut h, "12", "");
     command(&mut h, cancel(7));
@@ -1166,7 +1172,7 @@ fn the_journal_owns_a_non_2xx_outcome() {
             r#"{"code":"102015","msg":"Order price is not within the price limit"}"#,
             Some(Outcome::Rejected),
         ),
-        (429, "{}", Some(Outcome::Rejected)),
+        (429, "{}", Some(Outcome::Unknown)),
     ] {
         let mut h = seeded();
         command(&mut h, place(7, 1.0));
@@ -1195,4 +1201,281 @@ fn a_verify_detail_in_the_wrong_state_is_never_not_sent() {
         Some(Outcome::NotSent | Outcome::Rejected)
     ));
     assert_eq!(count(&h, "/batch-orders"), 0);
+}
+
+const LIST_FAMILIES: [&str; 2] = ["orders-tpsl-pending", "orders-algo-pending"];
+
+fn reduce_only_close(id: u32) -> Command {
+    Command::PlaceOrders {
+        command: id,
+        orders: vec![
+            serde_json::from_value(serde_json::json!({
+                "symbol": "BTCUSDT", "type": "market", "side": "sell", "amount": 1, "reduceOnly": true
+            }))
+            .unwrap(),
+        ],
+    }
+}
+
+fn answer_census(h: &mut Harness, normal_rows: &str) {
+    reply(
+        h,
+        "orders-pending?",
+        200,
+        &format!(r#"{{"code":"0","data":[{normal_rows}]}}"#),
+    );
+    // A page with rows asks for the next one.
+    if count(h, "orders-pending?") == 1 {
+        reply(h, "orders-pending?", 200, r#"{"code":"0","data":[]}"#);
+    }
+    for path in LIST_FAMILIES {
+        reply(h, path, 200, r#"{"code":"0","data":[]}"#);
+    }
+}
+
+const MALFORMED_STORED: &str = r#"{"instId":"BTC-USDT","orderCategory":"normal","orderId":"12","orderType":"limit","side":"buy","size":"10","price":"60000","filledSize":null,"state":"live"}"#;
+const MALFORMED_NEW: &str = r#"{"instId":"BTC-USDT","orderCategory":"normal","orderId":"99","orderType":"limit","side":"buy","size":"10","price":"60000","filledSize":null,"state":"live"}"#;
+
+#[test]
+fn a_malformed_row_with_a_stored_copy_does_not_hold_the_uncertain_fence() {
+    let mut h = seeded();
+    seed_order(&mut h, "12", "");
+    command(&mut h, place(800, 1.0));
+    reply(&mut h, "batch-orders", 503, "Service Unavailable");
+    assert_eq!(failure(&h, 800).outcome, Some(Outcome::Unknown));
+    answer_census(&mut h, MALFORMED_STORED);
+    command(&mut h, place(801, 1.0));
+    assert_eq!(count(&h, "batch-orders"), 1, "the row predates the write");
+}
+
+#[test]
+fn a_new_malformed_row_keeps_openings_fenced_but_a_reduce_only_close_is_sent() {
+    let mut h = seeded();
+    command(&mut h, place(810, 1.0));
+    reply(&mut h, "batch-orders", 503, "Service Unavailable");
+    assert_eq!(failure(&h, 810).outcome, Some(Outcome::Unknown));
+    answer_census(&mut h, MALFORMED_NEW);
+    command(&mut h, place(811, 1.0));
+    assert_eq!(
+        count(&h, "batch-orders"),
+        0,
+        "this row may be the lost write"
+    );
+    assert_eq!(failure(&h, 811).outcome, Some(Outcome::NotSent));
+    command(&mut h, reduce_only_close(812));
+    assert_eq!(count(&h, "batch-orders"), 1, "closes are never fenced");
+}
+
+#[test]
+fn a_reduce_only_close_is_sent_while_the_reconcile_read_is_still_out() {
+    let mut h = seeded();
+    command(&mut h, place(820, 1.0));
+    reply(&mut h, "batch-orders", 503, "Service Unavailable");
+    assert_eq!(failure(&h, 820).outcome, Some(Outcome::Unknown));
+    command(&mut h, reduce_only_close(821));
+    assert_eq!(count(&h, "batch-orders"), 1);
+}
+
+#[test]
+fn a_captured_refusal_with_order_id_zero_is_not_an_unknown_outcome() {
+    let mut h = seeded();
+    command(&mut h, place(830, 1.0));
+    reply(
+        &mut h,
+        "batch-orders",
+        200,
+        r#"{"code":"1","msg":"All operations failed","data":[{"orderId":"0","clientOrderId":"x","msg":"Order maximum buy price is 0.08328 USDT","code":"102123","positionId":""}]}"#,
+    );
+    let error = failure(&h, 830);
+    assert_ne!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+    assert!(
+        error.message.contains("Order maximum buy price"),
+        "{error:?}"
+    );
+    command(&mut h, place(831, 1.0));
+    assert_eq!(count(&h, "batch-orders"), 1, "a refusal leaves no fence");
+}
+
+// 102016's body is not captured; the row is built from the code only.
+#[test]
+fn listed_refusal_codes_in_a_successful_envelope_are_not_unknown() {
+    for code in ["102123", "102016"] {
+        let mut h = seeded();
+        command(&mut h, place(840, 1.0));
+        reply(
+            &mut h,
+            "batch-orders",
+            200,
+            &format!(
+                r#"{{"code":"0","msg":"","data":[{{"orderId":"","code":"{code}","msg":"refused"}}]}}"#
+            ),
+        );
+        assert_ne!(failure(&h, 840).outcome, Some(Outcome::Unknown), "{code}");
+    }
+}
+
+#[test]
+fn zero_protection_and_price_fields_read_as_unset() {
+    let mut h = seeded();
+    command(
+        &mut h,
+        Command::PlaceOrders {
+            command: 850,
+            orders: vec![
+                serde_json::from_value(serde_json::json!({
+                    "symbol": "BTCUSDT", "type": "market", "side": "buy", "amount": 1,
+                    "price": 0, "stopLoss": 0, "takeProfit": 0
+                }))
+                .unwrap(),
+            ],
+        },
+    );
+    assert_eq!(count(&h, "batch-orders"), 1, "sent, not refused");
+    let body = h.take("batch-orders").body.unwrap();
+    assert!(!body.contains("TriggerPrice"), "{body}");
+}
+
+#[test]
+fn accepted_settings_prefix_is_applied_without_a_created_order_id() {
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    let mut h = hedged_isolated();
+    h.requests.clear();
+    command(
+        &mut h,
+        Command::SetLeverage {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+            leverage: 30.0,
+            side: None,
+        },
+    );
+    reply(
+        &mut h,
+        "set-leverage",
+        200,
+        r#"{"code":"0","data":{"leverage":"30"}}"#,
+    );
+    reply(
+        &mut h,
+        "set-leverage",
+        200,
+        r#"{"code":"110006","msg":"Leverage cannot be adjusted"}"#,
+    );
+    let error = failure(&h, 7);
+    let elements = error.elements.as_ref().expect("complete settings effects");
+    assert_eq!(elements.len(), 2);
+    assert!(matches!(
+        &elements[0].result,
+        ElementResult::Applied {
+            effect: AppliedEffect::Settings,
+            target_order_id: None,
+            ..
+        }
+    ));
+    assert!(
+        matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+    );
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty())
+    );
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|(method, _)| *method == safe_cex_engine::Method::Post)
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn mixed_cancel_outcomes_reference_targets_without_placing_them() {
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    let mut h = seeded();
+    for id in ["12", "13", "14"] {
+        seed_order(&mut h, id, "");
+    }
+    h.requests.clear();
+    command(
+        &mut h,
+        Command::CancelOrders {
+            command: 7,
+            ids: vec!["12".into(), "13".into(), "14".into()],
+        },
+    );
+    reply(
+        &mut h,
+        "cancel-batch-orders",
+        200,
+        r#"{"code":"2","data":[{"orderId":"14","code":"0"},{"orderId":"13","code":"103003","msg":"refused"},{"orderId":"12","code":"0"}]}"#,
+    );
+    let error = failure(&h, 7);
+    let elements = error
+        .elements
+        .as_ref()
+        .expect("complete cancellation outcomes");
+    assert_eq!(elements.len(), 3);
+    for (index, expected) in [(0, "12"), (2, "14")] {
+        assert_eq!(
+            elements[index].result,
+            ElementResult::Applied {
+                effect: AppliedEffect::Cancel,
+                target_order_id: Some(expected.into()),
+                position_key: None
+            }
+        );
+    }
+    assert!(
+        matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) } if error.outcome == Some(Outcome::Rejected))
+    );
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.order_ids.is_empty()),
+        "cancel target IDs must not be reported as newly placed"
+    );
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|(method, _)| *method == safe_cex_engine::Method::Post)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn a_code_zero_row_retains_acceptance_when_legacy_message_policy_stops() {
+    let mut h = seeded();
+    command(&mut h, place(860, 1.0));
+    reply(
+        &mut h,
+        "batch-orders",
+        200,
+        r#"{"code":"0","msg":"","data":[{"orderId":"9","code":"0","msg":"Order placed successfully"}]}"#,
+    );
+    // TS:2254 stops on this message; code 0 still proves the order was placed.
+    let error = failure(&h, 860);
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["9"]);
+    assert!(matches!(&error.elements.as_ref().unwrap()[0].result,
+        safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["9"]));
+}
+
+// Live, 5 of 5: a partly filled order's cancel reads partially_canceled, and the replacement was lost.
+#[test]
+fn a_partly_filled_amend_still_replaces_after_partially_canceled() {
+    let mut h = Harness::with_secondary();
+    h.open_private();
+    h.seed();
+    seed_order(&mut h, "12", "");
+    command(&mut h, amend(7));
+    reply(&mut h, "cancel-batch-orders", 200, ACCEPTED_CANCEL);
+    let at = h.now + 350.0;
+    fire_until(&mut h, at);
+    let detail =
+        CANCELED_DETAIL.replace(r#""state":"canceled""#, r#""state":"partially_canceled""#);
+    let intents = reply(&mut h, "order-detail", 200, &detail);
+    managed(&h, &intents, "batch-orders");
 }

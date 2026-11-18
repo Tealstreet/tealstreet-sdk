@@ -328,3 +328,43 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
         }
     }
 }
+
+#[test]
+fn inverse_empty_catalogue_emits_typed_startup_error() {
+    let mut h = support::Harness::started_expecting(
+        Options {
+            public_data_only: true,
+            product: safe_cex_venue_bitget::Product::Inverse,
+            ..Options::default()
+        },
+        true,
+    );
+    h.respond("/contracts", 200, r#"{"code":"00000","data":[]}"#);
+
+    assert_eq!(h.startup_failures.len(), 1);
+    let failure = &h.startup_failures[0];
+    assert_eq!(failure.message, "Bitget lists no inverse contracts");
+    assert_eq!(
+        failure.kind,
+        Some(safe_cex_engine::ErrorKind::VenueUnavailable)
+    );
+    let errors: Vec<_> = h
+        .events
+        .iter()
+        .filter(|event| event.level == safe_cex_engine::Level::Error)
+        .collect();
+    assert_eq!(
+        errors.len(),
+        1,
+        "startup rejection must also be visible to event consumers"
+    );
+    assert_eq!(errors[0].code, safe_cex_engine::log::code::REQUEST_FAILED);
+    assert_eq!(errors[0].message, failure.message);
+    assert!(errors[0].fields.contains(&(
+        "kind",
+        safe_cex_engine::log::Value::Str("venueUnavailable".into())
+    )));
+    assert!(!h.engine.store().loaded().markets);
+    assert!(h.sockets.is_empty());
+    assert_eq!(h.deactivations, 0);
+}

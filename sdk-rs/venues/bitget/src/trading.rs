@@ -6,46 +6,122 @@ use safe_cex_engine::classify::{
     BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, Verdict, WriteFact,
 };
 use safe_cex_engine::log::code;
-use safe_cex_engine::model::*;
+use safe_cex_engine::model::{
+    MarginType, Market, Order, OrderExtra, OrderIdentityKind, OrderIdentityReceipt, OrderSide,
+    OrderStatus, OrderType, PlaceOrderOpts, PositionMode, PositionSide, StopTriggerType,
+    TimeInForce,
+};
 use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     ConditionOwner, ConditionWait, Context, Credential, HttpOwnerRetirement, Operation, Plan,
     Policy, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData, ResendGrant,
-    RetryPolicy,
+    RetryPolicy, WriteResult,
 };
+use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+#[cfg(test)]
+#[path = "protective_quote_tests.rs"]
+mod protective_quote_tests;
+
 /// Each call's own bound; the streamed Plan has no whole-job deadline.
 const CALL_MS: u32 = 20_000;
 /// Native wait for Classic/UTA account detection (scoped engine condition wait).
 const DETECTION_MS: u32 = 10_000;
 const DETECTION: &str = "Bitget account detection did not complete";
+const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
 
-/// Bitget's native write codes: 40009 earns the one fresh resend, 40010, 40725
-/// and 45001 prove nothing, the read side's key refusals keep their auth kind
+/// Bitget's native write codes: 40009 earns the one fresh resend; 40010, 40725,
+/// 45001 and the system, upgrade, busy and timeout codes prove nothing; the read side's key refusals keep their auth kind
 /// (pinned by account::write_and_read_key_refusals_agree), and any other code is
 /// a pre-execution refusal.
 pub(crate) const CODES: CodeTable = CodeTable {
     rows: &[
         Row {
+            key: Key::Int(429),
+            verdict: Verdict::Unknown(Some(ErrorKind::RateLimited)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(25000),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(25001),
+            verdict: Verdict::Unknown(Some(ErrorKind::Timeout)),
+            only: None,
+        },
+        Row {
             key: Key::Int(40009),
             verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
             only: None,
         },
-        auth(40001, ErrorKind::AuthInvalid),
-        auth(40006, ErrorKind::AuthInvalid),
-        auth(40011, ErrorKind::AuthInvalid),
-        auth(40012, ErrorKind::AuthInvalid),
-        auth(40037, ErrorKind::AuthInvalid),
-        auth(40014, ErrorKind::AuthPermission),
-        auth(40018, ErrorKind::AuthPermission),
+        // UTA trailing stop refused, seen on one key; whether it is venue-wide is unconfirmed.
+        refused(400172, ErrorKind::Rejected),
+        refused(40001, ErrorKind::AuthInvalid),
+        refused(40006, ErrorKind::AuthInvalid),
+        refused(40011, ErrorKind::AuthInvalid),
+        refused(40012, ErrorKind::AuthInvalid),
+        refused(40037, ErrorKind::AuthInvalid),
+        refused(40014, ErrorKind::AuthPermission),
+        refused(40018, ErrorKind::AuthPermission),
+        // Balance and margin refusals (cross-checked against ccxt's Bitget map).
+        refused(40711, ErrorKind::InsufficientBalance),
+        refused(40712, ErrorKind::InsufficientBalance),
+        refused(40762, ErrorKind::InsufficientBalance),
+        refused(43012, ErrorKind::InsufficientBalance),
+        // Order rules the order itself broke: unknown symbol or parameter value,
+        // parameter verification (including the six-digit 400171), wrong quantity
+        // or price, size precision, minimum and maximum order value, and a stop
+        // price on the wrong side of the mark.
+        refused(40034, ErrorKind::InvalidInput),
+        refused(400171, ErrorKind::InvalidInput),
+        refused(40108, ErrorKind::InvalidInput),
+        refused(40706, ErrorKind::InvalidInput),
+        refused(40808, ErrorKind::InvalidInput),
+        refused(40917, ErrorKind::InvalidInput),
+        refused(43011, ErrorKind::InvalidInput),
+        refused(45110, ErrorKind::InvalidInput),
+        refused(45113, ErrorKind::InvalidInput),
+        refused(45122, ErrorKind::InvalidInput),
+        // "Not enough position is available": a reduce-only size above the
+        // position, refused at any price until the position changes. No capture
+        // has carried 40757 yet, so the text names it under any code or none.
+        refused(40757, ErrorKind::InvalidInput),
+        Row {
+            key: Key::Phrase("Not enough position is available"),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
         Row {
             key: Key::Int(40010),
             verdict: Verdict::Unknown(None),
+            only: None,
+        },
+        Row {
+            key: Key::Int(40015),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(40200),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(40604),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(50008),
+            verdict: Verdict::Unknown(Some(ErrorKind::Timeout)),
             only: None,
         },
         Row {
@@ -64,11 +140,11 @@ pub(crate) const CODES: CodeTable = CodeTable {
     status: &[
         (401, Verdict::Refused(ErrorKind::AuthInvalid)),
         (403, Verdict::Refused(ErrorKind::AuthPermission)),
-        (429, Verdict::Refused(ErrorKind::RateLimited)),
+        (429, Verdict::Unknown(Some(ErrorKind::RateLimited))),
     ],
 };
 
-const fn auth(code: i64, kind: ErrorKind) -> Row {
+const fn refused(code: i64, kind: ErrorKind) -> Row {
     Row {
         key: Key::Int(code),
         verdict: Verdict::Refused(kind),
@@ -78,14 +154,17 @@ const fn auth(code: i64, kind: ErrorKind) -> Row {
 
 #[derive(Default)]
 pub struct Trading {
+    /// minTradeUSDT by symbol. Market limits carry no value minimum.
+    pub(crate) min_order_value: HashMap<String, f64>,
     acknowledged: HashMap<String, (String, Planned)>,
     /// Commands behind the active job, each a Preflight parked with no I/O.
     queue: VecDeque<Queued>,
     active: Option<Job>,
     metadata_at: HashMap<String, f64>,
+    references: HashMap<String, crate::protective::Quote>,
     /// A released write whose Plan the engine sealed itself (unproven status):
     /// restore and reconcile at the next callback that holds Cx.
-    retired_write: Option<Planned>,
+    retired_write: Option<(Planned, bool)>,
 }
 
 struct Queued {
@@ -123,6 +202,8 @@ struct Job {
     retry: Option<Request>,
     /// The write call in flight, kept for an engine-sealed retirement.
     live: Option<Planned>,
+    /// The current cancel-plan answer is exactly empty success and failure lists.
+    empty_plan_ack: bool,
     /// '; <note>' appended to the projected failure (a failed protection rollback).
     note: Option<String>,
     intent: Command,
@@ -135,9 +216,16 @@ struct Job {
     fallback: Option<VecDeque<Planned>>,
     rollback: Option<Planned>,
     error: Option<VenueError>,
+    /// A Classic batch refusal TS continues past, retained for reporting.
+    batch_error: Option<VenueError>,
     ids: Vec<String>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    /// The symbol of a stop this amend cancels before replacing it.
+    replaces_stop: Option<(String, OrderSide, OrderType)>,
+    /// The symbol of a plain order this job cancels before placing its replacement.
+    replaces_order: Option<String>,
+    guard: Option<crate::protective::Guard>,
 }
 
 pub struct Request {
@@ -182,7 +270,7 @@ enum Answer {
     Batch {
         expected: usize,
         accepted: Vec<String>,
-        failures: Vec<String>,
+        failures: Vec<(Option<i64>, String)>,
     },
     Unproven,
     Coded,
@@ -198,6 +286,11 @@ struct Planned {
 #[derive(Clone)]
 enum Effect {
     Metadata(String),
+    ProtectiveQuote(String),
+    ProtectiveAmend {
+        sources: Vec<Order>,
+        updated: Vec<Order>,
+    },
     ResolveAmend {
         id: String,
         price: f64,
@@ -210,6 +303,12 @@ enum Effect {
     Cancel {
         orders: Vec<Order>,
         idempotent_missing: bool,
+    },
+    /// After an empty cancel-plan acknowledgement: does Bitget still list the plan?
+    ConfirmPlanGone {
+        order: Box<Order>,
+        plan_type: &'static str,
+        unproven: String,
     },
     Amend {
         id: String,
@@ -232,7 +331,6 @@ enum Effect {
 #[derive(Clone, Serialize)]
 #[serde(untagged)]
 enum Leverage {
-    Number(f64),
     Text(String),
 }
 
@@ -246,6 +344,13 @@ struct CancelId {
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Payload {
+    /// Local diagnostic custody only; never part of signed native bytes.
+    #[serde(skip)]
+    close_diagnostic: Option<crate::telemetry::CloseRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    long_leverage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    short_leverage: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     trailing_stop_params: Option<Vec<TrailingParams>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -301,6 +406,10 @@ struct Payload {
     #[serde(skip_serializing_if = "Option::is_none")]
     trigger_price: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    execute_price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    range_rate: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     trigger_type: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     callback_ratio: Option<String>,
@@ -318,6 +427,14 @@ struct Payload {
     tp_order_type: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     sl_order_type: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tp_limit_price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sl_limit_price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_preset_stop_surplus_price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_preset_stop_loss_price: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     preset_stop_surplus_price: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -357,6 +474,9 @@ struct ReplyData<'a> {
     success_list: Vec<ReplyItem<'a>>,
     #[serde(default)]
     failure_list: Vec<Failure>,
+    /// UTA cancel-symbol-order answers one result per order here, each with its own code.
+    #[serde(default)]
+    list: Vec<ListResult>,
     #[serde(default, alias = "state", alias = "orderStatus")]
     status: String,
     #[serde(default, alias = "filledQty", alias = "cumExecQty")]
@@ -365,22 +485,75 @@ struct ReplyData<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReplyItem<'a> {
-    #[serde(borrow)]
+    #[serde(default, borrow)]
     order_id: Identifier<'a>,
+    #[serde(default, borrow)]
+    client_oid: Option<ReplyClientId<'a>>,
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ReplyClientId<'a> {
+    Known(#[serde(borrow)] Identifier<'a>),
+    Invalid(serde::de::IgnoredAny),
+}
+#[derive(Deserialize)]
+struct ListResult {
+    #[serde(default)]
+    code: Number,
+    #[serde(default)]
+    msg: String,
+}
+/// A per-order result that is a failure; 24056, not existed, is already gone and so done.
+fn listed_failures(list: &[ListResult]) -> Vec<(Option<i64>, String)> {
+    list.iter()
+        .filter_map(|item| {
+            let code = item
+                .code
+                .0
+                .filter(|code| code.fract() == 0.0)
+                .map(|code| code as i64)?;
+            (code != 0 && code != 24056).then(|| (Some(code), item.msg.clone()))
+        })
+        .collect()
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Failure {
     #[serde(default)]
     error_msg: String,
+    /// Which order of the batch this row refuses; anything unreadable names none.
+    #[serde(default)]
+    client_oid: Option<FailureClient>,
+    #[serde(default)]
+    error_code: Number,
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum FailureClient {
+    Text(String),
+    Other(serde::de::IgnoredAny),
 }
 #[derive(Deserialize)]
 struct Reply<'a> {
     code: Number,
     #[serde(default)]
     msg: String,
-    #[serde(borrow)]
+    #[serde(borrow, default, deserialize_with = "reply_data")]
     data: Option<ReplyData<'a>>,
+}
+
+/// Settings writes answer with `"data":"success"`: a success with nothing to read.
+fn reply_data<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<ReplyData<'de>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Data<'a> {
+        Row(#[serde(borrow)] ReplyData<'a>),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(match Data::deserialize(d)? {
+        Data::Row(row) => Some(row),
+        Data::Other(_) => None,
+    })
 }
 
 impl BitgetFutures {
@@ -422,6 +595,14 @@ impl BitgetFutures {
         if let Err(error) = validation {
             self.refuse_entry(cx, not_sent(error));
             return;
+        }
+        if let Command::PlaceOrders { orders, .. } = &command {
+            for order in orders {
+                if let Err(error) = self.tpsl_trigger_selection(order) {
+                    self.refuse_entry(cx, not_sent(error).kind(ErrorKind::InvalidInput));
+                    return;
+                }
+            }
         }
         // In-job reads sign with the static Read role; writes with Primary.
         let (read_credential, _) = self.read_selection(paths::ACCOUNT);
@@ -486,7 +667,7 @@ impl BitgetFutures {
                 if o.kind == OrderType::Conditional
                     || (o.trigger_price.is_some() && !o.redundant_protective_trigger())
                 {
-                    return Err("Bitget opening conditional orders are unsupported".into());
+                    return Err("Bitget conditional orders are unsupported".into());
                 }
                 if !o.amount.is_finite() || o.amount < 0.0 {
                     return Err("invalid Bitget order amount".into());
@@ -535,8 +716,10 @@ impl BitgetFutures {
     }
 
     fn start_job(&mut self, cx: &mut Cx<'_, Pending>, preflight: Preflight, intent: Command) {
+        // Frame-fed: settings and hedge mode arrive as frames, never read here.
         let metadata = symbols(cx, &intent)
             .into_iter()
+            .filter(|_| !cx.frame_fed())
             .filter(|symbol| {
                 cx.store.setting(symbol).is_none()
                     || (!cx
@@ -558,6 +741,7 @@ impl BitgetFutures {
             parked: None,
             retry: None,
             live: None,
+            empty_plan_ack: false,
             note: None,
             original: if let Command::AmendOrder { id, .. } = &intent {
                 cx.store.order(id).cloned()
@@ -573,8 +757,12 @@ impl BitgetFutures {
             fallback: None,
             rollback: None,
             error: None,
+            batch_error: None,
             ids: vec![],
             effective: false,
+            replaces_stop: None,
+            replaces_order: None,
+            guard: None,
         };
         self.drive(cx, job, At::Entry);
     }
@@ -622,7 +810,25 @@ impl BitgetFutures {
             job.planned = true;
         }
         match job.calls.pop_front() {
-            Some(call) => self.call_step(cx, call),
+            Some(call) => {
+                if matches!(call.effect, Effect::Cancel { .. })
+                    && let Some(guard) = job.guard.as_ref()
+                    && guard.frame_fed
+                    && guard.quote.is_none()
+                {
+                    let symbol = guard.sources[0].symbol.clone();
+                    job.calls.push_front(call);
+                    return self.call_step(
+                        cx,
+                        Planned {
+                            path: paths::TICKERS,
+                            payload: Payload::default(),
+                            effect: Effect::ProtectiveQuote(symbol),
+                        },
+                    );
+                }
+                self.call_step(cx, call)
+            }
             None => Step::Finish,
         }
     }
@@ -646,6 +852,15 @@ impl BitgetFutures {
                     )
                 }
             }
+            Effect::ConfirmPlanGone {
+                order, plan_type, ..
+            } => format!(
+                "{}?symbol={}&productType={}&planType={plan_type}&orderId={}",
+                paths::PLANS,
+                sign::encode(&order.symbol),
+                self.product(),
+                sign::encode(&native_id(order))
+            ),
             Effect::ResolveAmend { client, .. } => format!(
                 "{}?symbol={}&productType={}&clientOid={}",
                 paths::ORDER_DETAIL,
@@ -653,6 +868,9 @@ impl BitgetFutures {
                 self.product(),
                 sign::encode(client)
             ),
+            Effect::ProtectiveQuote(_) => {
+                format!("{}?productType={}", paths::TICKERS, self.product())
+            }
             _ => call.path.to_owned(),
         };
         let body = (!read).then(|| serde_json::to_string(&call.payload).expect("Bitget payload"));
@@ -790,7 +1008,13 @@ impl BitgetFutures {
 
     #[inline(never)]
     fn send_call(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job, request: Request) {
-        job.live = (!request.call.read()).then(|| request.call.clone());
+        if request.call.is_place() {
+            self.remember_close_requests(cx.now, &request.call.close_requests(cx));
+        }
+        // A confirming read stands for its cancel if the engine retires the owner.
+        job.live = (!request.call.read()
+            || matches!(request.call.effect, Effect::ConfirmPlanGone { .. }))
+        .then(|| request.call.clone());
         if let Effect::Cancel { orders, .. } = &request.call.effect {
             for order in orders {
                 cx.store.set_order_status(&order.id, OrderStatus::Canceling);
@@ -809,7 +1033,17 @@ impl BitgetFutures {
             request.method,
             request.body.clone(),
         );
+        let plan = job.plan.clone().expect("live Plan");
         self.trading.active = Some(job);
+        if self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|job| job.error.is_some())
+        {
+            let _ = cx.present_plan_failure(&plan,
+                "Bitget protective replacement was refused; its put-back outcome is unknown, check Open Orders before placing another stop");
+        }
         if let Err((pending, reason)) = cx.request_signed_managed(
             context,
             None,
@@ -840,6 +1074,71 @@ impl BitgetFutures {
             let (original, note) = with_rollback(job.error.take(), error);
             error = original;
             job.note = note;
+        }
+        if error.outcome == Some(Outcome::Unknown)
+            && job.live.as_ref().is_some_and(|call| !call.read())
+        {
+            let request = job.live.as_ref().map_or_else(String::new, |call| {
+                serde_json::to_string(&call.payload).expect("native order payload")
+            });
+            // A prior refusal may supply the journal's projected message.
+            // Keep the uncertainty visible even when that refusal wins selection.
+            let unknown = format!("{UNKNOWN_TEXT}; unconfirmed request {request}");
+            job.note = Some(match job.note.take() {
+                Some(note) => format!("{note}; {unknown}"),
+                None => unknown,
+            });
+            cx.event(
+                Level::Warn,
+                "order.outcome_unknown",
+                UNKNOWN_TEXT,
+                vec![
+                    ("command", job.id.into()),
+                    ("placedCount", (job.ids.len() as f64).into()),
+                    ("unknownRequest", request.into()),
+                ],
+            );
+        }
+        // The cancel landed and nothing replaced it: lead with what the user must act on.
+        if job.effective
+            && job.ids.is_empty()
+            && let Some((symbol, side, kind)) = &job.replaces_stop
+        {
+            // The note, because a Plan's failure text is projected from its recorded fact.
+            let stop = safe_cex_engine::error::stop_gone_text(
+                symbol,
+                *side,
+                *kind,
+                error.outcome == Some(Outcome::Unknown),
+            );
+            job.note = Some(match job.note.take() {
+                Some(note) => format!("{stop}; {note}"),
+                None => stop,
+            });
+        }
+        if job.effective
+            && job.ids.is_empty()
+            && let Some(symbol) = &job.replaces_order
+        {
+            let order = safe_cex_engine::error::order_gone_text(
+                symbol,
+                error.outcome == Some(Outcome::Unknown),
+            );
+            job.note = Some(match job.note.take() {
+                Some(note) => format!("{order}; {note}"),
+                None => order,
+            });
+        }
+        if job.guard.is_some()
+            && job.effective
+            && job.ids.is_empty()
+            && error.outcome != Some(Outcome::Unknown)
+        {
+            error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
+            error.presents = true;
+            error
+                .message
+                .push_str("; protection is not in place; re-place it now");
         }
         if (job.effective || !job.ids.is_empty())
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
@@ -877,7 +1176,7 @@ impl BitgetFutures {
         mut job: Job,
         current: Option<(&Slot, &Context)>,
     ) {
-        if let Some(error) = job.error.take() {
+        if let Some(error) = job.error.take().or_else(|| job.batch_error.take()) {
             return self.end(cx, job, current, error);
         }
         let ids = serde_json::to_string(&job.ids).expect("order ids");
@@ -1028,7 +1327,8 @@ impl BitgetFutures {
             .is_some_and(|job| owner.matches_preflight(&job.preflight))
         {
             let job = self.trading.active.take().expect("retired job");
-            self.trading.retired_write = job.live;
+            let plain_cancel = job.is_plain_cancel();
+            self.trading.retired_write = job.live.map(|call| (call, plain_cancel));
             return self
                 .trading
                 .queue
@@ -1036,6 +1336,39 @@ impl BitgetFutures {
                 .map(|queued| queued.preflight.clone());
         }
         None
+    }
+
+    /// Engine-gated HTTP failure can retire the owner without response delivery.
+    /// Export its targets once, before that same event's source refresh ask.
+    pub(crate) fn take_retired_cancel_targets(
+        &mut self,
+    ) -> Vec<safe_cex_engine::model::CancelOrderRef> {
+        let Some((call, plain)) = self.trading.retired_write.as_mut() else {
+            return vec![];
+        };
+        if !std::mem::take(plain) {
+            return vec![];
+        }
+        match &call.effect {
+            Effect::ConfirmPlanGone { order, .. } => std::slice::from_ref(order.as_ref())
+                .iter()
+                .filter(|o| matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit))
+                .map(|o| safe_cex_engine::model::CancelOrderRef {
+                    id: o.id.clone(),
+                    symbol: o.symbol.clone(),
+                })
+                .collect(),
+            Effect::Cancel { orders, .. } => orders
+                .iter()
+                .filter(|o| matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit))
+                .take(64)
+                .map(|o| safe_cex_engine::model::CancelOrderRef {
+                    id: o.id.clone(),
+                    symbol: o.symbol.clone(),
+                })
+                .collect(),
+            _ => vec![],
+        }
     }
 
     /// Native restore and reconcile for a write the engine sealed as Unknown.
@@ -1047,11 +1380,17 @@ impl BitgetFutures {
 
     /// The I/O-free half of the settle: exact Store restoration. Returns whether
     /// the order refresh is still owed.
-    fn restore_retired_write(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
-        let Some(call) = self.trading.retired_write.take() else {
+    pub(crate) fn restore_retired_write(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
+        let Some((call, plain_cancel)) = self.trading.retired_write.take() else {
             return false;
         };
         restore_canceling(cx, &call);
+        if plain_cancel && let Effect::Cancel { orders, .. } = &call.effect {
+            self.check_unknown_cancels(cx, orders);
+        }
+        if let Effect::ConfirmPlanGone { order, .. } = &call.effect {
+            self.check_unknown_cancels(cx, std::slice::from_ref(order.as_ref()));
+        }
         if matches!(call.effect, Effect::Place { .. }) {
             self.account.orders_version = self.account.orders_version.wrapping_add(1);
         }
@@ -1110,6 +1449,19 @@ impl BitgetFutures {
                     job.calls.push_back(call.clone());
                 }
             }
+            // An order the store has lost is still cancelled by its id and symbol.
+            Command::CancelOrdersWithSymbols { orders, .. } => {
+                let orders: Vec<_> = orders
+                    .iter()
+                    .map(|order| {
+                        cx.store
+                            .order(&order.id)
+                            .cloned()
+                            .unwrap_or_else(|| order.limit_stand_in())
+                    })
+                    .collect();
+                job.calls = self.cancel_calls(cx, &orders, true)?.into();
+            }
             Command::CancelSymbolOrders { symbol, .. } => {
                 let orders: Vec<_> = cx
                     .store
@@ -1132,6 +1484,21 @@ impl BitgetFutures {
                         );
                     }
                     job.calls.push_back(call.clone());
+                }
+                // Reaches orders the store has not seen; their rows follow from the stream.
+                if self.account.uta && !symbol.is_empty() {
+                    job.calls.push_back(Planned {
+                        path: paths::UTA_CANCEL_SYMBOL,
+                        payload: Payload {
+                            category: Some(self.product().to_uppercase()),
+                            symbol: Some(symbol.clone()),
+                            ..Payload::default()
+                        },
+                        effect: Effect::Cancel {
+                            orders: Vec::new(),
+                            idempotent_missing: false,
+                        },
+                    });
                 }
             }
             Command::AmendOrder {
@@ -1167,8 +1534,8 @@ impl BitgetFutures {
                         PositionSide::Short => "short",
                     });
                 let mut p = self.classic(cx, symbol)?;
-                p.leverage = Some(Leverage::Number(leverage));
-                let path = if self.account.uta && isolated_hedge {
+                p.leverage = Some(Leverage::Text(num::format(leverage)));
+                let path = if self.account.uta {
                     p = Payload {
                         category: Some(self.product().to_uppercase()),
                         symbol: Some(symbol.clone()),
@@ -1177,6 +1544,25 @@ impl BitgetFutures {
                         pos_side: side_text,
                         ..Payload::default()
                     };
+                    // Isolated hedge names both sides' leverage (25200 otherwise).
+                    if isolated_hedge {
+                        let setting = cx.store.setting(symbol);
+                        let held = |kept: Option<f64>| num::format(kept.unwrap_or(leverage));
+                        let (long, short) = if requested_side == PositionSide::Long {
+                            (
+                                num::format(leverage),
+                                held(setting.and_then(|s| s.sell_leverage)),
+                            )
+                        } else {
+                            (
+                                held(setting.and_then(|s| s.buy_leverage)),
+                                num::format(leverage),
+                            )
+                        };
+                        p.margin_mode = Some(margin_text(MarginType::Isolated));
+                        p.long_leverage = Some(long);
+                        p.short_leverage = Some(short);
+                    }
                     paths::UTA_SET_LEVERAGE
                 } else {
                     p.hold_side = side_text;
@@ -1212,6 +1598,18 @@ impl BitgetFutures {
                         ))),
                         ..Payload::default()
                     };
+                    // Isolated hedge names both sides' leverage (25200 otherwise).
+                    if margin == MarginType::Isolated && cx.store.hedged() {
+                        p.leverage = None;
+                        let setting = cx.store.setting(symbol);
+                        let scalar = setting.map_or(1.0, |s| s.leverage);
+                        p.long_leverage = Some(num::format(
+                            setting.and_then(|s| s.buy_leverage).unwrap_or(scalar),
+                        ));
+                        p.short_leverage = Some(num::format(
+                            setting.and_then(|s| s.sell_leverage).unwrap_or(scalar),
+                        ));
+                    }
                     paths::UTA_SET_LEVERAGE
                 } else {
                     paths::SET_MARGIN
@@ -1252,6 +1650,52 @@ impl BitgetFutures {
                     payload,
                     effect: Effect::Mode(*hedged),
                 });
+            }
+            // A nuke's: the product's every pending order, unseen ones included.
+            Command::Venue {
+                action: safe_cex_engine::VenueAction::CancelAccountOrders,
+                ..
+            } => {
+                let (path, payload) = if self.account.uta {
+                    let payload = Payload {
+                        category: Some(self.product().to_uppercase()),
+                        ..Payload::default()
+                    };
+                    (paths::UTA_CANCEL_SYMBOL, payload)
+                } else {
+                    let payload = Payload {
+                        product_type: Some(self.product().into()),
+                        margin_coin: (!self.inverse()).then(|| self.coin().into()),
+                        ..Payload::default()
+                    };
+                    (paths::CANCEL_ALL, payload)
+                };
+                let plans = if self.account.uta {
+                    Vec::new()
+                } else {
+                    // Classic cancel-all leaves plan orders; each type is cancelled product-wide.
+                    NUKE_PLAN_TYPES
+                        .iter()
+                        .map(|plan| Payload {
+                            plan_type: Some((*plan).into()),
+                            ..payload.clone()
+                        })
+                        .collect()
+                };
+                for (path, payload) in std::iter::once((path, payload)).chain(
+                    plans
+                        .into_iter()
+                        .map(|payload| (paths::CANCEL_PLAN, payload)),
+                ) {
+                    job.calls.push_back(Planned {
+                        path,
+                        payload,
+                        effect: Effect::Cancel {
+                            orders: Vec::new(),
+                            idempotent_missing: false,
+                        },
+                    });
+                }
             }
             _ => return Err("unsupported Bitget trading command".into()),
         }
@@ -1312,7 +1756,7 @@ impl BitgetFutures {
                     .filter(|position| position.symbol == order.symbol)
                     .map(|position| format!("{:?}:{}", position.side, position.contracts))
                     .collect::<Vec<_>>()
-                    .join(", ");
+                    .join_with(", ");
                 cx.notice(Level::Warn, code::COMMAND_UNSUPPORTED, format!(
                     "Sized {} stop became a full-position stop: no open {:?} position to size requested {} against, positions seen [{}]",
                     order.symbol, protected_position(order.side), order.amount,
@@ -1320,6 +1764,74 @@ impl BitgetFutures {
                 ));
             }
         }
+    }
+
+    /// Bitget's refusal of a close beyond the position's unlocked size, worded
+    /// as the action it needs. `client` names the refused order; without it only
+    /// a batch whose closes share one side names that side.
+    fn closable_refusal(
+        &self,
+        cx: &Cx<'_, Pending>,
+        call: &Planned,
+        message: &str,
+        client: Option<&str>,
+    ) -> Option<String> {
+        if call.path != paths::BATCH_PLACE
+            || !message
+                .to_ascii_lowercase()
+                .contains("not enough position is available")
+        {
+            return None;
+        }
+        let symbol = call.payload.symbol.as_deref()?;
+        let rows = call.payload.order_list.as_deref()?;
+        // A hedged close names its position's side; a one-way close sells a long.
+        let closes_long = |o: &Payload| {
+            (o.reduce_only == Some("YES") || o.trade_side == Some("close")).then(|| {
+                if o.trade_side == Some("close") {
+                    o.side == Some("buy")
+                } else {
+                    o.side == Some("sell")
+                }
+            })
+        };
+        let named = client.and_then(|client| {
+            rows.iter()
+                .find(|o| o.client_oid.as_deref() == Some(client))
+        });
+        let long = match named {
+            Some(row) => closes_long(row),
+            None => {
+                let mut sides = rows.iter().filter_map(closes_long);
+                let first = sides.next();
+                first.filter(|long| sides.all(|other| other == *long))
+            }
+        };
+        let side = match long {
+            Some(true) => " long",
+            Some(false) => " short",
+            None => "",
+        };
+        // Numbers only from the split of the Store's admitted row for that side.
+        let split = long.and_then(|long| {
+            let side = if long {
+                PositionSide::Long
+            } else {
+                PositionSide::Short
+            };
+            self.admitted_split(cx, symbol, side)
+        });
+        Some(match split {
+            Some(split) => format!(
+                "only {} of your {} {symbol}{side} position is free to close; {} is held by open close orders; cancel them first ({message})",
+                num::format(split.available),
+                num::format(split.total),
+                num::format(split.locked)
+            ),
+            None => format!(
+                "part of your {symbol}{side} position is held by open close orders; cancel them first ({message})"
+            ),
+        })
     }
 
     fn classic(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Result<Payload, String> {
@@ -1331,11 +1843,37 @@ impl BitgetFutures {
         })
     }
 
+    fn tpsl_trigger_selection(&self, order: &PlaceOrderOpts) -> Result<(), String> {
+        let attached = order.take_profit.is_some() || order.stop_loss.is_some();
+        let selections = [
+            order.trigger_type,
+            order.tp_trigger_type,
+            order.sl_trigger_type,
+        ];
+        if (is_algo(order.kind) || attached)
+            && selections.contains(&Some(StopTriggerType::IndexPrice))
+        {
+            return Err("Bitget TP/SL trigger supports Last or Mark, not Index".into());
+        }
+        if attached
+            && !is_algo(order.kind)
+            && selections.iter().any(Option::is_some)
+            && !(self.account.detected && self.account.uta)
+        {
+            return Err("Bitget entry preset trigger selection requires a detected UTA account; Classic preset default is unproven, omit the selection or use position TP/SL".into());
+        }
+        Ok(())
+    }
+
     fn place_calls(
         &self,
         cx: &Cx<'_, Pending>,
         orders: &[PlaceOrderOpts],
     ) -> Result<Vec<Planned>, String> {
+        // Recheck the detected route after queued work or an account-mode change.
+        for order in orders {
+            self.tpsl_trigger_selection(order)?;
+        }
         let mut calls = vec![];
         let mut groups: Vec<(String, Vec<Payload>)> = vec![];
         for o in orders.iter().filter(|o| !is_algo(o.kind)) {
@@ -1346,15 +1884,23 @@ impl BitgetFutures {
             if total <= 0.0 {
                 continue;
             }
-            let max = if m.limits.amount.max > 0.0 && m.limits.amount.max.is_finite() {
-                floor_lot(m.limits.amount.max, m.precision.amount)
-            } else {
+            let cap = self
+                .order_caps
+                .get(&o.symbol)
+                .map_or(m.limits.amount.max, |caps| {
+                    caps.for_order(m.limits.amount.max, o.kind == OrderType::Market)
+                });
+            let max = if cap > 0.0 && cap.is_finite() {
+                floor_lot(cap, m.precision.amount)
+            } else if cap == f64::INFINITY {
                 total
+            } else {
+                return Err("Bitget market has no valid maximum order quantity".into());
             };
             if max <= 0.0 {
                 return Err("Bitget maximum size is smaller than one lot".into());
             }
-            let mut left = total;
+            let max = if cap.is_finite() { cap } else { max };
             let count = (total / max).ceil() as usize;
             if o.client_order_id.is_some() && count > 1 {
                 return Err("Bitget caller clientOrderId would split across native orders".into());
@@ -1362,9 +1908,15 @@ impl BitgetFutures {
             if count > 10_000 {
                 return Err("Bitget order exceeds the split bound".into());
             }
-            while left > 0.0 {
-                let size = left.min(max);
-                left = clean(left - size);
+            // TS: packages/safe-cex/src/__tests__/reference/bitget/bitget.exchange.ts:2059-2073,2127-2141.
+            // Both routes repeat the rounded equal lot, then append its rounded remainder.
+            let rest = if total > max {
+                num::adjust(total % max, m.precision.amount)
+            } else {
+                0.0
+            };
+            let size = num::adjust((total - rest) / count as f64, m.precision.amount);
+            for size in std::iter::repeat_n(size, count).chain((rest != 0.0).then_some(rest)) {
                 let payload = self.normal_payload(cx, o, size)?;
                 if self.account.uta {
                     calls.push(Planned {
@@ -1468,8 +2020,12 @@ impl BitgetFutures {
             p.time_in_force = (o.kind == OrderType::Limit).then_some(tif(o.time_in_force));
             p.take_profit = o.take_profit.map(|v| number(v, m.precision.price));
             p.stop_loss = o.stop_loss.map(|v| number(v, m.precision.price));
-            p.tp_trigger_by = o.take_profit.map(|_| uta_trigger(o.tp_trigger_type));
-            p.sl_trigger_by = o.stop_loss.map(|_| uta_trigger(o.sl_trigger_type));
+            p.tp_trigger_by = o
+                .take_profit
+                .map(|_| uta_trigger(o.tp_trigger_type.or(o.trigger_type)));
+            p.sl_trigger_by = o
+                .stop_loss
+                .map(|_| uta_trigger(o.sl_trigger_type.or(o.trigger_type)));
             p.tp_order_type = o.take_profit.map(|_| "market");
             p.sl_order_type = o.stop_loss.map(|_| "market");
         } else {
@@ -1480,7 +2036,7 @@ impl BitgetFutures {
             p.preset_stop_surplus_price = o.take_profit.map(|v| number(v, m.precision.price));
             p.preset_stop_loss_price = o.stop_loss.map(|v| number(v, m.precision.price));
         }
-        Ok(p)
+        Ok(diagnostic_payload(o, p))
     }
 
     fn plan_size(&self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<(String, f64), String> {
@@ -1489,16 +2045,23 @@ impl BitgetFutures {
         let position = cx.store.positions().iter().find(|p| {
             p.symbol == o.symbol && p.side == protected_position(o.side) && p.contracts > 0.0
         });
-        let capacity = position.map_or(0.0, |p| {
-            floor_lot(
-                if self.inverse() {
-                    p.notional
-                } else {
-                    p.contracts
-                },
-                m.precision.amount,
-            )
-        });
+        let capacity = if let Some(position) = position {
+            let size = if self.inverse() {
+                position.notional
+            } else {
+                position.contracts
+            };
+            if !size.is_finite() {
+                return Err("Position size is unknown".into());
+            }
+            let capacity = floor_lot(size, m.precision.amount);
+            if !capacity.is_finite() {
+                return Err("Position size is unknown".into());
+            }
+            capacity
+        } else {
+            0.0
+        };
         let requested = num::adjust(o.amount, m.precision.amount);
         let size = if o.amount == 0.0 || capacity < m.precision.amount {
             0.0
@@ -1520,7 +2083,6 @@ impl BitgetFutures {
 
     fn algo_payload(&self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<Payload, String> {
         let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
-        let (plan, size) = self.plan_size(cx, o)?;
         let mut p = self.classic(cx, &o.symbol)?;
         p.client_oid = Some(mint(cx)?);
         p.reduce_only = (!cx.store.hedged()).then_some("YES");
@@ -1549,6 +2111,7 @@ impl BitgetFutures {
             ));
             p.callback_ratio = Some(num::format(ratio));
         } else {
+            let (plan, size) = self.plan_size(cx, o)?;
             p.plan_type = Some(plan);
             p.size = (size > 0.0).then(|| num::format(size));
             p.hold_side = Some(if cx.store.hedged() {
@@ -1559,7 +2122,7 @@ impl BitgetFutures {
                 "sell"
             });
         }
-        Ok(p)
+        Ok(diagnostic_payload(o, p))
     }
 
     fn trailing_values(
@@ -1625,38 +2188,41 @@ impl BitgetFutures {
         if o.kind == OrderType::TrailingStopLoss {
             let (size, distance, _) = self.trailing_values(cx, o, retained)?;
             let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
-            return Ok(Payload {
-                category: Some(self.product().to_uppercase()),
-                symbol: Some(o.symbol.clone()),
-                kind: Some("trailing_stop"),
-                side: Some(side_text(o.side)),
-                pos_side: cx.store.hedged().then_some(protected_side(o.side)),
-                qty: Some(num::format(size)),
-                reduce_only: (!cx.store.hedged()).then_some("yes"),
-                margin_mode: Some(margin_text(
-                    cx.store
-                        .setting(&o.symbol)
-                        .and_then(|s| s.margin_type)
-                        .unwrap_or(MarginType::Cross),
-                )),
-                // UTA only accepts clientOid for tpsl. Distance avoids an
-                // undocumented ratio unit conversion and keeps chart prices exact.
-                trailing_stop_params: Some(vec![TrailingParams {
-                    activation_price: number(
-                        o.price.ok_or("trailing price is required")?,
-                        m.precision.price,
-                    ),
-                    activation_type: uta_trigger(o.sl_trigger_type.or(o.trigger_type)),
-                    trail_type: if retained.is_some_and(|(kind, _)| kind == "ratio") {
-                        "ratio"
-                    } else {
-                        "distance"
-                    },
-                    trail_variance: num::format(distance),
-                    pre_order_type: "market",
-                }]),
-                ..Payload::default()
-            });
+            return Ok(diagnostic_payload(
+                o,
+                Payload {
+                    category: Some(self.product().to_uppercase()),
+                    symbol: Some(o.symbol.clone()),
+                    kind: Some("trailing_stop"),
+                    side: Some(side_text(o.side)),
+                    pos_side: cx.store.hedged().then_some(protected_side(o.side)),
+                    qty: Some(num::format(size)),
+                    reduce_only: (!cx.store.hedged()).then_some("yes"),
+                    margin_mode: Some(margin_text(
+                        cx.store
+                            .setting(&o.symbol)
+                            .and_then(|s| s.margin_type)
+                            .unwrap_or(MarginType::Cross),
+                    )),
+                    // UTA only accepts clientOid for tpsl. Distance avoids an
+                    // undocumented ratio unit conversion and keeps chart prices exact.
+                    trailing_stop_params: Some(vec![TrailingParams {
+                        activation_price: number(
+                            o.price.ok_or("trailing price is required")?,
+                            m.precision.price,
+                        ),
+                        activation_type: uta_trigger(o.sl_trigger_type.or(o.trigger_type)),
+                        trail_type: if retained.is_some_and(|(kind, _)| kind == "ratio") {
+                            "ratio"
+                        } else {
+                            "distance"
+                        },
+                        trail_variance: num::format(distance),
+                        pre_order_type: "market",
+                    }]),
+                    ..Payload::default()
+                },
+            ));
         }
         if !matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit) {
             return Err("unsupported Bitget UTA strategy type".into());
@@ -1680,11 +2246,16 @@ impl BitgetFutures {
             symbol: Some(o.symbol.clone()),
             kind: Some("tpsl"),
             side: Some(side_text(o.side)),
-            pos_side: cx.store.hedged().then_some(protected_side(o.side)),
+            // One-way too: Bitget refuses a tpsl without it, 40019.
+            pos_side: Some(protected_side(o.side)),
             tpsl_mode: Some(if size > 0.0 { "partial" } else { "full" }),
             qty: (size > 0.0).then(|| num::format(size)),
             reduce_only: Some("yes"),
             client_oid: Some(mint(cx)?),
+            // Without it an isolated position is not found: 31008.
+            margin_mode: (cx.store.setting(&o.symbol).and_then(|s| s.margin_type)
+                == Some(MarginType::Isolated))
+            .then(|| margin_text(MarginType::Isolated)),
             ..Payload::default()
         };
         if o.kind == OrderType::TakeProfit {
@@ -1696,7 +2267,7 @@ impl BitgetFutures {
             p.sl_trigger_by = Some(uta_trigger(o.sl_trigger_type.or(o.trigger_type)));
             p.sl_order_type = Some("market");
         }
-        Ok(p)
+        Ok(diagnostic_payload(o, p))
     }
 
     fn cancel_calls(
@@ -1745,11 +2316,7 @@ impl BitgetFutures {
                 });
             } else if strategy {
                 let mut payload = self.classic(cx, &order.symbol)?;
-                if order.kind == OrderType::TrailingStopLoss {
-                    payload.order_id_list = Some(vec![CancelId { order_id: id }]);
-                } else {
-                    payload.order_id = Some(id);
-                }
+                payload.order_id_list = Some(vec![CancelId { order_id: id }]);
                 payload.plan_type = Some(
                     self.account
                         .plans
@@ -1798,6 +2365,108 @@ impl BitgetFutures {
         Ok(normal_calls)
     }
 
+    pub(crate) fn trading_seed_reference(&mut self, symbol: &str, last: f64, at: f64) {
+        self.trading
+            .references
+            .entry(symbol.into())
+            .or_default()
+            .last
+            .get_or_insert((last, at));
+    }
+
+    pub(crate) fn observe_protective_quote(
+        &mut self,
+        symbol: &str,
+        last: Option<f64>,
+        mark: Option<f64>,
+        at: f64,
+    ) {
+        if last.is_some() || mark.is_some() {
+            // Borrow the usual seeded symbol instead of allocating a lookup key per ticker.
+            if let Some(quote) = self.trading.references.get_mut(symbol) {
+                quote.update(last, mark, at);
+            } else {
+                self.trading
+                    .references
+                    .entry(symbol.into())
+                    .or_default()
+                    .update(last, mark, at);
+            }
+        }
+    }
+
+    pub(crate) fn protective_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        let Pending::Trade(request) = pending else {
+            return Ok(());
+        };
+        if let Effect::ProtectiveAmend { sources, .. } = &request.call.effect {
+            let unchanged = sources.iter().all(|source| {
+                store.order(&source.id).is_some_and(|current| {
+                    let mut expected = source.clone();
+                    // An identical refresh changes its receipt, not the native amendment.
+                    expected.last_update = current.last_update;
+                    current == &expected
+                })
+            });
+            return if unchanged {
+                Ok(())
+            } else {
+                Err(VenueError::new(
+                    "Bitget protective edit source changed; no amendment sent, refresh before editing",
+                )
+                .kind(ErrorKind::InvalidInput)
+                .outcome(Outcome::NotSent))
+            };
+        }
+        let Effect::Cancel { .. } = &request.call.effect else {
+            return Ok(());
+        };
+        let Some(job) = self.trading.active.as_ref() else {
+            return Ok(());
+        };
+        if job.id == request.command
+            && job
+                .plan
+                .as_ref()
+                .is_some_and(|plan| plan.owner() == request.context.owner())
+            && let Some(guard) = &job.guard
+        {
+            if guard
+                .trailing
+                .iter()
+                .any(|(id, retained)| self.account.trailing.get(id) != Some(retained))
+            {
+                return Err(crate::protective::refusal());
+            }
+            guard.validate(
+                store,
+                // Quote receipts use scheduling time; corrected protocol UTC cannot age them.
+                release.time.raw_ms,
+                self.trading.references.get(&guard.sources[0].symbol),
+            )?;
+            let source = &guard.sources[0];
+            let minimum = self
+                .trading
+                .min_order_value
+                .get(&source.symbol)
+                .copied()
+                .unwrap_or(0.0);
+            if !source.reduce_only
+                && guard.size > 0.0
+                && let Some(entry) = guard.entry_price
+                && guard.size * entry < minimum
+            {
+                return Err(crate::protective::refusal());
+            }
+        }
+        Ok(())
+    }
+
     fn plan_amend(
         &self,
         cx: &Cx<'_, Pending>,
@@ -1841,7 +2510,12 @@ impl BitgetFutures {
                     .plans
                     .get(&order.id)
                     .is_some_and(|p| p == "uta_tpsl"));
-        if standalone && !self.account.uta && order.kind == OrderType::TrailingStopLoss {
+        let moving = self
+            .account
+            .plans
+            .get(&order.id)
+            .is_some_and(|plan| plan == "moving_plan");
+        if standalone && !self.account.uta && order.kind == OrderType::TrailingStopLoss && !moving {
             let mut opts = place_opts(&order);
             opts.price = Some(next_price);
             opts.amount = next_amount;
@@ -1855,14 +2529,17 @@ impl BitgetFutures {
             let (_, _, ratio) = self.trailing_values(cx, &opts, retained)?;
             job.calls.push_back(Planned {
                 path: "/api/v2/mix/order/modify-plan-order",
-                payload: Payload {
-                    product_type: Some(self.product().into()),
-                    order_id: Some(native_id(&order)),
-                    new_size: amount.map(|_| num::format(next_amount)),
-                    new_trigger_price: price.map(|_| num::format(next_price)),
-                    new_callback_ratio: Some(num::format(ratio)),
-                    ..Payload::default()
-                },
+                payload: diagnostic_payload(
+                    &opts,
+                    Payload {
+                        product_type: Some(self.product().into()),
+                        order_id: Some(native_id(&order)),
+                        new_size: amount.map(|_| num::format(next_amount)),
+                        new_trigger_price: price.map(|_| num::format(next_price)),
+                        new_callback_ratio: Some(num::format(ratio)),
+                        ..Payload::default()
+                    },
+                ),
                 effect: Effect::Place { expected: 1 },
             });
             return Ok(());
@@ -1870,7 +2547,30 @@ impl BitgetFutures {
         if standalone && !self.account.uta {
             let mut p = self.classic(cx, &order.symbol)?;
             p.order_id = Some(native_id(&order));
-            p.trigger_price = price.map(|_| num::format(next_price));
+            p.trigger_price = Some(num::format(next_price));
+            p.trigger_type = Some(trigger(order.trigger_type));
+            if moving {
+                let (kind, rate) = self
+                    .account
+                    .trailing
+                    .get(&order.id)
+                    .filter(|(kind, rate)| {
+                        kind == "ratio" && rate.is_finite() && *rate > 0.0 && *rate <= 10.0
+                    })
+                    .ok_or(
+                        "Bitget native moving-plan range is unavailable; refresh before editing",
+                    )?;
+                debug_assert_eq!(kind, "ratio");
+                p.range_rate = Some(num::format(*rate));
+            } else {
+                p.execute_price = Some(num::format(
+                    self.account
+                        .execution_prices
+                        .get(&order.id)
+                        .copied()
+                        .ok_or("Bitget execution price is unavailable; stop not changed; check Open Orders and re-place it")?,
+                ));
+            }
             p.size = Some(if amount.is_some_and(|a| a > 0.0) {
                 num::format(next_amount)
             } else if order.amount > 0.0 {
@@ -1880,14 +2580,90 @@ impl BitgetFutures {
             });
             job.calls.push_back(Planned {
                 path: paths::MODIFY_TPSL,
-                payload: p,
+                payload: diagnostic_payload(&place_opts(&order), p),
                 effect: Effect::Place { expected: 1 },
+            });
+            return Ok(());
+        }
+        let attached = linked.iter().find(|o| o.kind == OrderType::Limit);
+        if !self.account.uta
+            && matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+            && amount.is_none()
+            && attached.is_some_and(|parent| parent.filled == 0.0)
+        {
+            let mut payload = self.classic(cx, &order.symbol)?;
+            payload.order_id = Some(native_id(&order));
+            payload.new_client_oid = Some(mint(cx)?);
+            payload.new_preset_stop_loss_price = attached
+                .and_then(|parent| parent.stop_loss)
+                .map(num::format);
+            payload.new_preset_stop_surplus_price = attached
+                .and_then(|parent| parent.take_profit)
+                .map(num::format);
+            let mut updated = linked.clone();
+            for row in &mut updated {
+                if row.id == id {
+                    row.price = next_price;
+                }
+                match row.kind {
+                    OrderType::StopLoss => {
+                        payload.new_preset_stop_loss_price = Some(num::format(row.price))
+                    }
+                    OrderType::TakeProfit => {
+                        payload.new_preset_stop_surplus_price = Some(num::format(row.price))
+                    }
+                    _ => {}
+                }
+            }
+            job.calls.push_back(Planned {
+                path: paths::MODIFY_ORDER,
+                payload,
+                effect: Effect::ProtectiveAmend {
+                    sources: linked,
+                    updated,
+                },
+            });
+            return Ok(());
+        }
+        if standalone
+            && self.account.uta
+            && order.kind != OrderType::TrailingStopLoss
+            && order.amount > 0.0
+            && amount != Some(0.0)
+        {
+            if next_amount <= 0.0
+                || next_amount < m.limits.amount.min
+                || next_amount > m.limits.amount.max
+            {
+                return Err(
+                    "Bitget amended size is outside market limits; the stop is unchanged".into(),
+                );
+            }
+            let mut payload = Payload {
+                order_id: Some(native_id(&order)),
+                qty: Some(num::format(next_amount)),
+                ..Payload::default()
+            };
+            let mut updated = linked.clone();
+            for row in &mut updated {
+                if row.id == id {
+                    row.price = next_price;
+                }
+                row.amount = next_amount;
+                strategy_leg(&mut payload, row)?;
+            }
+            job.calls.push_back(Planned {
+                path: "/api/v3/trade/modify-strategy-order",
+                payload,
+                effect: Effect::ProtectiveAmend {
+                    sources: linked,
+                    updated,
+                },
             });
             return Ok(());
         }
         let mut opts = place_opts(&order);
         opts.client_order_id = None;
-        let attached = linked.iter().find(|o| o.kind == OrderType::Limit);
         if let Some(parent) = attached {
             opts = place_opts(parent);
             opts.client_order_id = None;
@@ -1899,15 +2675,36 @@ impl BitgetFutures {
                 .iter()
                 .find(|o| o.kind == OrderType::TakeProfit)
                 .map(|o| if o.id == id { next_price } else { o.price });
+            opts.sl_trigger_type = linked
+                .iter()
+                .find(|o| o.kind == OrderType::StopLoss)
+                .and_then(crate::protective::reference);
+            opts.tp_trigger_type = linked
+                .iter()
+                .find(|o| o.kind == OrderType::TakeProfit)
+                .and_then(crate::protective::reference);
             opts.price = Some(if parent.id == id {
                 next_price
             } else {
                 parent.price
             });
-            opts.amount = amount.unwrap_or(parent.amount);
+            opts.amount = replacement_size(amount.unwrap_or(parent.amount), parent.filled, m)?;
         } else {
             opts.price = Some(next_price);
-            opts.amount = next_amount;
+            opts.amount = replacement_size(next_amount, order.filled, m)?;
+        }
+        // Checked before the cancel: an amend must not cost the order its place on the book.
+        let replacement_value = opts.amount * opts.price.unwrap_or(0.0);
+        let min_value = self
+            .trading
+            .min_order_value
+            .get(&order.symbol)
+            .copied()
+            .unwrap_or(0.0);
+        if !standalone && replacement_value > 0.0 && replacement_value < min_value {
+            return Err(format!(
+                "Bitget amendment would leave {replacement_value} USDT, below the {min_value} USDT minimum; the order is unchanged"
+            ));
         }
         let mut replacement = if standalone && self.account.uta {
             vec![]
@@ -1924,34 +2721,40 @@ impl BitgetFutures {
             };
             let mut original =
                 self.strategy_payload_with_trailing(cx, &place_opts(&order), retained)?;
+            if order.kind == OrderType::TrailingStopLoss {
+                if order.amount <= 0.0 {
+                    return Err(
+                        "Bitget original trailing quantity is unavailable; refresh before editing"
+                            .into(),
+                    );
+                }
+                original.qty = Some(num::format(order.amount));
+            }
             let mut next = self.strategy_payload_with_trailing(
                 cx,
                 &opts,
                 if price.is_none() { retained } else { None },
             )?;
-            if linked.len() > 1 {
+            if order.kind != OrderType::TrailingStopLoss {
+                original.tpsl_mode = Some(if order.amount > 0.0 {
+                    "partial"
+                } else {
+                    "full"
+                });
+                original.qty = (order.amount > 0.0).then(|| num::format(order.amount));
+                if order.amount == 0.0 && amount.is_none_or(|amount| amount == 0.0) {
+                    next.tpsl_mode = Some("full");
+                    next.qty = None;
+                }
+            }
+            if order.kind != OrderType::TrailingStopLoss {
                 for related in &linked {
-                    let original_price = number(related.price, m.precision.price);
-                    let changed = if related.id == id {
-                        number(next_price, m.precision.price)
-                    } else {
-                        original_price.clone()
-                    };
-                    if related.kind == OrderType::StopLoss {
-                        original.stop_loss = Some(original_price);
-                        next.stop_loss = Some(changed);
-                        original.sl_order_type = Some("market");
-                        next.sl_order_type = Some("market");
-                        original.sl_trigger_by = Some(uta_trigger(related.trigger_type));
-                        next.sl_trigger_by = Some(uta_trigger(related.trigger_type));
-                    } else if related.kind == OrderType::TakeProfit {
-                        original.take_profit = Some(original_price);
-                        next.take_profit = Some(changed);
-                        original.tp_order_type = Some("market");
-                        next.tp_order_type = Some("market");
-                        original.tp_trigger_by = Some(uta_trigger(related.trigger_type));
-                        next.tp_trigger_by = Some(uta_trigger(related.trigger_type));
+                    strategy_leg(&mut original, related)?;
+                    let mut changed = related.clone();
+                    if related.id == id {
+                        changed.price = next_price;
                     }
+                    strategy_leg(&mut next, &changed)?;
                 }
             }
             replacement = vec![Planned {
@@ -1963,6 +2766,43 @@ impl BitgetFutures {
                 path: paths::UTA_STRATEGY,
                 payload: original,
                 effect: Effect::Place { expected: 1 },
+            });
+        }
+        // A resting limit's bracket protects nothing until the limit has filled.
+        if linked.iter().any(|o| is_algo(o.kind)) && attached.is_none_or(|limit| limit.filled > 0.0)
+        {
+            job.replaces_stop = linked
+                .iter()
+                .find(|o| is_algo(o.kind))
+                .map(|stop| (stop.symbol.clone(), stop.side, stop.kind));
+        } else {
+            job.replaces_order = Some(order.symbol.clone());
+        }
+        if linked.iter().any(|row| is_algo(row.kind)) {
+            job.guard = Some(crate::protective::Guard {
+                sources: linked.clone(),
+                trailing: linked
+                    .iter()
+                    .filter(|row| row.kind == OrderType::TrailingStopLoss)
+                    .filter_map(|row| {
+                        self.account
+                            .trailing
+                            .get(&row.id)
+                            .cloned()
+                            .map(|retained| (row.id.clone(), retained))
+                    })
+                    .collect(),
+                target: id.into(),
+                price: next_price,
+                size: if standalone && order.amount == 0.0 && amount.is_none_or(|a| a == 0.0) {
+                    0.0
+                } else {
+                    opts.amount
+                },
+                entry_price: attached.and(opts.price),
+                hedged: cx.store.hedged(),
+                frame_fed: cx.frame_fed(),
+                quote: None,
             });
         }
         let mut fallback: VecDeque<_> = self.cancel_calls(cx, &linked, false)?.into();
@@ -2022,6 +2862,23 @@ impl BitgetFutures {
             return;
         }
         let current = Some((&request.slot, &request.context));
+        // Before any mode promotion: a confirming read never replans its cancel.
+        if let Effect::ConfirmPlanGone {
+            order,
+            plan_type,
+            unproven,
+        } = &request.call.effect
+        {
+            let listed = (response.status == 200)
+                .then(|| pending_plan_listed(response.body, &native_id(order)))
+                .flatten();
+            let (order, plan_type, unproven) = (order.clone(), *plan_type, unproven.clone());
+            if listed == Some(false) {
+                self.plan_cancel_proven_gone(cx, &order, plan_type);
+                return self.drive(cx, job, At::Data(&request.slot, &request.context));
+            }
+            return self.plan_cancel_unproven(cx, job, current, &order, unproven);
+        }
         let read = request.call.read();
         if serde_json::from_str::<Envelope<serde::de::IgnoredAny>>(response.body)
             .ok()
@@ -2070,6 +2927,38 @@ impl BitgetFutures {
             }
             return;
         }
+        if let Effect::ProtectiveQuote(symbol) = &request.call.effect {
+            let rows = (response.status == 200)
+                .then(|| {
+                    serde_json::from_str::<Envelope<Vec<crate::wire::TickerRow>>>(response.body)
+                        .ok()
+                })
+                .flatten()
+                .and_then(|envelope| envelope.checked().ok());
+            let quote = rows.and_then(|rows| {
+                let mut matching = rows.iter().filter(|row| {
+                    (row.symbol == symbol.as_str()
+                        && (row.inst_id.is_empty() || row.inst_id == symbol.as_str()))
+                        || (row.symbol.is_empty() && row.inst_id == symbol.as_str())
+                });
+                let row = matching.next()?;
+                if matching.next().is_some() {
+                    return None;
+                }
+                let mut quote = crate::protective::Quote::default();
+                quote.update(
+                    row.value(crate::wire::TickerField::LastPr),
+                    row.value(crate::wire::TickerField::MarkPrice),
+                    cx.now,
+                );
+                Some(quote)
+            });
+            if let (Some(guard), Some(quote)) = (&mut job.guard, quote) {
+                guard.quote = Some(quote);
+                return self.drive(cx, job, At::Data(&request.slot, &request.context));
+            }
+            return self.end(cx, job, current, crate::protective::refusal());
+        }
         if let Effect::Metadata(symbol) = &request.call.effect {
             let resolved = if self.account.uta {
                 let parsed = (response.status == 200)
@@ -2110,8 +2999,12 @@ impl BitgetFutures {
                 Err(error) => self.end(cx, job, current, not_sent(error)),
             };
         }
+        let diagnostic = crate::telemetry::NativeReply::parse(response.body);
         let status = response.status;
         let parsed = serde_json::from_str::<Reply>(response.body).map_err(|e| e.to_string());
+        job.empty_plan_ack = request.call.path == paths::CANCEL_PLAN
+            && status == 200
+            && empty_plan_ack(response.body);
         if let Effect::ResolveAmend { id, .. } = &request.call.effect {
             let ready = parsed.as_ref().is_ok_and(|reply| {
                 status == 200
@@ -2127,10 +3020,20 @@ impl BitgetFutures {
         let explicit_rejection = parsed.as_ref().is_ok_and(|reply| {
             status < 500
                 && status != 408
-                && !reply
-                    .code
-                    .0
-                    .is_some_and(|code| [40010.0, 40725.0, 45001.0].contains(&code))
+                && status != 429
+                // Every code the table marks unknown (busy, timeout), not a hand-kept subset.
+                && !reply.code.0.is_some_and(|code| {
+                    matches!(
+                        CODES.verdict(
+                            &safe_cex_engine::classify::Native {
+                                code: safe_cex_engine::classify::NativeCode::Int(code as i64),
+                                message: "",
+                            },
+                            safe_cex_engine::classify::Intent::Amend,
+                        ),
+                        safe_cex_engine::classify::Verdict::Unknown(_)
+                    )
+                })
                 && (status >= 400 || reply.code.0.is_some_and(|code| code != 0.0))
         });
         // The one native resend: a fresh Context re-signed under the same owner.
@@ -2142,7 +3045,7 @@ impl BitgetFutures {
         {
             let message = format!("Bitget 40009: sign signature error (HTTP {status})");
             let native = native_code(parsed.as_ref().ok(), status);
-            let (_, grant) =
+            let (_, grant, _) =
                 self.record_once(cx, &request, native, Answer::Coded, &message, &mut false);
             let plan = job.plan.clone().expect("live Plan");
             if let Some(context) = grant.and_then(|grant| {
@@ -2156,9 +3059,27 @@ impl BitgetFutures {
                 };
                 return self.send_call(cx, job, request);
             }
-            return self.call_settled(cx, job, request, parsed, status, explicit_rejection, true);
+            return self.call_settled(
+                cx,
+                job,
+                request,
+                parsed,
+                status,
+                explicit_rejection,
+                true,
+                &diagnostic,
+            );
         }
-        self.call_settled(cx, job, request, parsed, status, explicit_rejection, false)
+        self.call_settled(
+            cx,
+            job,
+            request,
+            parsed,
+            status,
+            explicit_rejection,
+            false,
+            &diagnostic,
+        )
     }
 
     /// The native answer of a call that will not be resent: record its write
@@ -2174,18 +3095,39 @@ impl BitgetFutures {
         status: u16,
         explicit_rejection: bool,
         mut recorded: bool,
+        diagnostic: &crate::telemetry::NativeReply,
     ) {
         let current = Some((&request.slot, &request.context));
         let native = native_code(parsed.as_ref().ok(), status);
         let mut error = match &parsed {
             Ok(reply) if status == 200 && reply.code.0 == Some(0.0) => None,
-            Ok(reply) => Some(format!(
-                "Bitget {}: {} (HTTP {status})",
-                reply.code.get(),
-                reply.msg
-            )),
+            Ok(reply) => {
+                let text = self
+                    .closable_refusal(cx, &request.call, &reply.msg, None)
+                    .unwrap_or_else(|| reply.msg.to_string());
+                Some(format!(
+                    "Bitget {}: {text} (HTTP {status})",
+                    reply.code.get()
+                ))
+            }
             Err(error) => Some(error.clone()),
         };
+        // 25204 means the order is gone, which is what a cancel wants. Not an amend's cancel:
+        // gone may mean filled, and its replacement must not then be placed.
+        let is_replacing = job.replaces_stop.is_some() || job.replaces_order.is_some();
+        let gone = !is_replacing
+            && matches!(request.call.effect, Effect::Cancel { .. })
+            && parsed
+                .as_ref()
+                .is_ok_and(|reply| reply.code.0 == Some(25204.0));
+        if gone {
+            error = None;
+            if let Effect::Cancel { orders, .. } = &request.call.effect {
+                for order in orders {
+                    self.trading.acknowledged.remove(&native_id(order));
+                }
+            }
+        }
         if let Effect::Cancel { idempotent_missing: true, .. } = &request.call.effect
             && parsed.as_ref().is_ok_and(|reply| reply.msg == "Failed to stop the strategy because the corresponding strategy ID could not be found") { error = None; }
         let mut answer = if error.is_none() {
@@ -2206,7 +3148,10 @@ impl BitgetFutures {
         let mut write_noted = false;
         // A 2xx success answer that does not account for every order.
         let mut unproven = false;
+        // An empty acknowledgement of one plan's cancel, and the pending type to read it under.
+        let mut confirm_plan: Option<(&'static str, Order)> = None;
         if error.is_none()
+            && !gone
             && let Effect::Cancel { orders, .. } = &request.call.effect
         {
             let data = parsed.as_ref().ok().and_then(|r| r.data.as_ref());
@@ -2217,8 +3162,29 @@ impl BitgetFutures {
                 d.success_list
                     .iter()
                     .map(|i| i.order_id.text().into_owned())
+                    .filter(|id| !id.is_empty())
                     .collect()
             });
+            if request.call.path == paths::CANCEL_PLAN
+                && let Some(data) = data
+            {
+                for item in &data.success_list {
+                    if !item.order_id.text().is_empty() {
+                        continue;
+                    }
+                    let Some(ReplyClientId::Known(client)) = &item.client_oid else {
+                        continue;
+                    };
+                    let client = client.text();
+                    if !client.is_empty() {
+                        for order in orders {
+                            if order.client_order_id.as_deref() == Some(client.as_ref()) {
+                                accepted.insert(native_id(order));
+                            }
+                        }
+                    }
+                }
+            }
             if let Some(data) = data {
                 let native = data.order_id.text();
                 let client = data.client_oid.text();
@@ -2242,22 +3208,126 @@ impl BitgetFutures {
                 }
             }
             if let Some(failures) = data
-                .map(|d| failure_messages(&d.failure_list))
+                .map(|d| {
+                    let mut failures = failure_messages(&d.failure_list);
+                    failures.extend(listed_failures(&d.list));
+                    failures
+                })
                 .filter(|f| !f.is_empty())
             {
-                error = Some(format!("Bitget cancel failure: {}", failures.join("; ")));
-                answer = Answer::Batch {
-                    expected: orders.len(),
-                    accepted: accepted.into_iter().collect(),
-                    failures,
+                error = Some(format!(
+                    "Bitget cancel failure: {}",
+                    failure_text(&failures)
+                ));
+                answer = if orders.is_empty() {
+                    // An account-wide cancel names no orders to count: some may still be live.
+                    unproven = true;
+                    Answer::Unproven
+                } else {
+                    Answer::Batch {
+                        expected: orders.len(),
+                        accepted: accepted.into_iter().collect(),
+                        failures,
+                    }
                 };
-            } else if (request.call.path == paths::BATCH_CANCEL || retained)
+            } else if request.call.path == paths::UTA_CANCEL_STRATEGY && data.is_none() {
+                // One strategy's cancel: a success code is its acknowledgement, data null.
+                for order in orders {
+                    self.trading.acknowledged.remove(&native_id(order));
+                }
+            } else if (request.call.path == paths::BATCH_CANCEL
+                || request.call.path == paths::CANCEL_PLAN
+                || retained)
                 && orders.iter().any(|o| !accepted.contains(&native_id(o)))
             {
                 unproven = true;
                 answer = Answer::Unproven;
-                error = Some("Bitget batch cancel did not acknowledge every order".into());
+                confirm_plan = (request.call.path == paths::CANCEL_PLAN
+                    && job.is_plain_cancel()
+                    && accepted.is_empty()
+                    && job.empty_plan_ack)
+                    .then(|| {
+                        request
+                            .call
+                            .payload
+                            .plan_type
+                            .as_deref()
+                            .and_then(pending_plan_type)
+                    })
+                    .flatten()
+                    .zip(match orders.as_slice() {
+                        [order] => Some(order.clone()),
+                        _ => None,
+                    });
+                // Name them: the user otherwise believes every order is gone.
+                let rest: Vec<_> = orders
+                    .iter()
+                    .filter(|o| !accepted.contains(&native_id(o)))
+                    .map(|o| {
+                        let side = if o.side == OrderSide::Buy {
+                            "buy"
+                        } else {
+                            "sell"
+                        };
+                        let kind = format!("{:?}", o.kind).to_ascii_lowercase();
+                        format!("{} {side} {kind} {}", o.symbol, o.id)
+                    })
+                    .collect();
+                // What Bitget did list, and the plan type asked for, tell an unlisted
+                // success from a cancel aimed at the wrong plan type.
+                let mut listed: Vec<_> = accepted.iter().cloned().collect();
+                listed.sort_unstable();
+                let plan = request
+                    .call
+                    .payload
+                    .plan_type
+                    .as_deref()
+                    .map(|plan| format!(", planType {plan}"))
+                    .unwrap_or_default();
+                error = Some(format!(
+                    "Bitget batch cancel did not acknowledge every order; these may still be open: {} (acknowledged [{}]{plan})",
+                    rest.join_with(", "),
+                    listed.join_with(", ")
+                ));
             }
+        }
+        if error.is_none() && job.error.is_some() && request.call.is_place() {
+            let proven = parsed
+                .as_ref()
+                .ok()
+                .and_then(|reply| reply.data.as_ref())
+                .is_some_and(|data| {
+                    let client = data.client_oid.text();
+                    !data.order_id.text().is_empty()
+                        && (client.is_empty()
+                            || request
+                                .call
+                                .payload
+                                .client_oid
+                                .as_ref()
+                                .is_none_or(|expected| expected == client.as_ref()))
+                });
+            if !proven {
+                unproven = true;
+                answer = Answer::Unproven;
+                error = Some("Bitget put-back identity is unproven; check Open Orders".into());
+            }
+        }
+        let confirming = confirm_plan.is_some();
+        if let Some((plan_type, order)) = confirm_plan {
+            // The request was answered; whether the plan is gone is the read's to prove.
+            let unproven_text = error.take().unwrap_or_default();
+            unproven = false;
+            answer = Answer::Accepted(vec![]);
+            job.calls.push_front(Planned {
+                path: paths::PLANS,
+                payload: Payload::default(),
+                effect: Effect::ConfirmPlanGone {
+                    order: Box::new(order),
+                    plan_type,
+                    unproven: unproven_text,
+                },
+            });
         }
         if error.is_none() {
             let data = parsed.as_ref().ok().and_then(|r| r.data.as_ref());
@@ -2280,13 +3350,25 @@ impl BitgetFutures {
                     }
                 }
                 answer = Answer::Accepted(ids.clone());
-                if let Some(failures) = data
+                if let Some(mut failures) = data
                     .map(|d| failure_messages(&d.failure_list))
                     .filter(|f| !f.is_empty())
                 {
+                    let rows = data.map_or(&[][..], |d| d.failure_list.as_slice());
+                    for (row, (_, message)) in rows.iter().zip(&mut failures) {
+                        let client = match &row.client_oid {
+                            Some(FailureClient::Text(client)) => Some(client.as_str()),
+                            _ => None,
+                        };
+                        if let Some(clear) =
+                            self.closable_refusal(cx, &request.call, message, client)
+                        {
+                            *message = clear;
+                        }
+                    }
                     error = Some(format!(
                         "Bitget batch failure after ids {ids:?}: {}",
-                        failures.join("; ")
+                        failure_text(&failures)
                     ));
                     answer = Answer::Batch {
                         expected,
@@ -2302,6 +3384,20 @@ impl BitgetFutures {
                     ));
                 }
                 if !ids.is_empty() {
+                    let closes = request.call.close_requests(cx);
+                    if let Some(data) = data {
+                        for item in &data.success_list {
+                            if let Some(ReplyClientId::Known(client)) = &item.client_oid {
+                                self.bind_close_identity(
+                                    client.text().as_ref(),
+                                    item.order_id.text().as_ref(),
+                                );
+                            }
+                        }
+                    }
+                    if closes.len() == 1 && ids.len() == 1 {
+                        self.bind_close_identity(&closes[0].client, &ids[0]);
+                    }
                     self.acknowledge(cx, &request, data, &ids);
                     self.note_write(cx);
                     write_noted = true;
@@ -2312,17 +3408,137 @@ impl BitgetFutures {
                 job.ids.extend(ids);
             }
         }
-        if let Some(message) = error {
-            self.record_once(cx, &request, native, answer, &message, &mut recorded);
-            let error = match &parsed {
-                _ if unproven => VenueError::new(message).outcome(Outcome::Unknown),
+        if error.is_none()
+            && let Effect::ProtectiveAmend { .. } = &request.call.effect
+        {
+            let echoed = parsed
+                .as_ref()
+                .ok()
+                .and_then(|reply| reply.data.as_ref())
+                .map(|data| data.order_id.text());
+            if echoed.as_deref() != request.call.payload.order_id.as_deref() {
+                unproven = true;
+                answer = Answer::Unproven;
+                error = Some("Bitget protective amend identity is unproven".into());
+            }
+        }
+        if let Some(mut message) = error {
+            let closes = request.call.close_requests(cx);
+            if !closes.is_empty() {
+                if diagnostic.failures.is_empty() {
+                    self.close_rejection_event(
+                        cx,
+                        &closes,
+                        diagnostic.code.as_deref(),
+                        diagnostic.message.as_deref(),
+                        explicit_rejection,
+                    );
+                } else {
+                    let rows = request
+                        .call
+                        .payload
+                        .order_list
+                        .as_deref()
+                        .unwrap_or(std::slice::from_ref(&request.call.payload));
+                    for failure in &diagnostic.failures {
+                        let matching: Vec<_> =
+                            rows.iter()
+                                .filter(|row| {
+                                    failure.client.as_deref().is_some_and(|client| {
+                                        row.client_oid.as_deref() == Some(client)
+                                    })
+                                })
+                                .collect();
+                        let row = if matching.len() == 1 {
+                            Some(matching[0])
+                        } else if failure.client.is_none() && rows.len() == 1 {
+                            Some(&rows[0])
+                        } else {
+                            None
+                        };
+                        if let Some(row) = row {
+                            if let Some(close) = &row.close_diagnostic {
+                                self.close_rejection_event(
+                                    cx,
+                                    std::slice::from_ref(close),
+                                    failure.code.as_deref(),
+                                    failure.message.as_deref(),
+                                    true,
+                                );
+                            } else if rows.len() == 1 {
+                                self.close_rejection_event(
+                                    cx,
+                                    &closes,
+                                    failure.code.as_deref(),
+                                    failure.message.as_deref(),
+                                    true,
+                                );
+                            }
+                            // A matched opening row has no closing metadata.
+                        } else {
+                            self.unattributed_close_failure(
+                                cx,
+                                failure.code.as_deref(),
+                                failure.message.as_deref(),
+                                true,
+                            );
+                        }
+                    }
+                }
+            }
+            let batch_unknown = if let Answer::Batch { failures, .. } = &answer {
+                failures.iter().any(|(code, _)| {
+                    let verdict = CODES.verdict(
+                        &Native {
+                            code: code.map_or(NativeCode::None, NativeCode::Int),
+                            message: "",
+                        },
+                        request.call.intent(),
+                    );
+                    matches!(verdict, Verdict::Unknown(_))
+                })
+            } else {
+                false
+            };
+            let uncertain = unproven
+                || (!explicit_rejection
+                    && !parsed
+                        .as_ref()
+                        .is_ok_and(|reply| status == 200 && reply.code.0 == Some(0.0)))
+                || batch_unknown;
+            if uncertain && !request.call.read() {
+                message.push_str("; ");
+                message.push_str(UNKNOWN_TEXT);
+            }
+            let native_unchanged = !uncertain
+                && explicit_rejection
+                && matches!(request.call.effect, Effect::ProtectiveAmend { .. });
+            if native_unchanged {
+                message.push_str("; your stop is unchanged");
+            }
+            let (_, _, native_unknown) =
+                self.record_once(cx, &request, native, answer, &message, &mut recorded);
+            let mut error = match &parsed {
+                _ if unproven || batch_unknown => {
+                    VenueError::new(message).outcome(Outcome::Unknown)
+                }
                 Ok(reply) if explicit_rejection => {
-                    let error = VenueError::new(message).kind(match status {
-                        401 => ErrorKind::AuthInvalid,
-                        403 => ErrorKind::AuthPermission,
-                        429 => ErrorKind::RateLimited,
-                        _ => ErrorKind::Rejected,
-                    });
+                    // The table's kind for the native code, else its documented
+                    // status row; a 401/403/429 carries no code (`native_code`).
+                    // Place reads the row any intent would: every row is unscoped
+                    // (pinned in code_table_tests).
+                    let kind = native
+                        .as_ref()
+                        .and_then(|native| CODES.verdict(native, Intent::Place).kind())
+                        .or_else(|| {
+                            CODES
+                                .status
+                                .iter()
+                                .find(|(documented, _)| *documented == status)
+                                .and_then(|(_, verdict)| verdict.kind())
+                        })
+                        .unwrap_or(ErrorKind::Rejected);
+                    let error = VenueError::new(message).kind(kind);
                     let error = match reply.code.0 {
                         Some(code) => error.venue_code(code.to_string()),
                         None => error,
@@ -2334,6 +3550,9 @@ impl BitgetFutures {
                 // 408, 5xx, malformed answers and Bitget's ambiguous codes.
                 _ => VenueError::new(message).outcome(Outcome::Unknown),
             };
+            if native_unchanged {
+                error.presents = true;
+            }
             if request.call.is_place() {
                 self.account.orders_version = self.account.orders_version.wrapping_add(1);
             }
@@ -2348,12 +3567,107 @@ impl BitgetFutures {
                 job.calls.push_back(rollback);
                 return self.drive(cx, job, At::Data(&request.slot, &request.context));
             }
+            // TS Classic batches throw on failureList or HTTP failure, but
+            // continue after a bare HTTP-200 business refusal. Keep its fact.
+            if status == 200
+                && explicit_rejection
+                && request.call.path == paths::BATCH_PLACE
+                && parsed.as_ref().is_ok_and(|reply| {
+                    reply
+                        .data
+                        .as_ref()
+                        .is_none_or(|data| data.failure_list.is_empty())
+                })
+            {
+                job.batch_error.get_or_insert(error);
+                return self.drive(cx, job, At::Data(&request.slot, &request.context));
+            }
+            if (native_unknown || error.outcome == Some(Outcome::Unknown))
+                && job.is_plain_cancel()
+                && let Effect::Cancel { orders, .. } = &request.call.effect
+            {
+                self.check_unknown_cancels(cx, orders);
+                let data = parsed.as_ref().ok().and_then(|r| r.data.as_ref());
+                let endpoint = if request.call.path == paths::CANCEL_PLAN {
+                    "cancel-plan-order"
+                } else if request.call.path == paths::UTA_CANCEL_STRATEGY {
+                    "cancel-strategy-order"
+                } else {
+                    "cancel-order"
+                };
+                cx.event(
+                    safe_cex_engine::Level::Warn,
+                    "bitget.cancel.check",
+                    "An uncertain cancel requests native order confirmation",
+                    vec![
+                        (
+                            "accountMode",
+                            if self.account.uta { "uta" } else { "classic" }.into(),
+                        ),
+                        ("endpoint", endpoint.into()),
+                        ("httpStatus", (status as f64).into()),
+                        (
+                            "nativeCode",
+                            parsed
+                                .as_ref()
+                                .ok()
+                                .and_then(|r| r.code.0)
+                                .unwrap_or(-1.0)
+                                .into(),
+                        ),
+                        (
+                            "dataShape",
+                            if data.is_some() {
+                                "object"
+                            } else {
+                                "none-or-unrecognized"
+                            }
+                            .into(),
+                        ),
+                        (
+                            "successCount",
+                            (data.map_or(0, |d| d.success_list.len()) as f64).into(),
+                        ),
+                        (
+                            "failureCount",
+                            (data.map_or(0, |d| {
+                                d.failure_list.len() + listed_failures(&d.list).len()
+                            }) as f64)
+                                .into(),
+                        ),
+                        ("reconciliation", "requested".into()),
+                    ],
+                );
+            }
             self.end(cx, job, current, error);
             self.refresh_orders(cx, false);
             return;
         }
         match &request.call.effect {
-            Effect::Cancel { orders, .. } => {
+            Effect::ProtectiveAmend { updated, .. } => {
+                for row in updated {
+                    if self.order_revision(&row.id) <= request.stream_revision
+                        && !self.order_terminal(&row.id)
+                    {
+                        let mut row = row.clone();
+                        row.last_update = cx.now;
+                        if let Some(client) = &request.call.payload.new_client_oid {
+                            row.client_order_id = Some(client.clone());
+                        }
+                        cx.store.upsert_order(row);
+                    }
+                }
+                let native_id = request
+                    .call
+                    .payload
+                    .order_id
+                    .clone()
+                    .expect("amend order id");
+                let ids = vec![native_id];
+                answer = Answer::Accepted(ids.clone());
+                job.ids.extend(ids);
+            }
+            Effect::Cancel { orders, .. } if !confirming => {
                 for order in orders {
                     self.mark_canceled(cx, &order.id);
                 }
@@ -2386,6 +3700,7 @@ impl BitgetFutures {
                     answer = Answer::Accepted(vec![next.clone()]);
                     job.ids.push(next);
                 } else {
+                    // Frame-fed too: this read is part of the amend's own sequence, as LOCAL.
                     job.calls.push_front(Planned {
                         path: paths::ORDER_DETAIL,
                         payload: Payload {
@@ -2472,6 +3787,13 @@ impl BitgetFutures {
         if request.call.path != paths::ORDER_DETAIL {
             job.effective = true;
         }
+        if request.call.is_place()
+            && let Some(error) = job.error.as_mut()
+        {
+            error.protection = Some(safe_cex_engine::error::Protection::Restored);
+            error.presents = true;
+            error.message.push_str("; original protection restored");
+        }
         self.drive(cx, job, At::Data(&request.slot, &request.context));
     }
 
@@ -2486,9 +3808,9 @@ impl BitgetFutures {
         answer: Answer,
         message: &str,
         recorded: &mut bool,
-    ) -> (bool, Option<ResendGrant>) {
+    ) -> (bool, Option<ResendGrant>, bool) {
         if *recorded || request.call.read() {
-            return (false, None);
+            return (false, None, false);
         }
         *recorded = true;
         let context = &request.context;
@@ -2504,31 +3826,37 @@ impl BitgetFutures {
                     .iter()
                     .map(|id| BatchItem::Accepted(id.as_str()))
                     .collect();
-                items.extend(failures.iter().map(|failure| {
+                items.extend(failures.iter().map(|(code, message)| {
                     BatchItem::Native(Native {
-                        code: NativeCode::None,
-                        message: failure.as_str(),
+                        code: code.map_or(NativeCode::None, NativeCode::Int),
+                        message: message.as_str(),
                     })
                 }));
-                let _ = cx.http_write_batch(context, &CODES, expected, &items, message, None);
-                return (false, None);
+                let result = cx.http_write_batch(context, &CODES, expected, &items, message, None);
+                let unknown = match result {
+                    Ok(WriteResult::PartialUnknown(_)) | Err(_) => true,
+                    Ok(WriteResult::Failed(error)) => error.outcome == Some(Outcome::Unknown),
+                    Ok(_) => false,
+                };
+                return (false, None, unknown);
             }
             Answer::Unproven => {
                 let _ = cx.http_write_unproven(context, message);
-                return (false, None);
+                return (false, None, true);
             }
             Answer::Coded => match cx.classify_write(context, &CODES, native.as_ref(), message) {
                 Ok(fact) => WriteFact::Failed {
                     fact,
                     known_effects: false,
                 },
-                Err(_) => return (false, None),
+                Err(_) => return (false, None, true),
             },
         };
+        let unknown = matches!(&fact, WriteFact::Failed { fact, .. } if matches!(fact.verdict(), Verdict::Unknown(_)));
         let refusal =
             matches!(&fact, WriteFact::Failed { fact, .. } if fact.verdict().is_refusal());
         let grant = cx.http_write_fact(context, fact, None).ok().flatten();
-        (refusal, grant)
+        (refusal, grant, unknown)
     }
 
     /// Native placement custody: each acknowledged ID keeps its own cancel call
@@ -2569,19 +3897,11 @@ impl BitgetFutures {
                     margin_coin: p.margin_coin.clone(),
                     ..Payload::default()
                 };
+                payload.order_id_list = Some(vec![CancelId {
+                    order_id: id.clone(),
+                }]);
                 if strategy {
                     payload.plan_type = p.plan_type.clone();
-                    if request.call.path == paths::PLACE_TRAILING {
-                        payload.order_id_list = Some(vec![CancelId {
-                            order_id: id.clone(),
-                        }]);
-                    } else {
-                        payload.order_id = Some(id.clone());
-                    }
-                } else {
-                    payload.order_id_list = Some(vec![CancelId {
-                        order_id: id.clone(),
-                    }]);
                 }
                 payload
             };
@@ -2618,7 +3938,7 @@ impl BitgetFutures {
                 remaining: 0.0,
                 reduce_only: false,
                 close: None,
-                client_order_id: None,
+                client_order_id: p.client_oid.clone(),
                 time_in_force: None,
                 last_update: cx.now,
                 trigger_type: None,
@@ -2689,6 +4009,18 @@ impl BitgetFutures {
     /// A confirmed setting write, through one Store closure per table.
     fn apply_setting(&mut self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
         self.account.config_at = Some(cx.now);
+        self.account.settings_version += 1;
+        // Frame-fed: keep this write's value until the source's frames agree.
+        match effect {
+            Effect::Mode(_) => cx.hold_setting(SettingKey::Hedged),
+            Effect::Leverage { symbol, .. } => {
+                cx.hold_setting(SettingKey::Leverage(symbol.clone()))
+            }
+            Effect::Margin { symbol, .. } => {
+                cx.hold_setting(SettingKey::MarginType(symbol.clone()))
+            }
+            _ => {}
+        }
         match effect {
             Effect::Mode(hedged) => cx.store.set_hedged(*hedged),
             Effect::Leverage { symbol, .. } | Effect::Margin { symbol, .. } => {
@@ -2731,7 +4063,12 @@ impl BitgetFutures {
         });
     }
 
-    fn apply_symbol_config(&self, cx: &mut Cx<'_, Pending>, symbol: &str, row: &SymbolConfig) {
+    pub(crate) fn apply_symbol_config(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        row: &SymbolConfig,
+    ) {
         cx.store.set_hedged(is_hedged(&row.pos_mode));
         let kind = margin(&row.margin_mode);
         let leverage = if kind == MarginType::Cross {
@@ -2797,6 +4134,13 @@ impl BitgetFutures {
                     return;
                 }
             }
+            if let Effect::ConfirmPlanGone {
+                order, unproven, ..
+            } = &request.call.effect
+            {
+                let (order, unproven) = (order.clone(), unproven.clone());
+                return self.plan_cancel_unproven(cx, job, None, &order, unproven);
+            }
             let resolve = request.call.is_resolve();
             let error = if resolve {
                 error.outcome(Outcome::Unknown)
@@ -2815,9 +4159,18 @@ impl BitgetFutures {
         if released || request.signature_retry {
             // A released write, or a resend after the first attempt reached the venue.
             error.outcome = Some(Outcome::Unknown);
+            error
+                .message
+                .push_str("; outcome unknown, check Open Orders");
         }
         if released && request.call.is_place() {
             self.account.orders_version = self.account.orders_version.wrapping_add(1);
+        }
+        if error.outcome == Some(Outcome::Unknown)
+            && job.is_plain_cancel()
+            && let Effect::Cancel { orders, .. } = &request.call.effect
+        {
+            self.check_unknown_cancels(cx, orders);
         }
         let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
         self.end(cx, job, None, error);
@@ -2851,6 +4204,51 @@ impl BitgetFutures {
                 self.refresh_orders(cx, false);
             }
         }
+    }
+
+    /// A fresh, complete pending-plan read no longer lists the plan: it is gone,
+    /// canceled or triggered, so the row leaves the Store without a Canceled claim.
+    fn plan_cancel_proven_gone(&mut self, cx: &mut Cx<'_, Pending>, order: &Order, endpoint: &str) {
+        let id = native_id(order);
+        self.trading.acknowledged.remove(&id);
+        self.forget_order(cx, &order.id);
+        cx.event(
+            safe_cex_engine::Level::Info,
+            "bitget.cancel.confirmed",
+            "A pending-plan read answered an empty cancel acknowledgement",
+            vec![
+                ("orderId", id.into()),
+                ("result", "absent".into()),
+                ("accountMode", "classic".into()),
+                ("endpoint", format!("orders-plan-pending:{endpoint}").into()),
+            ],
+        );
+    }
+
+    /// The plan may still be live: the cancel stays Unknown, as before the read.
+    fn plan_cancel_unproven(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        job: Job,
+        current: Option<(&Slot, &Context)>,
+        order: &Order,
+        unproven: String,
+    ) {
+        cx.store.update_order(&order.id, |current| {
+            if current.status == OrderStatus::Canceling {
+                current.status = order.status;
+            }
+        });
+        self.check_unknown_cancels(cx, std::slice::from_ref(order));
+        // The cancel's fact is Accepted (Bitget answered it); the plan's fate is not.
+        if let Some(plan) = &job.plan {
+            let inherited = cx.inherit_plan_uncertainty(plan);
+            debug_assert!(inherited.is_ok(), "{inherited:?}");
+        }
+        let error = VenueError::new(format!("{unproven}; outcome unknown, check Open Orders"))
+            .outcome(Outcome::Unknown);
+        self.end(cx, job, current, error);
+        self.refresh_orders(cx, false);
     }
 
     /// Issues a read retry on the slot the Plan's timer handed back.
@@ -2918,11 +4316,16 @@ fn command_id(command: &Command) -> Option<u32> {
     match command {
         Command::PlaceOrders { command, .. }
         | Command::CancelOrders { command, .. }
+        | Command::CancelOrdersWithSymbols { command, .. }
         | Command::CancelSymbolOrders { command, .. }
         | Command::AmendOrder { command, .. }
         | Command::SetLeverage { command, .. }
         | Command::SetMarginType { command, .. }
-        | Command::SetPositionMode { command, .. } => Some(*command),
+        | Command::SetPositionMode { command, .. }
+        | Command::Venue {
+            command,
+            action: safe_cex_engine::VenueAction::CancelAccountOrders,
+        } => Some(*command),
         _ => None,
     }
 }
@@ -3029,6 +4432,19 @@ fn uta_trigger(value: Option<StopTriggerType>) -> &'static str {
         "mark"
     }
 }
+/// A cancel-and-replace order is new, so it carries only what is left of the total.
+/// A full-position stop's amount of 0 stays 0.
+fn replacement_size(total: f64, filled: f64, market: &Market) -> Result<f64, String> {
+    if filled <= 0.0 {
+        return Ok(total);
+    }
+    if total <= filled {
+        return Err(format!(
+            "Bitget amendment size must exceed the {filled} already filled"
+        ));
+    }
+    Ok(num::adjust(total - filled, market.precision.amount))
+}
 fn amend_remaining(order: &mut Order, inverse: bool) {
     let native = clean((order.amount - order.filled).max(0.0));
     order.remaining = if inverse && order.price > 0.0 {
@@ -3064,6 +4480,16 @@ fn related(orders: &[Order], order: &Order) -> Vec<Order> {
         .cloned()
         .collect()
 }
+/// Every plan type `plan_type` maps, plus untyped triggers.
+const NUKE_PLAN_TYPES: [&str; 7] = [
+    "normal_plan",
+    "profit_plan",
+    "loss_plan",
+    "pos_profit",
+    "pos_loss",
+    "track_plan",
+    "moving_plan",
+];
 fn fallback_plan(order: &Order) -> &'static str {
     match (order.kind, order.amount > 0.0) {
         (OrderType::TakeProfit, true) => "profit_plan",
@@ -3192,19 +4618,163 @@ fn native_code<'a>(reply: Option<&'a Reply<'a>>, status: u16) -> Option<Native<'
     })
 }
 
-fn failure_messages(failures: &[Failure]) -> Vec<String> {
-    failures.iter().map(|e| e.error_msg.clone()).collect()
+fn strategy_leg(payload: &mut Payload, order: &Order) -> Result<(), String> {
+    let execution = order
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.conditional_order_price)
+        .filter(|price| price.is_finite() && *price >= 0.0)
+        .ok_or("Bitget execution price is unavailable; refresh before editing")?;
+    let kind = if execution == 0.0 { "market" } else { "limit" };
+    let limit = (execution > 0.0).then(|| num::format(execution));
+    match order.kind {
+        OrderType::StopLoss => {
+            payload.stop_loss = Some(num::format(order.price));
+            payload.sl_trigger_by = Some(uta_trigger(order.trigger_type));
+            payload.sl_order_type = Some(kind);
+            payload.sl_limit_price = limit;
+        }
+        OrderType::TakeProfit => {
+            payload.take_profit = Some(num::format(order.price));
+            payload.tp_trigger_by = Some(uta_trigger(order.trigger_type));
+            payload.tp_order_type = Some(kind);
+            payload.tp_limit_price = limit;
+        }
+        _ => return Err("Bitget strategy execution is unavailable; refresh before editing".into()),
+    }
+    Ok(())
+}
+
+/// The failed rows' messages, as the error text has always read.
+fn failure_text(failures: &[(Option<i64>, String)]) -> String {
+    failures
+        .iter()
+        .map(|(_, message)| message.as_str())
+        .collect::<Vec<_>>()
+        .join_with("; ")
+}
+
+/// Each failed row's message and integer code, when Bitget sends one.
+fn failure_messages(failures: &[Failure]) -> Vec<(Option<i64>, String)> {
+    failures
+        .iter()
+        .map(|e| {
+            let code = e.error_code.0.filter(|code| code.fract() == 0.0);
+            (code.map(|code| code as i64), e.error_msg.clone())
+        })
+        .collect()
+}
+
+/// The orders-plan-pending planType that lists a cancel-plan-order planType:
+/// `profit_loss` covers profit_plan, loss_plan, moving_plan, pos_profit and pos_loss.
+fn pending_plan_type(cancel: &str) -> Option<&'static str> {
+    match cancel {
+        "profit_plan" | "loss_plan" | "moving_plan" | "pos_profit" | "pos_loss" => {
+            Some("profit_loss")
+        }
+        "normal_plan" => Some("normal_plan"),
+        "track_plan" => Some("track_plan"),
+        _ => None,
+    }
+}
+
+/// A JSON object only: derive(Deserialize) also takes a sequence for a struct,
+/// which no Bitget evidence is. Derived fields still refuse duplicate keys.
+struct ObjectOnly<T>(T);
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for ObjectOnly<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Object<T>(std::marker::PhantomData<T>);
+        impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for Object<T> {
+            type Value = T;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON object")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<T, A::Error> {
+                T::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+            }
+        }
+        d.deserialize_map(Object(std::marker::PhantomData))
+            .map(ObjectOnly)
+    }
+}
+
+/// Proof envelopes: the literal success code, never a number that parses to 0.
+#[derive(Deserialize)]
+struct ProofEnvelope<T> {
+    code: String,
+    data: ObjectOnly<T>,
+}
+fn proof<'de, T: Deserialize<'de>>(body: &'de str) -> Option<T> {
+    serde_json::from_str::<ObjectOnly<ProofEnvelope<T>>>(body)
+        .ok()
+        .filter(|e| e.0.code == "00000")
+        .map(|e| e.0.data.0)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingPlanPage<'a> {
+    /// Outer `None`: the field is missing; inner `None`: Bitget's null empty list.
+    #[serde(default, borrow, deserialize_with = "present")]
+    entrusted_list: Option<Option<Vec<ObjectOnly<PendingPlanRow<'a>>>>>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingPlanRow<'a> {
+    #[serde(default, borrow)]
+    order_id: Identifier<'a>,
+}
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
+
+/// `{"code":"00000","data":{"successList":[],"failureList":[]}}` and nothing
+/// else in `data`; duplicate keys refuse.
+fn empty_plan_ack(body: &str) -> bool {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Lists {
+        success_list: Vec<serde::de::IgnoredAny>,
+        failure_list: Vec<serde::de::IgnoredAny>,
+    }
+    proof::<Lists>(body).is_some_and(|l| l.success_list.is_empty() && l.failure_list.is_empty())
+}
+
+/// Whether a pending-plan page lists `id`: `None` unless the page is a clean,
+/// complete answer (code "00000", an entrustedList of objects, every row
+/// identified, under the limit).
+fn pending_plan_listed(body: &str, id: &str) -> Option<bool> {
+    const PAGE_LIMIT: usize = 100;
+    let page = proof::<PendingPlanPage>(body)?;
+    let rows = page.entrusted_list?.unwrap_or_default();
+    if rows.len() >= PAGE_LIMIT {
+        return None;
+    }
+    let mut listed = false;
+    for ObjectOnly(row) in &rows {
+        let row_id = row.order_id.text();
+        if row_id.is_empty() {
+            return None;
+        }
+        listed |= row_id == id;
+    }
+    Some(listed)
 }
 
 fn restore_canceling(cx: &mut Cx<'_, Pending>, call: &Planned) {
-    if let Effect::Cancel { orders, .. } = &call.effect {
-        for order in orders {
-            cx.store.update_order(&order.id, |current| {
-                if current.status == OrderStatus::Canceling {
-                    current.status = order.status;
-                }
-            });
-        }
+    let orders = match &call.effect {
+        Effect::Cancel { orders, .. } => orders.as_slice(),
+        Effect::ConfirmPlanGone { order, .. } => std::slice::from_ref(order.as_ref()),
+        _ => &[],
+    };
+    for order in orders {
+        cx.store.update_order(&order.id, |current| {
+            if current.status == OrderStatus::Canceling {
+                current.status = order.status;
+            }
+        });
     }
 }
 
@@ -3222,6 +4792,8 @@ fn with_rollback(original: Option<VenueError>, error: VenueError) -> (VenueError
                     original.kind
                 },
                 outcome: error.outcome.filter(|o| *o == Outcome::Unknown),
+                protection: None,
+                presents: true,
                 ..original
             },
             Some(format!("protection rollback failed: {}", error.message)),
@@ -3238,6 +4810,20 @@ pub(crate) fn trade_reconciliation(
 }
 
 impl Job {
+    fn is_plain_cancel(&self) -> bool {
+        self.replaces_stop.is_none()
+            && self.replaces_order.is_none()
+            && matches!(
+                &self.intent,
+                Command::CancelOrders { .. }
+                    | Command::CancelSymbolOrders { .. }
+                    | Command::Venue {
+                        action: safe_cex_engine::VenueAction::CancelAccountOrders,
+                        ..
+                    }
+            )
+    }
+
     /// The operation the job issues next once a condition wait releases.
     fn next_operation(&self) -> Operation {
         if !self.metadata.is_empty() || self.calls.front().is_some_and(Planned::read) {
@@ -3264,7 +4850,10 @@ impl Planned {
     fn read(&self) -> bool {
         matches!(
             self.effect,
-            Effect::Metadata(_) | Effect::ResolveAmend { .. }
+            Effect::Metadata(_)
+                | Effect::ProtectiveQuote(_)
+                | Effect::ResolveAmend { .. }
+                | Effect::ConfirmPlanGone { .. }
         )
     }
 
@@ -3278,11 +4867,123 @@ impl Planned {
 
     fn intent(&self) -> Intent {
         match self.effect {
-            Effect::Metadata(_) | Effect::ResolveAmend { .. } => Intent::Read,
+            Effect::Metadata(_)
+            | Effect::ProtectiveQuote(_)
+            | Effect::ResolveAmend { .. }
+            | Effect::ConfirmPlanGone { .. } => Intent::Read,
             Effect::Place { .. } => Intent::Place,
             Effect::Cancel { .. } => Intent::Cancel,
-            Effect::Amend { .. } => Intent::Amend,
+            Effect::Amend { .. } | Effect::ProtectiveAmend { .. } => Intent::Amend,
             Effect::Leverage { .. } | Effect::Margin { .. } | Effect::Mode(_) => Intent::Setting,
         }
+    }
+}
+
+#[cfg(test)]
+mod code_table_tests {
+    use super::*;
+
+    /// assert_table covers the status rows (never Satisfied or RefusedResend);
+    /// Bitget pins 40009 as its one documented re-sign and every row unscoped.
+    #[test]
+    fn the_bitget_table_satisfies_the_engine_invariants() {
+        safe_cex_engine::classify::assert_table(&CODES);
+        for row in CODES.rows {
+            assert_eq!(row.only, None, "{row:?}");
+            if matches!(row.verdict, Verdict::RefusedResend(_)) {
+                assert_eq!(row.key, Key::Int(40009), "{row:?}");
+            }
+            assert!(!matches!(row.verdict, Verdict::Satisfied(_)), "{row:?}");
+        }
+    }
+
+    /// The position refusal's code is fixed from the venue's text when the rows are
+    /// read, so a message reworded after that (the close-locked wording) still classifies.
+    #[test]
+    fn a_code_less_position_refusal_keeps_its_kind_after_rewording() {
+        let rows: Vec<Failure> = serde_json::from_str(
+            r#"[{"errorMsg":"Not enough position is available"},{"errorMsg":"Not enough position is available","errorCode":"40999"}]"#,
+        )
+        .unwrap();
+        for (code, _) in failure_messages(&rows) {
+            let reworded = "only 0.4 of the 1 BTCUSDT long is free to close; 0.6 is held by open close orders, cancel them first (Not enough position is available)";
+            let native = Native {
+                code: code.map_or(NativeCode::None, NativeCode::Int),
+                message: reworded,
+            };
+            assert_eq!(
+                CODES.verdict(&native, Intent::Place),
+                Verdict::Refused(ErrorKind::InvalidInput)
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod code_tests {
+    use super::*;
+
+    #[test]
+    fn a_system_busy_or_timeout_answer_is_not_a_refusal() {
+        for code in [40015, 40200, 40604, 50008] {
+            let answer = Native {
+                code: NativeCode::Int(code),
+                message: "",
+            };
+            assert!(
+                matches!(CODES.verdict(&answer, Intent::Place), Verdict::Unknown(_)),
+                "{code}"
+            );
+        }
+    }
+}
+
+/// Keeps diagnostic metadata off the serialized/native request.
+fn diagnostic_payload(order: &PlaceOrderOpts, mut payload: Payload) -> Payload {
+    if order.reduce_only.unwrap_or(false) || is_algo(order.kind) {
+        payload.close_diagnostic = Some(crate::telemetry::CloseRequest {
+            symbol: order.symbol.clone(),
+            side: protected_position(order.side),
+            requested: payload
+                .size
+                .as_deref()
+                .or(payload.qty.as_deref())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(order.amount),
+            submitted: payload
+                .size
+                .as_deref()
+                .or(payload.qty.as_deref())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0),
+            client: payload.client_oid.clone().unwrap_or_default(),
+        });
+    }
+    payload
+}
+impl Planned {
+    fn close_requests(&self, cx: &Cx<'_, Pending>) -> Vec<crate::telemetry::CloseRequest> {
+        if let Some(rows) = &self.payload.order_list {
+            return rows
+                .iter()
+                .filter_map(|row| row.close_diagnostic.clone())
+                .collect();
+        }
+        if let Some(close) = &self.payload.close_diagnostic {
+            return vec![close.clone()];
+        }
+        if let Effect::Amend { id, amount, .. } = &self.effect
+            && let Some(order) = cx.store.order(id)
+            && (order.reduce_only || order.close == Some(true) || is_algo(order.kind))
+        {
+            return vec![crate::telemetry::CloseRequest {
+                symbol: order.symbol.clone(),
+                side: protected_position(order.side),
+                requested: *amount,
+                submitted: *amount,
+                client: order.client_order_id.clone().unwrap_or_default(),
+            }];
+        }
+        vec![]
     }
 }

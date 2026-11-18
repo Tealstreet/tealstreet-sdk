@@ -5,6 +5,16 @@ sidebar_position: 2
 
 # Hooks & webhooks
 
+Hook secrets, commands and listener identity belong to the signed-in user. Switching users closes the old listener and hosted relay; pending work from the old login is cancelled. See [user profiles and migration](./config-files.md#login-logout-and-migration).
+
+An alert stays bound to the login that received it, including while it waits
+for the hosted relay's acknowledgement or the command queue. If you change
+logins during that wait, the CLI cancels the alert with a message instead of
+running it under the new login. Local hook commands keep their original login
+through asynchronous work too. Late hosted status replies and output from an
+old relay are discarded after the login changes; reconnect and registration
+retries cannot restart that old relay.
+
 There are two ways a webhook reaches the CLI:
 
 - **Hosted webhooks** — TradingView (or any sender) posts to your
@@ -45,7 +55,7 @@ box. The full grammar works — `;` / `&` chaining, aliases, `@vars`,
 `simulation on` in the REPL first (a webhook cannot change it):
 
 ```text
-buy $250 SOLUSDT at -0.5%
+buy $250 SOLUSDT at 150
 close longs; buy $500 BTCUSDT
 my-entry-alias
 ```
@@ -137,7 +147,7 @@ Quoting rule for the command body: use `"…"` or `'…'`. There is no escape
 syntax inside the quotes — pick whichever quote your body doesn't contain.
 
 ```text
-hook create alert-long "buy $250 SOLUSDT at -0.5%"
+hook create alert-long "buy $250 SOLUSDT at 150"
 hook create flatten "nuke positions" --account mybybit
 hook revoke 4f3a1c8e
 hook rotate 4f3a1c8e
@@ -202,7 +212,7 @@ were a `cmd:exec`.
 ```text
 $ curl -X POST http://127.0.0.1:53219/hook/4f3a1c8e... \
        -H "X-Hook-Token: 8b9d2e4a..."
-{"ok":true,"runId":"r_01HK…","command":"buy $250 SOLUSDT at -0.5%"}
+{"ok":true,"runId":"r_01HK…","command":"buy $250 SOLUSDT at 150"}
 ```
 
 ---

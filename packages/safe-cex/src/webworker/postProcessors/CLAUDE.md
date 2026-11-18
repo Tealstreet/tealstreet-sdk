@@ -28,7 +28,8 @@ new computation lives. More specific rules elsewhere win.
   over the canonical store + account context, plus stateful
   time-windowed bookkeeping (rolling PnL). Writes the **derived**
   `StoreData` fields: `displayedPositions`, `displayedMargin`, `ordersRisk`,
-  `activeChasers`, `activeTWAPs`, `messageHandlerStats`. Output **must
+  `messageHandlerStats`. (`activeChasers`/`activeTWAPs` come from the
+  engine's Rust algos, not a post-processor.) Output **must
   be identical for every consumer** — no dependence on user display
   settings.
 - **UI render** (`apps/web/src/components`, atoms, hooks) —
@@ -71,8 +72,7 @@ Worked examples, applied to the Open Positions derivations:
 firing:
 
 1. `_exchangeDependentPostprocessors[*].process(processedData)` —
-   classes that need the live `Exchange` instance (chaser, twap,
-   message-handler-stats).
+   classes that need the live `Exchange` instance (message-handler-stats).
 2. `_postprocessors[*].process(processedData)` — classes that
    only need account/options/store data (displayed-positions,
    displayed-margin, chaser-order-enrichment, orders-risk, snapshot).
@@ -187,11 +187,12 @@ contracts; Bybit inverse leaves `contractSize` unset ($1).
 `store.displayedMargin` = `{ longExposure, shortExposure, totalNotional }`.
 This is the margin analog of `displayedPositions`: a worker-derived
 internal layer the margin UI reads instead of looping positions on the
-render path. It's a single order-preserving pass using the exact formula
-the UI used inline (`Math.abs(notional || 0)` summed in array order, per
-side and overall), so the sums are floating-point identical to the old
-filter+reduce — locked by an oracle-parity test in
-`DisplayedMarginPostprocessor.test.ts`.
+render path. It's a single order-preserving pass: finite values use absolute
+notional and preserve the old filter+reduce accumulation order. Missing or
+nonfinite notional makes its side and the total unknown (`null`), rather than
+publishing a partial sum. The opposite side remains usable when complete;
+empty scopes and reported zero remain zero. Tests pin both finite parity and
+unknown propagation.
 
 It mirrors `displayedPositions` at every bridge point: defaulted in
 `defaultStore` / `store.stub`, exposed via the `Store` interface getter,
@@ -253,8 +254,7 @@ linear). Now aliases.
 | `independentPostprocessors`       | `(accountName, exchangeName, options)`                   | Worker side OR client-side (hosted) |
 | `exchangeDependentPostprocessors` | `(accountName, exchangeName, options, exchangeInstance)` | Server side (hosted) OR worker side |
 
-If a postprocessor needs the live `Exchange` instance (e.g. for
-`chaserOrderManagerInstance`, `twapManager`, or to read off
+If a postprocessor needs the live `Exchange` instance (e.g. to read off
 `exchange.publicWebsocket`), put it in
 `exchangeDependentPostprocessors`. Otherwise prefer
 `independentPostprocessors` so the work can run client-side in

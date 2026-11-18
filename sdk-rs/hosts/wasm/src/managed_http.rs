@@ -54,6 +54,9 @@ pub(super) struct GroupMemberOut<'a> {
 #[serde(tag = "phase", rename_all = "camelCase")]
 pub(super) enum HttpPhaseOut<'a> {
     Prepare {
+        #[cfg(target_arch = "wasm32")]
+        #[serde(rename = "requestClass")]
+        request_class: u8,
         preparation: String,
         intent: &'static str,
         packet: HttpPacket<'a>,
@@ -78,10 +81,14 @@ impl<'a> From<&'a HttpAction> for HttpPhaseOut<'a> {
     fn from(action: &'a HttpAction) -> Self {
         match action {
             HttpAction::Prepare {
+                #[cfg(target_arch = "wasm32")]
+                request_class,
                 preparation,
                 intent,
                 request,
             } => Self::Prepare {
+                #[cfg(target_arch = "wasm32")]
+                request_class: *request_class,
                 preparation: preparation.to_wire(),
                 intent: match intent {
                     RoutingIntent::Public => "public",
@@ -137,6 +144,13 @@ enum ClaimOut {
 
 #[wasm_bindgen]
 impl WasmEngine {
+    #[wasm_bindgen(js_name = httpCommandOwner)]
+    pub fn http_command_owner(&self, request: f64) -> Result<Option<CommandId>, js_sys::Error> {
+        Ok(self
+            .inner
+            .http_command_owner(RequestId(host_resource_id(request)?)))
+    }
+
     #[wasm_bindgen(js_name = signingPending)]
     pub fn signing_pending(&self, attempt: f64) -> Result<bool, js_sys::Error> {
         let attempt = host_resource_id(attempt)?;
@@ -152,6 +166,13 @@ impl WasmEngine {
         Ok(self.inner.sign_meta(RequestId(attempt)).map(|meta| {
             serde_json::to_string(&sign_meta::Out::from(meta)).expect("scalars serialize")
         }))
+    }
+
+    #[cfg(feature = "hyperliquid")]
+    #[wasm_bindgen(js_name = httpReadClass)]
+    pub fn http_read_class(&self, request: f64) -> Result<u8, js_sys::Error> {
+        let request = host_resource_id(request)?;
+        Ok(self.inner.http_read_class(RequestId(request)) as u8)
     }
 
     #[wasm_bindgen(js_name = httpPreparationPending)]
@@ -185,19 +206,9 @@ impl WasmEngine {
     ) -> Result<String, JsError> {
         let token = Preparation::from_wire(preparation)
             .map_err(|_| JsError::new("Invalid HTTP preparation"))?;
-        let (reason, kind) = match code {
-            "unsupported" => (Error::Invalid, safe_cex_engine::ErrorKind::Unsupported),
-            "timedOut" => (Error::TimedOut, safe_cex_engine::ErrorKind::Timeout),
-            "stale" => (Error::Stale, safe_cex_engine::ErrorKind::InvalidInput),
-            "invalid" => (Error::Invalid, safe_cex_engine::ErrorKind::InvalidInput),
-            _ => (Error::State, safe_cex_engine::ErrorKind::Network),
-        };
-        self.inner.http_preparation_failed(
-            now,
-            token,
-            reason,
-            safe_cex_engine::VenueError::new("HTTP transport preparation failed").kind(kind),
-        );
+        let (reason, error) = preparation_failure(code);
+        self.inner
+            .http_preparation_failed(now, token, reason, error);
         Ok(self.flush())
     }
 
@@ -251,9 +262,56 @@ impl WasmEngine {
     }
 }
 
+// The admission label changes diagnostics only; native timeout settlement stays shared.
+fn preparation_failure(code: &str) -> (Error, safe_cex_engine::VenueError) {
+    let (reason, kind) = match code {
+        "unsupported" => (Error::Invalid, safe_cex_engine::ErrorKind::Unsupported),
+        "timedOut" | "infoAdmissionTimedOut" => {
+            (Error::TimedOut, safe_cex_engine::ErrorKind::Timeout)
+        }
+        "stale" => (Error::Stale, safe_cex_engine::ErrorKind::InvalidInput),
+        "invalid" => (Error::Invalid, safe_cex_engine::ErrorKind::InvalidInput),
+        _ => (Error::State, safe_cex_engine::ErrorKind::Network),
+    };
+    (
+        reason,
+        safe_cex_engine::VenueError::new(preparation_failure_text(code)).kind(kind),
+    )
+}
+
+/// A request that got no answer must not read as a preparation fault or a refusal.
+fn preparation_failure_text(code: &str) -> &'static str {
+    match code {
+        "infoAdmissionTimedOut" => "HTTP admission deadline expired",
+        "timedOut" => "Relay or network request timed out",
+        _ => "HTTP transport preparation failed",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn info_admission_expiry_has_a_distinct_closed_title() {
+        for code in ["timedOut", "infoAdmissionTimedOut"] {
+            let (reason, error) = preparation_failure(code);
+            assert_eq!(reason, Error::TimedOut);
+            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+        }
+        assert_eq!(
+            preparation_failure_text("infoAdmissionTimedOut"),
+            "HTTP admission deadline expired"
+        );
+        assert_eq!(
+            preparation_failure_text("timedOut"),
+            "Relay or network request timed out"
+        );
+        assert_eq!(
+            preparation_failure_text("info_admission:PRIVATE"),
+            "HTTP transport preparation failed"
+        );
+    }
+
     #[test]
     fn managed_wire_keeps_wide_tokens_and_legacy_http_bytes() {
         let request = safe_cex_engine::HttpRequest {
@@ -270,11 +328,13 @@ mod tests {
             encode(&[Action::Http(request.clone())]),
             r#"[{"op":"http","request":7,"method":"POST","timeoutMs":900,"url":"https://venue.test/read","headers":[],"body":"{}"}]"#
         );
-        let text = "p1:7:18446744073709551615:18446744073709551615";
+        let text = "p2:18446744073709551615:7:18446744073709551615:18446744073709551615";
         let preparation = Preparation::from_wire(text).unwrap();
-        let permit_text = "r1:7:18446744073709551615:18446744073709551615:18446744073709551615";
+        let permit_text = "r2:18446744073709551615:7:18446744073709551615:18446744073709551615:18446744073709551615";
         let actions = [
             HttpAction::Prepare {
+                #[cfg(target_arch = "wasm32")]
+                request_class: 3,
                 preparation,
                 intent: RoutingIntent::Secondary,
                 request: request.clone(),
@@ -293,6 +353,8 @@ mod tests {
         let rows: serde_json::Value = serde_json::from_str(&encode(&actions)).unwrap();
         assert_eq!(rows[0]["op"], "managedHttp");
         assert_eq!(rows[0]["intent"], "secondary");
+        #[cfg(target_arch = "wasm32")]
+        assert_eq!(rows[0]["requestClass"], 3);
         assert_eq!(rows[0]["preparation"], text);
         assert_eq!(rows[1]["permit"], permit_text);
         assert_eq!(rows[1]["packet"]["request"], 7);
@@ -316,7 +378,7 @@ mod tests {
             signer_headers: vec![],
             body: None,
         };
-        let text = format!("p1:{id}:18446744073709551615:0");
+        let text = format!("p2:1:{id}:18446744073709551615:0");
         let preparation = Preparation::from_wire(&text).unwrap();
         let actions = [
             Action::Http(request.clone()),
@@ -380,6 +442,8 @@ mod sign_meta {
     #[derive(Serialize)]
     struct Setup {
         operation: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        algorithm: Option<safe_cex_engine::signing::Algorithm>,
         slot: &'static str,
     }
     fn slot_name(slot: CredentialSlot) -> &'static str {
@@ -415,15 +479,20 @@ mod sign_meta {
             let (owner, slot, role) = match meta.kind {
                 SignKind::Setup {
                     generation,
-                    operation: SetupOperation::PublicAddress,
+                    operation,
                     slot,
                 } => {
+                    let (operation, algorithm) = match operation {
+                        SetupOperation::PublicAddress => ("publicAddress", None),
+                        SetupOperation::PublicKey(algorithm) => ("publicKey", Some(algorithm)),
+                    };
                     return Self::Setup(SetupOut {
                         task: meta.task.0,
                         owner: Owner::Setup { generation },
                         deadline_ms: meta.deadline_ms,
                         setup: Setup {
-                            operation: "publicAddress",
+                            operation,
+                            algorithm,
                             slot: slot_name(slot),
                         },
                     });
@@ -581,6 +650,16 @@ mod sign_meta_wire_tests {
                 slot: CredentialSlot::Secondary,
             }),
             r#"{"task":7,"owner":{"kind":"setup","generation":3},"deadlineMs":20001.25,"setup":{"operation":"publicAddress","slot":"secondary"}}"#
+        );
+        assert_eq!(
+            encode(SignKind::Setup {
+                generation: 3,
+                operation: SetupOperation::PublicKey(
+                    safe_cex_engine::signing::Algorithm::StarkDigest
+                ),
+                slot: CredentialSlot::Primary,
+            }),
+            r#"{"task":7,"owner":{"kind":"setup","generation":3},"deadlineMs":20001.25,"setup":{"operation":"publicKey","algorithm":"starkDigest","slot":"primary"}}"#
         );
     }
 }

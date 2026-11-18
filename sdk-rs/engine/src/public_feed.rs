@@ -26,6 +26,8 @@ pub struct PublicFeedUpdate {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PublicTicker {
     pub symbol: String,
+    /// Negotiated source receipt times for last/mark/index; null means unobserved.
+    pub observed_at: Option<[Option<f64>; 3]>,
     pub bid: Option<f64>,
     pub ask: Option<f64>,
     pub last: Option<f64>,
@@ -117,10 +119,35 @@ impl PublicTicker {
         .flatten()
         .all(|value| value.is_finite())
             && self.mid_price.flatten().is_none_or(f64::is_finite)
+            && self
+                .observed_at
+                .iter()
+                .flatten()
+                .flatten()
+                .all(|time| time.is_finite() && *time >= 0.)
     }
     pub(crate) fn merge(&mut self, update: Self) {
         macro_rules! fields {
             ($($field:ident),*) => { $(if update.$field.is_some() { self.$field = update.$field; })* };
+        }
+        if update.observed_at.is_none()
+            && [update.last, update.mark, update.index]
+                .iter()
+                .any(Option::is_some)
+        {
+            // A provider may restart on an older build behind the same shared port.
+            self.observed_at = None;
+        } else if self.observed_at.is_some() || update.observed_at.is_some() {
+            let mut times = self.observed_at.unwrap_or([None; 3]);
+            for (slot, value) in [update.last, update.mark, update.index]
+                .into_iter()
+                .enumerate()
+            {
+                if value.is_some() {
+                    times[slot] = update.observed_at.and_then(|source| source[slot]);
+                }
+            }
+            self.observed_at = Some(times);
         }
         fields!(
             bid,

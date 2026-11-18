@@ -2,6 +2,7 @@
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, PublicFeedPolicy, Response, SocketId};
 use safe_cex_venue_cryptocom::Cryptocom;
 pub mod fixture;
+mod hosted_parity;
 use fixture::Options;
 pub const INSTRUMENTS: &str = r#"{"code":0,"result":{"data":[{"symbol":"BTCUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"BTC","quote_ccy":"USD","price_tick_size":"0.1","qty_tick_size":"0.001","quote_decimals":1,"quantity_decimals":3,"max_leverage":"50","underlying_symbol":"BTCUSD-INDEX"}]}}"#;
 pub const TICKERS: &str = r#"{"code":0,"result":{"data":[{"i":"BTCUSD-PERP","b":"99","k":"101","a":"100","c":"0.01","v":"1","vv":"100"}]}}"#;

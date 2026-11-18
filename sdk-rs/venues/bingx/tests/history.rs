@@ -13,6 +13,7 @@ struct Harness {
     requests: Vec<HttpRequest>,
     timers: Vec<(TimerId, f64)>,
     results: Vec<Result<String, String>>,
+    errors: Vec<safe_cex_engine::VenueError>,
     now: f64,
 }
 
@@ -28,6 +29,7 @@ impl Harness {
             requests: Vec::new(),
             timers: Vec::new(),
             results: Vec::new(),
+            errors: Vec::new(),
             now: 1_702_713_615_000.0,
         }
     }
@@ -46,6 +48,7 @@ impl Harness {
                 }
                 Action::Notice(Notice::CommandDone { result, .. }) => self.results.push(Ok(result)),
                 Action::Notice(Notice::CommandFailed { error, .. }) => {
+                    self.errors.push(error.clone());
                     self.results.push(Err(error.legacy_text()))
                 }
                 _ => {}
@@ -78,6 +81,53 @@ impl Harness {
 
     fn result<T: for<'de> Deserialize<'de>>(&self) -> T {
         serde_json::from_str(self.results.last().unwrap().as_ref().unwrap()).unwrap()
+    }
+}
+
+#[test]
+fn every_history_list_keeps_rate_limit_kind_unblock_delay_and_message() {
+    use safe_cex_engine::ErrorKind;
+    for query in [
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+        Query::PublicTrades {
+            symbol: "BTCUSDT".into(),
+            limit: None,
+        },
+    ] {
+        let mut h = Harness::new(true);
+        h.query(query);
+        let body = format!(
+            r#"{{"code":100410,"msg":"请稍后重试; unblocked after {}"}}"#,
+            h.now + 90_000.0
+        );
+        h.reply(&body);
+        assert_eq!(h.errors.len(), 1);
+        let error = &h.errors[0];
+        assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+        assert_eq!(error.retry_after_ms, Some(90_000.0));
+        assert_eq!(error.venue_code.as_deref(), Some("100410"));
+        assert!(!error.message.contains("expected list"));
+        assert!(error.message.contains("请稍后重试"));
+        assert!(h.requests.is_empty());
     }
 }
 
@@ -551,5 +601,351 @@ fn fills_stream_error_metadata_and_truncation_discard_already_decoded_rows() {
         h.reply(&body);
         assert_eq!(h.results.len(), 1);
         assert!(h.results[0].is_err());
+    }
+}
+
+/// A live user's answer on d5649b9a: the order list sits under data.orders, here empty.
+#[test]
+fn order_history_reads_its_list_under_data_orders() {
+    let mut h = Harness::new(true);
+    h.query(Query::OrderHistory {
+        symbol: None,
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    h.reply(r#"{"code":0,"msg":"","data":{"orders":[]}}"#);
+    let rows: Vec<Order> = h.result();
+    assert!(rows.is_empty());
+}
+
+#[test]
+fn history_refusals_keep_typed_kind_closed_cause_and_native_code() {
+    use safe_cex_engine::{ErrorCause, ErrorKind};
+    for (status, code, kind, cause) in [
+        (200, 100410, ErrorKind::RateLimited, "HISTORY_RATE_LIMITED"),
+        (200, 100413, ErrorKind::AuthInvalid, "HISTORY_AUTH_INVALID"),
+        (
+            200,
+            100004,
+            ErrorKind::AuthPermission,
+            "HISTORY_AUTH_PERMISSION",
+        ),
+        (
+            200,
+            109400,
+            ErrorKind::InvalidInput,
+            "HISTORY_INVALID_PARAMS",
+        ),
+        (200, 999999, ErrorKind::Rejected, "HISTORY_VENUE_ERROR"),
+        (
+            503,
+            100413,
+            ErrorKind::VenueUnavailable,
+            "HISTORY_VENUE_ERROR",
+        ),
+    ] {
+        let mut h = Harness::new(true);
+        h.query(Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(h.now - 1000.0),
+            to_ms: Some(h.now),
+            limit: None,
+        });
+        let request = h.requests.remove(0);
+        let body = serde_json::json!({"code":code, "msg":"refused"}).to_string();
+        h.event(Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status,
+                headers: "",
+                body: &body,
+            },
+        });
+        assert_eq!(h.errors.len(), 1);
+        let error = &h.errors[0];
+        assert_eq!(error.kind, Some(kind));
+        assert_eq!(serde_json::to_value(error).unwrap()["causeCode"], cause);
+        assert_eq!(error.venue_code.as_deref(), Some(code.to_string().as_str()));
+        assert_eq!(error.outcome, None);
+        assert!(h.requests.is_empty());
+    }
+    let mut h = Harness::new(true);
+    h.query(Query::Fills {
+        symbol: Some("BTCUSDT".into()),
+        order_id: None,
+        from_ms: Some(h.now - 1000.0),
+        to_ms: Some(h.now),
+        limit: None,
+    });
+    h.reply(r#"{"code":0,"data":{}}"#);
+    assert_eq!(h.errors[0].kind, Some(ErrorKind::Internal));
+    assert_eq!(h.errors[0].cause_code, Some(ErrorCause::HistoryDecode));
+}
+
+fn diagnostic_income_query() -> Query {
+    Query::Income {
+        symbol: None,
+        kind: None,
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    }
+}
+
+fn diagnostic_orders_query() -> Query {
+    Query::OrderHistory {
+        symbol: None,
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    }
+}
+
+fn diagnostic_income_row() -> serde_json::Value {
+    serde_json::json!({"symbol":"BTC-USDT","incomeType":"FUNDING_FEE","income":"0.25",
+        "asset":"USDT","time":1702713615000_u64,"tranId":"private-tran-canary","tradeId":"private-trade-canary"})
+}
+
+fn diagnostic_order_row() -> serde_json::Value {
+    serde_json::json!({"orderId":"private-order-canary","symbol":"BTC-USDT","side":"BUY",
+        "type":"LIMIT","status":"NEW","price":"10","avgPrice":"0","origQty":"2",
+        "executedQty":"0","time":1702713615000_u64,"updateTime":1702713615000_u64})
+}
+
+fn expect_decode_shape(
+    query: Query,
+    body: &str,
+    [schema, reason, field, expected, actual, envelope_code]: [&str; 6],
+) {
+    let mut h = Harness::new(true);
+    h.query(query);
+    h.reply(body);
+    assert_eq!(h.errors.len(), 1);
+    let error = serde_json::to_value(&h.errors[0]).unwrap();
+    assert_eq!(error["kind"], "internal");
+    assert_eq!(error["causeCode"], "HISTORY_DECODE");
+    assert_eq!(
+        error["historyDecode"],
+        serde_json::json!({"schema":schema,"reason":reason,
+        "shape":{"field":field,"expected":expected,"actual":actual,"envelopeCode":envelope_code}})
+    );
+    let wire = serde_json::to_string(&error).unwrap();
+    assert!(
+        !wire.contains("private-"),
+        "diagnostic must not expose native row values"
+    );
+    assert!(h.requests.is_empty());
+}
+
+#[test]
+fn income_decode_identifies_closed_field_and_json_types_without_values() {
+    for (name, value, field, expected, actual) in [
+        (
+            "income",
+            serde_json::Value::Null,
+            "row.income",
+            "numberOrNumericString",
+            "null",
+        ),
+        (
+            "incomeType",
+            serde_json::json!(7),
+            "row.incomeType",
+            "string",
+            "number",
+        ),
+        (
+            "time",
+            serde_json::json!({"private-amount-canary":1}),
+            "row.time",
+            "numberOrNumericString",
+            "object",
+        ),
+    ] {
+        let mut row = diagnostic_income_row();
+        row[name] = value;
+        let body = serde_json::json!({"code":0,"data":[row]}).to_string();
+        expect_decode_shape(
+            diagnostic_income_query(),
+            &body,
+            [
+                "bingxIncome",
+                "fieldType",
+                field,
+                expected,
+                actual,
+                "present",
+            ],
+        );
+    }
+    let mut row = diagnostic_income_row();
+    row.as_object_mut().unwrap().remove("tranId");
+    expect_decode_shape(
+        diagnostic_income_query(),
+        &serde_json::json!({"code":0,"data":[row]}).to_string(),
+        [
+            "bingxIncome",
+            "fieldType",
+            "row.tranId",
+            "stringOrInteger",
+            "missing",
+            "present",
+        ],
+    );
+}
+
+#[test]
+fn non_object_history_rows_keep_their_type_without_treating_arrays_as_structs() {
+    for (row, actual) in [
+        ("[]", "array"),
+        ("null", "null"),
+        ("false", "boolean"),
+        ("7", "number"),
+    ] {
+        expect_decode_shape(
+            diagnostic_income_query(),
+            &format!(r#"{{"code":0,"data":[{row}]}}"#),
+            [
+                "bingxIncome",
+                "rowShape",
+                "row",
+                "object",
+                actual,
+                "present",
+            ],
+        );
+    }
+}
+
+#[test]
+fn orders_decode_identifies_closed_field_and_value_refusals_without_values() {
+    let mut row = diagnostic_order_row();
+    row["origQty"] = serde_json::json!({"private-quantity-canary":2});
+    expect_decode_shape(
+        diagnostic_orders_query(),
+        &serde_json::json!({"code":0,"data":{"orders":[row]}}).to_string(),
+        [
+            "bingxOrders",
+            "fieldType",
+            "row.origQty",
+            "numberOrNumericString",
+            "object",
+            "present",
+        ],
+    );
+    let mut row = diagnostic_order_row();
+    row["status"] = serde_json::json!("private-status-canary");
+    expect_decode_shape(
+        diagnostic_orders_query(),
+        &serde_json::json!({"code":0,"data":[row]}).to_string(),
+        [
+            "bingxOrders",
+            "orderStatus",
+            "row.status",
+            "string",
+            "string",
+            "present",
+        ],
+    );
+}
+
+#[test]
+fn history_envelope_diagnostics_distinguish_missing_code_and_wrong_containers() {
+    expect_decode_shape(
+        diagnostic_income_query(),
+        r#"{"data":[]}"#,
+        [
+            "bingxIncome",
+            "envelopeCode",
+            "code",
+            "integer",
+            "missing",
+            "absent",
+        ],
+    );
+    expect_decode_shape(
+        diagnostic_income_query(),
+        r#"{"code":0,"data":"private-body-canary"}"#,
+        [
+            "bingxIncome",
+            "dataShape",
+            "data",
+            "array",
+            "string",
+            "present",
+        ],
+    );
+    expect_decode_shape(
+        diagnostic_orders_query(),
+        r#"{"code":0,"data":{"orders":{}}}"#,
+        [
+            "bingxOrders",
+            "dataShape",
+            "data.orders",
+            "array",
+            "object",
+            "present",
+        ],
+    );
+    expect_decode_shape(
+        diagnostic_income_query(),
+        "<html>private-body-canary</html>",
+        [
+            "bingxIncome",
+            "envelopeShape",
+            "root",
+            "object",
+            "invalidJson",
+            "unavailable",
+        ],
+    );
+}
+
+#[test]
+fn documented_rest_partiallyfilled_history_status_is_open() {
+    let mut h = Harness::new(true);
+    h.query(diagnostic_orders_query());
+    let mut row = diagnostic_order_row();
+    row["status"] = serde_json::json!("PARTIALLYFILLED");
+    row["executedQty"] = serde_json::json!("1");
+    h.reply(&serde_json::json!({"code":0,"data":{"orders":[row]}}).to_string());
+    let rows: Vec<Order> = h.result();
+    assert_eq!(rows[0].status, "open");
+    assert_eq!(rows[0].filled, 1.0);
+}
+
+#[test]
+fn documented_rest_failed_history_status_is_canceled() {
+    let mut h = Harness::new(true);
+    h.query(diagnostic_orders_query());
+    let mut row = diagnostic_order_row();
+    row["status"] = serde_json::json!("FAILED");
+    h.reply(&serde_json::json!({"code":0,"data":[row]}).to_string());
+    let rows: Vec<Order> = h.result();
+    assert_eq!(rows[0].status, "canceled");
+}
+
+#[test]
+fn non_json_http_refusal_is_not_relabelled_as_a_row_decode_failure() {
+    for query in [diagnostic_income_query(), diagnostic_orders_query()] {
+        let mut h = Harness::new(true);
+        h.query(query);
+        let request = h.requests.remove(0);
+        h.event(Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 403,
+                headers: "Content-Type: text/html",
+                body: "<html>edge refusal</html>",
+            },
+        });
+        assert_eq!(h.errors.len(), 1);
+        let error = serde_json::to_value(&h.errors[0]).unwrap();
+        assert_eq!(error["kind"], "authPermission");
+        assert_eq!(error["causeCode"], "HISTORY_AUTH_PERMISSION");
+        assert!(error.get("historyDecode").is_none());
+        assert!(h.requests.is_empty());
     }
 }

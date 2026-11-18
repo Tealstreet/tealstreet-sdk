@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:03:14.920Z",
+  "endpoint": "/v5/order/create",
+  "http_status": 200,
+  "body": "{\"retCode\":10002,\"retMsg\":\"invalid request, please check your server timestamp or recv_window param: req_timestamp[1793152984132],server_timestamp[1793152994934],recv_window[5000]\",\"result\":{},\"retExtInfo\":{},\"time\":1793152994934}",
+  "expect": {
+    "kind": "authInvalid",
+    "outcome": "rejected",
+    "path": "write"
+  }
+}

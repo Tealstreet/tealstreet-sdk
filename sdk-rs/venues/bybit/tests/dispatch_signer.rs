@@ -393,10 +393,19 @@ fn ready_options(options: Options) -> (Harness, Arc<Gate>) {
         if h.has_request("status=PreLaunch") {
             h.respond("status=PreLaunch", 200, EMPTY);
         }
-        h.respond("/v5/market/instruments-info", 200, support::INSTRUMENTS);
-        h.respond("/v5/market/tickers", 200, support::TICKERS);
+        // Signing stamps here follow the host clock, so no answer calibrates it.
+        h.respond(
+            "/v5/market/instruments-info",
+            200,
+            &support::untimed(support::INSTRUMENTS),
+        );
+        h.respond(
+            "/v5/market/tickers",
+            200,
+            &support::untimed(support::TICKERS),
+        );
     } else {
-        h.load_public();
+        h.load_public_untimed();
     }
     if variant.is_hyro() {
         let socket = h.socket("/v5/private").unwrap();
@@ -602,7 +611,18 @@ fn hyro_provider_refusal_preserves_an_earlier_ack_and_unknown_create() {
             );
         }
         // H2: Hyro creates are managed Plan legs; the second is signed at dispatch.
-        let actions = managed(&mut h.engine, h.now);
+        // The persistent harness retains prepared routes across the release wait.
+        h.collect();
+        if !lost {
+            h.advance(200.0);
+        }
+        let actions: Vec<_> = h
+            .notices
+            .iter()
+            .cloned()
+            .map(Action::Notice)
+            .chain(h.requests.iter().cloned().map(Action::Http))
+            .collect();
         let error = failed(&actions, 42);
         assert_eq!(
             error.outcome,
@@ -703,6 +723,8 @@ fn static_ws_serialization_uses_primary_and_preserves_hyro_correlation_and_strin
 
 #[test]
 fn spot_mixed_provider_and_native_refusal_aggregate_keeps_reached_venue_evidence_in_both_orders() {
+    // TS catches definite provider refusal: reference/bybit/bybitspot.exchange.ts:844-856.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | Spot per-request provider/transport catches
     for provider_first in [true, false] {
         let (mut h, gate) = ready(Variant::Spot);
         gate.mode.store(4, Ordering::SeqCst);
@@ -738,7 +760,10 @@ fn spot_mixed_provider_and_native_refusal_aggregate_keeps_reached_venue_evidence
             Some(Outcome::Rejected),
             "provider_first={provider_first}: a native refusal proves a POST reached the venue"
         );
-        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Rejected));
+        assert_eq!(
+            error.kind,
+            Some(safe_cex_engine::ErrorKind::InsufficientBalance)
+        );
         assert_eq!(error.venue_code.as_deref(), Some("110007"));
         // The journal reports the earliest leg that reached the venue.
         assert!(
@@ -869,7 +894,19 @@ fn refused_retry_after_initial_dispatch(
             },
         );
     }
-    let retry_actions = prepare_parked(&mut h.engine, h.now);
+    let mut retry_actions = prepare_parked(&mut h.engine, h.now);
+    let wakes: Vec<_> = retry_actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms <= h.now + 200.0 => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    for (timer, at) in wakes {
+        h.now = h.now.max(at);
+        h.engine.handle(h.now, Event::TimerFired { timer });
+        retry_actions.extend(prepare_parked(&mut h.engine, h.now));
+    }
     let (attempt, retry_work) = work(retry_actions);
     assert!(retry_work.operations.iter().any(|op| matches!(op,safe_cex_engine::signing::Operation::Sign {payload,..} if matches!(payload.last(),Some(safe_cex_engine::signing::PayloadPart::Bytes {bytes}) if bytes==body.as_bytes()))),"retry must retain exact body and immutable client identity");
     assert_eq!(
@@ -1109,9 +1146,18 @@ fn hyro_retry_refused_after_a_released_create_stays_unknown() {
         error: "lost after dispatch",
     });
     h.respond("/v5/order/realtime", 200, EMPTY_PAGE);
-    // Both axes are now complete and absent: the same-ID retry is signed next.
-    gate.mode.store(2, Ordering::SeqCst);
     h.respond("/v5/order/history", 200, EMPTY_PAGE);
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        h.respond(&format!("orderStatus={status}"), 200, EMPTY_PAGE);
+    }
+    // A caller retry must still reconcile under its original uncertainty.
+    gate.mode.store(2, Ordering::SeqCst);
+    h.command(Command::PlaceOrders {
+        command: 43,
+        orders: vec![order()],
+    });
+    assert!(!h.has_request("/v5/order/create"));
+    assert_eq!(h.outcomes.last(), Some(&(43, Some(Outcome::Unknown))));
     assert_eq!(
         h.outcomes
             .iter()

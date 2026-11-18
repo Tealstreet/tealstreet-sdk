@@ -68,6 +68,32 @@ class RequestContextBan(unittest.TestCase):
             with self.subTest(source=source), self.assertRaises(ValueError):
                 ban.fingerprints(source)
 
+    def test_the_single_ruled_growth_allowance_is_exact_and_self_expiring(self):
+        self.assertEqual(ban.RULED_GROWTH, (
+            ('venues/paradex/src/account.rs',
+             'de9d09faf6d835f5164746112b2915550e9364b218dcf7701191482bbc0b492e', 1),))
+        path = 'venues/reference/src/lib.rs'
+        base = {path: dict(ban.fingerprints('cx.request(1);'))}
+        (ruled,) = ban.fingerprints('cx.sign_http(id, step);')
+        other = next(iter(ban.fingerprints('cx.request(2);')))
+        allowance = ((path, ruled, 1),)
+        previous = [('HEAD', base), ('merge parents', base), ('origin/master', base)]
+        grown = {path: {**base[path], ruled: 1}}
+        self.assertFalse(ban.check(grown, grown, previous, allowance))
+        self.assertTrue(ban.check(grown, grown, previous, ()))
+        twice = {path: {**base[path], ruled: 2}}
+        self.assertTrue(ban.check(twice, twice, previous, allowance))
+        # An absolute ceiling: a parent already holding one never admits two.
+        self.assertTrue(ban.check(twice, twice, [('HEAD', grown)], allowance))
+        foreign = {path: {**base[path], other: 1}}
+        self.assertTrue(ban.check(foreign, foreign, previous, allowance))
+        moved = {'venues/elsewhere/src/lib.rs': {ruled: 1}, **base}
+        self.assertTrue(ban.check(moved, moved, previous, allowance))
+        # Once the row is gone, the allowance itself fails until it is deleted;
+        # removing both together passes.
+        self.assertTrue(ban.check(base, base, [('HEAD', grown)], allowance))
+        self.assertFalse(ban.check(base, base, [('HEAD', grown)], ()))
+
     def test_exact_inventory_and_independent_shrink_ratchet(self):
         path = 'venues/reference/src/lib.rs'
         one = {path: dict(ban.fingerprints('cx.request(1);'))}

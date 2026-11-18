@@ -10,6 +10,25 @@ fill notifications, connection dots.
 
 ---
 
+## Windows console glyphs {#windows-console-glyphs}
+
+On Windows outside Windows Terminal, or when the console code page is not
+UTF-8, the CLI prints ASCII instead of glyphs the legacy console font cannot
+draw. Every other terminal keeps Unicode.
+
+| Unicode     | ASCII              |
+| ----------- | ------------------ |
+| `✗ ⚠ ✓ ℹ`   | `[x] [!] [ok] [i]` |
+| `⛔`        | `[!!]`             |
+| `─ ═ │ ┌ ┼` | `- = \| + +`       |
+| `— … → ≥`   | `- . > >=`         |
+
+`TEALSTREET_ASCII=1` forces ASCII on any platform; `TEALSTREET_ASCII=0` keeps
+Unicode. The code page is read once at startup. ASCII only applies to what a
+person reads in the terminal: `--json` documents, redirected or piped output,
+and output sent to web clients over the listener always keep the original
+Unicode text.
+
 ## Output kinds
 
 Every line the CLI prints carries a `PrintKind`. Listener `cmd:output` frames
@@ -23,6 +42,10 @@ expose the same kind to web clients.
 | `warn`    | yellow  | `warn`         | terminal only     |
 | `error`   | red     | `error`        | terminal only     |
 
+Exchange output belongs to the login that connected the exchange. After switching
+users, delayed output and disposal notices from the previous login are discarded.
+Disabling an account within the same login still reports interrupted chases.
+
 Where each stream goes:
 
 - `logger.info / warn / error / debug` → `~/.tealstreet/cli.log` only — never
@@ -34,12 +57,20 @@ Where each stream goes:
   Everything else prints **above** the prompt (readline-aware, so async output
   never shreds what you're mid-typing).
 - `console.warn / error` → log file + printed above the prompt, and the latest
-  one is mirrored on the [top status bar](#status-bar--footer).
+  one is mirrored on the [top status bar](#status-bar--footer). The terminal
+  line always carries the cause: an error's message, a venue envelope's
+  `retMsg`/`ret_msg`/`msg` (also inside a proxied `raw_response`), else its
+  code or kind, else the body serialized to 300 characters. The full body is
+  always in `cli.log`.
 - `console.debug` → log file **only when `DEBUG=1` / `DEBUG=true`** is set;
   dropped otherwise (it routes to `logger.debug`, gated by `MIN_LOG_LEVEL`,
   which defaults to `info`).
 - `print()` / `originalConsoleLog()` → terminal only, no rate limit — what
   command handlers use for primary output.
+
+Bybit timestamp refusals use the Rust engine's per-account clock correction and
+one bounded re-signed retry. A detected system-clock skew prints one warning per
+CLI session, including the measured fast/slow offset and Windows time-sync steps.
 
 Verbose HoW/tradetunnel request diagnostics also use the existing console
 pipeline: start the CLI with `DEBUG=1` or `DEBUG=true` to add sanitized
@@ -49,6 +80,19 @@ operational, so these lines stay off the terminal. This is off by default, does
 not create a second network log file, omits headers, redacts sensitive keys,
 preserves URL query-key names without query values, and truncates large
 payloads.
+
+Routine ReconnectingWebSocket and HOW reconnect diagnostics stay in `cli.log`,
+without a red error or a prompt line. URLs contain only their origin and path;
+URL-provider functions, query strings, credentials and outgoing frames are not
+logged. Repeated connection failures and exhausted retries still show an error,
+as do authentication failures and uncertain order outcomes.
+
+The Node/Bun relay sends native WebSocket pings every 15 seconds and reconnects
+after 45 seconds without incoming traffic or a pong. These control frames never
+enter the exchange's application stream. Bybit's engine separately sends its
+JSON ping every 10 seconds on public and private sockets; its 20-second receive
+silence deadline still recovers a stalled upstream. HOW keeps its existing
+5-second RPC ping and 25-second silence recovery.
 
 The `operational` / `info` / `warn` / `error` / `critical` taxonomy lives in
 `apps/cli/src/log-classify.ts`; routing in `apps/cli/src/logger.ts`. View the
@@ -74,6 +118,10 @@ code, goes to stderr instead, and the background update notice is skipped. See
 
 ## Status bar + footer {#status-bar--footer}
 
+Changing login clears the old status and watch messages, stops its redraws and
+loads the new user's footer settings. Late exchange events, command output and
+webhook replies from the previous session are discarded.
+
 Two pinned single-line surfaces frame the scrolling output, both reserved via
 one shared ANSI scroll region (so they never fight each other or corrupt the
 prompt):
@@ -94,6 +142,20 @@ prompt):
 Both **no-op on a non-TTY** (pipes / CI) and suspend/resume cleanly around
 watch-mode alt-screen. Source: `apps/cli/src/scroll-region.ts` (the single
 region owner), `status-line.ts`, `footer.ts`, `footer-segments.ts`.
+
+Order and position sizes (`o`, `ps`, `p`, the prompt, charts, and the footer
+`position` segment) are base-asset amounts, shown to the market's base lot step
+(lot step × contract size); a step of 1 or more shows whole units.
+Order tables, chart annotations (including SL/TP/trailing orders), and the chase
+monitor's current-order row show the remaining base amount after partial fills.
+Inverse contracts have a price-dependent base size, so fractional amounts use
+up to eight significant digits rather than a fixed decimal count. Small nonzero
+positions and remaining order sizes stay visible.
+
+Unknown position valuation displays as `—` in position cards and position/margin
+tables, including derived leverage, PnL percentages and incomplete account totals.
+Known quantities and currency PnL remain visible. The footer also shows `—` for
+the PnL percentage until a known nonzero valuation is available.
 
 ---
 
@@ -130,7 +192,7 @@ prompt preview                  # render the current format with live data
 | `{account}`  | Account name                        |
 | `{price}`    | Last price for focused symbol       |
 | `{side}`     | Position side (`L` / `S` / `—`)     |
-| `{size}`     | Position size                       |
+| `{size}`     | Base amount + asset (`240 DOGE`)    |
 | `{entry}`    | Entry price                         |
 | `{pnl}`      | Unrealized PnL (currency)           |
 | `{pnl%}`     | Unrealized PnL (percent)            |
@@ -208,7 +270,8 @@ Every fill on the active exchange produces a one-liner:
 ```
 
 When you're inside a watch mode, the fill is appended via `addWatchMessage`
-to whichever panel is up. Source: `apps/cli/src/repl.ts:850-858`.
+to whichever panel is up. Switching back to an already enabled account still
+prints each fill once. Source: `apps/cli/src/exchange-listeners.ts`.
 
 ---
 
@@ -217,7 +280,7 @@ to whichever panel is up. Source: `apps/cli/src/repl.ts:850-858`.
 Per-account critical errors (geo-blocked, invalid API key, etc.) are
 classified by `HealthMonitor` and **only printed once** per category.
 If your error scrolled by an hour ago, check `cli.log` — it's still in there.
-Source: `apps/cli/src/repl.ts:872-884`.
+Source: `apps/cli/src/exchange-listeners.ts`.
 
 ---
 

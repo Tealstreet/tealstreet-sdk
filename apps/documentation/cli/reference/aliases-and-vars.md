@@ -5,6 +5,8 @@ sidebar_position: 3
 
 # Aliases & user variables
 
+Variables, aliases, their sync queue and safety settings belong to the signed-in user. Switching users reloads that user’s files and resets live/tracked variables and session budget spend. See [user profiles and migration](../operations/config-files.md#login-logout-and-migration).
+
 The CLI gives you three kinds of named values plus aliases for shorthand
 commands. Read this page once and you'll know which one to reach for.
 
@@ -45,7 +47,7 @@ time you read the variable.
 
 ```text
 sets @spread $ask-$bid
-sets @stopline $entry -1%
+sets @stopline $entry*0.99
 
 echo @spread          # re-reads bid/ask now
 sleep 5s; echo @spread # re-reads again

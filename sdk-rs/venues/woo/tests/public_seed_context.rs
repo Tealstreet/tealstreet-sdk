@@ -12,6 +12,9 @@ use support::{MARKETS, TICKERS};
 type Driver = Engine<Woo>;
 const FUNDING: &str = r#"{"success":true,"rows":[{"symbol":"PERP_BTC_USDT","est_funding_rate":0.002,"next_funding_time":1700057600000}]}"#;
 const EMPTY: &str = r#"{"success":true,"rows":[]}"#;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
+const READ_DEADLINE_MS: f64 = 20_000.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Seed {
@@ -199,6 +202,15 @@ fn issued(seed: Seed, released: bool) -> (Driver, Packet, f64, Vec<Action>) {
     }
     (e, funding, 60_020., actions)
 }
+/// The bound of a seed issued now: discovery until markets and tickers are both loaded.
+fn deadline_ms(e: &Driver) -> f64 {
+    let loaded = e.store().loaded();
+    if loaded.markets && loaded.tickers {
+        READ_DEADLINE_MS
+    } else {
+        DISCOVERY_DEADLINE_MS
+    }
+}
 fn timer_at(actions: &[Action], at: f64) -> TimerId {
     actions
         .iter()
@@ -244,7 +256,7 @@ fn managed(seed: Seed) {
         "no dispatch before Claim"
     );
     assert_eq!(p.intent, Some(RoutingIntent::Primary));
-    assert_eq!(p.request.timeout_ms, Some(20_000));
+    assert_eq!(p.request.timeout_ms, Some(deadline_ms(&e) as u32));
     assert!(p.request.route.is_none());
     release(&mut e, &p, now);
     response(&mut e, &p, now + 1., 200, seed.body());
@@ -292,35 +304,36 @@ fn held_funding_cannot_publish() {
     held(Seed::Funding);
 }
 
-fn equality(seed: Seed, offset: f64) {
+fn equality(seed: Seed, past_deadline: f64) {
     let (mut e, p, now, _) = issued(seed, true);
-    response(&mut e, &p, now + offset, 200, seed.body());
+    let deadline = now + deadline_ms(&e);
+    response(&mut e, &p, deadline + past_deadline, 200, seed.body());
     assert_unpublished(&e, seed);
 }
 // NEW managed observation bound; the raw native requests have no such deadline.
 #[test]
 fn markets_new_deadline_equality_rejects_data() {
-    equality(Seed::Markets, 20_000.);
+    equality(Seed::Markets, 0.);
 }
 #[test]
 fn tickers_new_deadline_equality_rejects_data() {
-    equality(Seed::Tickers, 20_000.);
+    equality(Seed::Tickers, 0.);
 }
 #[test]
 fn funding_new_deadline_equality_rejects_data() {
-    equality(Seed::Funding, 20_000.);
+    equality(Seed::Funding, 0.);
 }
 #[test]
 fn markets_new_deadline_late_rejects_data() {
-    equality(Seed::Markets, 20_001.);
+    equality(Seed::Markets, 1.);
 }
 #[test]
 fn tickers_new_deadline_late_rejects_data() {
-    equality(Seed::Tickers, 20_001.);
+    equality(Seed::Tickers, 1.);
 }
 #[test]
 fn funding_new_deadline_late_rejects_data() {
-    equality(Seed::Funding, 20_001.);
+    equality(Seed::Funding, 1.);
 }
 
 fn held_streamed_bad_row(seed: Seed) {
@@ -609,7 +622,21 @@ fn nonfinite_delivery(failure: bool) {
                         "Startup incomplete: still waiting for tickers"
                     }
                 );
-                assert!(event.fields.is_empty());
+                assert_eq!(
+                    event.fields,
+                    if seed == Seed::Markets {
+                        vec![
+                            ("deadlineMs", 60_000.0.into()),
+                            ("startupMarketsState", "started".into()),
+                            ("startupTickersState", "neverStarted".into()),
+                        ]
+                    } else {
+                        vec![
+                            ("deadlineMs", 60_000.0.into()),
+                            ("startupTickersState", "started".into()),
+                        ]
+                    }
+                );
             }
 
             assert_eq!(
@@ -1075,8 +1102,9 @@ fn owned_deadline_failure_keeps_native_recovery_once_without_data_authority() {
             p.preparation.is_some(),
             "managed owner needed to test genuine expiry custody"
         );
+        let deadline = now + deadline_ms(&e);
         e.handle(
-            now + 20_000.,
+            deadline,
             Event::HttpFailed {
                 request: p.request.id,
                 error: "released at exact managed deadline",
@@ -1108,7 +1136,7 @@ fn owned_deadline_failure_keeps_native_recovery_once_without_data_authority() {
             }
         }
         e.handle(
-            now + 20_001.,
+            deadline + 1.,
             Event::HttpFailed {
                 request: p.request.id,
                 error: "duplicate expiry",
@@ -1251,4 +1279,21 @@ fn cleanup_matcher_uses_genuine_resources_and_preserves_a_finite_peer() {
         exact_cleanup(&e.drain_actions().collect::<Vec<_>>(), peer),
         Ok(())
     );
+}
+
+#[test]
+fn catalogue_and_live_seed_classes_are_declared_at_issuance() {
+    use safe_cex_engine::request_budget::RequestClass;
+    for (seed, class, budget) in [
+        (Seed::Markets, RequestClass::Discovery, 90_000),
+        (Seed::Tickers, RequestClass::Discovery, 90_000),
+        (Seed::Funding, RequestClass::Read, 20_000),
+    ] {
+        let (engine, packet, _, _) = issued(seed, false);
+        assert_eq!(
+            engine.http_request_class(packet.preparation.unwrap()),
+            Some(class)
+        );
+        assert_eq!(packet.request.timeout_ms, Some(budget));
+    }
 }

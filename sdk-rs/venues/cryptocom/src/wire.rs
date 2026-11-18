@@ -194,8 +194,9 @@ pub struct CandleRow<'a> {
 }
 impl CandleRow<'_> {
     pub fn candle(&self) -> Candle {
+        // `t` is the candle start in milliseconds; candles carry seconds.
         Candle {
-            timestamp: self.t,
+            timestamp: self.t / 1000.0,
             open: num::parse(self.o),
             high: num::parse(self.h),
             low: num::parse(self.l),

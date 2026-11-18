@@ -66,8 +66,8 @@ ladder stays where it is.
 
 The offset is a plain direction, not a side-aware one: `+` is up the price
 axis. This signal is a LONG, so `+3%` puts the stop above entry. **On a short
-it would be `be -3%`** — `+3%` there widens the stop rather than tightening
-it.
+it would be `be $entry -3%`** — `+3%` there widens the stop rather than
+tightening it, and a bare `be -3%` is [refused for now](../reference/sizing-and-prices.md#negative-offsets).
 
 **`price >=` means the price TOUCHED your target, not that your rung filled.**
 The two are usually the same moment and occasionally are not: your own resting

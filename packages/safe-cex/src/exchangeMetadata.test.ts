@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { privateProxyIpsVultrTokyo } from '@tealstreet/proxy-ips-lists/src';
 import {
   exchangeMetadata,
   exchangePrettyNames,
@@ -234,15 +235,19 @@ describe('exchangeMetadata', () => {
       expect(coinbaseSpot.enableInPreview).toBe(true);
     });
 
-    it('should keep HyroTrader dev-only until the private relay or HTTPS path is ready', () => {
-      // Plain HTTP simulator private REST/WS works for local dev, but preview
-      // and prod need Hyro HTTPS/WSS private endpoints or a Tealstreet relay.
+    it('should keep HyroTrader preview-enabled without production rollout', () => {
+      // Hyro fronts the simulator at a TLS hostname with browser CORS for
+      // Tealstreet, so preview beta validation can run direct. Keep production
+      // dark until the beta is explicitly approved.
       const hyrotrader = exchangeMetadata.hyrotrader;
 
       expect(hyrotrader.exchangeName).toBe('hyrotrader');
       expect(hyrotrader.enabled).toBe(false);
       expect(hyrotrader.enabledInDev).toBe(true);
-      expect(hyrotrader.enableInPreview).toBe(false);
+      expect(hyrotrader.enableInPreview).toBe(true);
+      expect(hyrotrader.forbidCors).toBe(false);
+      expect(hyrotrader.enforceWsTunnel).toBe(false);
+      expect(hyrotrader.supportsTunnel).toBe(false);
     });
 
     it('should keep Robinhood Lighter enabled for preview without production rollout', () => {
@@ -271,6 +276,16 @@ describe('exchangeMetadata', () => {
             `${name}: requiresCors is true but privateProxyIps is empty`,
           ).toBeGreaterThan(0);
         }
+      });
+    });
+
+    // Since AWS_EXIT.md step 3e every private path egresses from the Vultr Tokyo fleet,
+    // so the form must never again suggest an AWS pool to whitelist on master.
+    it('every whitelist the account form can show is the Vultr Tokyo fleet', () => {
+      exchanges.forEach((name) => {
+        const m = exchangeMetadata[name];
+        const lists = [m.privateProxyIps, ...Object.values(m.privateProxyRegions)].filter((ips) => ips.length);
+        lists.forEach((ips) => expect(ips, name).toEqual(privateProxyIpsVultrTokyo));
       });
     });
 
@@ -344,7 +359,6 @@ describe('exchangeMetadata', () => {
         'bitrue',
         'bitunix',
         'blofin',
-        'breakoutprop',
         'bybit',
         'bybitdemo',
         'hyrotrader',
@@ -434,5 +448,15 @@ describe('exchangeMetadata', () => {
       expect(exchangeMetadata.binanceinverse.requiresTickersForMarketsLoaded).toBe(true);
       expect(exchangeMetadata.binanceinverse.latencyDomain).toBe('dapi.binance.com');
     });
+  });
+});
+
+
+describe('Hyperliquid candle capabilities', () => {
+  it.each(['hyperliquid', 'hyperliquidspot'] as const)('declares the native candle set for %s', (name) => {
+    expect(exchangeMetadata[name].supportsKlineSeconds).toBe(false);
+    expect(exchangeMetadata[name].supportedCandleIntervals).toEqual([
+      '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '1d', '3d', '1w', '1M',
+    ]);
   });
 });

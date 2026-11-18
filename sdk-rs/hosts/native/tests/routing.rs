@@ -167,48 +167,6 @@ async fn proxy_public_selection_headers_and_fresh_tokens_reach_the_wire() {
 }
 
 #[tokio::test]
-async fn breakout_generated_proxy_plan_keeps_dxapi_and_proxy_credentials_separate() {
-    #[derive(Deserialize)]
-    struct Example {
-        name: String,
-        plan: RoutingPlan,
-    }
-    let examples: Vec<Example> =
-        serde_json::from_str(include_str!("fixtures/routing-plans.json")).unwrap();
-    let mut plan = examples
-        .into_iter()
-        .find(|example| example.name == "breakout-proxy")
-        .expect("TS-generated Breakout proxy route")
-        .plan;
-    assert_eq!(plan.http.authorization_header, "Tealstreet-Authorization");
-    let (listener, origin) = listener().await;
-    plan.http.prefix = origin;
-    let server = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let request = request_text(&mut stream).await;
-        stream
-            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}")
-            .await
-            .unwrap();
-        request
-    });
-    let (send, mut events) = mpsc::unbounded_channel();
-    let mut request = http_request(
-        1,
-        "https://breakout.prosp.devexperts.com/dxsca-web/marketdata".into(),
-    );
-    request
-        .headers
-        .push(("Authorization", "DXAPI documented-session".into()));
-    NetworkTransport::with_routing(plan, tokens()).request(request, send);
-    assert_eq!(http_body(&mut events).await, b"{}");
-    let packet = server.await.unwrap();
-    assert!(packet.contains("authorization: DXAPI documented-session\r\n"));
-    assert!(packet.contains("tealstreet-authorization: Bearer account-token\r\n"));
-    assert!(!packet.contains("\r\nauthorization: Bearer account-token\r\n"));
-}
-
-#[tokio::test]
 async fn resolved_header_alias_keeps_venue_jwt_separate_from_proxy_token() {
     let (listener, origin) = listener().await;
     let server = tokio::spawn(async move {
@@ -611,6 +569,8 @@ async fn prepared_how_binds_after_auth_and_dropping_a_bound_packet_sends_no_http
             let _request_task = bound.dispatch(events);
             assert_eq!(http_body(&mut inbox).await, b"{}");
         }
+        // The pooled socket lives as long as the account's transport.
+        drop(transport);
         tokio::time::timeout(Duration::from_secs(3), server)
             .await
             .unwrap()
@@ -759,12 +719,13 @@ async fn how_accepts_binary_gzip_base64_raw_and_legacy_responses() {
     let expected = br#"{"id":18446744073709551615}"#.to_vec();
     let body = expected.clone();
     let server = tokio::spawn(async move {
+        // One pooled socket carries all four requests.
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+        ws.send(Message::text(r#"{"type":"rpc.auth","status":"success"}"#))
+            .await
+            .unwrap();
         for encoding in 0..4 {
-            let (stream, _) = listener.accept().await.unwrap();
-            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
-            ws.send(Message::text(r#"{"type":"rpc.auth","status":"success"}"#))
-                .await
-                .unwrap();
             let request = rpc(&mut ws).await;
             let nonce = request.nonce.unwrap();
             let mut encoder =
@@ -798,7 +759,6 @@ async fn how_accepts_binary_gzip_base64_raw_and_legacy_responses() {
             } else {
                 ws.send(Message::text(header)).await.unwrap();
             }
-            let _ = ws.next().await;
         }
     });
     let mut plan = RoutingPlan::default();
@@ -837,7 +797,7 @@ async fn proxy_token_acquisition_is_inside_the_request_deadline() {
     tokio::task::yield_now().await;
     tokio::time::advance(Duration::from_secs(21)).await;
     assert!(
-        matches!(events.recv().await, Some(HostEvent::HttpFailed(RequestId(20), error)) if error == "transport request timed out")
+        matches!(events.recv().await, Some(HostEvent::HttpFailed(RequestId(20), error)) if error == "HTTP request timed out (class=orderWrite budget=20000ms elapsed=21000ms)")
     );
     assert!(
         tokio::time::timeout(Duration::from_millis(1), listener.accept())
@@ -1832,7 +1792,7 @@ async fn routed_signed_network_notices(
         let payload = match notice {
             Notice::Event(event) => event.message.clone(),
             Notice::CommandDone { result, .. } => result.clone(),
-            Notice::CommandFailed { error, .. } | Notice::StartupFailed { error } => {
+            Notice::CommandFailed { error, .. } | Notice::StartupFailed { error, .. } => {
                 error.legacy_text()
             }
             Notice::CommandError { message, .. } => message.clone(),
@@ -1928,8 +1888,10 @@ async fn proxy_token_provider_failures_cannot_leak_through_direct_authorization_
 async fn proxy_token_provider_failures_cannot_leak_through_how_authentication_notices() {
     let (listener, origin) = listener().await;
     let server = tokio::spawn(async move {
-        for _ in 0..2 {
-            let (stream, _) = listener.accept().await.unwrap();
+        // Requests waiting on one pooled open share its failure: one socket or more.
+        while let Ok(Ok((stream, _))) =
+            tokio::time::timeout(Duration::from_millis(1_500), listener.accept()).await
+        {
             let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
             socket
                 .send(Message::text(r#"{"type":"serverTime"}"#))
@@ -1956,8 +1918,8 @@ async fn proxy_token_provider_failures_cannot_leak_through_how_authentication_no
     let transport = NetworkTransport::with_routing(plan, rejected_proxy_token(calls.clone()));
     let notices = routed_signed_network_notices(&origin, transport, true).await;
     assert_proxy_authorization_notices(&notices);
-    assert!(calls.load(Ordering::SeqCst) >= 2);
-    tokio::time::timeout(Duration::from_secs(3), server)
+    assert!(calls.load(Ordering::SeqCst) >= 1);
+    tokio::time::timeout(Duration::from_secs(5), server)
         .await
         .unwrap()
         .unwrap();

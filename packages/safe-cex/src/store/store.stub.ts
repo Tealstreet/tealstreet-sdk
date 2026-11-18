@@ -83,7 +83,7 @@ const stubPosition: Position = {
   leverage: 0,
   unrealizedPnl: 0,
   contracts: 0,
-  liquidationPrice: 0,
+  liquidationPrice: null,
 };
 
 const stubDisplayedPosition: DisplayedPosition = {
@@ -136,11 +136,12 @@ const stubOrderRiskProfile: OrderRiskProfile = {
  * the StoreData type at compile time.
  */
 export const stubStore: StoreData = {
-  latency: 0,
+  latency: null,
   balance: stubBalance,
   markets: [stubMarket],
   tickers: [stubTicker],
   positions: [stubPosition],
+  positionSettings: {},
   displayedPositions: [stubDisplayedPosition],
   displayedMargin: { longExposure: 0, shortExposure: 0, totalNotional: 0 },
   ordersRisk: { stub: [stubOrderRiskProfile] },

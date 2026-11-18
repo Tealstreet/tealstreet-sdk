@@ -54,7 +54,7 @@ describe('KuCoin spot Rust SDK boundary', () => {
       wsOpen: noActions, wsMessage: noActions, wsClose: noActions, wsRouteExhausted: noActions,
       httpStart: noActions, httpChunk: noActions, httpEnd: noActions, httpFailed: noActions, timer: noActions,
     };
-    const construct = vi.fn(function (_venue: string, _options: string) { return engine; });
+    const construct = vi.fn(function (_venue: string, _options: string, _signerSetup?: string) { return engine; });
     setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
     const store = new DefaultStore();
     installNativeStartupFrames(engine, store, () => (rails ? { fetchedLeverage: rails } : {}));
@@ -67,13 +67,15 @@ describe('KuCoin spot Rust SDK boundary', () => {
 
   it('registers a spot account and loads once for account queries before startup', async () => {
     const { exchange, construct } = setup();
-    expect(isRustVenue('kucoinspot')).toBe(false);
+    expect(isRustVenue('kucoinspot')).toBe(true);
     expect(exchange.isSpot).toBe(true);
     await expect(exchange.getAccount()).resolves.toEqual({ userId: 'user', subId: null, affiliateId: null });
     await exchange.start();
     expect(construct).toHaveBeenCalledOnce();
     expect(construct.mock.calls[0][0]).toBe('kucoinspot');
-    expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ key: 'key', secret: 'secret', passphrase: 'passphrase' });
+    const options = JSON.parse(construct.mock.calls[0][1]);
+    for (const field of ['key', 'secret', 'passphrase']) expect(options).not.toHaveProperty(field);
+    expect(JSON.parse(construct.mock.calls[0][2]!)).toEqual({ primary: { key: 'key', secret: 'secret', passphrase: 'passphrase' } });
   });
 
   it('preserves caller IDs, rejects invalid IDs and marks open-only misses', async () => {

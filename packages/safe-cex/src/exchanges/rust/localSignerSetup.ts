@@ -1,7 +1,9 @@
 import type { LocalIdentityMetadata, LocalSignerMetadata, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeOptions } from '../../generated/ExchangeOptions';
+import type { ExchangeName } from '../../types';
 import type { CredentialPresence, IdentitySetupPolicy, SignerSetupPolicy } from './construction';
+import { derivePublicMode, deriveSignerSetupPolicy } from './construction';
 
 type LocalIdentity = LocalIdentityMetadata & {
   key?: string;
@@ -10,7 +12,7 @@ type LocalIdentity = LocalIdentityMetadata & {
   /** Secondary only, set by a family setup mapping: sign with the primary's ref. */
   signingFromPrimary?: true;
   /** Primary only, set by a family setup mapping: role-bound provider material. */
-  extra?: { zklinkSeed?: { value: string; encoding: 'hex' } };
+  extra?: { zklinkSeed?: { value: string; encoding: 'hex' }; kucoinBroker?: { value: string; encoding: 'utf8' } };
 };
 type Credentials = { primary?: LocalIdentity; secondary?: LocalIdentity };
 type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
@@ -19,10 +21,11 @@ const invalidMetadata = (): never => {
   const message = 'Invalid local signer setup metadata';
   throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
 };
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 const record = (value: unknown, fields: readonly string[]): Record<string, unknown> => {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !fields.includes(key)))
+  if (!isRecord(value) || Array.isArray(value) || Object.keys(value).some((key) => !fields.includes(key)))
     return invalidMetadata();
-  return value as Record<string, unknown>;
+  return value;
 };
 const identityMetadata = (input: unknown): LocalIdentityMetadata | undefined => {
   if (input === undefined) return undefined;
@@ -30,10 +33,10 @@ const identityMetadata = (input: unknown): LocalIdentityMetadata | undefined => 
   const { stableId, secretEncoding, trimCredential } = value;
   if (stableId !== undefined && (typeof stableId !== 'string' || !stableId.trim() || new TextEncoder().encode(stableId).length > 256 || /[\u0000-\u001f\u007f-\u009f]/u.test(stableId)))
     return invalidMetadata();
-  if (secretEncoding !== undefined && (typeof secretEncoding !== 'string' || !['utf8', 'base64', 'hex', 'pem', 'base64Text', 'base58'].includes(secretEncoding)))
+  if (secretEncoding !== undefined && secretEncoding !== 'utf8' && secretEncoding !== 'base64' && secretEncoding !== 'hex' && secretEncoding !== 'pem' && secretEncoding !== 'base64Text' && secretEncoding !== 'base58')
     return invalidMetadata();
   if (trimCredential !== undefined && typeof trimCredential !== 'boolean') return invalidMetadata();
-  return { stableId, secretEncoding, trimCredential } as LocalIdentityMetadata;
+  return { stableId, secretEncoding, trimCredential };
 };
 export const parseLocalSignerMetadata = (input: unknown): LocalSignerMetadata => {
   if (input === undefined) return {};
@@ -55,6 +58,44 @@ export const effectiveIdentityMetadata = (
   if (policy?.trimCredential !== undefined) effective = { ...effective, trimCredential: policy.trimCredential };
   if (policy?.trimSigning !== undefined) effective = { ...effective, trimSigning: policy.trimSigning };
   return effective;
+};
+
+/** Primary key presence exactly as signer setup normalizes it (effective metadata, Rust trim).
+ * A non-string key, or unparseable metadata beside a nonempty key, is keyed and malformed. */
+const primaryKeyPresence = (name: ExchangeName, options: Partial<ExchangeOptions>):
+  { key: boolean; primary?: LocalIdentityMetadata; malformed: boolean } => {
+  const rawKey: unknown = options.key;
+  if (rawKey !== undefined && typeof rawKey !== 'string') return { key: true, malformed: true };
+  try {
+    const primary = effectiveIdentityMetadata(parseLocalSignerMetadata(options.localSigner).primary, deriveSignerSetupPolicy(name).primary);
+    return { key: credentialPresent(options.key, primary?.trimCredential === true), primary, malformed: false };
+  } catch {
+    const keyed = options.key !== undefined && options.key !== '';
+    return { key: keyed, malformed: keyed };
+  }
+};
+
+/** Whether the account carries a primary key, normalized as signer setup does. */
+export const hasPrimaryKey = (name: ExchangeName, options: Partial<ExchangeOptions>): boolean =>
+  primaryKeyPresence(name, options).key;
+
+/** Public mode resolved before any custody, callback or admission check, from the same
+ * normalized credential presence signer setup gives derivePublicMode. A configured callback
+ * (any value but undefined) stands in for the secret only beside a nonempty primary key, as
+ * the delegated primary signing identity does natively; malformed setup on a keyed account
+ * resolves private so setup reports its typed invalidInput refusal. */
+export const resolveEffectivePublicDataOnly = (name: ExchangeName, options: Partial<ExchangeOptions>): boolean => {
+  if (options.publicDataOnly === true) return true;
+  const { key, primary, malformed } = primaryKeyPresence(name, options);
+  // A malformed key or unparseable metadata keeps a keyed account private for setup's typed refusal.
+  if (malformed) return false;
+  const remoteSigner = options.remoteSigner !== undefined;
+  const payloadSigner = options.payloadSigner !== undefined;
+  const secret = credentialPresent(options.secret, primary?.trimSigning === true) || (key && (remoteSigner || payloadSigner));
+  // Keyed: a configured callback is present even if malformed, so admission/setup refuse it.
+  // Keyless: unused callbacks keep raw truthiness and never make the account private.
+  const callbacks = key ? { remoteSigner, payloadSigner } : {};
+  return derivePublicMode(name, { key: '', secret: '', ...options }, undefined, { key, secret, ...callbacks }).publicDataOnly;
 };
 
 /** One required-field/fallback policy for trusted local and callback setup.
@@ -124,11 +165,15 @@ export class LocalSignerSetup {
     resolveSetupPassphrase('secondary', secondary, options.secondary_passphrase, options.passphrase, policy.secondary, options.publicDataOnly === true);
     // A public-only PublicRead provider holds no primary (native drops it too).
     const primaryDropped = policy.readCredentials === 'publicRead' && options.publicDataOnly === true;
+    const broker = policy.primary?.extra?.key === 'kucoinBroker' ? options.extra?.kucoinBroker : undefined;
+    const brokerMaterial = typeof broker?.brokerKey === 'string' && rustTrim(broker.partner) && rustTrim(broker.brokerName)
+      ? { extra: { kucoinBroker: { value: broker.brokerKey, encoding: 'utf8' as const } } }
+      : {};
     this.#credentials = {
       ...(!primaryDropped && (options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined)
         ? { primary: {
           ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase,
-          ...(zklinkSeed ? { extra: { zklinkSeed: { value: zklinkSeed, encoding: 'hex' as const } } } : {}),
+          ...(zklinkSeed ? { extra: { zklinkSeed: { value: zklinkSeed, encoding: 'hex' as const } } } : brokerMaterial),
         } }
         : {}),
       ...(secondary
@@ -144,7 +189,8 @@ export class LocalSignerSetup {
     if (!credentials) throw new Error('Local signer setup has already been consumed or disposed');
     this.#credentials = undefined;
     try {
-      return new Constructor(venue, withReadCredentialsValid(optionsJson, this.readCredentialsValid), JSON.stringify(credentials));
+      return new Constructor(venue, withReadCredentialsValid(optionsJson, this.readCredentialsValid), JSON.stringify(credentials,
+        (key, value) => key === 'trimSigning' && value === false ? undefined : value));
     } finally {
       if (credentials.primary) {
         credentials.primary.key = undefined;
@@ -196,12 +242,17 @@ export const withoutSigningCredentials = (options: ExchangeOptions): ExchangeOpt
     auth,
     ...routing
   } = options;
-  // AsterDEX's wallet key is signing material; its public addresses stay.
+  const broker = routing.extra?.kucoinBroker;
+  const safeRouting = broker ? (() => {
+    const { brokerKey: _brokerKey, ...metadata } = broker;
+    return { ...routing, extra: { ...routing.extra, kucoinBroker: metadata } };
+  })() : routing;
+  // Signing material stays in provider setup; public addresses and broker labels stay.
   if (auth) {
     const { privateKey: _privateKey, ...addresses } = auth;
-    return { ...routing, auth: addresses } as ExchangeOptions;
+    return { ...safeRouting, auth: addresses } as ExchangeOptions;
   }
   // BaseExchange's legacy type requires key/secret; Rust uses the cached
   // construction record and provider refs instead of reading those fields.
-  return routing as ExchangeOptions;
+  return safeRouting as ExchangeOptions;
 };

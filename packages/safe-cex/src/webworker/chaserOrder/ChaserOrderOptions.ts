@@ -62,5 +62,7 @@ export type ChaserCompleteEvent = {
   reduceOnly: boolean;
   size: number;
   filled: number;
+  /** Whether any order of this chase was ever accepted. */
+  placed: boolean;
   stopReason: string;
 };

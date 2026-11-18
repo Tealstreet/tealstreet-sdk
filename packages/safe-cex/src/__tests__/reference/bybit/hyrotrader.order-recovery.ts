@@ -3,8 +3,9 @@ import type { BybitCreateOrderResponse } from './bybit.exchange';
 
 import { nanoid } from 'nanoid';
 
-import { getBybitResponseMeta } from './bybit.response';
 import { ENDPOINTS } from '../../../exchanges/bybit/bybit.types';
+import { BYBIT_TERMINAL_ORDER_STATUSES } from './bybit.order-history';
+import { getBybitResponseMeta } from './bybit.response';
 
 export const hyroSubmissionKey = (value: unknown): string =>
   JSON.stringify(value, (_key, item) => {
@@ -209,13 +210,26 @@ export class HyroOrderRecovery {
   }
 
   private async findOrder(payload: Record<string, any>) {
-    for (const endpoint of [ENDPOINTS.UNFILLED_ORDERS, ENDPOINTS.USER_ORDERS]) {
+    const queries = [
+      { endpoint: ENDPOINTS.UNFILLED_ORDERS, orderStatus: undefined },
+      ...[undefined, ...BYBIT_TERMINAL_ORDER_STATUSES].map((orderStatus) => ({
+        endpoint: ENDPOINTS.USER_ORDERS,
+        orderStatus,
+      })),
+    ];
+    for (const { endpoint, orderStatus } of queries) {
       let cursor = '';
       const seen = new Set<string>();
       for (let page = 0; page < 100; page++) {
         if (this.isDisposed()) throw new Error('exchange was disposed during reconciliation');
         const { data } = await this.getClient().get(endpoint, {
-          params: { category: 'linear', symbol: payload.symbol, limit: 50, cursor },
+          params: {
+            category: 'linear',
+            symbol: payload.symbol,
+            limit: 50,
+            cursor,
+            ...(orderStatus ? { orderStatus } : {}),
+          },
         });
         const status = getBybitResponseMeta(data);
         if (!status.isSuccess || !Array.isArray(data?.result?.list)) {

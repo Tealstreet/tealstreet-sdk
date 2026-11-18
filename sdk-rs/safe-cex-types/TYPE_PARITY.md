@@ -1,4 +1,27 @@
-# P0d type ownership parity
+# Type ownership parity
+
+## Current Position cutover (P1)
+
+Position and its enum/Greeks dependency closure now generate the public SDK
+modules under `packages/safe-cex/src/generated`; `types.ts` re-exports them.
+`notional` and `liquidationPrice` are required `number | null`
+(`Option<f64>` in the shared Rust contract). Unknown valuation stays null
+through JSON and typed Store decoding; known zero stays zero. No public Position
+field was removed or renamed. The historical P0/P1a tables below document the earlier spike and are not a claim that every
+current public type has completed cutover. See
+[`TYPE_OWNERSHIP_P1.md`](../../docs/plans/TYPE_OWNERSHIP_P1.md) for the current
+per-type comparison and consumer census.
+
+`corepack yarn types:generate` updates Rust bindings and the public Position
+closure; `corepack yarn generate:script-types` regenerates the authoring bundle.
+`node --test sdk-rs/safe-cex-types/tests/position-contract.cjs` checks production
+bytes and compile-time nullability, readonly and enum use. The actual engine
+writer is covered through the SDK by `corepack yarn rust:test-frame-wire`.
+The legacy broad checker still fails on the baseline's missing imported
+`LocalSignerMetadata` oracle declaration; it is not used as evidence of a
+completed whole-surface cutover.
+
+## Historical P0d type ownership parity
 
 ## Decision
 
@@ -523,7 +546,7 @@ and the reserved word `static`, reducing 31 fallbacks to four.
 Round 2 passed eight wire tests, six generator tests, the same nine Node tests,
 all local parity/build/lint gates, and the full 105-file TypeScript byte check.
 
-Round 3 derives `LighterRobinhood`, `TealstreetDex`, `InProcess`, and `Static`,
+Round 3 derives `LighterRobinhood`, `InProcess`, and `Static`,
 leaving **zero** positional fallback variants in the current production model.
 Negative controls still cover genuine reserved `Self`, separator/camel collisions,
 unsupported punctuation and invalid identifier results. The case-sensitive

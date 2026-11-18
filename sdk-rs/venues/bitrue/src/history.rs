@@ -34,6 +34,8 @@ pub struct Request {
     from_ms: Option<f64>,
     to_ms: Option<f64>,
     limit: usize,
+    /// A window with no limit: a full native page cannot prove coverage.
+    open_window: bool,
     received: usize,
     seen: HashSet<String>,
     failed: bool,
@@ -235,7 +237,11 @@ impl Bitrue {
         };
         let market = cx.store.market(&symbol).unwrap();
         let symbol = market.symbol.clone();
-        let limit = limit.unwrap_or(200).clamp(1, 1000) as usize;
+        // A window with no limit asks for the native maximum and flags a full page.
+        let open_window = from_ms.is_some() && limit.is_none();
+        let limit = limit
+            .unwrap_or(if open_window { 1000 } else { 200 })
+            .clamp(1, 1000) as usize;
         let mut path = format!(
             "/fapi/v2/myTrades?contractName={}&limit={limit}",
             safe_cex_engine::url::encode(&market.id)
@@ -271,6 +277,7 @@ impl Bitrue {
                 from_ms,
                 to_ms,
                 limit,
+                open_window,
                 received: 0,
                 seen: HashSet::new(),
                 failed: false,
@@ -406,7 +413,12 @@ impl Bitrue {
                 return;
             }
         }
-        let _ = request.owner.finish_with(cx, Ok(()), |mut rows| {
+        let coverage = if request.open_window && request.received >= request.limit {
+            Err(VenueError::new("Bitrue fills read one full page"))
+        } else {
+            Ok(())
+        };
+        let _ = request.owner.finish_with(cx, coverage, |mut rows| {
             rows.sort_by(|a, b| b.time_ms.total_cmp(&a.time_ms));
             rows.truncate(request.limit);
             encode_executions(&rows)

@@ -85,6 +85,8 @@ pub struct Level {
 }
 #[derive(Deserialize)]
 pub struct Depth<'a> {
+    #[serde(default)]
+    pub fast: bool,
     #[serde(borrow)]
     pub coin: Cow<'a, str>,
     pub time: f64,
@@ -126,6 +128,14 @@ impl CandleRow<'_> {
             volume: self.v,
         }
     }
+}
+#[derive(Deserialize)]
+pub struct TradeRow<'a> {
+    #[serde(borrow)]
+    pub coin: Cow<'a, str>,
+    #[serde(deserialize_with = "number")]
+    pub px: f64,
+    pub time: f64,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -242,6 +252,9 @@ pub struct SpotEnvelope<'a> {
     #[serde(borrow)]
     pub spot_state: SpotState<'a>,
 }
+fn nullable_text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Cow<'static, str>, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.map_or(Cow::Borrowed(""), Cow::Owned))
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderRow<'a> {
@@ -260,16 +273,19 @@ pub struct OrderRow<'a> {
     pub reduce_only: bool,
     #[serde(default, borrow)]
     pub cloid: Option<Cow<'a, str>>,
-    #[serde(default, borrow)]
+    #[serde(default, deserialize_with = "nullable_text")]
     pub order_type: Cow<'a, str>,
     #[serde(default, deserialize_with = "optional_number")]
     pub trigger_px: Option<f64>,
-    #[serde(default, borrow)]
+    #[serde(default, deserialize_with = "nullable_text")]
     pub tpsl: Cow<'a, str>,
-    #[serde(default, borrow)]
+    // Real trigger rows send null here.
+    #[serde(default, deserialize_with = "nullable_text")]
     pub tif: Cow<'a, str>,
     #[serde(default)]
     pub is_trigger: bool,
+    #[serde(default)]
+    pub is_position_tpsl: Option<bool>,
     #[serde(default)]
     pub timestamp: f64,
 }

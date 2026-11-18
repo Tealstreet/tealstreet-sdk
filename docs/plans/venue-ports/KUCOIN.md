@@ -419,7 +419,7 @@ final-head CI.
 
 ### Twelve-venue integration checkpoint
 
-All six required/compatibility selective replays pass: KuCoin, Binance and
+All four required/compatibility selective replays pass: KuCoin, Binance and
 Hyperliquid public/private. Exact request and write comparisons remain enabled.
 Three-run public medians (TS / Rust):
 
@@ -485,7 +485,7 @@ all 13 venues before merge, then cut the follow-up branch.
 
 ### Thirteen-venue integration checkpoint
 
-All six selective gates pass: KuCoin, Binance and incoming Bitrue public/private.
+All four selective gates pass: KuCoin, Binance and incoming Bitrue public/private.
 Three-run public medians TS/Rust, with exact output/request/write/signature and
 socket audits unchanged:
 
@@ -605,7 +605,7 @@ the fresh branch.
 
 ### Fourteen-venue WOO integration checkpoint
 
-All six required/compatibility replays pass: KuCoin, Binance and incoming WOO
+All four required/compatibility replays pass: KuCoin, Binance and incoming WOO
 public/private. Public three-run medians TS/Rust:
 
 | Venue | CPU ms | Steady CPU ms | Retained MB | Bundle bytes |
@@ -655,7 +655,7 @@ PR1312 into feat/rust-rewrite and create the follow-up branch.
 
 ### Fifteen-venue Lighter integration checkpoint
 
-All six required/compatibility replays pass: KuCoin, Binance and Lighter
+All four required/compatibility replays pass: KuCoin, Binance and Lighter
 public/private. Public three-run medians TS/Rust:
 
 | Venue | CPU ms | Steady CPU ms | Retained MB | Bundle bytes |
@@ -682,7 +682,7 @@ integrations), then merge into feat/rust-rewrite and create the follow-up branch
 
 ### Orderly family landing integration plan
 
-Landingf66bdc26f9 adds Orderly and six broker aliases (#1318) while the
+Landingf66bdc26f9 adds Orderly and four broker aliases (#1318) while the
 Lighter-integratedc59bbb77a9 replay matrix is fully green and root CI finishes.
 Resolve harness/host conflicts preserving generation-aware correlated request
 audits, signatures and protocol fallbacks. Retain original KuCoin headers in
@@ -707,7 +707,7 @@ and cut the fresh follow-up branch.
 ### Sixteen-venue Orderly integration checkpoint
 
 All seven selective gates pass: KuCoin/Binance public+private, Orderly public
-and mainnet private, Tealstreet DEX testnet private. Public three-run medians
+and mainnet private, testnet private. Public three-run medians
 TS/Rust:
 
 | Venue | CPU ms | Steady CPU ms | Retained MB | Bundle bytes |

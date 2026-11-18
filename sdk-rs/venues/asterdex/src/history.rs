@@ -1,10 +1,11 @@
 //! Typed rare reads; Aster executions carry cumulative PnL, unlike Binance.
 use crate::{AsterDex, Pending, account, sign::Query};
+use safe_cex_engine::history::ReadCompletion;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Interval, OrderStatus, OrderType};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
-use safe_cex_engine::request_context::Context;
+use safe_cex_engine::request_context::{Context, Owner};
 use safe_cex_engine::{Command, Cx, Query as Read, Response, TimerId};
 use safe_cex_venue_binance::wire::{HistoricalOrderRow, UserTrade};
 use serde::{Deserialize, Serialize};
@@ -61,6 +62,8 @@ pub enum Request {
         root: Context,
         rows: Vec<HistoricalOrder>,
         invalid: bool,
+        /// A window with no limit: a full native page cannot prove coverage.
+        open_window: bool,
     },
     Income {
         root: Context,
@@ -394,7 +397,12 @@ impl AsterDex {
                 limit,
             } => {
                 let symbol = symbol.expect("local read handled at command entry");
-                if let Some((from, to)) = from_ms.zip(to_ms) {
+                // A start alone with no limit walks up to now, not one page from the start.
+                let open_end = limit
+                    .is_none()
+                    .then(|| cx.protocol_now().floor())
+                    .filter(|end| from_ms.is_some_and(|from| *end >= from));
+                if let Some((from, to)) = from_ms.zip(to_ms.or(open_end)) {
                     let limit = limit.unwrap_or(500).clamp(1, 1000);
                     self.next_fill_page(
                         cx,
@@ -445,13 +453,22 @@ impl AsterDex {
                 "allOrders",
                 Query::new()
                     .opt_str("symbol", symbol.as_deref())
-                    .num("limit", f64::from(limit.unwrap_or(500).clamp(1, 1000)))
+                    // A window with no limit asks for the native maximum and flags a full page.
+                    .num(
+                        "limit",
+                        f64::from(
+                            limit
+                                .unwrap_or(if from_ms.is_some() { 1000 } else { 500 })
+                                .clamp(1, 1000),
+                        ),
+                    )
                     .opt_num("startTime", from_ms)
                     .opt_num("endTime", to_ms),
                 Request::Orders {
                     root,
                     rows: Vec::new(),
                     invalid: false,
+                    open_window: from_ms.is_some() && limit.is_none(),
                 },
                 true,
             ),
@@ -462,7 +479,12 @@ impl AsterDex {
                 to_ms,
                 limit,
             } => {
-                if let Some((from, to)) = from_ms.zip(to_ms) {
+                // A start alone with no limit walks up to now, not one page from the start.
+                let open_end = limit
+                    .is_none()
+                    .then(|| cx.protocol_now().floor())
+                    .filter(|end| from_ms.is_some_and(|from| *end > from));
+                if let Some((from, to)) = from_ms.zip(to_ms.or(open_end)) {
                     let limit = limit.unwrap_or(1000).clamp(1, 1000);
                     self.next_income_page(
                         cx,
@@ -662,6 +684,7 @@ impl AsterDex {
                 .or_else(|| native_error(r.body)),
             Err(e) => Some(e.into()),
         };
+        let mut full_page = false;
         let (root, invalid, result) = match request {
             Request::Fills {
                 root,
@@ -723,7 +746,9 @@ impl AsterDex {
                 root,
                 mut rows,
                 invalid,
+                open_window,
             } => {
+                full_page = open_window && rows.len() >= 1000;
                 rows.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
                 (root, invalid, serde_json::to_string(&rows))
             }
@@ -776,6 +801,23 @@ impl AsterDex {
             result.map_err(|e| e.to_string())
         };
         let _ = match result {
+            Ok(data) if full_page => {
+                let Owner::Command { id, .. } = root.owner() else {
+                    let _ = cx.done_context(&root, data);
+                    return;
+                };
+                match ReadCompletion::from_context(cx, id, root.clone()) {
+                    Ok(mut completion) => {
+                        completion.incomplete(
+                            safe_cex_engine::history::IncompleteReason::PageFull,
+                            "history is INCOMPLETE: Aster orders read one page and it was full",
+                        );
+                        let _ = completion.finish(cx, Ok(data));
+                        return;
+                    }
+                    Err(error) => cx.fail_context(&root, error.read_venue_error()),
+                }
+            }
             Ok(data) => cx.done_context(&root, data),
             Err(error) => cx.fail_context(&root, error),
         };

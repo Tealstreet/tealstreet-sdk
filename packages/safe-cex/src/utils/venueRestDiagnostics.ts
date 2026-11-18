@@ -291,16 +291,14 @@ const endpointOf = (config: unknown): string | undefined => {
 };
 
 /**
- * Record whether the proxy-auth interceptor attached a credential.
- *
- * Stamped on the CONFIG rather than inferred from the headers, because after
- * the interceptor declines to send an empty `Bearer ` there is no header left
- * to read — and "no auth header" would then be indistinguishable from "this
- * request never went through the proxy". The stamp says which.
+ * Record that the proxy-auth interceptor attached a credential (it refuses the
+ * request rather than send none). Stamped on the CONFIG so that a missing header
+ * at failure time reads as "lost on the way", distinct from "this request never
+ * went through the proxy".
  */
-export const markRestProxyHeader = <T>(config: T, shape: 'present' | 'empty'): T => {
+export const markRestProxyHeader = <T>(config: T): T => {
   try {
-    (config as Record<string, unknown>)[PROXY_HEADER] = shape;
+    (config as Record<string, unknown>)[PROXY_HEADER] = 'present';
   } catch {
     /* a sealed config must not be able to fail the request */
   }
@@ -329,7 +327,7 @@ export const markRestProxyHeader = <T>(config: T, shape: 'present' | 'empty'): T
  */
 const proxyHeaderOf = (config: unknown): 'bearer' | 'malformed' | 'absent' | undefined => {
   const stamped = (config as Record<string, unknown> | undefined)?.[PROXY_HEADER];
-  if (stamped !== 'present' && stamped !== 'empty') return undefined;
+  if (stamped !== 'present') return undefined;
 
   const sent = readHeaders((config as { headers?: unknown } | undefined)?.headers, [
     'authorization',

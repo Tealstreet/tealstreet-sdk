@@ -1,0 +1,68 @@
+# Native remote signer
+
+`remote_account` installs opaque identities and forwards signing work over the
+existing device `sign-req` / `sign-res` channel. Credentials and private signer
+setup are removed from engine options before construction.
+
+Public mode is resolved before custody validation or reference installation.
+Explicit public requests, including captured `publicMode.requested`, return
+empty signing identities and an inert provider without a device link. KuCoin
+Futures/Spot accounts without a public key also resolve to this public capsule.
+Captured intent takes precedence over the legacy `publicDataOnly` flag. Unused
+credential/setup fields are stripped, and all signing capabilities refuse.
+
+Private KuCoin Futures and Spot use the existing `kucoin-batch` device format.
+Private setup installs a passphrase reference; its value stays with the device and is
+neither required nor retained by this host. Complete public `extra.kucoinBroker`
+partner/name metadata also installs an optional broker reference. A supplied
+`brokerKey` is stripped from engine options; the device resolves its own key.
+Native secondary remote credentials remain unsupported.
+
+The provider admits the closed atomic graph: present the owned public credential,
+HMAC the exact byte preimage, HMAC the owned passphrase credential, and optionally
+HMAC the public broker prefix plus the owned public credential. The descriptor
+carries only `{slot: "primary", payload, brokerPrefix?}`. Neither private material
+nor opaque references cross the device wire. Credential-only presentation stays
+local; partial graphs and raw passphrase presentation refuse before device I/O.
+
+One reply must contain the selected public credential and exactly two or three
+canonical base64 SHA-256 MACs. A wrong account, malformed MAC or partial reply
+refuses the entire batch; no fallback or partial result is published. The engine
+receipt remains attached to the original graph.
+
+Run `cargo test --locked -j2 -p safe-cex-remote-signer` from `sdk-rs` for native
+setup/provider/link tests. KuCoin tests drive the actual registry device codec
+and compare every result byte with an independent LocalSigner control.
+
+Private AsterDEX V1 uses the existing `asterdex-hmac` device codec with
+`{slot:"primary", payload}`. Only the owned credential/HMAC two-operation graph
+is sent; credential-only presentation stays local. The atomic reply must contain
+that public credential and one canonical lowercase SHA-256 MAC. Partial, foreign,
+extra-field or malformed replies refuse without publishing any result. The
+original receipt survives unchanged. The serialized UTF-8 descriptor, including
+its JSON envelope and escaping, must fit the inclusive 1 MiB device limit;
+oversized descriptors refuse before device I/O. Wallet/address graphs and
+nonce-bearing V3 work remain unsupported by this V1 bridge.
+
+Admission `join_proof` waits reuse the same pending ID map. They return the actual
+receiving socket plus bounded original JSON to the server's closed proof decoder;
+legacy Value responses cannot settle these waits. Suspend, attach, disposal and
+dropped waits retire them without replay. Ordinary signing requests retain their
+existing bounded park/resume behavior. Routing a reply is not proof verification
+and never grants account authority.
+
+`RemoteAccount::public_binding_source` exposes only the original provider's
+public binding and opaque signing reference. It performs no setup or device IO
+and grants no signing authority. The account-owned handover barrier must still
+wait for the original sign/setup jobs to join; the read-only source never owns
+the protected resident or replaces engine-owned seals and nonce state.
+
+GRVT address validation remains with canonical engine construction. Missing or
+malformed metadata stays unbound and cannot authorize a handover; the engine
+retains its existing private-init refusal before any order dispatch.
+
+Fresh native Schnorr construction can consume `with_registered_public_key` with
+validated routed metadata before exposing the provider. Published handles, prior
+provider use and foreign families refuse this construction-only pin; later key
+rotation cannot change it. Older unpinned providers remain distinguishable from
+ones whose original registration was captured.

@@ -51,8 +51,10 @@ class MemoryRedis implements RedisLikeMarketCacheClient {
 const market = (id: string): Market =>
   ({
     id,
-    symbol: id,
-  }) as Market;
+    symbol: id, base: '', quote: '', active: true,
+    precision: { amount: 1, price: 1 },
+    limits: { amount: { min: 0, max: 0 }, leverage: { min: 1, max: 1 } },
+  });
 
 describe('PublicExchangeFactory', () => {
   beforeEach(() => {
@@ -62,7 +64,7 @@ describe('PublicExchangeFactory', () => {
     createPublicExchange.mockImplementation(async (name, options) => {
       Object.setPrototypeOf(
         mockExchange,
-        options?.engine === 'rust' || name === 'tealstreet-dex' ? RustEngineExchange.prototype : Object.prototype,
+        options?.engine === 'rust' || name === 'woofi' ? RustEngineExchange.prototype : Object.prototype,
       );
       return mockExchange;
     });
@@ -179,7 +181,7 @@ describe('PublicExchangeFactory', () => {
       ...market('BTC-30DEC26-100000-C'),
       info: { symbolType: '', instrumentKind: 'CALL', expiry: 1798588800, strike: 100000 },
       option: { underlying: 'BTC', expiry: 1798588800, strike: 100000, right: 'call', style: 'european', settlement: 'cash', settleAsset: 'USDC', premiumAsset: 'USDC' },
-    } as Market;
+    } satisfies Market;
     mockExchange.fetchMarkets.mockResolvedValueOnce([linear]).mockResolvedValueOnce([linear, option]);
     const defaultFactory = new PublicExchangeFactory({ redis, now, exchangeOptions: { engine: 'rust' } });
     const combinedOptions = { engine: 'rust' as const, enableInverseMarkets: true, enableOptionMarkets: true };
@@ -213,14 +215,14 @@ describe('PublicExchangeFactory', () => {
     mockExchange.fetchMarkets.mockResolvedValueOnce([market('MAINNET')]).mockResolvedValueOnce([market('TESTNET')]);
     const main = new PublicExchangeFactory({ redis, now });
     const test = new PublicExchangeFactory({ redis, now, exchangeOptions: { testnet: true } });
-    expect((await main.get('tealstreet-dex')).markets[0].id).toBe('MAINNET');
-    expect((await test.get('tealstreet-dex')).markets[0].id).toBe('TESTNET');
+    expect((await main.get('woofi')).markets[0].id).toBe('MAINNET');
+    expect((await test.get('woofi')).markets[0].id).toBe('TESTNET');
     expect(mockExchange.start).toHaveBeenCalledTimes(2);
     expect(mockExchange.fetchMarkets).toHaveBeenCalledTimes(2);
     const warmMain = new PublicExchangeFactory({ redis, now });
     const warmTest = new PublicExchangeFactory({ redis, now, exchangeOptions: { testnet: true } });
-    expect((await warmMain.get('tealstreet-dex')).markets[0].id).toBe('MAINNET');
-    expect((await warmTest.get('tealstreet-dex')).markets[0].id).toBe('TESTNET');
+    expect((await warmMain.get('woofi')).markets[0].id).toBe('MAINNET');
+    expect((await warmTest.get('woofi')).markets[0].id).toBe('TESTNET');
     expect(mockExchange.start).toHaveBeenCalledTimes(2);
     expect(mockExchange.fetchMarkets).toHaveBeenCalledTimes(2);
   });

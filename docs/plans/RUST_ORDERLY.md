@@ -7,10 +7,10 @@ Full auto; no master, stash, rebase or force-push. PR targets `feat/rust-rewrite
 ## Scope and design
 
 One `safe-cex-venue-orderly` crate under `sdk-rs/venues/orderly` with a typed
-broker option. Registered aliases: kodiakfi, mode, salsadex, tealstreet-dex,
-what, woofi. All share the existing EVM REST/WS hosts and Tealstreet broker
-UUID; regular order tags respectively TEALKODIAK, TEALMODE, TEALSALSA,
-TEALSTREET, TEALWHAT, TEALSTREET. Testnet selects its own hosts and broker UUID.
+broker option. Registered aliases: kodiakfi, mode, what, woofi. All share the
+existing EVM REST/WS hosts and Tealstreet broker
+UUID; regular order tags respectively TEALKODIAK, TEALMODE, TEALWHAT,
+TEALSTREET. Testnet selects its own hosts and broker UUID.
 No TS method transcription or generic JSON values. Borrowed typed payloads,
 streamed large REST arrays, sans-I/O state machines, ED25519 from crypto.
 
@@ -278,7 +278,7 @@ plans. Orderly uses that shared transport; its provisional adapter is removed.
 The shared HTTP path guards Orderly method, routed URL, body, venue headers and
 request signal before dispatch, while allowing intermediary authorization
 headers. Raw HOW preserves decimal lexemes and IDs in requests and responses,
-so all six brokers advertise tunnel support again. Deterministic wire tests
+so all four brokers advertise tunnel support again. Deterministic wire tests
 cover all six aliases and testnet. Direct/custom/proxy, cancellation, mutation
 rejection and native policy regressions use the shared transport boundary.
 SDK startup retains memoization, default loading, prompt disposal and explicit

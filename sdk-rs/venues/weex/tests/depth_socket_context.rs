@@ -1,4 +1,5 @@
 //! Original runtime boundaries; all authority comes from real engine admission.
+use safe_cex_engine::ControlFrame;
 mod support;
 
 use safe_cex_engine::book::Book;
@@ -286,13 +287,13 @@ fn exact_cleanup(out: &Trace, issued: Option<&Issued>) {
 }
 
 #[test]
-fn depth_waits_for_prepare_with_primary_unsigned_twenty_second_bound() {
+fn depth_waits_for_prepare_with_primary_unsigned_discovery_bound() {
     let (mut d, _) = public();
     let out = d.subscribe(NOW + 1., A, true);
     let issued = prepared(&out);
     assert_eq!(issued.intent, RoutingIntent::Primary);
     assert_eq!(issued.deadline, NOW + 1. + LIMIT);
-    assert_eq!(issued.request.timeout_ms, Some(20_000));
+    assert_eq!(issued.request.timeout_ms, Some(LIMIT as u32));
     assert_eq!(
         issued.request.url,
         "https://api-contract.weex.com/capi/v3/market/depth?limit=200&symbol=BTCUSDT"
@@ -778,6 +779,8 @@ impl Venue for RetirementPressure {
                 controls: ControlPolicy::Native,
                 invalidation: Invalidation::Required,
                 subscription_interval_ms: 0.,
+                close_floors: &[],
+                data_silence: None,
             })
             .expect("genuine foreign feed registration"),
         );
@@ -866,7 +869,10 @@ impl Venue for RetirementPressure {
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if Some(socket) == self.foreign_socket {
-            cx.send(socket, "fixture:foreign-positive");
+            cx.send(
+                socket,
+                ControlFrame::subscription("fixture:foreign-positive"),
+            );
         } else {
             self.inner.on_message(cx, socket, text);
         }
@@ -1137,7 +1143,8 @@ fn physical_depth_timeout(held: bool) {
             }
             Action::Notice(safe_cex_engine::Notice::Event(event))
                 if event.code == safe_cex_engine::log::code::REQUEST_FAILED
-                    && event.message == "WEEX: HTTP request timed out" =>
+                    && event.message
+                        == "WEEX: Request timed out (class=read budget=20000ms elapsed=20000ms)" =>
             {
                 diagnostics += 1
             }
@@ -1146,6 +1153,9 @@ fn physical_depth_timeout(held: bool) {
             {
                 assert!(retry.replace((*timer, *at_ms)).is_none());
             }
+            // The rig's public socket stays silent, so this notice is true here.
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::PUBLIC_FEED_UNAVAILABLE => {}
             _ => panic!("unexpected physical-timeout effect: {action:?}"),
         }
     }

@@ -9,6 +9,16 @@ import {
   createCoinbaseSocketAudit,
   installSynchronousEs256,
 } from './coinbase-protocol.mjs';
+import {
+  createDrbSocketAudit,
+  drbRequestBody,
+  drbSocketReplies,
+  isDrbUrl,
+  isDrbWrite,
+  isRustOnlyTape,
+  verifyDrbRequest,
+  verifyDrbSocketMessage,
+} from './coinbase-drb-tape.mjs';
 import { installSynchronousDigest } from './sync-webcrypto.mjs';
 import {
   APEX_SEED,
@@ -19,14 +29,14 @@ import {
   validateApexRequest,
 } from './apexomni-protocol.mjs';
 import { createRequire } from 'node:module';
-import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols } from './binance-protocol.mjs';
+import { createBinanceSpotSocketAudit, prepareBinanceSpot, prepareBinancePmPublic, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols } from './binance-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { hyperliquidspot } from './hyperliquidspot.mjs';
 import { createHyperliquidRequestValidator } from './hyperliquid-protocol.mjs';
 import { krakenspot } from './krakenspot.mjs';
 import { kucoin } from './kucoin.mjs';
 import { kucoinspot } from './kucoinspot.mjs';
-import { breakoutprop } from './breakoutprop-requests.mjs';
+import { bingxspot } from './bingxspot.mjs';
 import { polymarket } from './polymarket.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 import {
@@ -200,18 +210,14 @@ export const ORDERLY_REPLAY = {
   publicApplicationId: 'OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY',
 };
 export const ORDERLY_BROKERS = {
-  'tealstreet-dex': 'TEALSTREET',
   kodiakfi: 'TEALKODIAK',
   mode: 'TEALMODE',
-  salsadex: 'TEALSALSA',
   what: 'TEALWHAT',
   woofi: 'TEALSTREET',
 };
 const orderlyClasses = {
-  'tealstreet-dex': 'TealstreetDEXExchange',
   kodiakfi: 'KodiakFIExchange',
   mode: 'MODEExchange',
-  salsadex: 'SalsaDEXExchange',
   what: 'WhatExchange',
   woofi: 'WoofiExchange',
 };
@@ -265,7 +271,7 @@ const orderlyAuth = (message) => {
   );
 };
 const orderly = (alias) => {
-  const name = alias === 'orderly' ? 'tealstreet-dex' : alias;
+  const name = alias === 'orderly' ? 'woofi' : alias;
   return {
     family: 'orderly',
     virtualPrivateClock: true,
@@ -788,10 +794,17 @@ const coinbase = (name) => ({
     || Boolean(store.loaded.markets && store.loaded.tickers && exchange.publicWebsocket?.isConnected),
   tsBooksSubscribed: (exchange, count) =>
     Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('level2.')).length >= count,
-  verifyRequest: verifyCoinbaseRequest,
-  verifySubscribe: verifyCoinbaseSubscribe,
+  // INTX private state is on the drb gateway; its tape replays Rust only.
+  verifyRequest: (request) => (isDrbUrl(request.url) ? verifyDrbRequest : verifyCoinbaseRequest)(request),
+  verifySubscribe: (message) => message?.jsonrpc === '2.0' || verifyCoinbaseSubscribe(message),
+  validateSocketMessage: (socket, text) => {
+    if (!isDrbUrl(socket.url)) return;
+    if (!verifyDrbSocketMessage(socket.url, JSON.parse(text))) throw new Error(`invalid drb socket request on ${socket.url}`);
+  },
+  requestBody: drbRequestBody,
+  socketReplies: drbSocketReplies,
   subscriptionMessage: coinbaseSubscription,
-  createSocketAudit: createCoinbaseSocketAudit,
+  createSocketAudit: (impl, context) => (isRustOnlyTape(context.records) ? createDrbSocketAudit : createCoinbaseSocketAudit)(impl, context),
   streamOf: (text) => {
     try {
       const message = JSON.parse(text);
@@ -816,7 +829,7 @@ const coinbase = (name) => ({
   // must not leave it seconds ahead of a rewound clock.
   monotonicReplayClock: true,
   loadTs: ({ isPrivate }) => { if (isPrivate) installSynchronousEs256(); },
-  isWrite: (method) => method !== 'GET',
+  isWrite: (method, url) => (isDrbUrl(url) ? isDrbWrite(url) : method !== 'GET'),
   generatedBodyId: (key, value) =>
     key === 'client_order_id' && typeof value === 'string' && value.startsWith('tealstreet-'),
 });
@@ -833,6 +846,8 @@ function validBitunixSignature(key, nonce, timestamp, sign, query, body) {
 export const VENUES = {
   txflow: {
     rust: 'txflow',
+    // Agent actions use the fixed testnet domain; an explicit default is wire-equivalent.
+    defaultBodyValues: { signatureChainId: 2511 },
     independentLeverage: true,
     options: { testnet: true },
     virtualPrivateClock: true,
@@ -858,7 +873,6 @@ export const VENUES = {
     tsBooksSubscribed: (exchange, count) => exchange.nodeSocket?.bookListeners.size >= count,
     tsSettings: (_exchange, store) => Object.entries(store.fetchedLeverage).map(([symbol, setting]) => ({ symbol, ...setting })),
   },
-  breakoutprop,
   grvt: (() => {
     // Public deterministic replay key. Never use this well-known key for funds.
     const secret = '0x' + '01'.repeat(32);
@@ -1755,6 +1769,7 @@ export const VENUES = {
         };
       }),
   },
+  bingxspot,
   bingx: {
     rust: 'bingx',
     virtualPrivateClock: true,
@@ -1994,6 +2009,7 @@ export const VENUES = {
     privateSocket: name === 'binancespot' ? '/ws-api/v3' : name === 'binancepm' ? '/pm/ws' : name === 'binanceinverse' ? '/ws/' : '/private/ws',
     volatileBodyFields: true,
     ...(name === 'binanceinverse' ? { coinNativeAmounts: true } : {}),
+    ...(name === 'binancepm' ? { prepareTs: prepareBinancePmPublic } : {}),
     ...(name === 'binancespot' ? {
       compareFillPrices: true,
       compareCoins: true,
@@ -2011,6 +2027,14 @@ export const VENUES = {
       prepareTs: prepareBinanceSpot,
     } : {}),
   }])),
+  binanceoptions: {
+    rust: 'binanceoptions', virtualPrivateClock: true, polling: true,
+    tsBooksSubscribed: (_exchange, count) => count === 0,
+    requestKey: typedRequest, validateRequest: validateBinanceRequest,
+    ts: { module: `${root}/binance/binanceoptions.exchange.ts`, className: 'BinanceOptionsExchange', name: 'binanceoptions' },
+    volatileBodyFields: true,
+    isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
+  },
   polymarket,
   kucoin: {
     ...kucoin,
@@ -2028,11 +2052,19 @@ export const VENUES = {
   ...Object.fromEntries(['okx', 'okxeu', 'okxdemo', 'okxeudemo'].map((name) => [name, okx(name)])),
 };
 
-export const venueOf = (name) => {
-  const venue = VENUES[name];
-  if (!venue) throw new Error(`unknown venue ${name}; known: ${Object.keys(VENUES).join(', ')}`);
+const lookupVenue = (name, replay) => {
+  const venue = Object.hasOwn(VENUES, name) ? VENUES[name] : undefined;
+  if (!venue || (!replay && venue.rustFixture)) {
+    const names = Object.keys(VENUES).filter(key => replay || !VENUES[key].rustFixture);
+    throw new Error(`unknown venue ${name}; known: ${names.join(', ')}`);
+  }
   return venue;
 };
+
+// Live recording/smoke lookup must never admit a fixture-only constructor.
+export const venueOf = name => lookupVenue(name, false);
+// Offline gate/replay callers explicitly select the qualification registry.
+export const replayVenueOf = name => lookupVenue(name, true);
 
 /** Every axios instance the exchange owns, so all of its REST goes to the tape. */
 export const axiosClients = (exchange) =>

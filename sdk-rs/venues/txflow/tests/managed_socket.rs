@@ -1,3 +1,4 @@
+use account::signer;
 #[path = "support/account.rs"]
 mod account;
 #[path = "support/mod.rs"]
@@ -86,7 +87,7 @@ impl Rig {
             testnet: true,
             public_data_only: !private,
             application_id: private.then(|| account::WALLET.into()),
-            secret: private.then(|| format!("0x{:064x}", 1)),
+            credentials: if private { signer::identity() } else { None },
             ..Default::default()
         }));
         Self::connecting(engine, policy)
@@ -96,7 +97,7 @@ impl Rig {
 impl<V: Venue> Rig<V> {
     fn connecting(mut engine: Engine<V>, policy: PublicFeedPolicy) -> (Self, Vec<Action>) {
         engine.set_public_feed_policy(policy).unwrap();
-        engine.start(account::NOW);
+        signer::start(&mut engine, account::NOW);
         let mut rig = Self {
             engine,
             now: account::NOW,
@@ -380,7 +381,7 @@ fn released_private_batch_precedes_opening_refresh() {
 #[test]
 fn native_wire_roles_and_first_frame_then_150ms_pacing() {
     let (mut rig, startup) = Rig::with_policy(true, PublicFeedPolicy::Direct);
-    assert!(startup.iter().any(|action| matches!(action, Action::WsConnect { socket, channel: Some(SocketChannel::Private), .. } if *socket == rig.node)));
+    assert!(startup.iter().any(|action| matches!(action, Action::WsConnect { socket, channel: Some(SocketChannel::Private), public_topics: true, .. } if *socket == rig.node)));
     assert!(startup.iter().any(|action| matches!(action, Action::WsConnect { socket, channel: Some(SocketChannel::Public), .. } if Some(*socket) == rig.api)));
     assert_eq!(sent(&rig.open(true), rig.socket(true)), [API_SUB]);
     let at = rig.now;
@@ -420,7 +421,7 @@ fn shared_and_disabled_preserve_private_topics_and_financial_data() {
     for policy in [PublicFeedPolicy::Shared, PublicFeedPolicy::Disabled] {
         let (mut rig, startup) = Rig::with_policy(true, policy);
         assert!(rig.api.is_none());
-        assert!(startup.iter().any(|action| matches!(action, Action::WsConnect { socket, channel: Some(SocketChannel::Private), .. } if *socket == rig.node)));
+        assert!(startup.iter().any(|action| matches!(action, Action::WsConnect { socket, channel: Some(SocketChannel::Private), public_topics: false, .. } if *socket == rig.node)));
         let mut trace = rig.open(false);
         trace.extend(rig.advance(rig.now + 450.0));
         assert_eq!(
@@ -565,12 +566,12 @@ fn missing_private_address_rejects_setup_without_artificial_socket_or_account_wo
         public_data_only: false,
         application_id: None,
         vault: None,
-        secret: Some(format!("0x{:064x}", 1)),
+        credentials: signer::identity(),
         ..Default::default()
     };
     assert!(options.validate().is_err());
     let mut engine = safe_cex_engine::test_support::seeded_engine(TxFlow::new(options));
-    engine.start(account::NOW);
+    signer::start(&mut engine, account::NOW);
     let actions: Vec<_> = engine.drain_actions().collect();
     assert!(actions.iter().any(|action| matches!(action,
         Action::Notice(safe_cex_engine::Notice::Event(event))
@@ -862,6 +863,8 @@ impl Venue for Pressure {
                 controls: ControlPolicy::None,
                 invalidation: Invalidation::None,
                 subscription_interval_ms: 0.,
+                close_floors: &[],
+                data_silence: None,
             })?;
             self.spare = Some(spare);
             for _ in 0..MAX_FEEDS {
@@ -904,7 +907,7 @@ fn real_proposal_capacity_refusal_frees_then_reconnects_and_refreshes_once() {
         inner: TxFlow::new(Options {
             testnet: true,
             application_id: Some(account::WALLET.into()),
-            secret: Some(format!("0x{:064x}", 1)),
+            credentials: signer::identity(),
             ..Default::default()
         }),
         inject: true,

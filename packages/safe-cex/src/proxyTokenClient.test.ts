@@ -131,3 +131,99 @@ describe('proxyTokenClient', () => {
     });
   });
 });
+
+describe('proxyTokenClient hung fetch', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('aborts a /api/proxykey fetch after 10 s and frees the single flight for the next caller', async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    const signals: AbortSignal[] = [];
+    const fetchMock = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          signals.push(init.signal!);
+          init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { refreshProxyToken } = await import('./proxyTokenClient');
+    const first = refreshProxyToken();
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(signals[0].aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(first).resolves.toBe('');
+    expect(signals[0].aborted).toBe(true);
+    // The single flight was released: the next caller fetches again instead of joining the hung one.
+    void refreshProxyToken();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('proxyTokenClient failure cause', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps the last /api/proxykey failure until a token arrives', async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    const replies: Array<() => Promise<Response>> = [
+      async () => new Response('{"error":"Unauthorized"}', { status: 401 }),
+      async () => Promise.reject(new TypeError('Failed to fetch')),
+      async () => new Response('{}', { status: 200 }),
+      (() => new Promise<Response>(() => {})) as () => Promise<Response>,
+      async () => new Response(JSON.stringify({ token: jwt.sign({ exp: 4_102_444_800 }, 'k') }), { status: 200 }),
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init: RequestInit) => {
+        const reply = replies.shift()!;
+        return new Promise<Response>((resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+          reply().then(resolve, reject);
+        });
+      }),
+    );
+    const { lastProxyKeyFailure, refreshProxyToken } = await import('./proxyTokenClient');
+    expect(lastProxyKeyFailure()).toBeUndefined();
+    await refreshProxyToken();
+    expect(lastProxyKeyFailure()).toBe('/api/proxykey answered HTTP 401');
+    await refreshProxyToken();
+    expect(lastProxyKeyFailure()).toBe('/api/proxykey failed: network error');
+    await refreshProxyToken();
+    expect(lastProxyKeyFailure()).toBe('/api/proxykey returned no token');
+    const hung = refreshProxyToken();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await hung;
+    expect(lastProxyKeyFailure()).toBe('/api/proxykey timed out after 10 s');
+    await refreshProxyToken();
+    expect(lastProxyKeyFailure()).toBeUndefined();
+  });
+
+  it('names that failure when a proxied request gives up waiting for a token', async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{"error":"Unauthorized"}', { status: 401 })),
+    );
+    const { refreshProxyToken } = await import('./proxyTokenClient');
+    const { tealstreetTransport } = await import('./transport/tealstreet/tealstreetTransport');
+    await refreshProxyToken();
+    const route = tealstreetTransport.rest({
+      exchange: 'blofin',
+      options: { key: 'k', secret: 's', tealstreetProxy: true },
+      config: { baseURL: 'https://openapi.blofin.com' },
+    } as never);
+    const authorized = route.authorize!({ headers: {} } as never).catch((error: Error) => error);
+    await vi.advanceTimersByTimeAsync(15_500);
+    expect(String(await authorized)).toContain(
+      '[blofin] Tealstreet proxy authorization missing: no proxy token within 15s (/api/proxykey answered HTTP 401), so the private request was not sent',
+    );
+  });
+});

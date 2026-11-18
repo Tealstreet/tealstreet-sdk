@@ -1,5 +1,6 @@
 //! Original timing controls; the explicit progress mapping changes at API adoption.
 #![cfg(feature = "managed-sockets")]
+use safe_cex_engine::ControlFrame;
 mod support;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
@@ -50,6 +51,8 @@ impl Venue for Native {
             controls: ControlPolicy::Native,
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
+            close_floors: &[],
+            data_silence: None,
         };
         let feed = if self.snapshot {
             cx.register_socket_feed_with_snapshot(policy)
@@ -93,7 +96,10 @@ impl Venue for Native {
                 self.challenge = false;
                 self.acks = 0;
                 if self.waiting_challenge {
-                    cx.send(epoch.socket(), "key-challenge");
+                    cx.send(
+                        epoch.socket(),
+                        ControlFrame::authentication("key-challenge"),
+                    );
                 }
             }
             LifecycleEvent::Ready { .. } => self.ready += 1,
@@ -128,6 +134,9 @@ impl Venue for Native {
     }
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, text: &str) {
         self.messages += 1;
+        if text == "ordinary-data" {
+            cx.record_socket_topic(&["ordinary-interest"]);
+        }
         if text
             .strip_prefix("challenge:")
             .is_some_and(|s| !s.is_empty())
@@ -137,9 +146,13 @@ impl Venue for Native {
             self.challenge = true;
             self.accepted_challenges += 1;
             if self.signed_auth {
-                cx.send_signed(socket, "auth-subscription".into(), Box::new(AuthRecipe));
+                cx.send_signed(
+                    socket,
+                    ControlFrame::authentication("auth-subscription"),
+                    Box::new(AuthRecipe),
+                );
             } else {
-                cx.send(socket, "auth-subscription");
+                cx.send(socket, ControlFrame::authentication("auth-subscription"));
             }
         }
         if text == "ack" && self.challenge {
@@ -593,4 +606,125 @@ fn parked_old_signer_cannot_release_after_real_reconnect() {
     assert_eq!(h.sends("ordinary-interest"), 0);
     assert!(!h.closed(h.socket));
     assert_ne!(h.engine.venue().epochs[0], h.engine.venue().epochs[1]);
+}
+
+mod allocation_budget {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct Count {
+        pub calls: usize,
+        pub bytes: usize,
+    }
+    thread_local! {
+        static COUNT: Cell<Option<Count>> = const { Cell::new(None) };
+    }
+    pub struct Allocator;
+    fn note(bytes: usize) {
+        let _ = COUNT.try_with(|slot| {
+            if let Some(mut count) = slot.get() {
+                count.calls += 1;
+                count.bytes += bytes;
+                slot.set(Some(count));
+            }
+        });
+    }
+    unsafe impl GlobalAlloc for Allocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            note(layout.size());
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            note(layout.size());
+            unsafe { System.alloc_zeroed(layout) }
+        }
+        unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            note(size);
+            unsafe { System.realloc(pointer, layout, size) }
+        }
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(pointer, layout) }
+        }
+    }
+    pub fn measure<T>(run: impl FnOnce() -> T) -> (T, Count) {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                COUNT.with(|slot| slot.set(None));
+            }
+        }
+        COUNT.with(|slot| {
+            assert!(slot.get().is_none());
+            slot.set(Some(Count::default()));
+        });
+        let reset = Reset;
+        let result = run();
+        let count = COUNT.with(|slot| slot.get().unwrap());
+        drop(reset);
+        (result, count)
+    }
+}
+#[global_allocator]
+static ALLOCATOR: allocation_budget::Allocator = allocation_budget::Allocator;
+
+#[test]
+fn managed_socket_core_keeps_the_baseline_allocation_budget_and_wire_order() {
+    let (_, timer_table) = allocation_budget::measure(|| HashMap::<TimerId, ()>::with_capacity(1));
+    let (_, fixture_table) =
+        allocation_budget::measure(|| HashMap::<TimerId, f64>::with_capacity(1));
+    assert_eq!(timer_table.calls, 1);
+    assert_eq!(fixture_table.calls, 1);
+    // Baseline ARM64 tables are 44/76 B; x86-64 hashbrown control groups add
+    // 8 B per table. Calibrate only those two existing startup allocations.
+    let start_bytes = 24593 - 44 - 76 + timer_table.bytes + fixture_table.bytes;
+    // Each existing IoCore default allocates a repair issuer only in this mode.
+    let start_calls = if cfg!(feature = "repair-mutations") {
+        34
+    } else {
+        32
+    };
+    let (mut h, start) = allocation_budget::measure(Harness::new);
+    h.output.reserve(128);
+    h.timers.reserve(32);
+    let (_, open) = allocation_budget::measure(|| h.open(0.));
+    let (_, challenge) = allocation_budget::measure(|| h.message(14_000., "challenge:nonce"));
+    let (_, accepted) = allocation_budget::measure(|| {
+        h.message(18_000., "ack");
+        h.message(18_001., "ack");
+    });
+    let (_, data) = allocation_budget::measure(|| h.message(18_002., "ordinary-data"));
+    let (_, expiry) = allocation_budget::measure(|| h.message(78_002., "too-late"));
+    assert!(h.closed(h.socket));
+    assert_eq!(h.sends("auth-subscription"), 1);
+    assert_eq!(h.sends("ordinary-interest"), 1);
+    let sent: Vec<_> = h
+        .output
+        .iter()
+        .filter_map(|action| match action {
+            Action::WsSend { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        ["key-challenge", "auth-subscription", "ordinary-interest"]
+    );
+    // Baseline from master 7d9554615dc; singleton replay now skips its sort-key allocation.
+    for (actual, calls, bytes) in [
+        (start, start_calls, start_bytes),
+        (open, 8, 3541),
+        (challenge, 5, 2233),
+        (accepted, 16, 3729),
+        (data, 0, 0),
+        (expiry, 10, 3218),
+    ] {
+        assert_eq!(actual.calls, calls, "allocation calls differ: {actual:?}");
+        if cfg!(target_pointer_width = "64") {
+            assert!(
+                actual.bytes <= bytes,
+                "more allocation: {actual:?}, baseline {bytes}"
+            );
+        }
+    }
 }

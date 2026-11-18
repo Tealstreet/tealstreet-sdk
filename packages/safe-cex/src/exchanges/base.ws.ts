@@ -17,11 +17,16 @@ import {
   WS_MIN_RECONNECTION_DELAY,
 } from '../config/config';
 import { LogSeverity } from '../types';
+import { diagnosticConsole, diagnosticText } from '../utils/diagnosticRedaction';
 import {
+  isHeartbeatFrame,
   isWsDiagnosticsEnabled,
   redactWsDiagnosticPayload,
   stringifyWsDiagnosticPayload,
+  WsDiagnosticSampler,
 } from '../utils/wsDiagnostics';
+
+export { isHeartbeatFrame };
 import { MessageHandlers, MessageHandlersStats } from './types';
 
 // Per exchange: the last re-open that triggered a private-state resync, and its socket.
@@ -68,7 +73,7 @@ type WebSocketConnectionOptions = Omit<Options, 'headers'> & {
  */
 const lifecycleLog = (...args: unknown[]): void => {
   if (ENABLE_WS_LIFECYCLE_DEBUG_LOGS) {
-    console.log(...args);
+    diagnosticConsole.log(...args);
   }
 };
 
@@ -79,9 +84,6 @@ const STATS_RECONCILE_INTERVAL_MS = 5000;
 // several fire in a single teardown, so closing many panels at once would
 // otherwise be O(panels x topics).
 const STATS_RECONCILE_FORCE_MIN_MS = 250;
-const WS_DIAGNOSTIC_RATE_WINDOW_MS = 1000;
-const WS_DIAGNOSTIC_MAX_FRAMES_PER_WINDOW = 200;
-const WS_DIAGNOSTIC_MAX_PAYLOAD_CHARS = 4096;
 
 type ModuleWithCreateRequire = {
   createRequire?: (url: string | URL) => (id: string) => unknown;
@@ -172,22 +174,6 @@ export function getCloseCodeDescription(code: number): string {
   return WS_CLOSE_CODE_DESCRIPTIONS[code] || `Unknown close code (${code})`;
 }
 
-export function isHeartbeatFrame(message: string): boolean {
-  const trimmed = message.trim();
-  if (/^(ping|pong)$/i.test(trimmed)) return true;
-
-  try {
-    const payload = JSON.parse(trimmed) as Record<string, unknown>;
-    if (!payload || Array.isArray(payload) || typeof payload !== 'object') return false;
-
-    const heartbeatOperation = [payload.op, payload.type, payload.event, payload.method].some(
-      (value) => typeof value === 'string' && /^(?:server\.)?(?:ping|pong)$/i.test(value),
-    );
-    return heartbeatOperation || Object.hasOwn(payload, 'ping') || Object.hasOwn(payload, 'pong');
-  } catch {
-    return false;
-  }
-}
 
 /*
  * ws onOpen must contain
@@ -277,9 +263,7 @@ export class BaseWebSocket<T extends BaseExchange> {
   private wsErrorLogSignature: string | null = null;
   private wsErrorLogLastAt = 0;
   private wsErrorLogSuppressedCount = 0;
-  private wsDiagnosticWindowStartedAt = 0;
-  private wsDiagnosticFrameCount = 0;
-  private wsDiagnosticSuppressedCount = 0;
+  private wsDiagnosticSampler = new WsDiagnosticSampler();
 
   /**
    * When true, the pong-miss reconnect path is suppressed: any inbound message
@@ -434,36 +418,11 @@ export class BaseWebSocket<T extends BaseExchange> {
   }
 
   private shouldDropWsDiagnostic(): boolean {
-    const now = Date.now();
-    if (now - this.wsDiagnosticWindowStartedAt >= WS_DIAGNOSTIC_RATE_WINDOW_MS) {
-      this.wsDiagnosticWindowStartedAt = now;
-      this.wsDiagnosticFrameCount = 0;
-    }
-
-    this.wsDiagnosticFrameCount += 1;
-    if (this.wsDiagnosticFrameCount <= WS_DIAGNOSTIC_MAX_FRAMES_PER_WINDOW) {
-      return false;
-    }
-
-    this.wsDiagnosticSuppressedCount += 1;
-    return true;
-  }
-
-  private capWsDiagnosticPayload(message: string): string {
-    if (message.length <= WS_DIAGNOSTIC_MAX_PAYLOAD_CHARS) return message;
-    return `${message.slice(0, WS_DIAGNOSTIC_MAX_PAYLOAD_CHARS)}...truncated (${message.length} chars)`;
+    return this.wsDiagnosticSampler.drop();
   }
 
   private emitWsDiagnosticEvent(eventName: 'grafana-pws' | 'grafana-pws-sub', message: string): void {
-    const suppressed = this.wsDiagnosticSuppressedCount;
-    if (suppressed > 0) {
-      this.wsDiagnosticSuppressedCount = 0;
-      this.parent.emitter.emit(
-        eventName,
-        `[${this.parent.name}] suppressed ${suppressed} websocket diagnostic frame(s) due to rate limit`,
-      );
-    }
-    this.parent.emitter.emit(eventName, this.capWsDiagnosticPayload(message));
+    this.wsDiagnosticSampler.emit((text) => this.parent.emitter.emit(eventName, text), this.parent.name, message);
   }
 
   protected emitWsDiagnosticReceive(data: unknown, options: WsDiagnosticReceiveOptions = {}): void {
@@ -537,9 +496,9 @@ export class BaseWebSocket<T extends BaseExchange> {
   lastLog = new RingBuffer<string>(20);
   logLastLog = (message: string) => {
     try {
-      this.lastLog.add(message);
+      this.lastLog.add(diagnosticText(message));
     } catch (e) {
-      console.error('Error adding log to ring buffer from websocket', e);
+      diagnosticConsole.error('Error adding log to ring buffer from websocket', e);
     }
   };
 
@@ -942,7 +901,7 @@ export class BaseWebSocket<T extends BaseExchange> {
     // In reconnect storms, dedupe repeated signatures within cooldown windows.
     const errorMessage = this.getCloseLogMessage(closeCode, closeReason, closeCodeDescription);
     if (errorMessage) {
-      console.error(`[${this.parent.name}] ${errorMessage}`);
+      diagnosticConsole.error(`[${this.parent.name}] ${errorMessage}`);
       this.parent.emitter.emit('grafana-error', errorMessage);
     }
 

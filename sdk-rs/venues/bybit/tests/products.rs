@@ -14,6 +14,57 @@ const OPTIONS: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":
 const QUOTE: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"BTC-25DEC26-100000-C-USDT","bid1Price":"1000","ask1Price":"1010","markPrice":"1005","lastPrice":"1000","markIv":"0.5","bid1Iv":"0.49","ask1Iv":"0.51","underlyingPrice":"99000","delta":"0.4","gamma":"0.01","vega":"12","theta":"-8"}]}}"#;
 
 #[test]
+fn after_failure_option_rejection_keeps_the_later_option() {
+    // TS catches special-order refusal: reference/bybit/bybit.exchange.ts:2969-2985.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: bybit | regular Linear/Inverse create-batch runtime continuation and fallback
+    let mut h = ready(true);
+    let mut first = order(OPTION, 0.1);
+    first.client_order_id = Some("refused-option".into());
+    let mut second = order(OPTION, 0.1);
+    second.client_order_id = Some("later-option".into());
+    h.command(Command::PlaceOrders {
+        command: 170,
+        orders: vec![first, second],
+    });
+    let first = h.take("/v5/order/create");
+    assert!(first.body.as_deref().unwrap().contains("refused-option"));
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"option refused"}"#,
+    );
+    let second = h.take("/v5/order/create");
+    assert!(second.body.as_deref().unwrap().contains("later-option"));
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"accepted-option","orderLinkId":"later-option"}}"#,
+    );
+    assert!(!h.has_request("/v5/order/create"));
+    assert!(h.result(170).is_some());
+    let elements = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 170,
+                error,
+            } => error.elements.as_ref(),
+            _ => None,
+        })
+        .expect("option outcomes after continuation");
+    use safe_cex_engine::write_plan::ElementResult;
+    assert_eq!(elements.len(), 2);
+    assert!(matches!(
+        elements[0].result,
+        ElementResult::NotSent { error: Some(_) }
+    ));
+    assert!(
+        matches!(&elements[1].result, ElementResult::Placed { order_ids } if order_ids == &["accepted-option"])
+    );
+}
+
+#[test]
 fn option_seed_envelope_limit_preserves_reset_headers_and_retries_after_reset() {
     let mut h = Harness::started(options(false));
     respond(&mut h, "instruments-info", "option", None, OPTIONS);
@@ -23,7 +74,10 @@ fn option_seed_envelope_limit_preserves_reset_headers_and_retries_after_reset() 
         .position(|r| r.url.contains("tickers") && r.url.contains("baseCoin=BTC"))
         .unwrap();
     let request = h.requests.remove(index);
-    let headers = format!("X-Bapi-Limit-Reset-Timestamp: {}", h.now + 60_000.0);
+    let headers = format!(
+        "X-Bapi-Limit-Reset-Timestamp: {}",
+        h.engine.signing_clock(h.now).0 + 60_000.0
+    );
     h.event(Event::HttpResponse {
         request: request.id,
         response: safe_cex_engine::Response {
@@ -243,6 +297,7 @@ fn native_options_chain_expiries_greeks_and_iv_order_keep_their_wire_contract() 
             .contains("\"theta\":-4.0")
     );
     let mut opts = order(OPTION, 0.12);
+    opts.price = None;
     opts.implied_volatility = Some(0.6);
     opts.client_order_id = Some("option-caller".into());
     h.command(Command::PlaceOrders {
@@ -303,9 +358,9 @@ fn malformed_option_stream_greeks_preserve_proven_position_and_frame_values() {
                 .find(|(kind, _)| *kind == safe_cex_engine::wire::section::POSITIONS)
                 .unwrap()
                 .1;
-            // One position: count/market/enums/padding + nine f64 columns,
+            // Revision 2: count/market/enums/padding + eleven f64 columns,
             // followed by its exact ID, matching the Greek metadata reference.
-            assert_eq!(&positions[88..92], &section[4..8]);
+            assert_eq!(&positions[104..108], &section[4..8]);
             let values: [f64; 4] = std::array::from_fn(|index| {
                 let at = 16 + index * 8;
                 f64::from_le_bytes(section[at..at + 8].try_into().unwrap())
@@ -420,7 +475,14 @@ fn account_wide_histories_visit_enabled_categories_and_symbol_queries_route_dire
         },
     });
     for category in ["linear", "inverse", "option"] {
+        h.advance(250.0);
         respond(&mut h, "order/history", category, None, EMPTY);
+        for status in ["Cancelled", "Rejected", "Deactivated"] {
+            let request = h.take(&format!("orderStatus={status}"));
+            assert!(request.url.contains(&format!("category={category}")));
+            assert!(!request.url.contains("cursor="));
+            h.reply(request.id, 200, EMPTY);
+        }
     }
     assert_eq!(h.result(91).unwrap().as_ref().unwrap(), "[]");
     h.command(Command::Query {
@@ -1074,9 +1136,10 @@ fn owned_history_category_failure_keeps_sorted_globally_limited_prior_rows() {
                 if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
             {
                 assert_eq!(
-                    event.fields,
+                    event.fields[..1],
                     [("command", safe_cex_engine::Value::Num(811.0))]
                 );
+                assert_eq!(event.fields[1].0, "reason");
                 Some(index)
             }
             _ => None,
@@ -1092,7 +1155,7 @@ fn owned_history_category_failure_keeps_sorted_globally_limited_prior_rows() {
 #[test]
 fn unsupported_order_memory_is_separate_and_persistent_across_product_swaps() {
     let mut h = ready(true);
-    let expected = "Bybit order shared-unsupported has an unsupported type and is not shown";
+    let expected = r#"Bybit order shared-unsupported has an unsupported type (orderType Some("FutureType"), stopOrderType None, createType None, tpslMode None, side None, triggerPrice None) and is not shown"#;
     for round in 0..3 {
         if round > 0 {
             h.advance(15_000.0);
@@ -1349,7 +1412,8 @@ fn option_seeds_are_managed_background_reads() {
         .collect();
     assert!(!seeds.is_empty(), "option seeds requested");
     for seed in seeds {
-        assert_eq!(seed.timeout_ms, Some(20_000), "{} is managed", seed.url);
+        // Option seeds share startup discovery's 60 s read plus 30 s readiness bound.
+        assert_eq!(seed.timeout_ms, Some(90_000), "{} is managed", seed.url);
     }
 }
 
@@ -1417,4 +1481,105 @@ fn greeks_never_re_read_on_text_alone() {
     h.reply(first.id, 401, "error sign: recv_window");
     assert!(!h.has_request("/v5/asset/coin-greeks"));
     assert_eq!(h.done.iter().filter(|(id, _)| *id == 96).count(), 1);
+}
+
+#[test]
+fn one_category_cannot_release_an_account_refresh_slot() {
+    let mut h = ready(true);
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY);
+    }
+    h.command(Command::Venue {
+        command: 90,
+        action: safe_cex_engine::VenueAction::RefreshOrders { symbols: None },
+    });
+    let linear: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime") && r.url.contains("category=linear"))
+        .map(|r| r.id)
+        .collect();
+    assert!(!linear.is_empty());
+    for id in linear {
+        h.requests.retain(|r| r.id != id);
+        h.reply(id, 200, EMPTY);
+    }
+    let outstanding: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    assert!(!outstanding.is_empty(), "inverse and option are still out");
+    h.command(Command::Venue {
+        command: 91,
+        action: safe_cex_engine::VenueAction::RefreshOrders { symbols: None },
+    });
+    let after: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(
+        after, outstanding,
+        "H7: completing linear alone must not permit another complete refresh batch while inverse and option remain out"
+    );
+}
+
+#[test]
+fn parity_exception_unknown_option_halts_later_special_orders() {
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybit.exchange.ts:2969-2985.
+    for status in [Some(200), Some(503), None] {
+        let mut h = ready(true);
+        h.command(Command::PlaceOrders {
+            command: 179,
+            orders: vec![order(OPTION, 0.1); 3],
+        });
+        let first = h.take("/v5/order/create");
+        h.reply(
+            first.id,
+            200,
+            r#"{"retCode":0,"result":{"orderId":"known-prefix"}}"#,
+        );
+        let second = h.take("/v5/order/create");
+        if let Some(status) = status {
+            h.reply(
+                second.id,
+                status,
+                r#"{"retCode":10016,"retMsg":"uncertain"}"#,
+            );
+        } else {
+            h.event(Event::HttpFailed {
+                request: second.id,
+                error: "reply lost",
+            });
+        }
+        support::assert_unknown_pin(&mut h, 179, &["known-prefix"], 1, 3);
+    }
+}
+
+#[test]
+fn pin_option_capability_and_missing_price_refuse_before_any_io() {
+    // TS validates all callers before dispatch: reference/bybit/bybit.exchange.ts:2764-2786,2940-2946.
+    for fault in 0..4 {
+        let mut h = ready(true);
+        h.requests.clear();
+        let mut invalid = order(OPTION, 0.1);
+        match fault {
+            0 => invalid.price = None,
+            1 => invalid.price = Some(0.0),
+            2 => invalid.stop_loss = Some(500.0),
+            _ => invalid.kind = OrderType::Conditional,
+        }
+        h.command(Command::PlaceOrders {
+            command: 180,
+            orders: vec![order("BTCUSDT", 1.0), invalid],
+        });
+        assert!(matches!(h.result(180), Some(Err(_))));
+        assert!(
+            h.requests.is_empty(),
+            "preflight must precede reads and writes"
+        );
+    }
 }

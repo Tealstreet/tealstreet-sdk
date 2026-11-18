@@ -866,7 +866,11 @@ fn healthy_continuation_pages_get_a_full_budget_and_stalled_peer_still_expires()
                 timer: original_deadline,
             },
         );
-        assert!(e.prepared_actions(NOW + 20_000.0).next().is_none());
+        // The rig's public socket stays silent, so its notice is all that is due here.
+        assert!(e.prepared_actions(NOW + 20_000.0).all(|a| matches!(
+            a,
+            Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code == safe_cex_engine::log::code::PUBLIC_FEED_UNAVAILABLE
+        )));
         assert!(!e.store().loaded().orders);
         e.handle(
             NOW + 24_000.0,

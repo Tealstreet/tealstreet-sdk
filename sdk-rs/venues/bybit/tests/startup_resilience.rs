@@ -208,7 +208,10 @@ mod discovery_envelope_limits {
             r#"{"retCode":10006,"retMsg":"Too many visits!","result":{"list":[]}}"#,
         ] {
             let mut h = started();
-            let headers = format!("X-Bapi-Limit-Reset-Timestamp: {}", h.now + 120_000.0);
+            let headers = format!(
+                "X-Bapi-Limit-Reset-Timestamp: {}",
+                h.engine.signing_clock(h.now).0 + 120_000.0
+            );
             reply(&mut h, MARKETS, 200, &headers, body);
             assert!(!h.engine.store().loaded().markets);
             assert_retry_waits(&mut h, MARKETS, 120_000.0);
@@ -226,7 +229,7 @@ mod discovery_envelope_limits {
             h.respond(MARKETS, 200, INSTRUMENTS);
             let headers = format!(
                 "x-BAPI-limit-reset-timestamp: {}\r\nRetry-After: {retry_seconds}",
-                h.now + reset_ms
+                h.engine.signing_clock(h.now).0 + reset_ms
             );
             reply(&mut h, TICKERS_PATH, 200, &headers, LIMITED);
             assert_retry_waits(&mut h, TICKERS_PATH, wait_ms);
@@ -258,7 +261,10 @@ mod discovery_envelope_limits {
         for reset in [true, false] {
             let mut h = started();
             let headers = if reset {
-                format!("X-Bapi-Limit-Reset-Timestamp: {}", h.now + 2000.0)
+                format!(
+                    "X-Bapi-Limit-Reset-Timestamp: {}",
+                    h.engine.signing_clock(h.now).0 + 2000.0
+                )
             } else {
                 "Retry-After: 2".into()
             };
@@ -284,7 +290,10 @@ mod discovery_envelope_limits {
     fn reset_header_on_success_or_other_business_error_does_not_pause_discovery() {
         for success in [true, false] {
             let mut h = started();
-            let headers = format!("X-Bapi-Limit-Reset-Timestamp: {}", h.now + 120_000.0);
+            let headers = format!(
+                "X-Bapi-Limit-Reset-Timestamp: {}",
+                h.engine.signing_clock(h.now).0 + 120_000.0
+            );
             if success {
                 reply(&mut h, MARKETS, 200, &headers, INSTRUMENTS);
                 let read = h.take(TICKERS_PATH);
@@ -309,7 +318,10 @@ mod discovery_envelope_limits {
     #[test]
     fn envelope_reset_cannot_shorten_the_http403_floor() {
         let mut h = started();
-        let headers = format!("X-Bapi-Limit-Reset-Timestamp: {}", h.now + 2000.0);
+        let headers = format!(
+            "X-Bapi-Limit-Reset-Timestamp: {}",
+            h.engine.signing_clock(h.now).0 + 2000.0
+        );
         reply(&mut h, MARKETS, 403, &headers, LIMITED);
         assert_retry_waits(&mut h, MARKETS, 600_000.0);
     }
@@ -317,9 +329,15 @@ mod discovery_envelope_limits {
     #[test]
     fn a_shorter_later_hint_does_not_replace_an_existing_window() {
         let mut h = started();
-        let headers = format!("X-Bapi-Limit-Reset-Timestamp: {}", h.now + 120_000.0);
+        let headers = format!(
+            "X-Bapi-Limit-Reset-Timestamp: {}",
+            h.engine.signing_clock(h.now).0 + 120_000.0
+        );
         reply(&mut h, MARKETS, 200, &headers, LIMITED);
-        let headers = format!("X-Bapi-Limit-Reset-Timestamp: {}", h.now + 30_000.0);
+        let headers = format!(
+            "X-Bapi-Limit-Reset-Timestamp: {}",
+            h.engine.signing_clock(h.now).0 + 30_000.0
+        );
         reply(&mut h, TICKERS_PATH, 200, &headers, LIMITED);
         assert_retry_waits(&mut h, MARKETS, 120_000.0);
     }
@@ -364,7 +382,10 @@ mod discovery_envelope_limits {
             .0;
         h.advance(250.0);
         let inverse = take_category(&mut h, "inverse");
-        let headers = format!("X-Bapi-Limit-Reset-Timestamp: {}", h.now + 60_000.0);
+        let headers = format!(
+            "X-Bapi-Limit-Reset-Timestamp: {}",
+            h.engine.signing_clock(h.now).0 + 60_000.0
+        );
         h.event(Event::HttpResponse {
             request: inverse.id,
             response: safe_cex_engine::Response {

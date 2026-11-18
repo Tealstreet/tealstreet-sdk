@@ -1,0 +1,1291 @@
+//! The Rust twin of packages/safe-cex/src/exchanges/rust/remoteSignerProvider.ts:
+//! engine sign work becomes today's ws-auth `RemoteSignerRequest`, so the
+//! browser's existing signing host answers it unchanged.
+mod apexomni;
+mod coinbase;
+mod kraken;
+mod orderly;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::task::Poll;
+use tokio::time::Instant;
+
+use base64::Engine as _;
+use safe_cex_engine::signing::{
+    Algorithm, Capability, Encoding as PartEncoding, KeyRef, Operation, OwnedSetupExecution,
+    PayloadPart, SignError, SignFuture, SignReceipt, SignRequest, SignResult, Signer,
+};
+use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
+
+use crate::link::{Failure, SignerLink};
+use crate::policy::{Encoding, ExtraData, Policy, Wire};
+
+const MAX_PAYLOAD: usize = 1_048_576;
+const MAX_OPERATIONS: usize = 32;
+const MAX_PARTS: usize = 256;
+const LIGHTER_SIGNATURE: usize = 80;
+/// `WebSocketRemoteSigner.MAX_CONSECUTIVE_FAILURES` and `FATAL_MIN_STREAK_MS`.
+pub const MAX_CONSECUTIVE_FAILURES: u32 = 10;
+pub const FATAL_MIN_STREAK: std::time::Duration = std::time::Duration::from_millis(30_000);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Family {
+    Hmac,
+    ApexOmni,
+    Backpack,
+    Coinbase,
+    Kucoin,
+    Kraken,
+    DoubleSha256,
+    Hyperliquid,
+    Grvt,
+    Lighter,
+    Paradex,
+    Orderly,
+}
+impl Family {
+    pub(crate) fn of(venue: &str) -> Self {
+        match venue {
+            "apexomni" => Self::ApexOmni,
+            "backpack" => Self::Backpack,
+            "coinbase" | "coinbasespot" => Self::Coinbase,
+            "kucoin" | "kucoinspot" => Self::Kucoin,
+            "kraken" => Self::Kraken,
+            "bitunix" => Self::DoubleSha256,
+            "hyperliquid" | "hyperliquidspot" => Self::Hyperliquid,
+            "grvt" => Self::Grvt,
+            "lighter" | "lighter-robinhood" => Self::Lighter,
+            "paradex" => Self::Paradex,
+            "orderly" | "kodiakfi" | "mode" | "what" | "woofi" => Self::Orderly,
+            _ => Self::Hmac,
+        }
+    }
+    fn algorithm(self) -> Algorithm {
+        match self {
+            Self::Hmac | Self::Kucoin | Self::ApexOmni => Algorithm::HmacSha256,
+            Self::Kraken => Algorithm::HmacSha512,
+            Self::Backpack => Algorithm::Ed25519,
+            Self::Coinbase => Algorithm::Es256,
+            Self::DoubleSha256 => Algorithm::Sha256SecretSuffix,
+            Self::Hyperliquid | Self::Grvt => Algorithm::Secp256k1Digest,
+            Self::Lighter => Algorithm::SchnorrDigest,
+            Self::Paradex => Algorithm::StarkDigest,
+            Self::Orderly => Algorithm::Ed25519,
+        }
+    }
+}
+
+/// One owned identity: opaque engine refs plus the public key text the device knows.
+pub(crate) struct Owned {
+    pub credential: KeyRef,
+    pub signing: KeyRef,
+    pub public: Vec<u8>,
+    pub passphrase: Option<KeyRef>,
+    pub passphrase_value: Option<Vec<u8>>,
+    pub broker: Option<KeyRef>,
+    pub zklink_seed: Option<KeyRef>,
+}
+
+#[derive(Default)]
+struct Streak {
+    count: u32,
+    started: Option<Instant>,
+    fired: bool,
+}
+
+pub(crate) struct Inner {
+    pub venue: String,
+    pub family: Family,
+    pub policy: Policy,
+    pub account_name: Option<String>,
+    pub link: Arc<SignerLink>,
+    pub primary: Owned,
+    coinbase: Option<safe_cex_venue_coinbase::sign::Binding>,
+    bound: Mutex<Option<Vec<u8>>>,
+    published: AtomicBool,
+    streak: Mutex<Streak>,
+    on_fatal: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// When each signer warning last reached stderr, so a looping account logs once a minute.
+    warned: Mutex<std::collections::HashMap<&'static str, Instant>>,
+}
+
+/// How often one signer warning of one account reaches the server journal.
+const SIGN_WARN_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn refused<T>() -> Result<T, SignError> {
+    Err(SignError::Refused)
+}
+
+fn nanoid() -> String {
+    const ALPHABET: &[u8; 64] = b"useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
+    let mut bytes = [0u8; 21];
+    getrandom::getrandom(&mut bytes).expect("OS entropy");
+    bytes
+        .iter()
+        .map(|byte| ALPHABET[(byte & 63) as usize] as char)
+        .collect()
+}
+
+fn hex_bytes(text: &str) -> Option<Vec<u8>> {
+    if !text.len().is_multiple_of(2) || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    (0..text.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).ok())
+        .collect()
+}
+
+/// `0x` then exactly `length` bytes of hex.
+fn prefixed(value: &Value, length: usize) -> Result<Vec<u8>, SignError> {
+    let text = value.as_str().ok_or(SignError::Refused)?;
+    let body = text.strip_prefix("0x").ok_or(SignError::Refused)?;
+    if body.len() != length * 2 {
+        return refused();
+    }
+    hex_bytes(body).ok_or(SignError::Refused)
+}
+
+/// One 32-byte MAC in the family's declared presentation; anything else refuses.
+fn mac(value: &Value, encoding: Encoding) -> Result<Vec<u8>, SignError> {
+    let text = value.as_str().ok_or(SignError::Refused)?;
+    let base64_body = |text: &str, data: usize, pad: &str| {
+        text.len() == data + pad.len()
+            && text.ends_with(pad)
+            && text[..data]
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'+' || byte == b'/')
+    };
+    match encoding {
+        Encoding::Hex => {
+            if text.len() != 64 {
+                return refused();
+            }
+            hex_bytes(text).ok_or(SignError::Refused)
+        }
+        Encoding::Base64 => {
+            if !base64_body(text, 43, "=") {
+                return refused();
+            }
+            // Strict decoding refuses nonzero unused pad bits.
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(text)
+                .map_err(|_| SignError::Refused)?;
+            if bytes.len() != 32 {
+                return refused();
+            }
+            Ok(bytes)
+        }
+        Encoding::HexBase64 => {
+            if !base64_body(text, 86, "==") {
+                return refused();
+            }
+            let inner = base64::engine::general_purpose::STANDARD
+                .decode(text)
+                .map_err(|_| SignError::Refused)?;
+            if inner.len() != 64
+                || !inner
+                    .iter()
+                    .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+            {
+                return refused();
+            }
+            hex_bytes(std::str::from_utf8(&inner).map_err(|_| SignError::Refused)?)
+                .ok_or(SignError::Refused)
+        }
+    }
+}
+
+/// A canonical decimal safe integer.
+fn stamp(text: &str) -> Option<f64> {
+    let canonical = text == "0"
+        || (!text.is_empty()
+            && !text.starts_with('0')
+            && text.bytes().all(|byte| byte.is_ascii_digit()));
+    let value: f64 = text.parse().ok()?;
+    (canonical && value <= 9_007_199_254_740_991.).then_some(value)
+}
+
+/// Decode only the declared prepared WS grammar; never draw a new timestamp.
+fn ws_metadata(
+    wire: Option<&Wire>,
+    payload: &str,
+    key: &str,
+    receipt: SignReceipt,
+    credential_delimited: bool,
+    suffix_delimited: bool,
+) -> Result<Option<Value>, SignError> {
+    let Some(wire) = wire else { return Ok(None) };
+    if receipt.stamp_ms.is_some() && !credential_delimited && !suffix_delimited {
+        return Ok(None);
+    }
+    match (wire.extra_data, &wire.seconds_suffix) {
+        (Some(ExtraData::SecondsTimestamp), Some((method, path))) => {
+            let Some(prefix) = payload.strip_suffix(&format!("{method}{path}")) else {
+                return Ok(None);
+            };
+            let timestamp = stamp(prefix).ok_or(SignError::Refused)?;
+            if timestamp * 1000. > 9_007_199_254_740_991.
+                || receipt
+                    .stamp_ms
+                    .is_some_and(|stamp| stamp != timestamp * 1000.)
+            {
+                return refused();
+            }
+            Ok(Some(json!({ "timestamp": timestamp as u64 })))
+        }
+        (Some(ExtraData::BybitExpiry), _) => {
+            let Some(rest) = payload.strip_prefix("GET/realtime") else {
+                return Ok(None);
+            };
+            let expiry = stamp(rest).ok_or(SignError::Refused)?;
+            if receipt.expiry_ms.is_some_and(|expected| expected != expiry) {
+                return refused();
+            }
+            Ok(Some(json!({ "expires": expiry as u64 })))
+        }
+        (Some(ExtraData::BinanceSpot), _) => {
+            let Some(rest) = payload.strip_prefix(&format!("apiKey={key}&recvWindow=")) else {
+                return Ok(None);
+            };
+            let tail: Vec<&str> = rest.split("&timestamp=").collect();
+            let [window, time] = tail.as_slice() else {
+                return refused();
+            };
+            let (Some(window), Some(time)) = (stamp(window), stamp(time)) else {
+                return refused();
+            };
+            if receipt.stamp_ms.is_some_and(|stamp| stamp != time) {
+                return refused();
+            }
+            Ok(Some(
+                json!({ "apiKey": key, "recvWindow": window as u64, "timestamp": time as u64 }),
+            ))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Exactly one bytes part, at most `max` long.
+fn single_bytes(parts: &[PayloadPart], max: usize) -> Result<&[u8], SignError> {
+    match parts {
+        [PayloadPart::Bytes { bytes }] if bytes.len() <= max => Ok(bytes),
+        _ => refused(),
+    }
+}
+
+fn utf8(bytes: &[u8]) -> Result<String, SignError> {
+    String::from_utf8(bytes.to_vec()).map_err(|_| SignError::Refused)
+}
+
+fn sha256(bytes: &[u8]) -> Vec<u8> {
+    Sha256::digest(bytes).to_vec()
+}
+
+/// Read-only public facts from one original remote provider and its opaque ref.
+/// Cloning this source cannot install a key, complete setup or authorize signing.
+#[derive(Clone)]
+pub struct PublicBindingSource(pub(crate) Arc<Inner>);
+impl PublicBindingSource {
+    /// `None` means an older Schnorr provider has no trusted initial binding.
+    pub fn public_key(
+        &self,
+        key: &KeyRef,
+        algorithm: Algorithm,
+    ) -> Result<Option<Vec<u8>>, SignError> {
+        let inner = &self.0;
+        if !inner.owns_signing(key) || algorithm != inner.family.algorithm() {
+            return Err(SignError::Unsupported);
+        }
+        let bytes = match inner.family {
+            Family::Hyperliquid | Family::Grvt | Family::Paradex => {
+                inner.bound().ok_or(SignError::Unavailable)?
+            }
+            Family::Backpack => {
+                let text = utf8(&inner.primary.public)?;
+                if text.len() != 44 {
+                    return refused();
+                }
+                let encoding = base64::engine::general_purpose::STANDARD;
+                let bytes = encoding.decode(&text).map_err(|_| SignError::Refused)?;
+                if bytes.len() != 32 || encoding.encode(&bytes) != text {
+                    return refused();
+                }
+                bytes
+            }
+            Family::Orderly => {
+                let text = utf8(&inner.primary.public)?;
+                let text = text.strip_prefix("ed25519:").ok_or(SignError::Refused)?;
+                if !(32..=44).contains(&text.len()) {
+                    return refused();
+                }
+                let bytes = bs58::decode(text)
+                    .into_vec()
+                    .map_err(|_| SignError::Refused)?;
+                if bytes.len() != 32 || bs58::encode(&bytes).into_string() != text {
+                    return refused();
+                }
+                bytes
+            }
+            Family::Lighter => return Ok(inner.bound()),
+            _ => return Err(SignError::Unsupported),
+        };
+        Ok(Some(bytes))
+    }
+}
+
+impl Inner {
+    pub(crate) fn publish(&self) {
+        self.published.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn bind_registered_public_key(
+        &self,
+        public: &safe_cex_crypto::admission::PublicKey,
+    ) -> Result<(), SignError> {
+        if self.published.load(Ordering::Acquire)
+            || self.family != Family::Lighter
+            || public.family() != safe_cex_crypto::admission::Family::Schnorr
+        {
+            return Err(SignError::Unsupported);
+        }
+        self.bind(public.as_bytes())
+    }
+
+    pub(crate) fn bind_public_metadata(
+        &self,
+        options: &Map<String, Value>,
+    ) -> Result<(), SignError> {
+        if self.family == Family::Grvt
+            && let Some(address) = options
+                .get("grvtSignerAddress")
+                .and_then(|value| prefixed(value, 20).ok())
+        {
+            self.bind(&address)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn new(
+        venue: String,
+        policy: Policy,
+        account_name: Option<String>,
+        link: Arc<SignerLink>,
+        primary: Owned,
+    ) -> Self {
+        Self {
+            family: Family::of(&venue),
+            venue,
+            policy,
+            account_name,
+            link,
+            primary,
+            coinbase: None,
+            bound: Mutex::new(None),
+            published: AtomicBool::new(false),
+            streak: Mutex::new(Streak::default()),
+            on_fatal: Mutex::new(None),
+            warned: Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    pub(crate) fn with_coinbase_binding(
+        mut self,
+        binding: Option<safe_cex_venue_coinbase::sign::Binding>,
+    ) -> Self {
+        self.coinbase = binding;
+        self
+    }
+
+    /// A signer problem the server could not otherwise see: the browser answers or
+    /// stays silent, and nothing else would put it in the journal.
+    fn warn_sign(&self, what: &'static str) {
+        let mut warned = self.warned.lock().unwrap_or_else(|p| p.into_inner());
+        let now = Instant::now();
+        if warned
+            .get(what)
+            .is_some_and(|at| now.duration_since(*at) < SIGN_WARN_EVERY)
+        {
+            return;
+        }
+        warned.insert(what, now);
+        eprintln!(
+            "safe-cex warn signer [{} {}]: {what}",
+            self.account_name.as_deref().unwrap_or("-"),
+            self.venue
+        );
+    }
+
+    pub(crate) fn set_fatal(&self, callback: Box<dyn FnOnce() + Send>) {
+        *self.on_fatal.lock().unwrap_or_else(|p| p.into_inner()) = Some(callback);
+    }
+
+    fn record_failure(&self) {
+        let fire = {
+            let mut streak = self.streak.lock().unwrap_or_else(|p| p.into_inner());
+            if streak.count == 0 {
+                streak.started = Some(Instant::now());
+            }
+            streak.count += 1;
+            let long = streak
+                .started
+                .is_some_and(|started| started.elapsed() >= FATAL_MIN_STREAK);
+            if streak.count >= MAX_CONSECUTIVE_FAILURES && long && !streak.fired {
+                streak.fired = true;
+                true
+            } else {
+                false
+            }
+        };
+        if fire
+            && let Some(callback) = self
+                .on_fatal
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .take()
+        {
+            callback();
+        }
+    }
+
+    fn record_success(&self) {
+        self.streak.lock().unwrap_or_else(|p| p.into_inner()).count = 0;
+    }
+
+    /// One ws-auth round trip; returns `wsAuthSignature`. Failures the device
+    /// reports count toward the account's fatal streak; a timeout does not.
+    async fn ask<T>(
+        &self,
+        id: String,
+        exchange_name: &str,
+        to_sign: String,
+        output_format: &str,
+        extra_data: Option<Value>,
+        decode: impl FnOnce(&Value) -> Result<T, SignError>,
+    ) -> Result<T, SignError> {
+        let mut ws_auth = Map::new();
+        ws_auth.insert("toSign".into(), to_sign.into());
+        ws_auth.insert("outputFormat".into(), output_format.into());
+        if let Some(extra) = extra_data {
+            ws_auth.insert("extraData".into(), extra);
+        }
+        let mut request = Map::new();
+        request.insert("id".into(), id.clone().into());
+        request.insert("type".into(), "ws-auth".into());
+        request.insert("exchangeName".into(), exchange_name.into());
+        if self.venue == "bybit" && crate::supports_remote_signing(&self.venue) {
+            let key_id =
+                std::str::from_utf8(&self.primary.public).map_err(|_| SignError::Refused)?;
+            request.insert("keyId".into(), key_id.into());
+        }
+        if let Some(name) = &self.account_name {
+            request.insert("accountName".into(), name.clone().into());
+        }
+        request.insert("wsAuth".into(), ws_auth.into());
+        let request = Value::Object(request);
+        // A declared fixed id (binanceSpot user data) waits for the previous
+        // request with that id to settle rather than refusing.
+        let deadline = Instant::now() + crate::link::SIGN_TIMEOUT;
+        let response = loop {
+            match self.link.round_trip(&id, &request).await {
+                Err(Failure::Duplicate) if Instant::now() < deadline => {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                other => break other,
+            }
+        };
+        let response = match response {
+            Ok(response) => response,
+            Err(Failure::Suspended | Failure::Aborted) => return Err(SignError::Unavailable),
+            // Silence is a slow page, not a failed signer: the socket's worker
+            // answers echoes while the page's thread is too busy to sign.
+            Err(Failure::Duplicate | Failure::TimedOut) => {
+                self.warn_sign("sign request timed out after 15s");
+                return Err(SignError::TimedOut);
+            }
+            Err(Failure::Unavailable | Failure::SendFailed) => {
+                self.record_failure();
+                return Err(SignError::Unavailable);
+            }
+        };
+        let error = response.get("error");
+        if error.is_some_and(|error| error.as_str() != Some("")) {
+            // The page answers this when it holds no signer for the account.
+            if error.and_then(Value::as_str).is_some_and(|text| {
+                text.starts_with("No signer for") || text.contains("cannot sign")
+            }) {
+                self.warn_sign(
+                    "sign request unroutable: the page holds no signer for this account",
+                );
+            } else {
+                self.warn_sign("sign request refused by the page");
+            }
+            self.record_failure();
+            return refused();
+        }
+        // Only a decodable answer ends a failure streak.
+        let decoded = (response.get("id").and_then(Value::as_str) == Some(id.as_str()))
+            .then(|| decode(response.get("wsAuthSignature").unwrap_or(&Value::Null)));
+        match decoded {
+            Some(Ok(value)) => {
+                self.record_success();
+                Ok(value)
+            }
+            _ => {
+                self.record_failure();
+                refused()
+            }
+        }
+    }
+
+    async fn device<T>(
+        &self,
+        to_sign: String,
+        output_format: &str,
+        decode: impl FnOnce(&Value) -> Result<T, SignError>,
+    ) -> Result<T, SignError> {
+        self.ask(nanoid(), &self.venue, to_sign, output_format, None, decode)
+            .await
+    }
+
+    fn bound(&self) -> Option<Vec<u8>> {
+        self.bound.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    /// One provider binds one device key; a different one is never adopted.
+    fn bind(&self, key: &[u8]) -> Result<(), SignError> {
+        let mut bound = self.bound.lock().unwrap_or_else(|p| p.into_inner());
+        if bound.as_deref().is_some_and(|bound| bound != key) {
+            return refused();
+        }
+        *bound = Some(key.to_vec());
+        Ok(())
+    }
+
+    fn owns_signing(&self, key: &KeyRef) -> bool {
+        *key == self.primary.signing
+    }
+
+    pub(crate) async fn sign(
+        self: Arc<Self>,
+        request: SignRequest,
+    ) -> Result<SignResult, SignError> {
+        if self.family == Family::Coinbase {
+            return self.sign_coinbase(&request).await;
+        }
+        if self.family == Family::Orderly {
+            return self.sign_orderly(&request).await;
+        }
+        let receipt = request.receipt;
+        if self.family == Family::ApexOmni
+            && (receipt.validate().is_err() || receipt.nonce.is_some())
+        {
+            return refused();
+        }
+        if request.operations.is_empty() || request.operations.len() > MAX_OPERATIONS {
+            return refused();
+        }
+        let operations = request.operations;
+        let values = match self.family {
+            Family::Hyperliquid => self.sign_wallet(&operations).await?,
+            Family::Grvt => self.sign_grvt(&operations).await?,
+            Family::Lighter => self.sign_lighter(&operations).await?,
+            Family::Paradex => self.sign_stark(&operations).await?,
+            Family::DoubleSha256 => self.sign_double_sha256(&operations).await?,
+            Family::Hmac if self.venue == "asterdex" => {
+                self.sign_aster_v1(&operations, receipt).await?
+            }
+            Family::Hmac => self.sign_hmac(&operations, receipt).await?,
+            Family::ApexOmni => self.sign_apexomni(&operations).await?,
+            Family::Orderly => return refused(),
+            Family::Kucoin => self.sign_kucoin(&operations).await?,
+            Family::Kraken => self.sign_kraken(&operations, receipt).await?,
+            Family::Backpack => self.sign_backpack(&operations).await?,
+            Family::Coinbase => return refused(),
+        };
+        Ok(SignResult::new(values, receipt))
+    }
+
+    async fn sign_backpack(&self, operations: &[Operation]) -> Result<Vec<Vec<u8>>, SignError> {
+        let primary = &self.primary;
+        if let [Operation::Present { key }] = operations {
+            return if *key == primary.credential {
+                Ok(vec![primary.public.clone()])
+            } else {
+                refused()
+            };
+        }
+        let [
+            Operation::Present { key: credential },
+            Operation::Sign {
+                algorithm: Algorithm::Ed25519,
+                key: signing,
+                payload,
+            },
+        ] = operations
+        else {
+            return refused();
+        };
+        if *credential != primary.credential || !self.owns_signing(signing) {
+            return refused();
+        }
+        let payload = utf8(single_bytes(payload, MAX_PAYLOAD)?)?;
+        if payload.is_empty() {
+            return refused();
+        }
+        let descriptor = json!({ "slot": "primary", "payload": payload }).to_string();
+        if descriptor.len() > MAX_PAYLOAD {
+            return refused();
+        }
+        self.device(descriptor, "backpack-ed25519", |value| {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Answer {
+                credential: String,
+                signature: String,
+            }
+            let output: Answer = serde_json::from_str(value.as_str().ok_or(SignError::Refused)?)
+                .map_err(|_| SignError::Refused)?;
+            if output.credential.as_bytes() != primary.public || output.signature.len() != 88 {
+                return refused();
+            }
+            let signature = base64::engine::general_purpose::STANDARD
+                .decode(&output.signature)
+                .map_err(|_| SignError::Refused)?;
+            if signature.len() != 64
+                || base64::engine::general_purpose::STANDARD.encode(&signature) != output.signature
+            {
+                return refused();
+            }
+            Ok(vec![primary.public.clone(), signature])
+        })
+        .await
+    }
+
+    /// Every keyed operation names the primary signing ref.
+    fn keyed_by_signing(&self, operations: &[Operation]) -> Result<(), SignError> {
+        for operation in operations {
+            let key = match operation {
+                Operation::Sign { key, .. }
+                | Operation::PublicAddress { key }
+                | Operation::PublicKey { key, .. }
+                | Operation::Present { key } => key,
+                Operation::Sha256 { .. } => continue,
+            };
+            if !self.owns_signing(key) {
+                return refused();
+            }
+        }
+        Ok(())
+    }
+
+    async fn sign_wallet(&self, operations: &[Operation]) -> Result<Vec<Vec<u8>>, SignError> {
+        self.keyed_by_signing(operations)?;
+        match operations {
+            [Operation::PublicAddress { .. }] => {
+                let public = utf8(&self.primary.public)?;
+                let address = self
+                    .device(public, "hyperliquid-address", |v| prefixed(v, 20))
+                    .await?;
+                self.bind(&address)?;
+                Ok(vec![address])
+            }
+            [
+                Operation::Sha256 { payload: statement },
+                Operation::PublicAddress { .. },
+                Operation::Sign {
+                    algorithm: Algorithm::Secp256k1Digest,
+                    payload,
+                    ..
+                },
+            ] => {
+                let bound = self.bound().ok_or(SignError::Refused)?;
+                let preimage = single_bytes(statement, MAX_PAYLOAD)?.to_vec();
+                if single_bytes(payload, 32)?.len() != 32 {
+                    return refused();
+                }
+                let signature = self
+                    .device(utf8(&preimage)?, "hyperliquid-l1", |v| prefixed(v, 65))
+                    .await?;
+                Ok(vec![sha256(&preimage), bound, signature])
+            }
+            _ => refused(),
+        }
+    }
+
+    // GRVT login presents its API credential; orders bind one statement, address
+    // and signature atomically. The engine verifies the returned signing proof.
+    async fn sign_grvt(&self, operations: &[Operation]) -> Result<Vec<Vec<u8>>, SignError> {
+        match operations {
+            [Operation::Present { key }] if *key == self.primary.credential => {
+                Ok(vec![self.primary.public.clone()])
+            }
+            [
+                Operation::Sha256 { payload: statement },
+                Operation::PublicAddress { key: address },
+                Operation::Sign {
+                    algorithm: Algorithm::Secp256k1Digest,
+                    key,
+                    payload,
+                },
+            ] if address == key && self.owns_signing(key) => {
+                let preimage = single_bytes(statement, MAX_PAYLOAD)?;
+                if single_bytes(payload, 32)?.len() != 32 {
+                    return refused();
+                }
+                let joined = self
+                    .device(utf8(preimage)?, "grvt-order", |value| prefixed(value, 85))
+                    .await?;
+                let (address, signature) = joined.split_at(20);
+                self.bind(address)?;
+                Ok(vec![sha256(preimage), address.to_vec(), signature.to_vec()])
+            }
+            _ => refused(),
+        }
+    }
+
+    async fn sign_lighter(&self, operations: &[Operation]) -> Result<Vec<Vec<u8>>, SignError> {
+        let [Operation::Sha256 { payload }, signs @ ..] = operations else {
+            return refused();
+        };
+        if signs.is_empty()
+            || !signs.iter().all(|sign| {
+                matches!(sign, Operation::Sign { algorithm: Algorithm::SchnorrDigest, key, .. } if self.owns_signing(key))
+            })
+        {
+            return refused();
+        }
+        let preimage = single_bytes(payload, MAX_PAYLOAD)?.to_vec();
+        let length = signs.len() * LIGHTER_SIGNATURE;
+        let joined = self
+            .device(utf8(&preimage)?, "lighter-tx", |v| prefixed(v, length))
+            .await?;
+        let mut values = vec![sha256(&preimage)];
+        values.extend(joined.chunks(LIGHTER_SIGNATURE).map(<[u8]>::to_vec));
+        Ok(values)
+    }
+
+    async fn sign_stark(&self, operations: &[Operation]) -> Result<Vec<Vec<u8>>, SignError> {
+        self.keyed_by_signing(operations)?;
+        match operations {
+            [
+                Operation::PublicKey {
+                    algorithm: Algorithm::StarkDigest,
+                    ..
+                },
+            ] => {
+                let public = utf8(&self.primary.public)?;
+                let key = self
+                    .device(public, "paradex-public", |v| prefixed(v, 32))
+                    .await?;
+                self.bind(&key)?;
+                Ok(vec![key])
+            }
+            [Operation::Sha256 { payload }, signs @ ..] => {
+                if self.bound().is_none()
+                    || signs.is_empty()
+                    || signs.len() > 10
+                    || !signs.iter().all(|sign| {
+                        matches!(
+                            sign,
+                            Operation::Sign {
+                                algorithm: Algorithm::StarkDigest,
+                                ..
+                            }
+                        )
+                    })
+                {
+                    return refused();
+                }
+                let preimage = single_bytes(payload, MAX_PAYLOAD)?.to_vec();
+                let length = 64 * signs.len();
+                let joined = self
+                    .device(utf8(&preimage)?, "paradex-stark", |v| prefixed(v, length))
+                    .await?;
+                let mut values = vec![sha256(&preimage)];
+                values.extend(joined.chunks(64).map(<[u8]>::to_vec));
+                Ok(values)
+            }
+            _ => refused(),
+        }
+    }
+
+    /// `[sha256 bytes|own credential, sign sha256SecretSuffix result{0,hex}, present credential]`.
+    async fn sign_double_sha256(
+        &self,
+        operations: &[Operation],
+    ) -> Result<Vec<Vec<u8>>, SignError> {
+        let [
+            Operation::Sha256 { payload: digest },
+            Operation::Sign {
+                algorithm: Algorithm::Sha256SecretSuffix,
+                key,
+                payload: reference,
+            },
+            Operation::Present { key: presented },
+        ] = operations
+        else {
+            return refused();
+        };
+        if !self.owns_signing(key)
+            || *presented != self.primary.credential
+            || !matches!(
+                reference.as_slice(),
+                [PayloadPart::Result {
+                    index: 0,
+                    encoding: PartEncoding::Hex
+                }]
+            )
+            || digest.is_empty()
+            || digest.len() > MAX_PARTS
+        {
+            return refused();
+        }
+        let credential = &self.primary.public;
+        let mut preimage = Vec::new();
+        for part in digest {
+            match part {
+                PayloadPart::Credential { key } if *key == self.primary.credential => {
+                    preimage.extend_from_slice(credential)
+                }
+                PayloadPart::Bytes { bytes } => preimage.extend_from_slice(bytes),
+                _ => return refused(),
+            }
+            if preimage.len() + credential.len() > MAX_PAYLOAD {
+                return refused();
+            }
+        }
+        let outer = self
+            .device(utf8(&preimage)?, "bitunix-double-sha256", |v| {
+                mac(v, Encoding::Hex)
+            })
+            .await?;
+        Ok(vec![sha256(&preimage), outer, credential.clone()])
+    }
+
+    async fn sign_kucoin(&self, operations: &[Operation]) -> Result<Vec<Vec<u8>>, SignError> {
+        let primary = &self.primary;
+        if let [Operation::Present { key }] = operations {
+            return if *key == primary.credential {
+                Ok(vec![primary.public.clone()])
+            } else {
+                refused()
+            };
+        }
+        let [
+            Operation::Present { key: credential },
+            Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: signing,
+                payload,
+            },
+            Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: passphrase_signing,
+                payload: passphrase_payload,
+            },
+            broker @ ..,
+        ] = operations
+        else {
+            return refused();
+        };
+        if *credential != primary.credential
+            || !self.owns_signing(signing)
+            || passphrase_signing != signing
+            || !matches!(passphrase_payload.as_slice(), [PayloadPart::Credential { key }] if primary.passphrase.as_ref() == Some(key))
+        {
+            return refused();
+        }
+        let payload = utf8(single_bytes(payload, MAX_PAYLOAD)?)?;
+        if payload.is_empty() {
+            return refused();
+        }
+        let mut descriptor = json!({ "slot": "primary", "payload": payload });
+        match broker {
+            [] => {}
+            [
+                Operation::Sign {
+                    algorithm: Algorithm::HmacSha256,
+                    key,
+                    payload,
+                },
+            ] if primary.broker.as_ref() == Some(key) => {
+                let [
+                    PayloadPart::Bytes { bytes },
+                    PayloadPart::Credential { key },
+                ] = payload.as_slice()
+                else {
+                    return refused();
+                };
+                if *key != primary.credential || bytes.is_empty() || bytes.len() > MAX_PAYLOAD {
+                    return refused();
+                }
+                descriptor["brokerPrefix"] = utf8(bytes)?.into();
+            }
+            _ => return refused(),
+        }
+        let descriptor = descriptor.to_string();
+        if descriptor.len() > MAX_PAYLOAD {
+            return refused();
+        }
+        let public = utf8(&primary.public)?;
+        self.device(descriptor, "kucoin-batch", |value| {
+            let output: Value = serde_json::from_str(value.as_str().ok_or(SignError::Refused)?)
+                .map_err(|_| SignError::Refused)?;
+            let output = output.as_object().ok_or(SignError::Refused)?;
+            if output.len() != 2
+                || output.get("credential").and_then(Value::as_str) != Some(public.as_str())
+            {
+                return refused();
+            }
+            let macs = output
+                .get("macs")
+                .and_then(Value::as_array)
+                .ok_or(SignError::Refused)?;
+            if macs.len() != operations.len() - 1 {
+                return refused();
+            }
+            let mut values = vec![primary.public.clone()];
+            for value in macs {
+                values.push(mac(value, Encoding::Base64)?);
+            }
+            Ok(values)
+        })
+        .await
+    }
+
+    async fn sign_aster_v1(
+        &self,
+        operations: &[Operation],
+        receipt: SignReceipt,
+    ) -> Result<Vec<Vec<u8>>, SignError> {
+        let primary = &self.primary;
+        if let [Operation::Present { key }] = operations {
+            return if *key == primary.credential {
+                Ok(vec![primary.public.clone()])
+            } else {
+                refused()
+            };
+        }
+        let [
+            Operation::Present { key: credential },
+            Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: signing,
+                payload,
+            },
+        ] = operations
+        else {
+            return refused();
+        };
+        if *credential != primary.credential
+            || !self.owns_signing(signing)
+            || receipt.nonce.is_some()
+        {
+            return refused();
+        }
+        let [PayloadPart::Bytes { bytes }] = payload.as_slice() else {
+            return refused();
+        };
+        if bytes.is_empty() || bytes.len() > MAX_PAYLOAD {
+            return refused();
+        }
+        let descriptor = json!({"slot":"primary","payload":utf8(bytes)?}).to_string();
+        // The device limit includes the JSON envelope and escaping expansion.
+        if descriptor.len() > MAX_PAYLOAD {
+            return refused();
+        }
+        self.device(descriptor, "asterdex-hmac", |value| {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Batch {
+                credential: String,
+                signature: String,
+            }
+            let text = value.as_str().ok_or(SignError::Refused)?;
+            let batch: Batch = serde_json::from_str(text).map_err(|_| SignError::Refused)?;
+            if batch.credential.as_bytes() != primary.public
+                || batch.signature.len() != 64
+                || !batch
+                    .signature
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                return refused();
+            }
+            let signature = hex_bytes(&batch.signature).ok_or(SignError::Refused)?;
+            Ok(vec![primary.public.clone(), signature])
+        })
+        .await
+    }
+
+    async fn sign_hmac(
+        &self,
+        operations: &[Operation],
+        receipt: SignReceipt,
+    ) -> Result<Vec<Vec<u8>>, SignError> {
+        enum Work {
+            Present(Vec<u8>),
+            Sign {
+                payload: String,
+                extra: Option<Value>,
+            },
+        }
+        let primary = &self.primary;
+        let mut total = 0usize;
+        let mut work = Vec::with_capacity(operations.len());
+        let mut presents_passphrase = false;
+        let mut signs = false;
+        for operation in operations {
+            match operation {
+                Operation::Present { key } => {
+                    let material = if *key == primary.credential {
+                        &primary.public
+                    } else {
+                        match (&primary.passphrase, &primary.passphrase_value) {
+                            (Some(passphrase), Some(value)) if passphrase == key => {
+                                presents_passphrase = true;
+                                value
+                            }
+                            _ => return refused(),
+                        }
+                    };
+                    total += material.len();
+                    if total > MAX_PAYLOAD {
+                        return refused();
+                    }
+                    work.push(Work::Present(material.clone()));
+                }
+                Operation::Sign {
+                    algorithm: Algorithm::HmacSha256,
+                    key,
+                    payload,
+                } => {
+                    if !self.owns_signing(key) || payload.len() > MAX_PARTS {
+                        return refused();
+                    }
+                    let mut parts = Vec::with_capacity(payload.len());
+                    for part in payload {
+                        let bytes: &[u8] = match part {
+                            PayloadPart::Credential { key } if *key == primary.credential => {
+                                &primary.public
+                            }
+                            PayloadPart::Bytes { bytes } => bytes,
+                            _ => return refused(),
+                        };
+                        total += bytes.len();
+                        if total > MAX_PAYLOAD {
+                            return refused();
+                        }
+                        parts.push(bytes);
+                    }
+                    let text = utf8(&parts.concat())?;
+                    let credential_delimited =
+                        payload.len() == 3 && matches!(payload[1], PayloadPart::Credential { .. });
+                    let wire = self.policy.wire.as_ref();
+                    let suffix_delimited = match wire.and_then(|wire| {
+                        (wire.extra_data == Some(ExtraData::SecondsTimestamp))
+                            .then_some(wire.seconds_suffix.as_ref())
+                            .flatten()
+                    }) {
+                        Some((method, path)) => {
+                            payload.len() == 3
+                                && payload
+                                    .iter()
+                                    .all(|part| matches!(part, PayloadPart::Bytes { .. }))
+                                && parts[1] == method.as_bytes()
+                                && parts[2] == path.as_bytes()
+                        }
+                        None => false,
+                    };
+                    let public = utf8(&primary.public)?;
+                    let extra = ws_metadata(
+                        wire,
+                        &text,
+                        &public,
+                        receipt,
+                        credential_delimited,
+                        suffix_delimited,
+                    )?;
+                    signs = true;
+                    work.push(Work::Sign {
+                        payload: text,
+                        extra,
+                    });
+                }
+                _ => return refused(),
+            }
+        }
+        if presents_passphrase && !signs {
+            return refused();
+        }
+        let encoding = self.policy.encoding;
+        let mut values = Vec::with_capacity(work.len());
+        for item in work {
+            match item {
+                Work::Present(bytes) => values.push(bytes),
+                Work::Sign { payload, extra } => {
+                    let wire = self.policy.wire.as_ref();
+                    let (id, exchange_name) = match (&extra, wire) {
+                        (Some(_), Some(wire)) => (
+                            wire.request_id.clone().unwrap_or_else(nanoid),
+                            wire.exchange_name.as_str(),
+                        ),
+                        _ => (nanoid(), self.venue.as_str()),
+                    };
+                    let signature = self
+                        .ask(id, exchange_name, payload, encoding.wire(), extra, |v| {
+                            mac(v, encoding)
+                        })
+                        .await?;
+                    values.push(signature);
+                }
+            }
+        }
+        Ok(values)
+    }
+}
+
+/// The installed engine provider for one hosted account.
+pub struct RemoteProvider {
+    pub(crate) inner: Arc<Inner>,
+}
+
+/// Public accounts retain neither identities nor a device link.
+pub(crate) struct PublicProvider;
+
+impl Signer for PublicProvider {
+    fn sign(&self, _request: SignRequest) -> SignFuture {
+        Box::pin(async { Err(SignError::Refused) })
+    }
+
+    fn can_sign(&self, _key: &KeyRef, _algorithm: Algorithm) -> Capability {
+        Capability::Unsupported
+    }
+}
+
+impl Signer for RemoteProvider {
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        self.inner.publish();
+        Box::pin(self.inner.clone().sign(request))
+    }
+
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.inner.publish();
+        if self.inner.family == Family::Coinbase {
+            return if self.inner.owns_signing(key)
+                && self
+                    .inner
+                    .coinbase
+                    .as_ref()
+                    .is_some_and(|binding| algorithm == coinbase::algorithm(binding.algorithm))
+            {
+                Capability::Supported
+            } else {
+                Capability::Unsupported
+            };
+        }
+        if self.inner.family == Family::ApexOmni
+            && self.inner.primary.zklink_seed.as_ref() == Some(key)
+            && algorithm == Algorithm::ZkLinkContract
+        {
+            return Capability::Supported;
+        }
+        if (self.inner.owns_signing(key) || self.inner.primary.broker.as_ref() == Some(key))
+            && algorithm == self.inner.family.algorithm()
+        {
+            Capability::Supported
+        } else {
+            Capability::Unsupported
+        }
+    }
+
+    fn owned_public_address_capability(&self) -> Capability {
+        match self.inner.family {
+            Family::Hyperliquid | Family::Paradex => Capability::Supported,
+            _ => Capability::Unsupported,
+        }
+    }
+
+    fn create_public_address_setup(
+        &self,
+        request: SignRequest,
+    ) -> Option<Box<dyn OwnedSetupExecution>> {
+        let admitted = match (self.inner.family, request.operations.as_slice()) {
+            (Family::Hyperliquid, [Operation::PublicAddress { key }]) => {
+                self.inner.owns_signing(key)
+            }
+            (
+                Family::Paradex,
+                [
+                    Operation::PublicKey {
+                        algorithm: Algorithm::StarkDigest,
+                        key,
+                    },
+                ],
+            ) => self.inner.owns_signing(key),
+            _ => false,
+        };
+        if !admitted
+            || request.receipt != Default::default()
+            || request.context != Default::default()
+        {
+            return None;
+        }
+        Some(Box::new(Setup {
+            work: Some(Box::pin(self.inner.clone().sign(request))),
+            running: None,
+            started: false,
+        }))
+    }
+}
+
+type Work = Pin<Box<dyn Future<Output = Result<SignResult, SignError>> + Send>>;
+
+/// The address or public-key binding at startup, over the same device wire.
+/// Dropping the future withdraws its pending request, so join is immediate.
+struct Setup {
+    work: Option<Work>,
+    running: Option<Work>,
+    started: bool,
+}
+
+impl OwnedSetupExecution for Setup {
+    fn start(&mut self) -> Result<(), SignError> {
+        if self.started {
+            return Err(SignError::InvalidRequest);
+        }
+        self.started = true;
+        self.running = self.work.take();
+        Ok(())
+    }
+    fn cancel(&mut self) -> Result<(), SignError> {
+        self.started = true;
+        self.work = None;
+        self.running = None;
+        Ok(())
+    }
+    fn poll_result(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<SignResult, SignError>> {
+        let Some(running) = &mut self.running else {
+            return Poll::Pending;
+        };
+        let result = running.as_mut().poll(cx);
+        if result.is_ready() {
+            self.running = None;
+        }
+        result
+    }
+    fn poll_joined(&mut self, _: &mut std::task::Context<'_>) -> Poll<Result<(), SignError>> {
+        if self.started && self.running.is_none() {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
+        }
+    }
+}

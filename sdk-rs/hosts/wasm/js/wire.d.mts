@@ -1,3 +1,6 @@
+import type { Balance } from '../../../../packages/safe-cex/src/generated/Balance.js';
+export type { Balance } from '../../../../packages/safe-cex/src/generated/Balance.js';
+export type { CoinBalance } from '../../../../packages/safe-cex/src/generated/CoinBalance.js';
 /** Reader for the engine's flush frame. See wire.mjs and docs/plans/RUST_REWRITE.md. */
 export const SECTION: {
   STRINGS: 1;
@@ -21,6 +24,8 @@ export const SECTION: {
   CAPABILITIES: 19;
   UNDERLYING_TOKENS: 20;
   ACCOUNT_READ: 21;
+  TICKER_OBSERVATIONS: 24;
+  MESSAGE_HANDLER_STATS: 25;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -33,6 +38,7 @@ export const MARKET_COLUMNS: readonly [
   'maxLeverage', 'minPrice', 'contractSize', 'takerFee', 'makerFee',
 ];
 export type MarketColumn = (typeof MARKET_COLUMNS)[number];
+export const ORDER_TRIGGER_WORD: { TP_SHIFT: 0; SL_SHIFT: 8; TRIGGER_MASK: 255; NATIVE_ALGO: 65536 };
 export const MARKET_FLAG: { ACTIVE: 1; INVERSE: 2; SPOT: 4; PERPETUAL: 8; EXPIRING: 16; READ_ONLY: 32 };
 export type QuantityUnits = 'base' | 'nativePlacement' | 'inverseNative' | 'contractCount' | 'inverseContractSized';
 export const QUANTITY_UNITS: readonly QuantityUnits[];
@@ -73,14 +79,22 @@ export interface EngineCapabilities {
   isolatedBookSubscriptions: boolean;
   inverseClosedPositions: boolean;
   scheduleCancel: boolean;
+  orderHistoryNeedsSymbol: boolean;
+  freshPositions: boolean;
+  /** The `cancelAccountOrders` op, which only a nuke sends. */
+  nukeAccountCancel: boolean;
+  /** A symbol cancel can miss an order the store has not seen yet. */
+  symbolCancelMissesUnseen: boolean;
+  /** The source writes read covers; a frame-fed page lifts fences on them (Rust ingest only). */
+  orderReadCovers: boolean;
 }
 export const LOADED_FLAG: { BALANCE: 1; ORDERS: 2; MARKETS: 4; TICKERS: 8; POSITIONS: 16 };
-export const STATUS_FLAG: { HEDGED: 1 };
+export const STATUS_FLAG: { HEDGED: 1; LATENCY_MEASURED: 2 };
 export const ORDER_COLUMNS: readonly ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
 export type OrderColumn = (typeof ORDER_COLUMNS)[number];
 export const POSITION_COLUMNS: readonly [
   'entryPrice', 'notional', 'leverage', 'unrealizedPnl', 'realizedPnl',
-  'contracts', 'liquidationPrice', 'marginSize', 'lastUpdate',
+  'contracts', 'liquidationPrice', 'marginSize', 'lastUpdate', 'contractsNative', 'unrealizedPnlNative',
 ];
 export type PositionColumn = (typeof POSITION_COLUMNS)[number];
 
@@ -121,6 +135,18 @@ export type MarketTable = { count: number; flags: Uint32Array } & Columns<Market
   quote(i: number): string;
   prettySymbol?(i: number): string | undefined;
 };
+export interface MessageHandlerStatsTable {
+  count: number;
+  /** False updates only the named topics; true replaces the complete snapshot. */
+  replace: boolean;
+  /** 0 public, 1 business, 2 futures, 3 private. */
+  group(i: number): number;
+  topic(i: number): string;
+  subscribed(i: number): boolean;
+  active(i: number): boolean;
+  /** NaN until the subscription first delivers data. */
+  ageMs(i: number): number;
+}
 export interface InstrumentClassificationTable {
   count: number;
   market: Uint32Array;
@@ -211,22 +237,24 @@ export type OrderTable = { count: number; market: Uint32Array; enums: Uint32Arra
   clientOrderId(i: number): string | undefined;
   parentId(i: number): string | undefined;
 };
-export type PositionTable = { count: number; market: Uint32Array; enums: Uint32Array; id(i: number): string | undefined; symbol?(i: number): string | undefined } & Columns<PositionColumn>;
-export interface CoinBalance { base: string; amount: number; notional: number }
-export interface CurrencyBalance {
-  used: number;
-  free: number;
-  total: number;
-  upnl: number;
-}
-export interface Balance extends CurrencyBalance {
-  coins?: Record<string, CoinBalance>;
-  currencies?: Record<string, CurrencyBalance>;
-}
+export type PositionTable = {
+  count: number;
+  market: Uint32Array;
+  enums: Uint32Array;
+  id(i: number): string;
+  symbol(i: number): string;
+  liquidationPrice: Array<number | null>;
+  realizedPnl: Array<number | undefined>;
+  marginSize: Array<number | undefined>;
+  lastUpdate: Array<number | undefined>;
+  contractsNative: Array<number | undefined>;
+  unrealizedPnlNative: Array<number | undefined>;
+} & Columns<'entryPrice' | 'notional' | 'leverage' | 'unrealizedPnl' | 'contracts'>;
+export type CurrencyBalance = { -readonly [K in 'used' | 'free' | 'total' | 'upnl']: Balance[K] };
 export interface Status {
   loaded: number;
   hedged: boolean;
-  latency: number;
+  latency: number | null;
 }
 export interface SettingTable {
   count: number;
@@ -270,6 +298,8 @@ export class Frame {
   /** Owned copies survive source transfer; identities remain lazily decoded. */
   tickers(owned?: boolean): TickerTable | undefined;
   tickerDeltas(): Float64Array | undefined;
+  messageHandlerStats(): MessageHandlerStatsTable | undefined;
+  tickerObservations(): Float64Array | undefined;
   books(): Generator<BookRows>;
   bookDeltas(): Generator<BookDeltaRows>;
   candles(): CandleRows | undefined;

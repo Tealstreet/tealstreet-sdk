@@ -102,7 +102,15 @@ pub(crate) fn public(
         pacing: None,
         retry: RetryPolicy::Never,
     };
-    let Ok(context) = cx.http_context(scope, policy) else {
+    let issue = if matches!(
+        &pending,
+        Pending::Daily { .. } | Pending::Premium { .. } | Pending::Candles { .. }
+    ) {
+        Cx::http_live_context
+    } else {
+        Cx::http_context
+    };
+    let Ok(context) = issue(cx, scope, policy) else {
         return Err((Box::new(pending), refused()));
     };
     let (url, _, body) = crate::sign::dispatch::unsigned(method, path, &params);

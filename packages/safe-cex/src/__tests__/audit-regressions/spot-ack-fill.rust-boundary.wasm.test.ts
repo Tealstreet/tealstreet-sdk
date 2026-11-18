@@ -7,8 +7,8 @@ import { BaseExchange } from '../../exchanges/base';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
-import { prepareRecordedHttp } from '../support/managedHttp';
 import { OrderSide } from '../../types';
+import { prepareRecordedHttp } from '../support/managedHttp';
 
 it.each([false, true])(
   'delivers a quantified Spot cancel ACK racing execution once to worker and main stores (reused=%s)',
@@ -120,13 +120,19 @@ it.each([false, true])(
     setRustEngineTransport(() => transport);
     const exchange = new RustEngineExchange('binancespot', { key: 'key', secret: 'secret' }, new DefaultStore());
     const main = new BaseExchange('binancespot', { key: '', secret: '' }, new DefaultStore());
-    const message = (event: unknown) => privateMessage!(JSON.stringify({ subscriptionId: 7, event }));
+    const message = (event: unknown) => {
+      const receive = privateMessage;
+      if (receive === undefined) throw new Error('Expected the private message handler');
+      receive(JSON.stringify({ subscriptionId: 7, event }));
+    };
     exchange.on('fill', (fill: OrderFillEvent) => workerFills.push(fill));
     main.on('fill', (fill: OrderFillEvent) => mainFills.push(fill));
     exchange.on('error', (error: unknown) => errors.push(error));
     try {
       await exchange.start();
-      main.applyWorkerFrame(exchange.snapshotFrame()!);
+      const snapshot = exchange.snapshotFrame();
+      if (snapshot === undefined) throw new Error('Expected the engine snapshot');
+      main.applyWorkerFrame(snapshot);
       exchange.onFrame = (frame) => main.applyWorkerFrame(frame.slice(0));
       const cancellation = exchange.cancelSymbolOrders('BTCUSDT');
       await vi.waitFor(() => expect(releaseCancel).toBeDefined());
@@ -148,7 +154,8 @@ it.each([false, true])(
         });
         await vi.waitFor(() => expect(exchange.store.orders.find((row) => row.id === 'maker')?.symbol).toBe('ETHUSDT'));
       }
-      releaseCancel!();
+      if (releaseCancel === undefined) throw new Error('Expected the pending cancellation');
+      releaseCancel();
       await cancellation;
       await vi.waitFor(() =>
         expect(main.store.orders.find((row) => row.id === 'maker')).toMatchObject(
@@ -179,7 +186,9 @@ it.each([false, true])(
         expect(workerFills).toHaveLength(1);
         expect(mainFills).toHaveLength(1);
       });
-    const expected = [{ id: 'maker', orderId: 'maker', symbol: 'BTCUSDT', side: OrderSide.Buy, price: 9100, amount: 1 }];
+      const expected = [
+        { id: 'maker', orderId: 'maker', symbol: 'BTCUSDT', side: OrderSide.Buy, price: 9100, amount: 1 },
+      ];
       expect(workerFills).toEqual(expected);
       expect(mainFills).toEqual(expected);
       if (reused) {

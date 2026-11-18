@@ -31,6 +31,215 @@ function rig(options = {}, overrides = {}, handlers = {}) {
 
 const done = (host, id, result = '"done"') => host.run(JSON.stringify([{ op: 'done', command: id, result }]));
 
+function ownedAlgos(transition) {
+  const created = { ownerId: 'synthetic-A', generation: 7 };
+  let current = { ...created };
+  let unavailable = false;
+  let running = true;
+  const events = [];
+  const deaths = [];
+  let frees = 0;
+  const replies = [];
+  const r = rig({ ownsEngine: true }, {
+    algoStart() {}, algoStartOwned() {},
+    algoRunning: () => running,
+    algoDeadline: () => undefined,
+    algoEmits: () => JSON.stringify(replies.splice(0)),
+    algoOp() { events.push('op'); return '[]'; },
+    algoAdvance() { events.push('advance'); return '[]'; },
+    algoDispose() { events.push('dispose'); running = false; return '[]'; },
+    algoStopAll() {
+      events.push('stop-all');
+      replies.push({ op: 'algos:stopped', data: { stoppedChasers: [], stoppedTwaps: [], settled: true } });
+      return '[]';
+    },
+    health: () => '{"ticks":1}',
+    free() { frees++; },
+  }, { onDead: (error) => deaths.push(error) });
+  r.host.algoStart('same-account', created, () => {
+    if (unavailable) throw new Error('owner unavailable');
+    return current?.ownerId === created.ownerId && current?.generation === created.generation;
+  });
+  const retire = () => {
+    if (transition === 'owner' || transition === 'returning') current = { ownerId: 'synthetic-B', generation: 8 };
+    if (transition === 'returning') current = { ownerId: 'synthetic-A', generation: 9 };
+    if (transition === 'generation') current = { ownerId: 'synthetic-A', generation: 8 };
+    if (transition === 'logout') current = null;
+    if (transition === 'throw') unavailable = true;
+  };
+  return { ...r, events, deaths, retire, frees: () => frees };
+}
+
+for (const transition of ['unchanged', 'owner', 'generation', 'returning', 'logout', 'throw']) {
+  test(`algo status observation is nonterminal: ${transition}`, () => {
+    const r = ownedAlgos(transition);
+    try {
+      r.retire();
+      assert.equal(r.host.algosRunning, transition === 'unchanged');
+      assert.equal(r.host.algosRunning, transition === 'unchanged');
+      assert.equal(r.host.dead, false);
+      assert.equal(r.host.disposed, false);
+      assert.deepEqual(r.host.health(), { ticks: 1 });
+      assert.equal(typeof r.host.socketHealth().private, 'object');
+      assert.deepEqual(r.events, []);
+      assert.deepEqual(r.deaths, []);
+      assert.equal(r.frees(), 0);
+    } finally { r.host.dispose(); }
+  });
+
+  test(`algo cleanup is ordinary disposal after ownership observation: ${transition}`, async () => {
+    const r = ownedAlgos(transition);
+    try {
+      r.retire();
+      await r.host.algoDispose('account reload');
+      r.host.dispose();
+      assert.equal(r.host.dead, false);
+      assert.deepEqual(r.deaths, []);
+      assert.deepEqual(r.events, transition === 'unchanged' ? ['dispose'] : []);
+      assert.equal(r.frees(), 1);
+    } finally { r.host.dispose(); }
+  });
+
+  test(`status reads leave pending write disposal provenance intact: ${transition}`, async () => {
+    const r = ownedAlgos(transition);
+    const pending = r.host.command({ op: 'placeOrders', orders: [{ clientOrderId: 'synthetic-client' }] })
+      .then((value) => ({ value }), (error) => ({ error }));
+    try {
+      r.retire();
+      assert.equal(r.host.algosRunning, transition === 'unchanged');
+      assert.equal(r.host.commands.size, 1);
+      assert.equal(r.host.dead, false);
+      assert.equal(r.frees(), 0);
+      r.host.dispose();
+      const { error } = await pending;
+      assert.ok(error instanceof EngineDisposedError);
+      assert.equal(error.code, 'ENGINE_DISPOSED');
+      assert.equal(error.outcome, 'unknown');
+      assert.deepEqual(error.clientOrderIds, ['synthetic-client']);
+      assert.deepEqual(r.deaths, []);
+      assert.equal(r.frees(), 1);
+    } finally { r.host.dispose(); await pending; }
+  });
+
+  for (const action of ['op', 'stop-all', 'command', 'timer']) {
+    test(`real algo execution retains its strict owner fence: ${action}/${transition}`, async () => {
+      const r = ownedAlgos(transition);
+      try {
+        r.retire();
+        if (action === 'op') {
+          if (transition === 'unchanged') r.host.algoOp('exec', {});
+          else assert.throws(() => r.host.algoOp('exec', {}), EngineDeadError);
+        } else if (action === 'stop-all') await r.host.algoStopAll('user nuke');
+        else if (action === 'timer') r.host.advanceAlgos();
+        else {
+          const pending = r.host.command({ op: 'setLeverage', symbol: 'BTC', leverage: 2 });
+          if (transition === 'unchanged') { done(r.host, 1); await pending; }
+          else await assert.rejects(pending, EngineDeadError);
+        }
+        assert.equal(r.host.dead, transition !== 'unchanged');
+        assert.equal(r.deaths.length, transition === 'unchanged' ? 0 : 1);
+        assert.equal(r.frees(), transition === 'unchanged' ? 0 : 1);
+        assert.deepEqual(r.events, transition === 'unchanged'
+          ? action === 'op' ? ['op'] : action === 'stop-all' ? ['stop-all'] : action === 'timer' ? ['advance'] : []
+          : []);
+        assert.equal(r.calls.length, action === 'command' && transition === 'unchanged' ? 1 : 0);
+      } finally { r.host.dispose(); }
+    });
+  }
+}
+
+test('algoStart selects bound ownership only when the optional owner is provided', () => {
+  for (const owner of [undefined, { ownerId: 'A', generation: 7 }]) {
+    const calls = [];
+    const { host } = rig({}, {
+      algoStart: (...args) => calls.push(['legacy', ...args]),
+      algoStartOwned: (...args) => calls.push(['owned', ...args]),
+      algoDeadline: () => undefined,
+      algoRunning: () => true,
+      algoDispose: () => '',
+    });
+    host.algoStart('acct', owner);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], owner ? 'owned' : 'legacy');
+    assert.deepEqual(calls[0].slice(1, -1), owner ? ['acct', JSON.stringify(owner), 0] : ['acct', 0]);
+    host.dispose();
+  }
+});
+
+test('an owner hook without a current owner starts algos unowned, never legacy', () => {
+  for (const owner of [null, {}, { ownerId: '', generation: 1 }, { ownerId: 'A', generation: -1 }, { ownerId: 'A', generation: 1.5 }]) {
+    const calls = [];
+    const { host } = rig({}, { algoStart: () => calls.push('legacy'), algoStartUnowned: () => calls.push('unowned'), algoDeadline: () => undefined, algoRunning: () => true, algoDispose: () => '' });
+    host.algoStart('acct', owner);
+    assert.deepEqual(calls, ['unowned']);
+    assert.equal(host.algosRunning, true);
+    host.dispose();
+  }
+  for (const owner of [null, { ownerId: 'A', generation: 7 }]) {
+    const calls = [];
+    const { host } = rig({}, { algoStart: () => calls.push('legacy') });
+    assert.throws(() => host.algoStart('acct', owner), (error) => error.kind === 'unsupported' && /predates TWAP ownership/.test(error.message));
+    assert.deepEqual(calls, []);
+    host.dispose();
+  }
+});
+
+test('live algo ownership fences timers, EXEC wakeups and completions after startup', () => {
+  for (const wake of ['timer', 'completion']) {
+    for (const transition of ['unchanged', 'generation', 'returning', 'logout', 'throw']) {
+      let current = { ownerId: 'A', generation: 7 };
+      const created = { ...current };
+      let steps = 0;
+      let freed = 0;
+      let started = false;
+      const r = rig({ ownsEngine: true }, {
+        algoStart() {}, algoStartOwned() {},
+        algoDeadline: () => steps ? undefined : 10,
+        algoRunning: () => true,
+        algoEmits: () => '[]',
+        algoAdvance() { steps++; return '[]'; },
+        httpEnd() { steps++; return '[]'; },
+        free() { freed++; },
+      });
+      r.host.algoStart('acct', created, () => {
+        if (started && transition === 'throw') throw new Error('owner unavailable');
+        return current?.ownerId === created.ownerId && current?.generation === created.generation;
+      });
+      started = true;
+      if (transition === 'generation') current = { ownerId: 'A', generation: 8 };
+      if (transition === 'returning') {
+        current = { ownerId: 'B', generation: 8 };
+        current = { ownerId: 'A', generation: 9 };
+      }
+      if (transition === 'logout') current = null;
+      if (wake === 'timer') r.advance(10);
+      else r.host.run(r.host.invoke(r.engine.httpEnd, 1, 10));
+      assert.equal(steps, transition === 'unchanged' ? 1 : 0, `${wake}/${transition}`);
+      assert.equal(r.host.dead, transition !== 'unchanged', `${wake}/${transition}`);
+      assert.equal(freed, transition === 'unchanged' ? 0 : 1);
+      r.host.dispose();
+    }
+  }
+});
+
+test('signer microtasks cannot outlive the algo creation binding', async () => {
+  for (const changed of [false, true]) {
+    let owner = 7, signed = 0;
+    const r = rig({ signer: () => { signed++; return { receipt: {}, values: [[1]] }; } }, {
+      useExternalSigner() {}, algoStart() {}, algoStartOwned() {},
+      algoDeadline: () => undefined, algoRunning: () => true,
+      signed: () => '[]', signFailed: () => '[]', algoEmits: () => '[]',
+    });
+    r.host.algoStart('acct', { ownerId: 'A', generation: 7 }, () => owner === 7);
+    r.host.execute({ op: 'sign', attempt: 7, work: { receipt: {}, context: {}, operations: [{ kind: 'present', key: 'fixture' }] }, timeoutMs: 1000 });
+    if (changed) owner = 8;
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    assert.equal(signed, changed ? 0 : 1);
+    assert.equal(r.host.dead, changed);
+    r.host.dispose();
+  }
+});
+
 test('deadlines validate without sending commands; only the effective wait enters native JSON', async () => {
   for (const invalid of [0, -1, NaN, Infinity, 1.5, 2_147_483_648, '100', null]) {
     assert.throws(() => rig({ commandTimeoutMs: invalid }), RangeError);
@@ -74,7 +283,7 @@ test('synchronous completions, validation errors and no-reply events allocate no
     setTimeout() { timerCalls++; throw new Error('unnecessary timer'); }, clearTimeout() {} });
   assert.equal(await host.command({ op: 'getAccount' }), 42);
   await assert.rejects(host.command({ op: 'bad' }), /native validation/);
-  for (const op of ['publicFeedUpdate', 'setTickerSymbols', 'setPollScale', 'subscribeOrderBook', 'unsubscribeOrderBook', 'subscribeCandles', 'unsubscribeCandles']) {
+  for (const op of ['publicFeedUpdate', 'setTickerSymbols', 'setPollScale', 'subscribeOrderBook', 'unsubscribeOrderBook', 'subscribeCandles', 'unsubscribeCandles', 'repairSubscription']) {
     await host.command({ op });
   }
   assert.equal(timerCalls, 0);
@@ -216,7 +425,6 @@ test('normal disposal settles all callers despite failures in every cleanup adap
   r.transport.clearTimeout = () => { throw new Error('clear failed'); };
   r.transport.dispose = () => { disposed++; throw new Error('dispose failed'); };
   r.host.requests.set(1, { abort() { aborted++; throw new Error('abort failed'); } });
-  r.host.signings.set(2, { controller: { abort() { aborted++; throw new Error('sign abort failed'); } }, timer: 99 });
   r.host.sockets.set(3, { close() { closed++; throw new Error('close failed'); } });
   r.host.timers.set(4, 100);
   const pending = Promise.allSettled([
@@ -231,10 +439,10 @@ test('normal disposal settles all callers despite failures in every cleanup adap
   assert.equal(write.reason.clientOrderId, 'one');
   assert.deepEqual(write.reason.clientOrderIds, ['one']);
   assert.equal(read.reason.outcome, undefined);
-  assert.equal(aborted, 2);
+  assert.equal(aborted, 1);
   assert.equal(closed, 1);
   assert.equal(disposed, 1);
-  for (const key of ['commands', 'requests', 'signings', 'sockets', 'timers']) assert.equal(r.host[key].size, 0);
+  for (const key of ['commands', 'requests', 'sockets', 'timers']) assert.equal(r.host[key].size, 0);
   r.advance(DEFAULT_COMMAND_TIMEOUT_MS);
   assert.equal(r.host.dead, false);
   await assert.rejects(r.host.command({ op: 'placeOrders' }), (error) => error.code === 'ENGINE_DISPOSED' && error.outcome === undefined);
@@ -477,6 +685,25 @@ test('a history.incomplete event naming the command marks its rows incomplete', 
   assert.equal((await other).incomplete, undefined);
 });
 
+
+test("an incomplete event's closed reason code rides the rows, never its message", async () => {
+  const r = rig();
+  const reasoned = r.host.command({ op: 'fetchFills' });
+  const bare = r.host.command({ op: 'fetchFills' });
+  r.host.run(JSON.stringify([
+    { op: 'event', level: 'warn', code: 'history.incomplete', message: 'venue said: ip 1.2.3.4', fields: { command: 1, reason: 'cursorStalled' } },
+    { op: 'event', level: 'warn', code: 'history.incomplete', message: 'older engine', fields: { command: 2 } },
+    { op: 'done', command: 1, result: '[{"id":"a"}]' },
+    { op: 'done', command: 2, result: '[{"id":"b"}]' },
+  ]));
+  const rows = await reasoned;
+  assert.equal(rows.incomplete, true);
+  assert.equal(rows.incompleteReason, 'cursorStalled');
+  assert.deepEqual(Object.keys(rows), ['0'], 'the reason is not enumerable either');
+  const older = await bare;
+  assert.equal(older.incomplete, true);
+  assert.equal(older.incompleteReason, undefined);
+});
 
 const coverageEvent = (command) => ({
   op: 'event', level: 'warn', code: 'history.incomplete', message: 'partial history', fields: { command },

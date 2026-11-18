@@ -10,14 +10,13 @@ const POSITION: &str = r#"{"market":"BTC-USD-PERP","status":"OPEN","side":"LONG"
 const ORDER: &str = r#"{"id":"123","market":"BTC-USD-PERP","type":"LIMIT","status":"OPEN","side":"BUY","size":"2","remaining_size":"2","price":"99","instruction":"GTC","time_in_force":"GTC","created_at":1700000000000,"last_updated_at":1700000000000,"client_id":"caller-1"}"#;
 fn options() -> Options {
     Options {
-        key: Some(format!("0x{}1", "0".repeat(63))),
         paradex_address: Some("0x0123".into()),
         subkey_address: Some("0x456".into()),
         ..Options::default()
     }
 }
 fn seed() -> (Harness, SocketId) {
-    let mut h = Harness::empty(options());
+    let mut h = Harness::keyed(options(), STARK_KEY);
     h.reply("/markets", MARKETS);
     h.reply("summary", TICKERS);
     h.reply(
@@ -605,11 +604,19 @@ fn delayed_jwt_response_cannot_dispatch_private_requests_after_its_expiry() {
         1
     );
     h.reply("/auth/", r#"{"jwt_token":"fresh"}"#);
+    // The boot margins read outlived its 20 s window while the JWT was late, so
+    // it ends unsent; the cycle's next private read carries the fresh JWT.
+    assert!(!h.pending.iter().any(|r| r.url.ends_with("/account/margin")));
     assert!(
-        h.take("/account/margin")
+        h.take("/positions")
             .headers
             .iter()
             .any(|(n, v)| *n == "Authorization" && v == "Bearer fresh")
+    );
+    assert!(
+        !h.pending
+            .iter()
+            .any(|r| r.headers.iter().any(|(_, v)| v.contains("already-expired")))
     );
 }
 
@@ -1079,8 +1086,9 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
-    let mut pending: Vec<_> = e
-        .drain_actions()
+    // Account reads are managed: the shared fixture prepares and releases them.
+    let mut pending: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, due)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -1122,10 +1130,14 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                     },
                 },
             );
-            pending.extend(e.drain_actions().filter_map(|a| match a {
-                Action::Http(r) => Some(r),
-                _ => None,
-            }));
+            pending.extend(
+                safe_cex_engine::test_support::prepared_actions(&mut e, due + 1.)
+                    .into_iter()
+                    .filter_map(|a| match a {
+                        Action::Http(r) => Some(r),
+                        _ => None,
+                    }),
+            );
         }
     }
     assert!(pending.is_empty(), "all fixture account reads complete");
@@ -1618,4 +1630,122 @@ fn one_malformed_margin_row_keeps_its_stored_leverage_while_valid_peers_commit()
         assert!(logs.contains(&message), "{message}");
     }
     assert!(!logs.iter().any(|l| l.contains("-3")));
+}
+
+#[test]
+fn the_user_s_own_cancel_is_not_logged_as_a_rejection() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    h.now += 5_000.;
+    h.actions.clear();
+    let row = ORDER
+        .replace(
+            "\"instruction\":\"GTC\"",
+            "\"instruction\":\"GTC\",\"cancel_reason\":\"USER_CANCELED\"",
+        )
+        .replace("1700000000000", "1700000005000");
+    order_update(&mut h, socket, &row);
+    assert!(!h.actions.iter().any(|a| matches!(a,
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.message.contains("order rejected"))));
+}
+
+#[test]
+fn a_refused_key_fails_the_start_instead_of_waiting() {
+    let (mut h, _) = seed();
+    let auth = h.take("/auth/");
+    h.respond(auth, 401, r#"{"error":"INVALID_TOKEN"}"#);
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}
+
+/// Acknowledges every subscribe sent so far on `socket`, after `skip` of them.
+fn ack_subscriptions(h: &mut Harness, socket: SocketId, skip: usize) -> usize {
+    #[derive(serde::Deserialize)]
+    struct Params {
+        channel: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Rpc {
+        method: Option<String>,
+        id: Option<u64>,
+        params: Option<Params>,
+    }
+    let acks: Vec<String> = h
+        .sent()
+        .iter()
+        .filter_map(|text| serde_json::from_str::<Rpc>(text).ok())
+        .filter(|rpc| rpc.method.as_deref() == Some("subscribe"))
+        .skip(skip)
+        .map(|rpc| {
+            format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":{},\"result\":{{\"channel\":\"{}\"}}}}",
+                rpc.id.unwrap(),
+                rpc.params.unwrap().channel
+            )
+        })
+        .collect();
+    for ack in &acks {
+        message(h, socket, ack);
+    }
+    acks.len()
+}
+
+#[test]
+fn the_first_private_ready_rereads_positions_and_orders_after_the_last_ack() {
+    let (mut h, socket) = loaded();
+    h.pending.clear();
+    authenticate(&mut h, socket);
+    assert!(h.pending.is_empty(), "{:?}", h.pending);
+    assert_eq!(ack_subscriptions(&mut h, socket, 0), 5);
+    h.take("/positions");
+    h.take("/orders");
+    assert!(h.pending.is_empty(), "{:?}", h.pending);
+}
+
+#[test]
+fn a_read_in_flight_at_private_ready_is_read_again_after_the_cycle_settles() {
+    let (mut h, socket) = seed();
+    h.reply("/auth/", r#"{"jwt_token":"jwt-first"}"#);
+    let margin = h.take("/account/margin");
+    authenticate(&mut h, socket);
+    assert_eq!(ack_subscriptions(&mut h, socket, 0), 5);
+    assert!(
+        h.pending.is_empty(),
+        "the startup margin read is still running"
+    );
+    h.respond(margin, 200, r#"{"configs":[]}"#);
+    h.reply("/positions", r#"{"results":[]}"#);
+    h.reply(
+        "/account",
+        r#"{"total_collateral":"1000","free_collateral":"800"}"#,
+    );
+    h.reply("/orders", r#"{"results":[]}"#);
+    assert!(!h.pending.iter().any(|r| r.url.contains("/positions")));
+    h.reply("/account/margin", r#"{"configs":[]}"#);
+    h.take("/positions");
+    h.take("/orders");
+    assert!(h.pending.is_empty(), "{:?}", h.pending);
+}
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for status in [401, 403] {
+        let (mut h, _) = seed();
+        let auth = h.take("/auth/");
+        h.respond(
+            auth,
+            status,
+            r#"{"error":"INVALID_TOKEN","message":"Unauthorized"}"#,
+        );
+        assert!(
+            h.actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+            )),
+            "{status}"
+        );
+    }
 }

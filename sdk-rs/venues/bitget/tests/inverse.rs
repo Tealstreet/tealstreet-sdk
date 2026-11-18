@@ -15,6 +15,10 @@ const TICKERS: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSD","lastPr":"40
 const BALANCE: &str = r#"{"code":"00000","data":[{"marginCoin":"BTC","unionTotalMargin":"2","unionAvailable":"1.5","unrealizedPL":"0.1","usdtEquity":"100000"},{"marginCoin":"ETH","accountEquity":"3","available":"2","unrealizedPL":"0.2","usdtEquity":"0"}]}"#;
 
 fn started(tickers: &str) -> Harness {
+    started_with_contracts(tickers, CONTRACTS)
+}
+
+fn started_with_contracts(tickers: &str, contracts: &str) -> Harness {
     let mut h = Harness::started(Options {
         product: Product::Inverse,
         key: Some("key".into()),
@@ -22,7 +26,7 @@ fn started(tickers: &str) -> Harness {
         passphrase: Some("pass".into()),
         ..Options::default()
     });
-    h.respond("/contracts", 200, CONTRACTS);
+    h.respond("/contracts", 200, contracts);
     h.respond("/tickers", 200, tickers);
     let public = h
         .sockets
@@ -533,4 +537,98 @@ fn inverse_position_zero_row_mark_falls_through_to_the_row_market_price() {
         .find(|p| p.symbol == "BTCUSD")
         .unwrap();
     assert_eq!(p.contracts, 0.02);
+}
+
+#[test]
+fn an_empty_coin_futures_catalogue_ends_the_start_with_a_reason() {
+    let mut h = Harness::started(Options {
+        product: Product::Inverse,
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("pass".into()),
+        ..Options::default()
+    });
+    h.expect_startup_failure = true;
+    h.respond("/contracts", 200, r#"{"code":"00000","data":[]}"#);
+    assert!(h.sockets.is_empty(), "{:?}", h.sockets);
+    assert!(h.requests.is_empty());
+    assert!(h.timers.is_empty(), "no retry forever");
+}
+
+#[test]
+fn inverse_keeps_legacy_max_trade_num_until_market_cap_units_are_proven() {
+    let contracts = CONTRACTS.replace(
+        "\"maxTradeNum\":\"2000\"",
+        "\"maxTradeNum\":\"2000\",\"maxOrderQty\":\"100\",\"maxMarketOrderQty\":\"1\"",
+    );
+    let h = started_with_contracts(TICKERS, &contracts);
+    assert_eq!(
+        h.engine.store().market("BTCUSD").unwrap().limits.amount.max,
+        2000.0
+    );
+}
+
+#[test]
+fn explicit_inverse_trailing_size_does_not_require_position_notional() {
+    for notional in [1000.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut h = ready();
+        h.engine.store_mut().update_positions(|position| {
+            if position.symbol == "BTCUSD" {
+                position.notional = notional;
+            }
+        });
+        h.requests.clear();
+        h.command(Command::PlaceOrders {
+            command: 93,
+            orders: vec![
+                serde_json::from_value(json!({
+                    "symbol":"BTCUSD", "type":"trailing_stop_market", "side":"sell",
+                    "amount":5, "price":39000
+                }))
+                .unwrap(),
+            ],
+        });
+        let request = h.take("/place-plan-order");
+        let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload["planType"], "track_plan");
+        assert_eq!(payload["size"], "5");
+    }
+}
+
+#[test]
+fn unknown_notional_refuses_inverse_sized_stops_before_http() {
+    for value in [1000.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut h = ready();
+        h.engine.store_mut().update_positions(|p| {
+            if p.symbol == "BTCUSD" {
+                p.notional = value;
+            }
+        });
+        h.requests.clear();
+        h.command(Command::PlaceOrders {
+            command: 92,
+            orders: vec![
+                serde_json::from_value(json!({
+                    "symbol":"BTCUSD","type":"stop_market","side":"sell","amount":5,"price":48000
+                }))
+                .unwrap(),
+            ],
+        });
+        if value.is_finite() {
+            let request = h.take("/place-tpsl-order");
+            let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+            assert_eq!(payload["size"], "5");
+        } else {
+            assert!(
+                h.requests.is_empty(),
+                "unknown capacity must not choose a partial or full stop: {:?}",
+                h.requests
+            );
+            assert!(
+                h.done
+                    .iter()
+                    .any(|(id, result)| *id == 92 && result.is_err())
+            );
+        }
+    }
 }

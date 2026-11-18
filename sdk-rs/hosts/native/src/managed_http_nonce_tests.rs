@@ -33,13 +33,8 @@ struct NonceVenue {
     failures: Vec<VenueError>,
 }
 fn identity() -> Identity {
-    Identity {
-        credential: KeyRef("fixture".into()),
-        signing: KeyRef("fixture".into()),
-        passphrase: None,
-        stable_id: Some("native-nonce-final-claim".into()),
-        extra: Default::default(),
-    }
+    Identity::new(KeyRef("fixture".into()), Some(KeyRef("fixture".into())))
+        .with_stable_id(Some("native-nonce-final-claim".into()))
 }
 impl Venue for NonceVenue {
     #[inline]

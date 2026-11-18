@@ -388,7 +388,7 @@ fn assert_unknown_setting_failure(h: &Harness, result: &[Action], provider_posts
                 assert_eq!(
                     error.message,
                     // A 5xx write is the engine's unproven seal; no body is decoded.
-                    "HTTP response does not prove the write outcome"
+                    "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
                 );
                 Some("failure")
             }
@@ -1122,7 +1122,7 @@ impl Signer for AlterProvider {
 }
 #[test]
 fn bracket_provider_refusal_and_invalid_atomic_results_release_nothing() {
-    for alter in 0..6 {
+    for alter in [0, 1, 2, 4, 5] {
         let mut h = fixture(options());
         h.engine
             .set_signer(Some(Arc::new(AlterProvider {
@@ -1163,6 +1163,48 @@ fn bracket_provider_refusal_and_invalid_atomic_results_release_nothing() {
             100.
         );
     }
+}
+
+#[test]
+fn callback_headers_cannot_replace_native_authentication() {
+    let mut h = fixture(options());
+    h.engine
+        .set_signer(Some(Arc::new(AlterProvider {
+            inner: h.provider.clone(),
+            alter: 3,
+        })))
+        .unwrap();
+    let request = bracket(&mut h);
+    assert_ne!(header(&request, "X-CH-SIGN"), "injected");
+    assert_eq!(header(&request, "X-CH-SIGN").len(), 64);
+}
+
+#[test]
+fn rest_only_signing_keeps_account_reads_without_listen_key_or_private_socket() {
+    let mut h = fixture(options());
+    h.engine
+        .set_private_feed_policy(safe_cex_engine::signing_policy::PrivateFeedPolicy::RestOnly)
+        .unwrap();
+    let request = catalogue(&mut h);
+    let startup = response(&mut h, NOW, &request, 200, CONTRACT);
+    assert!(
+        !startup
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("listenKey")))
+    );
+    assert!(!startup.iter().any(|a| matches!(
+        a,
+        Action::WsConnect {
+            channel: Some(safe_cex_engine::SocketChannel::Private),
+            ..
+        }
+    )));
+    take_http(&startup, Method::Get, "/fapi/v2/account");
+    take_http(
+        &startup,
+        Method::Get,
+        "/fapi/v2/openOrders?contractName=E-BTC-USDT",
+    );
 }
 
 struct ParkedProvider(Arc<RecordingSigner>);
@@ -1489,4 +1531,22 @@ fn refused_inspect_resign_does_not_invent_an_unknown_write() {
     assert_eq!(failures.len(), 1, "{result:?}");
     assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::NotSent));
     assert_eq!(h.engine.store().orders(), [order]);
+}
+
+#[test]
+fn engine_ambiguity_429_signature_cannot_resend_setting() {
+    let mut h = fixture(options());
+    let first = setting(&mut h);
+    h.engine
+        .store_mut()
+        .update_setting(SYMBOL, |setting| setting.leverage = 5.);
+    let count = provider_setting_posts(&h);
+    let result = response(
+        &mut h,
+        NOW + 10.,
+        &first,
+        429,
+        r#"{"code":"-1022","msg":"Invalid signature"}"#,
+    );
+    assert_unknown_setting_failure(&h, &result, count);
 }

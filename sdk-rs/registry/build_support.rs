@@ -22,6 +22,10 @@ enum Input {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Rule {
+    beta_admitted: Option<bool>,
+    // Hosted admission is read by the host, not emitted into LOCAL construction.
+    #[serde(default, rename = "delegated")]
+    _delegated: Option<DelegatedPolicy>,
     can_sign: Option<Vec<Vec<Input>>>,
     private_eligible: Option<Vec<Vec<Input>>>,
     explicit_private_error: Option<String>,
@@ -36,6 +40,13 @@ struct Rule {
     setup_mapping: Option<SetupMapping>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DelegatedPolicy {
+    #[serde(default, rename = "enabled")]
+    _enabled: bool,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum SetupMapping {
@@ -45,6 +56,9 @@ enum SetupMapping {
     #[serde(rename = "apexomni")]
     ApexOmni,
     Lighter,
+    Hyperliquid,
+    Txflow,
+    Paradex,
 }
 
 #[derive(Default, Deserialize)]
@@ -65,6 +79,8 @@ enum SignatureEncoding {
     #[default]
     Hex,
     Base64,
+    #[serde(rename = "hex-base64")]
+    Base64Hex,
 }
 
 #[derive(Deserialize)]
@@ -168,6 +184,8 @@ struct ExtraKeyPolicy {
     field: ExtraFieldPolicy,
     #[serde(default)]
     encoding: Option<KeyEncoding>,
+    #[serde(default)]
+    trim: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -176,6 +194,7 @@ enum ExtraFieldPolicy {
     #[default]
     Optional,
     RequiredForPrivate,
+    AliasPrimary,
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,6 +202,7 @@ enum ExtraFieldPolicy {
 enum ExtraKey {
     ZklinkSeed,
     L1Wallet,
+    KucoinBroker,
 }
 
 #[derive(Debug, Deserialize)]
@@ -204,6 +224,14 @@ struct BridgeRule {
     isolated_book_subscriptions: bool,
     dispatch_signing: bool,
     read_credentials: ReadCredentialsPolicy,
+    helpers: Option<HelperCapabilities>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HelperCapabilities {
+    resolve_leverage_context: Option<bool>,
+    fetch_algo_orders: Option<bool>,
 }
 
 /// What trusted setup does with a family's read key; absent installs it.
@@ -229,6 +257,7 @@ enum DemoRule {
 #[serde(deny_unknown_fields)]
 struct Rules {
     default: Rule,
+    #[serde(deserialize_with = "unique_venues")]
     venues: BTreeMap<String, Rule>,
 }
 
@@ -257,8 +286,20 @@ fn rule(value: &Rule) -> String {
         None => "None".into(),
     };
     let bridge = &value.bridge;
+    let helpers = if cfg!(any(feature = "phemex", feature = "okx")) {
+        let value = match &bridge.helpers {
+            None => "None".to_owned(),
+            Some(helpers) => format!(
+                "Some(HelperCapabilities {{ resolve_leverage_context: {:?}, fetch_algo_orders: {:?} }})",
+                helpers.resolve_leverage_context, helpers.fetch_algo_orders
+            ),
+        };
+        format!(", helpers: {value}")
+    } else {
+        String::new()
+    };
     let bridge = format!(
-        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {}, dispatch_signing: {}, read_credentials: ReadCredentialsPolicy::{:?} }}",
+        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {}, dispatch_signing: {}, read_credentials: ReadCredentialsPolicy::{:?}{helpers} }}",
         bridge.spot,
         bridge.demo,
         bridge.primary_credentials_only,
@@ -286,8 +327,8 @@ fn rule(value: &Rule) -> String {
                         |encoding| format!("Some(safe_cex_engine::signing::KeyEncoding::{encoding:?})"),
                     );
                     format!(
-                        "Some(safe_cex_engine::signing::ExtraKeyPolicy {{ key: safe_cex_engine::signing::ExtraKey::{:?}, field: safe_cex_engine::signing::ExtraFieldPolicy::{:?}, encoding: {encoding} }})",
-                        extra.key, extra.field
+                        "Some(safe_cex_engine::signing::ExtraKeyPolicy {{ key: safe_cex_engine::signing::ExtraKey::{:?}, field: safe_cex_engine::signing::ExtraFieldPolicy::{:?}, encoding: {encoding}, trim: {} }})",
+                        extra.key, extra.field, extra.trim
                     )
                 },
             );
@@ -314,7 +355,16 @@ fn rule(value: &Rule) -> String {
                 "Some(&[{}])",
                 names
                     .iter()
-                    .map(|name| format!("{name:?}"))
+                    .map(|name| {
+                        // Broker metadata belongs only to the compiled MEXC family.
+                        if matches!(value.setup_mapping.as_ref(), Some(SetupMapping::Mexc))
+                            && name == "source"
+                        {
+                            format!("#[cfg(feature = \"mexc\")] {name:?}")
+                        } else {
+                            format!("{name:?}")
+                        }
+                    })
                     .collect::<Vec<_>>()
                     .join(",")
             )
@@ -337,14 +387,106 @@ fn rule(value: &Rule) -> String {
         |mapping| format!("Some(SetupMapping::{mapping:?})"),
     );
     format!(
-        "Rule {{ can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing}, setup_mapping: {setup_mapping} }}",
+        "Rule {{ beta_admitted: {}, can_sign: {}, private_eligible: {}, explicit_private_error: {error}, bridge: {bridge}, signer_setup: {signer_setup}, remote_signing: {remote_signing}, setup_mapping: {setup_mapping} }}",
+        value.beta_admitted.unwrap_or(true),
         conditions(&value.can_sign),
         conditions(&value.private_eligible),
     )
 }
 
+fn unique_venues<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BTreeMap<String, Rule>, D::Error> {
+    struct Venues;
+    impl<'de> serde::de::Visitor<'de> for Venues {
+        type Value = BTreeMap<String, Rule>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("unique construction policy venues")
+        }
+
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut venues = BTreeMap::new();
+            while let Some(name) = map.next_key::<String>()? {
+                if venues.contains_key(&name) {
+                    return Err(serde::de::Error::custom(format!(
+                        "duplicate policy venue: {name}"
+                    )));
+                }
+                venues.insert(name, map.next_value()?);
+            }
+            Ok(venues)
+        }
+    }
+    deserializer.deserialize_map(Venues)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ArtifactCensus {
+    budget_venues: Vec<String>,
+    construction_policy_venues: Vec<String>,
+}
+
+fn validate_census(rules: &Rules) -> Result<(), String> {
+    let census: ArtifactCensus = serde_json::from_str(include_str!("../artifact-census.json"))
+        .map_err(|error| error.to_string())?;
+    for names in [&census.budget_venues, &census.construction_policy_venues] {
+        if names.is_empty()
+            || names.windows(2).any(|pair| pair[0] >= pair[1])
+            || names.iter().any(|name| {
+                !name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+                    || !name.bytes().all(|byte| {
+                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+                    })
+            })
+        {
+            return Err("invalid, duplicate or unsorted artifact census".into());
+        }
+    }
+    let missing: Vec<_> = census
+        .construction_policy_venues
+        .iter()
+        .filter(|name| !rules.venues.contains_key(*name))
+        .cloned()
+        .collect();
+    let unexpected: Vec<_> = rules
+        .venues
+        .keys()
+        .filter(|name| !census.construction_policy_venues.contains(*name))
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "missing construction policy venues: {}",
+            missing.join(", ")
+        ));
+    }
+    if !unexpected.is_empty() {
+        return Err(format!(
+            "unexpected construction policy venues: {}",
+            unexpected.join(", ")
+        ));
+    }
+    Ok(())
+}
+
 pub fn generate(json: &str) -> Result<String, String> {
     let rules: Rules = serde_json::from_str(json).map_err(|error| error.to_string())?;
+    validate_census(&rules)?;
+    render(rules)
+}
+
+// Synthetic renderer fixtures intentionally use invented venue names.
+#[cfg(test)]
+pub fn generate_fixture(json: &str) -> Result<String, String> {
+    render(serde_json::from_str(json).map_err(|error| error.to_string())?)
+}
+
+fn render(rules: Rules) -> Result<String, String> {
     if rules.default.can_sign.is_none() || rules.default.private_eligible.is_none() {
         return Err("default signing and private conditions are required".into());
     }
@@ -420,7 +562,7 @@ pub fn generate(json: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::generate;
+    use super::generate_fixture as generate;
 
     #[test]
     fn signer_setup_rules_emit_constant_explicit_and_undeclared_fields() {
@@ -469,7 +611,7 @@ mod tests {
         let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
             "p":{"signerSetup":{"primary":{"extra":{"key":"l1Wallet","field":"requiredForPrivate","encoding":"hex"}}}}
         }}"#).unwrap();
-        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::L1Wallet, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
+        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::L1Wallet, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex), trim: false })"));
     }
 
     #[test]
@@ -478,8 +620,8 @@ mod tests {
             "v":{"signerSetup":{"primary":{"secretEncoding":"base64Text","extra":{"key":"zklinkSeed","field":"requiredForPrivate","encoding":"hex"}}}},
             "o":{"signerSetup":{"primary":{"extra":{"key":"zklinkSeed"}}}}
         }}"#).unwrap();
-        assert!(output.contains("secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text), extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
-        assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: None })"));
+        assert!(output.contains("secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text), extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex), trim: false })"));
+        assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: None, trim: false })"));
         let base58 = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"secretEncoding":"base58"}}}}}"#;
         assert!(generate(base58).unwrap().contains("KeyEncoding::Base58"));
         let url = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"secretEncoding":"base64Url"}}}}}"#;

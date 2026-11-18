@@ -354,3 +354,35 @@ fn income_final_limit_does_not_shorten_native_paging_or_split_native_id_dedupe()
     assert_eq!(rows.as_array().unwrap().len(), 1);
     assert_eq!(rows[0]["tranId"], "1000:pnl");
 }
+
+// Live: 17 fills in 1 day, exactly 100 in 7: a cap closed the window as covered.
+#[test]
+fn fills_with_no_limit_walk_past_the_first_hundred() {
+    let mut h = Harness::new();
+    h.seed();
+    query(
+        &mut h,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(1_690_000_000_000.0),
+            to_ms: Some(1_690_100_000_000.0),
+            limit: None,
+        },
+    );
+    let row = |id: usize| {
+        format!(
+            r#"{{"instId":"BTC-USDT","tradeId":"{id}","orderId":"12","side":"buy","positionSide":"net","fillPrice":"100","fillSize":"1","fee":"0","ts":"1690000001000"}}"#
+        )
+    };
+    let page = (1..=100).map(row).collect::<Vec<_>>().join(",");
+    h.reply(
+        "fills-history",
+        &format!(r#"{{"code":"0","data":[{page}]}}"#),
+    );
+    h.reply(
+        "fills-history",
+        &format!(r#"{{"code":"0","data":[{}]}}"#, row(101)),
+    );
+    assert_eq!(result(&h).unwrap().as_array().unwrap().len(), 101);
+}

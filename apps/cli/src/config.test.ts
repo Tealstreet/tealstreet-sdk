@@ -1,3 +1,15 @@
+// These are store semantics tests; cross-user-isolation.test.ts exercises real paths.
+vi.mock('./storage-context', () => ({
+  getStorageDir: () => '/home/testuser/.tealstreet',
+  getStoragePath: (name: string) => `${'/home/testuser/.tealstreet'}/${name}`,
+  getStorageOwner: () => null,
+  authOwner: () => null,
+  selectStorageOwner: vi.fn(),
+  onStorageOwnerChange: () => () => {},
+  getStorageEpoch: () => 0,
+  assertStorageSession: () => {},
+  isRecord: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
+}));
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import type { Config, ExchangeAccountConfig } from './config';

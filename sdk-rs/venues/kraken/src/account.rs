@@ -1,11 +1,13 @@
 //! Private challenge state, atomic reconciliation and execution-only fills.
-use crate::{Kraken, Pending, wire};
+use crate::{Kraken, Pending, sign, wire};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowRepeat, RowReports, SnapshotBuilder};
+use safe_cex_engine::fresh_positions::{self, FreshPositions};
 use safe_cex_engine::log::code;
 use safe_cex_engine::{
-    Cx, Fill, Method, Response, SocketId, TimerId,
+    Cx, ErrorKind, Fill, Method, Response, SocketId, TimerId, VenueError,
     json::{self, ArrayAt},
     model::*,
 };
@@ -17,6 +19,52 @@ use std::{
 };
 
 const FEEDS: [&str; 3] = ["fills", "open_orders", "open_positions"];
+/// Kraken alerts on any frame it dislikes; only these words refuse the private feeds.
+fn refuses_private_feed(msg: &Ws<'_>) -> bool {
+    match msg.event.as_ref() {
+        "error" | "subscribed_failed" | "unsubscribed_failed" => true,
+        "alert" | "info" => {
+            let message = format!("{} {}", msg.error, msg.message).to_ascii_lowercase();
+            message.contains("authenticat") || message.contains("api key")
+        }
+        _ => false,
+    }
+}
+
+fn private_refusal(msg: &Ws<'_>) -> VenueError {
+    let detail = if !msg.error.is_empty() {
+        msg.error.as_ref()
+    } else if !msg.message.is_empty() {
+        msg.message.as_ref()
+    } else {
+        msg.reason.as_ref()
+    };
+    let detail: String = detail.chars().take(128).collect();
+    let lower = detail.to_ascii_lowercase();
+    let kind = if lower.contains("permission") {
+        ErrorKind::AuthPermission
+    } else if lower.contains("authenticat")
+        || lower.contains("api key")
+        || lower == "invalid challenge"
+    {
+        ErrorKind::AuthInvalid
+    } else {
+        ErrorKind::Rejected
+    };
+    let mut error = VenueError::new(if detail.is_empty() {
+        "Kraken private subscription rejected".into()
+    } else {
+        format!("Kraken private subscription rejected: {detail}")
+    })
+    .kind(kind);
+    if !detail.is_empty() {
+        error = error.venue_message(detail);
+    }
+    if !msg.error.is_empty() {
+        error = error.venue_code(msg.error.chars().take(64).collect::<String>());
+    }
+    error
+}
 /// Recent execution deduplication and terminal fences survive reconnects without
 /// retaining every historical identity for the lifetime of the engine.
 #[derive(Default)]
@@ -54,6 +102,7 @@ pub enum Scope {
 }
 pub struct Request {
     scope: Scope,
+    read_epoch: u64,
     revision: u64,
     settings_revision: u64,
     orders: SnapshotBuilder<String, Order>,
@@ -61,17 +110,24 @@ pub struct Request {
     settings: Vec<(String, Option<f64>)>,
     /// False on a structural failure or held catalogue exposure: nothing commits.
     valid: bool,
+    /// Owned rows on a market the catalogue does not list.
+    unlisted: Vec<String>,
+    /// The number of a positions read, so `readPositions` can name one it may trust.
+    read: u32,
 }
 impl Request {
-    fn new(scope: Scope, revision: u64, settings_revision: u64) -> Self {
+    fn new(scope: Scope, revision: u64, settings_revision: u64, read_epoch: u64) -> Self {
         Self {
             scope,
+            read_epoch,
             revision,
             settings_revision,
             orders: SnapshotBuilder::default(),
             positions: SnapshotBuilder::default(),
             settings: vec![],
             valid: true,
+            unlisted: Vec::new(),
+            read: 0,
         }
     }
 }
@@ -90,6 +146,10 @@ pub struct Account {
     settings_write_revision: u64,
     orders_revision: u64,
     positions_revision: u64,
+    positions_reads: u32,
+    pub(crate) fresh_positions: FreshPositions,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<VenueError>,
     terminal: RecentIds<16384>,
     inflight: HashSet<u8>,
     orders_reconcile: bool,
@@ -104,7 +164,11 @@ pub struct Account {
     payload_complete: bool,
     poll: Option<TimerId>,
     heal: Option<TimerId>,
-    seen_fills: RecentIds<8192>,
+    emitted_fills: RecentIds<8192>,
+    /// The first snapshot is history, not live executions. Keep it separate so
+    /// those identities never suppress a later live delivery.
+    startup_fill_history: RecentIds<8192>,
+    fill_history_initialized: bool,
     payloads: HashMap<String, f64>,
     snapshot_orders_revision: u64,
     snapshot_settings_revision: u64,
@@ -202,6 +266,115 @@ struct OrderWire<'a> {
     )]
     last_update_time: Option<Stamp<'a>>,
 }
+
+/// Fixed field order and type alphabet are documented under Futures order-row diagnostics.
+/// Only types leave this function; unknown names and every value are discarded.
+fn order_field_types(item: &str) -> String {
+    const FIELDS: [&str; 29] = [
+        "order_id",
+        "orderId",
+        "uid",
+        "symbol",
+        "instrument",
+        "orderType",
+        "type",
+        "side",
+        "direction",
+        "limitPrice",
+        "limit_price",
+        "price",
+        "stopPrice",
+        "stop_price",
+        "unfilledSize",
+        "filledSize",
+        "filled",
+        "qty",
+        "quantity",
+        "size",
+        "reduceOnly",
+        "reduce_only",
+        "cliOrdId",
+        "cli_ord_id",
+        "trigger_signal",
+        "triggerSignal",
+        "lastUpdateTime",
+        "last_update_time",
+        "lastUpdateTimestamp",
+    ];
+    struct Type(u8);
+    impl<'de> Deserialize<'de> for Type {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct Kind;
+            impl<'de> serde::de::Visitor<'de> for Kind {
+                type Value = Type;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("a JSON value")
+                }
+                fn visit_unit<E: serde::de::Error>(self) -> Result<Type, E> {
+                    Ok(Type(b'z'))
+                }
+                fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<Type, E> {
+                    Ok(Type(b'b'))
+                }
+                fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<Type, E> {
+                    Ok(Type(b'n'))
+                }
+                fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<Type, E> {
+                    Ok(Type(b'n'))
+                }
+                fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<Type, E> {
+                    Ok(Type(b'n'))
+                }
+                fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<Type, E> {
+                    Ok(Type(b's'))
+                }
+                fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                    self,
+                    mut seq: A,
+                ) -> Result<Type, A::Error> {
+                    while seq.next_element::<Type>()?.is_some() {}
+                    Ok(Type(b'a'))
+                }
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    mut map: A,
+                ) -> Result<Type, A::Error> {
+                    while map.next_entry::<serde::de::IgnoredAny, Type>()?.is_some() {}
+                    Ok(Type(b'o'))
+                }
+            }
+            deserializer.deserialize_any(Kind)
+        }
+    }
+    struct Fields;
+    impl<'de> serde::de::Visitor<'de> for Fields {
+        type Value = [u8; FIELDS.len()];
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("an order object")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut types = [b'-'; FIELDS.len()];
+            while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+                // Validate unknown values too, preserving the old decoder's range/depth refusal.
+                let kind = map.next_value::<Type>()?.0;
+                if let Some(index) = FIELDS.iter().position(|name| *name == key.as_ref()) {
+                    types[index] = kind;
+                }
+            }
+            Ok(types)
+        }
+    }
+    let mut decoder = serde_json::Deserializer::from_str(item);
+    serde::Deserializer::deserialize_map(&mut decoder, Fields)
+        .and_then(|types| decoder.end().map(|()| types))
+        .unwrap_or([b'-'; FIELDS.len()])
+        .into_iter()
+        .map(char::from)
+        .collect()
+}
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Direction<'a> {
@@ -222,6 +395,25 @@ impl Stamp<'_> {
         }
     }
 }
+// Unusable price metadata must not discard an otherwise valid position update.
+fn optional_position_price<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum PositionPrice {
+        Number(
+            #[serde(deserialize_with = "safe_cex_engine::de::lenient_optional_number")] Option<f64>,
+        ),
+        Unusable(serde::de::IgnoredAny),
+    }
+
+    Ok(match PositionPrice::deserialize(deserializer)? {
+        PositionPrice::Number(value) => value,
+        PositionPrice::Unusable(_) => None,
+    })
+}
+
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PositionWire<'a> {
@@ -235,16 +427,20 @@ struct PositionWire<'a> {
     balance: Option<f64>,
     #[serde(default, alias = "entry_price", deserialize_with = "wire::number")]
     price: f64,
-    #[serde(default, alias = "mark_price", deserialize_with = "wire::number")]
-    mark_price: f64,
+    #[serde(
+        default,
+        alias = "mark_price",
+        deserialize_with = "optional_position_price"
+    )]
+    mark_price: Option<f64>,
     #[serde(default, alias = "pnl", deserialize_with = "wire::number")]
     unrealized_pnl: f64,
     #[serde(
         default,
         alias = "liquidation_threshold",
-        deserialize_with = "wire::number"
+        deserialize_with = "optional_position_price"
     )]
-    liquidation_price: f64,
+    liquidation_price: Option<f64>,
     #[serde(default, deserialize_with = "wire::optional_number")]
     max_fixed_leverage: Option<f64>,
 }
@@ -263,6 +459,8 @@ struct Ws<'a> {
     feed: Cow<'a, str>,
     #[serde(default, borrow)]
     message: Cow<'a, str>,
+    #[serde(default, borrow)]
+    error: Cow<'a, str>,
     #[serde(default, borrow)]
     reason: Cow<'a, str>,
     #[serde(default)]
@@ -357,14 +555,42 @@ struct SignedParts {
     body: Option<String>,
 }
 impl Kraken {
+    pub(super) fn account_signing_released(&mut self, socket: SocketId) {
+        if self.account.socket == Some(socket) && self.account.challenge.is_some() {
+            self.account.signed_challenge = Some(String::new());
+        }
+    }
     pub(crate) fn signed_request(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
         form: String,
-        pending: Pending,
+        mut pending: Pending,
     ) -> Result<(), String> {
+        if let Some(ids) = &self.identities {
+            let selected = self.select_http(ids, method, path)?;
+            let selection = *selected.selection();
+            let context = self.signing_context(cx, &pending, method, selected.credential())?;
+            if let Pending::Trade(request) = &mut pending {
+                request.context = Some(context.clone());
+            }
+            let recipe = selected
+                .futures_http(method, path, &form, self.options.testnet, 5000.)
+                .map_err(|_| "Invalid Kraken signing request")?;
+            cx.request_selected_managed(
+                context.clone(),
+                &selection,
+                None,
+                method,
+                recipe.url().into(),
+                recipe.body().map(str::to_owned),
+                Box::new(recipe),
+                Pending::Signing(Box::new(pending), context),
+            )
+            .map_err(|(_, reason)| reason.to_string())?;
+            return Ok(());
+        }
         let SignedParts { url, headers, body } = self.signed_parts(cx, method, path, form)?;
         cx.request(method, url, headers, body, pending);
         Ok(())
@@ -376,8 +602,33 @@ impl Kraken {
         path: &str,
         form: String,
         at: ArrayAt,
-        pending: Pending,
+        mut pending: Pending,
     ) -> Result<(), String> {
+        if let Some(ids) = &self.identities {
+            let selected = self.select_http(ids, method, path)?;
+            let selection = *selected.selection();
+            let context = self.signing_context(cx, &pending, method, selected.credential())?;
+            if let Pending::History(request) = &mut pending {
+                request.set_leg(context.clone());
+            }
+            let recipe = selected
+                .futures_http(method, path, &form, self.options.testnet, 5000.)
+                .map_err(|_| "Invalid Kraken signing request")?;
+            let id = cx
+                .request_selected_managed(
+                    context.clone(),
+                    &selection,
+                    None,
+                    method,
+                    recipe.url().into(),
+                    recipe.body().map(str::to_owned),
+                    Box::new(recipe),
+                    Pending::Signing(Box::new(pending), context),
+                )
+                .map_err(|(_, reason)| reason.to_string())?;
+            cx.stream_response(id, at);
+            return Ok(());
+        }
         let SignedParts { url, headers, body } = self.signed_parts(cx, method, path, form)?;
         let id = cx.request_streamed_body(method, url, headers, body, at, pending);
         if path.starts_with("/api/history/") {
@@ -407,7 +658,7 @@ impl Kraken {
             self.signer.as_mut()
         }
         .ok_or("Kraken signing credentials unavailable")?
-        .nonce(cx.now)?;
+        .nonce(cx.protocol_now())?;
         let signer = if read {
             self.read_signer.as_ref()
         } else {
@@ -445,6 +696,70 @@ impl Kraken {
     }
     pub(crate) fn account_settings_revision(&self) -> u64 {
         self.account.settings_revision
+    }
+    fn select_http(
+        &self,
+        ids: &safe_cex_engine::signing::Identities,
+        method: Method,
+        path: &str,
+    ) -> Result<sign::dispatch::Selected, String> {
+        use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
+        let role = if path.starts_with("/api/history/") {
+            CredentialRole::PrimaryRead {
+                reason: PrimaryReason::History,
+                scope: None,
+            }
+        } else if method == Method::Get {
+            CredentialRole::Read { scope: None }
+        } else {
+            CredentialRole::Mutation
+        };
+        sign::dispatch::Selected::futures_without_nonce(ids, role)
+            .map_err(|_| "Kraken signing identity is unavailable".into())
+    }
+    fn signing_context(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        pending: &Pending,
+        method: Method,
+        credential: safe_cex_engine::request_context::Credential,
+    ) -> Result<safe_cex_engine::request_context::Context, String> {
+        use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Scope};
+        let scope = match pending {
+            Pending::History(request) => Scope::Command(request.command()),
+            Pending::Trade(_) => Scope::Command(
+                self.active_trading_command()
+                    .ok_or("Missing Kraken command")?,
+            ),
+            _ => Scope::Background,
+        };
+        let policy = Policy {
+            operation: if method == Method::Get {
+                Operation::Read
+            } else {
+                Operation::Mutation
+            },
+            credential: Some(credential),
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        };
+        if let Pending::History(request) = pending
+            && let Some(root) = request.root()
+        {
+            return cx
+                .http_leg_context(root, policy)
+                .map_err(|reason| reason.to_string());
+        }
+        if let Some(root) = self
+            .trading_root()
+            .filter(|_| matches!(pending, Pending::Trade(_)))
+        {
+            cx.http_leg_context(root, policy)
+        } else {
+            cx.http_context(scope, policy)
+        }
+        .map_err(|reason| reason.to_string())
     }
     pub(crate) fn account_setting(&self, symbol: &str) -> Option<(f64, MarginType)> {
         self.account.settings.get(symbol).copied()
@@ -561,9 +876,6 @@ impl Kraken {
             self.account_native_order_clock(&order.id, order.last_update);
         }
         let order = self.account_merge_order(order);
-        if live {
-            self.trade_order_observed(&order.id, order.filled, order.status);
-        }
         self.account.orders_revision += 1;
         self.account.records.insert(order.id.clone(), order.clone());
         cx.store.upsert_order(order);
@@ -579,7 +891,7 @@ impl Kraken {
         }
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.started || self.signer.is_none() || self.options.public_data_only {
+        if self.account.started || !self.can_sign() || self.options.public_data_only {
             return;
         }
         self.account.started = true;
@@ -618,7 +930,7 @@ impl Kraken {
         self.account_refresh(cx);
     }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.signer.is_none() {
+        if !self.can_sign() {
             return;
         }
         for (scope, path, array) in [
@@ -652,27 +964,40 @@ impl Kraken {
                 Scope::Settings => self.account.settings_revision,
                 Scope::Balance => 0,
             };
-            let request = Pending::Account(Request::new(
+            let mut request = Request::new(
                 scope,
                 revision,
                 self.account.settings_revision,
-            ));
-            let result = if let Some(array) = array {
-                self.signed_streamed(
-                    cx,
-                    Method::Get,
-                    path,
-                    String::new(),
-                    ArrayAt::Field(array),
-                    request,
-                )
-            } else {
-                self.signed_request(cx, Method::Get, path, String::new(), request)
-            };
-            if let Err(error) = result {
-                self.account.inflight.remove(&key);
-                cx.retried_failure("kraken.account:634", error);
+                cx.order_read_epoch(),
+            );
+            if scope == Scope::Positions {
+                self.account.positions_reads += 1;
+                request.read = self.account.positions_reads;
             }
+            let read = request.read;
+            let request = Pending::Account(request);
+            cx.with_startup_request(request, |cx, request| {
+                let result = if let Some(array) = array {
+                    self.signed_streamed(
+                        cx,
+                        Method::Get,
+                        path,
+                        String::new(),
+                        ArrayAt::Field(array),
+                        request,
+                    )
+                } else {
+                    self.signed_request(cx, Method::Get, path, String::new(), request)
+                };
+                if let Err(error) = result {
+                    self.account.inflight.remove(&key);
+                    if scope == Scope::Positions {
+                        let fresh = VenueError::new(error.clone());
+                        self.account.fresh_positions.failed(cx, 0, read, &fresh);
+                    }
+                    cx.retried_failure("kraken.account:634", error);
+                }
+            });
         }
     }
     fn account_schedule_heal(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -696,18 +1021,11 @@ impl Kraken {
         let Ok(msg) = serde_json::from_str::<Ws<'_>>(text) else {
             return Control::Other;
         };
-        if msg.event == "pong" {
+        if msg.event == "pong" || msg.feed == "heartbeat" {
             return Control::Pong;
         }
-        if msg.event == "error"
-            || msg.event == "alert"
-            || msg.event == "subscribed_failed"
-            || msg.event == "unsubscribed_failed"
-            || (msg.event == "info" && msg.message.to_ascii_lowercase().contains("authentication"))
-        {
-            return Control::Auth(AuthEvidence::Rejected(safe_cex_engine::VenueError::new(
-                "Kraken private subscription rejected",
-            )));
+        if refuses_private_feed(&msg) {
+            return Control::Auth(AuthEvidence::Rejected(private_refusal(&msg)));
         }
         if !authenticated {
             if msg.event == "challenge" && self.account.waiting_challenge && !msg.message.is_empty()
@@ -748,10 +1066,26 @@ impl Kraken {
         self.account.payload_complete = false;
         cx.send(
             socket,
-            serde_json::to_string(
-                &serde_json::json!({"event":"challenge","api_key":self.options.key}),
-            )
-            .unwrap(),
+            ControlFrame::subscription(r#"{"event":"subscribe","feed":"heartbeat"}"#),
+        );
+        if let Some(ids) = &self.identities {
+            if let Some(identity) = &ids.primary {
+                cx.send_signed(
+                    socket,
+                    ControlFrame::authentication(String::new()),
+                    Box::new(sign::dispatch::WsAuth::challenge(identity.clone(), socket)),
+                );
+            }
+            return true;
+        }
+        cx.send(
+            socket,
+            ControlFrame::authentication(
+                serde_json::to_string(
+                    &serde_json::json!({"event":"challenge","api_key":self.options.key}),
+                )
+                .unwrap(),
+            ),
         );
         true
     }
@@ -759,6 +1093,9 @@ impl Kraken {
         if self.account.socket != Some(socket) {
             return false;
         }
+        // If startup's snapshot was lost, the replacement must recover fills
+        // instead of silently treating its executions as an initial baseline.
+        self.account.fill_history_initialized |= self.account.open;
         self.account.orders_revision += 1;
         self.account.positions_revision += 1;
         self.account.socket = None;
@@ -771,8 +1108,8 @@ impl Kraken {
         self.account.waiting_challenge = false;
         true
     }
-    fn account_disconnect(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
-        cx.notice(Level::Error, code::STREAM_UNAVAILABLE, message);
+    fn account_disconnect(&mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        cx.notice_error(Level::Error, code::STREAM_UNAVAILABLE, &error);
         if let Some(socket) = self.account.socket {
             if let Some(feed) = self.account.feed {
                 cx.retire_socket(
@@ -818,24 +1155,39 @@ impl Kraken {
             }
             self.account.waiting_challenge = false;
             self.account.challenge = Some(msg.message.to_string());
+            if let Some(ids) = &self.identities {
+                if let Some(identity) = &ids.primary {
+                    for feed in FEEDS {
+                        cx.send_signed(
+                            socket,
+                            ControlFrame::authentication(String::new()),
+                            Box::new(sign::dispatch::WsAuth::subscribe(
+                                identity.clone(),
+                                socket,
+                                msg.message.to_string(),
+                                feed,
+                            )),
+                        );
+                    }
+                }
+                return true;
+            }
             let Some(signer) = self.signer.as_ref() else {
-                self.account_disconnect(cx, "Kraken signing credentials unavailable");
+                self.account_disconnect(
+                    cx,
+                    VenueError::new("Kraken signing credentials unavailable"),
+                );
                 return true;
             };
             let signature = signer.challenge(&msg.message);
             self.account.signed_challenge = Some(signature.clone());
             for feed in FEEDS {
-                cx.send(socket, serde_json::json!({"event":"subscribe","feed":feed,"api_key":self.options.key,"original_challenge":msg.message,"signed_challenge":signature}).to_string());
+                cx.send(socket, ControlFrame::subscription(serde_json::json!({"event":"subscribe","feed":feed,"api_key":self.options.key,"original_challenge":msg.message,"signed_challenge":signature}).to_string()));
             }
             return true;
         }
-        if msg.event == "error"
-            || msg.event == "alert"
-            || msg.event == "subscribed_failed"
-            || msg.event == "unsubscribed_failed"
-            || (msg.event == "info" && msg.message.to_ascii_lowercase().contains("authentication"))
-        {
-            self.account_disconnect(cx, "Kraken private subscription rejected");
+        if refuses_private_feed(&msg) {
+            self.account_disconnect(cx, private_refusal(&msg));
             return true;
         }
         if msg.event == "subscribed"
@@ -848,6 +1200,9 @@ impl Kraken {
         if self.account.signed_challenge.is_none() {
             return true;
         }
+        if msg.event.is_empty() {
+            cx.record_socket_topic(&[msg.feed.strip_suffix("_snapshot").unwrap_or(&msg.feed)]);
+        }
         match msg.feed.as_ref() {
             "fills" | "fills_snapshot" => {
                 if let Some(raw) = msg.fills {
@@ -855,6 +1210,9 @@ impl Kraken {
                     let decoded = json::each::<Execution<'_>>(raw.get(), |e| executions.push(e));
                     if decoded.is_ok() {
                         self.account.payloads.insert("fills".into(), cx.now);
+                        let snapshot = msg.feed == "fills_snapshot";
+                        let seed_history = snapshot && !self.account.fill_history_initialized;
+                        self.account.fill_history_initialized |= snapshot;
                         for e in executions {
                             if e.fill_id.is_empty()
                                 || e.order_id.is_empty()
@@ -864,15 +1222,21 @@ impl Kraken {
                             {
                                 continue;
                             }
-                            if !self.account.seen_fills.insert(e.fill_id.to_string()) {
-                                continue;
-                            }
-                            if msg.feed == "fills_snapshot"
+                            // Timestamps cannot prove delivery: reconnect snapshots may
+                            // contain unseen executions at or before the last emitted fill.
+                            if self.account.emitted_fills.contains(&e.fill_id)
                                 || cx.store.market(&e.instrument).is_none()
+                                || (snapshot
+                                    && self.account.startup_fill_history.contains(&e.fill_id))
                             {
                                 continue;
                             }
-                            self.trade_execution_observed(&e.order_id);
+                            if seed_history {
+                                self.account
+                                    .startup_fill_history
+                                    .insert(e.fill_id.to_string());
+                                continue;
+                            }
                             if let (Some(remaining), Some(time), Some(mut order)) = (
                                 e.remaining_order_qty,
                                 e.time,
@@ -908,6 +1272,7 @@ impl Kraken {
                                 price: e.price,
                                 amount: e.qty,
                             });
+                            self.account.emitted_fills.insert(e.fill_id.to_string());
                         }
                         self.account_schedule_heal(cx);
                     }
@@ -915,11 +1280,11 @@ impl Kraken {
             }
             "open_orders" | "open_orders_snapshot" => {
                 if msg.is_cancel && !msg.order_id.is_empty() {
-                    self.account_ws_remove(cx, &msg.order_id, 0.0, &msg.reason);
+                    self.account_ws_remove(cx, &msg.order_id, &msg.reason);
                     self.account.payloads.insert("open_orders".into(), cx.now);
                     self.account_schedule_heal(cx);
                 } else if let Some(raw) = msg.orders {
-                    let mut request = Request::new(Scope::Orders, 0, 0);
+                    let mut request = Request::new(Scope::Orders, 0, 0, 0);
                     let result = json::each::<&RawValue>(raw.get(), |item| {
                         self.account_order_item(cx, &mut request, item.get())
                     });
@@ -937,10 +1302,9 @@ impl Kraken {
                             let mapped = recovered(&builder, |o| (&o.id, &o.id));
                             self.account
                                 .rearm_skips("order:", builder.rejected() == 0, mapped);
-                            let live = builder.rows().len();
                             let orders =
                                 builder.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
-                            self.account_commit_orders(cx, orders, live);
+                            self.account_commit_orders(cx, orders);
                         }
                     } else {
                         cx.notice(
@@ -952,7 +1316,7 @@ impl Kraken {
                     }
                 } else if let Some(raw) = msg.order
                     && let Ok(row) = serde_json::from_str::<OrderWire<'_>>(raw.get())
-                    && let Some(order) = self.map_order(cx, row)
+                    && let Ok(order) = self.map_order(cx, row)
                 {
                     if msg.is_cancel
                         && self.account.records.get(&order.id).is_some_and(|old| {
@@ -964,7 +1328,7 @@ impl Kraken {
                     }
                     self.account.payloads.insert("open_orders".into(), cx.now);
                     if msg.is_cancel {
-                        self.account_ws_remove(cx, &order.id, order.filled, &msg.reason);
+                        self.account_ws_remove(cx, &order.id, &msg.reason);
                     } else {
                         self.account_apply_order(cx, order, true);
                     }
@@ -973,7 +1337,7 @@ impl Kraken {
             }
             "open_positions" | "open_positions_snapshot" => {
                 if let Some(raw) = msg.positions {
-                    let mut request = Request::new(Scope::Positions, 0, 0);
+                    let mut request = Request::new(Scope::Positions, 0, 0, 0);
                     let result = json::each::<&RawValue>(raw.get(), |item| {
                         self.account_position_item(cx, &mut request, item.get(), true)
                     });
@@ -1025,29 +1389,22 @@ impl Kraken {
         }
         true
     }
-    fn account_ws_remove(&mut self, cx: &mut Cx<'_, Pending>, id: &str, filled: f64, reason: &str) {
+    fn account_ws_remove(&mut self, cx: &mut Cx<'_, Pending>, id: &str, reason: &str) {
         if reason == "stop_order_triggered" {
-            self.trade_execution_observed(id);
             self.account.orders_revision += 1;
             self.account.records.remove(id);
             self.account.local_order_updates.remove(id);
             cx.store.remove_orders(&[id]);
         } else {
-            self.trade_order_observed(
-                id,
-                filled,
-                if reason == "full_fill" {
-                    OrderStatus::Closed
-                } else {
-                    OrderStatus::Canceled
-                },
-            );
             self.account_order_removed(cx, id);
         }
     }
-    fn map_order(&self, cx: &Cx<'_, Pending>, row: OrderWire<'_>) -> Option<Order> {
-        if row.order_id.is_empty() || cx.store.market(&row.symbol).is_none() {
-            return None;
+    fn map_order(&self, cx: &Cx<'_, Pending>, row: OrderWire<'_>) -> Result<Order, &'static str> {
+        if row.order_id.is_empty() {
+            return Err("missing_order_id");
+        }
+        if cx.store.market(&row.symbol).is_none() {
+            return Err("market");
         }
         let typ = row.order_type.to_ascii_lowercase();
         let kind = match typ.as_str() {
@@ -1056,7 +1413,7 @@ impl Kraken {
             "trailing_stop" => OrderType::TrailingStopLoss,
             "lmt" | "limit" | "post" | "ioc" | "fok" => OrderType::Limit,
             "mkt" | "market" => OrderType::Market,
-            _ => return None,
+            _ => return Err("order_type"),
         };
         let buy = match row.direction {
             Some(Direction::Number(0)) => true,
@@ -1065,18 +1422,13 @@ impl Kraken {
             Some(Direction::Text(t)) if t.eq_ignore_ascii_case("sell") => false,
             None if row.side.eq_ignore_ascii_case("buy") => true,
             None if row.side.eq_ignore_ascii_case("sell") => false,
-            _ => return None,
+            _ => return Err("direction"),
         };
-        let remaining = row
-            .unfilled_size
-            .unwrap_or((row.qty - row.filled_size).max(0.0));
-        let amount = if row.unfilled_size.is_some() {
-            remaining + row.filled_size
-        } else {
-            row.qty
-        };
+        // The socket's qty is what is left, like REST's unfilledSize.
+        let remaining = row.unfilled_size.unwrap_or(row.qty);
+        let amount = remaining + row.filled_size;
         if amount <= 0.0 || remaining < 0.0 || row.filled_size < 0.0 || row.filled_size > amount {
-            return None;
+            return Err("quantity");
         }
         let trigger_type = match row.trigger_signal.as_ref() {
             "mark" => Some(StopTriggerType::MarkPrice),
@@ -1084,7 +1436,7 @@ impl Kraken {
             "spot" | "index" => Some(StopTriggerType::IndexPrice),
             _ => None,
         };
-        Some(Order {
+        Ok(Order {
             id: row.order_id.into_owned(),
             parent_id: None,
             status: OrderStatus::Open,
@@ -1164,20 +1516,38 @@ impl Kraken {
                 MarginType::Cross,
             )
         };
-        let mark = if row.mark_price > 0.0 {
-            row.mark_price
-        } else {
+        let row_mark = row
+            .mark_price
+            .filter(|mark| mark.is_finite() && *mark > 0.0);
+        let mark = row_mark.or_else(|| {
             cx.store
-                .tickers()
-                .iter()
-                .find(|t| t.symbol == row.symbol)
-                .map_or(0.0, |t| t.mark)
-        };
+                .ticker(&row.symbol)
+                .map(|ticker| ticker.mark)
+                .filter(|mark| mark.is_finite() && *mark > 0.0)
+        });
+        // PF sizes already name base-coin units. Inverse sizes name contracts
+        // whose quote value is independent of the current mark.
+        let inverse = market.is_inverse == Some(true);
+        let notional = if inverse {
+            market
+                .contract_size
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .map(|value| quantity.abs() * value)
+        } else {
+            mark.map(|mark| quantity.abs() * mark)
+        }
+        .filter(|value| value.is_finite() && (*value > 0.0 || quantity == 0.0))
+        .unwrap_or(f64::NAN);
         let old = cx
             .store
             .positions()
             .iter()
             .find(|p| p.symbol == row.symbol && p.side == side);
+        let liquidation_price = if live {
+            row.liquidation_price
+        } else {
+            old.map(|p| p.liquidation_price)
+        };
         Some(Position {
             id: format!(
                 "{}:{}",
@@ -1191,11 +1561,13 @@ impl Kraken {
             symbol: row.symbol.into_owned(),
             side,
             entry_price: row.price,
-            notional: if !live {
-                old.filter(|p| p.contracts == quantity.abs())
-                    .map_or(quantity.abs() * mark, |p| p.notional)
+            notional: if !live && !inverse && row_mark.is_none() {
+                old.filter(|p| {
+                    p.contracts == quantity.abs() && p.notional.is_finite() && p.notional > 0.0
+                })
+                .map_or(notional, |p| p.notional)
             } else {
-                quantity.abs() * mark
+                notional
             },
             leverage,
             margin_type: Some(margin),
@@ -1203,27 +1575,21 @@ impl Kraken {
             unrealized_pnl: row.unrealized_pnl,
             realized_pnl: None,
             contracts: quantity.abs(),
-            liquidation_price: if live {
-                row.liquidation_price
-            } else {
-                old.map_or(0.0, |p| p.liquidation_price)
-            },
+            liquidation_price: liquidation_price
+                .filter(|price| price.is_finite() && *price > 0.0)
+                .unwrap_or(f64::NAN),
             margin_size: None,
             last_update: Some(cx.now),
         })
     }
-    /// The first `live` rows are native observations; the rest are kept stored copies.
-    fn account_commit_orders(&mut self, cx: &mut Cx<'_, Pending>, orders: Vec<Order>, live: usize) {
+    fn account_commit_orders(&mut self, cx: &mut Cx<'_, Pending>, orders: Vec<Order>) {
         let mut mapped = vec![];
-        for (n, order) in orders.into_iter().enumerate() {
+        for order in orders {
             if self.account.terminal.contains(&order.id) {
                 continue;
             }
             self.account_native_order_clock(&order.id, order.last_update);
             let order = self.account_merge_order(order);
-            if n < live {
-                self.trade_order_observed(&order.id, order.filled, order.status);
-            }
             mapped.push(order);
         }
         self.account.records = mapped.iter().map(|o| (o.id.clone(), o.clone())).collect();
@@ -1245,23 +1611,37 @@ impl Kraken {
         cx.store.set_positions(positions);
     }
     /// A row without an id protects every stored order; otherwise only its own.
-    fn account_reject_order(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, id: &str) {
+    fn account_reject_order(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &mut Request,
+        id: &str,
+        symbol: &str,
+        item: &str,
+        reason: &'static str,
+    ) {
         let kept = cx
             .store
             .orders()
             .iter()
             .any(|o| (id.is_empty() || o.id == id) && !self.account.terminal.contains(&o.id));
         let level = if kept { Level::Warn } else { Level::Error };
-        if id.is_empty() {
-            let message = "Kraken skipped order row without an id".to_owned();
-            self.account.log_skip(cx, "order:".into(), level, message);
-            request.orders.reject(None);
-        } else {
-            let message = format!("Kraken skipped unmappable order {id}");
-            self.account
-                .log_skip(cx, format!("order:{id}"), level, message);
-            request.orders.reject(Some(id.to_owned()));
-        }
+        self.account.skip_logged.report_with_fields(
+            cx,
+            format!("order:{id}"),
+            level,
+            format!("Kraken skipped unmappable order ({reason})"),
+            vec![
+                (
+                    "order_row_reason",
+                    safe_cex_engine::log::Value::StaticStr(reason),
+                ),
+                ("order_row_fields", order_field_types(item).into()),
+            ],
+        );
+        request
+            .orders
+            .reject_in((!id.is_empty()).then(|| id.to_owned()), symbol);
     }
     /// Both legs of `symbol` keep their stored copies; an empty symbol protects all.
     /// A row with no stored copy is reported as an error: it commits as flat.
@@ -1296,13 +1676,22 @@ impl Kraken {
         match serde_json::from_str::<OrderWire<'_>>(item) {
             Ok(row) => {
                 if row.symbol.is_empty() {
-                    self.account_reject_order(cx, request, &row.order_id);
+                    self.account_reject_order(
+                        cx,
+                        request,
+                        &row.order_id,
+                        "",
+                        item,
+                        "missing_symbol",
+                    );
                 } else if cx.store.market(&row.symbol).is_some() {
                     let id = row.order_id.to_string();
-                    if let Some(order) = self.map_order(cx, row) {
-                        request.orders.push(order);
-                    } else {
-                        self.account_reject_order(cx, request, &id);
+                    let symbol = row.symbol.to_string();
+                    match self.map_order(cx, row) {
+                        Ok(order) => request.orders.push(order),
+                        Err(reason) => {
+                            self.account_reject_order(cx, request, &id, &symbol, item, reason)
+                        }
                     }
                 } else if self.skipped_markets.contains(row.symbol.as_ref()) {
                     request.valid = false;
@@ -1317,7 +1706,18 @@ impl Kraken {
                 {
                     request.valid = false;
                 } else {
-                    self.account_reject_order(cx, request, &row.order_id);
+                    let symbol = safe_cex_engine::coverage::fence_symbol(
+                        cx.store,
+                        Some(row.symbol.as_ref()),
+                    );
+                    self.account_reject_order(
+                        cx,
+                        request,
+                        &row.order_id,
+                        &symbol,
+                        item,
+                        "wire_decode",
+                    );
                 }
             }
         }
@@ -1345,6 +1745,7 @@ impl Kraken {
                 } else if self.skipped_markets.contains(row.symbol.as_ref()) {
                     request.valid = false;
                 } else {
+                    request.unlisted.push(row.symbol.to_string());
                     self.account_unlisted(cx, vec![row.symbol.into_owned()]);
                 }
             }
@@ -1355,6 +1756,7 @@ impl Kraken {
                 } else if self.skipped_markets.contains(row.symbol.as_ref()) {
                     request.valid = false;
                 } else {
+                    request.unlisted.push(row.symbol.to_string());
                     self.account_unlisted(cx, vec![row.symbol.into_owned()]);
                 }
             }
@@ -1410,11 +1812,15 @@ impl Kraken {
             }
         }
         if !wire::success(response) || !request.valid {
+            let error = read_error(response);
+            cx.startup_read_refused(&error);
             self.account.read_failures = self.account.read_failures.saturating_add(1);
-            cx.retried_failure(
-                "kraken.account:1266",
-                "Kraken account reconciliation failed",
-            );
+            cx.retried_failure_error("kraken.account:1266", &error);
+            if request.scope == Scope::Positions {
+                let read = request.read;
+                self.account.fresh_positions.failed(cx, 0, read, &error);
+                self.read_fresh_positions_again(cx, read);
+            }
             self.account_schedule_heal(cx);
             return;
         }
@@ -1423,21 +1829,21 @@ impl Kraken {
             Scope::Orders => {
                 if request.revision == self.account.orders_revision {
                     let orders = request.orders;
-                    let clean = orders.rejected() == 0;
+                    let unproven = orders.unproven().to_vec();
                     let mapped = recovered(&orders, |o| (&o.id, &o.id));
                     self.account
                         .rearm_skips("order:", orders.rejected() == 0, mapped);
                     // Rejected rows keep their stored copies.
                     let orders = orders.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
-                    self.account_commit_orders(cx, orders, 0);
-                    if clean {
-                        cx.orders_reconciled(None);
-                    }
+                    self.account_commit_orders(cx, orders);
+                    cx.orders_reconciled_except(&unproven, request.read_epoch);
                 }
             }
             Scope::Positions => {
+                let read = request.read;
                 if request.revision == self.account.positions_revision {
                     let builder = request.positions;
+                    let rejected = builder.rejected() != 0;
                     let mapped = recovered(&builder, |p| (&p.id, &p.symbol));
                     self.account
                         .rearm_skips("position:", builder.rejected() == 0, mapped);
@@ -1453,7 +1859,16 @@ impl Kraken {
                         }
                     }
                     self.account_commit_positions(cx, positions);
+                    if rejected {
+                        let error = VenueError::new("Kraken positions: a row could not be mapped");
+                        self.account.fresh_positions.failed(cx, 0, read, &error);
+                    } else {
+                        self.account
+                            .fresh_positions
+                            .committed(cx, 0, read, &request.unlisted);
+                    }
                 }
+                self.read_fresh_positions_again(cx, read);
             }
             Scope::Settings => {
                 if request.revision == self.account.settings_revision {
@@ -1500,18 +1915,93 @@ impl Kraken {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        _error: &str,
+        error: &str,
     ) {
         self.account.inflight.remove(&(request.scope as u8));
         if request.scope == Scope::Orders && self.account.orders_reconcile {
             self.account_refresh(cx);
         }
         self.account.read_failures = self.account.read_failures.saturating_add(1);
-        cx.retried_failure(
-            "kraken.account:1343",
-            "Kraken account reconciliation transport failure",
-        );
+        let mut failure = self
+            .account
+            .read_error
+            .take()
+            .unwrap_or_else(|| VenueError::new(error));
+        let description = if matches!(failure.kind, Some(ErrorKind::Network | ErrorKind::Timeout)) {
+            "Kraken account reconciliation transport failure"
+        } else {
+            "Kraken account reconciliation failed"
+        };
+        failure.message = format!("{description}: {}", failure.message);
+        cx.retried_failure_error("kraken.account:1343", &failure);
+        if request.scope == Scope::Positions {
+            let read = request.read;
+            self.account.fresh_positions.failed(cx, 0, read, &failure);
+            self.read_fresh_positions_again(cx, read);
+        }
         self.account_schedule_heal(cx);
+    }
+
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.started {
+            let error =
+                VenueError::new("Kraken account is not loaded").kind(ErrorKind::InvalidInput);
+            fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.positions_reads + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.account_refresh(cx);
+        }
+    }
+
+    /// At once for a waiter the read predates; a waiter a stream frame held
+    /// waits for the heal read.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>, read: u32) {
+        if self.account.fresh_positions.predates(0, read) {
+            self.account_refresh(cx);
+        } else if self.account.fresh_positions.owed(0) {
+            self.account_schedule_heal(cx);
+        }
+    }
+}
+
+/// Only the error code leaves an HTTP refusal; never its account payload.
+fn read_error(response: Response<'_>) -> VenueError {
+    let envelope = serde_json::from_str::<wire::Envelope<'_>>(response.body).ok();
+    let native = envelope.as_ref().map_or("", |value| value.error.as_ref());
+    let kind = match (response.status, native) {
+        (408, _) => ErrorKind::Timeout,
+        (429, _) => ErrorKind::RateLimited,
+        (500..=599, _) => ErrorKind::VenueUnavailable,
+        (401, _) => ErrorKind::AuthInvalid,
+        (403, _) => ErrorKind::AuthPermission,
+        (_, "apiLimitExceeded") => ErrorKind::RateLimited,
+        (_, "authenticationError" | "unauthorized" | "nonceBelowThreshold" | "nonceDuplicate") => {
+            ErrorKind::AuthInvalid
+        }
+        (_, "marketUnavailable" | "Server Error" | "Unavailable") => ErrorKind::VenueUnavailable,
+        (400..=499, _) => ErrorKind::Rejected,
+        (_, "") => ErrorKind::Internal,
+        _ => ErrorKind::Rejected,
+    };
+    let native: String = native.chars().take(128).collect();
+    let detail = if native.is_empty() {
+        String::new()
+    } else {
+        format!(", Kraken code {native}")
+    };
+    let error = VenueError::new(format!(
+        "Kraken account reconciliation failed (HTTP {}{detail})",
+        response.status
+    ))
+    .kind(kind);
+    if native.is_empty() {
+        error
+    } else {
+        error.venue_code(native.clone()).venue_message(native)
     }
 }
 fn balance(accounts: Accounts<'_>) -> (Balance, Vec<CoinBalance>) {
@@ -1597,6 +2087,18 @@ fn balance(accounts: Accounts<'_>) -> (Balance, Vec<CoinBalance>) {
             .collect(),
     )
 }
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self.scope {
+            Scope::Balance => S::BALANCE,
+            Scope::Positions => S::POSITIONS,
+            Scope::Orders => S::ORDERS,
+            Scope::Settings => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod cache_tests {
     use super::*;
@@ -1604,15 +2106,15 @@ mod cache_tests {
     fn execution_identity_memory_is_bounded_without_forgetting_recent_duplicates() {
         let mut account = Account::new();
         for n in 0..20000 {
-            assert!(account.seen_fills.insert(format!("fill-{n}")));
+            assert!(account.emitted_fills.insert(format!("fill-{n}")));
         }
         assert!(
-            account.seen_fills.len() <= 8192,
+            account.emitted_fills.len() <= 8192,
             "execution identity cache grew without bound"
         );
-        assert!(account.seen_fills.contains("fill-19999"));
-        assert!(!account.seen_fills.insert("fill-19999".into()));
-        assert!(!account.seen_fills.contains("fill-0"));
+        assert!(account.emitted_fills.contains("fill-19999"));
+        assert!(!account.emitted_fills.insert("fill-19999".into()));
+        assert!(!account.emitted_fills.contains("fill-0"));
     }
     #[test]
     fn terminal_order_memory_is_bounded_without_forgetting_recent_fences() {
@@ -1627,5 +2129,131 @@ mod cache_tests {
         assert!(account.terminal.contains("order-19999"));
         assert!(!account.terminal.insert("order-19999".into()));
         assert!(!account.terminal.contains("order-0"));
+    }
+}
+
+#[cfg(test)]
+mod startup_cause_tests {
+    use super::*;
+    use safe_cex_engine::book::Book;
+    use safe_cex_engine::{Action, Command, Event, Notice, SocketId, TimerId, Venue};
+
+    struct RefreshOnly(Kraken);
+    impl Venue for RefreshOnly {
+        type Pending = Pending;
+        fn startup_reads(p: &Pending) -> safe_cex_engine::startup::Sections {
+            Kraken::startup_reads(p)
+        }
+        fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+            use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Scope};
+            let context = cx
+                .http_context(
+                    Scope::Background,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 120_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            cx.request_managed(
+                context,
+                None,
+                Method::Get,
+                "https://startup.test/orders".into(),
+                None,
+                Pending::Account(Request::new(super::Scope::Orders, 0, 0, 0)),
+            )
+            .unwrap_or_else(|(_, reason)| panic!("startup parent queue refused: {reason:?}"));
+        }
+        fn on_response(&mut self, cx: &mut Cx<'_, Pending>, _: Pending, _: Response<'_>) {
+            self.0.account_refresh(cx);
+        }
+        fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {}
+        fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
+        fn on_command(&mut self, _: &mut Cx<'_, Pending>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[test]
+    fn optional_settings_signing_refusal_does_not_poison_delivering_orders() {
+        let mut native = Kraken::new(crate::secondary_tests::options());
+        for scope in [Scope::Orders, Scope::Positions, Scope::Balance] {
+            native.account.inflight.insert(scope as u8);
+        }
+        let mut engine = safe_cex_engine::test_support::seeded_engine(RefreshOnly(native));
+        engine.set_account_startup(true);
+        let now = (u64::MAX / 1000) as f64 + 1_000_000.;
+        let started = now - 1_000.;
+        engine.start(started);
+        let requests: Vec<_> =
+            safe_cex_engine::test_support::prepared_actions(&mut engine, started)
+                .into_iter()
+                .filter_map(|a| match a {
+                    Action::Http(r) => Some(r),
+                    _ => None,
+                })
+                .collect();
+        assert_eq!(requests.len(), 1);
+        engine.handle(
+            now,
+            Event::HttpResponse {
+                request: requests[0].id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "{}",
+                },
+            },
+        );
+        let events: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(e)) => Some(e),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            events
+                .iter()
+                .any(|e| e.code == safe_cex_engine::log::code::REQUEST_FAILED
+                    && e.message.contains("Kraken invalid nonce clock")),
+            "{events:?}"
+        );
+        engine.handle(now + 600_000., Event::PollScaleChanged { scale: 1. });
+        let watch = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Notice(Notice::Event(e))
+                    if e.code == safe_cex_engine::log::code::STARTUP_INCOMPLETE =>
+                {
+                    Some(e)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            watch
+                .fields
+                .contains(&("startupOrdersState", "started".into())),
+            "{watch:?}"
+        );
+        assert!(
+            !watch
+                .fields
+                .iter()
+                .any(|(key, _)| *key == "startupOrdersHttpStatus"),
+            "{watch:?}"
+        );
     }
 }

@@ -931,7 +931,8 @@ fn incomplete_pairs(h: &Harness, command: u32) -> Vec<&Notice> {
         .filter(|notice| match notice {
             Notice::Event(event) => {
                 event.code == code::HISTORY_INCOMPLETE
-                    && event.fields == vec![("command", Value::Num(f64::from(command)))]
+                    && event.fields.first() == Some(&("command", Value::Num(f64::from(command))))
+                    && event.fields.get(1).is_some_and(|field| field.0 == "reason")
             }
             Notice::CommandDone { command: id, .. } | Notice::CommandFailed { command: id, .. } => {
                 *id == command
@@ -1250,4 +1251,48 @@ fn general_page_cap_returns_bounded_rows_with_one_owned_gap() {
     assert!(matches!(notices[0], Notice::Event(event) if event.message.contains("page cap")));
     assert!(matches!(notices[1], Notice::CommandDone { .. }));
     assert!(h.requests.iter().all(|r| !r.url.ends_with("fill_history")));
+}
+#[test]
+fn client_lookup_says_placed_only_for_an_order_the_venue_took() {
+    for (status, traded, expected) in [
+        ("REJECTED", "0", Some(r#""definitive":true"#)),
+        ("CANCELLED", "0", Some(r#""definitive":false"#)),
+        ("CANCELLED", "2", None),
+    ] {
+        let mut h = Harness::new(true);
+        h.query(Query::OrderByClientId {
+            symbol: "BTC_USDT_PERP".into(),
+            client_order_id: "9223372036854775807".into(),
+        });
+        let r = h.take("/order");
+        let row = ORDER
+            .replace(r#""s":"FILLED""#, &format!(r#""s":"{status}""#))
+            .replace(r#""ts":["2"]"#, &format!(r#""ts":["{traded}"]"#));
+        h.respond(r, &format!(r#"{{"r":{row}}}"#), "");
+        let result = h.result().unwrap();
+        match expected {
+            Some(definitive) => {
+                assert!(result.contains(r#""found":false"#), "{status}: {result}");
+                assert!(result.contains(definitive), "{status}: {result}");
+            }
+            None => assert!(result.contains(r#""found":true"#), "{status}: {result}"),
+        }
+    }
+}
+
+#[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let mut h = Harness::new(true);
+    h.query(fills(None, None));
+    let rows = (0..1000)
+        .map(|n| FILL.replace("9007199254740993-1", &format!("9007199254740993-{n}")))
+        .collect::<Vec<_>>()
+        .join(",");
+    h.reply(
+        "fill_history",
+        &format!(r#"{{"r":[{rows}],"n":"page-2"}}"#),
+        "",
+    );
+    let next = h.take("fill_history");
+    assert!(next.body.as_deref().unwrap().contains(r#""c":"page-2""#));
 }

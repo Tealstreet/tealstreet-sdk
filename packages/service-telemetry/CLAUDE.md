@@ -27,6 +27,22 @@ Projects: `exchange-server` (`4512049750933504`) and `candle-server`
 `CANDLE_SERVER_SENTRY_DSN` (on `tealstreet-data`), passed into the container by
 the `envVars` block — the container sees only what is listed there.
 
+## Exchange box identity
+
+`exchange-server` and its parent `exchange-gateway` use `TEALSTREET_BOX` as both
+Sentry `server_name` and the `box` tag. Only an explicit stable box label is
+allowed; automatic container hostnames stay stripped. Their release comes from
+the supplied release or runtime `TEALSTREET_RELEASE` image revision. Missing,
+blank and placeholder values are omitted. Their `region` tag is removed because
+`CONNECT_REGION` can be a stale routing default. Other services keep their
+existing identity behavior. Identity is normalized at client initialization and
+on error and session paths. Metric and log identities are rewritten on their
+serialized envelopes, after the SDK merges scope attributes. Sessions are
+omitted without an image release because the Sentry session schema requires one.
+The final envelope allowlist keeps only events, sessions, session aggregates,
+serialized metrics and logs. All other types, including future types, are
+dropped until their identity normalization is implemented.
+
 ## The default integration set is the leak, not the events
 
 `@sentry/bun` default-enables `Console`, `Http`, an outgoing fetch wrapper
@@ -94,6 +110,10 @@ rule needs 16+ chars with a letter AND a digit or it eats `ECONNREFUSED`,
 `JSON.stringify` throw — a throw inside an `unhandledRejection` handler
 re-enters as an uncaught exception, which is the key that pages.
 
+The original error crosses the shared diagnostic copier before whitespace/ID
+normalization and clipping. Parser provenance survives in the resulting stable
+bucket; ordinary status codes and connection conditions remain distinct.
+
 ## Adding a service
 
 Declare the dep, add the DSN to the Worker's `Env` type **and** its `envVars`
@@ -102,3 +122,28 @@ block, `initServiceSentry` at every ENTRY POINT (exchange-server has two:
 `flushServiceSentry` before any `process.exit`. Add the package to
 `.github/workflows/deploy-connect-data-edge.yml` `paths:` or edits here will not
 deploy.
+
+## Shared diagnostic policy
+
+`src/diagnosticRedaction.ts` owns the single diagnostic-copy policy, exported at
+`@tealstreet/service-telemetry/diagnostic-redaction` without initializing Sentry.
+Web consumers may retain their package facade, but must not maintain a second
+matcher. The complete [diagnostic policy](diagnostic-redaction-policy.md) applies
+to that subpath. Service scrub/capture/final hooks use this same local policy; the only
+workspace dependency is the SDK-owned HTTP diagnostic URL helper.
+
+Parser provenance must cover sibling fingerprints and alert keys before throttle
+retention and final sending. Ordinary grouping and live input objects are preserved.
+
+Whole-copy omission is a refusal: final event/breadcrumb hooks return null, and
+alert capture drops the diagnostic before claiming any throttle bucket. Never
+project fields from the omission marker or fall back to uninspected raw input.
+
+Redaction fixtures construct public canary bytes from short pieces or explicit
+JSON/base64 encoding. Keep the original runtime bytes and assertions; historical
+scan exceptions are exact commit/file/rule/line records, never a test-path exemption.
+
+`redactDiagnosticDataWithOutcome` exposes the same single pass as the legacy copy
+API, adding only closed omission reason/stage and bounded inspected-string byte
+metrics. It must not retry reads, stringify raw input, inspect thrown values or
+relax a parser limit. See the policy for the byte metric's partial-work semantics.

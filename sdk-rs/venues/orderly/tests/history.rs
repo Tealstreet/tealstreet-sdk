@@ -954,3 +954,27 @@ fn owned_signing_refusal_after_accepted_page_is_strict() {
     let error = owned_terminal(&mut e, 77, false).unwrap_err();
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
 }
+
+#[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let (mut e, _) = ready();
+    actions(&mut e);
+    ask(
+        &mut e,
+        Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: Some(2000.0),
+            to_ms: Some(3000.0),
+            limit: None,
+        },
+    );
+    let first = request(&mut e);
+    let rows = (0..100)
+        .map(|n| FILL.replace("9007199254740993", &(9007199254740993u64 + n).to_string()))
+        .collect::<Vec<_>>()
+        .join(",");
+    reply(&mut e, &first, 200, &page(&rows, 101, 1));
+    let second = request(&mut e);
+    assert!(second.url.contains("page=2"));
+}

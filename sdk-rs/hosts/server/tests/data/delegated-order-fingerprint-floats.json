@@ -1,0 +1,79 @@
+{
+  "accountName": "main",
+  "intentId": "018bcfe5-6800-7101-8101-010101010101",
+  "seq": 1,
+  "cases": [
+    {
+      "name": "one-e21",
+      "inputBits": "444b1ae4d6e2ef50",
+      "paramsJson": "{\"amount\":1e+21}",
+      "fingerprint": null
+    },
+    {
+      "name": "addition",
+      "inputBits": "3fd3333333333334",
+      "paramsJson": "{\"amount\":0.30000000000000004}",
+      "fingerprint": "d1cbe13377a1ef4320a5c130bbf429186946677a4691f1cf454f07337a8192f7"
+    },
+    {
+      "name": "negative-zero",
+      "inputBits": "8000000000000000",
+      "paramsJson": "{\"amount\":0}",
+      "fingerprint": "f7440afe3e8f2fb4d30fdbe8d43c98e84fd9e2fe0a1a772b1f91bc6c60518e50"
+    },
+    {
+      "name": "smallest-subnormal",
+      "inputBits": "0000000000000001",
+      "paramsJson": "{\"amount\":5e-324}",
+      "fingerprint": "34e38dc7652719c3b26c81ce3ee52f62528e42e07d784d5560b3f696ac08649d"
+    },
+    {
+      "name": "small-exponent",
+      "inputBits": "3e7ad7f29abcaf48",
+      "paramsJson": "{\"amount\":1e-7}",
+      "fingerprint": "afdae6943ea62e2842fd9c6f70b75f85fb4df4857dd7f2c7dac88353cf6d07bd"
+    },
+    {
+      "name": "decimal-threshold",
+      "inputBits": "3eb0c6f7a0b5ed8d",
+      "paramsJson": "{\"amount\":0.000001}",
+      "fingerprint": "0ab7c6190693fbe696063113f3770eb9fb7779632260990acfa22cadc5d81d46"
+    },
+    {
+      "name": "smallest-normal",
+      "inputBits": "0010000000000000",
+      "paramsJson": "{\"amount\":2.2250738585072014e-308}",
+      "fingerprint": "dff7076cc2f2a772b1abe9f4dbdf224bd65e538ee3e3628dc6ae475309adbd32"
+    },
+    {
+      "name": "large-integer",
+      "inputBits": "430c6bf526340000",
+      "paramsJson": "{\"amount\":1000000000000000}",
+      "fingerprint": "bc6b2cf79fd328df6d5445bca859d64a07eac0c5ebde0c07e13031056294d42a"
+    },
+    {
+      "name": "u32-plus-one",
+      "inputBits": "41f0000000100000",
+      "paramsJson": "{\"amount\":4294967297}",
+      "fingerprint": "df2db3ffe4773eb06f0d37eef1b68f78f82380b389c8e2d188d93d0a41b58703"
+    },
+    {
+      "name": "max-safe-integer",
+      "inputBits": "433fffffffffffff",
+      "paramsJson": "{\"amount\":9007199254740991}",
+      "fingerprint": "5cda42a1b0ac895d92dba14d2623655a398480f2a8bddfb90a27ce7b91af7553"
+    },
+    {
+      "name": "min-safe-integer",
+      "inputBits": "c33fffffffffffff",
+      "paramsJson": "{\"amount\":-9007199254740991}",
+      "fingerprint": "372f09a08697e47c0b24390dadb64a5cd5af3b629d1427a13498e28a055102d9"
+    },
+    {
+      "name": "unsafe-integer",
+      "inputBits": "4340000000000000",
+      "paramsJson": "{\"amount\":9007199254740992}",
+      "fingerprint": null
+    }
+  ]
+}

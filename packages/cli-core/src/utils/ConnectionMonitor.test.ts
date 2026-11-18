@@ -24,6 +24,14 @@ function createMockExchange(overrides: Partial<ExchangeLike> = {}): ExchangeLike
 }
 
 describe('ConnectionMonitor', () => {
+  it('omits unmeasured latency from CLI status and preserves a measured zero', () => {
+    const unknown = getConnectionStatus(createMockExchange({ store: { latency: null } }));
+    expect(unknown.latency).toBeUndefined();
+    expect(formatConnectionStatusLine(unknown)).not.toContain('ms');
+    const measured = getConnectionStatus(createMockExchange({ store: { latency: 0 } }));
+    expect(measured.latency).toBe(0);
+    expect(formatConnectionStatusLine(measured)).toContain('0ms');
+  });
   beforeEach(() => {
     vi.useFakeTimers();
   });

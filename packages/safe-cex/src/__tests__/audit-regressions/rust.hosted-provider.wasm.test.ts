@@ -1,5 +1,8 @@
 import { vi } from 'vitest';
 
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
+
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
   return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
@@ -181,7 +184,7 @@ it('actual WASM public capture strips auth, preserves caller query and never sta
   }));
   expect(output.error).toBeUndefined();
   expect(output.config?.params).toEqual({ symbol: 'BTCUSDT' });
-  expect(output.config?.headers).toEqual({ 'Content-Type': 'application/json, charset=utf-8' });
+  expect(output.config?.headers).toEqual({ 'Content-Type': 'application/json; charset=utf-8' });
   expect(io).toEqual([]);
   expect(Object.values(store.loaded).some(Boolean)).toBe(false);
 });

@@ -1,17 +1,17 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { Market, OrderFillEvent } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { ExchangeEmitter } from '../../exchanges/exchangeEmitter';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 const market: Market = {
   id: 'BTCUSDT',
@@ -21,6 +21,19 @@ const market: Market = {
   active: true,
   precision: { amount: 0.001, price: 0.1 },
   limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+};
+
+const expectDiagnosticError = (label: string, cause: Error) => {
+  expect(console.error).toHaveBeenCalledExactlyOnceWith(label, expect.any(Error));
+  const actual = vi.mocked(console.error).mock.calls[0][1];
+  expect(actual).not.toBe(cause);
+  const fields = (error: Error): Record<string, unknown> => ({
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+    ...(error.cause instanceof Error ? { cause: fields(error.cause) } : {}),
+  });
+  expect(actual).toMatchObject(fields(cause));
 };
 
 describe('exchange event listener isolation', () => {
@@ -45,7 +58,7 @@ describe('exchange event listener isolation', () => {
 
     expect(() => store.update({ latency: 15 })).not.toThrow();
     expect(later).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ latency: 15 }));
-    expect(console.error).toHaveBeenCalledExactlyOnceWith('[binance] Event "update" listener failed', cause);
+    expectDiagnosticError('[binance] Event "update" listener failed', cause);
   });
 
   it('delivers the original binary Rust fill to a later listener before forwarding its frame', () => {
@@ -62,7 +75,7 @@ describe('exchange event listener isolation', () => {
       structuredClone(buffer, { transfer: [buffer] });
     });
     exchange.onFrame = forwarded;
-    const frame = consumerFrame({ markets: [market] }, undefined, true);
+    const frame = consumerFrame({ markets: [market] }, undefined, { fillId: 'order-1', fillSymbol: 'BTCUSDT' });
 
     (exchange as unknown as { receiveFrame(buffer: ArrayBuffer): void }).receiveFrame(frame);
     expect(received).toEqual([
@@ -70,7 +83,7 @@ describe('exchange event listener isolation', () => {
     ]);
     expect(forwarded).toHaveBeenCalledTimes(1);
     expect(frame.byteLength).toBe(0);
-    expect(console.error).toHaveBeenCalledExactlyOnceWith('[grvt] Event "fill" listener failed', cause);
+    expectDiagnosticError('[grvt] Event "fill" listener failed', cause);
   });
 
   it.each(['error', 'log'])('reports a throwing %s listener without recursively emitting errors or logs', (event) => {
@@ -90,7 +103,7 @@ describe('exchange event listener isolation', () => {
     expect(first).toHaveBeenCalledExactlyOnceWith(original, 123);
     expect(later).toHaveBeenCalledExactlyOnceWith(original, 123);
     expect(other).not.toHaveBeenCalled();
-    expect(console.error).toHaveBeenCalledExactlyOnceWith(`[binance] Event "${event}" listener failed`, cause);
+    expectDiagnosticError(`[binance] Event "${event}" listener failed`, cause);
   });
 
   it('preserves listener context, arguments, return-this and original callback removal', () => {
@@ -135,7 +148,7 @@ describe('exchange event listener isolation', () => {
     emitter.emit('event', 'outer');
     expect(contexts).toEqual([context]);
     expect(calls).toEqual(['once:outer', 'later:inner', 'later:outer']);
-    expect(console.error).toHaveBeenCalledExactlyOnceWith('[binance] Event "event" listener failed', cause);
+    expectDiagnosticError('[binance] Event "event" listener failed', cause);
   });
 
   it('keeps the current listener snapshot when callbacks add and remove subscriptions', () => {

@@ -48,7 +48,7 @@ fn unsupported_mutation_refusal_requires_valid_entry() {
         &mut e,
         Command::SetLeverage {
             command: 7,
-            symbol: "BTC-PERP-INTX".into(),
+            symbol: "BTC-USD".into(),
             leverage: 2.,
             side: None,
         },
@@ -62,7 +62,7 @@ fn initial_history_validation_requires_valid_entry() {
         Command::Query {
             command: 7,
             query: Query::PublicTrades {
-                symbol: "BTC-PERP-INTX".into(),
+                symbol: "BTC-USD".into(),
                 limit: Some(0),
             },
         },
@@ -72,6 +72,7 @@ fn full_startup_queue() -> support::Driver {
     let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
+            spot_only: true,
             ..Default::default()
         })
         .unwrap(),
@@ -81,7 +82,7 @@ fn full_startup_queue() -> support::Driver {
             1000.,
             Event::Command(Command::FetchCandles {
                 command,
-                symbol: "BTC-PERP-INTX".into(),
+                symbol: "BTC-USD".into(),
                 interval: Interval::M1,
                 limit: Some(1),
                 from_ms: None,
@@ -102,7 +103,7 @@ fn startup_capacity_refusal_requires_valid_entry() {
         &mut e,
         Command::FetchCandles {
             command: 1000,
-            symbol: "BTC-PERP-INTX".into(),
+            symbol: "BTC-USD".into(),
             interval: Interval::M1,
             limit: Some(1),
             from_ms: None,
@@ -113,6 +114,12 @@ fn startup_capacity_refusal_requires_valid_entry() {
 #[test]
 fn finite_local_results_and_refusals_keep_native_contract() {
     let (mut e, _) = support::ready();
+    e.store_mut().update_markets(|market| {
+        market.id = "BTC-USD".into();
+        market.symbol = "BTC-USD".into();
+        market.is_spot = Some(true);
+        market.is_perpetual = Some(false);
+    });
     e.handle(1000., Event::Command(Command::FetchAccount { command: 7 }));
     let a: Vec<_> = e.drain_actions().collect();
     assert!(
@@ -158,7 +165,7 @@ fn full_startup_queue_keeps_exact_failure_and_warning() {
         1000.,
         Event::Command(Command::FetchCandles {
             command: 1000,
-            symbol: "BTC-PERP-INTX".into(),
+            symbol: "BTC-USD".into(),
             interval: Interval::M1,
             limit: Some(1),
             from_ms: None,

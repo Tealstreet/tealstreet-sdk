@@ -105,7 +105,7 @@ describe('captureAlert scrubs and bounds what it sends', () => {
   it('scrubs a key-shaped value out of the fingerprint', () => {
     const key = 'unhandled-rejection:Error:bad key AKIA1234567890ABCDEFGHIJKLMNOPQRSTUV';
     captureAlert({ key, message: 'm', level: 'error', severity: 'low' });
-    expect(lastEvent().fingerprint[0]).toBe('unhandled-rejection:Error:bad key [redacted]');
+    expect(lastEvent().fingerprint[0]).toBe('unhandled-rejection:Error:bad key [REDACTED]');
   });
 
   it('caps fingerprint length, so issue cardinality is bounded', () => {
@@ -122,12 +122,12 @@ describe('captureAlert scrubs and bounds what it sends', () => {
       level: 'error',
       severity: 'low',
     });
-    expect(lastEvent().message).toBe('failed with [redacted]');
+    expect(lastEvent().message).toBe('failed with [REDACTED]');
   });
 
   it('scrubs detail by key name', () => {
     captureAlert({ key: 'k', message: 'm', detail: { apiKey: 'x', venue: 'bybit' }, level: 'error', severity: 'low' });
-    expect(lastEvent().extra).toMatchObject({ apiKey: '[redacted]', venue: 'bybit' });
+    expect(lastEvent().extra).toMatchObject({ apiKey: '[REDACTED]', venue: 'bybit' });
   });
 
   it('never lets a Sentry failure break the caller', () => {
@@ -160,7 +160,7 @@ describe('init hardening', () => {
       named('BunHttpServer'),
       named('LocalVariables'),
     ]);
-    expect(kept.map((i: { name: string }) => i.name)).toEqual(['LocalVariables']);
+    expect(kept.map((i: { name: string }) => i.name)).toEqual(['ServiceBoxIdentity', 'LocalVariables']);
   });
 
   /**
@@ -172,7 +172,7 @@ describe('init hardening', () => {
   it('drops the global handlers, which would bypass the throttle entirely', () => {
     const named = (name: string) => ({ name, setupOnce: () => {} });
     const kept = initOptions().integrations([named('OnUncaughtException'), named('OnUnhandledRejection')]);
-    expect(kept).toEqual([]);
+    expect(kept.map((integration: { name: string }) => integration.name)).toEqual(['ServiceBoxIdentity']);
   });
 
   it('sends no PII, rich request context, or traces', () => {
@@ -199,8 +199,8 @@ describe('init hardening', () => {
       message: 'GET ?api_key=AKIA1234567890ABCDEFGHIJKLMNOPQRSTUV',
       data: { secret: 'x' },
     });
-    expect(crumb.message).toBe('GET ?api_key=[redacted]');
-    expect(crumb.data).toEqual({ secret: '[redacted]' });
+    expect(crumb.message).toBe('GET ?api_key=[REDACTED]');
+    expect(crumb.data).toEqual({ secret: '[REDACTED]' });
   });
 
   it('strips the container hostname from every event', () => {
@@ -269,8 +269,8 @@ describe('an Error is sent as an exception so the stack survives', () => {
     captureAlert({ key: 'k', message: 'm', level: 'error', severity: 'low', error: err });
 
     const [sent] = lastException();
-    expect(sent.message).toBe('auth failed for [redacted]');
-    expect(sent.stack).toContain('[redacted]');
+    expect(sent.message).toBe('auth failed for [REDACTED]');
+    expect(sent.stack).toContain('[REDACTED]');
     expect(sent.stack).not.toContain('AKIA1234567890ABCDEFGHIJKLMNOPQRSTUV');
     expect(sent.stack).toContain('at sign (remote-signer.ts:62)');
   });

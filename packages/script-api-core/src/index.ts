@@ -137,13 +137,16 @@ export { bySymbol } from './adapter/HostBindings';
 export type { HostAccount, HostBindings, HostExchange, HostWriteEvent } from './adapter/HostBindings';
 export { ScriptValidationError } from './order/ScriptValidationError';
 export {
+  assertCloseLikeOrderAmount,
   isStopLikeOrderType,
   roundMarketCloseSize,
+  roundPercentageCloseSize,
   roundMarketOrderSize,
   roundOrderPrice,
   roundOrderSize,
   roundOrderSizeToNearest,
   venueAutoDownsizesReduceOrders,
+  venueUsesBaseAmountRails,
   venueSupportsInfinityStops,
 } from './order/orderPricing';
 export { notionalToNativeSize } from './order/notionalSizing';

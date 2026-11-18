@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { compareRecordedReport, createRecordedReplay, recordedReportFields } from './recorded-replay.mjs';
-import { performanceOrder } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, performanceOrder } from './performance-policy.mjs';
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const fixture = (run) => {
   const root = mkdtempSync(join(tmpdir(), 'recorded-gate-'));
@@ -13,13 +13,13 @@ const fixture = (run) => {
   const tape = 'public.jsonl'; writeFileSync(join(root, tape), '{"type":"meta","private":false}\n');
   const bytes = '{"type":"meta","private":false}\n';
   const slots = [...['ts', 'rust'].map((impl) => ({ impl, mode: 'correctness', run: 0 })),
-    ...Array.from({ length: 9 }, (_, index) => performanceOrder(index).map((impl) => ({ impl, mode: 'performance', run: index }))).flat()];
+    ...Array.from({ length: PUBLIC_REPLAY_PAIRS }, (_, index) => performanceOrder(index).map((impl) => ({ impl, mode: 'performance', run: index }))).flat()];
   const raw = slots.map((slot, index) => {
     const bytes = JSON.stringify({ impl: slot.impl, frames: index, metrics: { fixed: true } });
     writeFileSync(join(out, `${index}.json`), bytes);
     return { ...slot, bytes, sha256: hash(bytes) };
   });
-  const evidence = { report: { schema: 1, private: false, runs: 9, correctnessRuns: 1, venue: 'mexc', tape,
+  const evidence = { report: { schema: 1, private: false, runs: PUBLIC_REPLAY_PAIRS, correctnessRuns: 1, venue: 'mexc', tape,
     tapeSha256: hash(bytes), books: 'BTC', artifacts: slots.map((slot, index) => ({ ...slot, path: join(out, `${index}.json`) })) }, raw };
   try { run({ root, evidence, slots, reader: () => createRecordedReplay({ root, evidence, venue: 'mexc', tape, books: 'BTC' }) }); }
   finally { rmSync(root, { recursive: true, force: true }); }

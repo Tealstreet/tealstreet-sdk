@@ -6,7 +6,7 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeOptions, Market, PayloadSignerRequest, PlaceOrderOpts } from '../../types';
+import type { ExchangeOptions, Market, PlaceOrderOpts } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -48,7 +48,7 @@ describe('Rust Paradex account boundary', () => {
       wsOpen: noActions, wsMessage: noActions, wsClose: noActions, wsRouteExhausted: noActions,
       httpStart: noActions, httpChunk: noActions, httpEnd: noActions, httpFailed: noActions, timer: noActions,
     };
-    const construct = vi.fn(function (_venue: string, _options: string) { return engine; });
+    const construct = vi.fn(function (_venue: string, _options: string, _setup?: string) { return engine; });
     const load = vi.fn(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
     setWasmEngineLoader(load);
     const store = new DefaultStore();
@@ -68,7 +68,12 @@ describe('Rust Paradex account boundary', () => {
     await exchange.start();
     expect(construct).toHaveBeenCalledOnce();
     expect(construct.mock.calls[0][0]).toBe('paradex');
-    expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ ...credentials, publicDataOnly: false, testnet: true });
+    const { key, ...account } = credentials;
+    const engineOptions = JSON.parse(construct.mock.calls[0][1]);
+    expect(engineOptions).toMatchObject({ ...account, publicDataOnly: false, testnet: true });
+    expect(engineOptions).not.toHaveProperty('key');
+    // The account key reaches only trusted setup's private capsule.
+    expect(JSON.parse(construct.mock.calls[0][2]!)).toEqual({ primary: { secret: key } });
   });
 
   it.each([{ key: '' }, { paradexAddress: '' }, { subkeyAddress: '' }, { publicDataOnly: true }])(
@@ -85,44 +90,13 @@ describe('Rust Paradex account boundary', () => {
       const { exchange, load, construct } = setup({ ...missing, publicDataOnly: false });
       await exchange.start();
       expect(load).toHaveBeenCalledOnce();
+      // The key is setup material, never an engine option; public fields stay.
+      const { key: _key, ...forwarded } = missing as Partial<ExchangeOptions>;
       expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({
-        ...missing, publicDataOnly: true, publicMode: { requested: false },
+        ...forwarded, publicDataOnly: true, publicMode: { requested: false },
       });
     },
   );
-
-  it('loads delegated payload signing with an opaque public key', async () => {
-    const payloadSigner = vi.fn(async () => ({ signature: '["1","2"]' }));
-    const { exchange, construct } = setup({ payloadSigner, key: 'public-subkey' });
-    await exchange.start();
-    expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ key: 'public-subkey', payloadSigner: true });
-    expect(payloadSigner).not.toHaveBeenCalled();
-  });
-
-  it('allows the TS remote HTTP signer alongside local JWT signing', async () => {
-    const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
-    const { exchange, construct } = setup({ remoteSigner });
-    await exchange.start();
-    expect(construct).toHaveBeenCalledOnce();
-    expect(remoteSigner.sign).not.toHaveBeenCalled();
-  });
-
-  it('calls the payload callback with the TS options receiver and one argument', async () => {
-    const payload = { exchangeName: 'paradex', key: 'public-subkey', payload: '0x123', scheme: 'stark', encoding: 'felt-pair' };
-    const payloadSigner = vi.fn(function (this: ExchangeOptions, request: PayloadSignerRequest) {
-      expect(this.key).toBe('public-subkey');
-      expect(arguments.length).toBe(1);
-      expect(request).toEqual(payload);
-      return { signature: 'opaque' };
-    });
-    const { exchange, engine } = setup({ payloadSigner, key: 'public-subkey' });
-    const start = engine.start;
-    engine.start = (now) => { start(now); return JSON.stringify([{ op: 'signPayload', request: 1, payload, timeoutMs: 20_000 }]); };
-    engine.payloadSigned = () => '[]';
-    engine.payloadSignFailed = () => '[]';
-    await exchange.start();
-    await vi.waitFor(() => expect(payloadSigner).toHaveBeenCalledOnce());
-  });
 
   it('honors caller IDs verbatim and mints bounded attributed IDs', async () => {
     const { exchange, commands } = setup();

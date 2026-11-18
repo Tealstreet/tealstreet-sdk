@@ -129,6 +129,12 @@ const setup = (spot: boolean, cancelReply?: () => Promise<unknown>, options: Par
             liquidationPrice: '8000',
           },
         ]);
+      // Binance's CM/UM integration C.5 adds a separate open-algo census.
+      // This ordinary-order fixture has no algo orders.
+      if (!spot && path === '/dapi/v1/openAlgoOrders' && request.method === 'GET') {
+        expect(new URL(request.url).searchParams.get('algoType')).toBe('CONDITIONAL');
+        return raw([]);
+      }
       if (path.endsWith('/openOrders'))
         return raw(
           spot
@@ -268,7 +274,9 @@ it('preserves COIN-M USD contract placement units and coin wallet valuation thro
       await t.exchange.placeOrder({ symbol: t.symbol, type: OrderType.Market, side: OrderSide.Buy, amount: 3 }),
     ).toEqual(['123']);
     const request = t.requests.find((r) => r.method === 'POST' && r.url.includes('/order?'))!;
+    expect(new URL(request.url).pathname).toBe('/dapi/v1/order');
     expect(new URL(request.url).searchParams.get('quantity')).toBe('3');
+    expect(t.requests.filter((r) => r.method === 'POST' && new URL(r.url).pathname === '/dapi/v1/algoOrder')).toEqual([]);
     expect(t.errors).toEqual([]);
     const before = t.requests.length;
     await expect(
@@ -296,6 +304,7 @@ it('rejects a partial COIN-M batch with the native accepted IDs through the SDK'
     ])).rejects.toMatchObject({ message: 'insufficient margin', partialOrderIds: ['321'] });
     expect(t.requests.filter((r) => r.method === 'POST' && r.url.includes('/batchOrders?'))).toHaveLength(1);
     expect(t.requests.filter((r) => r.method === 'POST' && r.url.includes('/order?'))).toHaveLength(0);
+    expect(t.requests.filter((r) => r.method === 'POST' && new URL(r.url).pathname === '/dapi/v1/algoOrder')).toEqual([]);
     // The SDK command boundary reports the rejection exactly once.
     expect(t.errors).toEqual(['insufficient margin']);
   } finally {
@@ -417,6 +426,9 @@ it.each([true, false])('forwards recvWindow through actual Spot/COIN-M WASM sign
     const signed = t.requests.filter((request) => new URL(request.url).searchParams.has('signature'));
     expect(signed.some((request) => request.method === 'GET')).toBe(true);
     expect(signed.some((request) => request.method === 'POST')).toBe(true);
+    expect(signed.filter((request) => request.method === 'POST').map((request) => new URL(request.url).pathname)).toEqual([
+      spot ? '/api/v3/order' : '/dapi/v1/order',
+    ]);
     for (const request of signed) {
       expect(new URL(request.url).searchParams.getAll('recvWindow')).toEqual(['4321']);
       const [query, signature] = new URL(request.url).search.slice(1).split('&signature=');

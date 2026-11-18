@@ -1,4 +1,5 @@
-//! Orderly perpetuals, shared by its six broker frontends.
+//! Orderly perpetuals, shared by its four broker frontends.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod funding;
 mod history;
@@ -22,10 +23,9 @@ use wire::*;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Broker {
     #[default]
-    Tealstreet,
+    Orderly,
     KodiakFi,
     Mode,
-    SalsaDex,
     What,
     WooFi,
 }
@@ -34,9 +34,8 @@ impl Broker {
         match self {
             Self::KodiakFi => "TEALKODIAK",
             Self::Mode => "TEALMODE",
-            Self::SalsaDex => "TEALSALSA",
             Self::What => "TEALWHAT",
-            Self::Tealstreet | Self::WooFi => "TEALSTREET",
+            Self::Orderly | Self::WooFi => "TEALSTREET",
         }
     }
 }
@@ -317,7 +316,13 @@ impl Orderly {
         }
     }
     fn seed(&mut self, cx: &mut Cx<'_, Pending>, kind: Seed) {
-        let context = match cx.http_context(
+        let issue = if matches!(kind, Seed::Tickers) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(
+            cx,
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -380,11 +385,13 @@ impl Orderly {
         }
         cx.send(
             self.public.socket.unwrap(),
-            serde_json::to_string(&Sub {
-                event: if add { "subscribe" } else { "unsubscribe" },
-                topic,
-            })
-            .unwrap(),
+            ControlFrame::subscription(
+                serde_json::to_string(&Sub {
+                    event: if add { "subscribe" } else { "unsubscribe" },
+                    topic,
+                })
+                .unwrap(),
+            ),
         );
     }
     fn snapshot(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -413,15 +420,17 @@ impl Orderly {
         }
         cx.send(
             self.public.socket.unwrap(),
-            serde_json::to_string(&Request {
-                id: &id,
-                event: "request",
-                params: Params {
-                    r#type: "orderbook",
-                    symbol: &self.native[symbol],
-                },
-            })
-            .unwrap(),
+            ControlFrame::subscription(
+                serde_json::to_string(&Request {
+                    id: &id,
+                    event: "request",
+                    params: Params {
+                        r#type: "orderbook",
+                        symbol: &self.native[symbol],
+                    },
+                })
+                .unwrap(),
+            ),
         );
         state.snapshot = Some((id, cx.set_timer(10000.0)));
     }
@@ -563,7 +572,10 @@ impl Orderly {
         let env: Envelope<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
         match env.event.as_ref() {
             "ping" => {
-                cx.send(self.public.socket.unwrap(), "{\"event\":\"pong\"}");
+                cx.send(
+                    self.public.socket.unwrap(),
+                    ControlFrame::heartbeat("{\"event\":\"pong\"}"),
+                );
                 return Ok(());
             }
             "pong" => {
@@ -711,11 +723,24 @@ fn interval_valid(i: Interval) -> bool {
 }
 
 impl Venue for Orderly {
+    fn http_plans() -> bool {
+        false
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(_, request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             reject_order_history_filters: true,
@@ -743,7 +768,7 @@ impl Venue for Orderly {
         self.public.open = true;
         self.public.ping_at = cx.now;
         self.public.supervisor.opened(cx);
-        cx.send(socket, "{\"event\":\"ping\"}");
+        cx.send(socket, ControlFrame::heartbeat("{\"event\":\"ping\"}"));
         for topic in ["tickers", "bbos", "markprices"] {
             self.subscribe(cx, topic, true);
         }
@@ -1090,7 +1115,7 @@ impl Venue for Orderly {
                 invalid: false,
                 ..
             } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
             }
             invalid => self.on_request_failed(cx, invalid, "Orderly invalid response rows"),
@@ -1103,11 +1128,13 @@ impl Venue for Orderly {
         _reason: safe_cex_engine::request_context::Error,
         error: VenueError,
     ) {
-        if let Some(context) = Self::candle_context(&pending) {
-            let _ = cx.fail_context(context, error);
-        } else {
-            self.on_sign_error(cx, pending, error);
-        }
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if let Some(context) = Self::candle_context(&pending) {
+                let _ = cx.fail_context(context, error);
+            } else {
+                self.on_sign_error(cx, pending, error);
+            }
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
@@ -1123,10 +1150,10 @@ impl Venue for Orderly {
     /// A provider refusal of a private read: history is strict; an account
     /// read fails as a native failed read does, reported and retried.
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::History(request) => self.history_refused(cx, request, error),
             pending => self.on_sign_failed(cx, pending, &error.message),
-        }
+        });
     }
     /// A malformed stream was delivered, so its custody is checked first: a
     /// stale or superseded leg only closes its Context and changes nothing.
@@ -1227,7 +1254,7 @@ impl Venue for Orderly {
             SocketTick::Ping => {
                 if let Some(socket) = self.public.socket {
                     self.public.ping_at = cx.now;
-                    cx.send(socket, "{\"event\":\"ping\"}");
+                    cx.send(socket, ControlFrame::heartbeat("{\"event\":\"ping\"}"));
                 }
                 return;
             }
@@ -1379,7 +1406,7 @@ impl Venue for Orderly {
                 if from_ms.is_some() || to_ms.is_some() {
                     let limit = limit.unwrap_or(500).min(1000) as usize;
                     let from = from_ms.unwrap_or(0.0);
-                    let to = to_ms.unwrap_or(cx.now);
+                    let to = to_ms.unwrap_or(cx.protocol_now());
                     if from > to {
                         complete_local_read(cx, Ok("[]".into()));
                         return;

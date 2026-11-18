@@ -269,6 +269,27 @@ managed calls never fall back to their legacy request method. Claim returns only
 release/wait/denial status, without draining actions or invoking another provider
 before the synchronous transport handoff.
 
+HTTP preparation and release tokens carry a non-reused physical-lifecycle
+issuer as well as the local request, attempt and preparation counters. The
+issuer is allocated atomically in the linked engine runtime and never rewinds
+when an Engine is dropped. Foreign preparation completions/failures and claims
+are rejected before advancing expiry or settling the replacement's work. Group
+claims validate every member's issuer before touching any sibling.
+
+The opaque wire forms are `p2:<issuer>:<request>:<generation>:<sequence>`,
+`r2:<issuer>:<request>:<generation>:<prepared-id>:<sequence>` and
+`g2;<r2-member>;...`. Integer components remain canonical decimal strings; v1
+tokens are rejected. Hosts must round-trip them unchanged. Neither venue
+request bytes/resource IDs nor identity/signing entropy consumption changes.
+
+This issuer is a runtime-local identity, not an authentication credential or a
+namespace shared across separate processes/WASM modules. Real hosts must still
+capture the original Engine and dispose its executors during owner replacement.
+The native host uses one immutable Engine/actor inbox; the JS EngineHost retains
+its Engine and guards prepared resources and pacing wakes against disposal.
+Replacing the JS host's public `engine` property in place is not a supported
+owner transition. No production caller performing that replacement was found.
+
 Managed response admission rejects pre-release responses, premature end/chunk,
 duplicate start and stale preparation generations. Retirement inside a streaming
 row stops the remaining rows and cannot restore a removed continuation. Host
@@ -1174,6 +1195,8 @@ Ordinary managed auth observation now supplies the new read-only Store argument;
 late reconciliation remains silent. Owner requires the late-reconciliation
 follow-on to converge the broad revision with the snapshot epoch or document
 why both are necessary, rather than retaining two unexplained mechanisms.
+Resolved by documentation: both stay, for the reasons and controls in
+[RUST_ORDER_FENCE_DOMAINS.md](RUST_ORDER_FENCE_DOMAINS.md).
 
 Header policy review also found the same preexisting bypass in legacy client-ID
 lookup. Its single factory call is cleared by the history owner; completion and

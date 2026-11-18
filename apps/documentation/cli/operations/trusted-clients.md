@@ -5,6 +5,8 @@ sidebar_position: 3
 
 # Trusted clients
 
+Browser approvals belong to the signed-in user. Switching users requires approval for that user even when the browser client ID is unchanged. See [user profiles and migration](./config-files.md#login-logout-and-migration).
+
 The trusted-clients allowlist is the double-consent gate that decides which
 web clients are allowed to drive the standalone CLI over the listener's
 WebSocket. Each browser tab generates a `clientId` UUID and presents it in

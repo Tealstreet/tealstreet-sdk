@@ -1,0 +1,30 @@
+{
+  "comment": "One source for corpus redaction: safe_cex_engine::test_support::error_corpus re-checks with it and sdk-rs/harness/error-capture.mjs writes with it. A key is sensitive when, lowercased with _ and - removed, it equals a name or ends with a suffix. Free text also hides 40+ hex runs, IPv4, IPv6, UUIDs and mixed-case base58 runs of 32+. Each vector's raw text redacts to exactly its redacted text; keep texts pass both sides unchanged.",
+  "names": [
+    "apikey", "key", "secret", "signature", "sign", "passphrase", "password", "token", "jwt", "session",
+    "listenkey", "uid", "userid", "user", "owner", "email", "txid", "subaccount", "wallet", "ordid", "algoid"
+  ],
+  "suffixes": ["orderid", "orderids", "oid", "clordid", "linkid", "address", "accountid"],
+  "vectors": {
+    "redact": [
+      { "raw": "{\"code\":-2019,\"msg\":\"Margin is insufficient.\",\"orderId\":4294967295}", "redacted": "{\"code\":-2019,\"msg\":\"Margin is insufficient.\",\"orderId\":\"<redacted>\"}" },
+      { "raw": "{\"data\":[{\"ordId\":\"612938\",\"clOrdId\":\"t1\",\"sCode\":\"51008\"}]}", "redacted": "{\"data\":[{\"ordId\":\"<redacted>\",\"clOrdId\":\"<redacted>\",\"sCode\":\"51008\"}]}" },
+      { "raw": "{\"retCode\":110007,\"result\":{\"orderLinkId\":\"x\",\"sub_account_id\":7,\"vaultAddress\":\"v\"}}", "redacted": "{\"retCode\":110007,\"result\":{\"orderLinkId\":\"<redacted>\",\"sub_account_id\":\"<redacted>\",\"vaultAddress\":\"<redacted>\"}}" },
+      { "raw": "{\"orderIds\":[1,2],\"signature\":{\"r\":\"1\",\"s\":\"2\",\"v\":27},\"code\":0}", "redacted": "{\"orderIds\":\"<redacted>\",\"signature\":\"<redacted>\",\"code\":0}" },
+      { "raw": "{\"msg\":\"{\\\"cloid\\\":\\\"abc\\\",\\\"code\\\":1}\"}", "redacted": "{\"msg\":\"{\\\"cloid\\\":\\\"<redacted>\\\",\\\"code\\\":1}\"}" },
+      { "raw": "{\"code\":\"50110\",\"msg\":\"Your IP 203.0.113.7 is not included in your API key's IP whitelist.\"}", "redacted": "{\"code\":\"50110\",\"msg\":\"Your IP <redacted> is not included in your API key's IP whitelist.\"}" },
+      { "raw": "{\"code\":40018,\"msg\":\"Invalid IP 2001:db8::7 for this key\"}", "redacted": "{\"code\":40018,\"msg\":\"Invalid IP <redacted> for this key\"}" },
+      { "raw": "{\"error\":\"order 3f2504e0-4f89-11d3-9a0c-0305e82c3301 not found\"}", "redacted": "{\"error\":\"order <redacted> not found\"}" },
+      { "raw": "{\"error\":\"orderId-3f2504e0-4f89-11d3-9a0c-0305e82c3301-dead not found\"}", "redacted": "{\"error\":\"orderId-<redacted>-dead not found\"}" },
+      { "raw": "{\"error\":\"account 7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV not funded\"}", "redacted": "{\"error\":\"account <redacted> not funded\"}" },
+      { "raw": "{\"error\":\"bad sig 3045022100aabbccddeeff00112233445566778899aabbccddeeff\"}", "redacted": "{\"error\":\"bad sig <redacted>\"}" }
+    ],
+    "keep": [
+      "{\"code\":-1021,\"msg\":\"Timestamp for this request is outside of the recvWindow.\",\"serverTime\":\"2026-10-28T10:00:00.000Z\"}",
+      "{\"code\":10002,\"msg\":\"invalid request, please check your server timestamp or recv_window param. req_timestamp[1761645600000],server_timestamp[1761645612345],recv_window[5000]\"}",
+      "{\"code\":51000,\"msg\":\"Parameter sz error at 12:34:56; unrecognizedparameterwasprovidedtotheendpoint\"}",
+      "{\"code\":\"30003\",\"message\":\"INVALID_INSTRUMENT_NAME\",\"instrument\":\"BTCUSD-PERP\",\"price\":\"50111.5\",\"orderId\":\"\",\"uid\":null}",
+      "{\"status\":\"err\",\"response\":\"Order has invalid size. asset=4 version 1.2.3\"}"
+    ]
+  }
+}

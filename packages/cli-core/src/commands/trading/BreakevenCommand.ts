@@ -24,7 +24,7 @@ export class BreakevenCommand extends TradingBaseCommand {
   readonly description = 'Move the stop loss to break-even';
   readonly category = CommandCategory.Trading;
   readonly aliases = ['breakeven'];
-  readonly examples = ['be', 'be +3%', 'be -0.5%', 'be +100', 'be ETHUSDT'];
+  readonly examples = ['be', 'be +3%', 'be +100', 'be ETHUSDT'];
   readonly requiresConnection = true;
 
   async execute(ctx: CommandContext): Promise<CommandResult> {
@@ -34,6 +34,11 @@ export class BreakevenCommand extends TradingBaseCommand {
     if (!exchange.placeOrder) return this.error('Exchange does not support placing orders');
 
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
+    const operandIndex = args.findIndex((arg, index) => index > 0 && this.looksLikePrice(arg));
+    const invalid = this.refuseUnknownOrderArgs(ctx, operandIndex > 0 ? [operandIndex] : []);
+    if (invalid) return invalid;
     const targetSymbol = this.getTargetSymbol(ctx, []);
 
     const positions = (exchange.store?.positions ?? []).filter(

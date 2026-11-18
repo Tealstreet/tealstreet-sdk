@@ -37,8 +37,11 @@ export type WsStrategy =
     | { kind: 'direct' }
     // Always the tunnel host regardless of options (grvt).
     | { kind: 'alwaysProxy'; host: WsHost }
-    // tealstreetProxy ? host : direct (okx private/business, blofin, coinbase, apexomni).
+    // tealstreetProxy ? host : direct (okx private/business, blofin, coinbase).
     | { kind: 'proxyConditional'; host: WsHost }
+    // As proxyConditional on mainnet; testnet stays direct (apexomni: the relay
+    // carries only the mainnet upstream).
+    | { kind: 'mainnetProxyConditional'; host: WsHost }
     // tealstreetProxy ? (proxyRegion === 'JA' ? ja : other) : direct (no current exchange; was bitmex).
     | { kind: 'regionConditional'; ja: WsHost; other: WsHost }
     // bybitSiteId === 'BRA_BTL' ? host : direct. Browser WS cannot send the site

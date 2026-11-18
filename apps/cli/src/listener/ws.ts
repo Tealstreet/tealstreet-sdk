@@ -1,3 +1,10 @@
+import {
+  getStorageEpoch,
+  isStorageSessionCurrent,
+  onStorageOwnerChange,
+  runInStorageSession,
+  isRecord,
+} from '../storage-context';
 import type { ServerWebSocket, WebSocketHandler } from 'bun';
 import type { StandalonePlatformAdapter } from '../platform-adapter';
 import { logger } from '../logger';
@@ -39,9 +46,13 @@ function isHello(msg: unknown): msg is HelloFrame {
   return (
     typeof msg === 'object' &&
     msg !== null &&
-    (msg as { t?: unknown }).t === 'hello' &&
-    typeof (msg as { clientId?: unknown }).clientId === 'string' &&
-    (msg as { clientId: string }).clientId.length > 0
+    't' in msg &&
+    msg.t === 'hello' &&
+    'clientId' in msg &&
+    typeof msg.clientId === 'string' &&
+    msg.clientId.length > 0 &&
+    (!('label' in msg) || typeof msg.label === 'string') &&
+    (!('webCrossTradeActive' in msg) || typeof msg.webCrossTradeActive === 'boolean')
   );
 }
 
@@ -95,6 +106,26 @@ export function buildWebSocketHandler({
   notifyOwnCrossTradeWrite: () => void;
   onClientConnect?: () => void;
 }): WebSocketHandler<WsSessionData> {
+  const epoch = getStorageEpoch();
+  const connections = new Set<ServerWebSocket<WsSessionData>>();
+  const unsubscribe = onStorageOwnerChange(() => {
+    for (const ws of connections) {
+      ws.data.trusted = false;
+      try {
+        ws.close(4001, 'login-changed');
+      } catch {
+        /* continue revoking other clients */
+      }
+    }
+    connections.clear();
+    unsubscribe();
+  });
+  const isCurrent = (ws: ServerWebSocket<WsSessionData>) => {
+    if (isStorageSessionCurrent(epoch)) return true;
+    ws.data.trusted = false;
+    ws.close(4001, 'login-changed');
+    return false;
+  };
   const onTrusted = (ws: ServerWebSocket<WsSessionData>) => {
     if (isAccountSyncEnabled()) {
       ws.subscribe(ACCOUNTS_TOPIC);
@@ -108,6 +139,8 @@ export function buildWebSocketHandler({
   };
   return {
     open(ws) {
+      if (!isCurrent(ws)) return;
+      connections.add(ws);
       if (!isOriginAllowed(ws.data.origin)) {
         logger.warn(`listener: origin-blocked ${ws.data.origin || '(no Origin header)'}`);
         ws.close(4002, 'origin-blocked');
@@ -118,6 +151,7 @@ export function buildWebSocketHandler({
     },
 
     async message(ws, raw) {
+      if (!isCurrent(ws)) return;
       let parsed: unknown;
       try {
         parsed = JSON.parse(typeof raw === 'string' ? raw : raw.toString());
@@ -154,6 +188,7 @@ export function buildWebSocketHandler({
           origin: ws.data.origin,
         });
 
+        if (!isCurrent(ws)) return;
         if (approved) {
           try {
             addTrustedClient({
@@ -162,7 +197,9 @@ export function buildWebSocketHandler({
               origin: ws.data.origin,
             });
           } catch (err) {
-            logger.error(`listener: failed to persist trusted client: ${(err as Error).message}`);
+            logger.error(
+              `listener: failed to persist trusted client: ${err instanceof Error ? err.message : String(err)}`,
+            );
             sendRejected(ws);
             ws.close(4001, 'persist-failed');
             return;
@@ -185,12 +222,13 @@ export function buildWebSocketHandler({
         ws.close(4001, 'untrusted');
         return;
       }
-      const t = (parsed as { t?: unknown }).t;
+      if (!isRecord(parsed)) return;
+      const t = parsed.t;
       if (t === 'cmd:exec') {
-        const id = (parsed as { id?: unknown }).id;
-        const command = (parsed as { command?: unknown }).command;
-        const account = (parsed as { account?: unknown }).account;
-        const symbol = (parsed as { symbol?: unknown }).symbol;
+        const id = parsed.id;
+        const command = parsed.command;
+        const account = parsed.account;
+        const symbol = parsed.symbol;
         if (typeof id !== 'string' || id.length === 0) {
           logger.warn('listener: cmd:exec missing id');
           return;
@@ -199,13 +237,15 @@ export function buildWebSocketHandler({
           ws.send(JSON.stringify({ t: 'cmd:done', id, success: false, error: 'cmd:exec missing command' }));
           return;
         }
-        void handleCmdExec(
-          ws,
-          id,
-          command,
-          processCommand,
-          typeof account === 'string' && account.length > 0 ? account : undefined,
-          typeof symbol === 'string' && symbol.length > 0 ? symbol : undefined,
+        void runInStorageSession(() =>
+          handleCmdExec(
+            ws,
+            id,
+            command,
+            processCommand,
+            typeof account === 'string' && account.length > 0 ? account : undefined,
+            typeof symbol === 'string' && symbol.length > 0 ? symbol : undefined,
+          ),
         );
         return;
       }
@@ -223,7 +263,7 @@ export function buildWebSocketHandler({
         // Live update to the per-session feature signals carried in hello.
         // Only `webCrossTradeActive` is used today; other fields ignored
         // forward-compat.
-        const next = (parsed as { webCrossTradeActive?: unknown }).webCrossTradeActive;
+        const next = parsed.webCrossTradeActive;
         if (typeof next === 'boolean' && next !== ws.data.webCrossTradeActive) {
           ws.data.webCrossTradeActive = next;
           maybeWarnCrossTradeBoth(adapter, ws);
@@ -234,6 +274,7 @@ export function buildWebSocketHandler({
     },
 
     close(ws, code, reason) {
+      connections.delete(ws);
       const id = ws.data.clientId ? ws.data.clientId.slice(0, 8) : '(no hello)';
       logger.info(`listener: client closed ${id} code=${code} reason=${reason || ''}`);
     },

@@ -241,7 +241,7 @@ fn validated_coverage_gaps_keep_the_first_cause_and_exact_owner_before_success()
         let n = notices(scenario);
         assert_eq!(n.len(), 2, "{scenario}");
         assert!(
-            matches!(&n[0],Notice::Event(e) if e.code==code::HISTORY_INCOMPLETE && e.level==Level::Warn && e.message=="native cursor gap" && e.fields==vec![("command",Value::Num(7.0))])
+            matches!(&n[0],Notice::Event(e) if e.code==code::HISTORY_INCOMPLETE && e.level==Level::Warn && e.message=="native cursor gap" && e.fields==vec![("command",Value::Num(7.0)),("reason",Value::Str("coverageGap".into()))])
         );
         assert!(matches!(&n[1],Notice::CommandDone{command:7,result} if result==expected));
     }

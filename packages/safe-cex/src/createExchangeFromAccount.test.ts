@@ -317,10 +317,11 @@ describe('accountToExchangeOptions', () => {
         ...(proxyRegion ? { proxyRegion } : {}),
       });
 
-      it('threads the AWS public CORS host into secondaryProxyUrl, regardless of region', () => {
-        const AWS = 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy';
-        expect(accountToExchangeOptions(withSecondary('okx', 'SG')).secondaryProxyUrl).toBe(AWS);
-        expect(accountToExchangeOptions(withSecondary('bybit')).secondaryProxyUrl).toBe(AWS);
+      it('threads the public CORS host into secondaryProxyUrl, regardless of region', () => {
+        // Was AWS's exchange-proxy.jp; moved to the edge Worker's /api/public_proxy (AWS_EXIT.md 3d).
+        const PUBLIC = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy';
+        expect(accountToExchangeOptions(withSecondary('okx', 'SG')).secondaryProxyUrl).toBe(PUBLIC);
+        expect(accountToExchangeOptions(withSecondary('bybit')).secondaryProxyUrl).toBe(PUBLIC);
       });
 
       it('sets no secondaryProxyUrl without a secondary key', () => {

@@ -1,6 +1,7 @@
-// Engine-supported environments, not a catalogue of every venue's offerings.
-// Keep this allowlist aligned with venues/* and registry/src/lib.rs. Never
-// accept an endpoint from an environment variable or an API response unchecked.
+// Reviewed smoke environments, not a catalogue of every venue's offerings.
+// Ordinary profiles follow venues/* and registry/src/lib.rs; opt-in qualification
+// profiles confer no factory admission. Never accept an unchecked endpoint from
+// an environment variable or an API response.
 import { VENUES } from './venues.mjs';
 
 const profiles = {};
@@ -12,6 +13,12 @@ const modes = (testnet, mainnet) => ({ testnet, mainnet });
 register('binance', 'BINANCE', modes(
   endpoints('https://demo-fapi.binance.com', 'wss://demo-fstream.binance.com'),
   endpoints('https://fapi.binance.com', 'wss://fstream.binance.com'),
+));
+// COIN-M shares the futures demo keys. The demo REST and binancefuture socket
+// pairing mirrors the engine and TS reference paths.
+register('binanceinverse', 'BINANCE', modes(
+  endpoints('https://demo-dapi.binance.com', 'wss://dstream.binancefuture.com'),
+  endpoints('https://dapi.binance.com', 'wss://dstream.binance.com'),
 ));
 // Spot testnet keys are separate from futures demo keys, so Spot has its own env family.
 register('binancespot', 'BINANCESPOT', modes(
@@ -29,7 +36,7 @@ register('bitget bitgetusdc bitgetinverse', 'BITGET', modes(
   endpoints('https://api.bitget.com', 'wss://ws.bitget.com'),
   endpoints('https://api.bitget.com', 'wss://ws.bitget.com'),
 ), { key: 'KEY', secret: 'SECRET', passphrase: 'PASSPHRASE' });
-register('orderly tealstreet-dex kodiakfi mode salsadex what woofi', 'ORDERLY', modes(
+register('orderly kodiakfi mode what woofi', 'ORDERLY', modes(
   endpoints('https://testnet-api-evm.orderly.org', 'wss://testnet-ws-evm.orderly.org wss://testnet-ws-private-evm.orderly.org'),
   endpoints('https://api-evm.orderly.org', 'wss://ws-evm.orderly.org wss://ws-private-evm.orderly.org'),
 ), { key: 'KEY', secret: 'SECRET', applicationId: 'ACCOUNT_ID' });
@@ -80,7 +87,8 @@ for (const name of ['okx', 'okxeu', 'okxdemo', 'okxeudemo']) {
   const eea = name.startsWith('okxeu');
   const demo = endpoints(eea ? 'https://eea.okx.com' : 'https://openapi.okx.com',
     eea ? 'wss://wseeapap.okx.com' : 'wss://wspap.okx.com');
-  register(name, 'OKX', {
+  // EEA accounts and keys are separate from global OKX ones.
+  register(name, eea ? 'OKX_EEA' : 'OKX', {
     demo,
     ...(!name.endsWith('demo') ? { mainnet: endpoints(eea ? 'https://eea.okx.com' : 'https://www.okx.com',
       eea ? 'wss://wseea.okx.com' : 'wss://ws.okx.com') } : {}),
@@ -106,6 +114,11 @@ register('mexc', 'MEXC', {
 register('bingx', 'BINGX', {
   mainnet: endpoints('https://open-api.bingx.com', 'wss://ws-market-swap.qq-os.com wss://open-api-swap.bingx.com'),
 });
+// Qualification profile only: do not add this name to VENUES or a production
+// factory. Callers need a separately approved smoke-only engine constructor.
+register('bingxspot', 'BINGX_SPOT', {
+  mainnet: endpoints('https://open-api.bingx.com', 'wss://open-api-ws.bingx.com'),
+}, undefined, { optIn: true });
 register('weex', 'WEEX', {
   mainnet: endpoints('https://api-contract.weex.com', 'wss://ws-contract.weex.com'),
 }, { key: 'KEY', secret: 'SECRET', passphrase: 'PASSPHRASE' }, { options: { privateWsHeaders: true } });
@@ -131,7 +144,9 @@ register('polymarket', 'POLYMARKET', {
   },
 });
 
-export const LIVE_SMOKE_VENUES = Object.freeze(Object.keys(VENUES));
+// Fixture qualification and an opt-in smoke profile confer no ordinary admission.
+export const LIVE_SMOKE_VENUES = Object.freeze(Object.keys(VENUES)
+  .filter(name => !VENUES[name].rustFixture && !profiles[name]?.optIn));
 
 const setOption = (options, path, value) => {
   const parts = path.split('.');
@@ -140,14 +155,49 @@ const setOption = (options, path, value) => {
   target[parts.at(-1)] = value;
 };
 
-/** Resolve environment before touching credentials. There is no mainnet fallback. */
-export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
-  if (!Object.hasOwn(VENUES, name)) throw new Error('Unknown live-smoke venue');
+const testMode = (profile) => {
+  const availableModes = Object.keys(profile.environments);
+  return profile.defaultMode ?? (availableModes.includes('testnet') ? 'testnet' :
+    availableModes.includes('demo') ? 'demo' : undefined);
+};
+
+/**
+ * One credential set per family and environment, in the environment a funded
+ * smoke uses: the venue's test environment, mainnet only where it has none.
+ * Names only; this never reads a value.
+ */
+export const liveSmokeCredentialSets = (names = Object.keys(profiles).filter((name) => !profiles[name].optIn)) => {
+  const sets = new Map();
+  for (const name of names) {
+    const profile = profiles[name];
+    if (!profile) throw new Error(`Venue ${name} has no reviewed live-smoke endpoint profile`);
+    const mode = testMode(profile) ?? 'mainnet';
+    const entry = `${profile.family}_${mode.toUpperCase()}`;
+    const set = sets.get(entry) ?? { entry, mode, venues: [], fields: Object.values(profile.fields),
+      optionalFields: Object.values(profile.optionalFields ?? {}) };
+    set.venues.push(name);
+    sets.set(entry, set);
+  }
+  return [...sets.values()];
+};
+
+/**
+ * Resolve environment before touching credentials. There is no mainnet fallback.
+ * `credentials` (field suffix to value, e.g. from stdin) replaces the environment
+ * entirely; `allowMissing` lets a dry run proceed without any credential.
+ * BingX Spot additionally requires enableBingxSpot === true and authorized ===
+ * true on every call. Authorization attests a maintainer-approved transport,
+ * credential permissions and bounded order/cancel scope; it is not admission.
+ */
+export const liveSmokeProfile = (name, requestedMode, env = process.env,
+  { credentials, allowMissing = false, enableBingxSpot = false, authorized = false } = {}) => {
+  if (!Object.hasOwn(VENUES, name) && name !== 'bingxspot') throw new Error('Unknown live-smoke venue');
+  if (name === 'bingxspot' && (enableBingxSpot !== true || authorized !== true))
+    throw new Error('Venue has no reviewed live-smoke endpoint profile; BingX Spot smoke requires explicit opt-in and authorization');
   const profile = profiles[name];
   if (!profile) throw new Error('Venue has no reviewed live-smoke endpoint profile');
   const availableModes = Object.keys(profile.environments);
-  const mode = requestedMode ?? profile.defaultMode ?? (availableModes.includes('testnet') ? 'testnet' :
-    availableModes.includes('demo') ? 'demo' : undefined);
+  const mode = requestedMode ?? testMode(profile);
   if (!mode) throw new Error('Venue has no engine-supported test environment; explicit --mainnet is required');
   if (!Object.hasOwn(profile.environments, mode)) throw new Error('Requested environment is unsupported by this venue profile');
   const options = { testnet: mode !== 'mainnet' && !(name === 'bybitdemo' && mode === 'demo'),
@@ -155,27 +205,38 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
   if (name === 'coinbasespot') options.spotOnly = true;
   const secrets = {};
   const credentialEnv = {};
+  const suffixes = [...Object.values(profile.fields), ...Object.values(profile.optionalFields ?? {})];
+  if (credentials !== undefined) {
+    if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials))
+      throw new Error('Credentials must be one JSON object of field names');
+    for (const field of Object.keys(credentials))
+      // An inverted object would put a value in the name, so echo only name-shaped fields.
+      if (!suffixes.includes(field))
+        throw new Error(/^[A-Z0-9_]{1,40}$/.test(field) ? `Unknown credential field ${field}` : 'Unknown credential field');
+  }
   const read = (path, suffix, required) => {
     const variable = `RUST_LIVE_SMOKE_${profile.family}_${mode.toUpperCase()}_${suffix}`;
     credentialEnv[path] = variable;
-    const value = env[variable];
+    // Errors name the field, never its value.
+    const label = credentials === undefined ? `environment variable ${variable}` : `credential field ${suffix}`;
+    const value = credentials === undefined ? env[variable] : credentials[suffix];
     if (value === undefined || value === '') {
-      if (required) throw new Error(`Missing environment variable ${variable}`);
+      if (required && !allowMissing) throw new Error(`Missing ${label}`);
       return;
     }
-    if (typeof value !== 'string' || !value.trim()) throw new Error(`Invalid environment variable ${variable}`);
+    if (typeof value !== 'string' || !value.trim()) throw new Error(`Invalid ${label}`);
     if (['key', 'secret', 'passphrase', 'privateKey', 'omniKeySeed', 'apiKey', 'apiSecret', 'apiPassphrase'].includes(path.split('.').at(-1)) && value.length < 4)
-      throw new Error(`Credential environment variable ${variable} must contain at least four characters`);
+      throw new Error(`Credential ${label} must contain at least four characters`);
     if (path === 'polymarket.marketSlugs') {
       const slugs = value.split(',').map((slug) => slug.trim());
       if (!slugs.length || slugs.length > 100 || slugs.some((slug) => !slug) || new Set(slugs).size !== slugs.length)
-        throw new Error(`Invalid environment variable ${variable}`);
+        throw new Error(`Invalid ${label}`);
       setOption(options, path, slugs);
     } else if (path === 'polymarket.signerType') {
-      if (!/^[0-3]$/.test(value)) throw new Error(`Invalid environment variable ${variable}`);
+      if (!/^[0-3]$/.test(value)) throw new Error(`Invalid ${label}`);
       setOption(options, path, Number(value));
     } else if (path === 'asterdex.apiVersion') {
-      if (!['v1', 'v3'].includes(value)) throw new Error(`Invalid environment variable ${variable}`);
+      if (!['v1', 'v3'].includes(value)) throw new Error(`Invalid ${label}`);
       setOption(options, path, value);
     } else {
       secrets[path] = value;
@@ -184,7 +245,8 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
   };
   for (const [path, suffix] of Object.entries(profile.fields)) read(path, suffix, true);
   for (const [path, suffix] of Object.entries(profile.optionalFields ?? {})) read(path, suffix, false);
-  if (profile.family === 'HYPERLIQUID' && options.key.toLowerCase() === options.applicationId.toLowerCase())
+  if (profile.family === 'HYPERLIQUID' && options.key && options.applicationId &&
+    options.key.toLowerCase() === options.applicationId.toLowerCase())
     throw new Error('Hyperliquid smoke requires an agent wallet distinct from the account');
   const endpointSet = profile.environments[mode];
   const allowUrl = (url, kind) => {
@@ -205,7 +267,20 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
   const bitgetSimulation = profile.family === 'BITGET' && mode !== 'mainnet';
   const validateRequest = (request) => {
     if (!allowUrl(request.url, 'http')) throw new Error('HTTP URL is outside the selected venue environment');
-    if (profile.family === 'OKX' && mode === 'demo') {
+    if (name === 'bingxspot') {
+      const path = new URL(request.url).pathname;
+      const method = (request.method ?? 'GET').toUpperCase();
+      const reads = ['/openApi/spot/v1/common/symbols', '/openApi/spot/v2/quote/ticker',
+        '/openApi/spot/v2/quote/klines', '/openApi/spot/v1/market/depth',
+        '/openApi/spot/v1/account/balance', '/openApi/spot/v1/trade/openOrders',
+        '/openApi/spot/v1/trade/query', '/openApi/spot/v1/trade/myTrades'];
+      const writes = ['/openApi/spot/v1/trade/order', '/openApi/spot/v1/trade/cancel',
+        '/openApi/spot/v1/trade/cancelOpenOrders'];
+      if (!((method === 'GET' && reads.includes(path)) || (method === 'POST' && writes.includes(path)) ||
+          (['POST', 'PUT'].includes(method) && path === '/openApi/user/auth/userDataStream')))
+        throw new Error('BingX Spot request is outside the smoke routes');
+    }
+    if (['OKX', 'OKX_EEA'].includes(profile.family) && mode === 'demo') {
       const headers = Array.isArray(request.headers) ? request.headers : Object.entries(request.headers ?? {});
       const markers = headers.filter(([key]) => key.toLowerCase() === 'x-simulated-trading');
       if (markers.length !== 1 || markers[0][1] !== '1')
@@ -241,6 +316,8 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
   };
   const validateSocket = (url) => {
     if (!allowUrl(url, 'ws')) throw new Error('WebSocket URL is outside the selected venue environment');
+    if (name === 'bingxspot' && new URL(url).pathname !== '/market')
+      throw new Error('BingX Spot socket is outside the smoke routes');
     if (bitgetSimulation && !['/v2/ws/public', '/v2/ws/private'].includes(new URL(url).pathname))
       throw new Error('Bitget simulation does not support this socket');
   };
@@ -259,7 +336,9 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
     venue: name, mode, availableModes, options, secrets,
     // Bitrue rejects non-GTC; Polymarket's engine does not send postOnly yet.
     postOnly: !['bitrue', 'polymarket'].includes(name),
-    leverage: ['binancespot', 'bybitspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
+    // A funded mainnet run only places, confirms, cancels and reads back.
+    minimal: mode === 'mainnet',
+    leverage: ['binancespot', 'bybitspot', 'bingxspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
     secretValues: Object.values(secrets), credentialEnv,
     endpoints: { http: [...endpointSet.http], ws: [...endpointSet.ws] },
     allowUrl, canonicalizeUrl, validateRequest, validateSocket, validateSocketMessage,

@@ -373,6 +373,45 @@ fn price_history_samples_are_bounded_and_subscriptions_dispose() {
 }
 
 #[test]
+fn live_candle_windows_follow_protocol_utc_after_clock_corrections() {
+    let mut h = H::new();
+    h.load();
+    let origin = h.now;
+    assert!(h.e.sync_host_time(origin, origin));
+    assert!(h.e.sync_host_time(origin, origin + 7_200_000.));
+    h.event(Event::Command(Command::SubscribeCandles {
+        symbol: "election-Yes".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    }));
+    let check_window = |h: &H, utc: f64| {
+        let r = h
+            .http
+            .iter()
+            .find(|r| r.url.contains("prices-history"))
+            .unwrap();
+        assert!(
+            r.url
+                .contains(&format!("&startTs={}", ((utc - 60000.) / 1000.) as u64)),
+            "{}",
+            r.url
+        );
+        assert!(
+            r.url.contains(&format!("&endTs={}", (utc / 1000.) as u64)),
+            "{}",
+            r.url
+        );
+    };
+    check_window(&h, origin + 7_200_000.);
+    h.response("/prices-history", 200, r#"{"history":[]}"#);
+    // A later backwards correction must also reach the recurring poll.
+    h.now += 5000.;
+    assert!(h.e.sync_host_time(h.now, h.now - 7_200_000.));
+    let timer = h.timers.iter().find(|(_, at)| *at == h.now).unwrap().0;
+    h.event(Event::TimerFired { timer });
+    check_window(&h, h.now - 7_200_000.);
+}
+
+#[test]
 fn stale_public_quotes_trades_ticks_and_malformed_snapshots_cannot_replace_newer_state() {
     let mut h = H::new();
     h.load();
@@ -421,6 +460,37 @@ fn returned_candle_points_respect_subsecond_inclusive_bounds() {
     assert!(result.contains("101000"));
     assert!(result.contains("102000"));
     assert!(!result.contains("103000"));
+}
+
+#[test]
+fn price_history_sorts_stably_and_the_later_duplicate_point_wins() {
+    let mut h = H::new();
+    h.load();
+    h.event(Event::Command(Command::FetchCandles {
+        command: 7,
+        symbol: "election-Yes".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+        limit: None,
+        from_ms: Some(100_000.0),
+        to_ms: None,
+    }));
+    h.response(
+        "/prices-history",
+        200,
+        r#"{"history":[{"t":102,"p":0.5},{"t":101,"p":0.4},{"t":102,"p":0.55},{"t":101,"p":0.45}]}"#,
+    );
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(h.done.last().unwrap().as_ref().unwrap()).unwrap();
+    let rows: Vec<_> = rows
+        .iter()
+        .map(|row| {
+            (
+                row["timestamp"].as_f64().unwrap(),
+                row["close"].as_f64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(rows, [(101_000.0, 0.45), (102_000.0, 0.55)]);
 }
 
 #[test]

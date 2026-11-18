@@ -221,3 +221,17 @@ test('scheduleCancel interruptions stay unknown and cannot be mistaken for a cle
     assert.equal(r.host.commands.size, 0);
   }
 });
+
+
+test('history kind, native code and closed cause survive the command promise', async () => {
+  const detail = { message: 'history refused', kind: 'rateLimited', causeCode: 'HISTORY_RATE_LIMITED', venueCode: '100410' };
+  const r = rig(({ command }) => [done(command, { error: detail.message, detail })]);
+  await assert.rejects(r.host.command({ op: 'fetchFills' }), (error) => {
+    assert.equal(error.message, detail.message);
+    assert.equal(error.kind, detail.kind);
+    assert.equal(error.causeCode, detail.causeCode);
+    assert.equal(error.venueCode, detail.venueCode);
+    assert.equal(error.outcome, undefined);
+    return true;
+  });
+});

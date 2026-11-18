@@ -42,7 +42,7 @@ const toNumber = (value: unknown) => {
 };
 
 export const mapBlofinHistoricalOrder = (
-  row: Record<string, any>,
+  row: Record<string, unknown>,
   resolveSymbol: (instId: string) => string | undefined,
 ): HistoricalOrder | null => {
   const id = String(row.orderId ?? '');

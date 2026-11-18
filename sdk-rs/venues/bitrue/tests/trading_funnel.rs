@@ -87,6 +87,32 @@ fn level_edits(h: &Harness) -> usize {
         .count()
 }
 
+#[test]
+fn ambiguous_http_signature_response_never_resends_a_released_setting_write() {
+    for status in [429, 408, 500, 503] {
+        let mut h = Harness::new();
+        h.command(leverage(8));
+        assert_eq!(level_edits(&h), 1, "one physically released setting write");
+        let first = h.take(Method::Post, "/fapi/v2/level_edit");
+        h.reply_status(
+            first,
+            status,
+            r#"{"code":-1022,"msg":"Signature for this request is not valid."}"#,
+        );
+        assert_eq!(
+            1 + level_edits(&h),
+            1,
+            "HTTP {status}/-1022 must leave exactly one physical setting write"
+        );
+        assert_eq!(terminals(&h, 8), 1, "one terminal");
+        assert_eq!(
+            failure(&h, 8).expect("ambiguous write fails").outcome,
+            Some(Outcome::Unknown),
+            "HTTP {status}: reconcile instead of resending"
+        );
+    }
+}
+
 /// Control 7: A parked command whose caller wait expires never writes: at its wake
 /// the expiry is its one NotSent terminal.
 #[test]
@@ -193,17 +219,23 @@ fn an_unproven_verify_prepares_no_replacement() {
         cancel,
         &format!(r#"{{"code":"0","data":{{"orderId":{ORDER}}}}}"#),
     );
-    let verify = h.take(Method::Get, "/fapi/v2/order?");
-    h.reply(verify, &detail("PARTIALLY_FILLED", 0.004, ""));
+    // A cancel still live is re-read to its bound, then unproven.
+    h.verify_until_unproven(&detail("PARTIALLY_FILLED", 0.004, ""));
     assert!(
         !h.requests
             .iter()
             .any(|r| r.method == Method::Post && r.url.ends_with("/fapi/v2/order")),
         "no replacement without final cancellation proof"
     );
-    // The accepted cancel is a known effect: the journal's partial contract.
+    // Only here is the original's standing unknown: the Plan reconciles it.
     let error = failure(&h, 7).expect("one terminal");
-    assert_eq!(error.outcome, None);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        error.message.contains("could not be confirmed")
+            && error.message.contains("Check Open Orders"),
+        "{}",
+        error.message
+    );
     assert_eq!(
         error.partial.as_ref().map(|p| p.order_ids.clone()),
         Some(vec![ORDER.to_owned()])
@@ -528,5 +560,91 @@ fn a_signature_refusal_then_a_lost_resend_keeps_cancel_all_fenced() {
             .iter()
             .any(|r| r.method == Method::Post && r.url.ends_with("/fapi/v2/cancel")),
         "no cancel without the protective order's identity"
+    );
+}
+
+#[test]
+fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
+    let mut h = Harness::new();
+    position(&mut h);
+    h.e.store_mut().upsert_order(Order {
+        id: "456".into(),
+        parent_id: None,
+        status: OrderStatus::Open,
+        symbol: "E-BTC-USDT".into(),
+        kind: OrderType::StopLoss,
+        side: OrderSide::Sell,
+        price: 1800.0,
+        amount: 0.001,
+        filled: 0.0,
+        remaining: 0.001,
+        reduce_only: true,
+        close: None,
+        client_order_id: None,
+        time_in_force: Some(TimeInForce::GoodTillCancel),
+        last_update: 0.0,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    });
+    h.command(Command::AmendOrder {
+        command: 7,
+        id: "456".into(),
+        price: Some(1790.0),
+        amount: None,
+    });
+    let detail = |status| {
+        format!(
+            r#"{{"code":"0","data":[{{"orderId":456,"contractName":"E-BTC-USDT","status":"{status}","origQty":0.001,"executedQty":0,"side":"SELL","type":"MARKET","action":"CLOSE","conditionOrder":true,"triggerType":1,"triggerPriceType":2}}]}}"#
+        )
+    };
+    let inspect = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(inspect, &detail("INIT"));
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    h.reply(cancel, r#"{"code":"0","data":{"orderId":456}}"#);
+    let verify = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(verify, &detail("CANCELED"));
+    let create = h.take(Method::Post, "/fapi/v2/order");
+    // -2019 is not among Bitrue's documented refusals: its outcome is unknown,
+    // so nothing is put back and the stop may or may not stand.
+    h.reply(create, r#"{"code":"-2019","msg":"insufficient margin"}"#);
+    let error = failure(&h, 7).expect("a failure");
+    assert!(
+        error
+            .message
+            .contains("Your E-BTC-USDT long position may have no stop"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, None);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.ends_with("/fapi/v2/order")),
+        "no put-back over an unknown refusal"
+    );
+}
+#[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut h = Harness::new();
+    h.order(0.0);
+    h.amend();
+    let inspect = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(inspect, &detail("NEW", 0.0, ""));
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    h.reply(
+        cancel,
+        &format!(r#"{{"code":"0","data":{{"orderId":{ORDER}}}}}"#),
+    );
+    let verify = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(verify, &detail("CANCELED", 0.0, ""));
+    let create = h.take(Method::Post, "/fapi/v2/order");
+    h.reply(create, r#"{"code":"-2019","msg":"insufficient margin"}"#);
+    let error = failure(&h, 7).expect("a failure");
+    assert!(
+        error.message.contains("Your E-BTC-USDT order is gone"),
+        "{}",
+        error.message
     );
 }

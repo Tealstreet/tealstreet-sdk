@@ -16,15 +16,12 @@ function rig(actions = () => [], handlers = {}, options = {}) {
     setEntropy(source) { this.entropy = source; },
     command(json) { return JSON.stringify(actions(JSON.parse(json))); },
     start() { throw new WebAssembly.RuntimeError('unreachable'); },
-    payloadSigned() { return '[]'; },
-    payloadSignFailed() { return '[]'; },
   };
   const transport = {
     now: () => 0,
     setTimeout(fn) { timers.set(++next, fn); return next; },
     clearTimeout(id) { timers.delete(id); },
     request() { io.push('http'); return new Promise(() => {}); },
-    signPayload() { io.push('sign'); return new Promise(() => {}); },
   };
   const host = new EngineHost(engine, transport, {
     onCommandProgress(event) { events.push(event); },
@@ -38,11 +35,10 @@ function rig(actions = () => [], handlers = {}, options = {}) {
   };
 }
 
-test('native receipts are accumulated and delivered before HTTP, WebSocket or signing I/O', async () => {
-  for (const type of ['http', 'ws', 'sign']) {
+test('native receipts are accumulated and delivered before HTTP or WebSocket I/O', async () => {
+  for (const type of ['http', 'ws']) {
     const writes = { http: { op: 'http', request: 1, method: 'POST', url: 'https://example.test/orders', headers: [] },
-      ws: { op: 'wsSend', socket: 7, text: 'order' },
-      sign: { op: 'signPayload', request: 1, payload: 'order', timeoutMs: 10 } };
+      ws: { op: 'wsSend', socket: 7, text: 'order' } };
     const observed = [];
     const r = rig(({ command }) => [progress(command, [receipt()]), writes[type]], {
       onCommandProgress(event) {

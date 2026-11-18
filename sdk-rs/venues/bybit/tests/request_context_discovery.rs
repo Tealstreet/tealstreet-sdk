@@ -7,7 +7,8 @@ use safe_cex_engine::Event;
 use safe_cex_venue_bybit::{Endpoints, Variant};
 use support::{Harness, INSTRUMENTS, Options, PRELAUNCH, TICKERS};
 
-const WINDOW: Option<u32> = Some(20_000);
+/// Startup discovery's bound (the engine's discovery timeout plus readiness allowance).
+const WINDOW: Option<u32> = Some(90_000);
 const DISCOVERY: [&str; 2] = ["/v5/market/instruments-info", "/v5/market/tickers"];
 
 fn public(variant: Variant, rest: &str) -> Options {
@@ -85,7 +86,14 @@ fn an_admission_refused_discovery_read_retries_through_the_same_backoff() {
     assert!(h.startup_failures.is_empty());
     h.advance(60_000.);
     let retried = h.take("/v5/market/tickers");
-    assert_eq!(retried.timeout_ms, WINDOW);
+    // The wire bound is the context's remaining time, rounded up: float error may add 1 ms.
+    assert!(
+        retried
+            .timeout_ms
+            .is_some_and(|ms| (90_000..=90_001).contains(&ms)),
+        "{:?}",
+        retried.timeout_ms
+    );
 }
 
 /// C3: a discovery window that expires retries exactly like transport loss.
@@ -95,7 +103,7 @@ fn an_expired_discovery_window_retries_like_transport_loss() {
     h.respond("status=PreLaunch", 200, PRELAUNCH);
     let read = h.take("/v5/market/instruments-info");
     assert_eq!(read.timeout_ms, WINDOW);
-    h.advance(20_001.);
+    h.advance(90_001.);
     assert!(!h.has_request("/v5/market/instruments-info"));
     h.advance(1_000.);
     assert!(h.has_request("/v5/market/instruments-info"));
@@ -123,7 +131,7 @@ fn a_late_discovery_answer_publishes_no_rows() {
     let mut h = Harness::started(public(Variant::Linear, ""));
     h.respond("status=PreLaunch", 200, PRELAUNCH);
     let read = h.take("/v5/market/instruments-info");
-    h.advance(20_001.);
+    h.advance(90_001.);
     h.reply(read.id, 200, INSTRUMENTS);
     assert!(!h.engine.store().loaded().markets);
     assert!(h.engine.store().markets().is_empty());
@@ -186,7 +194,7 @@ fn a_reply_past_its_deadline_before_the_timer_still_retries() {
         let read = h.take("/v5/market/instruments-info");
         // The final assert must see a new discovery request, not a queued one.
         assert!(!h.has_request("/v5/market/instruments-info"));
-        h.now += 20_001.;
+        h.now += 90_001.;
         h.reply(read.id, 200, body);
         assert!(h.engine.store().markets().is_empty(), "no rows published");
         h.advance(120_000.);
@@ -195,4 +203,71 @@ fn a_reply_past_its_deadline_before_the_timer_still_retries() {
             "discovery stalled after a past-deadline reply ({body})"
         );
     }
+}
+
+/// A read whose context is no longer live when its answer comes must not latch
+/// discovery: the read is retried on backoff, never left in flight for good.
+#[test]
+fn a_discovery_answer_on_a_retired_read_still_retries() {
+    let mut h = Harness::started(public(Variant::Linear, ""));
+    h.respond("status=PreLaunch", 200, PRELAUNCH);
+    let read = h.take("/v5/market/instruments-info");
+    // Answered at the very end of its window: delivered, but no longer live.
+    h.advance(90_000.);
+    h.reply(read.id, 200, INSTRUMENTS);
+    h.advance(70_000.);
+    assert!(
+        h.has_request("/v5/market/instruments-info"),
+        "discovery latched on a retired read: {:?}",
+        h.paths()
+    );
+}
+
+/// A 403 from our own edge (a Cloudflare challenge, or our proxy) is not Bybit's
+/// ten-minute IP ban: it retries on the normal backoff.
+#[test]
+fn a_403_from_our_edge_retries_on_the_normal_backoff() {
+    for (headers, body) in [
+        ("cf-mitigated: challenge", "<html>Just a moment...</html>"),
+        ("", r#"{"message":"Authorization header is missing"}"#),
+        (
+            "",
+            "<html>Error 1020 Access denied fsjnpy143pbz-tyo.tealstreet.io</html>",
+        ),
+    ] {
+        let mut h = Harness::started(public(Variant::Linear, ""));
+        h.respond("status=PreLaunch", 200, PRELAUNCH);
+        h.respond("/v5/market/instruments-info", 200, INSTRUMENTS);
+        let ticker = h.take("/v5/market/tickers");
+        h.event(Event::HttpResponse {
+            request: ticker.id,
+            response: safe_cex_engine::Response {
+                status: 403,
+                headers,
+                body,
+            },
+        });
+        h.advance(35_000.);
+        assert!(
+            h.has_request("/v5/market/tickers"),
+            "{body}: waited out a ban"
+        );
+    }
+}
+
+/// A repeat 403 while Bybit's ban pause runs does not extend it: one window per streak.
+#[test]
+fn a_repeat_bybit_403_during_its_pause_does_not_extend_it() {
+    let mut h = Harness::started(public(Variant::Linear, ""));
+    let prelaunch = h.take("status=PreLaunch");
+    let markets = h.take("/v5/market/instruments-info");
+    h.reply(prelaunch.id, 403, "<html>403 Forbidden</html>");
+    h.advance(30_000.);
+    h.reply(markets.id, 403, "<html>403 Forbidden</html>");
+    h.advance(571_000.);
+    assert!(
+        h.has_request("/v5/market/instruments-info"),
+        "the second 403 extended the first pause: {:?}",
+        h.paths()
+    );
 }

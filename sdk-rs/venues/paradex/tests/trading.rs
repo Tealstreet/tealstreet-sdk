@@ -6,12 +6,14 @@ use safe_cex_venue_paradex::Options;
 use serde::Deserialize;
 use support::*;
 fn private() -> Harness {
-    let mut h = Harness::empty(Options {
-        key: Some(format!("0x{}1", "0".repeat(63))),
-        paradex_address: Some("0x0123".into()),
-        subkey_address: Some("0x456".into()),
-        ..Options::default()
-    });
+    let mut h = Harness::keyed(
+        Options {
+            paradex_address: Some("0x0123".into()),
+            subkey_address: Some("0x456".into()),
+            ..Options::default()
+        },
+        STARK_KEY,
+    );
     h.reply(
         "/markets",
         &MARKETS.replace(
@@ -34,6 +36,138 @@ fn private() -> Harness {
     h.reply("/orders", r#"{"results":[]}"#);
     h.reply("/account/margin", r#"{"configs":[]}"#);
     h
+}
+
+// Paradex declares no native rate-code table; RATE_LIMIT is diagnostic on 429.
+const AMBIGUOUS_WRITES: &[(u16, &str)] = &[
+    (429, "{}"),
+    (429, r#"{"error":"RATE_LIMIT","message":"slow down"}"#),
+    (429, r#"{"error":"INVALID_SIGNATURE","message":"refused"}"#),
+    (408, r#"{"error":"INVALID_PRICE","message":"refused"}"#),
+    (500, r#"{"error":"INVALID_SIGNATURE","message":"refused"}"#),
+    (502, "bad gateway"),
+    (503, r#"{"error":"INVALID_PRICE","message":"refused"}"#),
+    (504, "gateway timeout"),
+];
+
+fn assert_dispatched_unknown(h: &Harness) {
+    let error = failed(h, 91);
+    assert_eq!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::Unknown),
+        "{error:?}"
+    );
+    let text = error.legacy_text().to_ascii_lowercase();
+    assert!(
+        text.contains("unknown") && text.contains("check open orders"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("refused") && !text.replace("may have no stop", "").contains("no stop"),
+        "{text}"
+    );
+    assert_eq!(error.protection, None);
+    assert!(
+        !h.pending.iter().any(|r| r.method != Method::Get),
+        "no resend or put-back: {:?}",
+        h.pending
+    );
+}
+
+#[test]
+fn dispatched_ambiguous_ordinary_writes_are_unknown_without_resend() {
+    for &(status, body) in AMBIGUOUS_WRITES {
+        for operation in ["create", "amend", "cancel", "leverage"] {
+            let mut h = if operation == "amend" {
+                amendment_account(AMEND_ROW).0
+            } else {
+                private()
+            };
+            match operation {
+                "create" => place(&mut h, 91, vec![opts(OrderType::Limit)]),
+                "amend" => amend(&mut h, 91, Some(101.), Some(3.)),
+                "cancel" => h.command(Command::CancelOrders {
+                    command: 91,
+                    ids: vec!["123".into()],
+                }),
+                "leverage" => h.command(Command::SetLeverage {
+                    command: 91,
+                    symbol: "BTC-USD-PERP".into(),
+                    leverage: 20.,
+                    side: None,
+                }),
+                _ => unreachable!(),
+            }
+            let writes: Vec<_> = h
+                .pending
+                .iter()
+                .filter(|r| r.method != Method::Get)
+                .cloned()
+                .collect();
+            assert_eq!(writes.len(), 1, "{operation}: {:?}", h.pending);
+            let request = h.take(&writes[0].url);
+            h.respond(request, status, body);
+            assert_dispatched_unknown(&h);
+        }
+    }
+}
+
+#[test]
+fn dispatched_ambiguous_protective_writes_are_unknown_without_put_back() {
+    for &(status, body) in AMBIGUOUS_WRITES {
+        for leg in ["create", "cancel", "amend-cancel", "replacement", "restore"] {
+            let mut h = if leg == "create" {
+                private()
+            } else {
+                with_untriggered_stop()
+            };
+            if leg == "create" {
+                // An accepted entry precedes the dispatched protective child.
+                let mut order = opts(OrderType::Limit);
+                order.client_order_id = None;
+                order.stop_loss = Some(90.);
+                place(&mut h, 91, vec![order]);
+                let entry = h.take("/orders");
+                let payload: Payload =
+                    serde_json::from_str(entry.body.as_deref().unwrap()).unwrap();
+                h.respond(
+                    entry,
+                    200,
+                    &serde_json::json!({"id":"entry", "client_id":payload.client_id}).to_string(),
+                );
+            } else if leg == "cancel" {
+                h.command(Command::CancelOrders {
+                    command: 91,
+                    ids: vec!["123".into()],
+                });
+            } else {
+                amend_stop(&mut h, 91);
+                if leg != "amend-cancel" {
+                    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+                    h.respond(cancel, 204, "");
+                    confirm_stop_cancel(&mut h);
+                    if leg == "restore" {
+                        let replacement = h.take("/orders");
+                        h.respond(
+                            replacement,
+                            400,
+                            r#"{"error":"VALIDATION","message":"refused"}"#,
+                        );
+                    }
+                }
+            }
+            let writes: Vec<_> = h
+                .pending
+                .iter()
+                .filter(|r| r.method != Method::Get)
+                .cloned()
+                .collect();
+            assert_eq!(writes.len(), 1, "{leg}: {:?}", h.pending);
+            let request = h.take(&writes[0].url);
+            h.respond(request, status, body);
+            assert_dispatched_unknown(&h);
+        }
+    }
 }
 fn opts(kind: OrderType) -> PlaceOrderOpts {
     serde_json::from_str(&format!(r#"{{"symbol":"BTC-USD-PERP","type":{},"side":"buy","amount":1,"price":100,"clientOrderId":"caller"}}"#,serde_json::to_string(&kind).unwrap())).unwrap()
@@ -262,25 +396,25 @@ fn logged_child_rejection(h: &Harness, expected: &str) -> bool {
     })
 }
 #[test]
-fn partial_bracket_failure_returns_the_accepted_entry_and_does_not_replay_it() {
+fn partial_bracket_failure_skips_the_remaining_child_and_does_not_replay_entry() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1817-1896.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
     let mut h = private();
     bracket_entry(&mut h, 10, None);
     let tp = h.take("/orders");
     h.respond(tp, 400, r#"{"error":"REJECTED"}"#);
-    let sl = h.take("/orders");
-    let payload: Payload = serde_json::from_str(sl.body.as_deref().unwrap()).unwrap();
-    assert_eq!(payload.kind, "STOP_LOSS_MARKET");
-    assert_eq!(payload.flags, Some(vec!["REDUCE_ONLY".into()]));
-    h.respond(sl, 200, r#"{"id":"sl"}"#);
     assert!(h.pending.is_empty());
-    assert_eq!(h.result(10), Ok("[\"entry\",\"sl\"]"));
+    // The entry stands, but a refused leg leaves it unprotected: the command fails.
+    assert!(h.result(10).is_err());
     assert!(logged_child_rejection(
         &h,
-        "TP/SL take-profit placement failed: Paradex HTTP 400: REJECTED; still placing the stop-loss"
+        "TP/SL take-profit placement failed: Paradex HTTP 400: REJECTED"
     ));
 }
 #[test]
 fn a_rejected_stop_loss_keeps_the_take_profit_and_the_next_order() {
+    // Legacy TS: paradex.exchange.ts:1817-1896,1949-1965 keeps TP and continues entries.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
     let mut h = private();
     let mut next = opts(OrderType::Market);
     next.client_order_id = Some("next".into());
@@ -296,10 +430,10 @@ fn a_rejected_stop_loss_keeps_the_take_profit_and_the_next_order() {
     assert_eq!(payload.client_id.as_deref(), Some("next"));
     h.respond(after, 200, r#"{"id":"next-id","client_id":"next"}"#);
     assert!(h.pending.is_empty());
-    assert_eq!(h.result(11), Ok("[\"entry\",\"tp\",\"next-id\"]"));
+    assert!(h.result(11).is_err());
     assert!(logged_child_rejection(
         &h,
-        "TP/SL stop-loss placement failed: Paradex HTTP 400: REJECTED; no other leg remains to send"
+        "TP/SL stop-loss placement failed: Paradex HTTP 400: REJECTED"
     ));
 }
 #[test]
@@ -374,7 +508,7 @@ fn placement_continues_after_a_rejection_and_retains_earlier_and_later_ids() {
 }
 
 #[test]
-fn a_failed_entry_skips_only_its_children_then_attempts_the_next_entry() {
+fn a_refused_entry_skips_its_children_and_an_unknown_entry_stops_the_action() {
     for ambiguous in [false, true] {
         let mut h = private();
         let mut bracket = opts(OrderType::Market);
@@ -401,30 +535,28 @@ fn a_failed_entry_skips_only_its_children_then_attempts_the_next_entry() {
                 r#"{"error":"REJECTED","message":"entry refused"}"#,
             );
         }
-        let next = h.take("/orders");
-        let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
-        assert_eq!(payload.kind, "MARKET");
-        assert_eq!(payload.client_id.as_deref(), Some("next"));
-        h.respond(next, 200, r#"{"id":"accepted-next","client_id":"next"}"#);
         if ambiguous {
-            // Nothing is resent; the Unknown outcome only queues the fence's read.
+            after_failure_no_more_writes(&h);
             reconcile_read_only(&mut h);
-        }
-        assert!(h.pending.is_empty());
-        if ambiguous {
-            // A lost entry may have been accepted: never success, and the
-            // accepted next order stays visible.
             let error = failed(&h, 71);
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-            assert_eq!(error.partial.unwrap().order_ids, ["accepted-next"]);
+            assert!(error.partial.is_none());
         } else {
+            let next = take_method(&mut h, Method::Post, "/orders");
+            let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
+            assert_eq!(payload.kind, "MARKET");
+            assert_eq!(payload.client_id.as_deref(), Some("next"));
+            h.respond(next, 200, r#"{"id":"accepted-next","client_id":"next"}"#);
             assert_eq!(h.result(71), Ok("[\"accepted-next\"]"));
         }
+        assert!(h.pending.is_empty());
     }
 }
 
 #[test]
 fn a_child_leg_lost_in_transport_makes_the_command_unknown_with_accepted_ids() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1817-1896.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
     let mut h = private();
     bracket_entry(&mut h, 12, None);
     let tp = h.take("/orders");
@@ -436,13 +568,11 @@ fn a_child_leg_lost_in_transport_makes_the_command_unknown_with_accepted_ids() {
         },
     );
     h.collect();
-    // The sibling stop-loss is still placed.
-    let sl = h.take("/orders");
-    h.respond(sl, 200, r#"{"id":"sl"}"#);
+    // TS paradex.exchange.ts:1817-1896 skips SL after TP transport loss.
     reconcile_read_only(&mut h);
     let error = failed(&h, 12);
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    assert_eq!(error.partial.unwrap().order_ids, ["entry", "sl"]);
+    assert_eq!(error.partial.unwrap().order_ids, ["entry"]);
 }
 
 /// After an Unknown write the only pending request is the fence's order read.
@@ -453,7 +583,8 @@ fn reconcile_read_only(h: &mut Harness) {
 }
 
 fn failed(h: &Harness, id: u32) -> safe_cex_engine::VenueError {
-    h.actions
+    let error = h
+        .actions
         .iter()
         .rev()
         .find_map(|a| match a {
@@ -464,11 +595,15 @@ fn failed(h: &Harness, id: u32) -> safe_cex_engine::VenueError {
             }
             _ => None,
         })
-        .expect("command failed")
+        .expect("command failed");
+    if error.outcome == Some(safe_cex_engine::Outcome::Unknown) {
+        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+    }
+    error
 }
 
 #[test]
-fn a_mixed_native_batch_returns_correlated_successes_and_reports_missing_clients() {
+fn a_mixed_native_batch_fails_with_correlated_successes_and_missing_clients() {
     let mut h = private();
     let orders = ["first", "second", "third"].map(|id| {
         let mut order = opts(OrderType::Limit);
@@ -477,10 +612,66 @@ fn a_mixed_native_batch_returns_correlated_successes_and_reports_missing_clients
     });
     place(&mut h, 72, orders.into());
     h.reply("/orders/batch", r#"{"orders":[{"id":"three","client_id":"third"},{"id":"one","client_id":"first"}],"errors":[{"error":"INVALID_PRICE","message":"outside price bands"}]}"#);
-    assert_eq!(h.result(72), Ok("[\"one\",\"three\"]"));
+    assert_batch_refusal(
+        &h,
+        72,
+        vec!["one".into(), "three".into()],
+        "outside price bands",
+    );
     assert!(h.actions.iter().any(|action| matches!(action,
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. }))
         if message.contains("second") && message.contains("outside price bands"))));
+}
+
+fn rejection_level(h: &Harness) -> safe_cex_engine::Level {
+    h.actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.message.contains("placement failed for client IDs") =>
+            {
+                Some(event.level)
+            }
+            _ => None,
+        })
+        .expect("the rejection is logged")
+}
+
+#[test]
+fn a_lone_rejected_entry_leaves_its_toast_to_the_failed_command() {
+    let mut h = private();
+    place(&mut h, 74, vec![opts(OrderType::Market)]);
+    let only = h.take("/orders");
+    h.respond(
+        only,
+        400,
+        r#"{"error":"REJECTED","message":"entry refused"}"#,
+    );
+    assert!(h.result(74).unwrap_err().contains("entry refused"));
+    assert_eq!(rejection_level(&h), safe_cex_engine::Level::Warn);
+}
+
+#[test]
+fn a_rejected_last_entry_beside_an_accepted_one_still_reports_itself() {
+    let mut h = private();
+    let mut second = opts(OrderType::Market);
+    second.client_order_id = Some("second".into());
+    place(&mut h, 75, vec![opts(OrderType::Market), second]);
+    let first = h.take("/orders");
+    let accepted: Payload = serde_json::from_str(first.body.as_deref().unwrap()).unwrap();
+    let body = format!(
+        r#"{{"id":"one","client_id":"{}"}}"#,
+        accepted.client_id.unwrap()
+    );
+    h.respond(first, 200, &body);
+    let second = h.take("/orders");
+    h.respond(
+        second,
+        400,
+        r#"{"error":"REJECTED","message":"second refused"}"#,
+    );
+    assert_eq!(h.result(75), Ok("[\"one\"]"));
+    assert_eq!(rejection_level(&h), safe_cex_engine::Level::Error);
 }
 
 #[test]
@@ -588,7 +779,538 @@ fn cancel_pair_errors_are_correlated_and_attempt_all_batches_without_resending()
     assert!(h.pending.is_empty());
 }
 #[test]
-fn untriggered_stop_with_null_execution_price_can_be_amended_without_cancel_replace() {
+fn cancel_all_also_deletes_untriggered_stops_by_id() {
+    let mut h = private();
+    let private = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket: private });
+    h.collect();
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"jsonrpc":"2.0","id":0,"result":{}}"#,
+        },
+    );
+    h.collect();
+    h.e.handle(h.now,Event::WsMessage{socket:private,text:r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"orders.ALL","data":{"id":"123","market":"BTC-USD-PERP","type":"STOP_LOSS_MARKET","status":"UNTRIGGERED","side":"SELL","size":"2","remaining_size":"2","price":"95","trigger_price":"90","flags":["REDUCE_ONLY"],"instruction":"GTC","created_at":1700000000000}}}"#});
+    h.collect();
+    // Live: DELETE /orders?market= queued, the stop still there 8 minutes later.
+    h.command(Command::CancelSymbolOrders {
+        command: 12,
+        symbol: "BTC-USD-PERP".into(),
+    });
+    let stop = take_method(&mut h, Method::Delete, "/orders/123");
+    // Live: a stop already gone answers this, and the nuke read as failed.
+    h.respond(
+        stop,
+        400,
+        r#"{"error":"ORDER_ID_NOT_FOUND","message":"order not found"}"#,
+    );
+    let all = take_method(&mut h, Method::Delete, "/orders?market=");
+    h.respond(all, 200, r#"{"message":"cancel requests queued"}"#);
+    assert!(h.result(12).is_ok());
+}
+
+/// The untriggered SELL stop of `with_untriggered_stop`, edited to trigger at 91.
+fn amend_stop(h: &mut Harness, command: u32) {
+    h.command(Command::AmendOrder {
+        command,
+        id: "123".into(),
+        price: Some(91.),
+        amount: None,
+    });
+}
+fn order_posts(h: &Harness) -> usize {
+    h.pending
+        .iter()
+        .filter(|r| r.method == Method::Post && r.url.ends_with("/orders"))
+        .count()
+}
+
+#[test]
+fn a_refused_stop_replacement_puts_the_exact_original_back_once() {
+    let mut h = with_untriggered_stop();
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    confirm_stop_cancel(&mut h);
+    let place = h.take("/orders");
+    h.respond(place, 400, r#"{"error":"VALIDATION","message":"refused"}"#);
+    let restore = h.take("/orders");
+    let payload: Payload = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload.kind, "STOP_LOSS_MARKET");
+    assert_eq!(payload.trigger_price.as_deref(), Some("90"));
+    assert_eq!(payload.size.as_deref(), Some("2"));
+    assert_eq!(payload.price, None, "a market stop carries no price");
+    assert_eq!(payload.instruction.as_deref(), Some("GTC"));
+    assert_eq!(payload.flags, Some(vec!["REDUCE_ONLY".to_owned()]));
+    assert!(payload.signature.is_some_and(|s| !s.is_empty()));
+    let body = format!(
+        r#"{{"id":"124","client_id":"{}"}}"#,
+        payload.client_id.unwrap()
+    );
+    h.respond(restore, 201, &body);
+    let error = h.result(13).unwrap_err();
+    assert!(
+        error.contains("stop is unchanged") && error.contains("put back"),
+        "{error}"
+    );
+    assert_eq!(
+        h.failures.last().unwrap().protection,
+        Some(safe_cex_engine::error::Protection::Restored)
+    );
+    assert_eq!(order_posts(&h), 0);
+}
+
+#[test]
+fn a_refused_restore_is_visibly_unprotected_and_never_retried() {
+    let mut h = with_untriggered_stop();
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    confirm_stop_cancel(&mut h);
+    for _ in 0..2 {
+        let post = h.take("/orders");
+        h.respond(post, 400, r#"{"error":"VALIDATION","message":"refused"}"#);
+    }
+    let error = h.result(13).unwrap_err();
+    assert!(error.contains("no stop"), "{error}");
+    assert_eq!(
+        h.failures.last().unwrap().protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
+    assert_eq!(order_posts(&h), 0, "one restore, never a retry");
+}
+
+/// The ambiguous leg may have placed protection; an earlier refusal remains true.
+fn assert_unknown_stop(h: &Harness, command: u32) {
+    let error = h.result(command).unwrap_err();
+    assert!(
+        error.contains("outcome is unknown. Check Open Orders"),
+        "{error}"
+    );
+    let words = error.to_ascii_lowercase();
+    assert!(!words.contains("unprotected"), "{error}");
+    assert_eq!(h.failures.last().unwrap().protection, None);
+}
+
+fn assert_unknown_replacement(h: &Harness, command: u32) {
+    assert_unknown_stop(h, command);
+    let error = h.result(command).unwrap_err();
+    assert!(!error.contains("refused"), "{error}");
+}
+
+fn assert_unknown_put_back(h: &Harness, command: u32) {
+    assert_unknown_stop(h, command);
+    let error = h.result(command).unwrap_err();
+    let words = error.to_ascii_lowercase();
+    assert!(
+        !words.contains("no stop") || words.contains("may have no stop"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_rate_limited_restore_is_unknown_not_unprotected() {
+    let mut h = with_untriggered_stop();
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    confirm_stop_cancel(&mut h);
+    let place = h.take("/orders");
+    h.respond(place, 400, r#"{"error":"VALIDATION","message":"refused"}"#);
+    let restore = h.take("/orders");
+    h.respond(
+        restore,
+        429,
+        r#"{"error":"RATE_LIMIT","message":"slow down"}"#,
+    );
+    assert_unknown_put_back(&h, 13);
+    assert_eq!(order_posts(&h), 0, "one restore, never a retry");
+}
+
+#[test]
+fn a_rate_limited_replacement_is_unknown_and_never_put_back() {
+    let mut h = with_untriggered_stop();
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    confirm_stop_cancel(&mut h);
+    let place = h.take("/orders");
+    h.respond(
+        place,
+        429,
+        r#"{"error":"RATE_LIMIT","message":"slow down"}"#,
+    );
+    assert_eq!(
+        order_posts(&h),
+        0,
+        "a maybe-placed replacement is never doubled"
+    );
+    assert_unknown_replacement(&h, 13);
+}
+
+#[test]
+fn a_stale_crossed_or_changed_stop_at_the_final_send_cancels_nothing() {
+    for case in ["stale", "crossed", "changed"] {
+        let mut h = with_untriggered_stop();
+        // The JWT is due: the cancel waits on its refresh before it can leave.
+        h.now += 181_000.;
+        // The prices move (so their freshness is stamped) at the new time.
+        h.e.handle(h.now, Event::WsOpened { socket: h.public });
+        h.collect();
+        h.e.store_mut().update_ticker("BTC-USD-PERP", |t| {
+            t.mark = 100.6;
+            t.last = 100.1;
+        });
+        amend_stop(&mut h, 13);
+        assert!(!h.pending.iter().any(|r| r.method == Method::Delete));
+        match case {
+            "crossed" => h.e.store_mut().update_ticker("BTC-USD-PERP", |t| {
+                t.mark = 90.5;
+                t.last = 90.5;
+            }),
+            "changed" => {
+                // Edited elsewhere while the cancel waited.
+                let private = h
+                    .actions
+                    .iter()
+                    .find_map(|a| match a {
+                        safe_cex_engine::Action::WsConnect {
+                            socket,
+                            channel: Some(safe_cex_engine::SocketChannel::Private),
+                            ..
+                        } => Some(*socket),
+                        _ => None,
+                    })
+                    .unwrap();
+                h.e.handle(h.now,Event::WsMessage{socket:private,text:r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"orders.ALL","data":{"id":"123","market":"BTC-USD-PERP","type":"STOP_LOSS_MARKET","status":"UNTRIGGERED","side":"SELL","size":"2","remaining_size":"2","price":"95","trigger_price":"88","flags":["REDUCE_ONLY"],"instruction":"GTC","created_at":1700000000000,"last_updated_at":1700000999000}}}"#});
+                h.collect();
+            }
+            _ => h.now += 6_000.,
+        }
+        h.reply("/auth/", r#"{"jwt_token":"jwt"}"#);
+        assert!(
+            !h.pending.iter().any(|r| r.method == Method::Delete),
+            "{case}: {:?}",
+            h.pending.iter().map(|r| &r.url).collect::<Vec<_>>()
+        );
+        let error = h.result(13).unwrap_err();
+        assert!(error.contains("stop was not changed"), "{error}");
+        assert_eq!(
+            h.failures.last().unwrap().outcome,
+            Some(safe_cex_engine::Outcome::NotSent)
+        );
+        assert_eq!(
+            h.e.store().order("123").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open
+        );
+    }
+}
+
+/// An untriggered stop ENTRY (not reduce-only): Paradex maps it to Conditional.
+fn with_stop_entry(side: &str, kind: &str, trigger: &str, price: &str) -> Harness {
+    let mut h = private();
+    let private = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket: private });
+    h.collect();
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"jsonrpc":"2.0","id":0,"result":{}}"#,
+        },
+    );
+    h.collect();
+    let text = format!(
+        r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"orders.ALL","data":{{"id":"321","market":"BTC-USD-PERP","type":"{kind}","status":"UNTRIGGERED","side":"{side}","size":"1","remaining_size":"1","price":"{price}","trigger_price":"{trigger}","flags":[],"instruction":"GTC","stp":"EXPIRE_MAKER","created_at":1700000000000}}}}}}"#
+    );
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket: private,
+            text: &text,
+        },
+    );
+    h.collect();
+    assert_eq!(
+        h.e.store().order("321").unwrap().kind,
+        OrderType::Conditional
+    );
+    h
+}
+
+#[test]
+fn a_stop_its_signer_could_not_put_back_is_refused_before_its_cancel() {
+    // A reduce-only stop limit is a shape the Stark signer does not admit.
+    let mut h = with_untriggered_stop();
+    let private = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now,Event::WsMessage{socket:private,text:r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"orders.ALL","data":{"id":"123","market":"BTC-USD-PERP","type":"STOP_LOSS_LIMIT","status":"UNTRIGGERED","side":"SELL","size":"2","remaining_size":"2","price":"89","trigger_price":"90","flags":["REDUCE_ONLY"],"instruction":"GTC","created_at":1700000000000,"last_updated_at":1700000001000}}}"#});
+    h.collect();
+    amend_stop(&mut h, 13);
+    assert!(!h.pending.iter().any(|r| r.method == Method::Delete));
+    assert!(h.result(13).unwrap_err().contains("not changed"));
+}
+
+#[test]
+fn a_stop_entry_edit_checks_the_entry_direction() {
+    // mark 100.5, last 100: a buy entry fires above the market, a sell below it.
+    for (side, from, to, safe) in [
+        ("BUY", "110", 112., true),
+        ("SELL", "90", 88., true),
+        ("BUY", "110", 99., false),
+        ("SELL", "90", 101., false),
+    ] {
+        let price = if side == "BUY" { "111" } else { "89" };
+        let mut h = with_stop_entry(side, "STOP_LIMIT", from, price);
+        h.command(Command::AmendOrder {
+            command: 13,
+            id: "321".into(),
+            price: Some(to),
+            amount: None,
+        });
+        let cancelled = h.pending.iter().any(|r| r.method == Method::Delete);
+        assert_eq!(cancelled, safe, "{side} {from}->{to}");
+        if !safe {
+            let error = h.result(13).unwrap_err().to_owned();
+            assert!(
+                error.contains("not changed") || error.contains("at once"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_refused_stop_entry_replacement_puts_back_the_entry_exactly() {
+    let mut h = with_stop_entry("BUY", "STOP_LIMIT", "110", "111");
+    h.command(Command::AmendOrder {
+        command: 13,
+        id: "321".into(),
+        price: Some(112.),
+        amount: None,
+    });
+    let cancel = take_method(&mut h, Method::Delete, "/orders/321");
+    h.respond(cancel, 204, "");
+    confirm_cancel_row(
+        &mut h,
+        r#"{"id":"321","market":"BTC-USD-PERP","type":"STOP_LIMIT","status":"CLOSED","cancel_reason":"USER_CANCELED","side":"BUY","size":"1","remaining_size":"1","price":"111","trigger_price":"110","flags":[],"instruction":"GTC","created_at":1700000000000,"last_updated_at":1700000000100}"#,
+    );
+    let place = h.take("/orders");
+    h.respond(place, 400, r#"{"error":"VALIDATION","message":"refused"}"#);
+    let restore = h.take("/orders");
+    let body: serde_json::Value = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["type"], "STOP_LIMIT");
+    assert_eq!(body["trigger_price"], "110");
+    assert_eq!(body["price"], "111");
+    assert_eq!(body["stp"], "EXPIRE_TAKER", "the one mode the signer signs");
+    assert!(body.get("flags").is_none(), "an entry is not reduce-only");
+}
+
+#[test]
+fn a_stale_crossed_or_changed_stop_entry_at_the_final_send_cancels_nothing() {
+    for case in ["stale", "crossed", "changed"] {
+        // A BUY stop entry at 110 (limit 111), moved to 112.
+        let mut h = with_stop_entry("BUY", "STOP_LIMIT", "110", "111");
+        h.now += 181_000.;
+        h.e.handle(h.now, Event::WsOpened { socket: h.public });
+        h.collect();
+        h.e.store_mut().update_ticker("BTC-USD-PERP", |t| {
+            t.mark = 100.6;
+            t.last = 100.1;
+        });
+        h.command(Command::AmendOrder {
+            command: 13,
+            id: "321".into(),
+            price: Some(112.),
+            amount: None,
+        });
+        assert!(
+            !h.pending.iter().any(|r| r.method == Method::Delete),
+            "{case}"
+        );
+        match case {
+            // The market rose through 112 while the cancel waited: it would fire at once.
+            "crossed" => h.e.store_mut().update_ticker("BTC-USD-PERP", |t| {
+                t.mark = 112.5;
+                t.last = 112.5;
+            }),
+            "changed" => {
+                let private = h
+                    .actions
+                    .iter()
+                    .find_map(|a| match a {
+                        safe_cex_engine::Action::WsConnect {
+                            socket,
+                            channel: Some(safe_cex_engine::SocketChannel::Private),
+                            ..
+                        } => Some(*socket),
+                        _ => None,
+                    })
+                    .unwrap();
+                h.e.handle(h.now,Event::WsMessage{socket:private,text:r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"orders.ALL","data":{"id":"321","market":"BTC-USD-PERP","type":"STOP_LIMIT","status":"UNTRIGGERED","side":"BUY","size":"1","remaining_size":"1","price":"111","trigger_price":"109","flags":[],"instruction":"GTC","created_at":1700000000000,"last_updated_at":1700000999000}}}"#});
+                h.collect();
+            }
+            _ => h.now += 6_000.,
+        }
+        h.reply("/auth/", r#"{"jwt_token":"jwt"}"#);
+        assert!(
+            !h.pending.iter().any(|r| r.method == Method::Delete),
+            "{case}: {:?}",
+            h.pending.iter().map(|r| &r.url).collect::<Vec<_>>()
+        );
+        assert!(h.result(13).unwrap_err().contains("not changed"), "{case}");
+    }
+}
+
+#[test]
+fn a_crossed_reference_at_planning_or_an_already_gone_stop_never_restores() {
+    let mut h = with_untriggered_stop();
+    // A SELL stop at 101 is above the 100 last price: it would fire at once.
+    h.command(Command::AmendOrder {
+        command: 13,
+        id: "123".into(),
+        price: Some(101.),
+        amount: None,
+    });
+    assert!(!h.pending.iter().any(|r| r.method == Method::Delete));
+    let planning = h.result(13).unwrap_err().to_owned();
+    assert!(planning.contains("would trigger at once"), "{planning}");
+    // The venue no longer holds the stop (it may have fired): never put it back.
+    amend_stop(&mut h, 14);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(
+        cancel,
+        400,
+        r#"{"error":"ORDER_ID_NOT_FOUND","message":"order not found"}"#,
+    );
+    assert_eq!(order_posts(&h), 0);
+    expire_cancel_proof(&mut h);
+    assert!(
+        h.result(14)
+            .unwrap_err()
+            .contains("outcome of your BTC-USD-PERP protection update is unknown")
+    );
+}
+
+#[test]
+fn a_cancel_during_the_replacement_is_never_undone_by_a_put_back() {
+    // Cancelled before the refusal: the put-back is dropped.
+    let mut h = with_untriggered_stop();
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    confirm_stop_cancel(&mut h);
+    let place = h.take("/orders");
+    h.command(Command::CancelOrders {
+        command: 14,
+        ids: vec!["123".into()],
+    });
+    let user = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(
+        user,
+        400,
+        r#"{"error":"ORDER_ID_NOT_FOUND","message":"order not found"}"#,
+    );
+    h.respond(place, 400, r#"{"error":"VALIDATION","message":"refused"}"#);
+    assert_eq!(order_posts(&h), 0, "the cancelled stop is not put back");
+    assert!(h.result(13).unwrap_err().contains("no stop"));
+
+    // Cancelled after the put-back: the cancel follows it to its new id.
+    let mut h = with_untriggered_stop();
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    confirm_stop_cancel(&mut h);
+    let place = h.take("/orders");
+    h.respond(place, 400, r#"{"error":"VALIDATION","message":"refused"}"#);
+    let restore = h.take("/orders");
+    let payload: Payload = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+    let body = format!(
+        r#"{{"id":"124","client_id":"{}"}}"#,
+        payload.client_id.unwrap()
+    );
+    h.respond(restore, 201, &body);
+    h.command(Command::CancelOrders {
+        command: 15,
+        ids: vec!["123".into()],
+    });
+    let cancel = h.take("/orders/batch");
+    let body = cancel.body.as_deref().unwrap();
+    assert!(
+        body.contains("\"123\"") && body.contains("\"124\""),
+        "{body}"
+    );
+}
+
+#[test]
+fn a_second_amend_of_the_replaced_stop_is_refused() {
+    let mut h = with_untriggered_stop();
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    confirm_stop_cancel(&mut h);
+    let place = h.take("/orders");
+    h.command(Command::AmendOrder {
+        command: 14,
+        id: "123".into(),
+        price: Some(92.),
+        amount: None,
+    });
+    assert!(h.result(14).is_err());
+    h.respond(place, 400, r#"{"error":"VALIDATION","message":"refused"}"#);
+    assert_eq!(order_posts(&h), 1, "one put-back only");
+}
+
+#[test]
+fn an_amount_only_edit_below_the_minimum_sends_no_cancel() {
+    let mut h = with_untriggered_stop();
+    h.command(Command::AmendOrder {
+        command: 13,
+        id: "123".into(),
+        price: None,
+        // Below the 0.00001 size increment: nothing valid is left to place.
+        amount: Some(0.000001),
+    });
+    assert!(!h.pending.iter().any(|r| r.method == Method::Delete));
+    assert!(h.result(13).is_err());
+}
+
+#[test]
+fn an_untriggered_stop_edit_cancels_and_replaces() {
     let mut h = private();
     let private = h
         .actions
@@ -620,23 +1342,15 @@ fn untriggered_stop_with_null_execution_price_can_be_amended_without_cancel_repl
         price: Some(91.),
         amount: Some(3.),
     });
-    let request = h.take("/orders/123");
-    assert_eq!(request.method, Method::Put);
-    let payload: Payload = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
-    assert_eq!(payload.price.as_deref(), Some("0"));
+    // Live: editing an untriggered stop answers ORDER_IS_NOT_OPEN.
+    assert!(!h.pending.iter().any(|r| r.method == Method::Put));
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    confirm_stop_cancel(&mut h);
+    let place = h.take("/orders");
+    let payload: Payload = serde_json::from_str(place.body.as_deref().unwrap()).unwrap();
     assert_eq!(payload.trigger_price.as_deref(), Some("91"));
     assert_eq!(payload.size.as_deref(), Some("3"));
-    assert!(payload.signature.unwrap().starts_with("[\""));
-    h.respond(request, 200, r#"{"id":"123"}"#);
-    assert_eq!(h.result(13), Ok("[\"123\"]"));
-    h.command(Command::AmendOrder {
-        command: 130,
-        id: "123".into(),
-        price: None,
-        amount: Some(4.),
-    });
-    assert!(h.result(130).is_err());
-    assert!(h.pending.is_empty());
 }
 
 #[test]
@@ -834,8 +1548,9 @@ fn post_ack_repair_cannot_restore_old_amendment_attributes_even_after_a_same_sta
 }
 
 #[test]
-fn post_ack_size_and_trigger_changes_require_all_exact_mutable_attributes() {
-    for trigger in [false, true] {
+fn post_ack_size_changes_require_all_exact_mutable_attributes() {
+    {
+        let trigger = false;
         let row = if trigger {
             AMEND_ROW
                 .replace("\"type\":\"LIMIT\"", "\"type\":\"STOP_LIMIT\"")
@@ -1201,7 +1916,7 @@ fn batch_receipts_bind_exact_native_generated_and_requested_ids_before_http() {
 }
 
 #[test]
-fn write_failures_are_classified_without_changing_their_text() {
+fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() {
     use safe_cex_engine::{ErrorKind, Outcome};
     let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
     for (status, body, classified, text) in [
@@ -1216,7 +1931,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             429,
             "",
-            (Some(ErrorKind::RateLimited), None),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
             "Paradex HTTP 429",
         ),
         (
@@ -1236,7 +1951,12 @@ fn write_failures_are_classified_without_changing_their_text() {
         place(&mut h, 8, vec![opts(OrderType::Limit)]);
         let request = h.take("/orders");
         h.respond(request, status, body);
-        assert_eq!(h.result(8), Err(text), "{status} {body}");
+        if matches!(status, 408 | 429 | 500..) {
+            assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
+            assert_eq!(h.failures[0].venue_message.as_deref(), Some(text));
+        } else {
+            assert_eq!(h.result(8), Err(text), "{status} {body}");
+        }
         let error = &h.failures[0];
         assert_eq!((error.kind, error.outcome), classified, "{status} {body}");
     }
@@ -1246,6 +1966,8 @@ fn write_failures_are_classified_without_changing_their_text() {
     let request = h.take("/orders");
     h.respond(request, 200, "{}");
     assert_eq!(h.failures[0].outcome, Some(Outcome::Unknown));
+    assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
+    assert!(h.failures[0].venue_message.is_some());
     // Transport loss on a write is Unknown.
     let mut h = private();
     place(&mut h, 8, vec![opts(OrderType::Limit)]);
@@ -1262,6 +1984,8 @@ fn write_failures_are_classified_without_changing_their_text() {
         (h.failures[0].kind, h.failures[0].outcome),
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
+    assert!(h.result(8).unwrap_err().contains(ENGINE_UNKNOWN_TEXT));
+    assert_eq!(h.failures[0].venue_message.as_deref(), Some("reset"));
     // Unsupported controls were never sent.
     for command in [
         Command::FetchStpMode { command: 9 },
@@ -1298,6 +2022,221 @@ fn several_failed_placements_share_an_outcome_only_when_they_agree() {
         h.respond(request, second, "");
         assert_eq!(h.failures.len(), 1);
         assert_eq!(h.failures[0].outcome, outcome, "{second}");
+    }
+}
+
+#[test]
+fn aggregation_preserves_transport_diagnostic_before_refusal() {
+    assert_aggregated_unknown_diagnostic(true, false);
+}
+
+#[test]
+fn aggregation_preserves_transport_diagnostic_after_refusal() {
+    assert_aggregated_unknown_diagnostic(false, false);
+}
+
+#[test]
+fn aggregation_preserves_malformed_ack_diagnostic_before_refusal() {
+    assert_aggregated_unknown_diagnostic(true, true);
+}
+
+#[test]
+fn aggregation_preserves_malformed_ack_diagnostic_after_refusal() {
+    assert_aggregated_unknown_diagnostic(false, true);
+}
+
+fn assert_aggregated_unknown_diagnostic(unknown_first: bool, malformed: bool) {
+    let mut h = private();
+    let mut second = opts(OrderType::Market);
+    second.client_order_id = Some("second".into());
+    place(&mut h, 73, vec![opts(OrderType::Market), second]);
+    for unknown in [unknown_first, !unknown_first]
+        .into_iter()
+        .take(if unknown_first { 1 } else { 2 })
+    {
+        let request = take_method(&mut h, Method::Post, "/orders");
+        if unknown && malformed {
+            h.respond(request, 200, "{}");
+        } else if unknown {
+            h.e.handle(
+                h.now,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: "review transport diagnostic",
+                },
+            );
+            h.collect();
+        } else {
+            h.respond(
+                request,
+                400,
+                r#"{"error":"INVALID_PRICE","message":"definitive refusal"}"#,
+            );
+        }
+    }
+    let [error] = h.failures.as_slice() else {
+        panic!("{:?}", h.failures)
+    };
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    let diagnostic = if malformed {
+        "invalid Paradex placement response"
+    } else {
+        "review transport diagnostic"
+    };
+    assert_eq!(
+        error.venue_message.as_deref(),
+        Some(diagnostic),
+        "{error:?}"
+    );
+    let kind = (!malformed).then_some(safe_cex_engine::ErrorKind::Network);
+    assert_eq!(error.kind, kind);
+    let text = error.legacy_text().to_ascii_lowercase();
+    assert!(
+        text.contains("unknown") && text.contains("check open orders"),
+        "{error:?}"
+    );
+    assert_eq!(
+        text.contains("definitive refusal"),
+        !unknown_first,
+        "{text}"
+    );
+    assert!(!error.message.contains(diagnostic), "{error:?}");
+    assert!(
+        !h.pending.iter().any(|r| r.method != Method::Get),
+        "no resend or put-back: {:?}",
+        h.pending
+    );
+}
+
+#[test]
+fn the_first_unknown_diagnostic_is_retained_and_the_next_leg_is_withheld() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for transport_first in [false, true] {
+        let mut h = private();
+        let mut second = opts(OrderType::Market);
+        second.client_order_id = Some("second".into());
+        place(&mut h, 73, vec![opts(OrderType::Market), second]);
+        for transport in [transport_first, !transport_first].into_iter().take(1) {
+            let request = take_method(&mut h, Method::Post, "/orders");
+            if transport {
+                h.e.handle(
+                    h.now,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: "first transport diagnostic",
+                    },
+                );
+                h.collect();
+            } else {
+                h.respond(request, 429, "rate diagnostic");
+            }
+        }
+        let [error] = h.failures.as_slice() else {
+            panic!("{:?}", h.failures)
+        };
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        let (kind, diagnostic) = if transport_first {
+            (ErrorKind::Network, "first transport diagnostic")
+        } else {
+            (ErrorKind::RateLimited, "Paradex HTTP 429")
+        };
+        assert_eq!(error.kind, Some(kind));
+        assert_eq!(error.venue_message.as_deref(), Some(diagnostic));
+        assert!(error.message.contains("unknown") && error.message.contains("Check Open Orders"));
+        assert!(!h.pending.iter().any(|r| r.method != Method::Get));
+    }
+}
+
+#[test]
+fn aggregation_normalizes_transport_unknown_warning() {
+    for lost_first in [false, true] {
+        let mut h = private();
+        let mut second = opts(OrderType::Market);
+        second.client_order_id = Some("second".into());
+        place(&mut h, 73, vec![opts(OrderType::Market), second]);
+        for lost in [lost_first, !lost_first]
+            .into_iter()
+            .take(if lost_first { 1 } else { 2 })
+        {
+            let request = take_method(&mut h, Method::Post, "/orders");
+            if lost {
+                h.e.handle(
+                    h.now,
+                    Event::HttpFailed {
+                        request: request.id,
+                        error: "fixture connection reset",
+                    },
+                );
+                h.collect();
+            } else {
+                h.respond(
+                    request,
+                    400,
+                    r#"{"error":"INVALID_PRICE","message":"definitive refusal"}"#,
+                );
+            }
+        }
+        let [error] = h.failures.as_slice() else {
+            panic!("{:?}", h.failures)
+        };
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        let text = error.legacy_text().to_ascii_lowercase();
+        assert!(
+            text.contains("unknown") && text.contains("check open orders"),
+            "{error:?}"
+        );
+        assert_eq!(text.contains("definitive refusal"), !lost_first, "{text}");
+        assert!(!text.contains("connection reset"), "{text}");
+        assert!(
+            !h.pending.iter().any(|r| r.method != Method::Get),
+            "no resend or put-back: {:?}",
+            h.pending
+        );
+    }
+}
+
+#[test]
+fn aggregation_keeps_unknown_warning_beside_a_definitive_refusal() {
+    for ambiguous_first in [false, true] {
+        for &(status, body) in AMBIGUOUS_WRITES {
+            let mut h = private();
+            let mut second = opts(OrderType::Market);
+            second.client_order_id = Some("second".into());
+            place(&mut h, 73, vec![opts(OrderType::Market), second]);
+            for ambiguous in [ambiguous_first, !ambiguous_first]
+                .into_iter()
+                .take(if ambiguous_first { 1 } else { 2 })
+            {
+                let request = take_method(&mut h, Method::Post, "/orders");
+                if ambiguous {
+                    h.respond(request, status, body);
+                } else {
+                    h.respond(
+                        request,
+                        400,
+                        r#"{"error":"INVALID_PRICE","message":"definitive refusal"}"#,
+                    );
+                }
+            }
+            assert_eq!(h.failures.len(), 1);
+            let error = &h.failures[0];
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+            let text = error.legacy_text().to_ascii_lowercase();
+            assert!(
+                text.contains("unknown") && text.contains("check open orders"),
+                "{error:?}"
+            );
+            assert_eq!(
+                text.contains("definitive refusal"),
+                !ambiguous_first,
+                "only an already-attempted refusal stays visible: {text}"
+            );
+            assert!(
+                !h.pending.iter().any(|r| r.method != Method::Get),
+                "no resend or put-back: {:?}",
+                h.pending
+            );
+        }
     }
 }
 
@@ -1339,7 +2278,7 @@ fn public_rest_book_refusal_does_not_invalidate_or_refresh_existing_jwt() {
     assert!(h.pending.is_empty());
     assert!(!h.actions.iter().any(|a| matches!(
         a,
-        Action::SignPayload { .. } | Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
+        Action::Notice(safe_cex_engine::Notice::AccountAuth { .. })
     )));
     assert_eq!(
         (
@@ -1421,6 +2360,29 @@ fn an_unknown_placement_refuses_a_retry_until_a_fresh_order_read_reconciles_it()
     place(&mut h, 11, vec![opts(OrderType::Limit)]);
     take_method(&mut h, Method::Post, "/orders");
 }
+#[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let mut h = private();
+    place(&mut h, 8, vec![opts(OrderType::Limit)]);
+    let write = take_method(&mut h, Method::Post, "/orders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: write.id,
+            error: "response lost after acceptance",
+        },
+    );
+    h.collect();
+    let fresh = take_method(&mut h, Method::Get, "/orders");
+    h.respond(
+        fresh,
+        200,
+        r#"{"results":[{"id":"77","market":"SOL-USD-PERP"}]}"#,
+    );
+    place(&mut h, 9, vec![opts(OrderType::Limit)]);
+    take_method(&mut h, Method::Post, "/orders");
+}
+
 #[test]
 fn engine_reasks_join_a_slow_post_write_read_that_then_releases_the_fence() {
     let mut h = private();
@@ -1558,4 +2520,1195 @@ fn a_refused_auth_is_a_typed_terminal_failure_without_retries() {
     assert!(!h.pending.iter().any(|r| r.url.contains("/auth/")));
     let error = failed(&h, 81);
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
+}
+
+#[test]
+fn a_real_batch_answer_with_a_null_error_slot_is_accepted() {
+    let mut h = private();
+    place(&mut h, 9, vec![opts(OrderType::Limit)]);
+    let r = h.take("/orders");
+    let batch = r.url.contains("batch");
+    let client = opts(OrderType::Limit).client_order_id.unwrap();
+    let body = format!(
+        r#"{{"orders":[{{"id":"1793547697690201709231680000","market":"BTC-USD-PERP","side":"BUY","type":"LIMIT","size":"12","remaining_size":"12","price":"1.1117","status":"NEW","cancel_reason":"","client_id":"{client}","instruction":"GTC","flags":[],"trigger_price":"0"}}],"errors":[null]}}"#
+    );
+    h.respond(r, 200, &body);
+    assert!(batch, "this shape is the batch endpoint's");
+    assert!(h.result(9).is_ok(), "{:?}", h.result(9));
+}
+
+#[test]
+fn a_refused_bracket_leg_is_reported_with_the_entry_as_partial() {
+    let mut h = private();
+    let mut order = opts(OrderType::Limit);
+    order.client_order_id = None;
+    order.stop_loss = Some(90.);
+    place(&mut h, 9, vec![order]);
+    let main = h.take("/orders");
+    let payload: Payload = serde_json::from_str(main.body.as_deref().unwrap()).unwrap();
+    let client = payload.client_id.unwrap();
+    h.respond(
+        main,
+        200,
+        &format!("{{\"id\":\"entry\",\"client_id\":\"{client}\"}}"),
+    );
+    let sl = h.take("/orders");
+    h.respond(
+        sl,
+        400,
+        r#"{"error":"REDUCE_ONLY_NO_POSITION","message":"no position"}"#,
+    );
+    assert!(h.result(9).is_err());
+}
+
+fn with_untriggered_stop() -> Harness {
+    let mut h = private();
+    let private = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket: private });
+    h.collect();
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"jsonrpc":"2.0","id":0,"result":{}}"#,
+        },
+    );
+    h.collect();
+    h.e.handle(h.now,Event::WsMessage{socket:private,text:r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"orders.ALL","data":{"id":"123","market":"BTC-USD-PERP","type":"STOP_LOSS_MARKET","status":"UNTRIGGERED","side":"SELL","size":"2","remaining_size":"2","price":"95","trigger_price":"90","flags":["REDUCE_ONLY"],"instruction":"GTC","created_at":1700000000000}}}"#});
+    h.collect();
+    h
+}
+
+#[test]
+fn a_stop_replacement_with_unknown_outcome_says_the_stop_may_be_gone() {
+    let mut h = with_untriggered_stop();
+    h.command(Command::AmendOrder {
+        command: 13,
+        id: "123".into(),
+        price: Some(91.),
+        amount: None,
+    });
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    confirm_stop_cancel(&mut h);
+    let place = h.take("/orders");
+    h.respond(place, 503, "");
+    assert_eq!(
+        order_posts(&h),
+        0,
+        "an unknown replacement is never doubled"
+    );
+    let error = h.result(13).unwrap_err();
+    assert!(error.contains("may have no stop"), "{error}");
+    assert!(error.contains("Check Open Orders"), "{error}");
+}
+
+#[test]
+fn cancel_all_still_sweeps_the_market_when_a_stop_delete_fails() {
+    let mut h = with_untriggered_stop();
+    h.command(Command::CancelSymbolOrders {
+        command: 12,
+        symbol: "BTC-USD-PERP".into(),
+    });
+    let stop = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(
+        stop,
+        429,
+        r#"{"error":"RATE_LIMIT_EXCEEDED","message":"rate limit exceeded"}"#,
+    );
+    let all = take_method(&mut h, Method::Delete, "/orders?market=");
+    h.respond(all, 200, r#"{"message":"cancel requests queued"}"#);
+    assert!(h.result(12).is_err(), "the stop may still be live");
+}
+
+fn canceled_stop_row() -> &'static str {
+    r#"{"id":"123","market":"BTC-USD-PERP","type":"STOP_LOSS_MARKET","status":"CLOSED","cancel_reason":"USER_CANCELED","side":"SELL","size":"2","remaining_size":"2","price":"95","trigger_price":"90","flags":["REDUCE_ONLY"],"instruction":"GTC","created_at":1700000000000,"last_updated_at":1700000000100}"#
+}
+fn confirm_cancel_row(h: &mut Harness, row: &str) {
+    assert_eq!(order_posts(h), 0, "no create before exact target proof");
+    let read = take_method(h, Method::Get, "/orders-history?");
+    assert!(
+        read.url
+            .contains("market=BTC-USD-PERP&status=CLOSED&page_size=100")
+    );
+    h.respond(read, 200, &format!(r#"{{"results":[{row}]}}"#));
+}
+fn confirm_stop_cancel(h: &mut Harness) {
+    confirm_cancel_row(h, canceled_stop_row());
+}
+fn expire_cancel_proof(h: &mut Harness) {
+    let timer = h.timer_at(h.now + 5_000.);
+    h.now += 5_000.;
+    h.e.handle(h.now, Event::TimerFired { timer });
+    h.collect();
+    assert_eq!(order_posts(h), 0);
+    assert_eq!(
+        h.failures.last().unwrap().outcome,
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+    assert_eq!(h.failures.last().unwrap().protection, None);
+    assert!(
+        h.failures
+            .last()
+            .unwrap()
+            .message
+            .contains("Check Open Orders and your position before replacing protection")
+    );
+}
+#[test]
+fn guarded_cancel_not_found_never_authorizes_a_replacement_or_put_back() {
+    let mut h = with_untriggered_stop();
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(
+        cancel,
+        400,
+        r#"{"error":"ORDER_ID_NOT_FOUND","message":"order not found"}"#,
+    );
+    assert_eq!(
+        order_posts(&h),
+        0,
+        "ORDER_ID_NOT_FOUND is not unfilled target-terminal cancellation proof"
+    );
+}
+
+#[test]
+fn queued_guarded_cancel_waits_for_target_terminal_proof_before_create() {
+    let mut h = with_untriggered_stop();
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    assert_eq!(
+        order_posts(&h),
+        0,
+        "204 queues cancellation; it does not prove the stop canceled unfilled"
+    );
+}
+
+#[test]
+fn a_targeted_unfilled_cancel_proof_releases_exactly_one_replacement_even_after_not_found() {
+    for status in [204, 400] {
+        let mut h = with_untriggered_stop();
+        amend_stop(&mut h, 13);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        h.respond(
+            cancel,
+            status,
+            if status == 400 {
+                r#"{"error":"ORDER_ID_NOT_FOUND","message":"order not found"}"#
+            } else {
+                ""
+            },
+        );
+        confirm_stop_cancel(&mut h);
+        assert_eq!(order_posts(&h), 1);
+        let place = take_method(&mut h, Method::Post, "/orders");
+        let payload: Payload = serde_json::from_str(place.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.trigger_price.as_deref(), Some("91"));
+        assert_eq!(payload.size.as_deref(), Some("2"));
+        h.respond(
+            place,
+            201,
+            &format!(
+                r#"{{"id":"replacement","client_id":"{}"}}"#,
+                payload.client_id.unwrap()
+            ),
+        );
+        assert!(h.result(13).is_ok());
+        assert_eq!(order_posts(&h), 0);
+    }
+}
+
+fn observe_proof_stop(h: &mut Harness, client_id: Option<&str>) {
+    let socket = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let mut row: serde_json::Value = serde_json::from_str(canceled_stop_row()).unwrap();
+    row["status"] = "UNTRIGGERED".into();
+    row["cancel_reason"] = "".into();
+    if let Some(client_id) = client_id {
+        row["client_id"] = client_id.into();
+    }
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket,
+            text: &serde_json::json!({
+                "jsonrpc": "2.0", "method": "subscription",
+                "params": {"channel": "orders.ALL", "data": row}
+            })
+            .to_string(),
+        },
+    );
+    h.collect();
+}
+
+#[test]
+fn cancel_proof_history_window_adds_margins_to_target_creation_and_each_reads_own_time() {
+    for client_id in [None, Some("ts_original")] {
+        let mut h = with_untriggered_stop();
+        observe_proof_stop(&mut h, client_id);
+        h.now += 200.75;
+        amend_stop(&mut h, 13);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        h.now += 100.;
+        h.respond(cancel, 204, "");
+        for poll in 0..3 {
+            let read = take_method(&mut h, Method::Get, "/orders-history?");
+            assert!(
+                read.url.contains(&format!(
+                    "&start_at=1699999940000&end_at={:.0}",
+                    h.now.floor() + 60_000.
+                )),
+                "{}",
+                read.url
+            );
+            assert_eq!(
+                read.url.contains("&client_id=ts_original"),
+                client_id.is_some()
+            );
+            h.respond(read, 200, r#"{"results":[]}"#);
+            assert_eq!(order_posts(&h), 0);
+            if poll < 2 {
+                h.timer(h.now + 1_000.);
+            }
+        }
+        assert_eq!(
+            h.failures.last().unwrap().outcome,
+            Some(safe_cex_engine::Outcome::Unknown)
+        );
+        assert_eq!(h.failures.last().unwrap().protection, None);
+    }
+}
+
+#[test]
+fn a_clientless_bracket_leg_can_prove_its_cancel_in_the_bounded_history_window() {
+    let mut h = with_untriggered_stop();
+    let mut entry = opts(OrderType::Limit);
+    entry.amount = 2.;
+    entry.client_order_id = None;
+    entry.stop_loss = Some(90.);
+    place(&mut h, 9, vec![entry]);
+    let parent = take_method(&mut h, Method::Post, "/orders");
+    let parent_payload: Payload = serde_json::from_str(parent.body.as_deref().unwrap()).unwrap();
+    h.respond(
+        parent,
+        200,
+        &format!(
+            r#"{{"id":"entry","client_id":"{}"}}"#,
+            parent_payload.client_id.unwrap()
+        ),
+    );
+    let child = take_method(&mut h, Method::Post, "/orders");
+    let payload: Payload = serde_json::from_str(child.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload.kind, "STOP_LOSS_MARKET");
+    assert_eq!(payload.size.as_deref(), Some("2"));
+    assert_eq!(payload.trigger_price.as_deref(), Some("90"));
+    assert_eq!(
+        payload.client_id, None,
+        "native bracket children omit client_id"
+    );
+    h.respond(child, 201, r#"{"id":"123"}"#);
+    assert!(h.result(9).is_ok());
+    observe_proof_stop(&mut h, None);
+    h.now += 200.;
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    let read = take_method(&mut h, Method::Get, "/orders-history?");
+    assert!(
+        read.url
+            .contains("&start_at=1699999940000&end_at=1700000060200"),
+        "{}",
+        read.url
+    );
+    assert!(!read.url.contains("client_id="));
+    h.respond(
+        read,
+        200,
+        &format!(r#"{{"results":[{}]}}"#, canceled_stop_row()),
+    );
+    assert_eq!(order_posts(&h), 1);
+}
+
+fn prove_cancel_through_an_exclusive_history_window(filter_updated: bool) {
+    let mut h = with_untriggered_stop();
+    h.now += 200.;
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    let read = take_method(&mut h, Method::Get, "/orders-history?");
+    let bound = |name: &str| -> f64 {
+        read.url
+            .split_once('?')
+            .unwrap()
+            .1
+            .split('&')
+            .find_map(|pair| {
+                let (key, value) = pair.split_once('=')?;
+                (key == name).then(|| value.parse().unwrap())
+            })
+            .unwrap()
+    };
+    let mut row: serde_json::Value = serde_json::from_str(canceled_stop_row()).unwrap();
+    if filter_updated {
+        row["last_updated_at"] = 1_700_000_005_000_u64.into();
+        assert!(row["last_updated_at"].as_f64().unwrap() > h.now);
+    }
+    let timestamp = row[if filter_updated {
+        "last_updated_at"
+    } else {
+        "created_at"
+    }]
+    .as_f64()
+    .unwrap();
+    let body = if bound("start_at") < timestamp && timestamp < bound("end_at") {
+        serde_json::json!({"results": [row]}).to_string()
+    } else {
+        r#"{"results":[]}"#.into()
+    };
+    h.respond(read, 200, &body);
+    assert_eq!(
+        order_posts(&h),
+        1,
+        "the exact target must remain inside exclusive history bounds"
+    );
+    let place = take_method(&mut h, Method::Post, "/orders");
+    let payload: Payload = serde_json::from_str(place.body.as_deref().unwrap()).unwrap();
+    h.respond(
+        place,
+        201,
+        &format!(
+            r#"{{"id":"replacement","client_id":"{}"}}"#,
+            payload.client_id.unwrap()
+        ),
+    );
+    assert!(h.result(13).is_ok());
+}
+
+#[test]
+fn cancel_proof_window_includes_the_exact_target_creation_boundary() {
+    prove_cancel_through_an_exclusive_history_window(false);
+}
+
+#[test]
+fn cancel_proof_window_includes_a_venue_update_ahead_of_the_device_clock() {
+    prove_cancel_through_an_exclusive_history_window(true);
+}
+
+#[test]
+fn a_full_cancel_proof_page_requires_the_exact_target_even_with_a_cursor() {
+    for target_present in [false, true] {
+        let mut h = with_untriggered_stop();
+        amend_stop(&mut h, 13);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        h.respond(cancel, 204, "");
+        let mut rows = (0..100)
+            .map(|i| canceled_stop_row().replace("\"123\"", &format!("\"peer-{i}\"")))
+            .collect::<Vec<_>>();
+        if target_present {
+            rows[99] = canceled_stop_row().into();
+        }
+        let body = format!(r#"{{"results":[{}],"next":"more"}}"#, rows.join(","));
+        let read = take_method(&mut h, Method::Get, "/orders-history?");
+        h.respond(read, 200, &body);
+        if target_present {
+            assert_eq!(order_posts(&h), 1);
+        } else {
+            assert_eq!(order_posts(&h), 0);
+            expire_cancel_proof(&mut h);
+        }
+    }
+}
+
+#[test]
+fn cancel_proof_never_infers_cancellation_or_zero_fill_from_incomplete_rows() {
+    for row in [
+        canceled_stop_row().replace("\"id\":\"123\"", "\"id\":\"other\""),
+        canceled_stop_row().replace("CLOSED", "OPEN"),
+        canceled_stop_row().replace("USER_CANCELED", "FILLED"),
+        canceled_stop_row().replace("USER_CANCELED", ""),
+        canceled_stop_row().replace("\"remaining_size\":\"2\"", "\"remaining_size\":\"1\""),
+        canceled_stop_row().replace("\"remaining_size\":\"2\"", "\"remaining_size\":\"0\""),
+        canceled_stop_row().replace("\"remaining_size\":\"2\"", "\"remaining_size\":\"NaN\""),
+        canceled_stop_row().replace("\"size\":\"2\"", "\"size\":\"3\""),
+        canceled_stop_row().replace(
+            "\"remaining_size\":\"2\"",
+            "\"remaining_size\":\"2.000000001\"",
+        ),
+        canceled_stop_row().replace(
+            "\"remaining_size\":\"2\"",
+            "\"remaining_size\":\"1.99999999999999999999\"",
+        ),
+        canceled_stop_row().replace("1700000000100", "1690000000000"),
+        format!("{},{}", canceled_stop_row(), canceled_stop_row()),
+        canceled_stop_row().replace("BTC-USD-PERP", "ETH-USD-PERP"),
+        canceled_stop_row().replace("\"trigger_price\":\"90\"", "\"trigger_price\":\"89\""),
+        canceled_stop_row().replace("1700000000000", "1690000000000"),
+        "{}".into(),
+    ] {
+        let mut h = with_untriggered_stop();
+        amend_stop(&mut h, 13);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        h.respond(cancel, 204, "");
+        confirm_cancel_row(&mut h, &row);
+        assert_eq!(order_posts(&h), 0, "{row}");
+        expire_cancel_proof(&mut h);
+    }
+    for body in ["{}", "[]", r#"{"results":null}"#, r#"{"results":[]}"#] {
+        let mut h = with_untriggered_stop();
+        amend_stop(&mut h, 13);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        h.respond(cancel, 204, "");
+        let read = take_method(&mut h, Method::Get, "/orders-history?");
+        h.respond(read, 200, body);
+        expire_cancel_proof(&mut h);
+    }
+}
+
+#[test]
+fn cancel_proof_polls_are_bounded_and_share_one_nonrenewing_deadline() {
+    let mut h = with_untriggered_stop();
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    for n in 0..3 {
+        let read = take_method(&mut h, Method::Get, "/orders-history?");
+        h.respond(read, 200, r#"{"results":[],"next":"more"}"#);
+        assert_eq!(order_posts(&h), 0);
+        if n < 2 {
+            let timer = h.timer_at(h.now + 1_000.);
+            h.now += 1_000.;
+            h.e.handle(h.now, Event::TimerFired { timer });
+            h.collect();
+        }
+    }
+    assert!(
+        h.result(13)
+            .unwrap_err()
+            .contains("outcome of your BTC-USD-PERP protection update is unknown")
+    );
+    assert!(!h.pending.iter().any(|r| r.url.contains("/orders-history")));
+}
+
+#[test]
+fn a_late_terminal_proof_at_the_deadline_never_creates_or_finishes_twice() {
+    for deliver_first in [false, true] {
+        let mut h = with_untriggered_stop();
+        amend_stop(&mut h, 13);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        h.respond(cancel, 204, "");
+        let read = take_method(&mut h, Method::Get, "/orders-history?");
+        let timer = h.timer_at(h.now + 5_000.);
+        h.now += 5_000.;
+        if !deliver_first {
+            h.e.handle(h.now, Event::TimerFired { timer });
+            h.collect();
+        }
+        h.respond(
+            read,
+            200,
+            &format!(r#"{{"results":[{}]}}"#, canceled_stop_row()),
+        );
+        if deliver_first {
+            h.e.handle(h.now, Event::TimerFired { timer });
+            h.collect();
+        }
+        assert_eq!(order_posts(&h), 0);
+        assert_eq!(h.failures.len(), 1);
+        assert_eq!(
+            h.failures[0].outcome,
+            Some(safe_cex_engine::Outcome::Unknown)
+        );
+        h.e.handle(h.now, Event::TimerFired { timer });
+        h.collect();
+        assert_eq!(h.failures.len(), 1, "retired timer is inert");
+        assert_eq!(order_posts(&h), 0);
+    }
+}
+
+#[test]
+fn ordinary_paradex_place_amend_and_cancel_keep_the_master_wire_and_outcomes() {
+    fn wire(request: &safe_cex_engine::HttpRequest) -> serde_json::Value {
+        serde_json::json!({
+            "method": format!("{:?}", request.method), "url": request.url,
+            "headers": request.headers, "body": request.body, "route": format!("{:?}", request.route),
+        })
+    }
+    let mut records = Vec::new();
+    let mut h = private();
+    place(&mut h, 31, vec![opts(OrderType::Limit)]);
+    let request = h.take("/orders/batch");
+    records.push(wire(&request));
+    h.respond(
+        request,
+        201,
+        r#"{"orders":[{"id":"ordinary","client_id":"caller"}]}"#,
+    );
+    assert_eq!(h.result(31), Ok("[\"ordinary\"]"));
+    h.command(Command::CancelOrders {
+        command: 32,
+        ids: vec!["ordinary".into()],
+    });
+    let request = take_method(&mut h, Method::Delete, "/orders/ordinary");
+    records.push(wire(&request));
+    h.respond(
+        request,
+        400,
+        r#"{"error":"ORDER_ID_NOT_FOUND","message":"order not found"}"#,
+    );
+    assert_eq!(h.result(32), Ok("[]"));
+    assert!(
+        !h.pending
+            .iter()
+            .any(|request| request.url.contains("/orders-history"))
+    );
+    let (mut h, _) = amendment_account(AMEND_ROW);
+    amend(&mut h, 33, Some(101.), Some(3.));
+    let request = take_method(&mut h, Method::Put, "/orders/123");
+    records.push(wire(&request));
+    h.respond(request, 200, r#"{"id":"123"}"#);
+    assert!(h.result(33).is_ok());
+    assert!(
+        !h.pending
+            .iter()
+            .any(|request| request.url.contains("/orders-history"))
+    );
+    let wire = serde_json::to_vec(&records).unwrap();
+    assert_eq!(
+        safe_cex_crypto::hex(&safe_cex_crypto::sha256(&wire)),
+        "b3d210149a73d9320751a3768265a91c057ddc76e3b48baf11cd962aa65c5675"
+    );
+}
+
+#[test]
+fn a_failed_cancel_proof_read_never_restores_or_retries_a_write() {
+    for status in [400, 401, 403, 408, 429, 500, 503] {
+        let mut h = with_untriggered_stop();
+        amend_stop(&mut h, 13);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        h.respond(cancel, 204, "");
+        let read = take_method(&mut h, Method::Get, "/orders-history?");
+        h.respond(
+            read,
+            status,
+            r#"{"error":"READ_FAILED","message":"read failed"}"#,
+        );
+        assert_eq!(order_posts(&h), 0);
+        assert_eq!(h.failures.len(), 1);
+        assert_eq!(
+            h.failures[0].outcome,
+            Some(safe_cex_engine::Outcome::Unknown)
+        );
+        assert_eq!(h.failures[0].protection, None);
+        assert!(
+            h.failures[0]
+                .message
+                .contains("Check Open Orders and your position before replacing protection")
+        );
+        assert!(
+            !h.pending
+                .iter()
+                .any(|r| r.method == Method::Delete || r.url.contains("/orders-history"))
+        );
+    }
+}
+
+#[test]
+fn a_terminal_proof_cannot_override_an_observed_fill_or_a_new_cancel() {
+    for observed in ["fill", "cancel", "symbol-cancel", "crossed"] {
+        let mut h = with_untriggered_stop();
+        amend_stop(&mut h, 13);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        h.respond(cancel, 204, "");
+        let read = take_method(&mut h, Method::Get, "/orders-history?");
+        match observed {
+            "fill" => {
+                let socket = h.actions.iter().find_map(|a| match a {
+                    Action::WsConnect { socket, channel: Some(safe_cex_engine::SocketChannel::Private), .. } => Some(*socket),
+                    _ => None,
+                }).unwrap();
+                amendment_update(&mut h, socket, &canceled_stop_row().replace("\"remaining_size\":\"2\"", "\"remaining_size\":\"1\""));
+                assert_eq!(h.e.store().order("123").unwrap().filled, 1.);
+            }
+            "cancel" => {
+                h.command(Command::CancelOrders { command: 14, ids: vec!["123".into()] });
+                let user_cancel = take_method(&mut h, Method::Delete, "/orders/123");
+                h.respond(user_cancel, 204, "");
+                assert_eq!(h.result(14), Ok("[]"));
+            }
+            "symbol-cancel" => {
+                let socket = h.actions.iter().find_map(|a| match a {
+                    Action::WsConnect { socket, channel: Some(safe_cex_engine::SocketChannel::Private), .. } => Some(*socket),
+                    _ => None,
+                }).unwrap();
+                amendment_update(&mut h, socket, canceled_stop_row());
+                assert_eq!(h.e.store().order("123").unwrap().status, safe_cex_engine::model::OrderStatus::Canceled);
+                h.command(Command::CancelSymbolOrders { command: 14, symbol: "BTC-USD-PERP".into() });
+                let stop_cancel = take_method(&mut h, Method::Delete, "/orders/123");
+                h.respond(stop_cancel, 204, "");
+                let user_cancel = take_method(&mut h, Method::Delete, "/orders?market=");
+                h.respond(user_cancel, 200, r#"{"message":"cancel requests queued"}"#);
+                assert_eq!(h.result(14), Ok("[]"));
+            }
+            _ => h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"markets_summary","data":{"symbol":"BTC-USD-PERP","last_traded_price":"90","mark_price":"90"}}}"#),
+        }
+        if observed == "crossed" {
+            // Use the Store-facing quote receipt also used by the existing final-send controls.
+            h.e.store_mut().update_ticker("BTC-USD-PERP", |ticker| {
+                ticker.last = 90.;
+                ticker.mark = 90.;
+            });
+        }
+        h.respond(
+            read,
+            200,
+            &format!(r#"{{"results":[{}]}}"#, canceled_stop_row()),
+        );
+        assert_eq!(order_posts(&h), 0, "{observed}");
+        expire_cancel_proof(&mut h);
+    }
+}
+
+fn parity_market_limits(h: &mut Harness, min: f64) {
+    let mut markets = h.e.store().markets().to_vec();
+    let market = markets
+        .iter_mut()
+        .find(|m| m.symbol == "BTC-USD-PERP")
+        .unwrap();
+    market.limits.amount.min = min;
+    market.limits.amount.max = 5.0;
+    market.precision.amount = 0.1;
+    market.precision.price = 0.1;
+    h.e.store_mut().set_markets(markets);
+}
+
+fn parity_ack_batch(h: &mut Harness, request: safe_cex_engine::HttpRequest, prefix: &str) {
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    let response: Vec<_> = rows.iter().enumerate().map(|(index, row)| {
+        serde_json::json!({"id":format!("{prefix}-{index}"),"client_id":row["client_id"]})
+    }).collect();
+    h.respond(
+        request,
+        200,
+        &serde_json::json!({"orders":response}).to_string(),
+    );
+}
+
+fn assert_batch_refusal(h: &Harness, command: u32, accepted: Vec<String>, message: &str) {
+    use safe_cex_engine::{Notice, Outcome};
+    let failures: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        failures.len(),
+        1,
+        "batch refusal must fail the command: {:?}",
+        h.result(command)
+    );
+    let error = failures[0];
+    assert!(error.message.contains(message), "{error:?}");
+    assert_eq!(
+        error.partial.as_ref().map(|partial| &partial.order_ids),
+        Some(&accepted)
+    );
+    assert_eq!(
+        error.outcome, None,
+        "accepted prefix plus definite refusal is a known partial failure"
+    );
+    assert!(!h.actions.iter().any(|action| matches!(
+        action,
+        Action::Notice(Notice::CommandDone { command: id, .. }) if *id == command
+    )));
+    assert!(!h.actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandFailed { error, .. }) if error.outcome == Some(Outcome::Unknown)
+    )));
+    assert!(!h.actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
+    )));
+}
+
+#[test]
+fn parity_later_native_rule_violations_reach_the_venue_after_the_first_batch() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1574-1593,1683-1713,1949-1965.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    for (amount, price) in [
+        (0.5, 100.0),
+        (1.05, 100.0),
+        (6.0, 100.0),
+        (1.0, 100.05),
+        (0.01, 100.0),
+    ] {
+        let mut h = private();
+        parity_market_limits(&mut h, 1.0);
+        h.receipt_trace.clear();
+        let mut good = opts(OrderType::Limit);
+        good.client_order_id = None;
+        let mut orders = vec![good.clone(); 10];
+        let mut last = good;
+        last.amount = amount;
+        last.price = Some(price);
+        orders.push(last);
+        place(&mut h, 91, orders);
+        let first = h.take("/orders/batch");
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_str(first.body.as_deref().unwrap()).unwrap();
+        assert_eq!(rows.len(), 10);
+        parity_ack_batch(&mut h, first, "accepted");
+        let last = h.take("/orders/batch");
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_str(last.body.as_deref().unwrap()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["size"], amount.to_string());
+        assert_eq!(rows[0]["price"], price.to_string());
+        h.respond(
+            last,
+            400,
+            r#"{"error":"VALIDATION","message":"venue refused final row"}"#,
+        );
+        assert_batch_refusal(
+            &h,
+            91,
+            (0..10).map(|index| format!("accepted-{index}")).collect(),
+            "venue refused final row",
+        );
+        assert!(h.actions.iter().any(|action| matches!(action,
+            Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
+                level: safe_cex_engine::Level::Error, message, ..
+            })) if message.contains("venue refused final row"))));
+        assert_eq!(
+            h.receipt_trace
+                .iter()
+                .filter(|entry| matches!(entry, ReceiptTrace::Http(_)))
+                .count(),
+            2
+        );
+        assert!(
+            h.pending
+                .iter()
+                .all(|request| request.method == Method::Get)
+        );
+    }
+}
+
+#[test]
+fn parity_an_off_tick_child_is_submitted_after_its_parent() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1414-1422,1856-1875.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
+    let mut h = private();
+    parity_market_limits(&mut h, 1.0);
+    h.receipt_trace.clear();
+    let mut order = opts(OrderType::Limit);
+    order.client_order_id = None;
+    order.stop_loss = Some(90.05);
+    place(&mut h, 91, vec![order]);
+    let parent = h.take("/orders");
+    let payload: Payload = serde_json::from_str(parent.body.as_deref().unwrap()).unwrap();
+    h.respond(
+        parent,
+        200,
+        &serde_json::json!({"id":"parent","client_id":payload.client_id}).to_string(),
+    );
+    let child = h.take("/orders");
+    let payload: Payload = serde_json::from_str(child.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload.trigger_price.as_deref(), Some("90.05"));
+    h.respond(child, 400, r#"{"error":"VALIDATION","message":"off tick"}"#);
+    assert!(h.result(91).is_err());
+    assert_eq!(
+        h.receipt_trace
+            .iter()
+            .filter(|entry| matches!(entry, ReceiptTrace::Http(_)))
+            .count(),
+        2
+    );
+    assert!(
+        h.pending
+            .iter()
+            .all(|request| request.method == Method::Get)
+    );
+}
+
+#[test]
+fn parity_replacement_and_exact_put_back_have_no_new_native_minimum_gate() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:2067-2106; historical 31d7fda4:1394-1438.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:1785/protective-amend-and-put-back-gating
+    let mut h = with_untriggered_stop();
+    parity_market_limits(&mut h, 3.0);
+    h.command(Command::AmendOrder {
+        command: 91,
+        id: "123".into(),
+        price: Some(91.0),
+        amount: Some(0.5),
+    });
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    confirm_stop_cancel(&mut h);
+    let replacement = h.take("/orders");
+    let payload: Payload = serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload.size.as_deref(), Some("0.5"));
+    h.respond(
+        replacement,
+        400,
+        r#"{"error":"VALIDATION","message":"refused"}"#,
+    );
+    let restore = h.take("/orders");
+    let payload: Payload = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload.size.as_deref(), Some("2"));
+    assert_eq!(payload.trigger_price.as_deref(), Some("90"));
+    h.respond(
+        restore,
+        201,
+        &serde_json::json!({"id":"restored","client_id":payload.client_id}).to_string(),
+    );
+    assert_eq!(
+        failed(&h, 91).protection,
+        Some(safe_cex_engine::error::Protection::Restored)
+    );
+    assert_eq!(order_posts(&h), 0);
+}
+
+#[test]
+fn parity_all_valid_batches_still_submit_each_row_once() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1949-1965.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    let mut h = private();
+    h.receipt_trace.clear();
+    let mut order = opts(OrderType::Limit);
+    order.client_order_id = None;
+    place(&mut h, 91, vec![order; 11]);
+    let first = h.take("/orders/batch");
+    parity_ack_batch(&mut h, first, "first");
+    let last = h.take("/orders/batch");
+    parity_ack_batch(&mut h, last, "last");
+    let ids: Vec<String> = serde_json::from_str(h.result(91).unwrap()).unwrap();
+    assert_eq!(ids.len(), 11);
+    assert_eq!(
+        ids.iter().collect::<std::collections::HashSet<_>>().len(),
+        11
+    );
+    assert_eq!(
+        h.receipt_trace
+            .iter()
+            .filter(|entry| matches!(entry, ReceiptTrace::Http(_)))
+            .count(),
+        2
+    );
+    assert!(h.pending.is_empty());
+}
+
+fn after_failure_no_more_writes(h: &Harness) {
+    assert!(
+        h.pending.iter().all(|r| r.method == Method::Get),
+        "{:?}",
+        h.pending
+    );
+}
+
+fn after_failure_refuse(h: &mut Harness, request: safe_cex_engine::HttpRequest, lost: bool) {
+    if lost {
+        h.e.handle(
+            h.now,
+            Event::HttpFailed {
+                request: request.id,
+                error: "fixture transport loss",
+            },
+        );
+        h.collect();
+    } else {
+        h.respond(
+            request,
+            400,
+            r#"{"error":"VALIDATION","message":"fixture refusal"}"#,
+        );
+    }
+}
+
+#[test]
+fn after_failure_native_batch_stops_later_chunks_and_serial_entries() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1942-1958.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    // TS paradex.exchange.ts:1942-1958 awaits flush outside the per-entry catch.
+    for lost in [false, true] {
+        let mut h = private();
+        h.receipt_trace.clear();
+        let mut order = opts(OrderType::Limit);
+        order.client_order_id = None;
+        let mut orders = vec![order; 21];
+        let mut serial = opts(OrderType::Market);
+        serial.client_order_id = Some("unsent-serial".into());
+        orders.push(serial);
+        place(&mut h, 91, orders);
+        let first = h.take("/orders/batch");
+        parity_ack_batch(&mut h, first, "first");
+        let second = h.take("/orders/batch");
+        after_failure_refuse(&mut h, second, lost);
+        after_failure_no_more_writes(&h);
+        assert_eq!(
+            h.receipt_trace
+                .iter()
+                .filter(|r| matches!(r, ReceiptTrace::Http(_)))
+                .count(),
+            if lost { 3 } else { 2 }
+        );
+    }
+}
+
+#[test]
+fn after_failure_serial_entry_continues_only_after_definite_refusal() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1958-1965.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    // TS paradex.exchange.ts:1414-1431,1958-1965 catches one entry, then continues the loop.
+    for lost in [false, true] {
+        let mut h = private();
+        let mut entry = opts(OrderType::Market);
+        entry.client_order_id = None;
+        entry.take_profit = Some(110.);
+        entry.stop_loss = Some(90.);
+        let mut next = opts(OrderType::Market);
+        next.client_order_id = Some("next".into());
+        place(&mut h, 91, vec![entry, next]);
+        let first = h.take("/orders");
+        after_failure_refuse(&mut h, first, lost);
+        if lost {
+            after_failure_no_more_writes(&h);
+            assert_eq!(
+                failed(&h, 91).outcome,
+                Some(safe_cex_engine::Outcome::Unknown)
+            );
+            continue;
+        }
+        let next = take_method(&mut h, Method::Post, "/orders");
+        let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.kind, "MARKET");
+        assert_eq!(payload.client_id.as_deref(), Some("next"));
+        h.respond(next, 200, r#"{"id":"next","client_id":"next"}"#);
+        after_failure_no_more_writes(&h);
+    }
+}
+
+#[test]
+fn after_failure_take_profit_skips_stop_loss_and_continues_only_after_refusal() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:1817-1896.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
+    // TS paradex.exchange.ts:1817-1896 has one try for TP+SL; 1949-1965 continues entries.
+    for lost in [false, true] {
+        let mut h = private();
+        let mut next = opts(OrderType::Market);
+        next.client_order_id = Some("next".into());
+        bracket_entry(&mut h, 91, Some(next));
+        let tp = h.take("/orders");
+        let payload: Payload = serde_json::from_str(tp.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.kind, "TAKE_PROFIT_MARKET");
+        after_failure_refuse(&mut h, tp, lost);
+        if lost {
+            after_failure_no_more_writes(&h);
+            assert_eq!(
+                failed(&h, 91).outcome,
+                Some(safe_cex_engine::Outcome::Unknown)
+            );
+            continue;
+        }
+        let next = take_method(&mut h, Method::Post, "/orders");
+        let payload: Payload = serde_json::from_str(next.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload.kind, "MARKET");
+        assert_eq!(payload.client_id.as_deref(), Some("next"));
+        h.respond(next, 200, r#"{"id":"next","client_id":"next"}"#);
+        after_failure_no_more_writes(&h);
+    }
+}
+
+#[test]
+fn after_failure_protective_cancel_or_exact_restore_is_terminal() {
+    // Legacy TS: packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts:2105-2113; historical 31d7fda4:1427-1438.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:1785/protective-amend-and-put-back-gating
+    // Keep the existing Rust exact put-back per the lead's explicit no-removal instruction.
+    for cancel_failure in [true, false] {
+        let mut h = with_untriggered_stop();
+        amend_stop(&mut h, 91);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        if cancel_failure {
+            after_failure_refuse(&mut h, cancel, false);
+        } else {
+            h.respond(cancel, 204, "");
+            confirm_stop_cancel(&mut h);
+            let replacement = h.take("/orders");
+            after_failure_refuse(&mut h, replacement, false);
+            let restore = h.take("/orders");
+            let payload: Payload = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+            assert_eq!(payload.size.as_deref(), Some("2"));
+            assert_eq!(payload.trigger_price.as_deref(), Some("90"));
+            after_failure_refuse(&mut h, restore, false);
+        }
+        assert!(h.result(91).is_err());
+        after_failure_no_more_writes(&h);
+    }
+}
+
+#[test]
+fn pin_native_batch_row_refusal_keeps_accepted_rows_but_stops_the_next_chunk() {
+    // Legacy TS: paradex.exchange.ts:1772-1780,1942-1958 throws on a per-row batch error.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    let mut h = private();
+    h.receipt_trace.clear();
+    let mut order = opts(OrderType::Limit);
+    order.client_order_id = None;
+    place(&mut h, 91, vec![order; 11]);
+    let batch = h.take("/orders/batch");
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(batch.body.as_deref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 10);
+    let accepted: Vec<_> = rows[..9].iter().enumerate().map(|(i,row)| serde_json::json!({"id":format!("accepted-{i}"),"client_id":row["client_id"]})).collect();
+    h.respond(batch, 200, &serde_json::json!({"orders":accepted,"errors":[{"error":"INVALID_PRICE","message":"last row refused"}]}).to_string());
+    assert_batch_refusal(
+        &h,
+        91,
+        (0..9).map(|index| format!("accepted-{index}")).collect(),
+        "INVALID_PRICE",
+    );
+    after_failure_no_more_writes(&h);
+    assert_eq!(
+        h.receipt_trace
+            .iter()
+            .filter(|r| matches!(r, ReceiptTrace::Http(_)))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn pin_native_amend_refusal_stops_without_replacing_or_restoring() {
+    // Legacy TS: paradex.exchange.ts:2099-2113 PUT failure is rethrown without a fallback.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:1785/protective-amend-and-put-back-gating
+    let (mut h, _) = amendment_account(AMEND_ROW);
+    h.receipt_trace.clear();
+    amend(&mut h, 91, Some(101.), Some(3.));
+    let request = take_method(&mut h, Method::Put, "/orders/123");
+    after_failure_refuse(&mut h, request, false);
+    assert!(h.result(91).is_err());
+    after_failure_no_more_writes(&h);
+    assert_eq!(
+        h.receipt_trace
+            .iter()
+            .filter(|r| matches!(r, ReceiptTrace::Http(_)))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn unknown_exception_serial_entry_halts_the_action_with_accepted_ids() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:423/ten-row-batch-and-serial-placement
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at paradex.exchange.ts:1958-1965.
+    for lost in [false, true] {
+        let mut h = private();
+        let orders = ["accepted", "uncertain", "unsent"].map(|id| {
+            let mut order = opts(OrderType::Market);
+            order.client_order_id = Some(id.into());
+            order
+        });
+        place(&mut h, 91, orders.into());
+        h.reply("/orders", r#"{"id":"accepted-id","client_id":"accepted"}"#);
+        let second = take_method(&mut h, Method::Post, "/orders");
+        if lost {
+            after_failure_refuse(&mut h, second, true);
+        } else {
+            h.respond(second, 200, "{}");
+        }
+        after_failure_no_more_writes(&h);
+        let error = failed(&h, 91);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted-id"]);
+        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+        unknown_exception_journal_and_telemetry(&h);
+    }
+}
+
+#[test]
+fn unknown_exception_child_halts_later_children_and_independent_entries() {
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: paradex | trading.rs:532/separate-TP-SL
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at paradex.exchange.ts:1844-1850,1879-1898,1949-1965.
+    for lost in [false, true] {
+        let mut h = private();
+        let mut next = opts(OrderType::Market);
+        next.client_order_id = Some("unsent".into());
+        bracket_entry(&mut h, 91, Some(next));
+        let tp = take_method(&mut h, Method::Post, "/orders");
+        if lost {
+            after_failure_refuse(&mut h, tp, true);
+        } else {
+            h.respond(tp, 200, "{}");
+        }
+        after_failure_no_more_writes(&h);
+        let error = failed(&h, 91);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["entry"]);
+        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+        unknown_exception_journal_and_telemetry(&h);
+    }
+}
+
+fn unknown_exception_journal_and_telemetry(h: &Harness) {
+    let error = failed(h, 91);
+    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+    let event = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "order.outcome_unknown" =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("Unknown journal telemetry");
+    assert!(event.message.contains(ENGINE_UNKNOWN_TEXT));
+    assert!(
+        event
+            .fields
+            .iter()
+            .any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
+    );
+    let report = event
+        .fields
+        .iter()
+        .find_map(|(key, value)| (*key == "journal").then(|| value.as_str()).flatten())
+        .expect("journal snapshot");
+    let report: serde_json::Value = serde_json::from_str(report).unwrap();
+    assert_eq!(
+        report["placed"],
+        serde_json::json!(error.partial.as_ref().unwrap().order_ids)
+    );
+    let unknown = report["unknown"].as_array().unwrap();
+    assert_eq!(unknown.len(), 1);
+    assert!(error.message.contains(unknown[0].as_str().unwrap()));
+    assert!(!report["notSent"].as_array().unwrap().is_empty());
 }

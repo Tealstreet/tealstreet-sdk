@@ -6,6 +6,13 @@ use safe_cex_venue_binance::Variant;
 use support::Harness;
 
 fn ready(variant: Variant) -> Harness {
+    let mut h = ready_keeping_reads(variant);
+    h.requests.clear();
+    h
+}
+
+/// Markets loaded; the private startup reads are still pending.
+fn ready_keeping_reads(variant: Variant) -> Harness {
     let mut h = Harness::started(Options {
         variant,
         key: Some("key".into()),
@@ -35,7 +42,6 @@ fn ready(variant: Variant) -> Harness {
         );
         h.respond(&format!("{prefix}/premiumIndex"),200,r#"[{"symbol":"BTCUSD_PERP","markPrice":"100","indexPrice":"100","lastFundingRate":"0","nextFundingTime":1}]"#);
     }
-    h.requests.clear();
     h
 }
 fn order(variant: Variant, fields: &str) -> PlaceOrderOpts {
@@ -138,16 +144,23 @@ fn spot_brackets_have_no_limit_only_fields() {
     assert!(tp.url.contains("quantity=2"));
 }
 #[test]
-fn coin_m_stops_use_regular_endpoint_and_native_counts() {
+/// The CM-UM integration moved COIN-M stop types to the algo endpoint: /dapi/v1/order
+/// answers them -4120.
+fn coin_m_stops_use_the_algo_endpoint_and_native_counts() {
     let mut h = ready(Variant::CoinM);
     let mut o = order(Variant::CoinM, r#""reduceOnly":true"#);
     o.kind = safe_cex_engine::model::OrderType::StopLoss;
     place(&mut h, vec![o]);
-    let r = h.take("/dapi/v1/order");
-    assert!(r.url.contains("type=STOP_MARKET"));
-    assert!(r.url.contains("stopPrice=99"));
-    assert!(r.url.contains("quantity=2"));
-    assert!(!r.url.contains("algo"));
+    assert!(!h.has_request("/dapi/v1/order?"), "{:?}", h.paths());
+    let r = h.take("/dapi/v1/algoOrder");
+    assert_eq!(r.method, safe_cex_engine::Method::Post);
+    assert_eq!(param(&r.url, "algoType").as_deref(), Some("CONDITIONAL"));
+    assert_eq!(param(&r.url, "type").as_deref(), Some("STOP_MARKET"));
+    assert_eq!(param(&r.url, "triggerPrice").as_deref(), Some("99"));
+    assert_eq!(param(&r.url, "stopPrice"), None);
+    assert_eq!(param(&r.url, "quantity").as_deref(), Some("2"));
+    assert!(param(&r.url, "clientAlgoId").is_some());
+    assert_eq!(param(&r.url, "newClientOrderId"), None);
 }
 #[test]
 fn coin_m_all_native_order_families_cancel_in_one_call() {
@@ -214,14 +227,118 @@ struct NativeQuantity {
     quantity: String,
 }
 
+fn assert_attached_children_preserve_ts_whole_intent(variant: Variant) {
+    for (amount, entry, entry_total) in [
+        (11.0, vec![3.0, 3.0, 3.0, 1.0], 10.0),
+        (7.0, vec![3.0, 3.0, 2.0], 8.0),
+        (2.0, vec![2.0], 2.0),
+    ] {
+        let mut h = ready(variant);
+        let mut intent = order(variant, r#""stopLoss":90,"takeProfit":110"#);
+        intent.amount = amount;
+        place(&mut h, vec![intent]);
+        let mut lots = std::collections::BTreeMap::<String, Vec<f64>>::new();
+        let mut next_id = 1;
+        while !h.requests.is_empty() {
+            let request = h.requests.remove(0);
+            let rows = if let Some(batch) = param(&request.url, "batchOrders") {
+                serde_json::from_str::<Vec<NativeQuantity>>(&batch).unwrap()
+            } else {
+                vec![NativeQuantity {
+                    kind: param(&request.url, "type").unwrap(),
+                    quantity: param(&request.url, "quantity").unwrap(),
+                }]
+            };
+            let count = rows.len();
+            for row in rows {
+                let kind = match row.kind.as_str() {
+                    "LIMIT" => "LIMIT",
+                    "STOP_LOSS" | "STOP_MARKET" => "SL",
+                    "TAKE_PROFIT" | "TAKE_PROFIT_MARKET" => "TP",
+                    other => panic!("unexpected native type {other}"),
+                };
+                if variant == Variant::CoinM && kind != "LIMIT" {
+                    assert!(request.url.contains("/dapi/v1/algoOrder"));
+                    assert_eq!(param(&request.url, "reduceOnly").as_deref(), Some("true"));
+                }
+                lots.entry(kind.into())
+                    .or_default()
+                    .push(row.quantity.parse().unwrap());
+            }
+            let ids: Vec<_> = (next_id..next_id + count)
+                .map(|id| {
+                    if request.url.contains("/algoOrder") {
+                        format!(r#"{{"algoId":{id}}}"#)
+                    } else {
+                        format!(r#"{{"orderId":{id}}}"#)
+                    }
+                })
+                .collect();
+            next_id += count;
+            let body = if request.url.contains("batchOrders") {
+                format!("[{}]", ids.join(","))
+            } else {
+                ids[0].clone()
+            };
+            h.reply(request.id, 200, "", &body);
+        }
+        assert_eq!(lots["LIMIT"], entry, "{variant:?} amount={amount}");
+        assert_eq!(lots["SL"], [amount], "{variant:?} amount={amount} SL");
+        assert_eq!(lots["TP"], [amount], "{variant:?} amount={amount} TP");
+        assert_eq!(lots["LIMIT"].iter().sum::<f64>(), entry_total);
+        assert_eq!(lots["SL"].iter().sum::<f64>(), amount);
+        assert_eq!(lots["TP"].iter().sum::<f64>(), amount);
+        assert!(h.result(77).unwrap().is_ok());
+    }
+}
+
 #[test]
-fn spot_and_inverse_splits_preserve_entry_and_both_bracket_totals() {
+fn spot_attached_children_preserve_ts_whole_intent() {
+    assert_attached_children_preserve_ts_whole_intent(Variant::Spot);
+}
+
+#[test]
+fn coinm_attached_children_preserve_ts_whole_intent() {
+    assert_attached_children_preserve_ts_whole_intent(Variant::CoinM);
+}
+
+#[test]
+fn standalone_stops_keep_ts_primary_lot_allocation() {
+    for variant in [Variant::Spot, Variant::CoinM] {
+        let mut h = ready(variant);
+        let mut intent = order(variant, r#""reduceOnly":true"#);
+        intent.kind = safe_cex_engine::model::OrderType::StopLoss;
+        intent.amount = 11.0;
+        place(&mut h, vec![intent]);
+        let mut lots = Vec::new();
+        while !h.requests.is_empty() {
+            let request = h.requests.remove(0);
+            lots.push(param(&request.url, "quantity").unwrap());
+            h.reply(request.id, 200, "", r#"{"orderId":1,"algoId":1}"#);
+        }
+        assert_eq!(lots, ["3", "3", "3", "1"], "{variant:?}");
+        assert_eq!(
+            lots.iter()
+                .map(|lot| lot.parse::<f64>().unwrap())
+                .sum::<f64>(),
+            10.0
+        );
+        assert!(h.result(77).unwrap().is_ok());
+    }
+}
+
+#[test]
+// TS: reference/binance/binancespot.exchange.ts:535-547,550-571 and
+// binanceinverse.exchange.ts:871-924. Entry emits 3,3,3,1; each attached child stays 11.
+// KNOWN-ISSUE: legacy TS under-allocates (sum 10 of requested 11); kept for exact TS parity per Sam's decision
+fn spot_and_inverse_splits_keep_ts_entry_and_whole_brackets() {
     for variant in [Variant::Spot, Variant::CoinM] {
         let mut h = ready(variant);
         let mut o = order(variant, r#""stopLoss":90,"takeProfit":110"#);
         o.amount = 11.0;
         place(&mut h, vec![o]);
         let mut totals = std::collections::BTreeMap::<String, f64>::new();
+        let mut lots = std::collections::BTreeMap::<String, Vec<String>>::new();
         let mut native_orders = 0;
         while let Some(r) = h.requests.pop() {
             let rows = if let Some(batch) = param(&r.url, "batchOrders") {
@@ -235,7 +352,11 @@ fn spot_and_inverse_splits_preserve_entry_and_both_bracket_totals() {
             let count = rows.len();
             for row in rows {
                 let qty = row.quantity.parse::<f64>().unwrap();
-                assert!(qty > 0.0 && qty <= 5.0, "{variant:?} {qty}");
+                assert!(qty > 0.0, "{variant:?} {qty}");
+                if row.kind == "LIMIT" {
+                    assert!(qty <= 5.0, "{variant:?} {qty}");
+                }
+                lots.entry(row.kind.clone()).or_default().push(row.quantity);
                 *totals.entry(row.kind).or_default() += qty;
                 native_orders += 1;
             }
@@ -252,12 +373,17 @@ fn spot_and_inverse_splits_preserve_entry_and_both_bracket_totals() {
             };
             h.reply(r.id, 200, "", &body);
         }
-        assert_eq!(native_orders, 9, "{variant:?}");
+        assert_eq!(native_orders, 6, "{variant:?}");
         assert_eq!(totals.len(), 3, "{variant:?}");
-        assert!(
-            totals.values().all(|total| *total == 11.0),
-            "{variant:?} {totals:?}"
-        );
+        for (kind, sequence) in &lots {
+            let (expected, total) = if kind == "LIMIT" {
+                (&["3", "3", "3", "1"][..], 10.0)
+            } else {
+                (&["11"][..], 11.0)
+            };
+            assert_eq!(sequence, expected, "{variant:?} {kind}");
+            assert_eq!(totals[kind], total, "{variant:?} {kind}");
+        }
         assert!(h.result(77).unwrap().is_ok());
     }
 }
@@ -562,7 +688,7 @@ fn inverse_full_stop_requires_zero_input_or_an_explicit_close_intent() {
         let cancel = h.take("/dapi/v1/order");
         assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
         h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSD_PERP","orderId":999,"status":"CANCELED","origQty":"0","executedQty":"0"}"#);
-        let placed = h.take("/dapi/v1/order");
+        let placed = h.take("/dapi/v1/algoOrder");
         assert_eq!(param(&placed.url, "closePosition").as_deref(), Some("true"));
         assert!(param(&placed.url, "quantity").is_none());
     }
@@ -578,6 +704,7 @@ fn generated_split_and_bracket_receipts_precede_each_actual_write() {
         o.take_profit = Some(110.0);
         place(&mut h, vec![o]);
         let mut ids = std::collections::HashSet::new();
+        let mut lots = std::collections::BTreeMap::<String, Vec<String>>::new();
         let mut writes = 0;
         while let Some(request) = h.requests.first() {
             let request_id = request.id;
@@ -607,6 +734,17 @@ fn generated_split_and_bracket_receipts_precede_each_actual_write() {
                 assert!(ids.insert(receipt.identity.clone()));
             }
             let request = h.requests.remove(0);
+            let rows = if let Some(batch) = param(&request.url, "batchOrders") {
+                serde_json::from_str::<Vec<NativeQuantity>>(&batch).unwrap()
+            } else {
+                vec![NativeQuantity {
+                    kind: param(&request.url, "type").unwrap(),
+                    quantity: param(&request.url, "quantity").unwrap(),
+                }]
+            };
+            for row in rows {
+                lots.entry(row.kind).or_default().push(row.quantity);
+            }
             writes += 1;
             let response = if request.url.contains("batchOrders") {
                 r#"[{"orderId":1},{"orderId":2},{"orderId":3},{"orderId":4},{"orderId":5}]"#
@@ -629,10 +767,26 @@ fn generated_split_and_bracket_receipts_precede_each_actual_write() {
         }
         assert_eq!(
             ids.len(),
-            6,
+            5, // TS splits the entry into 3,3,2; each attached SL/TP stays 7.
             "every split entry and SL/TP has its actual identity"
         );
         assert!(writes > 0);
+        assert_eq!(lots.len(), 3);
+        for (kind, sequence) in &lots {
+            let (expected, total) = if kind == "LIMIT" {
+                (&["3", "3", "2"][..], 8.0)
+            } else {
+                (&["7"][..], 7.0)
+            };
+            assert_eq!(sequence, expected);
+            assert_eq!(
+                sequence
+                    .iter()
+                    .map(|value| value.parse::<f64>().unwrap())
+                    .sum::<f64>(),
+                total
+            );
+        }
         assert!(h.result(77).unwrap().is_ok());
     }
 }
@@ -696,8 +850,9 @@ fn unproven_spot_and_inverse_ids_keep_the_cancellable_namespace() {
             r#"{"orderId":12,"clientOrderId":"caller_1","code":"0"}"#,
             vec![],
         ),
-        (Variant::CoinM, r#"{"orderId":12}"#, vec!["12"]),
-        (Variant::CoinM, r#"{"algoId":13}"#, vec![]),
+        // A COIN-M stop is an algo order: only its algoId names it.
+        (Variant::CoinM, r#"{"algoId":13}"#, vec!["13"]),
+        (Variant::CoinM, r#"{"orderId":12}"#, vec![]),
     ] {
         let mut h = ready(variant);
         let mut input = order(variant, r#""clientOrderId":"caller_1""#);
@@ -710,7 +865,7 @@ fn unproven_spot_and_inverse_ids_keep_the_cancellable_namespace() {
         let request = h.take(if variant == Variant::Spot {
             "/api/v3/order"
         } else {
-            "/dapi/v1/order"
+            "/dapi/v1/algoOrder"
         });
         h.reply(request.id, 503, "", body);
         let failure = &h.failures.iter().find(|(id, _)| *id == 77).unwrap().1;
@@ -804,4 +959,117 @@ fn a_signature_code_on_an_unproven_status_is_never_resent() {
     assert!(h.requests.is_empty(), "no resend of an unproven write");
     let (_, error) = h.failures.last().expect("the write fails");
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+}
+
+/// COIN-M refuses a trailing level past its 10% callback ceiling, or one that rounds to
+/// 0%, instead of clamping it.
+#[test]
+fn coin_m_trailing_outside_the_callback_range_is_refused_not_clamped() {
+    for (price, rate) in [(85.0, None), (99.96, None), (98.0, Some("2"))] {
+        let mut h = ready(Variant::CoinM);
+        let mut trailing = order(Variant::CoinM, r#""reduceOnly":true"#);
+        trailing.kind = safe_cex_engine::model::OrderType::TrailingStopLoss;
+        trailing.side = safe_cex_engine::model::OrderSide::Sell;
+        trailing.price = Some(price);
+        place(&mut h, vec![trailing]);
+        // COIN-M trailing stops are algo orders.
+        let sent = h
+            .requests
+            .iter()
+            .find(|r| r.url.contains("/dapi/v1/algoOrder") || r.url.contains("/dapi/v1/order?"));
+        match rate {
+            Some(rate) => {
+                // Only the algo endpoint: /dapi/v1/order answers this type -4120.
+                let sent = sent.expect("an in-range trailing stop is placed");
+                assert!(sent.url.contains("/dapi/v1/algoOrder"), "{}", sent.url);
+                assert!(!h.has_request("/dapi/v1/order?"), "{:?}", h.paths());
+                assert_eq!(param(&sent.url, "callbackRate").as_deref(), Some(rate));
+            }
+            None => {
+                assert!(sent.is_none(), "{price}: {:?}", h.paths());
+                let refused = h.result(77).unwrap().as_ref().unwrap_err();
+                assert!(refused.contains("0.1%-10% callback range"), "{refused}");
+            }
+        }
+    }
+}
+
+/// COIN-M lists trailing stops in its regular snapshot with their native rate: an
+/// in-range amend still cancels and replaces, as on master.
+#[test]
+fn coin_m_trailing_stop_from_the_snapshot_can_be_amended() {
+    let mut h = ready_keeping_reads(Variant::CoinM);
+    h.respond(
+        "/dapi/v1/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":false}"#,
+    );
+    h.respond("/dapi/v1/openOrders",200,r#"[{"avgPrice":"0","clientOrderId":"coin-trail","cumBase":"0","executedQty":"0","orderId":77,"origQty":"2","origType":"TRAILING_STOP_MARKET","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","status":"NEW","stopPrice":"98","closePosition":false,"symbol":"BTCUSD_PERP","time":1,"timeInForce":"GTC","type":"TRAILING_STOP_MARKET","updateTime":1,"workingType":"CONTRACT_PRICE","priceProtect":false,"priceRate":"1.5","activatePrice":"103"}]"#);
+    h.respond("/dapi/v1/openAlgoOrders", 200, "[]");
+    h.requests.clear();
+    assert!(h.engine.store().order("77").is_some());
+    h.event(Event::Command(Command::AmendOrder {
+        command: 72,
+        id: "77".into(),
+        price: Some(97.0),
+        amount: None,
+    }));
+    let cancel = h.take("/dapi/v1/order");
+    assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
+}
+
+/// COIN-M ignores stopPrice for trailing stops, so a native row may list it as 0: after
+/// a refused replacement the put-back still restores the captured rate and activation.
+#[test]
+fn coin_m_zero_price_trailing_put_back_uses_its_native_parameters() {
+    for stop in ["98", "0"] {
+        let mut h = ready_keeping_reads(Variant::CoinM);
+        h.respond(
+            "/dapi/v1/positionSide/dual",
+            200,
+            r#"{"dualSidePosition":false}"#,
+        );
+        let row = r#"[{"avgPrice":"0","clientOrderId":"coin-trail","cumBase":"0","executedQty":"0","orderId":77,"origQty":"2","origType":"TRAILING_STOP_MARKET","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","status":"NEW","stopPrice":"98","closePosition":false,"symbol":"BTCUSD_PERP","time":1,"timeInForce":"GTC","type":"TRAILING_STOP_MARKET","updateTime":1,"workingType":"CONTRACT_PRICE","priceProtect":false,"priceRate":"1.5","activatePrice":"103"}]"#;
+        h.respond(
+            "/dapi/v1/openOrders",
+            200,
+            &row.replace(r#""stopPrice":"98""#, &format!(r#""stopPrice":"{stop}""#)),
+        );
+        h.respond("/dapi/v1/openAlgoOrders", 200, "[]");
+        h.requests.clear();
+        h.event(Event::Command(Command::AmendOrder {
+            command: 72,
+            id: "77".into(),
+            price: Some(97.0),
+            amount: None,
+        }));
+        let cancel = h.take("/dapi/v1/order");
+        assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
+        h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSD_PERP","orderId":77,"clientOrderId":"coin-trail","status":"CANCELED","origQty":"2","executedQty":"0"}"#);
+        // A stop placed before the algo migration is cancelled where it lives; its
+        // replacement and put-back are algo orders.
+        let replacement = h.take("/dapi/v1/algoOrder");
+        assert_eq!(
+            param(&replacement.url, "callbackRate").as_deref(),
+            Some("3")
+        );
+        h.reply(
+            replacement.id,
+            400,
+            "",
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+        let put_back = h.take("/dapi/v1/algoOrder");
+        assert_eq!(
+            put_back.method,
+            safe_cex_engine::Method::Post,
+            "stopPrice {stop}"
+        );
+        assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
+        assert_eq!(
+            param(&put_back.url, "activatePrice").as_deref(),
+            Some("103")
+        );
+        assert_eq!(param(&put_back.url, "activationPrice"), None);
+    }
 }

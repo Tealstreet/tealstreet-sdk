@@ -488,10 +488,9 @@ export class HyrotraderExchange extends BybitExchange {
     };
     if (production.rest.livenet || production.rest.testnet) return production;
 
-    // V1 user-pasted challenge keys are still simulator-backed until Hyro's
-    // production HTTPS/WSS origin is available. Keep the account classified as
-    // production (`isDemo = false`) while routing it to the configured simulator
-    // host; only bundled demo credentials are gated by `hyrotraderDemo`.
+    // V1 user-pasted challenge keys are production-mode accounts. The shipped
+    // production origin currently points at Hyro's TLS-fronted simulator; only
+    // bundled demo credentials are gated by `hyrotraderDemo`.
     if (simulator.rest.livenet || simulator.rest.testnet) return simulator;
 
     return production;

@@ -4,8 +4,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { venueFamily } from '../hosts/wasm/js/venues.mjs';
+import { readConstructionPolicy } from './artifact-census.mjs';
 
-const rules = JSON.parse(readFileSync(new URL('../../packages/safe-cex/src/exchanges/rust/construction-rules.json', import.meta.url)));
+const rules = readConstructionPolicy(readFileSync(new URL('../../packages/safe-cex/src/exchanges/rust/construction-rules.json', import.meta.url), 'utf8'));
 const manifest = fileURLToPath(new URL('../hosts/wasm/Cargo.toml', import.meta.url));
 const features = JSON.parse(execFileSync('python3', ['-c',
   'import json,sys,tomllib; print(json.dumps(tomllib.load(open(sys.argv[1], "rb"))["features"]))', manifest], { encoding: 'utf8' }));
@@ -14,11 +15,22 @@ const setupFeatures = {
   apexomni: ['dispatch-signing'],
   mexc: ['dispatch-signing'],
   lighter: ['dispatch-signing'],
-  asterdex: ['dispatch-signing', 'address-nonce', 'sign-meta'],
+  hyperliquid: ['dispatch-signing', 'address-nonce'],
+  // #3314 uses the fixed testnet wallet codec, never HTTP HMAC capture.
+  txflow: ['dispatch-signing', 'address-nonce'],
+  paradex: ['dispatch-signing'],
+  // Hosted V1 signing admits AsterDEX without a remoteSigning declaration.
+  asterdex: ['dispatch-signing', 'address-nonce', 'sign-meta', 'hosted-signing'],
 };
 
-function requiredFeatures(rule) {
+// Wallet families answer remote requests through the slim hosted-wallet export.
+const walletDevices = new Set(['hyperliquid', 'txflow', 'lighter', 'paradex', 'grvt', 'asterdex']);
+const remoteFeature = (rule, family) => walletDevices.has(rule.setupMapping ?? family) ? 'hosted-wallet' : 'hosted-signing';
+
+function requiredFeatures(rule, family) {
   const required = new Set(rule.bridge?.dispatchSigning ? ['dispatch-signing'] : []);
+  // Every family that admits remote signing keeps its device signing path.
+  if (rule.remoteSigning?.enabled) required.add(remoteFeature(rule, family));
   if (rule.setupMapping) {
     assert(Object.hasOwn(setupFeatures, rule.setupMapping), `Unspecified setup mapping: ${rule.setupMapping}`);
     for (const feature of setupFeatures[rule.setupMapping]) required.add(feature);
@@ -38,7 +50,7 @@ function enabledFeatures(graph, root, enabled = new Set()) {
 
 function checkFeatures(graph, family, rule) {
   const enabled = enabledFeatures(graph, family);
-  for (const feature of requiredFeatures(rule)) {
+  for (const feature of requiredFeatures(rule, family)) {
     assert(enabled.has(feature), `${family}: construction requires host feature ${feature}`);
   }
 }
@@ -48,6 +60,15 @@ for (const [venue, rule] of Object.entries(rules.venues)) {
     checkFeatures(features, venueFamily(venue), rule);
   });
 }
+
+test('a family that admits remote signing cannot drop hosted signing', () => {
+  const remote = Object.entries(rules.venues).filter(([, rule]) => rule.remoteSigning?.enabled);
+  assert.ok(remote.length > 0);
+  for (const [venue, rule] of remote)
+    assert.ok(enabledFeatures(features, venueFamily(venue)).has(remoteFeature(rule, venueFamily(venue))), venue);
+  assert.throws(() => checkFeatures({ family: ['dispatch-signing'], 'dispatch-signing': [] }, 'family',
+    { bridge: { dispatchSigning: true }, remoteSigning: { enabled: true } }), /hosted-signing/);
+});
 
 test('feature guard rejects missing bootstrap, address setup and signing metadata independently', () => {
   for (const required of ['dispatch-signing', 'address-nonce', 'sign-meta']) {
@@ -60,10 +81,55 @@ test('feature guard rejects missing bootstrap, address setup and signing metadat
   assert.throws(() => requiredFeatures({ setupMapping: 'new-mapping' }), /Unspecified setup mapping/);
 });
 
+test('Hyperliquid ScalarOnly setup requires isolated dispatch signing, address setup and hosted wallet', () => {
+  const required = ['dispatch-signing', 'address-nonce', 'hosted-wallet'];
+  for (const missing of required) {
+    const graph = { hyperliquid: required.filter(feature => feature !== missing),
+      'dispatch-signing': [], 'address-nonce': [], 'hosted-wallet': [] };
+    assert.throws(() => checkFeatures(graph, 'hyperliquid', rules.venues.hyperliquid), new RegExp(missing));
+    assert.throws(() => checkFeatures(graph, 'hyperliquid', rules.venues.hyperliquidspot), new RegExp(missing));
+  }
+});
+
+test('GRVT requires its isolated wallet codec without a setup mapping', () => {
+  const required = ['dispatch-signing', 'hosted-wallet'];
+  for (const missing of required) {
+    const graph = { grvt: required.filter(feature => feature !== missing),
+      'dispatch-signing': [], 'hosted-wallet': [] };
+    assert.throws(() => checkFeatures(graph, 'grvt', rules.venues.grvt), new RegExp(missing));
+  }
+  assert.throws(() => checkFeatures({ grvt: ['dispatch-signing', 'hosted-signing'],
+    'dispatch-signing': [], 'hosted-signing': [] }, 'grvt', rules.venues.grvt), /hosted-wallet/);
+});
+
 test('feature guard follows transitive local features, without borrowing combined defaults', () => {
-  const graph = { wallet: ['bootstrap', 'address-nonce'], bootstrap: ['dispatch-signing'],
+  const graph = { wallet: ['bootstrap', 'address-nonce'], bootstrap: ['dispatch-signing', 'hosted-signing'],
     'address-nonce': ['sign-meta'], default: ['unrelated'], unrelated: ['dispatch-signing'],
-    'dispatch-signing': [], 'sign-meta': [], bare: [] };
+    'dispatch-signing': [], 'hosted-signing': [], 'sign-meta': [], bare: [] };
   checkFeatures(graph, 'wallet', { setupMapping: 'asterdex' });
   assert.throws(() => checkFeatures(graph, 'bare', { bridge: { dispatchSigning: true } }), /dispatch-signing/);
+});
+
+test('KuCoin Spot admits remote batch custody with its own isolated signing codec', () => {
+  const rule = rules.venues.kucoinspot;
+  assert.equal(rule.remoteSigning?.enabled, true);
+  assert.equal(rule.remoteSigning?.payloadSupported, false);
+  assert.deepEqual(rule.remoteSigning, rules.venues.kucoin.remoteSigning);
+  checkFeatures(features, 'kucoinspot', rule);
+});
+
+
+test('TxFlow agent setup requires its own wallet codec and refuses an HMAC substitute', () => {
+  const required = ['dispatch-signing', 'address-nonce', 'hosted-wallet'];
+  const rule = rules.venues.txflow;
+  assert.equal(rule.remoteSigning?.enabled, true);
+  assert.equal(rule.remoteSigning?.payloadSupported, false);
+  assert.equal(rule.betaAdmitted, false);
+  for (const missing of required) {
+    const graph = { txflow: required.filter(feature => feature !== missing),
+      'dispatch-signing': [], 'address-nonce': [], 'hosted-wallet': [] };
+    assert.throws(() => checkFeatures(graph, 'txflow', rule), new RegExp(missing));
+  }
+  assert.throws(() => checkFeatures({ txflow: ['dispatch-signing', 'address-nonce', 'hosted-signing'],
+    'dispatch-signing': [], 'address-nonce': [], 'hosted-signing': [] }, 'txflow', rule), /hosted-wallet/);
 });

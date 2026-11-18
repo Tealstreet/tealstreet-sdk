@@ -35,7 +35,7 @@
  * is half of the `prompt_cache_key`, so a stale value would serve a plan built
  * against the previous contract.
  */
-export const OEMS_PLAN_SCHEMA_VERSION = 2;
+export const OEMS_PLAN_SCHEMA_VERSION = 3;
 
 /** Must match `^[a-zA-Z0-9_-]+$` — the provider validates the name. */
 export const OEMS_PLAN_SCHEMA_NAME = 'tealstreet_oems_plan';
@@ -104,7 +104,7 @@ const STEP = {
     amount: {
       ...nullableNumber,
       description:
-        "Size in the venue's own units — the same unit as a position's nativeContracts and an order's nativeRemaining, NOT the base contracts field.",
+        "Size in the venue's own units — the same unit as a position's nativeContracts and an order's nativeRemaining, NOT the base contracts field. For amend_order, the size that should remain open.",
     },
     price: { ...nullableNumber, description: 'Limit price, or the TRIGGER price for place_stop_loss.' },
     reduceOnly: { ...nullableBoolean, description: 'place_order only.' },

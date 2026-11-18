@@ -196,9 +196,10 @@ fn the_page_cap_warns_and_keeps_rows() {
         })
         .expect("owned semantic closed-position warning");
     assert_eq!(
-        event.fields,
-        vec![("command", safe_cex_engine::Value::Num(77.0))]
+        event.fields[..1],
+        [("command", safe_cex_engine::Value::Num(77.0))]
     );
+    assert_eq!(event.fields[1].0, "reason");
     let done = out
         .iter()
         .position(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 77, .. })))
@@ -280,7 +281,7 @@ fn failed_later_page_returns_only_validated_rows_with_owned_completeness() {
         | Notice::CommandFailed { command: 77, .. }))).collect();
     assert_eq!(notices.len(), 2);
     assert!(matches!(notices[0], Action::Notice(Notice::Event(event))
-        if event.fields == vec![("command", safe_cex_engine::Value::Num(77.0))]));
+        if event.fields.first() == Some(&("command", safe_cex_engine::Value::Num(77.0))) && event.fields.get(1).is_some_and(|field| field.0 == "reason")));
     assert!(matches!(
         notices[1],
         Action::Notice(Notice::CommandDone { command: 77, .. })
@@ -428,7 +429,7 @@ fn a_full_page_inside_one_millisecond_stops_as_incomplete_without_duplicates() {
     assert!(
         out.iter().any(|a| matches!(a,
             Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
-                && event.fields == vec![("command", safe_cex_engine::Value::Num(77.0))]
+                && event.fields.first() == Some(&("command", safe_cex_engine::Value::Num(77.0))) && event.fields.get(1).is_some_and(|field| field.0 == "reason")
         )),
         "rows of that millisecond past one page cannot be walked"
     );
@@ -461,6 +462,6 @@ fn a_nonadjacent_close_time_cursor_cycle_stops_in_the_shared_pager() {
     assert_eq!(rows.len(), 300);
     assert!(terminal.iter().any(|a| matches!(a,
         Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
-            && event.fields == vec![("command", safe_cex_engine::Value::Num(77.0))]
+            && event.fields.first() == Some(&("command", safe_cex_engine::Value::Num(77.0))) && event.fields.get(1).is_some_and(|field| field.0 == "reason")
     )));
 }

@@ -219,6 +219,7 @@ fn capacity_refusals(h: &mut Harness, now: f64) -> usize {
 fn a_superseded_account_leg_publishes_nothing_and_holds_no_capacity() {
     let run = |supersede: bool| {
         let mut h = Harness::new();
+        h.open_private();
         h.seed();
         let tick = h.tick;
         h.handle(10_000.0, Event::TimerFired { timer: tick });

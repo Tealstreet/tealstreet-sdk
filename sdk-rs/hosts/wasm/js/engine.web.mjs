@@ -13,7 +13,6 @@ function importFamily(family) {
     case 'bitrue': return import('../pkg/web/bitrue/safe_cex_wasm.js');
     case 'bitunix': return import('../pkg/web/bitunix/safe_cex_wasm.js');
     case 'blofin': return import('../pkg/web/blofin/safe_cex_wasm.js');
-    case 'breakoutprop': return import('../pkg/web/breakoutprop/safe_cex_wasm.js');
     case 'bybit': return import('../pkg/web/bybit/safe_cex_wasm.js');
     case 'coinbase': return import('../pkg/web/coinbase/safe_cex_wasm.js');
     case 'cryptocom': return import('../pkg/web/cryptocom/safe_cex_wasm.js');

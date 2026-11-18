@@ -4,6 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { NativeFrameSession, type NativeFrameSessionSink, type NativeFrameSocketFactory } from '../../packages/safe-cex-server/src/frameSession/NativeFrameSession.ts';
 import { ServerSessionFactory } from '../../packages/safe-cex-server/src/frameSession/ServerSessionFactory.ts';
 import { FrameApplier, type FrameBook } from '../../packages/safe-cex/src/store/frameApplier.ts';
@@ -75,10 +76,12 @@ function result(notice: Notice) {
 }
 
 test('server sessions forward native snapshots, book deltas, commands and fresh reconnect baselines', async () => {
-  const cargoArgs = ['--quiet', '--locked', '--manifest-path', 'sdk-rs/Cargo.toml', '-p', 'safe-cex-native', '--example', 'session-adapter-fixture'];
-  const build = spawnSync('cargo', ['build', ...cargoArgs], { encoding: 'utf8', timeout: 120_000 });
+  // Match the CI prebuild's toolchain and config; --manifest-path does not select those.
+  const cargoCwd = fileURLToPath(new URL('../', import.meta.url));
+  const cargoArgs = ['--quiet', '--locked', '-p', 'safe-cex-native', '--example', 'session-adapter-fixture'];
+  const build = spawnSync('cargo', ['build', ...cargoArgs], { cwd: cargoCwd, encoding: 'utf8', timeout: 120_000 });
   assert.equal(build.status, 0, build.stderr || build.error?.message);
-  const child = spawn('cargo', ['run', ...cargoArgs], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn('cargo', ['run', ...cargoArgs], { cwd: cargoCwd, stdio: ['pipe', 'pipe', 'pipe'] });
   const exited = once(child, 'exit');
   let stderr = '';
   child.stderr.setEncoding('utf8').on('data', (text: string) => { stderr += text; });

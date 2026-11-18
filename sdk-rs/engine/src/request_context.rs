@@ -7,6 +7,11 @@
 use crate::signing::{KeyRef, SignReceipt};
 use crate::{CommandId, CredentialSlot, Outcome, RequestId, VenueError};
 
+#[path = "http_token_issuer.rs"]
+mod token_issuer;
+
+const MAX_HOST_TOKEN_BYTES: usize = 103;
+
 #[cfg(feature = "http-plans")]
 #[path = "request_context_plan.rs"]
 pub mod plan;
@@ -238,6 +243,12 @@ impl SessionHeaders {
         }
     }
 
+    /// `Authorization: Bearer <token>`; the formatted value is wiped on refusal
+    /// and on drop like any `SecretHeaderValue`.
+    pub fn bearer(token: &str) -> Result<Self, Error> {
+        SecretHeaderValue::new(format!("Bearer {token}")).map(Self::authorization)
+    }
+
     pub fn placed(mut self, placement: SessionPlacement) -> Self {
         self.placement = placement;
         self
@@ -432,6 +443,12 @@ pub struct Context {
     owner: Owner,
     leg: u64,
     operation: Operation,
+    request_class: crate::request_budget::RequestClass,
+    #[cfg(not(target_arch = "wasm32"))]
+    created_at: f64,
+    // Precomputed at logical issuance, never reset by queueing or retries.
+    // Discovery keeps the logical bound; live reads use this shorter ceiling.
+    short_read_deadline: f64,
     credential: Option<Credential>,
     /// Egress declared at issuance; it may only confirm a credential's intent.
     egress: Option<Egress>,
@@ -484,12 +501,40 @@ impl Context {
             owner,
             leg,
             operation,
+            request_class: if operation == Operation::Mutation {
+                crate::request_budget::RequestClass::OrderWrite
+            } else {
+                crate::request_budget::RequestClass::Read
+            },
             credential,
+            #[cfg(not(target_arch = "wasm32"))]
+            created_at,
+            short_read_deadline: deadline,
             egress: None,
             deadline,
             pacing,
             retry: RetryPolicy::Never,
         })
+    }
+
+    pub fn request_class(&self) -> crate::request_budget::RequestClass {
+        self.request_class
+    }
+
+    pub(crate) fn set_request_class(&mut self, class: crate::request_budget::RequestClass) {
+        self.request_class = class.for_operation(self.operation);
+    }
+
+    pub(crate) fn set_background_budget(&mut self, issued_at: f64) {
+        self.short_read_deadline = self.deadline.min(issued_at + 20_000.);
+    }
+
+    pub(crate) fn background_deadline(&self, class: crate::request_budget::RequestClass) -> f64 {
+        if class == crate::request_budget::RequestClass::Discovery {
+            self.deadline
+        } else {
+            self.short_read_deadline
+        }
     }
 
     /// Capture egress before issuer binding: unsigned reads declare it, a
@@ -627,6 +672,9 @@ pub struct Prepared {
 #[derive(Clone, Debug, PartialEq)]
 pub enum HttpAction {
     Prepare {
+        /// Browser-only diagnostic metadata; outside immutable signed request bytes.
+        #[cfg(target_arch = "wasm32")]
+        request_class: u8,
         preparation: Preparation,
         intent: RoutingIntent,
         request: crate::HttpRequest,
@@ -725,14 +773,18 @@ impl HttpRelease {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Permit {
+    issuer: u64,
     attempt: Attempt,
     preparation: u64,
     sequence: u64,
+    // Native WS envelope provenance; never part of an HTTP wire token.
+    websocket_issuer: u64,
 }
 
 /// Returned to asynchronous route/sign work and checked again on completion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Preparation {
+    issuer: u64,
     attempt: Attempt,
     sequence: u64,
 }
@@ -745,21 +797,34 @@ impl Preparation {
     /// Lossless opaque host token: wide counters must never cross JS as numbers.
     pub fn to_wire(self) -> String {
         format!(
-            "p1:{}:{}:{}",
-            self.attempt.request.0, self.attempt.generation, self.sequence
+            "p2:{}:{}:{}:{}",
+            self.issuer, self.attempt.request.0, self.attempt.generation, self.sequence
         )
     }
 
     pub fn from_wire(token: &str) -> Result<Self, Error> {
-        let parts = token_parts(token.strip_prefix("p1:").ok_or(Error::Invalid)?, 3)?;
+        let parts = token_parts(token.strip_prefix("p2:").ok_or(Error::Invalid)?, 4)?;
+        if parts[0] == 0 {
+            return Err(Error::Invalid);
+        }
         Ok(Self {
-            attempt: token_attempt(parts[0], parts[1])?,
-            sequence: parts[2],
+            issuer: parts[0],
+            attempt: token_attempt(parts[1], parts[2])?,
+            sequence: parts[3],
         })
     }
 }
 
 impl Permit {
+    pub(crate) fn with_websocket_issuer(mut self, issuer: u64) -> Self {
+        self.websocket_issuer = issuer;
+        self
+    }
+
+    pub(crate) fn take_websocket_issuer(&mut self) -> u64 {
+        std::mem::take(&mut self.websocket_issuer)
+    }
+
     pub fn attempt(self) -> Attempt {
         self.attempt
     }
@@ -770,20 +835,26 @@ impl Permit {
 
     pub fn to_wire(self) -> String {
         format!(
-            "r1:{}:{}:{}:{}",
-            self.attempt.request.0, self.attempt.generation, self.preparation, self.sequence
+            "r2:{}:{}:{}:{}:{}",
+            self.issuer,
+            self.attempt.request.0,
+            self.attempt.generation,
+            self.preparation,
+            self.sequence
         )
     }
 
     pub fn from_wire(token: &str) -> Result<Self, Error> {
-        let parts = token_parts(token.strip_prefix("r1:").ok_or(Error::Invalid)?, 4)?;
-        if parts[3] == 0 {
+        let parts = token_parts(token.strip_prefix("r2:").ok_or(Error::Invalid)?, 5)?;
+        if parts[0] == 0 || parts[4] == 0 {
             return Err(Error::Invalid);
         }
         Ok(Self {
-            attempt: token_attempt(parts[0], parts[1])?,
-            preparation: parts[2],
-            sequence: parts[3],
+            issuer: parts[0],
+            attempt: token_attempt(parts[1], parts[2])?,
+            preparation: parts[3],
+            sequence: parts[4],
+            websocket_issuer: 0,
         })
     }
 }
@@ -798,11 +869,11 @@ fn token_attempt(request: u64, generation: u64) -> Result<Attempt, Error> {
     })
 }
 
-fn token_parts(token: &str, count: usize) -> Result<[u64; 4], Error> {
-    if token.len() > 80 {
+fn token_parts(token: &str, count: usize) -> Result<[u64; 5], Error> {
+    if token.len() > MAX_HOST_TOKEN_BYTES - 3 {
         return Err(Error::Invalid);
     }
-    let mut values = [0; 4];
+    let mut values = [0; 5];
     let mut words = token.split(':');
     for value in &mut values[..count] {
         let word = words.next().ok_or(Error::Invalid)?;
@@ -836,7 +907,11 @@ enum State {
 /// One physical attempt. A retry constructs another lifecycle with the same
 /// context; command evidence is retained separately until command sealing.
 pub struct Lifecycle {
+    issuer: u64,
+    #[cfg(not(target_arch = "wasm32"))]
+    created_at: f64,
     context: Context,
+    request_class: crate::request_budget::RequestClass,
     deadline: f64,
     attempt: Attempt,
     state: State,
@@ -853,6 +928,10 @@ pub enum Claim {
     WaitUntil(f64),
 }
 
+/// Commit a reserved write only if its synchronous physical handoff accepts it.
+pub type WebSocketCommit<'a> = dyn FnMut(&mut dyn FnMut() -> bool) -> bool + 'a;
+pub(crate) type ClaimHandoff<'a> = dyn FnMut(&mut WebSocketCommit<'_>) -> bool + 'a;
+
 #[path = "request_context_group_protocol.rs"]
 mod group_protocol;
 pub use group_protocol::{GroupClaim, GroupPacket, GroupPermit, GroupRelease};
@@ -863,7 +942,11 @@ pub(crate) mod group_lifecycle;
 impl Lifecycle {
     pub fn new(context: Context, attempt: Attempt) -> Self {
         Self {
+            issuer: token_issuer::next(),
+            #[cfg(not(target_arch = "wasm32"))]
+            created_at: context.created_at,
             deadline: context.deadline(),
+            request_class: context.request_class(),
             context,
             attempt,
             state: State::Preparing,
@@ -892,13 +975,56 @@ impl Lifecycle {
             return Err(Error::Invalid);
         }
         let mut lifecycle = Self::new(context, attempt);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            lifecycle.created_at = created_at;
+        }
         lifecycle.deadline = deadline;
         Ok(lifecycle)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn timeout_diagnostic(&self, now: f64) -> String {
+        self.request_class.diagnostic(
+            (self.deadline - self.created_at).max(0.) as u32,
+            (now - self.created_at).max(0.) as u128,
+        )
+    }
+
+    pub(crate) fn request_class(&self) -> crate::request_budget::RequestClass {
+        self.request_class
+    }
+
+    pub(crate) fn set_request_class(&mut self, class: crate::request_budget::RequestClass) {
+        self.request_class = class;
+    }
+
+    pub(crate) fn narrow_account_read(&mut self) -> bool {
+        let deadline = self
+            .context
+            .background_deadline(crate::request_budget::RequestClass::Read);
+        if self.context.operation() != Operation::Read || deadline >= self.deadline {
+            return false;
+        }
+        self.deadline = deadline;
+        self.request_class = crate::request_budget::RequestClass::Read;
+        true
     }
 
     /// Immutable physical cap; it never grants more time than the Context.
     pub fn deadline(&self) -> f64 {
         self.deadline
+    }
+    #[cfg(test)]
+    pub(crate) fn narrow_test_window(&mut self, created_at: f64, deadline: f64) {
+        assert!(created_at.is_finite() && deadline.is_finite());
+        assert!(created_at < deadline && deadline < self.deadline);
+        assert_eq!(self.state, State::Preparing);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.created_at = created_at;
+        }
+        self.deadline = deadline;
     }
     pub fn context(&self) -> &Context {
         &self.context
@@ -909,6 +1035,7 @@ impl Lifecycle {
 
     pub fn preparation(&self) -> Preparation {
         Preparation {
+            issuer: self.issuer,
             attempt: self.attempt,
             sequence: self.preparation,
         }
@@ -983,9 +1110,11 @@ impl Lifecycle {
         };
         self.permits = self.permits.checked_add(1).ok_or(Error::Capacity)?;
         let permit = Permit {
+            issuer: self.issuer,
             attempt: self.attempt,
             preparation: route.id,
             sequence: self.permits,
+            websocket_issuer: 0,
         };
         self.state = State::Permitted(route, permit);
         Ok(permit)
@@ -999,6 +1128,19 @@ impl Lifecycle {
         pacing: &mut SendPacing,
         admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
     ) -> Result<Claim, Error> {
+        self.claim_with_handoff(permit, time, pacing, admit, &mut |commit| {
+            commit(&mut || true)
+        })
+    }
+
+    pub(crate) fn claim_with_handoff(
+        &mut self,
+        permit: Permit,
+        time: ReleaseTime,
+        pacing: &mut SendPacing,
+        admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
+        handoff: &mut ClaimHandoff<'_>,
+    ) -> Result<Claim, Error> {
         let draft = match self.prepare_claim(permit, time, pacing)? {
             group_lifecycle::ClaimPreparation::WaitUntil(at) => return Ok(Claim::WaitUntil(at)),
             group_lifecycle::ClaimPreparation::Ready(draft) => draft,
@@ -1010,7 +1152,25 @@ impl Lifecycle {
                 return Err(error);
             }
         };
-        Ok(Claim::Released(self.commit_claim(ready, pacing)))
+        let mut ready = Some(ready);
+        let mut released = None;
+        handoff(&mut |send| {
+            let Some(ready) = ready.take() else {
+                return false;
+            };
+            if !send() {
+                return false;
+            }
+            released = Some(self.commit_claim(ready, pacing));
+            true
+        });
+        match released {
+            Some(release) => Ok(Claim::Released(release)),
+            None => {
+                self.state = State::Settled(None);
+                Err(Error::Revoked)
+            }
+        }
     }
 
     /// Reprepare after stale route/signature metadata; the old permit becomes
@@ -1323,13 +1483,22 @@ impl std::fmt::Debug for RejectionReports {
     }
 }
 
+/// One live, executed placement awaiting native IDs from an authoritative read/stream.
+/// The receipt is engine-bound and cannot be constructed by a host.
+pub struct PendingPlacement {
+    pub(super) context: Context,
+    pub(super) attempt: RequestId,
+}
+
 struct WriteAttempt {
     id: RequestId,
     // A classified RefusedResend verdict: the only evidence one resend may use.
     resend_granted: bool,
+    pending_identity: bool,
     leg: u64,
     released: bool,
     result: Option<WriteResult>,
+    record_sequence: u64,
     reports: RejectionReports,
     id_overflow: bool,
 }
@@ -1341,10 +1510,16 @@ struct WriteLeg {
     superseded: bool,
 }
 
+/// A Plan the engine sealed Unknown on an unproven reply after an earlier
+/// refusal: that refusal's words would misreport what stands.
+pub const UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+
 /// Bounded evidence retained for the whole command, including prior retries.
 /// Registration order is logical planning order, never callback arrival order.
 pub struct CommandWrites {
     attempts: Vec<WriteAttempt>,
+    // Callback completion order is independent of logical registration order.
+    record_sequence: u64,
     legs: Vec<WriteLeg>,
     capacity: usize,
     sealed: bool,
@@ -1353,6 +1528,21 @@ pub struct CommandWrites {
     evidence: evidence::EvidenceBudget,
     // An earlier attempt of this intent may have reached the venue.
     inherited_uncertain: bool,
+    /// The venue's words for a failure whose terminal presents none of its own.
+    /// Applied only when the projected outcome is `Unknown`; a definite
+    /// acceptance or rejection keeps the venue's own words. Used by venue
+    /// paths that stage a generic "unknown outcome; check Open Orders"
+    /// sentence BEFORE a leg is dispatched.
+    presentation: Option<String>,
+    /// The venue has already computed the correct user-facing message for
+    /// this failure and wants it to replace the projected venue text on any
+    /// outcome, including `Rejected`/`NotSent`. Used by venue paths that
+    /// RE-present their own composed message AFTER a terminal leg (protective
+    /// edit put-backs, batch-unknown summaries), where the venue's raw native
+    /// text would be strictly less informative.
+    presentation_force: Option<String>,
+    /// The engine recorded an unproven status reply the venue never saw.
+    unproven_status: bool,
     #[cfg(feature = "serial-plans")]
     stream: Option<Box<StreamedWrites>>,
 }
@@ -1366,6 +1556,7 @@ struct StreamedWrites {
     ids: Vec<String>,
     settled: usize,
     refused: usize,
+    sent_refusal: bool,
     effects: bool,
     retained: Vec<(RequestId, VenueError, RejectionReports)>,
     retained_bytes: usize,
@@ -1384,6 +1575,18 @@ impl PreparedWriteSeal {
 
     pub(crate) fn failure(&self) -> Option<&VenueError> {
         self.failure.as_ref()
+    }
+
+    #[cfg(feature = "plan-element-reports")]
+    pub(crate) fn retain_missing_elements(
+        &mut self,
+        elements: Option<&crate::write_plan::ElementOutcomes>,
+    ) {
+        if let Some(error) = &mut self.failure
+            && error.elements.is_none()
+        {
+            error.elements = elements.cloned().map(Box::new);
+        }
     }
 }
 impl CommandWrites {
@@ -1416,6 +1619,7 @@ impl CommandWrites {
         }
         Ok(Self {
             attempts: Vec::new(),
+            record_sequence: 0,
             legs: Vec::new(),
             capacity,
             sealed: false,
@@ -1423,6 +1627,9 @@ impl CommandWrites {
             report_messages: 0,
             evidence: evidence::EvidenceBudget::default(),
             inherited_uncertain: false,
+            presentation: None,
+            presentation_force: None,
+            unproven_status: false,
             #[cfg(feature = "serial-plans")]
             stream: None,
         })
@@ -1454,9 +1661,11 @@ impl CommandWrites {
             leg,
             released: false,
             result: None,
+            record_sequence: 0,
             reports: RejectionReports::default(),
             id_overflow: false,
             resend_granted: false,
+            pending_identity: false,
         });
         Ok(())
     }
@@ -1477,9 +1686,11 @@ impl CommandWrites {
             leg,
             released: false,
             result: None,
+            record_sequence: 0,
             reports: RejectionReports::default(),
             id_overflow: false,
             resend_granted: false,
+            pending_identity: false,
         });
         Ok(())
     }
@@ -1721,6 +1932,50 @@ impl CommandWrites {
         Ok(&mut attempt.released)
     }
 
+    pub(super) fn pending_placement(&mut self, id: RequestId) -> Result<(), Error> {
+        self.result(id, WriteResult::Accepted { order_ids: vec![] })?;
+        self.attempts
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or(Error::State)?
+            .pending_identity = true;
+        Ok(())
+    }
+    pub(super) fn resolve_placement(
+        &mut self,
+        id: RequestId,
+        ids: Vec<String>,
+    ) -> Result<(), Error> {
+        if ids.len() > evidence::ID_COUNT {
+            return Err(Error::Capacity);
+        }
+        if self.sealed
+            || ids.is_empty()
+            || ids.iter().any(String::is_empty)
+            || ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len()
+        {
+            return Err(Error::Invalid);
+        }
+        let index = self
+            .attempts
+            .iter()
+            .position(|a| a.id == id && a.pending_identity)
+            .ok_or(Error::Revoked)?;
+        if self.latest(self.attempts[index].leg) != Some(id) {
+            return Err(Error::Revoked);
+        }
+        let (budget, result, overflow) = self
+            .evidence
+            .result(WriteResult::Accepted { order_ids: ids });
+        if overflow {
+            return Err(Error::Capacity);
+        }
+        self.evidence = budget;
+        self.attempts[index].result = Some(result);
+        self.attempts[index].pending_identity = false;
+        Ok(())
+    }
+
     /// Mark a recorded effects-free refusal as resendable once. Only the
     /// engine classifier calls this, for a `RefusedResend` verdict.
     pub(crate) fn grant_resend(&mut self, id: RequestId) -> Result<(), Error> {
@@ -1767,7 +2022,9 @@ impl CommandWrites {
         status: u16,
         capture: impl FnOnce(&mut UnprovenEvidence),
     ) -> Result<(), Error> {
-        self.capture_unproven_result(id, |budget| UnprovenEvidence::new(budget, status), capture)
+        self.capture_unproven_result(id, |budget| UnprovenEvidence::new(budget, status), capture)?;
+        self.unproven_status = true;
+        Ok(())
     }
 
     pub(crate) fn unproven_native_result(
@@ -1802,7 +2059,9 @@ impl CommandWrites {
         let mut evidence = writer(self.evidence)?;
         capture(&mut evidence);
         let (budget, error, overflow) = evidence.finish();
+        self.record_sequence += 1;
         self.attempts[index].result = Some(WriteResult::Failed(error));
+        self.attempts[index].record_sequence = self.record_sequence;
         self.attempts[index].id_overflow = overflow;
         self.evidence = budget;
         Ok(())
@@ -1844,7 +2103,9 @@ impl CommandWrites {
             return Err(Error::State);
         }
         let (budget, result, id_overflow) = self.evidence.result(result);
+        self.record_sequence += 1;
         attempt.result = Some(result);
+        attempt.record_sequence = self.record_sequence;
         attempt.id_overflow = id_overflow;
         attempt.reports = reports;
         self.evidence = budget;
@@ -1933,6 +2194,25 @@ impl CommandWrites {
         Ok(error)
     }
 
+    #[cfg(feature = "plan-element-reports")]
+    pub(crate) fn retain_failed_attempt_elements(
+        &mut self,
+        id: RequestId,
+        elements: Box<crate::write_plan::ElementOutcomes>,
+    ) -> Result<(), Error> {
+        self.failed_attempt(id)?;
+        let attempt = self
+            .attempts
+            .iter_mut()
+            .find(|attempt| attempt.id == id)
+            .unwrap();
+        let Some(WriteResult::Failed(error)) = &mut attempt.result else {
+            return Err(Error::State);
+        };
+        error.elements = Some(elements);
+        Ok(())
+    }
+
     /// Seal success only when every terminal logical leg is proven accepted.
     /// Refused/failed/unresolved attempts remain available to the failure join;
     /// a venue's optimistic done callback cannot erase their evidence.
@@ -1943,6 +2223,9 @@ impl CommandWrites {
     }
 
     fn validate_success(&self) -> Result<(), Error> {
+        if self.attempts.iter().any(|a| a.pending_identity) {
+            return Err(Error::State);
+        }
         #[cfg(feature = "serial-plans")]
         if let Some(stream) = &self.stream {
             return self.validate_streamed_success(stream);
@@ -1971,14 +2254,41 @@ impl CommandWrites {
     }
 
     /// Mark a live journal maybe-sent; like `inheriting`, never clears.
-    #[cfg(feature = "http-plans")]
     pub(crate) fn inherit_uncertain(&mut self) {
         self.inherited_uncertain = true;
+    }
+
+    /// Words for this journal's failure when its terminal presents none; the
+    /// latest replaces any earlier. Applied only to `Unknown` seals. Outcome
+    /// and protection stay projected.
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn present_failure(&mut self, message: String) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        self.presentation = Some(message);
+        Ok(())
+    }
+
+    /// Words for this journal's failure that should REPLACE the venue text on
+    /// any outcome. Used where the venue path has already composed the right
+    /// user-facing message (protective put-back, batch-unknown summary) and
+    /// the raw native text would be strictly less informative. Outcome and
+    /// protection stay projected.
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn force_present_failure(&mut self, message: String) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        self.presentation_force = Some(message);
+        Ok(())
     }
 
     /// Seal exactly once. A caller's fallback text never chooses the outcome;
     /// sent-leg errors have priority over pre-send siblings. Earlier release
     /// evidence survives a signer/transport failure on a newer physical retry.
+    /// A fallback naming what a protective edit left (`protection`) supplies the
+    /// words and that fact; the outcome still comes from the legs.
     pub fn fail(&mut self, fallback: VenueError) -> Result<VenueError, Error> {
         let (error, budget) = self.failure_projection(fallback, None)?;
         self.evidence = budget;
@@ -1996,12 +2306,22 @@ impl CommandWrites {
 
     fn failure_projection(
         &self,
-        fallback: VenueError,
+        mut fallback: VenueError,
         note: Option<&str>,
     ) -> Result<(VenueError, evidence::EvidenceBudget), Error> {
         if self.sealed {
             return Err(Error::State);
         }
+        let elements = fallback.elements.take();
+        // Identity-only fallbacks declare no logical counts. They must neither
+        // invent an empty partial result nor erase selected native counts.
+        let plan_counts = elements
+            .as_ref()
+            .and(fallback.partial.as_ref())
+            .filter(|partial| partial.total.is_some() || partial.failed_index.is_some())
+            .map(|partial| (partial.total, partial.failed_index));
+        let presented = (fallback.protection.is_some() || fallback.presents)
+            .then(|| (fallback.message.clone(), fallback.protection));
         let mut projected_budget = self.evidence;
         #[cfg(feature = "serial-plans")]
         let any_released = self.streamed().is_some_and(|stream| stream.settled > 0)
@@ -2010,12 +2330,19 @@ impl CommandWrites {
         let any_released = self.attempts.iter().any(|a| a.released);
         let uncertain = self.attempts.iter().enumerate().any(|(index, a)| {
             a.released
-                && (matches!(
-                    a.result,
-                    None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_))
-                ) || self.attempts[index + 1..]
-                    .iter()
-                    .any(|later| later.leg == a.leg && !later.released))
+                && (a.pending_identity
+                    || match &a.result {
+                        None | Some(WriteResult::Failed(_) | WriteResult::PartialUnknown(_)) => {
+                            true
+                        }
+                        Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
+                            error.outcome == Some(Outcome::Unknown)
+                        }
+                        Some(WriteResult::Accepted { .. }) => false,
+                    }
+                    || self.attempts[index + 1..]
+                        .iter()
+                        .any(|later| later.leg == a.leg && !later.released))
         }) || self.legs.iter().any(|leg| {
             !leg.superseded
                 && leg.parent.is_some()
@@ -2036,7 +2363,12 @@ impl CommandWrites {
                 });
         #[cfg(feature = "serial-plans")]
         let all_rejected = all_rejected && !self.streamed().is_some_and(|stream| stream.effects);
-        let error = |a: &WriteAttempt| match &a.result {
+        let all_not_sent = all_rejected && self.attempts.iter()
+            .filter(|a| a.released && self.terminal(a))
+            .all(|a| matches!(&a.result, Some(WriteResult::Rejected(e)) if e.outcome == Some(Outcome::NotSent)));
+        #[cfg(feature = "serial-plans")]
+        let all_not_sent = all_not_sent && !self.streamed().is_some_and(|s| s.sent_refusal);
+        let error_from_attempt = |a: &WriteAttempt| match &a.result {
             Some(
                 WriteResult::Rejected(error)
                 | WriteResult::KnownPartial(error)
@@ -2045,26 +2377,54 @@ impl CommandWrites {
             ) => Some(error.clone()),
             _ => None,
         };
+        // Later failed attempts can carry a complete journal even when an
+        // earlier refusal still supplies the native error text.
+        let elements = elements.or_else(|| {
+            self.attempts
+                .iter()
+                .filter_map(|attempt| match &attempt.result {
+                    Some(
+                        WriteResult::Rejected(error)
+                        | WriteResult::KnownPartial(error)
+                        | WriteResult::PartialUnknown(error)
+                        | WriteResult::Failed(error),
+                    ) => error
+                        .elements
+                        .as_ref()
+                        .map(|elements| (attempt.record_sequence, elements)),
+                    _ => None,
+                })
+                .max_by_key(|(sequence, _)| *sequence)
+                .map(|(_, elements)| elements.clone())
+        });
         // Choose the terminal physical attempt of the earliest logical leg,
         // preferring legs that reached the venue. Callback order is irrelevant.
         let select = |sent_only: bool| {
             self.attempts
                 .iter()
                 .filter(|a| self.terminal(a) && (!sent_only || self.reached(a.leg)))
-                .filter_map(|a| error(a).map(|error| (self.order(a.leg), error)))
+                .filter_map(|a| error_from_attempt(a).map(|error| (self.order(a.leg), error)))
                 .min_by(|(a, _), (b, _)| a.cmp(b))
                 .map(|(_, error)| error)
         };
         // Settled serial refusals precede every live call in planning order.
         #[cfg(feature = "serial-plans")]
-        let selected = self
+        let retained = self
             .streamed()
             .and_then(|stream| stream.retained.first())
-            .map(|(_, error, _)| error.clone())
-            .or_else(|| select(true))
-            .or_else(|| select(false));
+            .map(|(_, error, _)| error.clone());
         #[cfg(not(feature = "serial-plans"))]
-        let selected = select(true).or_else(|| select(false));
+        let retained: Option<VenueError> = None;
+        // The text a settled refusal gave: stale once a later write is unknown.
+        let refusal_text = retained.is_some()
+            || self.attempts.iter().any(|attempt| {
+                self.terminal(attempt)
+                    && matches!(
+                        attempt.result,
+                        Some(WriteResult::Rejected(_) | WriteResult::KnownPartial(_))
+                    )
+            });
+        let selected = retained.or_else(|| select(true)).or_else(|| select(false));
         let mut overflow = self.attempts.iter().any(|attempt| attempt.id_overflow);
         let mut error = match selected {
             Some(error) => error, // Already-budgeted facts are never charged again.
@@ -2082,12 +2442,19 @@ impl CommandWrites {
                 error
             }
         };
+        // Native-error selection must retain the complete logical plan journal.
+        // Aggregate transport classification below remains engine-owned.
+        if elements.is_some() {
+            error.elements = elements;
+        }
         error.outcome = if self.inherited_uncertain {
             Some(Outcome::Unknown)
         } else if !any_released {
             Some(Outcome::NotSent)
         } else if uncertain || overflow {
             Some(Outcome::Unknown)
+        } else if all_not_sent {
+            Some(Outcome::NotSent)
         } else if all_rejected {
             Some(Outcome::Rejected)
         } else {
@@ -2095,6 +2462,28 @@ impl CommandWrites {
             // existing partial contract; do not invent execution uncertainty.
             None
         };
+        // Earlier refusal text/evidence must not erase a later cooldown. Any
+        // unresolved rate limit still constrains reconciliation; keep the
+        // longest terminal pause, including the default for a missing header.
+        if error.outcome == Some(Outcome::Unknown)
+            && let Some(rate) = self
+                .attempts
+                .iter()
+                .filter(|attempt| attempt.released && self.terminal(attempt))
+                .filter_map(error_from_attempt)
+                .filter(|error| error.kind == Some(crate::ErrorKind::RateLimited))
+                .max_by(|a, b| {
+                    let delay = |error: &VenueError| {
+                        error
+                            .retry_after_ms
+                            .unwrap_or(crate::classify::DEFAULT_RATE_LIMIT_DEFERRAL_MS)
+                    };
+                    delay(a).total_cmp(&delay(b))
+                })
+        {
+            error.kind = rate.kind;
+            error.retry_after_ms = rate.retry_after_ms;
+        }
         // Preserve the selected native/fallback evidence prefix exactly. Append
         // additional facts in logical replacement order, without charging known
         // IDs again or reordering a bounded retained prefix.
@@ -2142,6 +2531,19 @@ impl CommandWrites {
                 error = error.partial_ids(&ids);
             }
         }
+        // Logical counts travel with the complete venue journal, independently
+        // of native-error selection and the engine's accepted identity prefix.
+        if let Some((total, failed_index)) = plan_counts {
+            let partial = error.partial.get_or_insert_with(|| {
+                Box::new(crate::Partial {
+                    order_ids: Vec::new(),
+                    total: None,
+                    failed_index: None,
+                })
+            });
+            partial.total = total;
+            partial.failed_index = failed_index;
+        }
         if overflow {
             evidence::mark_id_overflow(&mut error);
         }
@@ -2152,6 +2554,30 @@ impl CommandWrites {
             .filter(|dropped| *dropped > 0)
         {
             error.message = format!("{} [truncated: {dropped} more refusals]", error.message);
+        }
+        if let Some((message, protection)) = presented {
+            error.message = message;
+            error.protection = protection;
+        } else if let Some(message) = &self.presentation_force {
+            // The venue path has already composed the exact user-facing
+            // message it wants for this failure (protective put-back summary,
+            // batch-unknown aggregate, re-presented local reason). Replace the
+            // projected venue text on every outcome, including definite
+            // rejections, where raw native text would be strictly less
+            // informative.
+            error.message = message.clone();
+        } else if let Some(message) = &self.presentation
+            && error.outcome == Some(Outcome::Unknown)
+        {
+            // A caller-staged presentation names an uncertain outcome. A
+            // definite acceptance or rejection carries the venue's own words;
+            // overwriting it would hide a real refusal behind generic text.
+            error.message = message.clone();
+        } else if self.unproven_status && refusal_text && error.outcome == Some(Outcome::Unknown) {
+            error.message = UNKNOWN_AFTER_REFUSAL.into();
+            if overflow {
+                evidence::mark_id_overflow(&mut error);
+            }
         }
         #[cfg(feature = "http-plans")]
         if let Some(note) = note {
@@ -2273,6 +2699,7 @@ impl CommandWrites {
         self.inherited_uncertain
             || self.attempts.iter().any(|attempt| {
                 attempt.id_overflow
+                    || attempt.pending_identity
                     || (attempt.released
                         && matches!(
                             attempt.result,
@@ -2376,10 +2803,11 @@ impl CommandWrites {
                                 stream.effects |= !partial.order_ids.is_empty();
                                 stream.ids.extend(partial.order_ids);
                             }
+                            stream.sent_refusal |= error.outcome != Some(Outcome::NotSent);
                             stream.refused += 1;
                             let bytes = error.message.len()
                                 + error.venue_code.as_ref().map_or(0, String::len)
-                                + error.venue_message.as_ref().map_or(0, String::len);
+                                + error.venue_message.as_deref().map_or(0, str::len);
                             if stream.retained_bytes + bytes <= evidence::RETAINED_TEXT_BYTES {
                                 stream.retained_bytes += bytes;
                                 stream.retained.push((
@@ -2435,3 +2863,7 @@ mod evidence_tests;
 #[cfg(test)]
 #[path = "request_context_replacement_tests.rs"]
 mod replacement_tests;
+
+#[cfg(test)]
+#[path = "request_context_write_plan_tests.rs"]
+mod write_plan_tests;

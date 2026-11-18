@@ -44,3 +44,14 @@ export function marketSymbolExists(markets: Market[] | undefined, symbol: string
   const target = symbol.trim().toUpperCase();
   return (markets ?? []).some((market) => market.symbol.toUpperCase() === target);
 }
+
+/** Resolve only a complete canonical symbol, base, or base+quote alias. */
+export function resolveCompleteMarketSymbol(markets: Market[] | undefined, input: string): string | undefined {
+  const token = input.trim().toUpperCase();
+  const resolved = resolveMarketSymbol(markets, token);
+  const market = markets?.find((m) => m.symbol === resolved);
+  if (!market) return undefined;
+  return [market.symbol, market.base, `${market.base}${market.quote}`].some((alias) => alias.toUpperCase() === token)
+    ? resolved
+    : undefined;
+}

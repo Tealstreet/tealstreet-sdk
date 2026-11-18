@@ -62,9 +62,11 @@ impl PhemexPerpetuals {
         }) else {
             return;
         };
-        let error = if cx.store.market(&symbol).is_none() {
-            Some("Phemex history requires a known symbol")
-        } else if self.history.active.len() >= 16 || self.history.active.contains(&command) {
+        let Some(symbol) = self.history_symbol(cx, &symbol) else {
+            let _ = cx.fail_context(&root, Self::history_symbol_error());
+            return;
+        };
+        let error = if self.history.active.len() >= 16 || self.history.active.contains(&command) {
             Some("Too many active Phemex history queries")
         } else if !self
             .native_symbol(&symbol)

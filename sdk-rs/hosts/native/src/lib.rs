@@ -4,24 +4,45 @@
 //! actions that come out. Transports are pluggable so recorded traffic can
 //! drive the same loop as the network.
 #![cfg(not(target_arch = "wasm32"))]
+#[cfg(test)]
+use safe_cex_engine::ControlFrame;
 
+mod how_pool;
 mod managed_http;
+pub mod report;
 mod routing;
 mod server;
+mod socket_health;
 mod transport;
+#[cfg(feature = "venues")]
+mod trusted_identities;
+#[cfg(feature = "venues")]
+pub use trusted_identities::TrustedSignerIdentities;
+#[cfg(test)]
+mod websocket_write_tests;
 
+pub use routing::resolve;
 pub use routing::{
     HttpRoute, HttpRouteMode, ProxyTokenFuture, ProxyTokenProvider, RoutingPlan, SocketChannel,
     SocketChannelRule, WsRoute, WsRoutes,
 };
-pub use server::{FrameServer, ServerConfig};
+#[cfg(feature = "venues")]
+pub use server::spawn_venue_account;
+pub use server::{
+    AccountHandle, BookLevels, ClientLink, DisposalCause, FrameServer, InputRefused, Outgoing,
+    ServerConfig, spawn_account,
+};
+pub use socket_health::{
+    SOCKET_STALE_MS, SocketDiagnostics, SocketHealth, SocketStats, SocketSummary,
+};
 pub use transport::{
-    BoundHttp, HttpPrepareError, HttpPrepareFuture, NetworkTransport, PayloadSigner,
-    PayloadSignerFuture, PayloadSignerResult, PreparedHttp, Transport,
+    BoundHttp, HttpPrepareError, HttpPrepareFuture, NetworkTransport, PreparedHttp,
+    SocketConnection, Transport, WebSocketWriteError, WebSocketWriter,
 };
 #[cfg(feature = "nonce-drain")]
 pub use transport::{DrainFuture, Drained};
 
+use safe_cex_engine::socket_lifecycle::{InterestObservation, InterestObserver};
 use safe_cex_engine::{
     Action, Command, Engine, Event, Notice, RequestId, SocketId, TimerId, Venue, VenueError,
 };
@@ -64,8 +85,6 @@ pub enum HostEvent {
         RequestId,
         Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>,
     ),
-    PayloadSigned(RequestId, PayloadSignerResult),
-    PayloadSignFailed(RequestId, String),
     Timer(TimerId),
 }
 
@@ -116,6 +135,9 @@ pub struct Host<V: Venue, T: Transport> {
     events: Events,
     inbox: mpsc::UnboundedReceiver<HostEvent>,
     sockets: HashMap<SocketId, mpsc::UnboundedSender<String>>,
+    socket_writers: HashMap<SocketId, std::sync::Arc<dyn WebSocketWriter>>,
+    socket_health: socket_health::SocketTracker,
+    legacy_interest_observer: Option<InterestObserver>,
     timers: HashMap<TimerId, AbortHandle>,
     managed_http: managed_http::Requests,
     signing_tasks: HashMap<RequestId, managed_http::Task>,
@@ -174,7 +196,8 @@ impl<V: Venue, T: Transport> Drop for SetupRunOwner<V, T> {
 }
 
 impl<V: Venue, T: Transport> Host<V, T> {
-    pub fn new(engine: Engine<V>, transport: T) -> Self {
+    pub fn new(mut engine: Engine<V>, transport: T) -> Self {
+        engine.enable_websocket_write_host();
         let (events, inbox) = mpsc::unbounded_channel();
         Self {
             engine,
@@ -182,6 +205,9 @@ impl<V: Venue, T: Transport> Host<V, T> {
             events,
             inbox,
             sockets: HashMap::new(),
+            socket_writers: HashMap::new(),
+            socket_health: Default::default(),
+            legacy_interest_observer: None,
             timers: HashMap::new(),
             managed_http: Default::default(),
             signing_tasks: HashMap::new(),
@@ -233,6 +259,16 @@ impl<V: Venue, T: Transport> Host<V, T> {
         self.engine.poll_address_setup((self.clock)(), cx);
         self.engine.address_nonce_setup_ready()
     }
+    /// Whether any address setup has settled; true at once with none to do.
+    pub(crate) fn address_setup_settled(&mut self) -> bool {
+        #[cfg(feature = "address-nonce")]
+        if !self.engine.has_started() {
+            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+            return self.poll_address_setup(&mut cx);
+        }
+        true
+    }
+
     /// Feed live configuration alongside transport completions.
     pub fn event_sender(&self) -> Events {
         self.events.clone()
@@ -245,9 +281,27 @@ impl<V: Venue, T: Transport> Host<V, T> {
     #[allow(clippy::manual_async_fn)]
     pub fn run(
         self,
-        mut commands: mpsc::UnboundedReceiver<Command>,
+        commands: mpsc::UnboundedReceiver<Command>,
         flush_every: Duration,
         mut on_frame: impl FnMut(&[u8]),
+        on_notice: impl FnMut(Notice),
+    ) -> impl std::future::Future<Output = Engine<V>> {
+        self.run_with_store(
+            commands,
+            flush_every,
+            move |frame, _| on_frame(frame),
+            on_notice,
+        )
+    }
+
+    /// [`Self::run`], also handing each flush frame's callback the engine store
+    /// it was taken from, for embedders that read typed state (markets) directly.
+    #[allow(clippy::manual_async_fn)]
+    pub fn run_with_store(
+        self,
+        mut commands: mpsc::UnboundedReceiver<Command>,
+        flush_every: Duration,
+        mut on_frame: impl FnMut(&[u8], &safe_cex_engine::Store),
         mut on_notice: impl FnMut(Notice),
     ) -> impl std::future::Future<Output = Engine<V>> {
         #[cfg(feature = "address-nonce")]
@@ -285,6 +339,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 host.report_terminal(&mut on_notice);
                 if cleanup.is_err() {
                     on_notice(Notice::StartupFailed {
+                        read_refusal: false,
                         error: VenueError::new("Address setup cleanup failed")
                             .kind(safe_cex_engine::ErrorKind::Internal),
                     });
@@ -306,7 +361,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
         &mut self,
         commands: &mut mpsc::UnboundedReceiver<Command>,
         flush_every: Duration,
-        on_frame: &mut impl FnMut(&[u8]),
+        on_frame: &mut impl FnMut(&[u8], &safe_cex_engine::Store),
         on_notice: &mut impl FnMut(Notice),
     ) {
         self.turn(|host| {
@@ -364,16 +419,17 @@ impl<V: Venue, T: Transport> Host<V, T> {
             // Deliberately outside the panic classifier: consumer failures are
             // never disguised as another engine terminal result.
             on_notice(Notice::StartupFailed {
+                read_refusal: false,
                 error: error.clone(),
             });
         }
     }
 
-    fn frame(&mut self, on_frame: &mut impl FnMut(&[u8])) {
+    fn frame(&mut self, on_frame: &mut impl FnMut(&[u8], &safe_cex_engine::Store)) {
         // Own the result before calling application code, outside the guard.
         let frame = self.turn(|host| host.engine.take_frame((host.clock)()).map(Vec::from));
         if let Some(Some(frame)) = frame {
-            on_frame(&frame);
+            on_frame(&frame, self.engine.store());
         }
     }
 
@@ -381,7 +437,14 @@ impl<V: Venue, T: Transport> Host<V, T> {
         self.inbox.close();
         self.managed_http.clear();
         self.signing_tasks.clear();
+        for (_, writer) in self.socket_writers.drain() {
+            writer.retire();
+        }
         self.sockets.clear();
+        if let Some(observer) = &self.legacy_interest_observer {
+            observer.observe(InterestObservation::Dropped);
+        }
+        self.socket_health.clear();
         for (_, timer) in self.timers.drain() {
             timer.abort();
         }
@@ -412,27 +475,50 @@ impl<V: Venue, T: Transport> Host<V, T> {
             HostEvent::PollScaleChanged(scale) => {
                 engine.handle(now, Event::PollScaleChanged { scale })
             }
-            HostEvent::WsOpened(socket) => engine.handle(now, Event::WsOpened { socket }),
-            HostEvent::WsBinary(socket, data) => engine.handle(
-                now,
-                Event::WsBinary {
-                    socket,
-                    data: &data,
-                },
-            ),
-            HostEvent::WsMessage(socket, text) => engine.handle(
-                now,
-                Event::WsMessage {
-                    socket,
-                    text: &text,
-                },
-            ),
+            HostEvent::WsOpened(socket) => {
+                self.socket_health.opened(socket);
+                engine.handle(now, Event::WsOpened { socket })
+            }
+            HostEvent::WsBinary(socket, data) => {
+                self.socket_health.received(socket);
+                engine.handle(
+                    now,
+                    Event::WsBinary {
+                        socket,
+                        data: &data,
+                    },
+                )
+            }
+            HostEvent::WsMessage(socket, text) => {
+                self.socket_health.received(socket);
+                engine.handle(
+                    now,
+                    Event::WsMessage {
+                        socket,
+                        text: &text,
+                    },
+                )
+            }
             HostEvent::WsClosed(socket, code) => {
+                if let Some(writer) = self.socket_writers.remove(&socket) {
+                    writer.retire();
+                }
                 self.sockets.remove(&socket);
+                if let Some(observer) = &self.legacy_interest_observer {
+                    observer.observe(InterestObservation::TransportClosed { socket });
+                }
+                self.socket_health.closed(socket, Some(code));
                 engine.handle(now, Event::WsClosed { socket, code })
             }
             HostEvent::WsRouteExhausted(socket) => {
+                if let Some(writer) = self.socket_writers.remove(&socket) {
+                    writer.retire();
+                }
                 self.sockets.remove(&socket);
+                if let Some(observer) = &self.legacy_interest_observer {
+                    observer.observe(InterestObservation::TransportClosed { socket });
+                }
+                self.socket_health.closed(socket, None);
                 engine.handle(now, Event::WsRouteExhausted { socket })
             }
             HostEvent::HttpStart {
@@ -466,21 +552,6 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 self.signing_tasks.remove(&attempt);
                 engine.handle(now, Event::Signed { attempt, result })
             }
-            HostEvent::PayloadSigned(request, result) => engine.handle(
-                now,
-                Event::PayloadSigned {
-                    request,
-                    signature: &result.signature,
-                    headers: result.headers,
-                },
-            ),
-            HostEvent::PayloadSignFailed(request, error) => engine.handle(
-                now,
-                Event::PayloadSignFailed {
-                    request,
-                    error: &error,
-                },
-            ),
             HostEvent::Timer(timer) => {
                 self.timers.remove(&timer);
                 engine.handle(now, Event::TimerFired { timer })
@@ -511,9 +582,12 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     url,
                     headers,
                     channel,
+                    public_topics,
                     context,
                 } => {
-                    let outgoing = self.transport.connect_encoding(
+                    self.socket_health
+                        .connecting(socket, channel.clone(), public_topics);
+                    let connection = self.transport.connect_socket(
                         binary,
                         socket,
                         url,
@@ -522,23 +596,44 @@ impl<V: Venue, T: Transport> Host<V, T> {
                         context,
                         self.events.clone(),
                     );
-                    self.sockets.insert(socket, outgoing);
+                    if let Some(writer) = connection.writer {
+                        self.socket_writers.insert(socket, writer);
+                    }
+                    self.sockets.insert(socket, connection.outgoing);
                 }
                 Action::WsSend { socket, text } => {
                     if let Some(outgoing) = self.sockets.get(&socket) {
-                        let _ = outgoing.send(text);
+                        if let Some(observer) = &self.legacy_interest_observer {
+                            if outgoing.send(text.clone()).is_ok() {
+                                observer.observe(InterestObservation::TransportSent {
+                                    socket,
+                                    text: &text,
+                                });
+                            }
+                        } else {
+                            let _ = outgoing.send(text);
+                        }
                     }
                 }
                 // Dropping the sender closes the socket.
                 Action::WsClose { socket } => {
+                    if let Some(writer) = self.socket_writers.remove(&socket) {
+                        writer.retire();
+                    }
                     self.sockets.remove(&socket);
+                    if let Some(observer) = &self.legacy_interest_observer {
+                        observer.observe(InterestObservation::TransportClosed { socket });
+                    }
+                    self.socket_health.closed(socket, None);
                 }
                 Action::Http(request) => self.transport.request(request, self.events.clone()),
                 Action::ManagedHttp(action) => {
                     self.turn(|host| host.execute_managed_http(*action));
                 }
-                Action::SignedOutbound { .. } => {
-                    unreachable!("engine drain unwraps signed outbound")
+                action @ Action::SignedOutbound { .. } => {
+                    let binding = safe_cex_engine::WebSocketWriteBinding::from_action(action)
+                        .expect("engine drain unwraps ordinary signing; only typed writes remain");
+                    self.turn(|host| host.execute_websocket_write(binding));
                 }
                 Action::RetireAddressSetup { .. } => {
                     self.terminal = Some(
@@ -579,13 +674,6 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     self.signing_tasks
                         .insert(attempt, managed_http::Task(task.abort_handle()));
                 }
-                Action::SignPayload {
-                    request,
-                    payload,
-                    timeout_ms,
-                } => self
-                    .transport
-                    .sign_payload(request, payload, timeout_ms, self.events.clone()),
                 Action::SetTimer { timer, at_ms } => {
                     let delay = (at_ms - (self.clock)()).max(0.0);
                     let deadline = Duration::try_from_secs_f64(delay / 1000.0)
@@ -756,9 +844,13 @@ mod timer_tests {
                 );
                 let unsafe_socket = SocketId(safe_cex_engine::resource_ids::MAX_RESOURCE_ID + 1);
                 if during_start {
-                    cx.send_signed(unsafe_socket, "".into(), Box::new(NeverStep));
+                    cx.send_signed(
+                        unsafe_socket,
+                        ControlFrame::authentication(""),
+                        Box::new(NeverStep),
+                    );
                 } else {
-                    cx.send(unsafe_socket, "");
+                    cx.send(unsafe_socket, ControlFrame::subscription(""));
                 }
             });
         let host = Host::new(
@@ -795,7 +887,7 @@ mod timer_tests {
         assert!(events.is_closed());
         let notices = notices.lock().unwrap();
         assert_eq!(notices.len(), 1);
-        assert!(matches!(&notices[0], Notice::StartupFailed { error }
+        assert!(matches!(&notices[0], Notice::StartupFailed { error, .. }
             if error.kind == Some(safe_cex_engine::ErrorKind::Internal)
             && error.outcome == Some(safe_cex_engine::Outcome::Unknown)));
     }
@@ -841,7 +933,7 @@ mod timer_tests {
         assert!(!engine.failed());
         assert_eq!(notices.len(), 1);
         assert!(
-            matches!(&notices[0], Notice::StartupFailed { error } if error.message == "fixture startup refusal")
+            matches!(&notices[0], Notice::StartupFailed { error, .. } if error.message == "fixture startup refusal")
         );
     }
 

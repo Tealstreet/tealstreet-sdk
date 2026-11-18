@@ -1,0 +1,63 @@
+{
+  "message": "stopped",
+  "outcome": "unknown",
+  "partial": {
+    "orderIds": [
+      "native-0"
+    ],
+    "total": 3,
+    "failedIndex": 1
+  },
+  "elements": [
+    {
+      "index": 0,
+      "clientOrderId": "first",
+      "status": "placed",
+      "orderIds": [
+        "native-0"
+      ]
+    },
+    {
+      "index": 1,
+      "clientOrderId": "cancel",
+      "status": "applied",
+      "effect": "cancel",
+      "targetOrderId": "old-order"
+    },
+    {
+      "index": 2,
+      "status": "applied",
+      "effect": "settings",
+      "positionKey": "BTCUSD:long"
+    },
+    {
+      "index": 3,
+      "clientOrderId": "deferred",
+      "status": "applied",
+      "effect": "deferredChild"
+    },
+    {
+      "index": 4,
+      "clientOrderId": "second",
+      "status": "notSent",
+      "error": {
+        "message": "rejected",
+        "outcome": "rejected",
+        "venueCode": "-1013"
+      }
+    },
+    {
+      "index": 5,
+      "clientOrderId": "third",
+      "status": "unknown",
+      "error": {
+        "message": "lost acknowledgement",
+        "outcome": "unknown"
+      }
+    },
+    {
+      "index": 6,
+      "status": "notSent"
+    }
+  ]
+}

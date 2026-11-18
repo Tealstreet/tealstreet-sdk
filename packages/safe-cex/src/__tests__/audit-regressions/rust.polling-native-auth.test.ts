@@ -1,7 +1,8 @@
 // @vitest-environment node
 import type { AccountAuthResult, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeOptions } from '../../types';
+import type { ExchangeName, ExchangeOptions } from '../../types';
+import type { TwapOwner } from '../../webworker/twap/TwapOwner';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -9,6 +10,7 @@ import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { OrderSide, OrderType } from '../../types';
 import { setTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { consumerFrame } from '../cutover/consumerFrame';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
@@ -31,16 +33,18 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function fixture(options: Partial<ExchangeOptions> = {}, initial: unknown[] = []) {
+function fixture(options: Partial<ExchangeOptions> = {}, initial: unknown[] = [], name: ExchangeName = 'binance') {
   let inbound: unknown[] = [];
   let socket!: Parameters<Transport['connect']>[1];
   let failNextPolicy = false;
   let trapMessages = false;
   const commands: Array<{ op: string; scale?: number | null; ceiling?: number }> = [];
+  const free = vi.fn();
   const idle = () => '[]';
   const native: WasmEngineLike = {
-    capabilities: () => engineCapabilities('binance'),
-    start: () => JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://controlled.invalid/private' }, ...initial]),
+    capabilities: () => engineCapabilities(name),
+    free,
+    start: vi.fn(() => JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://controlled.invalid/private' }, ...initial])),
     command(json) {
       const command = JSON.parse(json);
       commands.push(command);
@@ -85,7 +89,7 @@ function fixture(options: Partial<ExchangeOptions> = {}, initial: unknown[] = []
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   }));
   const exchange = new RustEngineExchange(
-    'binance',
+    name,
     {
       key: 'primary',
       secret: 'primary-secret',
@@ -106,6 +110,7 @@ function fixture(options: Partial<ExchangeOptions> = {}, initial: unknown[] = []
   return {
     exchange,
     native,
+    free,
     errors,
     deactivated,
     request,
@@ -127,6 +132,115 @@ function fixture(options: Partial<ExchangeOptions> = {}, initial: unknown[] = []
     trapMessages: () => { trapMessages = true; },
   };
 }
+
+const ownerTransitions = ['same', 'other', 'generation', 'returning', 'logout'] as const;
+const ownerFixture = () => {
+  let owner: TwapOwner | null = { ownerId: 'synthetic-owner-A', generation: 7 };
+  return {
+    current: () => owner,
+    change(transition: (typeof ownerTransitions)[number]) {
+      if (transition === 'other' || transition === 'returning') owner = { ownerId: 'synthetic-owner-B', generation: 8 };
+      if (transition === 'returning') owner = { ownerId: 'synthetic-owner-A', generation: 9 };
+      if (transition === 'generation') owner = { ownerId: 'synthetic-owner-A', generation: 8 };
+      if (transition === 'logout') owner = null;
+    },
+  };
+};
+
+for (const background of ['account-auth', 'multiplier', 'flush'] as const) {
+  it.each(ownerTransitions)(`background ${background} preserves the account across owner retirement: %s`, async (transition) => {
+    const owner = ownerFixture();
+    const r = fixture({}, [], 'bingx');
+    r.exchange.setTwapOwnerProvider(owner.current);
+    const dead = vi.fn();
+    r.exchange.on('engine-dead', dead);
+    await r.start();
+    owner.change(transition);
+    if (background === 'account-auth') r.deliver(auth('primary', 'orders', 'rejected'));
+    if (background === 'multiplier') setTickIntervalMultipliers({ '*': 2 });
+    if (background === 'flush') {
+      const extra = r.exchange.options.extra;
+      if (!extra) throw new Error('Fixture requires its polling override');
+      extra.tickInterval = 2000;
+    }
+    await vi.advanceTimersByTimeAsync(500);
+    expect({
+      symbols: r.exchange.store.markets.map((market) => market.symbol),
+      loaded: r.exchange.store.loaded.orders,
+      disposed: r.exchange.isDisposed,
+      dead: r.exchange.isEngineDead,
+      freed: r.free.mock.calls.length,
+      errors: r.errors.mock.calls.length,
+      terminalEvents: dead.mock.calls.length,
+      policy: r.controls(),
+    }).toEqual({
+      symbols: ['BTCUSDT'], loaded: true, disposed: false, dead: false,
+      freed: 0, errors: 0, terminalEvents: 0,
+      policy: transition === 'same' ? [1000, 2000] : [1000],
+    });
+    expect(r.request).not.toHaveBeenCalled();
+
+    if (transition !== 'same' && transition !== 'logout') {
+      const replacement = fixture({}, [], 'bingx');
+      replacement.exchange.setTwapOwnerProvider(owner.current);
+      await replacement.start();
+      replacement.deliver(auth('primary', 'orders', 'rejected'));
+      await vi.advanceTimersByTimeAsync(250);
+      expect(replacement.controls()).toEqual(background === 'multiplier' ? [2000, 4000] : [1000, 2000]);
+      expect(replacement.exchange.isDisposed).toBe(false);
+      expect(replacement.errors).not.toHaveBeenCalled();
+      expect(r.controls()).toEqual([1000]);
+    }
+  });
+}
+
+for (const write of ['placeOrders', 'cancelSymbolOrders', 'setLeverage'] as const) {
+  it.each(ownerTransitions)(`user writes after background retirement retain the ${write} fence: %s`, async (transition) => {
+    const owner = ownerFixture();
+    const r = fixture({}, [], 'bingx');
+    r.exchange.setTwapOwnerProvider(owner.current);
+    const dead = vi.fn();
+    r.exchange.on('engine-dead', dead);
+    await r.start();
+    owner.change(transition);
+    r.deliver(auth('primary', 'orders', 'rejected'));
+    await vi.advanceTimersByTimeAsync(0);
+    const pending = write === 'placeOrders'
+      ? r.exchange.placeOrder({ symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, price: 100 })
+      : write === 'cancelSymbolOrders'
+      ? r.exchange.cancelSymbolOrders('BTCUSDT')
+      : r.exchange.setLeverage('BTCUSDT', 2);
+    if (transition === 'same') {
+      await pending;
+      expect(r.commands.filter(({ op }) => op === write)).toHaveLength(1);
+      expect(r.errors).not.toHaveBeenCalled();
+      expect(dead).not.toHaveBeenCalled();
+      expect(r.free).not.toHaveBeenCalled();
+    } else {
+      await expect(pending).rejects.toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
+      expect(r.commands.filter(({ op }) => op === write)).toEqual([]);
+      expect(r.errors).toHaveBeenCalledOnce();
+      expect(dead).toHaveBeenCalledOnce();
+      expect(r.free).toHaveBeenCalledOnce();
+    }
+  });
+}
+
+it.each(ownerTransitions)('startup owner barrier remains strict before native start: %s', async (transition) => {
+  const owner = ownerFixture();
+  const r = fixture({}, [], 'bingx');
+  r.exchange.setTwapOwnerProvider(owner.current);
+  const starting = r.exchange.start();
+  owner.change(transition);
+  const outcome = transition === 'same'
+    ? expect(starting).resolves.toBeUndefined()
+    : expect(starting).rejects.toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
+  await vi.advanceTimersByTimeAsync(250);
+  await outcome;
+  expect(r.native.start).toHaveBeenCalledTimes(transition === 'same' ? 1 : 0);
+  expect(r.free).toHaveBeenCalledTimes(transition === 'same' ? 0 : 1);
+  expect(r.controls()).toEqual(transition === 'same' ? [1000] : []);
+});
 
 it('native startup rejection changes polling without inventing a terminal error', async () => {
   const r = fixture({}, [auth('secondary', 'orders', 'rejected')]);

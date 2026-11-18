@@ -1,7 +1,7 @@
 mod support;
 
 use safe_cex_engine::book::Book;
-use safe_cex_engine::history::{HistoryRows, ReadCompletion, ReadHistoryRows};
+use safe_cex_engine::history::{HistoryRows, IncompleteReason, ReadCompletion, ReadHistoryRows};
 use safe_cex_engine::log::code;
 use safe_cex_engine::request_context::{
     Claim, Context, HttpAction, Operation, Policy, Prepared, RetryPolicy, Scope,
@@ -130,7 +130,9 @@ impl Venue for Fixture {
             .finish(cx, Err(VenueError::new("later page failed")))
             .unwrap();
         if pending.profile == "duplicate" {
-            pending.duplicate.incomplete("duplicate must stay silent");
+            pending
+                .duplicate
+                .incomplete(IncompleteReason::CoverageGap, "duplicate must stay silent");
             assert!(pending.duplicate.finish(cx, Ok("[999]".into())).is_err());
         }
     }
@@ -213,7 +215,7 @@ fn assert_partial(notices: &[Notice]) {
     assert!(matches!(&notices[0], Notice::Event(event)
         if event.code == code::HISTORY_INCOMPLETE && event.level == Level::Warn
         && event.message.contains("later page failed")
-        && event.fields == vec![("command", Value::Num(7.))]));
+        && event.fields.first() == Some(&("command", Value::Num(7.))) && event.fields.get(1).is_some_and(|field| field.0 == "reason")));
     assert!(matches!(&notices[1], Notice::CommandDone { command: 7, result } if result == "[1]"));
 }
 

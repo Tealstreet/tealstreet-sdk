@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+safe-cex-position-math.workspace = true
 safe-cex-types.workspace = true
 indexmap = { version = "2.14.2", features = ["serde"] }
 ryu-js = "1"

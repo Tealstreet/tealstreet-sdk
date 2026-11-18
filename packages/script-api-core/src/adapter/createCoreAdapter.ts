@@ -24,10 +24,14 @@ import type {
 import type { CoreAdapter } from './AdapterContext';
 import type { HostBindings, HostExchange, HostWriteEvent } from './HostBindings';
 
+import { OrderStatus } from '@tealstreet/safe-cex/src/types';
+
 import { clampReduceOnlyOrder, prepareOrder } from '../order/prepareOrder';
 import {
+  assertCloseLikeOrderAmount,
   assertMinimumPrice,
   roundMarketCloseSize,
+  roundPercentageCloseSize,
   roundOrderPrice,
   roundOrderSizeToNearest,
 } from '../order/orderPricing';
@@ -61,6 +65,10 @@ const EMPTY: readonly never[] = Object.freeze([]);
 
 const lower = (name: string | undefined, fallback: ExchangeName): ExchangeName =>
   ((name ?? fallback) as string).toLowerCase() as ExchangeName;
+
+// The store keeps terminal rows a while; to a script they are not resting orders.
+const isNotTerminal = (order: Pick<Order, 'status'>): boolean =>
+  order.status !== OrderStatus.Canceled && order.status !== OrderStatus.Closed;
 
 export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
   const requireExchange = (account: string): HostExchange => {
@@ -175,9 +183,16 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
         totalUpnl += balance.upnl ?? 0;
       }
       for (const position of store.positions ?? []) {
-        if (position.side === 'long') longExposure += position.notional;
-        else if (position.side === 'short') shortExposure += position.notional;
+        const notional = position.notional;
+        if (typeof notional !== 'number' || !Number.isFinite(notional)) {
+          throw new Error('Position notional is unknown; combined exposure is unavailable');
+        }
+        if (position.side === 'long') longExposure += notional;
+        else if (position.side === 'short') shortExposure += notional;
       }
+    }
+    if (!Number.isFinite(longExposure) || !Number.isFinite(shortExposure)) {
+      throw new Error('Position notional is unknown; combined exposure is unavailable');
     }
     return { totalEquity, totalAvailable, totalUsed, totalUpnl, longExposure, shortExposure, currency: 'USD' };
   };
@@ -210,7 +225,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
 
     // ── Store reads ──────────────────────────────────────────────────────
     getMarkets: (account): readonly Market[] =>
-      host.readMarkets?.(account) ?? ((host.getStore(account)?.markets as readonly Market[]) ?? EMPTY),
+      host.readMarkets?.(account) ?? (host.getStore(account)?.markets as readonly Market[]) ?? EMPTY,
     getMarket: (symbol, account): Market | undefined => findMarket(symbol, account),
     getTicker: (symbol, account): Ticker | undefined => findTicker(symbol, account),
     getTickers: (symbols, account): readonly Ticker[] => {
@@ -226,7 +241,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
     getPositions: ({ account, symbol }): readonly Position[] =>
       bySymbol((host.getStore(account)?.positions as readonly Position[]) ?? EMPTY, symbol),
     getOrders: ({ account, symbol }): readonly Order[] =>
-      bySymbol((host.getStore(account)?.orders as readonly Order[]) ?? EMPTY, symbol),
+      bySymbol(((host.getStore(account)?.orders) ?? EMPTY).filter(isNotTerminal), symbol),
     getBalance: (account): Balance | undefined =>
       host.readBalance ? host.readBalance(account) : host.getStore(account)?.balance,
     getCombinedBalance: ({ accounts }): CombinedBalance => summarizeBalance(accounts),
@@ -329,7 +344,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
       guardWrites();
       const exchange = requireExchange(account);
       const cancelOrders = requireMethod(exchange, 'cancelOrders', account);
-      let candidates = (host.getStore(account)?.orders ?? []).slice();
+      let candidates = (host.getStore(account)?.orders ?? []).filter(isNotTerminal);
       // An id list answers the question the other fields exist to ask, so it
       // REPLACES them — a caller that enumerated 25 of 40 resting orders must
       // not have symbol/side widen that back to 40.
@@ -382,13 +397,16 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
           rounded.price = price;
         }
         if ('amount' in update && update.amount !== undefined) {
-          const amount = roundOrderSizeToNearest(update.amount, market);
+          assertCloseLikeOrderAmount(update.amount, order, market, exchange.name);
+          const amount = roundOrderSizeToNearest(update.amount, market, exchange.name);
           if (!Number.isFinite(amount) || amount < 0) {
             throw new ScriptValidationError(`updateOrder: invalid amount for '${order.symbol}': ${update.amount}`);
           }
           rounded.amount = amount;
         }
-        await updateOrder({ ...patch, update: rounded, order } as UpdateOrderOpts);
+        const options = { ...patch, update: rounded, order } as UpdateOrderOpts;
+        if (host.submitOrderAmend) await host.submitOrderAmend(account, options);
+        else await updateOrder(options);
         observe('updateOrder', account, summary, true);
       } catch (error) {
         observe('updateOrder', account, summary, false, { error: messageOf(error) });
@@ -405,6 +423,9 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
       const summary = `closePosition ${opts.symbol}${opts.side ? ` ${opts.side}` : ''}`;
       const orderIds: string[] = [];
       try {
+        if (opts.amount !== undefined && opts.percent !== undefined) {
+          throw new ScriptValidationError('Set only one of close amount and percent');
+        }
         const candidates = ((host.getStore(account)?.positions ?? []) as Position[]).filter(
           (position) => position.symbol === opts.symbol && (!opts.side || position.side === opts.side),
         );
@@ -416,11 +437,20 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
           // thousandfold on OKX's `DOGE-USDT-SWAP` and a fraction of the
           // position on a Bybit inverse market. `opts.amount` is already
           // native by contract; only the fallback needed converting.
-          const closeAmount = roundMarketCloseSize(opts.amount ?? nativePositionSize(position, market), market);
+          const exchange = requireExchange(account);
+          const amount =
+            opts.percent !== undefined
+              ? roundPercentageCloseSize(nativePositionSize(position, market), opts.percent, market, exchange.name)
+              : (opts.amount ?? nativePositionSize(position, market));
+          if (amount === null)
+            throw new ScriptValidationError(
+              `closePosition: native size is unknown for '${opts.symbol}'; refresh the position before closing`,
+            );
+          const closeAmount = roundMarketCloseSize(amount, market, exchange.name);
           if (!Number.isFinite(closeAmount) || closeAmount <= 0) {
             throw new ScriptValidationError(`closePosition: non-positive size for '${opts.symbol}'`);
           }
-          const placeOrder = requireMethod(requireExchange(account), 'placeOrder', account);
+          const placeOrder = requireMethod(exchange, 'placeOrder', account);
           const ids = await placeOrder({
             symbol: opts.symbol,
             side: position.side === 'long' ? 'sell' : 'buy',

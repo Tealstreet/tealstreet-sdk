@@ -22,10 +22,16 @@ impl BitunixFutures {
             supervision: Config {
                 idle_timeout_ms: 45_000.0,
                 ping_interval_ms: Some(15_000.0),
+                auth_timeout_ms: private.then_some(LOGIN_ANSWER_MS),
+                stable_ms: if private {
+                    10_000.0
+                } else {
+                    Config::default().stable_ms
+                },
                 ..Config::default()
             },
-            // Observe: login evidence drives the same-socket retry without a
-            // login deadline or gating private frames, as the legacy session did.
+            // Keep private data admissible before the login answer while the
+            // Supervisor retains master's independent ten-second answer bound.
             auth: if private {
                 AuthMode::Observe
             } else {
@@ -58,6 +64,8 @@ impl BitunixFutures {
             } else {
                 0.0
             },
+            close_floors: &[],
+            data_silence: None,
         }
     }
 
@@ -146,9 +154,18 @@ impl BitunixFutures {
 
     fn ping(cx: &mut Cx<'_, Pending>, feed: &Feed, socket: SocketId) {
         if matches!(feed, Feed::Private) {
-            cx.send(socket, r#"{"op":"ping"}"#);
+            cx.send(
+                socket,
+                ControlFrame::heartbeat(private_ping(cx.protocol_now())),
+            );
         } else {
-            cx.send(socket, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));
+            cx.send(
+                socket,
+                ControlFrame::heartbeat(format!(
+                    r#"{{"ping":{}}}"#,
+                    num::format(cx.protocol_now())
+                )),
+            );
         }
     }
 
@@ -166,16 +183,16 @@ impl BitunixFutures {
                     .clone();
                 match &feed {
                     Feed::Private => {
+                        self.account.login_answered = false;
+                        self.account.private_live = false;
                         Self::ping(cx, &feed, epoch.socket());
                         self.login(cx, epoch.socket());
-                        if cx.store.loaded().positions {
-                            for axis in [
-                                account::Axis::Balance,
-                                account::Axis::Positions,
-                                account::Axis::Orders,
-                            ] {
-                                self.read_axis(cx, axis);
-                            }
+                        for axis in [
+                            account::Axis::Balance,
+                            account::Axis::Positions,
+                            account::Axis::Orders,
+                        ] {
+                            self.read_axis(cx, axis);
                         }
                         return Ok(());
                     }
@@ -208,12 +225,21 @@ impl BitunixFutures {
                     self.login(cx, epoch.socket());
                 }
             }
-            LifecycleEvent::AuthFailure { evidence, .. } => match evidence {
-                AuthEvidence::Rejected(_) => self.login_failed(cx, true),
-                AuthEvidence::Malformed => self.login_failed(cx, false),
-                AuthEvidence::Accepted | AuthEvidence::Progress => {}
-            },
-            LifecycleEvent::Retired { epoch, reason } => {
+            LifecycleEvent::Authenticated { .. } => {
+                self.account.login_answered = true;
+                self.account.private_live = true;
+            }
+            LifecycleEvent::AuthFailure { evidence, .. } => {
+                self.account.login_answered = true;
+                match evidence {
+                    AuthEvidence::Rejected(_) => self.login_failed(cx, true),
+                    AuthEvidence::Malformed => self.login_failed(cx, false),
+                    AuthEvidence::Accepted
+                    | AuthEvidence::Progress
+                    | AuthEvidence::RouteRefused(_) => {}
+                }
+            }
+            LifecycleEvent::Retired { epoch, reason, .. } => {
                 let s = self
                     .sockets
                     .iter_mut()
@@ -221,6 +247,16 @@ impl BitunixFutures {
                     .ok_or(SocketError::Stale)?;
                 // The reconnect's routing context: a timeout recovers, a close does not.
                 s.recover = matches!(reason, RetireReason::Timeout(_));
+                if matches!(s.feed, Feed::Private) {
+                    self.account.private_live = false;
+                    if s.recover && !self.account.login_answered {
+                        cx.notice(
+                            Level::Warn,
+                            code::STREAM_UNAVAILABLE,
+                            "Bitunix did not answer the private socket login; reconnecting",
+                        );
+                    }
+                }
                 if matches!(s.feed, Feed::Futures) {
                     for (symbol, book) in &mut self.books {
                         book.levels.clear();
@@ -306,6 +342,7 @@ impl BitunixFutures {
         };
         match operation {
             "pong" => Control::Pong,
+            "ping" if m.pong => Control::Pong,
             "login" => {
                 #[derive(serde::Deserialize)]
                 struct Login {

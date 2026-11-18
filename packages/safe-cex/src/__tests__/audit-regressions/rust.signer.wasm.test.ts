@@ -104,7 +104,7 @@ it('actual WASM consumes separate local setup and rejects malformed or unsupport
 
 it('actual WASM refuses external-provider override on an unmigrated family', async () => {
   const { WasmEngine } = await loadNodeEngine();
-  const engine = new WasmEngine('blofin', JSON.stringify({ publicDataOnly: true })); // unadopted provider control
+  const engine = new WasmEngine('krakenspot', JSON.stringify({ publicDataOnly: true })); // unadopted provider control
   try {
     expect(() => new EngineHost(engine, makeTransport([]), {}, { signer: (request) => ({ values: [], receipt: request.receipt }) })).toThrow(/not supported/);
   } finally { engine.free?.(); }

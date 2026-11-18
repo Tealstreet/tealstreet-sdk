@@ -20,7 +20,7 @@ function inventory(directory) {
           if (owner.name && /ticker/i.test(owner.name.getText(ast))) tickerContext = true;
         }
         if (tickerContext) assert.equal(path.relative(root, filename),
-          'packages/safe-cex/src/exchanges/paradex/paradex.exchange.ts',
+          'packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts',
           'TICKER-TIMESTAMP unclassified ticker timestamp property');
       }
       if (ts.isObjectLiteralExpression(node)) {
@@ -45,9 +45,10 @@ function inventory(directory) {
   }
 }
 inventory(path.join(root, 'packages/safe-cex/src/exchanges'));
-assert.deepEqual(emitters, [{ file: 'packages/safe-cex/src/exchanges/paradex/paradex.exchange.ts',
+inventory(path.join(root, 'packages/safe-cex/src/__tests__/reference'));
+assert.deepEqual(emitters, [{ file: 'packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts',
   expression: 'virtualClock.getCurrentTimeMs()' }], 'TICKER-TIMESTAMP direct emitter inventory');
-const file = 'packages/safe-cex/src/exchanges/paradex/paradex.exchange.ts';
+const file = 'packages/safe-cex/src/__tests__/reference/paradex/paradex.exchange.ts';
 const text = fs.readFileSync(path.join(root, file), 'utf8');
 const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
 const found = [];

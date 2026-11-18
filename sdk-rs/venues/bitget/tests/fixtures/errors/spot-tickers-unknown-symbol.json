@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:38:29.562Z",
+  "endpoint": "/api/v2/spot/market/tickers?symbol=NOPEUSDT",
+  "http_status": 400,
+  "body": "{\"code\":\"40034\",\"msg\":\"Parameter NOPEUSDT does not exist\",\"requestTime\":1793155109535,\"data\":null}",
+  "expect": {
+    "kind": null,
+    "outcome": null,
+    "path": "read"
+  }
+}

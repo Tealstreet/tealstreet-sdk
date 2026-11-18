@@ -73,7 +73,7 @@ impl Read {
                 }
             }
         } else {
-            match cx.http_context(Scope::Background, policy(Operation::Read)) {
+            match cx.http_live_context(Scope::Background, policy(Operation::Read)) {
                 Ok(context) => Some(Self {
                     root: None,
                     context,

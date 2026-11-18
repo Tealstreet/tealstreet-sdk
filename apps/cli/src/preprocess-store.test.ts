@@ -1,3 +1,15 @@
+// These are store semantics tests; cross-user-isolation.test.ts exercises real paths.
+vi.mock('./storage-context', () => ({
+  getStorageDir: () => process.env.TEALSTREET_CONFIG_DIR || '/tmp/tealstreet-cli-store-test',
+  getStoragePath: (name: string) => `${process.env.TEALSTREET_CONFIG_DIR || '/tmp/tealstreet-cli-store-test'}/${name}`,
+  getStorageOwner: () => null,
+  authOwner: () => null,
+  selectStorageOwner: vi.fn(),
+  onStorageOwnerChange: () => () => {},
+  getStorageEpoch: () => 0,
+  assertStorageSession: () => {},
+  isRecord: (value: unknown) => typeof value === 'object' && value !== null && !Array.isArray(value),
+}));
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import { join } from 'path';
@@ -248,7 +260,11 @@ describe('FilePreprocessStore alias sync queue', { timeout: 30_000 }, () => {
     store.setAlias('long', 'buy 1');
     store.unsetAlias('long');
 
-    expect(lastWrite('aliases-sync.json')).toEqual({ cursor: null, owner: null, pending: [{ name: 'long', command: null }] });
+    expect(lastWrite('aliases-sync.json')).toEqual({
+      cursor: null,
+      owner: null,
+      pending: [{ name: 'long', command: null }],
+    });
   });
 
   it('applies server aliases without queueing them back', async () => {

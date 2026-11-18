@@ -99,7 +99,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange, base
     // Kraken Futures uses application/x-www-form-urlencoded which encodes spaces as +
     // qs.stringify defaults to RFC 3986 (%20 for spaces), so we use format: 'RFC1738' for + encoding
     // The SAME encoded string must be used for both signing and sending
-    // TODO: Audit whether HOW proxy re-serialization can break this signature (see bitmex.api.ts).
+    // TODO: Audit whether HOW proxy re-serialization can break this signature.
     let postData = '';
     if (method === 'get' || method === 'delete') {
       if (config.params && Object.keys(config.params).length) {

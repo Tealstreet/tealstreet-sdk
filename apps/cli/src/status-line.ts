@@ -21,9 +21,11 @@
  *    the alt buffer takes over and re-established on return.
  */
 import chalk from 'chalk';
+import { captureStorageSession, isStorageSessionCurrent, onStorageOwnerChange } from './storage-context';
 
 import type { LogCategory } from './log-classify';
 import { addResizeListener, reserveTop, resumeRegion, suspendRegion } from './scroll-region';
+import { G, terminalText } from './console-glyphs';
 
 const ESC = '\x1b';
 const SAVE_CURSOR = `${ESC}7`;
@@ -73,11 +75,11 @@ const BAR_STYLES: Record<
 };
 
 export function formatStatusContent(text: string, category: LogCategory, width: number, dim: boolean): string {
-  const icon = category === 'warn' ? '⚠' : category === 'critical' ? '⛔' : '✗';
+  const icon = category === 'warn' ? G.warn : category === 'critical' ? G.critical : G.error;
   const prefix = `${icon} `;
   const clean = text.replace(/\s+/g, ' ').trim();
   const max = Math.max(0, width - prefix.length);
-  const body = clean.length > max ? `${clean.slice(0, Math.max(0, max - 1))}…` : clean;
+  const body = terminalText(clean.length > max ? `${clean.slice(0, Math.max(0, max - 1))}…` : clean);
   // Clamp to EXACTLY the terminal width, then pad to it: the bar must never be
   // longer than one row, or it would wrap into the gap/scroll-region rows and
   // corrupt the layout (e.g. when width < the icon prefix). slice() handles the
@@ -117,7 +119,7 @@ function drawStatus(dim: boolean): void {
   // Row 1 = the alert bar; row 2 = a dimmed divider rule separating the alert
   // from the scrolling content below. The divider only appears once an alert
   // exists (before that, rows 1+2 are blank). Single write, cursor preserved.
-  const divider = chalk.dim('─'.repeat(cols()));
+  const divider = chalk.dim(G.rule.repeat(cols()));
   process.stdout.write(
     SAVE_CURSOR + moveTo(1, 1) + CLEAR_ROW + styled + moveTo(2, 1) + CLEAR_ROW + divider + RESTORE_CURSOR,
   );
@@ -136,6 +138,7 @@ function teardownRegion(): void {
  */
 export function enableStatusLine(): void {
   if (enabled || !isTty()) return;
+  const ownerSession = captureStorageSession();
   enabled = true;
   establishRegion();
 
@@ -143,7 +146,7 @@ export function enableStatusLine(): void {
   // (including the too-short reset). We only redraw the bar's content at the
   // new width after a resize; it fires after the region is re-applied.
   removeResizeListener = addResizeListener(() => {
-    if (!enabled || suspended) return;
+    if (!enabled || suspended || !ownerSession.isCurrent()) return;
     drawStatus(false);
   });
 }
@@ -190,12 +193,22 @@ export function resumeStatusLine(): void {
  * suspended, or non-TTY. Resets the auto-dim timer.
  */
 export function setStatus(text: string, category: LogCategory): void {
+  if (!isStorageSessionCurrent()) return;
   if (!enabled || !isTty() || !NOTABLE.has(category)) return;
+  const ownerSession = captureStorageSession();
   current = { text, category };
   drawStatus(false);
   if (dimTimer) clearTimeout(dimTimer);
   dimTimer = setTimeout(() => {
+    if (!ownerSession.isCurrent()) return;
     drawStatus(true);
     dimTimer = null;
   }, DIM_AFTER_MS);
 }
+
+onStorageOwnerChange(() => {
+  const restart = enabled;
+  disableStatusLine();
+  current = null;
+  if (restart) enableStatusLine();
+});

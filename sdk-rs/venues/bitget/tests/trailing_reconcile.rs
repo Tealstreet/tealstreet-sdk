@@ -303,6 +303,7 @@ fn newer_common_strategy_frame_is_protected_from_an_older_rest_result() {
         96.0,
         "fresh WS grace must also cover omission"
     );
+    h.message(r#"{"arg":{"channel":"ticker","instId":"BTCUSDT"},"data":[{"instId":"BTCUSDT","lastPr":"100"}]}"#);
     h.command(Command::AmendOrder {
         command: 17,
         id: "newer-common-frame".into(),
@@ -391,7 +392,8 @@ fn exact_documented_tpsl_pending_and_terminal_statuses_do_not_emit_executions() 
                 .store()
                 .orders()
                 .iter()
-                .all(|o| o.side == OrderSide::Sell && o.reduce_only)
+                // One-way: the row's side, as real captures show it (docs' example differs).
+                .all(|o| o.side == OrderSide::Buy && o.reduce_only)
         );
         assert!(
             h.engine
@@ -430,6 +432,7 @@ fn exact_documented_tpsl_long_position_stays_long_during_hedged_amend() {
     strategy_ws(&mut h, doc_tpsl("pending"));
     let id = "111111111111111111__stop_loss";
     assert_eq!(h.engine.store().order(id).unwrap().side, OrderSide::Sell);
+    h.message(r#"{"arg":{"channel":"ticker","instId":"BTCUSDT"},"data":[{"instId":"BTCUSDT","lastPr":"100000"}]}"#);
     h.command(Command::AmendOrder {
         command: 31,
         id: id.into(),
@@ -448,14 +451,17 @@ fn exact_documented_tpsl_long_position_stays_long_during_hedged_amend() {
         );
     }
     background(&mut h);
-    let cancel = h.take("/cancel-strategy-order");
-    let payload: Value = serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
+    let amend = h.take("/modify-strategy-order");
+    let payload: Value = serde_json::from_str(amend.body.as_deref().unwrap()).unwrap();
     assert_eq!(payload["orderId"], "111111111111111111");
-    h.reply(cancel.id, 200, r#"{"code":"00000","data":null}"#);
-    let replacement = h.take("/place-strategy-order");
-    let payload: Value = serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
-    assert_eq!(payload["side"], "sell");
-    assert_eq!(payload["posSide"], "long");
+    assert!(payload.get("side").is_none());
+    assert!(payload.get("posSide").is_none());
+    assert_eq!(h.engine.store().order(id).unwrap().side, OrderSide::Sell);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.url.contains("cancel"))
+    );
     assert_eq!(payload["stopLoss"], "90001");
     assert_eq!(payload["takeProfit"], "110000");
 }
@@ -492,9 +498,16 @@ fn delayed_absence_cannot_drop_newer_common_frame_after_grace_is_pruned() {
     let old = snapshot_delayed_past_common_frame_grace(&mut h, id);
     h.reply(old, 200, r#"{"code":"00000","data":[]}"#);
     assert_eq!(h.engine.store().order(id).unwrap().price, 96.0);
-    // A subsequent snapshot begun after the update is authoritative again.
-    for _ in 0..4 {
+    // A subsequent snapshot begun after the update is authoritative again: the
+    // next orders read (the 60 s reconcile while the stream is live).
+    for _ in 0..31 {
         poll(&mut h);
+        if h.requests
+            .iter()
+            .any(|r| r.url.contains("/unfilled-orders"))
+        {
+            break;
+        }
     }
     respond_orders(&mut h, &[], &[]);
     assert!(h.engine.store().order(id).is_none());
@@ -511,6 +524,7 @@ fn delayed_row_cannot_replace_newer_callback_after_grace_is_pruned() {
         &json!({"code":"00000","data":[trailing(id,"95","3")]}).to_string(),
     );
     assert_eq!(h.engine.store().order(id).unwrap().price, 96.0);
+    h.message(r#"{"arg":{"channel":"ticker","instId":"BTCUSDT"},"data":[{"instId":"BTCUSDT","lastPr":"100"}]}"#);
     h.command(Command::AmendOrder {
         command: 51,
         id: id.into(),

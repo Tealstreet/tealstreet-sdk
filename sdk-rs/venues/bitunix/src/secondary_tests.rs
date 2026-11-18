@@ -107,7 +107,7 @@ fn reads_use_the_read_key_and_the_login_stays_primary() {
         #[serde(rename_all = "camelCase")]
         struct LoginArg<'a> {
             api_key: &'a str,
-            timestamp: &'a str,
+            timestamp: u64,
             nonce: &'a str,
             sign: &'a str,
         }
@@ -124,7 +124,7 @@ fn reads_use_the_read_key_and_the_login_stays_primary() {
         let login: Login<'_> = serde_json::from_str(login).unwrap();
         let arg = &login.args[0];
         assert_eq!(arg.api_key, "primary-key");
-        assert_eq!(arg.timestamp, "1700000000123");
+        assert_eq!(arg.timestamp, 1700000000123);
         let payload = format!("{}{}primary-key", arg.nonce, arg.timestamp);
         let first = hex(&sha256(payload.as_bytes()));
         assert_eq!(

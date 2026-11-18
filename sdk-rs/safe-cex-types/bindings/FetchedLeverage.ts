@@ -2,24 +2,9 @@
 import type { MarginType } from "./MarginType";
 import type { PositionMode } from "./PositionMode";
 export type FetchedLeverage = {
-    /**
-     * @ts-mutable
-     */
     buyLeverage: number;
-    /**
-     * @ts-mutable
-     */
     sellLeverage: number;
-    /**
-     * @ts-mutable
-     */
     marginType?: MarginType;
-    /**
-     * @ts-mutable
-     */
     positionMode?: PositionMode;
-    /**
-     * @ts-mutable
-     */
     isFetching?: boolean;
 };

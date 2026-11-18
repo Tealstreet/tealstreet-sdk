@@ -1,4 +1,5 @@
 use crate::{Connection, Orderly, Pending, Seed, sign, symbol, wire::*};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, SnapshotBuilder};
 use safe_cex_engine::execution::{Arithmetic, Cursor};
@@ -1135,11 +1136,12 @@ impl Orderly {
                 && (400..500).contains(&response.status)
                 && !matches!(response.status, 408 | 429)
             {
-                cx.notice(
-                    Level::Error,
-                    code::AUTH_REJECTED,
-                    "Orderly API key expired or rejected",
-                );
+                let refused =
+                    safe_cex_engine::VenueError::new("Orderly API key expired or rejected")
+                        .kind(safe_cex_engine::ErrorKind::AuthInvalid);
+                if !cx.startup_read_refused(&refused) {
+                    cx.notice(Level::Error, code::AUTH_REJECTED, &refused.message);
+                }
                 cx.deactivate();
                 return;
             }
@@ -1446,7 +1448,7 @@ impl Orderly {
         let url = self.private_url();
         cx.send_signed(
             socket,
-            String::new(),
+            ControlFrame::authentication(String::new()),
             Box::new(sign::WsAuth::new(primary, &url)),
         );
     }
@@ -1860,21 +1862,23 @@ impl Orderly {
                     }
                     cx.send(
                         socket,
-                        serde_json::to_string(&Sub {
-                            topic,
-                            event: "subscribe",
-                        })
-                        .unwrap(),
+                        ControlFrame::subscription(
+                            serde_json::to_string(&Sub {
+                                topic,
+                                event: "subscribe",
+                            })
+                            .unwrap(),
+                        ),
                     );
                 }
                 self.account.socket.ping_at = cx.now;
-                cx.send(socket, "{\"event\":\"ping\"}");
+                cx.send(socket, ControlFrame::heartbeat("{\"event\":\"ping\"}"));
                 self.account_poll(cx, true);
             }
             return Ok(());
         }
         if env.event == "ping" {
-            cx.send(socket, "{\"event\":\"pong\"}");
+            cx.send(socket, ControlFrame::heartbeat("{\"event\":\"pong\"}"));
             return Ok(());
         }
         if env.event == "pong" {
@@ -1992,7 +1996,7 @@ impl Orderly {
             SocketTick::Ping => {
                 if let Some(socket) = self.account.socket.socket {
                     self.account.socket.ping_at = cx.now;
-                    cx.send(socket, "{\"event\":\"ping\"}");
+                    cx.send(socket, ControlFrame::heartbeat("{\"event\":\"ping\"}"));
                 }
             }
             SocketTick::TimedOut(_) => {
@@ -2004,6 +2008,18 @@ impl Orderly {
             SocketTick::Handled => {}
         }
         true
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Info => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            Self::Modes { .. } => S::POSITIONS,
+        }
     }
 }
 

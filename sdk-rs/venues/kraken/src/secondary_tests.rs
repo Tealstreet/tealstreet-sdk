@@ -1,7 +1,7 @@
 use super::*;
 use safe_cex_engine::test_support::{ProbeVenue, http_requests};
 use safe_cex_engine::{Action, ReadCredentials};
-fn options() -> Options {
+pub(super) fn options() -> Options {
     Options {
         key: Some("primary-key".into()),
         secret: Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=".into()),

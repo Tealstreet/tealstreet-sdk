@@ -93,7 +93,7 @@ fn opaque_remote_read_prepares_then_signs_the_selected_secondary_without_local_k
         unsigned.headers,
         vec![
             ("X-SOURCE-KEY", "Tealstreet".into()),
-            ("Content-Type", "application/json, charset=utf-8".into())
+            ("Content-Type", "application/json; charset=utf-8".into())
         ]
     );
     e.http_prepared(
@@ -164,7 +164,7 @@ fn absent_secondary_keeps_primary_identity_and_the_same_native_preparation_deadl
         request.headers,
         vec![
             ("X-SOURCE-KEY", "Tealstreet".into()),
-            ("Content-Type", "application/json, charset=utf-8".into())
+            ("Content-Type", "application/json; charset=utf-8".into())
         ]
     );
     assert!(request.signer_headers.is_empty());

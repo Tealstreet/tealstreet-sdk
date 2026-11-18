@@ -10,11 +10,12 @@ than chasing a separate `stop` call after the fill.
 ## Minimum viable
 
 ```text
-buy $100 stop -1%
+buy $100 stop $last -1%
 ```
 
 Market buy $100 notional on the focused symbol. A reduce-only market stop
-is placed **1% below the fill price** as soon as the entry resolves.
+is placed **1% below the last price when you send it**, as soon as the entry
+resolves. A bare `stop -1%` is [refused for now](../reference/sizing-and-prices.md#negative-offsets).
 
 **On a LIMIT entry, how the stop is carried differs per venue.** Bybit makes it
 a field on the entry order, so cancelling an unfilled limit cancels the stop
@@ -31,17 +32,16 @@ buy $100 at 50000 stop 49500
 Limit entry + absolute stop price. Stop attaches after the limit reports a fill.
 
 ```text
-buy $100 at $bid +0.1% stop -1%
+buy $100 at $bid +0.1% stop $last -1%
 ```
 
-Post-only-ish entry pegged just above the bid, percent-offset stop relative
-to the fill.
+Entry just above the bid, with the stop 1% below the last price.
 
 ```text
-buy $100 at 50000 po stop -1%
+buy $100 at 50000 po stop 49500
 ```
 
-Explicit post-only entry (rejected if it would cross), same percent stop.
+Explicit post-only entry (rejected if it would cross), absolute stop.
 
 ```text
 buy 50%bal stop $entry -2%
@@ -49,7 +49,8 @@ buy 50%bal stop $entry -2%
 
 Size by 50% of free balance; stop anchored to **`$entry`** (current
 position's entry price), not to the new fill. Useful when you're adding
-to an existing position and want the stop on the average entry.
+to an existing position and want the stop on the average entry. With no
+position open it fails with `$entry: no position` and places nothing.
 
 ```text
 sell $100 stop +1%
@@ -58,19 +59,20 @@ sell $100 stop +1%
 Short entry with stop 1% above the fill. The stop side flips automatically.
 
 ```text
-buy $100 stop -1% trigger -0.9%
+buy $100; stop at 49500 trigger 49550
 ```
 
-Limit stop — the order rests at -1% but only activates when mark crosses
--0.9%. See [`stop`](../reference/commands.md#stop) for the trigger grammar.
+Limit stop, placed as its own `stop` command because `buy` has no `trigger`
+option. The order rests at 49500 but only activates when mark crosses 49550. On
+Bybit this currently rests as a market stop at the trigger. See [`stop`](../reference/commands.md#stop) for the trigger grammar.
 
 ## Gotchas
 
 - The bracket stop is **always reduce-only** — it can't accidentally flip
   your position. This is by design and not configurable.
-- `stop -1%` is relative to the **fill price**, not to the limit price you
-  set. If you want the stop pinned to a known number, use `stop $entry -1%`
-  (after the position exists) or pass an absolute (`stop 49500`).
+- `stop $last -1%` is worked out from the **last price when you send it**, not
+  from the fill or the limit price you set. To pin the stop to your entry, use
+  `stop $entry -1%` after the position exists, or pass an absolute (`stop 49500`).
 - Bare numbers ≥ 100 with no `stop` keyword and no `at` are rejected — the
   parser asks "did you mean `at <price>`?" so a typo can't coerce a market
   order. See [Safety → fatfinger](../reference/safety.md#fatfinger) for the

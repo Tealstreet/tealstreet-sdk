@@ -1,0 +1,27 @@
+[package]
+name = "safe-cex-algos"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Shared runtime for server-side algos (chaser, TWAP, exec) on one account thread"
+
+[lints]
+workspace = true
+
+[features]
+default = ["tokio-executor"]
+# The native executor (tokio's local tasks and timers); the LOCAL worker's
+# wasm build provides a host-driven one instead.
+tokio-executor = ["tokio/rt", "tokio/time"]
+# The LOCAL worker's host-driven executor (no runtime, host-advanced clock).
+host-executor = []
+# Native instrument labels (Binance, Bybit builds), projected for the TradFi
+# guard; without it the projection reports none.
+product-semantics = ["safe-cex-engine/product-semantics"]
+
+[dependencies]
+safe-cex-engine.workspace = true
+tokio = { version = "1.53.3", features = ["sync"] }
+
+[dev-dependencies]
+tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "test-util"] }

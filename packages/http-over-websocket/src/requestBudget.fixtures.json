@@ -1,0 +1,152 @@
+[
+  {
+    "method": "GET",
+    "url": "https://venue.test/v5/market/instruments-info",
+    "requestClass": "discovery",
+    "budgetMs": 60000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/api/v3/exchangeInfo",
+    "requestClass": "discovery",
+    "budgetMs": 60000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/api/contracts",
+    "requestClass": "discovery",
+    "budgetMs": 60000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/api/orders",
+    "requestClass": "orderRead",
+    "budgetMs": 20000
+  },
+  {
+    "method": "POST",
+    "url": "https://venue.test/api/orders",
+    "requestClass": "orderWrite",
+    "budgetMs": 20000
+  },
+  {
+    "method": "DELETE",
+    "url": "https://venue.test/api/orders/1",
+    "requestClass": "orderWrite",
+    "budgetMs": 20000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/api/order/history",
+    "requestClass": "history",
+    "budgetMs": 30000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/v5/market/kline",
+    "requestClass": "history",
+    "budgetMs": 30000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/api/fills",
+    "requestClass": "history",
+    "budgetMs": 30000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/api/ticker",
+    "requestClass": "read",
+    "budgetMs": 20000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/api/account?next=/history",
+    "requestClass": "read",
+    "budgetMs": 20000
+  },
+  {
+    "method": "POST",
+    "url": "https://venue.test/api/markets",
+    "requestClass": "orderWrite",
+    "budgetMs": 20000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/api/orders-history",
+    "requestClass": "read",
+    "budgetMs": 20000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/api/%68istory",
+    "requestClass": "read",
+    "budgetMs": 20000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/api/history/../orders",
+    "requestClass": "history",
+    "budgetMs": 30000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/markets",
+    "requestClass": "discovery",
+    "timeoutMs": 1,
+    "budgetMs": 1
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/markets",
+    "requestClass": "discovery",
+    "timeoutMs": 20000,
+    "budgetMs": 20000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/markets",
+    "requestClass": "discovery",
+    "timeoutMs": 90000,
+    "budgetMs": 90000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/markets",
+    "requestClass": "discovery",
+    "timeoutMs": 0,
+    "budgetMs": 60000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/markets",
+    "requestClass": "discovery",
+    "timeoutMs": 4294967295,
+    "budgetMs": 2147483647
+  },
+  {
+    "method": "GET",
+    "url": "https:///history",
+    "requestClass": "read",
+    "budgetMs": 20000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/\u212aLINE",
+    "requestClass": "read",
+    "budgetMs": 20000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/api/v3/allOrders",
+    "requestClass": "history",
+    "budgetMs": 30000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/api/v3/klines",
+    "requestClass": "history",
+    "timeoutMs": 20000,
+    "budgetMs": 20000
+  }
+]

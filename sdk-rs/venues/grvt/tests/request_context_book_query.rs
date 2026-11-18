@@ -187,7 +187,6 @@ fn no_io(actions: &[Action]) {
         Action::Http(_)
             | Action::Sign { .. }
             | Action::SignedOutbound { .. }
-            | Action::SignPayload { .. }
             | Action::WsConnect { .. }
             | Action::WsSend { .. }
     )));
@@ -547,7 +546,14 @@ fn preparation_refusal(reason: Error, kind: ErrorKind) {
     );
     let actions = e.drain_actions().collect::<Vec<_>>();
     let error = native_error(&actions, kind);
-    assert_eq!(error.message, "preparation refused");
+    assert_eq!(
+        error.message,
+        if kind == ErrorKind::Timeout {
+            "preparation refused (class=orderRead budget=20000ms elapsed=1ms)"
+        } else {
+            "preparation refused"
+        }
+    );
     assert_eq!(error.retry_after_ms, Some(17.));
     assert_eq!(actions.iter().filter(|a| matches!(a, Action::ManagedHttp(a) if matches!(&**a,HttpAction::Cancel { preparation:p,signing:None } if *p==preparation))).count(), 1);
     e.http_preparation_failed(NOW + 2., preparation, reason, VenueError::new("duplicate"));

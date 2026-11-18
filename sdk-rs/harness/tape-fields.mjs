@@ -20,7 +20,7 @@ adjustMmrLevConstant adl adlRankIndicator af af1 afterCommand agentAccountId age
 aggregatedQuantity aid algoClOrdId algoId algoOrderId algoStatus algoType algo_order_id algo_status
 algo_type algorithm alias alias_to allTime allowTrailingStop allowances allowedSelfTradePreventionModes
 altname amendAllowed amendPrice amend_id amount amount24 amountScale ap apiAllowed apiKey apiKeyIndex
-apiMakerFeeRate apiPassphrase apiSecret apiStateClose apiStateOpen apiTakerFeeRate apiVersion api_fee
+apiMakerFeeRate apiPassphrase apiSecret apiStateBuy apiStateClose apiStateOpen apiTakerFeeRate apiVersion api_fee
 api_key api_version applicationId applyMaxToMarket applyMinToMarket appraisal approval_expiry approved
 approved_integrators approximate_quote_24h_volume archived arg args ask ask1 ask1Price ask1Size askId
 askLimitPriceRate askMultiplierDown askMultiplierUp askNotional askPr askPrice askPx askQty askRp askSize
@@ -285,7 +285,7 @@ riseFallRatesOfTimezone riseFallValue riskBaseVol riskId riskIncrImr riskIncrMmr
 riskLimitConfig riskLimitCustom riskLimitMode riskLimitRate riskLimitType riskLimitValue riskLimits
 riskLimitsV2 riskLongShortSwitch riskParameters riskStep riskTip risk_free_rate ro role rootAlgoOrderId
 rootSymbol root_algo_order_id rose rows rp rpcUrl rpiMinLevel rpiMinPxBand rpi_fee ruleType rwaMarketType s
-s1 sCode sMsg sa salsadex salt sas secondary secondary_key secondary_secret seconds secret selector
+s1 sCode sMsg sa salt sas secondary secondary_key secondary_secret seconds secret selector
 sellLimit sellLimitPriceRatio sellMax sellMin sellPriceLowerLimitPct sell_volume_24h_b sell_volume_24h_q
 send sendStatus separatedMode separatedType seq seqId sequence sequenceNo sequence_num sequence_number
 series seriesColor seriesId seriesSlug seriesType serverTime session sessionAvgPrice sessionToken session_id

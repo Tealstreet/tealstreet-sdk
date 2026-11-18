@@ -391,3 +391,18 @@ fn a_provider_refusal_sends_no_account_read_and_reports_no_auth() {
         "a provider refusal is not auth evidence"
     );
 }
+
+#[test]
+fn an_orders_cursor_is_the_ord_id_even_on_a_triggered_row() {
+    let mut cycle = Cycle::started(false);
+    let page = full_orders_page(1).replace("\"ordId\"", "\"algoId\":\"777\",\"ordId\"");
+    cycle.answer("orders-pending", &page, 5.0);
+    assert!(
+        cycle
+            .requests
+            .iter()
+            .any(|r| r.url.contains("orders-pending") && r.url.contains("after=100")),
+        "{:?}",
+        cycle.urls()
+    );
+}

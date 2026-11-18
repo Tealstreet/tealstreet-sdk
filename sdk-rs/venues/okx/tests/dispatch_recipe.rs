@@ -1,5 +1,6 @@
 //! Component vectors through the injected provider, not production adoption.
 use safe_cex_crypto::signer::LocalSigner;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::signing::{Identity, Operation, PayloadPart, SignRequest};
 use safe_cex_engine::{
     Action, Command, Cx, Engine, Event, Method, Response, SocketId, TimerId, Venue,
@@ -19,7 +20,7 @@ impl Venue for Probe {
             let socket = cx.connect(self.origin.clone());
             cx.send_signed(
                 socket,
-                String::new(),
+                ControlFrame::authentication(String::new()),
                 Box::new(WsLogin::new(self.identity.clone(), self.origin.clone())),
             );
         } else {
@@ -194,6 +195,6 @@ fn ws_uses_send_time_seconds_and_base64_without_moving_raw_time() {
         .unwrap();
     assert_eq!(
         text,
-        r#"{"op":"login","args":[{"apiKey":"test-key","passphrase":"test-passphrase","timestamp":"1234567890","sign":"qf8dggkdwH7IVTM6AIiNv9i1NS6Boqw3+pNUhrOWjWQ="}]}"#
+        r#"{"op":"login","args":[{"apiKey":"test-key","passphrase":"test-passphrase","timestamp":1234567890,"sign":"qf8dggkdwH7IVTM6AIiNv9i1NS6Boqw3+pNUhrOWjWQ="}]}"#
     );
 }

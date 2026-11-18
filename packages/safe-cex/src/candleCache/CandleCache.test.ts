@@ -1,10 +1,11 @@
 import type { Candle, Timeframe } from '../types';
+import type { CandleCacheSparseChunk } from './types';
 
 import { describe, expect, it, vi } from 'vitest';
 
 import { getCandleStartTime } from '../utils/getCandleStartTime';
-import { CandleCache, cleanCandles, fetchOHLCVWithExchange, getCandleCacheKey } from './CandleCache';
 import { MemoryCandleCacheBackend } from './backends/MemoryCandleCacheBackend';
+import { CandleCache, cleanCandles, fetchOHLCVWithExchange, getCandleCacheKey } from './CandleCache';
 
 const createCandle = (timestamp: number): Candle => ({
   timestamp,
@@ -15,7 +16,8 @@ const createCandle = (timestamp: number): Candle => ({
   volume: 1000,
 });
 
-const alignTimestamp = (timestamp: number, interval: Timeframe): number => getCandleStartTime(interval, timestamp / 1000) * 1000;
+const alignTimestamp = (timestamp: number, interval: Timeframe): number =>
+  getCandleStartTime(interval, timestamp / 1000) * 1000;
 
 describe('CandleCache', () => {
   it('cleans duplicate candles by timestamp', () => {
@@ -174,7 +176,7 @@ describe('CandleCache', () => {
         name: 'bitrue',
         fetchOHLCV,
         callMethodInWorker,
-      } as any,
+      },
       symbol: 'BTCUSDT',
       interval,
       fromMs: 1700000000000,
@@ -265,15 +267,16 @@ describe('CandleCache', () => {
     vi.useFakeTimers();
 
     const interval: Timeframe = '5m';
+    const loadAllChunks = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<Map<number, CandleCacheSparseChunk>>(() => {}))
+      .mockResolvedValueOnce(new Map());
     const cache = new CandleCache({
       backendReadMode: 'hydrate-once',
       hydrationTimeoutMs: 10,
       maxConcurrentHydrations: 1,
       backend: {
-        loadAllChunks: vi
-          .fn()
-          .mockImplementationOnce(() => new Promise<Map<number, any>>(() => {}))
-          .mockResolvedValueOnce(new Map()),
+        loadAllChunks,
         persistChunks: vi.fn().mockResolvedValue(undefined),
       },
     });
@@ -302,8 +305,7 @@ describe('CandleCache', () => {
     await expect(firstFetch).resolves.toEqual([]);
     await expect(secondFetch).resolves.toEqual([]);
 
-    const backend = (cache as any).backend;
-    expect(backend.loadAllChunks).toHaveBeenCalledTimes(2);
+    expect(loadAllChunks).toHaveBeenCalledTimes(2);
 
     vi.useRealTimers();
   });
@@ -319,13 +321,11 @@ describe('CandleCache', () => {
     const offset = candleIndex % chunkSize;
     const staleCandle = { ...createCandle(baseTime), close: 101 };
     const freshCandle = { ...createCandle(baseTime), close: 109 };
-    const staleChunk = new Array(chunkSize);
+    const staleChunk = new Array<Candle | undefined>(chunkSize);
     staleChunk[offset] = staleCandle;
 
-    let resolveHydration!: (chunks: Map<number, any>) => void;
-    const hydration = new Promise<Map<number, any>>((resolve) => {
-      resolveHydration = resolve;
-    });
+    const { promise: hydration, resolve: resolveHydration } =
+      Promise.withResolvers<Map<number, CandleCacheSparseChunk>>();
     const cache = new CandleCache({
       chunkSize,
       hydrationTimeoutMs: 1,
@@ -374,7 +374,7 @@ describe('CandleCache', () => {
         name: 'binance',
         fetchOHLCV,
         callMethodInWorker: vi.fn(),
-      } as any,
+      },
       symbol: 'BTCUSDT',
       interval: '5m',
       fromMs: 1700000000000,
@@ -534,5 +534,61 @@ describe('CandleCache calendar candles', () => {
 
     const cached = cache.getCachedCandles(cacheKey, interval, utc(2026, 10, 8), nowMs, 10, nowMs);
     expect(cached.contiguousBehindCandles.map((candle) => candle.timestamp)).toEqual([closed]);
+  });
+});
+
+describe('CandleCache forming bar', () => {
+  const interval: Timeframe = '1m';
+  const minute = 60_000;
+  const cacheKey = getCandleCacheKey('binance', 'BTCUSDT', interval);
+  const barStart = alignTimestamp(1700000000000, interval);
+  /** A chart's getBars, a footprint and a module, each asking up to now. */
+  type Fetcher = (opts: { from?: number; symbol: string }) => Promise<Candle[]>;
+  const askUpToNow = (cache: CandleCache, nowMs: number, fetcher: Fetcher) =>
+    cache.fetch({
+      cacheKey,
+      interval,
+      fromMs: barStart - 2 * minute,
+      toMs: nowMs,
+      limit: 10,
+      nowMs,
+      fetcher: (opts) => fetcher({ ...opts, symbol: 'BTCUSDT' }),
+    });
+
+  it('repeat calls inside one minute share one forming-bar read, and the next bar is read again', async () => {
+    const cache = new CandleCache();
+    const fetcher = vi.fn(async (opts: { from?: number }) =>
+      [barStart - 2 * minute, barStart - minute, barStart].filter((t) => t >= (opts.from ?? 0)).map(createCandle),
+    );
+    await askUpToNow(cache, barStart + 1_000, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    // The closed bars are cached; only the forming bar remains, and it is read once.
+    const repeats = await Promise.all([1_500, 2_000, 3_000].map((at) => askUpToNow(cache, barStart + at, fetcher)));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[1][0]).toMatchObject({ from: barStart });
+    for (const candles of repeats) expect(candles.map((c) => c.timestamp).at(-1)).toBe(barStart);
+    await askUpToNow(cache, barStart + 5_500, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    // Past the memo window it is read afresh; once the bar closes, the next one is new.
+    await askUpToNow(cache, barStart + 7_000, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    await askUpToNow(cache, barStart + minute + 500, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it('a failed forming-bar read is not shared', async () => {
+    const cache = new CandleCache();
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce([createCandle(barStart - 2 * minute), createCandle(barStart - minute)])
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValueOnce([createCandle(barStart)]);
+    await askUpToNow(cache, barStart + 1_000, fetcher);
+    await expect(askUpToNow(cache, barStart + 1_500, fetcher)).rejects.toThrow('timeout');
+    const after = await askUpToNow(cache, barStart + 2_000, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(after.map((c) => c.timestamp).at(-1)).toBe(barStart);
   });
 });

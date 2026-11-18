@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:03:13.398Z",
+  "endpoint": "/v5/position/list?category=linear&settleCoin=USDT",
+  "http_status": 401,
+  "body": "",
+  "expect": {
+    "kind": "authInvalid",
+    "outcome": null,
+    "path": "read"
+  }
+}

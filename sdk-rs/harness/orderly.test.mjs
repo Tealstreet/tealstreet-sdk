@@ -40,7 +40,7 @@ const connect = (tape, url = publicUrl, received = []) =>
   );
 
 test('every Orderly broker selects one frozen comparator and keeps its own Rust name', () => {
-  assert.equal(Object.keys(ORDERLY_BROKERS).length, 6);
+  assert.equal(Object.keys(ORDERLY_BROKERS).length, 4);
   for (const name of Object.keys(ORDERLY_BROKERS)) {
     const broker = venueOf(name);
     assert.equal(broker.rust, name);
@@ -52,7 +52,7 @@ test('every Orderly broker selects one frozen comparator and keeps its own Rust 
     assert.equal(broker.compareWriteOrder, true);
     assert.equal(broker.compareClientIds, true);
   }
-  assert.equal(venue.ts.name, 'tealstreet-dex');
+  assert.equal(venue.ts.name, 'woofi');
   const exchange = { publicWebsocket: {} };
   venue.configureTs(exchange);
   assert.equal(exchange.publicWebsocket.replaySnapshots, true);

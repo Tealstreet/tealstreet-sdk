@@ -19,7 +19,7 @@ export const validateBinanceRequest = ({ method, url, body, headers = {} }) => {
   const fields = Object.fromEntries((Array.isArray(headers) ? headers : Object.entries(headers))
     .map(([key, value]) => [key.toLowerCase(), String(value)]));
   if (body !== undefined && body !== null && body !== '') throw new Error('Binance request parameters must be in the URL');
-  if (publicPaths.test(parsed.pathname)) {
+  if (publicPaths.test(parsed.pathname) || /^\/eapi\/v1\/(?:ticker|mark)$/.test(parsed.pathname)) {
     if (fields['x-mbx-apikey'] || parsed.searchParams.has('signature')) throw new Error('Binance public request leaked credentials');
     return;
   }
@@ -204,6 +204,21 @@ export const prepareBinanceSpotPrivate = (exchange) => {
 export const prepareBinanceSpot = (exchange, WebSocket) => {
   prepareBinanceSpotPublic(exchange, WebSocket);
   prepareBinanceSpotPrivate(exchange);
+};
+
+/** Replay PM's real-time quote feed through the reference's existing handlers.
+ * Derive the subscription from its own seeded catalogue, never Rust output.
+ * Keep each symbol visible to strict subscription comparison.
+ */
+export const prepareBinancePmPublic = (exchange) => {
+  const feed = exchange.publicWebsocket;
+  feed.onOpen = () => {
+    if (feed.isDisposed) return;
+    const params = exchange.store.markets.map((market) => `${market.symbol.toLowerCase()}@bookTicker`);
+    if (params.length) feed.send(JSON.stringify({ id: 1, method: 'SUBSCRIBE', params }));
+    feed.resetOrderbook();
+    feed.subscribe();
+  };
 };
 
 // executionReport.p is the resting limit, L is this execution's price.

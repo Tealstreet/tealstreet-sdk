@@ -1,8 +1,10 @@
 import * as Sentry from '@sentry/bun';
 
+import { redactDiagnosticData } from './diagnosticRedaction';
+
 import { RESTRICTIVE_SENTRY_DATA_COLLECTION } from './dataCollection';
 import { SERVICE_DROPPED_INTEGRATIONS } from './integrations';
-import { scrub, scrubString } from './scrub';
+import { boundServiceData } from './scrub';
 
 /**
  * Sentry for the Bun edge services (`exchange-server`, `candle-server`).
@@ -44,11 +46,28 @@ export function isServiceSentryEnabled(): boolean {
 export function initServiceSentry({ dsn, service, release, environment, tags = {} }: ServiceSentryOptions): boolean {
   if (!dsn || initialised) return initialised;
 
+  const exchange = service === 'exchange-server' || service === 'exchange-gateway';
+  const label = (value: string | undefined): string | undefined => {
+    const trimmed = value?.trim();
+    return trimmed && !['undefined', 'null', 'unknown'].includes(trimmed.toLowerCase()) ? trimmed : undefined;
+  };
+  const configuredBox = exchange ? label(process.env.TEALSTREET_BOX) : undefined;
+  const box = configuredBox && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(configuredBox) ? configuredBox : undefined;
+  const imageRelease = exchange ? (label(release) ?? label(process.env.TEALSTREET_RELEASE)) : release;
+  const scopeTags: Record<string, string> = { ...tags, service };
+  if (exchange) {
+    delete scopeTags.region;
+    delete scopeTags.box;
+    if (box) scopeTags.box = box;
+  }
+
   Sentry.init({
     dsn,
-    release,
+    // An explicit empty release stops the SDK's SENTRY_RELEASE/build inference.
+    release: exchange ? (imageRelease ?? '') : imageRelease,
+    serverName: exchange ? (box ?? '') : undefined,
     environment,
-    initialScope: { tags: { ...tags, service } },
+    initialScope: { tags: scopeTags },
 
     // These processes hold users' exchange credentials and act on their
     // accounts. Keep the restrictive v10 baseline explicit: Sentry v11
@@ -59,8 +78,8 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
     /**
      * The default integration set is the leak, not the events.
      *
-     * `Console` turns every `console.error` into a breadcrumb — and the alert
-     * path logs its own unscrubbed detail line before deciding anything.
+     * `Console` turns every `console.error` into a breadcrumb, duplicating
+     * the alert path even though its diagnostic detail is already scrubbed.
      * `Http` / `NodeFetch` / `Fetch` breadcrumb outgoing request URLs, and a signed venue
      * REST call carries the API key and signature in its QUERY STRING;
      * `RequestData` is what lifts that query string onto an event.
@@ -75,27 +94,80 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
      * timed out`, every few seconds per session) reaches Sentry exactly that
      * way. That is the flood this package exists to bound, billed per event.
      */
-    integrations: (defaults) =>
-      defaults.filter((integration) => !DROPPED_INTEGRATIONS.has(integration.name)),
+    integrations: (defaults) => {
+      const retained = defaults.filter((integration) => !DROPPED_INTEGRATIONS.has(integration.name));
+      if (!exchange) return retained;
+      const identity: (typeof defaults)[number] = {
+        name: 'ServiceBoxIdentity',
+        beforeSetup(client) {
+          // Bun replaces blank serverName; clear it before any integration starts a session.
+          Object.assign(client.getOptions(), { serverName: box ?? '', release: imageRelease });
+          client.on('beforeSendSession', (session) => {
+            if ('aggregates' in session) {
+              session.attrs = { ...session.attrs, release: imageRelease };
+            } else session.release = imageRelease;
+          });
+          client.on('beforeEnvelope', (envelope) => {
+            for (let i = envelope[1].length - 1; i >= 0; i--) {
+              const [header, payload] = envelope[1][i];
+              // Only these payload types have identity normalization.
+              // Normalize any additional type before allowing it, including tracing.
+              if (!['event', 'session', 'sessions', 'trace_metric', 'log'].includes(header.type)) {
+                envelope[1].splice(i, 1);
+                continue;
+              }
+              // Sessions require a release; never send a caller's inferred fallback instead.
+              if (!imageRelease && ['session', 'sessions'].includes(header.type)) {
+                envelope[1].splice(i, 1);
+                continue;
+              }
+              if (header.type !== 'trace_metric' && header.type !== 'log') continue;
+              // Scope attributes are merged after beforeSendMetric/beforeSendLog.
+              const container = payload as { items: { attributes: Record<string, unknown> }[] };
+              for (const { attributes } of container.items) {
+                delete attributes['server.address'];
+                delete attributes['sentry.release'];
+                delete attributes.region;
+                delete attributes.box;
+                if (box) {
+                  attributes['server.address'] = { type: 'string', value: box };
+                  attributes.box = { type: 'string', value: box };
+                }
+                if (imageRelease) attributes['sentry.release'] = { type: 'string', value: imageRelease };
+              }
+            }
+          });
+        },
+      };
+      return [identity, ...retained];
+    },
 
     beforeSend(event) {
-      for (const exception of event.exception?.values ?? []) {
-        if (exception.value) exception.value = scrubString(exception.value);
+      const safe = redactDiagnosticData(event);
+      if (!safe || typeof safe !== 'object' || Array.isArray(safe)) return null;
+      if (safe.extra) safe.extra = boundServiceData(safe.extra) as Record<string, unknown>;
+      if (safe.contexts) safe.contexts = boundServiceData(safe.contexts) as typeof safe.contexts;
+      // Keep only the explicit box identity, never an SDK-inferred container hostname.
+      delete safe.server_name;
+      if (exchange) {
+        if (box) safe.server_name = box;
+        if (imageRelease) safe.release = imageRelease;
+        else delete safe.release;
+        safe.tags = { ...safe.tags };
+        // CONNECT_REGION can describe legacy routing, so it is not a box-location fact.
+        delete safe.tags.region;
+        delete safe.tags.box;
+        if (box) safe.tags.box = box;
       }
-      if (event.message) event.message = scrubString(event.message);
-      if (event.extra) event.extra = scrub(event.extra) as Record<string, unknown>;
-      if (event.contexts) event.contexts = scrub(event.contexts) as typeof event.contexts;
-      // Container hostnames are shard identifiers, not useful, and they change
-      // every deploy.
-      delete event.server_name;
-      return event;
+      return safe;
     },
 
     // Belt and braces: any breadcrumb an integration we did not drop produces.
     beforeBreadcrumb(breadcrumb) {
-      if (breadcrumb.message) breadcrumb.message = scrubString(breadcrumb.message);
-      if (breadcrumb.data) breadcrumb.data = scrub(breadcrumb.data) as Record<string, unknown>;
-      return breadcrumb;
+      const safe = redactDiagnosticData(breadcrumb);
+      if (!safe || typeof safe !== 'object' || Array.isArray(safe)) return null;
+      if (safe.data) safe.data = boundServiceData(safe.data) as Record<string, unknown>;
+      return safe;
     },
   });
 

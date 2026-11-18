@@ -280,7 +280,7 @@ fn cleanup(
 fn unsigned_headers() -> Vec<(&'static str, String)> {
     vec![
         ("X-SOURCE-KEY", "Tealstreet".into()),
-        ("Content-Type", "application/json, charset=utf-8".into()),
+        ("Content-Type", "application/json; charset=utf-8".into()),
     ]
 }
 fn release(
@@ -574,13 +574,13 @@ fn real_local_provider_preserves_primary_secondary_wire_and_exact_codec() {
             )
         };
         assert_eq!(request.method, Method::Get);
-        assert_eq!(request.url, format!("{URL}?signature={mac}&timestamp=1000"));
+        assert_eq!(request.url, format!("{URL}?timestamp=1000&signature={mac}"));
         assert_eq!(
             request.headers,
             vec![
                 ("X-SOURCE-KEY", "Tealstreet".into()),
                 ("X-BX-APIKEY", key.into()),
-                ("Content-Type", "application/json, charset=utf-8".into())
+                ("Content-Type", "application/json; charset=utf-8".into())
             ]
         );
         assert_eq!((request.body.as_ref(), request.route), (None, None));

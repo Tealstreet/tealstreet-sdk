@@ -6,6 +6,43 @@ patterns are in [`docs/plans/RUST_REWRITE.md`](../docs/plans/RUST_REWRITE.md).
 
 ## Crates
 
+### Host ownership observation and teardown
+
+`EngineHost.algosRunning` is a nonterminal ownership observation: a retired or
+unavailable owner returns false without failing the engine, freeing resources,
+settling commands or emitting `onDead`. Normal account teardown can therefore
+observe status and dispose once, without manufacturing an engine death. Retired
+cleanup sends no algo cancellation; already-dispatched writes keep their unknown
+outcome and identity when normal disposal settles them.
+
+Real algo operations, nuke/stop-all, timer execution, commands and I/O still use
+the strict owner guard. A retired or throwing owner prevents execution and fails
+the host. Native data reads retain their execution fence; observing status is
+not permission to resume work or rebind an old host.
+
+Local worker TWAP restore ownership is optional for compatibility with existing
+JS hosts. `EngineHost.algoStart(accountName, twapOwner?)` accepts a trusted
+`{ ownerId: string, generation: number }` snapshot (nonempty owner and a safe,
+nonnegative integer generation). It calls the additive WASM entry point
+`algoStartOwned(accountName, twapOwnerJson, now, wall)`; the JSON contains exactly
+`ownerId` and `generation`. Existing three-argument WASM `algoStart` remains
+unchanged and retains the prior account-name-only restore behavior when the
+owner parameter is absent. This compatibility exception is interim; explicit
+null/invalid ownership never selects it. Bound restores require both original
+persisted tags; untagged saved rows do not resume.
+
+The native server initially binds TWAPs to the verified registry identity digest when present,
+otherwise the authenticated user, with a generation derived from that binding.
+Same-owner reconnects, resumes and signing handovers keep the current generation,
+so the approved 60-second COSIGNED resume
+window keeps running TWAPs. Fresh bindings for the same authenticated identity
+use the same initial generation across account rebuilds, restarts and box moves.
+An in-place authenticated owner change advances the binding's generation and
+drops the old owner's pending slices, even when returning to an earlier owner;
+a retired generation is never reinstated on that binding.
+Bound restores refuse pre-release-8 untagged rows with a visible error; see the
+[TWAP ownership contract](algos/twap/README.md) for the exact messages.
+
 | Crate | Purpose |
 | --- | --- |
 | `safe-cex-crypto` | Signing primitives: HMAC, Ed25519, P-256, EIP-712, Starknet SNIP-12, Lighter Poseidon2/Schnorr, zkLink |
@@ -28,6 +65,99 @@ cargo build --locked --workspace --target wasm32-unknown-unknown
 
 CI runs all of these (`.github/workflows/rust.yml`).
 
+## WebSocket control and mutation frames
+
+`Cx::send` and `Cx::send_signed` consume `ControlFrame`. Venue encoding helpers
+declare subscriptions (including unsubscriptions and subscription snapshots),
+session authentication or heartbeats with `ControlFrame::subscription`,
+`ControlFrame::authentication` or `ControlFrame::heartbeat`. These declarations
+are protocol contracts: neither the engine nor the host infers authority from
+JSON method strings. Signed control recipes must preserve the declared purpose.
+Raw text and `WebSocketWrite` cannot enter either control-send API.
+
+Order and setting mutations use `Cx::websocket_write` with a live command
+Mutation Context, followed by `Cx::send_websocket_write`. The host must enable
+the typed write handoff and consume its single-use binding through
+`Engine::claim_websocket_write` immediately before the physical send. The shared
+write lifecycle reports transport-neutral timeout and unproven-outcome errors.
+
+## Bybit ticker reference freshness
+
+Bybit derivatives omit unchanged fields from ticker deltas. Only references
+established by the current socket's snapshot lineage, still matching the store,
+are confirmed by that symbol's subsequent deltas. Reconnects, malformed or
+untyped ticker frames, and explicitly unknown references retire that proof.
+REST seeds and other symbols' traffic cannot supply it. The protective-amend
+freshness limit remains five seconds without confirmation; unknown prices stay
+unknown. Spot, options and Hyro retain their existing snapshot/observation rules.
+
+## Browser request-failure diagnostics
+
+The JS host emits `http.request_failed` at Debug for failed managed HTTP work,
+including engine deadline refusals during preparation or after release. The native
+notice carries only its exact opaque request ID; the JS host joins the original
+resource before cancellation, without inferring a timeout from elapsed time.
+Facts contain only a closed HTTP method, phase, failure kind and a path template:
+fixed API vocabulary survives, all other segments become `:segment`, at most eight
+segments plus `:more`. Origins, queries, fragments, bodies and headers are excluded.
+The SDK adds the actual venue; consumers may retain a bounded recent breadcrumb.
+These diagnostics neither retry requests nor add a second user-facing error.
+
+Post-release JS HTTP failures retain a closed cause label in the existing engine
+error string (timeout, disconnect, direct-fetch, response-decode, aborted, disposed,
+tunnel or unknown). Raw errors, configs, URLs and nested causes never cross that
+boundary; group failures are classified only after every physical handoff.
+This diagnostic summary does not alter native error kind, retry or owner policy.
+
+Hyperliquid `/info` quota admission tags a proven pre-send deadline refusal with
+closed cause `info_admission` and fixed title `HTTP admission deadline expired`.
+It retains Timeout/NotSent and the original deadline, budget, retry and delivery.
+Generic relay readiness failures and errors after handoff keep their existing paths;
+`phase=preparing` alone does not prove an admission failure.
+
+## Startup discovery deadlines
+
+Before both markets and tickers load, credential-free Background Reads using the
+standard 20 s policy receive a 90 s total deadline: 60 s for discovery plus a
+30 s transport-readiness allowance. The host caps readiness within that original
+deadline; it never resets the clock after readiness. Credentialed reads, caller
+commands, writes, explicit venue timeouts and reads after discovery keep their
+existing bounds.
+
+## HTTP request classes
+
+The TS HOW package's `requestBudget.ts` defines the parity reference: catalogue
+reads have 60 s, history pages 30 s, and order reads, writes and other reads 20 s.
+Engine history queries (fills, order history and income) use 30 s. Candles,
+public trades, live account/order reads and mutations use 20 s. Background
+catalogue/metadata reads alone use discovery: markets, instruments, contracts,
+symbol/asset/product catalogues and closed catalogue RPC kinds. Discovery keeps
+60 s, or the existing 90 s startup discovery/readiness allowance.
+
+Background issuance reserves a bounded catalogue ceiling while the semantic
+request is not yet available. The shared managed-HTTP boundary resolves the
+request and caps its physical deadline from the original Context issuance time.
+Depth/order books, tickers/market summaries, trades, candle polls, funding/mark
+prices and unknown public read kinds use 20 s on every family. Catalogue matching
+uses closed path components/RPC discriminators, never query parameter values.
+Explicit nonstandard venue bounds and shorter Plan/caller caps still win.
+Re-preparation and retry cannot restart the original class deadline.
+
+Native hosts query `http_request_class` only for an exact pending preparation.
+Browser preparation actions carry a compact `u8` class outside signed packet
+bytes (discovery 0, orderRead 1, orderWrite 2, history 3, read 4). The JS host
+maps that code to a closed label and formats timeout diagnostics. Native-only
+class names, legacy path classification and diagnostic formatting are excluded
+from wasm; engine issuance retains numeric bounded deadlines. TS conservatively
+labels non-GET methods `orderWrite` regardless of hints while honoring the
+explicit remaining engine deadline. Labels grant no send or retry authority.
+Timeouts name class, budget and elapsed milliseconds, including host diagnostics
+when engine expiry wins the timer race. HOW readiness remains capped at 30 s
+inside the same original deadline. Legacy GET paths use exact catalogue/history/
+order components; unknown paths use the 20 s read default and non-GET requests
+conservatively use the short write default. Explicit transport deadlines win.
+No server, retry, outcome-unknown or socket-silence policy changes are needed.
+
 ## Host entropy
 
 Core construction is explicit: `Engine::new(venue, Some(entropy))` returns a
@@ -46,6 +176,9 @@ nonces, Coinbase JWTs or other request-signing randomness. No provider or seed i
 serialized into account options or commands. Both raw WASM setters and native
 setters reject replacement after startup. Provider failures stop ID/signature
 creation before send; retry jitter alone uses the nominal delay on failure.
+Before startup, replacing or removing the signing provider retires its queued
+signing and unclaimed signed packets with `notSent`; old completions cannot
+release them. Reinstalling the same provider handle preserves pending work.
 
 Rust correctness and performance replays each install an isolated identity
 stream from the exact tape SHA-256. The landed Bitget SHA/domain/counter byte
@@ -55,6 +188,12 @@ its separate source. Test fixtures deliberately inject both sources through the
 `test-support` feature; production constructors have no implicit seeded mode.
 
 ## Account transport routing
+
+Hosted local setup captures `TrustedSignerState` after the registry consumes
+signing material. Required public wallet metadata remains in account options;
+opaque non-JSON setup facts travel with native `ServerConfig` and refuse a
+different venue. Client JSON cannot assert trusted derived-key facts. The same
+state accompanies both the admission probe and resident construction.
 
 Venues emit real URLs and logical socket roles; the core never chooses a proxy.
 `RustEngineExchange` applies the registered safe-cex transport through
@@ -137,6 +276,12 @@ selected time window so later depth resynchronizations remain reproducible.
 Legacy contract families stay filtered as in TypeScript. `Triggered` displays
 as Closed but remains nonterminal; a later native New update can reopen it.
 Public books request full depth and replace periodic snapshots.
+Kline subscription snapshots replay only wire rows 1 then 0, matching the legacy
+TS `listenOHLCV` callback; the remaining history is not replayed. Explicit
+incremental frames continue streaming; unclassified/backfill frames are refused.
+Candle timestamps remain in seconds.
+Each public frame parse failure emits a `stream.malformed` warning with
+the raw frame's byte count and wire `type` (`unknown` for unreadable JSON).
 
 Fills and order history use bounded symbol-scoped reads (up to 200 rows), public
 trades up to 1000; they do not claim exhaustive range history. Generic income

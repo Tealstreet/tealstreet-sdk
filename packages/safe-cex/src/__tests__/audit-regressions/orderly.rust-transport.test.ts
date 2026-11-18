@@ -41,7 +41,7 @@ const createBase = () => {
     webSocketHeaders: true,
     now: vi.fn(() => 42),
     request: vi.fn(async () => response),
-    connect: vi.fn(() => ({ send: vi.fn(), close: vi.fn() })),
+    connect: vi.fn<EngineHostTransport['connect']>(() => ({ send: vi.fn(), close: vi.fn() })),
     setTimeout: vi.fn(() => 123),
     clearTimeout: vi.fn(),
   } satisfies EngineHostTransport;
@@ -230,7 +230,7 @@ describe('Orderly Rust transport boundary', () => {
     }
   });
 
-  it.each<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])(
+  it.each<ExchangeName>(['kodiakfi', 'mode', 'what', 'woofi'])(
     '%s refuses unsupported order history filters before dispatching a command',
     async (name) => {
       const exchange = new RustEngineExchange(name, options(undefined, { publicDataOnly: true }), new DefaultStore());
@@ -250,12 +250,13 @@ describe('Orderly Rust transport boundary', () => {
       const exchange = new RustEngineExchange(name, options(undefined, { publicDataOnly: true }), new DefaultStore());
       adoptEngineCapabilities(exchange);
       try {
+        // Past the filter guard to the command, where a public-only account's history is not read.
         await expect(
           exchange.fetchHistoricalOrders({ symbol: 'BTCUSDC', from: 1000, to: 2000, limit: 5 }),
-        ).rejects.toThrow('engine is not started');
+        ).rejects.toThrow('fetchOrderHistory was not read');
         if (name === 'binance') {
           await expect(exchange.fetchHistoricalOrders({ orderId: '42', status: [OrderStatus.Closed] })).rejects.toThrow(
-            'engine is not started',
+            'fetchOrderHistory was not read',
           );
         }
       } finally {
@@ -266,7 +267,7 @@ describe('Orderly Rust transport boundary', () => {
 
   it('keeps direct request bytes and streams through the generic host', async () => {
     const { base } = createBase();
-    const transport = createEngineTransport('tealstreet-dex', options(), base);
+    const transport = createEngineTransport('woofi', options(), base);
     const result = await transport.request(signed());
     expect(base.request).toHaveBeenCalledExactlyOnceWith({ ...signed(), signal: expect.any(AbortSignal) });
     const chunks: number[] = [];
@@ -275,7 +276,7 @@ describe('Orderly Rust transport boundary', () => {
     transport.dispose?.();
   });
 
-  it.each<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])(
+  it.each<ExchangeName>(['kodiakfi', 'mode', 'what', 'woofi'])(
     '%s uses shared direct/proxy routes and keeps escaped queries and signed body lexemes exact', async (name) => {
       const { base } = createBase();
       base.request.mockResolvedValue({ status: 200, headers: '', body: new Uint8Array() } as never);
@@ -405,7 +406,13 @@ describe('Orderly Rust transport boundary', () => {
     for (const [url, channel, feed] of [[publicUrl, 'public', 'market'], [publicUrl, 'public', 'funding'], [privateUrl, 'private', 'account']] as const) {
       const handlers = { channel, context: { feed, recover: false }, onOpen: vi.fn(), onMessage: vi.fn(), onClose: vi.fn() };
       transport.connect(url, handlers);
-      expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers: {}, onMessage: expect.any(Function), onBinary: expect.any(Function) });
+      // Diagnostics wrap lifecycle callbacks; exact routing and event delivery remain the contract.
+      expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers: {}, onMessage: expect.any(Function), onBinary: expect.any(Function), onOpen: expect.any(Function), onClose: expect.any(Function) });
+      const forwarded = base.connect.mock.lastCall![1];
+      forwarded.onOpen();
+      forwarded.onClose(1006);
+      expect(handlers.onOpen).toHaveBeenCalledExactlyOnceWith();
+      expect(handlers.onClose).toHaveBeenCalledExactlyOnceWith(1006);
     }
     transport.dispose?.();
   });
@@ -447,16 +454,23 @@ describe('Orderly Rust transport boundary', () => {
     expect(base.connect).not.toHaveBeenCalled();
     const capable = createEngineTransport('mode', options(custom), base);
     capable.connect(url, handlers);
-    expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers, onMessage: expect.any(Function), onBinary: expect.any(Function) });
+    // Diagnostics wrap lifecycle callbacks without changing custom upgrade headers.
+    expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers, onMessage: expect.any(Function), onBinary: expect.any(Function), onOpen: expect.any(Function), onClose: expect.any(Function) });
+    const forwarded = base.connect.mock.lastCall![1];
+    forwarded.onOpen();
+    forwarded.onClose(1006);
+    expect(handlers.onOpen).toHaveBeenCalledExactlyOnceWith();
+    expect(handlers.onClose).toHaveBeenCalledExactlyOnceWith(1006);
     incapable.dispose?.();
     capable.dispose?.();
   });
 
-  it.each<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])(
+  it.each<ExchangeName>(['kodiakfi', 'mode', 'what', 'woofi'])(
     '%s native routing plan uses the same serializable HOW policy', (name) => {
       const plan = resolveEngineRoutingPlan(name, options(tealstreetTransport, { tealstreetTunnel: true }), origin);
+      // Was fsjnpy143pbz.asia (AWS) until AWS_EXIT.md step 3e.
       expect(plan.http).toMatchObject({ mode: 'how', prefix: '', authorize: false,
-        tunnelUrl: 'wss://fsjnpy143pbz.asia.tealstreet.io/tunnel' });
+        tunnelUrl: 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel' });
       expect(plan.ws).toEqual({ public: {}, private: {}, business: {} });
       expect(JSON.stringify(plan)).not.toContain('unused-test-secret');
     },

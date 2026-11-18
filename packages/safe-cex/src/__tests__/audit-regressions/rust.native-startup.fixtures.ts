@@ -15,6 +15,8 @@ export function installNativeStartupFrames(
   store: Store,
   native: () => Partial<StoreData> = () => ({}),
 ): void {
+  // Command fixtures do not sign; the real clock/signature controls live separately.
+  engine.syncHostTime ??= () => true;
   let started = false;
   let published: string | undefined;
   const start = engine.start.bind(engine);

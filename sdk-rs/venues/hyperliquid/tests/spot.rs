@@ -8,6 +8,7 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 use support::Plain;
+use support::prepared_now;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 10_000.0;
 
@@ -16,13 +17,16 @@ fn ready(private: bool) -> (Engine<Hyperliquid>, SocketId) {
     ready_with_policy(private, PublicFeedPolicy::Direct)
 }
 fn ready_with_policy(private: bool, policy: PublicFeedPolicy) -> (Engine<Hyperliquid>, SocketId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
-        public_data_only: !private,
-        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
-        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        ..Options::default()
-    }));
+    let mut e = support::private_engine(
+        Options {
+            public_data_only: !private,
+            key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            ..Options::default()
+        },
+        "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
+        true,
+    );
     e.set_public_feed_policy(policy).unwrap();
     e.start(1000.0);
     let r = take_http(&mut e);
@@ -297,7 +301,7 @@ fn spot_books_subscribe_all_tiers_and_append_only_worse_levels() {
         .drain_plain()
         .filter(|a| matches!(a, Action::WsSend { .. }))
         .count();
-    assert_eq!(subscriptions, 5);
+    assert_eq!(subscriptions, 6, "five depth tiers and the pair's trades");
     support::message(
         &mut e,
         s,
@@ -585,6 +589,27 @@ fn placed() -> (Engine<Hyperliquid>, SocketId) {
     (e, s)
 }
 #[test]
+fn an_order_the_store_has_lost_is_cancelled_by_its_id_and_symbol() {
+    let (mut e, _) = placed();
+    let symbol = e.store().order("101").unwrap().symbol.clone();
+    e.store_mut().remove_orders(&["101"]);
+    e.handle(
+        5000.0,
+        Event::Command(Command::CancelOrdersWithSymbols {
+            command: 2,
+            orders: vec![safe_cex_engine::model::CancelOrderRef {
+                id: "101".into(),
+                symbol,
+            }],
+        }),
+    );
+    let r = take_http(&mut e);
+    let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    assert_eq!(p["action"]["cancels"][0]["a"], 10001);
+    assert_eq!(p["action"]["cancels"][0]["o"], 101);
+}
+
+#[test]
 fn cancel_uses_the_same_shifted_native_asset_id_and_removes_acknowledged_order() {
     let (mut e, _) = placed();
     assert!(e.store().order("101").is_some());
@@ -615,10 +640,12 @@ fn amend_waits_for_cancel_then_places_with_new_client_id() {
         Event::Command(Command::AmendOrder {
             command: 2,
             id: "101".into(),
-            price: Some(0.00095),
+            price: Some(0.002),
             amount: Some(6000.0),
         }),
     );
+    let read = take_http(&mut e);
+    support::answer_order_status(&mut e, &read);
     let r = take_http(&mut e);
     acknowledge(
         &mut e,
@@ -642,7 +669,7 @@ fn amend_waits_for_cancel_then_places_with_new_client_id() {
     let w = &p["action"]["orders"][0];
     assert_eq!(w["a"], 10001);
     assert_eq!(w["s"], "6000");
-    assert_eq!(w["p"], "0.00095");
+    assert_eq!(w["p"], "0.002");
     assert_ne!(w["c"], "0x00000000000000000000000000000001");
 }
 #[test]
@@ -653,10 +680,12 @@ fn fill_during_amend_cancel_stops_the_replacement_and_deduplicates_executions() 
         Event::Command(Command::AmendOrder {
             command: 2,
             id: "101".into(),
-            price: Some(0.00095),
+            price: Some(0.002),
             amount: None,
         }),
     );
+    let read = take_http(&mut e);
+    support::answer_order_status(&mut e, &read);
     let r = take_http(&mut e);
     let fill = r#"{"channel":"userFills","data":{"isSnapshot":false,"fills":[{"coin":"@1","side":"B","px":"0.000937","sz":"1","time":5001,"tid":9,"oid":101}]}}"#;
     support::message(&mut e, s, 5001.0, fill);
@@ -800,6 +829,7 @@ fn spot_book_protocol_uses_native_endpoint_and_only_documented_precision_values(
                 None
             }
         })
+        .filter(|m| m["subscription"]["type"] == "l2Book")
         .collect::<Vec<_>>();
     assert_eq!(messages.len(), 5);
     assert_eq!(
@@ -850,12 +880,15 @@ fn positional_context_fallback_requires_a_complete_homogeneous_documented_array(
 }
 const MULTI_QUOTE_META: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"HYPE","index":150,"szDecimals":2},{"name":"USDT0","index":268,"szDecimals":2},{"name":"USDH","index":360,"szDecimals":2},{"name":"USDE","index":235,"szDecimals":2}],"universe":[{"name":"@207","tokens":[150,268],"index":207},{"name":"@232","tokens":[150,360],"index":232},{"name":"@255","tokens":[150,235],"index":255},{"name":"@107","tokens":[150,0],"index":107},{"name":"@200","tokens":[268,0],"index":200}]},[{"coin":"@255","midPx":"13","markPx":"13"},{"coin":"@107","midPx":"40","markPx":"40"},{"coin":"@207","midPx":"11","markPx":"11"},{"coin":"@232","midPx":"12","markPx":"12"},{"coin":"@200","midPx":"0.98","markPx":"0.98"}]]"#;
 fn custom_spot(meta: &str) -> (Engine<Hyperliquid>, SocketId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
-        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
-        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        ..Options::default()
-    }));
+    let mut e = support::private_engine(
+        Options {
+            key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            ..Options::default()
+        },
+        "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
+        true,
+    );
     e.start(1000.0);
     let r = take_http(&mut e);
     support::reply(&mut e, &r, 200, meta);
@@ -901,6 +934,7 @@ fn duplicate_base_tokens_keep_each_quote_symbol_and_native_action_identity() {
                     None
                 }
             })
+            .filter(|m| m["subscription"]["type"] == "l2Book")
             .collect::<Vec<_>>();
         assert_eq!(messages.len(), 5);
         assert!(messages.iter().all(|m| m["subscription"]["coin"] == coin));
@@ -1048,12 +1082,28 @@ fn invalid_spot_local_credentials_reject_before_io_and_loaded_state() {
         (TEST_SECRET, "invalid-wallet"),
         (" ", TEST_WALLET),
     ] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
-            secret: Some(secret.into()),
-            key: Some(key.into()),
-            application_id: Some(TEST_WALLET.into()),
-            ..Options::default()
-        }));
+        if secret != TEST_SECRET {
+            let policy = serde_json::from_str(r#"{"primary":{"source":"scalarOnly","signingAlgorithm":"secp256k1Digest","secretEncoding":"hex"}}"#).unwrap();
+            let error = safe_cex_crypto::signer::LocalSigner::from_json_with_facts(
+                serde_json::json!({"primary":{"secret":secret}}).to_string(),
+                policy,
+                false,
+            )
+            .err()
+            .expect("trusted scalar decode refuses before any engine I/O");
+            assert_eq!(error, safe_cex_engine::signing::SignError::InvalidRequest);
+            assert_eq!(error.to_string(), "Invalid signing request");
+            continue;
+        }
+        let mut e = support::private_engine(
+            Options {
+                key: Some(key.into()),
+                application_id: Some(TEST_WALLET.into()),
+                ..Options::default()
+            },
+            secret.into(),
+            true,
+        );
         e.start(1000.0);
         let actions = e.drain_plain().collect::<Vec<_>>();
         assert!(
@@ -1073,13 +1123,16 @@ fn invalid_spot_local_credentials_reject_before_io_and_loaded_state() {
 }
 #[test]
 fn spot_local_signer_identity_is_separate_from_main_wallet_and_vault() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
-        secret: Some(TEST_SECRET.into()),
-        key: Some(TEST_WALLET.to_uppercase()),
-        application_id: Some("0x0000000000000000000000000000000000000002".into()),
-        vault: Some("0x0000000000000000000000000000000000000003".into()),
-        ..Options::default()
-    }));
+    let mut e = support::private_engine(
+        Options {
+            key: Some(TEST_WALLET.to_uppercase()),
+            application_id: Some("0x0000000000000000000000000000000000000002".into()),
+            vault: Some("0x0000000000000000000000000000000000000003".into()),
+            ..Options::default()
+        },
+        TEST_SECRET.into(),
+        true,
+    );
     e.start(1000.0);
     let request = take_http(&mut e);
     support::reply(&mut e, &request, 200, META);
@@ -1109,14 +1162,14 @@ fn absent_spot_local_credentials_and_explicit_public_mode_stay_public() {
         Options::default(),
         Options {
             key: Some(TEST_WALLET.into()),
-            secret: Some(String::new()),
+            credentials: None,
             application_id: Some(TEST_WALLET.into()),
             ..Options::default()
         },
         Options {
             public_data_only: true,
             key: Some("bad-wallet".into()),
-            secret: Some("bad-secret".into()),
+            credentials: None,
             application_id: Some(TEST_WALLET.into()),
             ..Options::default()
         },
@@ -1377,15 +1430,15 @@ fn shared_spot_prices_preserve_direct_private_valuation_cadence_and_raw_holdings
 fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
     let (mut e, _) = ready(true);
     let now = 2000.;
-    e.drain_actions().for_each(drop);
+    prepared_now(&mut e).into_iter().for_each(drop);
     e.handle(
         now,
         Event::PollScaleChanged {
             scale: f64::INFINITY,
         },
     );
-    let stale: Vec<_> = e
-        .drain_actions()
+    let stale: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::ClearTimer { timer } => Some(timer),
             _ => None,
@@ -1401,7 +1454,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                 scale: interval / POLL_MS,
             },
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = prepared_now(&mut e).into_iter().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         let timers: Vec<_> = actions
             .iter()
@@ -1418,12 +1471,16 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     for timer in obsolete {
         e.handle(now, Event::TimerFired { timer });
-        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            !prepared_now(&mut e)
+                .into_iter()
+                .any(|a| matches!(a, Action::Http(_)))
+        );
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
-    let mut pending: Vec<_> = e
-        .drain_actions()
+    let mut pending: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -1443,7 +1500,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: f64::INFINITY,
         },
     );
-    e.drain_actions().for_each(drop);
+    prepared_now(&mut e).into_iter().for_each(drop);
     for _ in 0..12 {
         if pending.is_empty() {
             break;
@@ -1461,7 +1518,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                     },
                 },
             );
-            pending.extend(e.drain_actions().filter_map(|a| match a {
+            pending.extend(prepared_now(&mut e).into_iter().filter_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
             }));
@@ -1474,8 +1531,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: 10_000. / POLL_MS,
         },
     );
-    let resumed: Vec<_> = e
-        .drain_actions()
+    let resumed: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -1490,12 +1547,15 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
 }
 #[test]
 fn spot_open_orders_are_loaded_and_externally_canceled_orders_are_removed() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
-        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
-        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        ..Options::default()
-    }));
+    let mut e = support::private_engine(
+        Options {
+            key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            ..Options::default()
+        },
+        "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
+        true,
+    );
     e.start(1000.0);
     let r = take_http(&mut e);
     support::reply(&mut e, &r, 200, META);
@@ -1542,12 +1602,15 @@ fn spot_open_orders_are_loaded_and_externally_canceled_orders_are_removed() {
 }
 #[test]
 fn open_order_read_sent_before_a_full_fill_cannot_restore_the_order() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new_spot(Options {
-        key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
-        application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        ..Options::default()
-    }));
+    let mut e = support::private_engine(
+        Options {
+            key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            ..Options::default()
+        },
+        "0x0123456789012345678901234567890123456789012345678901234567890123".into(),
+        true,
+    );
     e.start(1000.0);
     let r = take_http(&mut e);
     support::reply(&mut e, &r, 200, META);
@@ -1673,7 +1736,7 @@ mod owned_nonpageable {
         assert!(marker.message.contains("INCOMPLETE"));
         assert!(marker.message.contains("Hyperliquid spot"));
         assert!(
-            matches!(marker.fields.as_slice(), [("command", Value::Num(owner))] if *owner == f64::from(command))
+            matches!(marker.fields.as_slice(), [("command", Value::Num(owner)), ("reason", Value::Str(reason))] if *owner == f64::from(command) && reason == "noNativeRead")
         );
     }
 
@@ -1681,7 +1744,7 @@ mod owned_nonpageable {
     fn history_has_owned_incomplete_coverage_even_with_cached_orders_and_error_log_level() {
         let (mut e, _) = placed();
 
-        e.drain_actions().for_each(drop);
+        prepared_now(&mut e).into_iter().for_each(drop);
         let before = e.store().orders().to_vec();
         assert!(
             !before.is_empty(),
@@ -1692,7 +1755,10 @@ mod owned_nonpageable {
         for (index, query) in queries().into_iter().enumerate() {
             let command = 100 + index as u32;
             e.handle(5000., Event::Command(Command::Query { command, query }));
-            incomplete(&e.drain_actions().collect::<Vec<_>>(), command);
+            incomplete(
+                &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+                command,
+            );
             assert_eq!(e.store().orders(), before);
             assert_eq!(e.store().balance(), &balance);
         }
@@ -1701,7 +1767,7 @@ mod owned_nonpageable {
     #[test]
     fn public_trade_refusal_is_typed_not_sent_with_original_text_and_no_coverage() {
         let (mut e, _) = placed();
-        e.drain_actions().for_each(drop);
+        prepared_now(&mut e).into_iter().for_each(drop);
         e.handle(
             5000.,
             Event::Command(Command::Query {
@@ -1712,7 +1778,7 @@ mod owned_nonpageable {
                 },
             }),
         );
-        let output: Vec<_> = e.drain_actions().collect();
+        let output: Vec<_> = prepared_now(&mut e).into_iter().collect();
         let [
             Action::Notice(Notice::CommandFailed {
                 command: 200,
@@ -1733,7 +1799,7 @@ mod owned_nonpageable {
     #[test]
     fn lookup_miss_remains_nondefinitive_without_a_history_marker_or_io() {
         let (mut e, _) = placed();
-        e.drain_actions().for_each(drop);
+        prepared_now(&mut e).into_iter().for_each(drop);
         e.handle(
             5000.,
             Event::Command(Command::Query {
@@ -1744,7 +1810,7 @@ mod owned_nonpageable {
                 },
             }),
         );
-        let output: Vec<_> = e.drain_actions().collect();
+        let output: Vec<_> = prepared_now(&mut e).into_iter().collect();
         let [
             Action::Notice(Notice::CommandDone {
                 command: 300,
@@ -1759,7 +1825,7 @@ mod owned_nonpageable {
     #[test]
     fn existing_local_lookup_hit_stays_separate_from_unavailable_history() {
         let (mut e, _) = placed();
-        e.drain_actions().for_each(drop);
+        prepared_now(&mut e).into_iter().for_each(drop);
         let cached = e.store().orders()[0].clone();
         let client_order_id = cached
             .client_order_id
@@ -1775,7 +1841,7 @@ mod owned_nonpageable {
                 },
             }),
         );
-        let output: Vec<_> = e.drain_actions().collect();
+        let output: Vec<_> = prepared_now(&mut e).into_iter().collect();
         let [
             Action::Notice(Notice::CommandDone {
                 command: 400,
@@ -1792,5 +1858,287 @@ mod owned_nonpageable {
         assert_eq!(result["order"]["id"], cached.id);
         assert!(result.get("definitive").is_none());
         assert_eq!(e.store().orders(), &[cached]);
+    }
+}
+#[test]
+fn spot_native_tier_with_a_wide_top_gap_keeps_its_tier() {
+    let (mut e, s) = ready(false);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "PURR/USDC".into(),
+        }),
+    );
+    e.drain_plain().for_each(drop);
+    // Coarse tier: every price a multiple of 10 ticks.
+    support::message(
+        &mut e,
+        s,
+        2100.0,
+        r#"{"channel":"l2Book","data":{"coin":"PURR/USDC","time":2100,"levels":[[{"px":"0.2","sz":"20"},{"px":"0.1999","sz":"30"},{"px":"0.1998","sz":"30"}],[{"px":"0.21","sz":"40"},{"px":"0.2101","sz":"50"},{"px":"0.2102","sz":"50"}]]}}"#,
+    );
+    // Native tier with a 5-tick top gap; the gap alone would read as the coarse tier.
+    support::message(
+        &mut e,
+        s,
+        2200.0,
+        r#"{"channel":"l2Book","data":{"coin":"PURR/USDC","time":2200,"levels":[[{"px":"0.2","sz":"2"},{"px":"0.19995","sz":"3"},{"px":"0.19993","sz":"3"}],[{"px":"0.21","sz":"4"},{"px":"0.21005","sz":"5"},{"px":"0.21007","sz":"5"}]]}}"#,
+    );
+    let book = e
+        .venue()
+        .books()
+        .find(|(s, _)| *s == "PURR/USDC")
+        .unwrap()
+        .1;
+    // Both tiers kept: three native levels plus the two deeper coarse levels.
+    assert_eq!(book.bids().len(), 5);
+    assert_eq!(book.asks().len(), 5);
+}
+
+#[test]
+fn a_watched_spot_pair_takes_last_from_trades_and_mid_price_from_mids() {
+    let (mut e, s) = ready(false);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "PURR/USDC".into(),
+        }),
+    );
+    assert!(e.drain_plain().any(|a| matches!(a, Action::WsSend { text, .. }
+        if text == r#"{"method":"subscribe","subscription":{"type":"trades","coin":"PURR/USDC"}}"#)));
+    support::message(
+        &mut e,
+        s,
+        2100.0,
+        r#"{"channel":"trades","data":[{"coin":"PURR/USDC","side":"A","px":"0.215","sz":"10","time":2100,"hash":"0x0","tid":1}]}"#,
+    );
+    support::message(
+        &mut e,
+        s,
+        2200.0,
+        r#"{"channel":"allMids","data":{"mids":{"PURR/USDC":"0.22"}}}"#,
+    );
+    let ticker = e.store().ticker("PURR/USDC").unwrap();
+    assert_eq!((ticker.last, ticker.mid_price), (0.215, Some(0.22)));
+}
+
+#[test]
+fn a_trade_print_does_not_move_a_spot_market_order_price() {
+    let (mut e, s) = ready(true);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "PURR/USDC".into(),
+        }),
+    );
+    support::message(
+        &mut e,
+        s,
+        2100.0,
+        r#"{"channel":"trades","data":[{"coin":"PURR/USDC","side":"B","px":"0.3","sz":"10","time":2100,"hash":"0x0","tid":1}]}"#,
+    );
+    assert_eq!(e.store().ticker("PURR/USDC").unwrap().last, 0.3);
+    e.drain_plain().for_each(drop);
+    let mut o = order("PURR/USDC");
+    o.kind = OrderType::Market;
+    o.amount = 10.0;
+    o.price = None;
+    e.handle(
+        3000.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![o],
+        }),
+    );
+    let r = take_http(&mut e);
+    let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        p["action"]["orders"][0]["p"], "0.21973",
+        "mid 0.209265 + 5%"
+    );
+}
+
+fn spot_cancel_status_trace(status: serde_json::Value, unknown: bool) {
+    let (mut e, _) = placed();
+    e.handle(
+        5000.,
+        Event::Command(Command::AmendOrder {
+            command: 2,
+            id: "101".into(),
+            price: Some(0.002),
+            amount: Some(6000.),
+        }),
+    );
+    let read = take_http(&mut e);
+    support::answer_order_status(&mut e, &read);
+    let cancel = take_http(&mut e);
+    let body: serde_json::Value = serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["action"]["type"], "cancel");
+    acknowledge(&mut e, &cancel, 5001., &serde_json::json!({"status":"ok","response":{"type":"cancel","data":{"statuses":[status]}}}).to_string());
+    let actions = prepared_now(&mut e);
+    let actions = support::advance_packet_timers(&mut e, actions, 20_000.);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange"))),
+        "no replacement or retry after cancel failure"
+    );
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 2, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 2, .. })))
+    );
+    if unknown {
+        assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+        let events = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event)) => Some(event.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        support::assert_unknown_publication(
+            &serde_json::to_value(failures[0]).expect("error"),
+            &events,
+            2,
+        );
+    }
+}
+
+#[test]
+fn spot_cancel_errors_stop_before_replacement_including_terminal_misses() {
+    // TS hyperliquidspot.api.ts:78-95 throws; spot exchange:1205-1209 has no catch.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
+    for error in [
+        "Cannot cancel this order",
+        "Order was never placed, already canceled, or filled. asset=10001",
+    ] {
+        spot_cancel_status_trace(serde_json::json!({"error":error}), false);
+    }
+}
+
+#[test]
+fn spot_unknown_cancel_reply_keeps_fence_before_replacement() {
+    // TS spot exchange:1182-1187,1205-1209 does not validate this 2xx cancellation row.
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquidspot.exchange.ts:787-790,1013-1016,1182-1187,1205-1209.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
+    spot_cancel_status_trace(serde_json::json!({"mystery":true}), true);
+}
+
+fn spot_serial_status_trace(second_statuses: serde_json::Value, failed: bool, unknown: bool) {
+    let (mut e, _) = ready(true);
+    e.drain_plain().for_each(drop);
+    let mut first = order("HFUN/USDC");
+    first.client_order_id = None;
+    first.price = Some(0.002);
+    first.amount = 6000.;
+    let mut second = first.clone();
+    second.amount = 1.;
+    let orders = if failed {
+        vec![first.clone(), second, first]
+    } else {
+        vec![first, second]
+    };
+    e.handle(
+        5000.,
+        Event::Command(Command::PlaceOrders {
+            command: 72,
+            orders,
+        }),
+    );
+    let mut actions = prepared_now(&mut e);
+    let mut writes = Vec::new();
+    let mut terminals = Vec::new();
+    let mut events = Vec::new();
+    let mut unknown_failure = None;
+    for _ in 0..8 {
+        for action in &actions {
+            match action {
+                Action::Http(r) if r.url.ends_with("/exchange") => {
+                    let body: serde_json::Value =
+                        serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+                    writes.push(body["action"].clone());
+                    assert!(writes.len() <= 2, "no suffix or resend after failure");
+                    let statuses = if writes.len() == 2 {
+                        second_statuses.clone()
+                    } else {
+                        serde_json::json!([{"resting":{"oid":91}}])
+                    };
+                    support::reply(&mut e, r, 200, &serde_json::json!({"status":"ok","response":{"type":"order","data":{"statuses":statuses}}}).to_string());
+                }
+                Action::Notice(Notice::CommandDone { command: 72, .. }) => terminals.push(false),
+                Action::Notice(Notice::CommandFailed { command: 72, error }) => {
+                    if unknown {
+                        unknown_failure = Some(serde_json::to_value(error).expect("error"));
+                        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+                        assert_eq!(
+                            error.partial.as_ref().expect("accepted prefix").order_ids,
+                            ["91"]
+                        );
+                        let elements = error.elements.as_ref().expect("journal");
+                        assert_eq!(elements.len(), 3);
+                        assert!(
+                            matches!(&elements[0].result, safe_cex_engine::write_plan::ElementResult::Placed { order_ids } if order_ids == &["91"])
+                        );
+                        assert!(matches!(
+                            &elements[1].result,
+                            safe_cex_engine::write_plan::ElementResult::Unknown { .. }
+                        ));
+                        assert!(matches!(
+                            &elements[2].result,
+                            safe_cex_engine::write_plan::ElementResult::NotSent { error: None }
+                        ));
+                    }
+                    terminals.push(true);
+                }
+                Action::Notice(Notice::Event(event)) => events.push(event.clone()),
+                _ => {}
+            }
+        }
+        let next = prepared_now(&mut e);
+        actions = support::advance_packet_timers(&mut e, next, 20_000.);
+    }
+    if let Some(error) = unknown_failure {
+        support::assert_unknown_publication(&error, &events, 72);
+    }
+    assert_eq!(writes.len(), 2);
+    assert_eq!(terminals, vec![failed]);
+    for (wire, size) in writes.iter().zip(["6000", "1"]) {
+        assert_eq!(wire["type"], "order");
+        assert_eq!(wire["orders"].as_array().unwrap().len(), 1);
+        assert_eq!(wire["orders"][0]["a"], 10001);
+        assert_eq!(wire["orders"][0]["s"], size);
+        assert_eq!(wire["orders"][0]["p"], "0.002");
+    }
+}
+
+#[test]
+fn spot_serial_rows_pin_native_partial_sends_and_stop_after_refusal() {
+    // TS spot exchange:1007-1016 posts each row; API:78-95 throws before flatMap.
+    // exchanges/base.ts:1111-1114 stops the serial suffix after that throw.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
+    spot_serial_status_trace(serde_json::json!([{"resting":{"oid":92}}]), false, false);
+    spot_serial_status_trace(
+        serde_json::json!([{"error":"Order must have minimum value of $10."}]),
+        true,
+        false,
+    );
+}
+
+#[test]
+fn spot_unrecognized_or_empty_statuses_keep_unknown_fence_after_accepted_prefix() {
+    // TS spot exchange:787-790,1013-1016 drops unknown/empty rows; exchanges/base.ts:1111-1114 continues.
+    // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at hyperliquidspot.exchange.ts:787-790,1013-1016,1182-1187,1205-1209.
+    // KNOWN-ISSUE: see ~/agent-reports/known-issues-for-sam.txt row: hyperliquidspot | shared-placement-validation
+    for statuses in [serde_json::json!([]), serde_json::json!([{"mystery":true}])] {
+        spot_serial_status_trace(statuses, true, true);
     }
 }

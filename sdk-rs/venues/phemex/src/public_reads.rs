@@ -77,11 +77,20 @@ impl PublicRead {
     }
 }
 impl PhemexPerpetuals {
-    pub(crate) fn public_read(&self, cx: &mut Cx<'_, Pending>) -> Result<PublicRead, VenueError> {
+    pub(crate) fn public_read(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        live: bool,
+    ) -> Result<PublicRead, VenueError> {
         let policy = ReadPolicy {
             timeout_ms: 20_000,
             pacing: None,
             retry: RetryPolicy::Never,
+        };
+        let issue = if live {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
         };
         match SelectedRead::select(&self.public_read_slots, ReadRole::Read { scope: None }) {
             Ok(selected) => SelectedRead::background(cx, Ok(selected), policy)
@@ -92,19 +101,19 @@ impl PhemexPerpetuals {
                         VenueError::new("Phemex public read requires credentials")
                     }
                 }),
-            Err(CredentialUnavailable::Missing) => cx
-                .http_context(
-                    Scope::Background,
-                    Policy {
-                        operation: Operation::Read,
-                        credential: None,
-                        timeout_ms: 20_000,
-                        pacing: None,
-                        retry: RetryPolicy::Never,
-                    },
-                )
-                .map(PublicRead::Unsigned)
-                .map_err(|error| error.read_venue_error()),
+            Err(CredentialUnavailable::Missing) => issue(
+                cx,
+                Scope::Background,
+                Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            )
+            .map(PublicRead::Unsigned)
+            .map_err(|error| error.read_venue_error()),
         }
     }
 }

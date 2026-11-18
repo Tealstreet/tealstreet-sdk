@@ -233,7 +233,7 @@ Execution-history behavior (`fetchHistoricalFills`):
 **URL**:
 
 - Direct: `wss://quote.omni.apex.exchange/realtime_private?v=2&timestamp=<current>&requestId=<nanoid>` (or testnet equivalent)
-- Proxy (when `tealstreetProxy` is enabled): `wss://fsjnpy143pbz.asia.tealstreet.io/apex/private`
+- Proxy: none since AWS_EXIT 3e; apex private connects directly (the AWS `…asia…/apex/private` path is gone).
 
 **Connection flow**:
 
@@ -736,7 +736,6 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 - Sends the caller's ID as both `clientId` and `clientOrderId`; it is hashed into the signed nonce, so it is resolved before SDK init and signing. Rule: non-empty, no whitespace.
 - Mapped orders expose `clientOrderId` from the venue's `clientOrderId` or `clientId` field.
-
 
 ## Rust public discovery resilience
 

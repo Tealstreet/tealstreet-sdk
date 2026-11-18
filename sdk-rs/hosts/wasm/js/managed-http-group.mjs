@@ -1,3 +1,4 @@
+import { requestFailureFields, transportFailureMessage } from './request-failure.mjs';
 // Group resources are built and checked before the shared synchronous claim.
 export function bindGroup(manager, action, reason) {
   const { host } = manager;
@@ -22,10 +23,12 @@ export function bindGroup(manager, action, reason) {
       const member = members[i];
       const { resource } = entries[i];
       if (member.packet) {
-        resource.bound = resource.prepared.bind({ ...member.packet, headers: Object.fromEntries(member.packet.headers), signal: resource.controller.signal });
+        resource.diagnostic = requestFailureFields(member.packet);
+        resource.bound = resource.prepared.bind({ ...member.packet, readClass: resource.readClass, headers: Object.fromEntries(member.packet.headers), signal: resource.controller.signal });
         resource.phase = 'bound';
         resource.groupRequest = member.packet.request;
       }
+      if (resource.bound?.admitDispatch) { failGroup(manager, members, 'unsupported'); return; }
       if (!resource.bound || typeof resource.bound.ready !== 'function' || typeof resource.bound.dispatch !== 'function') throw new Error('Invalid bound HTTP group resource');
     }
   } catch (error) { const code = reason(error, 'invalid'); failGroup(manager, members, code === 'stale' ? 'invalid' : code); return; }
@@ -54,6 +57,7 @@ function claimGroup(manager, group) {
   let status = 0;
   let beforeClaim;
   let claimStarted = false;
+  let claimNow;
   let fatal;
   // External invoke/run/dispose/cleanup/cancel refuse while this guard is set.
   group.notificationCount = 0;
@@ -68,9 +72,16 @@ function claimGroup(manager, group) {
       } catch { beforeClaim = 'invalid'; break; }
     }
     if (!beforeClaim) {
+      try {
+        claimNow = host.transport.now();
+        for (const entry of group.entries) manager.assertCurrent(entry.resource);
+      }
+      catch { beforeClaim = 'invalid'; }
+    }
+    if (!beforeClaim) {
       claimStarted = true;
       // Narrow internal entry; general host.invoke remains closed to reentry.
-      status = host.engine.httpClaimGroup(group.permit, host.transport.now(), bounds);
+      status = host.engine.httpClaimGroup(group.permit, claimNow, bounds);
       if (host.engine.failed?.()) throw new Error('Engine failed during group claim');
       if (status === 1) {
         for (let i = 0; i < group.entries.length; i++) {
@@ -78,10 +89,11 @@ function claimGroup(manager, group) {
           entry.resource.phase = 'released';
           try {
             const rawNow = host.transport.now();
+            manager.assertCurrent(entry.resource);
             const sendBefore = bounds[i];
             if (!Number.isFinite(rawNow) || !Number.isFinite(sendBefore) || rawNow >= sendBefore) entry.failed = true;
             else entry.response = entry.resource.bound.dispatch();
-          } catch { entry.failed = true; }
+          } catch (error) { entry.failed = true; entry.error = error; }
         }
       }
     }
@@ -130,7 +142,11 @@ function claimGroup(manager, group) {
   // All synchronous handoffs precede every engine failure/response callback.
   for (const entry of group.entries) {
     if (entry.failed) {
-      manager.post(() => host.run(host.invoke(host.engine.httpFailed, entry.request, 'HTTP transport request failed', host.transport.now())));
+      // Inspect thrown values only after every synchronous physical handoff.
+      const message = transportFailureMessage(entry.error);
+      entry.error = undefined;
+      if (!manager.live(entry.token, entry.resource)) continue;
+      manager.post(() => host.run(host.invoke(host.engine.httpFailed, entry.request, message, host.transport.now())));
       manager.cancel(entry.token);
     } else void manager.receive(entry.token, entry.resource, entry.request, entry.response);
   }

@@ -990,30 +990,6 @@
       "binance": "QTUMUSDT"
     }
   ],
-  "breakoutprop": [
-    {
-      "symbol": "BTCUSD",
-      "base": "BTC",
-      "quote": "USD",
-      "id": "BTCUSD",
-      "_source": "code-verified",
-      "binance": "BTCUSD"
-    },
-    {
-      "symbol": "ETHUSD",
-      "base": "ETH",
-      "quote": "USD",
-      "id": "ETHUSD",
-      "binance": "ETHUSD"
-    },
-    {
-      "symbol": "SOLUSD",
-      "base": "SOL",
-      "quote": "USD",
-      "id": "SOLUSD",
-      "binance": "SOLUSD"
-    }
-  ],
   "bybit": [
     {
       "symbol": "BTCPERP",
@@ -2006,7 +1982,7 @@
   ],
   "mexc": [
     {
-      "symbol": "BTC_USDT",
+      "symbol": "BTCUSDT",
       "base": "BTC",
       "quote": "USDT",
       "id": "BTC_USDT",
@@ -2014,14 +1990,14 @@
       "binance": "BTCUSDT"
     },
     {
-      "symbol": "ETH_USDT",
+      "symbol": "ETHUSDT",
       "base": "ETH",
       "quote": "USDT",
       "id": "ETH_USDT",
       "binance": "ETHUSDT"
     },
     {
-      "symbol": "1000PEPE_USDT",
+      "symbol": "1000PEPEUSDT",
       "base": "1000PEPE",
       "quote": "USDT",
       "id": "1000PEPE_USDT",
@@ -2461,40 +2437,6 @@
     }
   ],
   "mode": [
-    {
-      "symbol": "BTCUSDC",
-      "base": "BTC",
-      "quote": "USDC",
-      "id": "BTC/USDC:USDC",
-      "_source": "code-verified",
-      "binance": "BTCUSDC"
-    },
-    {
-      "symbol": "ETHUSDC",
-      "base": "ETH",
-      "quote": "USDC",
-      "id": "ETH/USDC:USDC",
-      "binance": "ETHUSDC"
-    }
-  ],
-  "salsadex": [
-    {
-      "symbol": "BTCUSDC",
-      "base": "BTC",
-      "quote": "USDC",
-      "id": "BTC/USDC:USDC",
-      "_source": "code-verified",
-      "binance": "BTCUSDC"
-    },
-    {
-      "symbol": "ETHUSDC",
-      "base": "ETH",
-      "quote": "USDC",
-      "id": "ETH/USDC:USDC",
-      "binance": "ETHUSDC"
-    }
-  ],
-  "tealstreet-dex": [
     {
       "symbol": "BTCUSDC",
       "base": "BTC",

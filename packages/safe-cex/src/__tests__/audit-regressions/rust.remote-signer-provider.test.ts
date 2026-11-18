@@ -1,7 +1,7 @@
 import type { SignRequest, SignResult } from '@tealstreet/safe-cex-wasm/host';
 import type { PayloadSigner, RemoteSigner } from '../../types';
 
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
 import { prepareBitunixRequest } from '../../exchanges/bitunix/bitunix.signing';
@@ -460,5 +460,60 @@ describe('Bitunix fused double-SHA256 remote admission', () => {
     for (const name of ['bybit', 'bybitinverse', 'binance', 'binancespot', 'okx', 'okxeu', 'bitget', 'bitgetusdc', 'hyrotrader'] as const) {
       expect(remoteSignerAlgorithms(name), name).toEqual(['hmacSha256']);
     }
+  });
+});
+
+describe('BloFin base64-of-hex remote admission', () => {
+  const material = 'test-secret-value';
+  const own = { credential: 'owned/blofin/public', signing: 'owned/blofin/signing', publicCredential: 'blofin-key',
+    passphrase: 'owned/blofin/passphrase', passphraseValue: 'blofin-pass' };
+  const bytes = (text: string) => Array.from(Buffer.from(text, 'utf8'));
+  // Independent Node crypto oracle of BloFin's ACCESS-SIGN and login sign.
+  const blofinMac = (toSign: string) =>
+    Buffer.from(createHmac('sha256', material).update(toSign).digest('hex')).toString('base64');
+  const parts = ['/api/v1/account/balance', 'GET', '1700000000000', 'nonce-1', ''];
+  const work = (): SignRequest => ({
+    receipt: { stampMs: 1700000000000 },
+    context: { venue: 'untrusted', method: 'GET', host: 'untrusted.invalid', path: '/not-authority' },
+    operations: [
+      { kind: 'present', key: own.credential },
+      { kind: 'sign', algorithm: 'hmacSha256', key: own.signing, payload: parts.map((part) => ({ kind: 'bytes' as const, bytes: bytes(part) })) },
+      { kind: 'present', key: own.passphrase },
+    ],
+  });
+  const browser = (answer?: (toSign: string) => unknown) =>
+    remote(async ({ id, wsAuth }) => ({ id, wsAuthSignature: (answer ?? blofinMac)(wsAuth!.toSign) as string }));
+
+  it('signs the exact preimage through the hex-base64 wire and returns the raw MAC and presentations', async () => {
+    const r = browser();
+    const signer = createRemoteSignerProvider({ exchangeName: 'blofin', identities: { primary: own }, remoteSigner: r.value });
+    const input = work();
+    const output = await signer(input, context());
+    const toSign = parts.join('');
+    expect(r.value.sign).toHaveBeenCalledWith({ id: expect.any(String), type: 'ws-auth', exchangeName: 'blofin',
+      accountName: 'account-one', wsAuth: { toSign, outputFormat: 'hex-base64' } });
+    expect(output).toEqual({ receipt: input.receipt, values: [
+      bytes('blofin-key'), Array.from(createHmac('sha256', material).update(toSign).digest()), bytes('blofin-pass')] });
+  });
+
+  it('refuses any answer that is not the canonical base64 of 64 lowercase hex characters', async () => {
+    const hexText = (toSign: string) => createHmac('sha256', material).update(toSign).digest('hex');
+    for (const answer of [
+      hexText,
+      (toSign: string) => createHmac('sha256', material).update(toSign).digest('base64'),
+      (toSign: string) => Buffer.from(hexText(toSign).toUpperCase()).toString('base64'),
+      (toSign: string) => Buffer.from(hexText(toSign)).toString('base64').replace(/==$/, ''),
+      (toSign: string) => Buffer.from(hexText(toSign).slice(2)).toString('base64'),
+    ]) {
+      const signer = createRemoteSignerProvider({ exchangeName: 'blofin', identities: { primary: own }, remoteSigner: browser(answer).value });
+      await expect(signer(work(), context())).rejects.toThrow(/^Remote signing request refused$/);
+    }
+  });
+
+  it('never asks a PayloadSigner for a BloFin signature', async () => {
+    const callback = vi.fn();
+    const signer = createRemoteSignerProvider({ exchangeName: 'blofin', identities: { primary: own }, payloadSigner: callback });
+    await expect(signer(work(), context())).rejects.toThrow(/^Remote signing request refused$/);
+    expect(callback).not.toHaveBeenCalled();
   });
 });

@@ -39,7 +39,19 @@ impl BinanceFutures {
         credential: Option<Credential>,
         pending: Pending,
     ) {
-        let context = match cx.http_context(Scope::Background, policy(credential)) {
+        let issue = if matches!(
+            &pending,
+            Pending::Daily
+                | Pending::BookTickers
+                | Pending::PremiumIndex
+                | Pending::DepthSnapshot { .. }
+                | Pending::Klines { .. }
+        ) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, Scope::Background, policy(credential)) {
             Ok(context) => context,
             Err(_) => {
                 self.on_sign_error(

@@ -142,3 +142,41 @@ fn delayed_inverse_coin_walk_retains_newer_position_updates_and_closures() {
         );
     }
 }
+
+#[test]
+fn inverse_walk_keeps_the_first_release_cut_across_later_collateral_legs() {
+    for updated_total in [1500, 0] {
+        let mut h = ready();
+        let first = h.take("marginCoin=BTC");
+        h.now += 1.0;
+        h.private_message(
+            &json!({
+                "arg":{"channel":"positions"}, "action":"update",
+                "data":[position("BTCUSD", updated_total, 1)]
+            })
+            .to_string(),
+        );
+        h.now += 6_000.0;
+        h.reply(
+            first.id,
+            200,
+            &json!({"code":"00000","data":[position("BTCUSD",1000,999999)]}).to_string(),
+        );
+        reply_positions(&mut h, "ETH", 444);
+        let rows = h.engine.store().positions();
+        let btc = rows.iter().find(|p| p.symbol == "BTCUSD");
+        if updated_total == 0 {
+            assert!(
+                btc.is_none(),
+                "later collateral release cannot erase the first leg's zero"
+            );
+        } else {
+            assert_eq!(btc.unwrap().notional, f64::from(updated_total));
+        }
+        assert_eq!(
+            rows.iter().find(|p| p.symbol == "ETHUSD").unwrap().notional,
+            444.0,
+            "the unobserved peer still heals"
+        );
+    }
+}

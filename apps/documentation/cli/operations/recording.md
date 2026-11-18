@@ -5,6 +5,8 @@ sidebar_position: 5
 
 # Recording
 
+Recording configuration and SQLite data belong to the signed-in user. Switching users closes the old database and stops its recorders. Pending starts, stops, cleanup ticks and orderbook callbacks cannot publish into the new user's recording session. Legacy database migration preserves committed WAL data. See [user profiles and migration](./config-files.md#login-logout-and-migration).
+
 A built-in market-data recorder that snapshots orderbooks (and, with caveats,
 trades and funding) into a local SQLite database for offline analysis.
 Available both as a top-level subcommand and inside the REPL.

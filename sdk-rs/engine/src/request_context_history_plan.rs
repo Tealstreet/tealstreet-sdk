@@ -68,7 +68,7 @@ impl<P> Cx<'_, P> {
         page: Option<(&Slot, &Context)>,
         released_failure: bool,
         error: Option<VenueError>,
-        marker: Option<String>,
+        marker: Option<(crate::history::IncompleteReason, String)>,
     ) -> Result<PreparedHistoryTerminal, Error> {
         if self.io.core.http_owner_poison
             || self.io.core.http_plan_poison
@@ -109,18 +109,21 @@ impl<P> Cx<'_, P> {
             .retirements
             .try_reserve(1)
             .map_err(|_| Error::Capacity)?;
-        let seal = self.prepare_plan_terminal(plan, error, None, None)?;
+        let seal = self.core().prepare_plan_terminal(plan, error, None, None)?;
         let cleanup = self
             .io
             .prepare_read_history_cleanup(plan.owner(), None, 4)?;
         let Owner::Command { id, .. } = plan.owner() else {
             unreachable!()
         };
-        let marker = marker.map(|message| crate::log::LogEvent {
+        let marker = marker.map(|(reason, message)| crate::log::LogEvent {
             level: Level::Warn,
             code: crate::log::code::HISTORY_INCOMPLETE,
             message,
-            fields: vec![("command", Value::Num(f64::from(id)))],
+            fields: vec![
+                ("command", Value::Num(f64::from(id))),
+                ("reason", Value::Str(reason.code().into())),
+            ],
         });
         Ok(PreparedHistoryTerminal {
             plan: plan.clone(),

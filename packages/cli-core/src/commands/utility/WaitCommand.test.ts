@@ -28,7 +28,7 @@ function pos(p: Partial<Position> = {}): Position {
     unrealizedPnl: p.unrealizedPnl ?? 0,
     contracts: p.contracts ?? 1,
     liquidationPrice: p.liquidationPrice ?? 0,
-  } as Position;
+  };
 }
 
 function makeAdapter(): CLIPlatformAdapter {
@@ -64,6 +64,18 @@ function makeExchange(opts: {
     },
     emitter: { on: vi.fn(), off: vi.fn(), emit: vi.fn() },
   } as unknown as ExchangeLike;
+}
+
+function positionStore(exchange: ExchangeLike) {
+  const store = exchange.store;
+  if (store === undefined) throw new Error('Expected a store in the test fixture');
+  return store;
+}
+
+function positionRows(exchange: ExchangeLike) {
+  const positions = positionStore(exchange).positions;
+  if (positions === undefined) throw new Error('Expected positions in the test fixture');
+  return positions;
 }
 
 function ctx(
@@ -177,7 +189,7 @@ describe('WaitCommand — position / long / short', () => {
     // After 200ms (2 polls) — still no position.
     await vi.advanceTimersByTimeAsync(200);
     // Add a position. Next poll picks it up.
-    (ex.store as { positions: Position[] }).positions = [pos({ contracts: 1 })];
+    positionStore(ex).positions = [pos({ contracts: 1 })];
     await vi.advanceTimersByTimeAsync(100);
     const r = await promise;
     expect(r.success).toBe(true);
@@ -197,7 +209,7 @@ describe('WaitCommand — position / long / short', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(done).toBe(false);
 
-    (ex.store as { positions: Position[] }).positions = [
+    positionStore(ex).positions = [
       pos({ side: PositionSide.Short, contracts: 1 }),
       pos({ id: 'l', side: PositionSide.Long, contracts: 0.5 }),
     ];
@@ -332,7 +344,7 @@ describe('WaitCommand — anyposition', () => {
     const ex = makeExchange();
     const promise = cmd.execute(ctx(['wait', 'anyposition'], ex));
     await vi.advanceTimersByTimeAsync(200);
-    (ex.store as { positions: Position[] }).positions = [
+    positionStore(ex).positions = [
       pos({ symbol: 'SOLUSDT', contracts: 5 }),
     ];
     await vi.advanceTimersByTimeAsync(100);
@@ -833,7 +845,7 @@ describe('WaitCommand — either / both combinators', () => {
     );
     await vi.advanceTimersByTimeAsync(200);
     // Bump pnl past 200 → second sub-condition triggers.
-    (ex.store!.positions as Position[])[0] = pos({
+    positionRows(ex)[0] = pos({
       contracts: 1,
       unrealizedPnl: 250,
     });
@@ -872,7 +884,7 @@ describe('WaitCommand — either / both combinators', () => {
       ),
     );
     await vi.advanceTimersByTimeAsync(300);
-    (ex.store!.positions as Position[])[0] = pos({
+    positionRows(ex)[0] = pos({
       contracts: 1,
       unrealizedPnl: 150,
     });
@@ -1403,7 +1415,7 @@ describe('WaitCommand — tracked-var (@<trackedVar>) conditions', () => {
         unrealizedPnl: -10,
         contracts: 1,
         liquidationPrice: 0,
-      } as Position,
+      },
     ];
     const ex = makeExchange({ positions });
     const store = new MemoryPreprocessStore();
@@ -1453,7 +1465,7 @@ describe('WaitCommand — @<var> RHS conditions', () => {
         unrealizedPnl: 100,
         contracts: 1,
         liquidationPrice: 0,
-      } as Position,
+      },
     ];
     const ex = makeExchange({ positions });
     const store = new MemoryPreprocessStore();

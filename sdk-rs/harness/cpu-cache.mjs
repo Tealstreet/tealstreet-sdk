@@ -73,7 +73,7 @@ function snapshot(root, cachePath) {
 }
 function snapshotPrefix(prefix) {
   relative(prefix);
-  check(/^(?:cpu-collection|cpu-second)\/cache\/[a-f0-9]{64}$/.test(prefix), 'snapshot requires a fixed per-case cache prefix');
+  check(/^cpu-collection\/cache\/[a-f0-9]{64}$/.test(prefix), 'snapshot requires a fixed per-case cache prefix');
 }
 function destinationPath(root, destination, cachePath) {
   check(typeof destination === 'string', 'missing snapshot destination');

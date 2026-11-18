@@ -183,7 +183,9 @@ export const paginateIncomeRange = async (
       }
       pages += 1;
 
-      const [from, to] = pending.pop()!;
+      const range = pending.pop();
+      if (!range) break;
+      const [from, to] = range;
       if (from > to) continue;
 
       requests += 1;

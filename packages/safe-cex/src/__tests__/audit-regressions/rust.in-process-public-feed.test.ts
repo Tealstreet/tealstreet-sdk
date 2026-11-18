@@ -1,16 +1,22 @@
 // @vitest-environment node
-import type { Candle, Market, OHLCVOptions, OrderBook, PublicDataSource, StoreData, Ticker } from '../../types';
+import type { Candle, Market, OHLCVOptions, OrderBook, PublicDataSource, StoreData, Ticker, Writable } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { inProcessPortPair, RustPublicFeedClient, serveInProcessPublicData } from '../../exchanges/rust/publicFeed';
+import {
+  inProcessPortPair,
+  RustPublicFeedClient,
+  rustPublicFeedIdentity,
+  serveInProcessPublicData,
+} from '../../exchanges/rust/publicFeed';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 const market = (symbol: string) =>
   ({ id: symbol, symbol, contractSize: 1, isSpot: false, isPerpetual: true }) as Market;
-const ticker = (symbol: string, last: number) =>
-  ({ id: symbol, symbol, bid: last - 1, ask: last + 1, last, mark: last, index: last }) as Ticker;
+const ticker = (symbol: string, last: number): Ticker =>
+  ({ id: symbol, symbol, bid: last - 1, ask: last + 1, last, mark: last, index: last,
+    percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0 });
 
 /** exchange-server's shared source: a live view over whichever public exchange is current. */
 function restartableSource() {
@@ -81,7 +87,7 @@ function restartableSource() {
   };
 }
 
-function account(source: PublicDataSource) {
+function account(source: PublicDataSource, observations = false) {
   const [port, sourcePort] = inProcessPortPair();
   const stop = serveInProcessPublicData(source, sourcePort);
   const updates: Array<Record<string, unknown>> = [];
@@ -91,7 +97,7 @@ function account(source: PublicDataSource) {
     'identity is not checked in-process',
     async (update) => updates.push(update),
     (error) => failures.push(error),
-    { handshakeTimeoutMs: 30_000, inProcess: true },
+    { handshakeTimeoutMs: 30_000, inProcess: true, observations },
   );
   return { client, updates, failures, stop, connected: client.connect() };
 }
@@ -228,4 +234,87 @@ describe('Rust in-process shared public data (exchange-server externalPublicData
     expect(mode(false)).toBe('shared');
     expect(mode(true)).toBe('direct');
   });
+});
+
+it('isolates opted-in Hyperliquid fast-depth sources without splitting default-off callers', () => {
+  const options = { key: '', secret: '' };
+  const defaultId = rustPublicFeedIdentity('hyperliquid', options);
+  expect(defaultId).toBe(rustPublicFeedIdentity('hyperliquid', { ...options, hyperliquidFastBook: false }));
+  expect(defaultId).not.toBe(rustPublicFeedIdentity('hyperliquid', { ...options, hyperliquidFastBook: true }));
+  expect(rustPublicFeedIdentity('hyperliquidspot', { ...options, hyperliquidFastBook: true })).toBe(
+    rustPublicFeedIdentity('hyperliquidspot', options),
+  );
+});
+
+it('forwards genuine unchanged source observations, never polling time, to every shared account', async () => {
+  vi.useFakeTimers();
+  try {
+    const venue = restartableSource();
+    const row: Writable<Ticker> = { ...ticker('BTCUSDT', 100), observedAt: [1_000, 1_000, 1_000] };
+    venue.load([market('BTCUSDT')], [row]);
+    const first = account(venue.source, true);
+    const second = account(venue.source, true);
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.all([first.connected, second.connected]);
+    expect(first.updates.at(-1)).toMatchObject({ tickers: [{ observedAt: [1_000, 1_000, 1_000] }] });
+    row.observedAt = [1_000, 8_500, 1_000];
+    venue.notify();
+    await vi.advanceTimersByTimeAsync(250);
+    for (const peer of [first, second])
+      expect(peer.updates.at(-1)).toMatchObject({
+        tickers: [{ last: 100, mark: 100, observedAt: [1_000, 8_500, 1_000] }],
+      });
+    const count = first.updates.length;
+    venue.notify();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(first.updates).toHaveLength(count);
+    first.client.dispose();
+    second.client.dispose();
+    first.stop();
+    second.stop();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('negotiates observations independently of the other ticker fields', async () => {
+  vi.useFakeTimers();
+  try {
+    const venue = restartableSource();
+    const row: Ticker = { ...ticker('BTCUSDT', 100), observedAt: [1_000, 1_000, 1_000] };
+    venue.load([market('BTCUSDT')], [row]);
+    const old = account(venue.source);
+    const current = account(venue.source, true);
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.all([old.connected, current.connected]);
+    expect(old.updates.at(-1)).toEqual({
+      op: 'publicFeedUpdate',
+      tickers: [{ symbol: 'BTCUSDT', bid: 99, ask: 101, last: 100, mark: 100, index: 100, midPrice: null,
+        percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0 }],
+    });
+    expect(current.updates.at(-1)).toMatchObject({ tickers: [{ observedAt: [1_000, 1_000, 1_000] }] });
+    old.client.dispose();
+    current.client.dispose();
+    old.stop();
+    current.stop();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('accepts an old producer without inventing observation timestamps', async () => {
+  vi.useFakeTimers();
+  try {
+    const venue = restartableSource();
+    venue.load([market('BTCUSDT')], [ticker('BTCUSDT', 100)]);
+    const current = account(venue.source, true);
+    await vi.advanceTimersByTimeAsync(0);
+    await current.connected;
+    expect(current.updates.at(-1)).toMatchObject({ tickers: [{ last: 100 }] });
+    expect((current.updates.at(-1)?.tickers as Ticker[])[0]).not.toHaveProperty('observedAt');
+    current.client.dispose();
+    current.stop();
+  } finally {
+    vi.useRealTimers();
+  }
 });

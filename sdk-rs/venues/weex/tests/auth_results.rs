@@ -159,6 +159,30 @@ fn typed_auth_rejection_on_missing_stream_list_is_observed_but_business_rate_and
 }
 
 #[test]
+fn a_read_the_ip_whitelist_refuses_names_it_as_an_auth_failure() {
+    for status in [400, 200] {
+        let (mut e, a) = started(false);
+        let r = http(&a, "/balance");
+        let a = reply(
+            &mut e,
+            &r,
+            status,
+            r#"{"code":"40018","msg":"Invalid IP request"}"#,
+        );
+        assert!(
+            a.iter().any(|action| matches!(
+                action,
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.code == "auth.rejected"
+                        && event.level == safe_cex_engine::Level::Error
+                        && event.message.contains("Invalid IP request")
+                        && event.message.ends_with(safe_cex_engine::error::IP_WHITELIST_HINT)
+            )),
+            "{status}: {a:?}"
+        );
+    }
+}
+#[test]
 fn a_rejected_order_endpoint_is_not_reset_by_its_sibling_order_read() {
     let (mut e, a) = started(false);
     let orders = |a: &[Action]| -> Vec<AuthOutcome> {
@@ -232,4 +256,15 @@ fn accepted_credentials_still_commit_good_balance_peers_and_report_bad_rows() {
     );
     assert_eq!(e.store().balance().total, 42.0);
     assert!(a.iter().any(|a| matches!(a, Action::Notice(Notice::Event(e)) if e.code == safe_cex_engine::log::code::ROW_SKIPPED)));
+}
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let (mut e, a) = started(false);
+    let r = http(&a, "/balance");
+    let answered = reply(&mut e, &r, 200, r#"{"code":"40012","msg":"opaque"}"#);
+    assert!(answered.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
 }

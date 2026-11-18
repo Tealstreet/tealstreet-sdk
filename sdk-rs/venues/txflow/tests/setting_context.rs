@@ -1,4 +1,6 @@
 //! Original admission boundaries for the unsigned account-setting poll.
+#[path = "support/signer.rs"]
+mod signer;
 mod support;
 use safe_cex_engine::request_context::HttpAction;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Method, Notice, Response};
@@ -31,10 +33,10 @@ fn private_at_settings() -> Driver {
     let mut e = safe_cex_engine::test_support::seeded_engine(TxFlow::new(Options {
         testnet: true,
         application_id: Some(WALLET.into()),
-        secret: Some(format!("0x{:064x}", 1)),
+        credentials: signer::identity(),
         ..Default::default()
     }));
-    e.start(START);
+    signer::start(&mut e, START);
     let metadata = e
         .drain_actions()
         .find_map(|a| match a {
@@ -76,6 +78,11 @@ fn setting(e: &mut Driver) -> HttpRequest {
             _ => None,
         });
     let r = requests.next().expect("one physical native setting read");
+    assert_eq!(r.timeout_ms, Some(20_000));
+    assert_eq!(
+        e.http_read_class(r.id),
+        safe_cex_engine::HttpReadClass::Reconciliation
+    );
     assert!(requests.next().is_none());
     r
 }
@@ -102,7 +109,6 @@ fn no_command_or_signing(a: &[Action]) {
     assert!(!a.iter().any(|a| matches!(
         a,
         Action::Sign { .. }
-            | Action::SignPayload { .. }
             | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
     )));
 }

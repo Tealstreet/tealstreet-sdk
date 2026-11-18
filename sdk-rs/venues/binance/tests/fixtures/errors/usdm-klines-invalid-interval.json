@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T01:18:51.696Z",
+  "endpoint": "/fapi/v1/klines?symbol=BTCUSDT&interval=7x",
+  "http_status": 400,
+  "body": "{\"code\":-1120,\"msg\":\"Invalid interval.\"}",
+  "expect": {
+    "kind": "invalidInput",
+    "outcome": null,
+    "path": "read"
+  }
+}

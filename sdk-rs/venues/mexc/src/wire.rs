@@ -40,6 +40,34 @@ pub struct Envelope<'a> {
     pub data: Option<&'a RawValue>,
 }
 impl<'a> Envelope<'a> {
+    pub fn refusal(body: &str) -> Option<safe_cex_engine::VenueError> {
+        use safe_cex_engine::{ErrorKind, VenueError};
+        let envelope: Envelope<'_> = serde_json::from_str(body).ok()?;
+        if envelope.success != Some(false)
+            || envelope.code.fract() != 0.
+            || !(0. ..=9_007_199_254_740_991.).contains(&envelope.code)
+        {
+            return None;
+        }
+        let kind = match envelope.code as u64 {
+            401 | 602 => ErrorKind::AuthInvalid,
+            402 => ErrorKind::AuthExpired,
+            406 | 511 | 701..=704 => ErrorKind::AuthPermission,
+            429 | 510 => ErrorKind::RateLimited,
+            513 => ErrorKind::InvalidInput,
+            500 | 501 | 604 | 801 | 9999 => ErrorKind::VenueUnavailable,
+            _ => ErrorKind::Rejected,
+        };
+        let code = envelope.code.to_string();
+        let message: String = envelope.message.chars().take(128).collect();
+        Some(
+            VenueError::new(format!("MEXC {code}: {message}"))
+                .kind(kind)
+                .venue_code(code)
+                .venue_message(message),
+        )
+    }
+
     pub fn checked(body: &'a str) -> Result<Self, String> {
         let e: Self = serde_json::from_str(body).map_err(|e| format!("MEXC response: {e}"))?;
         if e.success != Some(true) || e.code != 0.0 {

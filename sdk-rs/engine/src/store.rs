@@ -4,14 +4,47 @@
 use crate::fence::{Epoch, Stamp};
 use crate::model::{
     Balance, CoinBalance, CurrencyBalance, Loaded, MarginType, Market, Order, OrderStatus,
-    Position, Ticker,
+    Position, StopTriggerType, Ticker,
 };
 #[cfg(any(test, feature = "product-semantics"))]
 use crate::model::{DerivativeProduct, InstrumentClassification, PositionGreeks, ProductKind};
 #[cfg(feature = "prediction")]
 use crate::model::{PredictionHolding, PredictionMarket};
-use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
+use crate::order_read_cover::{Covers, OrderReadMark, OrderReadScope};
+#[cfg(test)]
+use crate::wire::market_flag;
+use crate::wire::{self, FrameWriter, loaded_flag, section};
 use std::collections::{HashMap, HashSet};
+
+/// Each imported column owns its value (including absence) until its inputs
+/// change. A size update must not discard independent native PnL evidence.
+#[derive(Clone, Copy, Default)]
+struct PositionNativeExtras {
+    values: [Option<f64>; 2],
+    imported: [bool; 2],
+}
+
+impl PositionNativeExtras {
+    fn update(&mut self, position: &mut Position, update: impl FnOnce(&mut Position)) {
+        // Venue-owned rows have no imported evidence to invalidate.
+        let before = self
+            .imported
+            .iter()
+            .any(|&imported| imported)
+            .then(|| position.clone());
+        update(position);
+        if let Some(before) = before {
+            let same_row = before.id == position.id && before.symbol == position.symbol;
+            // Both sizing inputs matter: which one supplied the native quantity
+            // depends on the producer's units/catalogue, not the receiver's.
+            self.imported[0] &= same_row
+                && before.contracts.to_bits() == position.contracts.to_bits()
+                && before.notional.to_bits() == position.notional.to_bits();
+            self.imported[1] &=
+                same_row && before.unrealized_pnl.to_bits() == position.unrealized_pnl.to_bits();
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct Store {
@@ -35,11 +68,19 @@ pub struct Store {
     ticker_revision: u64,
     ticker_by_symbol: HashMap<Box<str>, u32>,
     orders: Vec<Order>,
+    /// Broad late-ACK fence: every row change advances it. Kept separate from
+    /// the snapshot fence by docs/plans/RUST_ORDER_FENCE_DOMAINS.md.
     orders_revision: u64,
+    /// Selective read fence: only `invalidate_order_snapshots` advances it.
     order_snapshot_epoch: Epoch,
+    /// Which read the rows are as fresh as, and which reads may replace them.
+    read_covers: Covers,
     #[cfg(feature = "repair-mutations")]
     snapshot_begins: u64,
     positions: Vec<Position>,
+    /// Parallel to positions. Frame-fed metadata is authoritative, including
+    /// absent values; venue-owned rows compute their metadata at output time.
+    position_native_extras: Vec<PositionNativeExtras>,
     position_ids: bool,
     balance: Balance,
     coin_balances: Option<Vec<CoinBalance>>,
@@ -50,11 +91,19 @@ pub struct Store {
     metadata: Option<Box<crate::metadata::State>>,
     hedged: bool,
     loaded: Loaded,
-    latency: f64,
+    latency: Option<f64>,
     changes: Changes,
     rejected_empty_catalogue: bool,
     /// Changed-field bits per ticker, in [`TICKER_FIELDS`] order.
     ticker_masks: Vec<u16>,
+    /// Host time each row's last, mark and index price was last observed: changed,
+    /// or explicitly reported unchanged by its venue. -inf before any data.
+    ticker_seen_at: Vec<[f64; 3]>,
+    /// Source-domain provenance, never the local protective-veto receipt clock.
+    ticker_observed_at: Vec<[f64; 3]>,
+    pub(crate) export_ticker_observations: bool,
+    /// The engine's current host time, set at each entry, so rows can be dated.
+    clock: f64,
     dirty_tickers: Vec<u32>,
     ticker_deltas_spare: Vec<(u32, u16)>,
     /// Funded base assets awaiting valuation; live data may add their rows after the seed.
@@ -178,7 +227,10 @@ impl Store {
     /// An empty catalogue is never authoritative: a venue outage can answer an
     /// empty list, which would otherwise mark markets loaded and wipe the
     /// previous catalogue. The engine reports each rejection as a warning.
-    pub fn set_markets(&mut self, markets: Vec<Market>) {
+    pub fn set_markets(&mut self, mut markets: Vec<Market>) {
+        for market in &mut markets {
+            crate::market_output::prepare(market, self.quantity_units);
+        }
         if markets.is_empty() {
             self.rejected_empty_catalogue = true;
             return;
@@ -369,8 +421,106 @@ impl Store {
             .collect();
         self.changes.tickers_replaced = true;
         self.ticker_masks = vec![0; self.tickers.len()];
+        self.ticker_seen_at = vec![[self.clock; 3]; self.tickers.len()];
+        self.ticker_observed_at = vec![[self.clock; 3]; self.tickers.len()];
         self.dirty_tickers.clear();
         self.set_loaded(|loaded| loaded.tickers = true);
+    }
+
+    /// The engine's host time, for dating ticker changes.
+    pub(crate) fn set_clock(&mut self, now: f64) {
+        if now.is_finite() {
+            self.clock = now;
+        }
+    }
+
+    /// When this symbol's `reference` price was last observed, on the engine's host clock.
+    pub fn reference_seen_at(&self, symbol: &str, reference: StopTriggerType) -> Option<f64> {
+        let slot = match reference {
+            StopTriggerType::LastPrice => 0,
+            StopTriggerType::MarkPrice => 1,
+            StopTriggerType::IndexPrice => 2,
+        };
+        self.ticker_index(symbol)
+            .and_then(|index| self.ticker_seen_at.get(index as usize))
+            .map(|seen| seen[slot])
+    }
+
+    /// A venue message reported these fields (`TICKER_FIELDS` bits) for `symbol`,
+    /// changed or not; delta omissions are not observations.
+    pub fn observe_ticker_fields(&mut self, symbol: &str, mask: u16) {
+        if let Some(index) = self.ticker_index(symbol) {
+            self.mark_references_seen(index, mask);
+            self.mark_observations_seen(index, mask);
+        }
+    }
+
+    // Bits 2, 3 and 4 of `TICKER_FIELDS` are last, mark and index.
+    fn mark_references_seen(&mut self, index: u32, mask: u16) {
+        if let Some(seen) = self.ticker_seen_at.get_mut(index as usize) {
+            for (slot, bit) in [2, 3, 4].into_iter().enumerate() {
+                if mask & (1 << bit) != 0 {
+                    seen[slot] = self.clock;
+                }
+            }
+        }
+    }
+
+    // High mask bits track observation changes independently of value deltas.
+    fn set_observation_times(&mut self, index: u32, times: [f64; 3]) {
+        if let Some(seen) = self.ticker_observed_at.get_mut(index as usize) {
+            let mut mask = 0;
+            for slot in 0..3 {
+                if seen[slot].to_bits() != times[slot].to_bits() {
+                    seen[slot] = times[slot];
+                    mask |= 1 << (12 + slot);
+                }
+            }
+            if mask != 0 && self.export_ticker_observations {
+                let dirty = &mut self.ticker_masks[index as usize];
+                if *dirty == 0 {
+                    self.dirty_tickers.push(index);
+                }
+                *dirty |= mask;
+            }
+        }
+    }
+
+    // Bits 2, 3 and 4 of `TICKER_FIELDS` are last, mark and index.
+    fn mark_observations_seen(&mut self, index: u32, mask: u16) {
+        if let Some(mut times) = self.ticker_observed_at.get(index as usize).copied() {
+            for (slot, bit) in [2, 3, 4].into_iter().enumerate() {
+                if mask & (1 << bit) != 0 {
+                    times[slot] = self.clock;
+                }
+            }
+            self.set_observation_times(index, times);
+        }
+    }
+
+    pub(crate) fn apply_shared_ticker(&mut self, ticker: &crate::public_feed::PublicTicker) {
+        let before = self
+            .ticker_index(&ticker.symbol)
+            .and_then(|index| self.ticker_observed_at.get(index as usize))
+            .copied();
+        self.update_ticker(&ticker.symbol, |target| ticker.apply(target));
+        if let (Some(source), Some(index)) = (ticker.observed_at, self.ticker_index(&ticker.symbol))
+        {
+            let mut times = before.unwrap_or([f64::NEG_INFINITY; 3]);
+            for (slot, value) in [ticker.last, ticker.mark, ticker.index]
+                .into_iter()
+                .enumerate()
+            {
+                if value.is_some() {
+                    times[slot] = source[slot].unwrap_or(f64::NEG_INFINITY);
+                }
+            }
+            self.set_observation_times(index, times);
+        }
+    }
+
+    pub(crate) fn import_observation_times(&mut self, index: u32, times: [f64; 3]) {
+        self.set_observation_times(index, times);
     }
 
     pub(crate) fn ticker_revision(&self) -> u64 {
@@ -396,6 +546,8 @@ impl Store {
         let index = self.tickers.len() as u32;
         self.tickers.push(ticker);
         self.ticker_masks.push(0);
+        self.ticker_seen_at.push([f64::NEG_INFINITY; 3]);
+        self.ticker_observed_at.push([f64::NEG_INFINITY; 3]);
         self.ticker_by_symbol.insert(symbol.into(), index);
         self.changes.tickers_replaced = true;
         Some(index)
@@ -434,6 +586,17 @@ impl Store {
 
     /// Mutate a row of the current ticker table; rebuild cached indexes on replacement.
     pub fn update_ticker_at(&mut self, index: u32, update: impl FnOnce(&mut Ticker)) {
+        self.update_ticker_at_observed(index, 0, update);
+    }
+
+    /// Update a current ticker row and record the fields a venue actually observed,
+    /// including unchanged values. Cached indexes must be rebuilt on replacement.
+    pub fn update_ticker_at_observed(
+        &mut self,
+        index: u32,
+        observed: u16,
+        update: impl FnOnce(&mut Ticker),
+    ) {
         let Some(ticker) = self.tickers.get_mut(index as usize) else {
             return;
         };
@@ -453,6 +616,12 @@ impl Store {
                 mask |= 1 << bit;
             }
         }
+        let reported = mask | observed;
+        if reported == 0 {
+            return;
+        }
+        self.mark_references_seen(index, reported);
+        self.mark_observations_seen(index, reported);
         if mask == 0 {
             return;
         }
@@ -472,6 +641,7 @@ impl Store {
         self.orders.iter().find(|order| order.id == id)
     }
 
+    /// Late-ACK reconciliation only; logical reads use `begin_orders_snapshot`.
     pub(crate) fn orders_revision(&self) -> u64 {
         self.orders_revision
     }
@@ -530,14 +700,163 @@ impl Store {
         true
     }
 
+    #[cfg(all(test, feature = "order-locks"))]
+    pub(crate) fn account_read_cover(&self) -> Option<f64> {
+        self.read_covers.account()
+    }
+
+    /// Every required order read has answered: orders are loaded, rows as they are.
+    pub fn set_orders_loaded(&mut self) {
+        self.set_loaded(|loaded| loaded.orders = true);
+    }
+
+    /// The row sequence a read released now records (`OrderReadMark::seq`).
+    pub fn order_read_sequence(&self) -> u64 {
+        self.read_covers.sequence()
+    }
+
+    /// What `commit_orders_read` with these rows would refuse, decided now and
+    /// changing nothing: `None` when it would refuse the whole read. A venue
+    /// keeping its own per-order state applies it only for symbols this admits,
+    /// then commits the same rows in the same handler.
+    pub fn orders_read_refusals(
+        &self,
+        read: OrderReadMark,
+        scope: OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: &[Order],
+    ) -> Option<Vec<String>> {
+        let selects = |symbol: &str| match scope {
+            OrderReadScope::Account { .. } => in_scope(symbol),
+            OrderReadScope::Symbols(listed) => listed.contains(&symbol),
+        };
+        let (_, admission) = self.admit_orders_read(read, scope, &selects, rows);
+        (!admission.whole_scope_refused).then_some(admission.refused)
+    }
+
+    /// The symbols a read speaks for, and which of them it may replace.
+    fn admit_orders_read(
+        &self,
+        read: OrderReadMark,
+        scope: OrderReadScope<'_>,
+        selects: &dyn Fn(&str) -> bool,
+        rows: &[Order],
+    ) -> (Vec<String>, crate::order_read_cover::Admission) {
+        let mut candidates: Vec<String> = Vec::new();
+        let listed: &[&str] = match scope {
+            OrderReadScope::Symbols(listed) => listed,
+            OrderReadScope::Account { .. } => &[],
+        };
+        // A symbol changed after the release is a candidate even with no row
+        // left: provenance outlives removal.
+        for symbol in self
+            .orders
+            .iter()
+            .chain(rows.iter())
+            .map(|order| order.symbol.as_str())
+            .chain(listed.iter().copied())
+            .chain(self.read_covers.changed_after(read))
+        {
+            if selects(symbol) && !candidates.iter().any(|known| known == symbol) {
+                candidates.push(symbol.to_owned());
+            }
+        }
+        let admission = self
+            .read_covers
+            .admit(read, scope, candidates.iter().map(String::as_str));
+        (candidates, admission)
+    }
+
+    /// Commit one read's rows for `scope`, atomically with the cover it proves.
+    /// A symbol whose rows changed after the read was released keeps them, and
+    /// the read proves nothing for it; an account scope committed after the
+    /// read refuses all of it. `in_scope` selects an account scope's symbols.
+    /// `unproven` names symbols whose rows the read could not map (rejected or
+    /// unsupported rows); its rows still commit, but it proves no cover for
+    /// them, and an empty symbol (a row naming no market) proves none at all.
+    /// Returns the refused symbols, or `None` when the whole read was refused.
+    pub fn commit_orders_read(
+        &mut self,
+        read: OrderReadMark,
+        scope: OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: Vec<Order>,
+        unproven: &[String],
+    ) -> Option<Vec<String>> {
+        let selects = |symbol: &str| match scope {
+            OrderReadScope::Account { .. } => in_scope(symbol),
+            OrderReadScope::Symbols(listed) => listed.contains(&symbol),
+        };
+        let (candidates, admission) = self.admit_orders_read(read, scope, &selects, &rows);
+        if admission.whole_scope_refused {
+            return None;
+        }
+        let refused = admission.refused;
+        let kept = |order: &Order| !selects(&order.symbol) || refused.contains(&order.symbol);
+        let mut next: Vec<Order> = self
+            .orders
+            .iter()
+            .filter(|order| kept(order))
+            .cloned()
+            .collect();
+        next.extend(rows.into_iter().filter(|order| !kept(order)));
+        let written: Vec<String> = candidates
+            .into_iter()
+            .filter(|symbol| !refused.contains(symbol))
+            .collect();
+        let complete = self.read_covers.committed(
+            read,
+            scope,
+            &written,
+            refused.is_empty() && unproven.is_empty(),
+            unproven,
+        );
+        if next != self.orders {
+            self.orders_revision = self.orders_revision.saturating_add(1);
+            self.orders = next;
+            self.changes.orders = true;
+        } else if self.read_covers.any() {
+            // The cover moved: send it, beside the unchanged rows.
+            self.changes.orders = true;
+        }
+        if complete {
+            self.set_loaded(|loaded| loaded.orders = true);
+        }
+        Some(refused)
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn exhaust_order_snapshots_for_test(&mut self) {
         self.order_snapshot_epoch.exhaust_for_test();
     }
 
     /// Replace every order with a venue snapshot.
+    /// Frame ingest: a data source's snapshot replaces every account section,
+    /// so they start empty and unloaded (markets and tickers stay).
+    pub fn reset_account(&mut self) {
+        self.orders.clear();
+        self.orders_revision = self.orders_revision.saturating_add(1);
+        self.read_covers.reset();
+        self.positions.clear();
+        self.position_native_extras.clear();
+        self.balance = Balance::default();
+        self.coin_balances = None;
+        self.currency_balances = None;
+        self.settings.clear();
+        self.hedged = false;
+        self.loaded.balance = false;
+        self.loaded.orders = false;
+        self.loaded.positions = false;
+        self.changes.orders = true;
+        self.changes.positions = true;
+        self.changes.balance = true;
+        self.changes.settings = true;
+        self.changes.status = true;
+    }
+
     pub fn set_orders(&mut self, orders: Vec<Order>) {
         self.orders_revision = self.orders_revision.saturating_add(1);
+        self.read_covers.mutated_all();
         self.orders = orders;
         self.changes.orders = true;
         self.set_loaded(|loaded| loaded.orders = true);
@@ -547,12 +866,18 @@ impl Store {
     /// status, until the next snapshot replaces the list.
     pub fn upsert_order(&mut self, order: Order) {
         self.orders_revision = self.orders_revision.saturating_add(1);
+        self.read_covers.mutated(&order.symbol);
         match self
             .orders
             .iter()
             .position(|existing| existing.id == order.id)
         {
-            Some(index) => self.orders[index] = order,
+            Some(index) => {
+                if self.orders[index].symbol != order.symbol {
+                    self.read_covers.mutated(&self.orders[index].symbol);
+                }
+                self.orders[index] = order;
+            }
             None => self.orders.push(order),
         }
         self.changes.orders = true;
@@ -564,7 +889,13 @@ impl Store {
             return false;
         };
         self.orders_revision = self.orders_revision.saturating_add(1);
+        let before = order.symbol.clone();
         update(order);
+        let after = (order.symbol != before).then(|| order.symbol.clone());
+        self.read_covers.mutated(&before);
+        if let Some(after) = after {
+            self.read_covers.mutated(&after);
+        }
         self.changes.orders = true;
         true
     }
@@ -575,8 +906,14 @@ impl Store {
 
     pub fn remove_orders(&mut self, ids: &[&str]) {
         let before = self.orders.len();
-        self.orders
-            .retain(|order| !ids.contains(&order.id.as_str()));
+        let covers = &mut self.read_covers;
+        self.orders.retain(|order| {
+            let removed = ids.contains(&order.id.as_str());
+            if removed {
+                covers.mutated(&order.symbol);
+            }
+            !removed
+        });
         if self.orders.len() != before {
             self.orders_revision = self.orders_revision.saturating_add(1);
             self.changes.orders = true;
@@ -588,6 +925,7 @@ impl Store {
     }
 
     pub fn set_positions(&mut self, positions: Vec<Position>) {
+        self.position_native_extras = vec![PositionNativeExtras::default(); positions.len()];
         self.positions = positions;
         #[cfg(any(test, feature = "product-semantics"))]
         self.prune_position_greeks();
@@ -595,6 +933,24 @@ impl Store {
         self.prune_prediction_holdings();
         self.changes.positions = true;
         self.set_loaded(|loaded| loaded.positions = true);
+    }
+
+    /// Keep the producer's native values and presence bits instead of deriving
+    /// them again from the receiving store's possibly missing/stale catalogue.
+    pub(crate) fn set_frame_positions(
+        &mut self,
+        positions: Vec<Position>,
+        native_extras: Vec<[Option<f64>; 2]>,
+    ) {
+        assert_eq!(positions.len(), native_extras.len());
+        self.set_positions(positions);
+        self.position_native_extras = native_extras
+            .into_iter()
+            .map(|values| PositionNativeExtras {
+                values,
+                imported: [true; 2],
+            })
+            .collect();
     }
 
     #[cfg(feature = "prediction")]
@@ -622,10 +978,19 @@ impl Store {
         match (index, position.contracts == 0.0) {
             (Some(index), true) => {
                 self.positions.remove(index);
+                self.position_native_extras.remove(index);
             }
-            (Some(index), false) => self.positions[index] = position,
+            (Some(index), false) => {
+                self.position_native_extras[index].update(&mut self.positions[index], |stored| {
+                    *stored = position;
+                });
+            }
             (None, true) => return,
-            (None, false) => self.positions.push(position),
+            (None, false) => {
+                self.positions.push(position);
+                self.position_native_extras
+                    .push(PositionNativeExtras::default());
+            }
         }
         #[cfg(any(test, feature = "product-semantics"))]
         self.prune_position_greeks();
@@ -636,9 +1001,17 @@ impl Store {
 
     /// Change positions in place; rows left with zero contracts are removed.
     pub fn update_positions(&mut self, mut update: impl FnMut(&mut Position)) {
-        for position in &mut self.positions {
-            update(position);
+        for (position, native) in self
+            .positions
+            .iter_mut()
+            .zip(&mut self.position_native_extras)
+        {
+            native.update(position, &mut update);
         }
+        // Filter the sidecar using the same rows before compacting positions.
+        let mut rows = self.positions.iter();
+        self.position_native_extras
+            .retain(|_| rows.next().is_some_and(|p| p.contracts != 0.0));
         self.positions.retain(|p| p.contracts != 0.0);
         #[cfg(any(test, feature = "product-semantics"))]
         self.prune_position_greeks();
@@ -660,6 +1033,13 @@ impl Store {
     pub fn set_coin_balances(&mut self, coins: Vec<CoinBalance>) {
         if self.coin_balances.as_ref() != Some(&coins) {
             self.coin_balances = Some(coins);
+            self.changes.balance = true;
+        }
+    }
+
+    /// Back to never supplied: a frame-fed source that no longer reports collateral.
+    pub fn clear_coin_balances(&mut self) {
+        if self.coin_balances.take().is_some() {
             self.changes.balance = true;
         }
     }
@@ -702,6 +1082,25 @@ impl Store {
         #[cfg(feature = "metadata-freshness")]
         if let Some(metadata) = &mut self.metadata {
             metadata.changed(None);
+        }
+    }
+
+    /// Replace every market's settings, keyed by symbol.
+    pub fn replace_settings<'a>(
+        &mut self,
+        settings: impl IntoIterator<Item = (&'a str, MarketSetting)>,
+    ) {
+        let settings: HashMap<Box<str>, MarketSetting> = settings
+            .into_iter()
+            .map(|(symbol, setting)| (symbol.into(), setting))
+            .collect();
+        if settings != self.settings {
+            self.settings = settings;
+            self.changes.settings = true;
+            #[cfg(feature = "metadata-freshness")]
+            if let Some(metadata) = &mut self.metadata {
+                metadata.changed(None);
+            }
         }
     }
 
@@ -875,7 +1274,15 @@ impl Store {
         self.loaded
     }
 
+    pub fn latency(&self) -> Option<f64> {
+        self.latency
+    }
+
     pub fn set_latency(&mut self, latency: f64) {
+        self.set_latency_sample(Some(latency));
+    }
+
+    pub(crate) fn set_latency_sample(&mut self, latency: Option<f64>) {
         if latency != self.latency {
             self.latency = latency;
             self.changes.status = true;
@@ -989,7 +1396,11 @@ impl Store {
         }
         if changes.tickers_replaced {
             self.write_tickers(w);
-        } else if !pending.ticker_deltas.is_empty() {
+        } else if pending
+            .ticker_deltas
+            .iter()
+            .any(|(_, mask)| mask & 0xfff != 0)
+        {
             let revision = u16::from(
                 pending
                     .ticker_deltas
@@ -998,6 +1409,10 @@ impl Store {
             );
             w.begin_revision(section::TICKER_DELTAS, revision);
             for &(index, mask) in &pending.ticker_deltas {
+                let mask = mask & 0xfff;
+                if mask == 0 {
+                    continue;
+                }
                 let values = ticker_values(&self.tickers[index as usize]);
                 w.f64s([index as f64, mask as f64]);
                 for (bit, value) in values.iter().enumerate() {
@@ -1008,8 +1423,36 @@ impl Store {
             }
             w.end();
         }
+        if self.export_ticker_observations
+            && (changes.tickers_replaced
+                || pending
+                    .ticker_deltas
+                    .iter()
+                    .any(|(_, mask)| mask & 0x7000 != 0))
+        {
+            w.begin(section::TICKER_OBSERVATIONS);
+            if changes.tickers_replaced {
+                for (index, times) in self.ticker_observed_at.iter().enumerate() {
+                    w.f64(index as f64);
+                    w.f64s(times.iter().copied());
+                }
+            } else {
+                for &(index, mask) in &pending.ticker_deltas {
+                    if mask & 0x7000 != 0 {
+                        w.f64(index as f64);
+                        w.f64s(self.ticker_observed_at[index as usize]);
+                    }
+                }
+            }
+            w.end();
+        }
         if changes.orders {
             self.write_orders(w);
+            // Directly after ORDERS: a segmenting host keeps the two together.
+            // Nothing is written until a read has proven a cover.
+            if self.read_covers.any() {
+                self.write_orders_read(w);
+            }
         }
         if changes.positions {
             self.write_positions(w);
@@ -1019,34 +1462,12 @@ impl Store {
             self.write_prediction_holdings(w);
         }
         if changes.balance {
-            let b = &self.balance;
-            w.begin(section::BALANCE);
-            w.f64s([b.used, b.free, b.total, b.upnl]);
-            if self.coin_balances.is_some() || self.currency_balances.is_some() {
-                let coins = self.coin_balances.as_deref().unwrap_or_default();
-                w.u32(coins.len() as u32);
-                for coin in coins {
-                    let base = w.string(&coin.base);
-                    w.u32(base);
-                }
-                w.pad();
-                w.f64s(coins.iter().map(|coin| coin.amount));
-                w.f64s(coins.iter().map(|coin| coin.notional));
-                if let Some(currencies) = &self.currency_balances {
-                    w.u32(currencies.len() as u32);
-                    w.u32(u32::from(self.coin_balances.is_none()));
-                    for currency in currencies {
-                        let name = w.string(&currency.currency);
-                        w.u32(name);
-                    }
-                    w.pad();
-                    w.f64s(currencies.iter().map(|row| row.balance.total));
-                    w.f64s(currencies.iter().map(|row| row.balance.free));
-                    w.f64s(currencies.iter().map(|row| row.balance.used));
-                    w.f64s(currencies.iter().map(|row| row.balance.upnl));
-                }
-            }
-            w.end();
+            crate::balance_output::write(
+                w,
+                &self.balance,
+                self.coin_balances.as_deref(),
+                self.currency_balances.as_deref(),
+            );
         }
         if changes.settings {
             self.write_settings(w);
@@ -1069,8 +1490,14 @@ impl Store {
             } else {
                 0
             };
+            let flags = flags
+                | if self.latency.is_some() {
+                    wire::status_flag::LATENCY_MEASURED
+                } else {
+                    0
+                };
             w.u32s([loaded, flags]);
-            w.f64(self.latency);
+            w.f64(self.latency.unwrap_or(0.0));
             w.end();
         }
     }
@@ -1149,8 +1576,14 @@ impl Store {
             w.u32s(refs);
         }
         w.pad();
-        w.f64s(rows.iter().map(|row| row.expiry.unwrap_or(f64::NAN)));
-        w.f64s(rows.iter().map(|row| row.strike.unwrap_or(f64::NAN)));
+        w.f64s(
+            rows.iter()
+                .map(|row| crate::market_output::optional(row.expiry)),
+        );
+        w.f64s(
+            rows.iter()
+                .map(|row| crate::market_output::optional(row.strike)),
+        );
         w.end();
     }
 
@@ -1219,58 +1652,7 @@ impl Store {
     }
 
     fn write_markets<'a>(&'a self, w: &mut FrameWriter<'a>) {
-        let markets = &self.markets;
-        let pretty = markets.iter().any(|market| market.pretty_symbol.is_some());
-        w.begin_revision(section::MARKETS, u16::from(pretty));
-        w.u32(markets.len() as u32);
-        for m in markets {
-            let refs = [
-                w.string(&m.id),
-                w.string(&m.symbol),
-                w.string(&m.base),
-                w.string(&m.quote),
-            ];
-            w.u32s(refs);
-        }
-        w.u32s(markets.iter().map(|m| {
-            [
-                (Some(m.active), market_flag::ACTIVE),
-                (m.is_inverse, market_flag::INVERSE),
-                (m.is_spot, market_flag::SPOT),
-                (m.is_perpetual, market_flag::PERPETUAL),
-                (m.is_expiring, market_flag::EXPIRING),
-                (m.is_read_only, market_flag::READ_ONLY),
-            ]
-            .iter()
-            .filter(|(set, _)| *set == Some(true))
-            .fold(
-                self.quantity_units << market_flag::UNITS_SHIFT,
-                |bits, (_, flag)| bits | flag,
-            )
-        }));
-        w.pad();
-        let columns: [fn(&Market) -> f64; 10] = [
-            |m| m.precision.amount,
-            |m| m.precision.price,
-            |m| m.limits.amount.min,
-            |m| m.limits.amount.max,
-            |m| m.limits.leverage.min,
-            |m| m.limits.leverage.max,
-            |m| m.limits.price.map_or(f64::NAN, |p| p.min),
-            |m| m.contract_size.unwrap_or(f64::NAN),
-            |m| m.taker_fee.unwrap_or(f64::NAN),
-            |m| m.maker_fee.unwrap_or(f64::NAN),
-        ];
-        for column in columns {
-            w.f64s(markets.iter().map(column));
-        }
-        if pretty {
-            for market in markets {
-                let reference = w.optional_string(market.pretty_symbol.as_deref());
-                w.u32(reference);
-            }
-        }
-        w.end();
+        crate::market_output::write(&self.markets, self.quantity_units, w);
     }
 
     fn write_tickers<'a>(&'a self, w: &mut FrameWriter<'a>) {
@@ -1302,102 +1684,55 @@ impl Store {
         w.end();
     }
 
-    fn write_orders<'a>(&'a self, w: &mut FrameWriter<'a>) {
-        let orders = &self.orders;
-        w.begin_revision(section::ORDERS, 1);
-        w.u32(orders.len() as u32);
-        for o in orders {
-            let refs = [
-                w.string(&o.id),
-                w.optional_string(o.client_order_id.as_deref()),
-                w.optional_string(o.parent_id.as_deref()),
-            ];
-            w.u32s(refs);
-        }
-        w.u32s(orders.iter().map(|o| self.market_ref(&o.symbol)));
-        w.u32s(orders.iter().map(|o| {
-            wire::order_enums(
-                o.status,
-                o.kind,
-                o.side,
-                o.reduce_only,
-                o.close,
-                o.time_in_force,
-                o.trigger_type,
-                o.extra.as_ref().and_then(|e| e.reject_reason),
-            )
-        }));
+    /// `ORDERS_READ` revision 1: the account cover (NaN when none), then each
+    /// symbol's newer cover, on this writer's clock.
+    fn write_orders_read<'a>(&'a self, w: &mut FrameWriter<'a>) {
+        let symbols: Vec<(&str, f64)> = self.read_covers.symbol_covers().collect();
+        w.begin_revision(section::ORDERS_READ, 1);
+        w.u32(symbols.len() as u32);
         w.pad();
-        let columns: [fn(&Order) -> f64; 7] = [
-            |o| o.price,
-            |o| o.amount,
-            |o| o.filled,
-            |o| o.remaining,
-            |o| o.last_update,
-            |o| o.take_profit.unwrap_or(f64::NAN),
-            |o| o.stop_loss.unwrap_or(f64::NAN),
-        ];
-        for column in columns {
-            w.f64s(orders.iter().map(column));
-        }
-        let extra_columns: [fn(&crate::model::OrderExtra) -> Option<f64>; 4] = [
-            |extra| extra.remaining_native,
-            |extra| extra.filled_in_placement_units,
-            |extra| extra.remaining_notional,
-            |extra| extra.conditional_order_price,
-        ];
-        for column in extra_columns {
-            w.f64s(
-                orders
-                    .iter()
-                    .map(|order| order.extra.as_ref().and_then(column).unwrap_or(f64::NAN)),
-            );
-        }
-        w.u32s(orders.iter().map(|order| {
-            order.extra.as_ref().map_or(0, |extra| {
-                extra
-                    .tp_trigger_type
-                    .map_or(0, |trigger| trigger as u32 + 1)
-                    | (extra
-                        .sl_trigger_type
-                        .map_or(0, |trigger| trigger as u32 + 1)
-                        << 8)
-            })
-        }));
-        for order in orders {
-            let symbol = w.string(&order.symbol);
-            w.u32(symbol);
-        }
+        w.f64(self.read_covers.account().unwrap_or(f64::NAN));
+        let refs: Vec<u32> = symbols.iter().map(|(symbol, _)| w.string(symbol)).collect();
+        w.u32s(refs);
+        w.pad();
+        w.f64s(symbols.iter().map(|(_, sent)| *sent));
         w.end();
+    }
+
+    fn write_orders<'a>(&'a self, w: &mut FrameWriter<'a>) {
+        crate::order_output::write(
+            &self.orders,
+            |symbol| self.market(symbol),
+            |symbol| self.market_ref(symbol),
+            self.quantity_units,
+            w,
+        );
     }
 
     fn write_settings<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let mut rows: Vec<_> = self
             .settings
             .iter()
-            .map(|(symbol, setting)| (self.market_ref(symbol), symbol, setting))
+            .filter_map(|(symbol, setting)| {
+                crate::store_output::rails(setting)
+                    .map(|rails| (self.market_ref(symbol), symbol, setting, rails))
+            })
             .collect();
-        rows.sort_unstable_by(|(a_index, a_symbol, _), (b_index, b_symbol, _)| {
+        rows.sort_unstable_by(|(a_index, a_symbol, _, _), (b_index, b_symbol, _, _)| {
             a_index.cmp(b_index).then(a_symbol.cmp(b_symbol))
         });
         w.begin_revision(section::SETTINGS, 1);
         w.u32(rows.len() as u32);
-        w.u32s(rows.iter().map(|(market, _, _)| *market));
+        w.u32s(rows.iter().map(|(market, _, _, _)| *market));
         w.u32s(
             rows.iter()
-                .map(|(_, _, s)| s.margin_type.map_or(0, |m| m as u32 + 1)),
+                .map(|(_, _, s, _)| s.margin_type.map_or(0, |m| m as u32 + 1)),
         );
         w.pad();
-        w.f64s(rows.iter().map(|(_, _, s)| s.leverage));
-        w.f64s(
-            rows.iter()
-                .map(|(_, _, s)| s.buy_leverage.unwrap_or(s.leverage)),
-        );
-        w.f64s(
-            rows.iter()
-                .map(|(_, _, s)| s.sell_leverage.unwrap_or(s.leverage)),
-        );
-        for (_, symbol, _) in &rows {
+        w.f64s(rows.iter().map(|(_, _, s, _)| s.leverage));
+        w.f64s(rows.iter().map(|(_, _, _, rails)| rails[0]));
+        w.f64s(rows.iter().map(|(_, _, _, rails)| rails[1]));
+        for (_, symbol, _, _) in &rows {
             let symbol = w.string(symbol);
             w.u32(symbol);
         }
@@ -1406,29 +1741,54 @@ impl Store {
 
     fn write_positions<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let positions = &self.positions;
-        w.begin_revision(section::POSITIONS, 1);
+        let extras: Vec<_> = positions
+            .iter()
+            .zip(&self.position_native_extras)
+            .map(|(position, native)| {
+                if native.imported == [true; 2] {
+                    return native.values;
+                }
+                let derived = {
+                    let market = self
+                        .market_by_symbol
+                        .get(position.symbol.as_str())
+                        .map(|index| &self.markets[*index as usize]);
+                    crate::position_output::native_extras(position, market, self.quantity_units)
+                };
+                std::array::from_fn(|i| {
+                    if native.imported[i] {
+                        native.values[i]
+                    } else {
+                        derived[i]
+                    }
+                })
+            })
+            .collect();
+        w.begin_revision(section::POSITIONS, 2);
         w.u32(positions.len() as u32);
         w.u32s(positions.iter().map(|p| self.market_ref(&p.symbol)));
-        w.u32s(
-            positions
-                .iter()
-                .map(|p| wire::position_enums(p.side, p.margin_type, p.position_mode)),
-        );
+        w.u32s(positions.iter().zip(&extras).map(|(p, extra)| {
+            wire::position_enums(p.side, p.margin_type, p.position_mode)
+                | (u32::from(extra[0].is_some()) << 24)
+                | (u32::from(extra[1].is_some()) << 25)
+        }));
         w.pad();
         let columns: [fn(&Position) -> f64; 9] = [
             |p| p.entry_price,
             |p| p.notional,
-            |p| p.leverage,
-            |p| p.unrealized_pnl,
-            |p| p.realized_pnl.unwrap_or(f64::NAN),
+            |p| crate::position_output::display(p.leverage),
+            |p| crate::position_output::display(p.unrealized_pnl),
+            |p| p.realized_pnl.filter(|v| v.is_finite()).unwrap_or(f64::NAN),
             |p| p.contracts,
-            |p| p.liquidation_price,
-            |p| p.margin_size.unwrap_or(f64::NAN),
-            |p| p.last_update.unwrap_or(f64::NAN),
+            |p| crate::position_output::liquidation(p.liquidation_price).unwrap_or(f64::NAN),
+            |p| p.margin_size.filter(|v| v.is_finite()).unwrap_or(f64::NAN),
+            |p| p.last_update.filter(|v| v.is_finite()).unwrap_or(f64::NAN),
         ];
         for column in columns {
             w.f64s(positions.iter().map(column));
         }
+        w.f64s(extras.iter().map(|extra| extra[0].unwrap_or(f64::NAN)));
+        w.f64s(extras.iter().map(|extra| extra[1].unwrap_or(f64::NAN)));
         for position in positions {
             let id = w.string(&position.id);
             w.u32(id);
@@ -1526,6 +1886,283 @@ mod tests {
             take_profit: None,
             stop_loss: None,
             extra: None,
+        }
+    }
+
+    /// Read covers (docs/plans/RUST_FRAME_FED_READ_COVER.md §2, H5 H8 H9 H10).
+    mod read_covers {
+        use super::*;
+        use crate::order_read_cover::{OrderReadMark, OrderReadScope};
+
+        const ACCOUNT: OrderReadScope<'static> = OrderReadScope::Account {
+            key: "all",
+            account: &["all"],
+        };
+
+        fn row(id: &str, symbol: &str) -> Order {
+            Order {
+                symbol: symbol.into(),
+                ..snapshot_order(id)
+            }
+        }
+
+        fn release(store: &Store, sent: f64) -> OrderReadMark {
+            OrderReadMark {
+                seq: store.order_read_sequence(),
+                sent,
+                epoch: 0,
+            }
+        }
+
+        fn ids(store: &Store) -> Vec<&str> {
+            store
+                .orders()
+                .iter()
+                .map(|order| order.id.as_str())
+                .collect()
+        }
+
+        fn sections(store: &mut Store) -> Vec<u16> {
+            let pending = store.account_snapshot();
+            let mut w = FrameWriter::new(Vec::new(), 0.);
+            store.write(&pending, &mut w);
+            crate::wire::sections(&w.finish())
+                .map(|(kind, _)| kind)
+                .filter(|kind| *kind != section::STRINGS)
+                .collect()
+        }
+
+        // H8: an old read (sent 0) misses the write; a fresh read (sent 5) finds
+        // the order; the old one lands last and must neither remove it nor move
+        // the cover. Every output after it still carries the order and cover 5.
+        #[test]
+        fn an_older_read_landing_after_a_fresh_one_neither_removes_the_found_order_nor_lowers_the_cover()
+         {
+            let mut store = Store::default();
+            let old = release(&store, 0.);
+            let fresh = release(&store, 5.);
+            let found = vec![row("lost", "BTC")];
+            assert_eq!(
+                store.commit_orders_read(fresh, ACCOUNT, |_| true, found, &[]),
+                Some(vec![])
+            );
+            assert_eq!(store.read_covers.account(), Some(5.));
+            assert_eq!(
+                store.commit_orders_read(old, ACCOUNT, |_| true, vec![], &[]),
+                None
+            );
+            assert_eq!(ids(&store), ["lost"]);
+            assert_eq!(store.read_covers.account(), Some(5.));
+            assert_eq!(
+                sections(&mut store)[..2],
+                [section::ORDERS, section::ORDERS_READ],
+                "a snapshot carries the order and its cover, together"
+            );
+        }
+
+        // H10: a read released at 5000 and a stream row at the same millisecond,
+        // after it. Ordered by sequence, the read is refused for that symbol.
+        #[test]
+        fn a_stream_row_after_a_reads_release_at_the_same_millisecond_refuses_that_read() {
+            let mut store = Store::default();
+            let read = release(&store, 5_000.);
+            store.upsert_order(row("streamed", "BTC"));
+            assert_eq!(
+                store.commit_orders_read(read, ACCOUNT, |_| true, vec![], &[]),
+                Some(vec!["BTC".to_owned()])
+            );
+            assert_eq!(ids(&store), ["streamed"], "the stream row stays");
+            assert_eq!(
+                store.read_covers.account(),
+                None,
+                "a refused read proves nothing"
+            );
+            // The same read, released after that row: it speaks for it.
+            let after = release(&store, 5_000.);
+            assert_eq!(
+                store.commit_orders_read(after, ACCOUNT, |_| true, vec![], &[]),
+                Some(vec![])
+            );
+            assert!(store.orders().is_empty());
+            assert_eq!(store.read_covers.account(), Some(5_000.));
+        }
+
+        // A missing row never erases the proof: a stream row added then removed
+        // after a read's release still refuses that read's copy of it, and an
+        // empty full replacement refuses the whole read.
+        #[test]
+        fn provenance_outlives_removed_rows_and_empty_replacements() {
+            let mut store = Store::default();
+            let read = release(&store, 1.);
+            store.upsert_order(row("gone", "BTC"));
+            store.remove_orders(&["gone"]);
+            assert_eq!(
+                store.commit_orders_read(read, ACCOUNT, |_| true, vec![row("gone", "BTC")], &[]),
+                Some(vec!["BTC".to_owned()])
+            );
+            assert!(store.orders().is_empty(), "the removed row is not re-added");
+            let read = release(&store, 2.);
+            store.set_orders(Vec::new());
+            assert_eq!(
+                store.commit_orders_read(read, ACCOUNT, |_| true, vec![row("stale", "ETH")], &[]),
+                None
+            );
+            assert!(store.orders().is_empty());
+        }
+
+        // H9: an account cover is the oldest send across its scopes.
+        #[test]
+        fn an_account_cover_is_the_oldest_send_across_its_scopes() {
+            let scopes: &[&str] = &["core", "dex"];
+            let core = OrderReadScope::Account {
+                key: "core",
+                account: scopes,
+            };
+            let dex = OrderReadScope::Account {
+                key: "dex",
+                account: scopes,
+            };
+            let mut store = Store::default();
+            let old_dex = release(&store, 0.);
+            let fresh_core = release(&store, 5.);
+            let is_dex = |symbol: &str| symbol.starts_with("xyz:");
+            store.commit_orders_read(fresh_core, core, |s| !is_dex(s), vec![], &[]);
+            assert_eq!(
+                store.read_covers.account(),
+                None,
+                "one scope is not the account"
+            );
+            store.commit_orders_read(old_dex, dex, is_dex, vec![], &[]);
+            assert_eq!(
+                store.read_covers.account(),
+                Some(0.),
+                "never the last scope's send"
+            );
+            assert_eq!(store.read_covers.cover("xyz:TSLA"), Some(0.));
+        }
+
+        // H5: per-symbol reads move only their own symbols' covers, across
+        // flushes, and an older one landing late is refused.
+        #[test]
+        fn per_symbol_reads_never_become_an_account_cover() {
+            let mut store = Store::default();
+            let eth = OrderReadScope::Symbols(&["ETH"]);
+            let early = release(&store, 1.);
+            store.commit_orders_read(early, eth, |_| false, vec![], &[]);
+            store.take_pending();
+            let late_sent_early = release(&store, 2.);
+            let next = release(&store, 500.);
+            store.commit_orders_read(next, eth, |_| false, vec![], &[]);
+            assert_eq!(store.read_covers.account(), None);
+            assert_eq!(store.read_covers.cover("ETH"), Some(500.));
+            assert_eq!(store.read_covers.cover("BTC"), None);
+            assert_eq!(
+                store.commit_orders_read(
+                    late_sent_early,
+                    eth,
+                    |_| false,
+                    vec![row("stale", "ETH")],
+                    &[]
+                ),
+                Some(vec!["ETH".to_owned()])
+            );
+            assert!(store.orders().is_empty());
+            assert_eq!(store.read_covers.cover("ETH"), Some(500.));
+        }
+
+        // codex-hcmq3f (#3004): rows wiped by an account reset take their cover
+        // with them, and nothing goes out claiming it.
+        #[test]
+        fn an_account_reset_clears_every_cover() {
+            let mut store = Store::default();
+            let read = release(&store, 3.);
+            store.commit_orders_read(read, ACCOUNT, |_| true, vec![row("a", "BTC")], &[]);
+            assert_eq!(store.read_covers.account(), Some(3.));
+            store.reset_account();
+            assert_eq!(store.read_covers.account(), None);
+            assert_eq!(store.read_covers.cover("BTC"), None);
+            assert!(!sections(&mut store).contains(&section::ORDERS_READ));
+            // A read released before the reset cannot restore it.
+            assert_eq!(
+                store.commit_orders_read(read, ACCOUNT, |_| true, vec![], &[]),
+                None
+            );
+        }
+
+        // codex-hcmq3f (#3004): a row added and removed after the release
+        // leaves no row to name it, yet the empty read is still refused for it.
+        #[test]
+        fn an_empty_read_is_refused_for_a_symbol_added_and_removed_after_its_release() {
+            let mut store = Store::default();
+            let read = release(&store, 1.);
+            store.upsert_order(row("brief", "BTC"));
+            store.remove_orders(&["brief"]);
+            assert_eq!(
+                store.commit_orders_read(read, ACCOUNT, |_| true, vec![], &[]),
+                Some(vec!["BTC".to_owned()])
+            );
+            assert_eq!(store.read_covers.account(), None, "not a clean read");
+        }
+
+        // codex-hcmq3f (#3005): rows a read could not map commit as they are,
+        // but prove nothing: an unmapped row with no market blocks the account
+        // cover, and a known symbol's blocks only that symbol's.
+        #[test]
+        fn unproven_rows_commit_but_prove_no_cover() {
+            let mut store = Store::default();
+            let read = release(&store, 1_000.);
+            assert_eq!(
+                store.commit_orders_read(
+                    read,
+                    ACCOUNT,
+                    |_| true,
+                    vec![row("ok", "ETH")],
+                    &[String::new()]
+                ),
+                Some(vec![])
+            );
+            assert_eq!(ids(&store), ["ok"], "healthy rows still publish");
+            assert_eq!(store.read_covers.account(), None);
+            let symbols = OrderReadScope::Symbols(&["BTC", "ETH"]);
+            let read = release(&store, 2_000.);
+            store.commit_orders_read(read, symbols, |_| false, vec![], &["BTC".to_owned()]);
+            assert_eq!(store.read_covers.cover("BTC"), None);
+            assert_eq!(store.read_covers.cover("ETH"), Some(2_000.));
+        }
+
+        // A preview refuses exactly what the commit then refuses, and changes
+        // nothing on the way.
+        #[test]
+        fn a_refusal_preview_matches_its_commit_and_changes_nothing() {
+            let mut store = Store::default();
+            let read = release(&store, 1.);
+            store.upsert_order(row("streamed", "BTC"));
+            let rows = vec![row("eth", "ETH")];
+            let before = store.order_read_sequence();
+            let preview = store.orders_read_refusals(read, ACCOUNT, |_| true, &rows);
+            assert_eq!(preview, Some(vec!["BTC".to_owned()]));
+            assert_eq!(store.order_read_sequence(), before);
+            assert_eq!(
+                store.commit_orders_read(read, ACCOUNT, |_| true, rows, &[]),
+                preview
+            );
+        }
+
+        // Until a read proves a cover, no output changes.
+        #[test]
+        fn no_cover_writes_no_section() {
+            let mut store = Store::default();
+            store.upsert_order(row("a", "BTC"));
+            assert_eq!(
+                sections(&mut store),
+                [
+                    section::ORDERS,
+                    section::POSITIONS,
+                    section::BALANCE,
+                    section::SETTINGS,
+                    section::STATUS
+                ]
+            );
         }
     }
 
@@ -1708,11 +2345,11 @@ mod tests {
         let mut writer = FrameWriter::new(Vec::new(), 1.);
         store.write_positions(&mut writer);
         let frame = writer.finish();
-        assert_eq!(u16::from_le_bytes(frame[18..20].try_into().unwrap()), 1);
+        assert_eq!(u16::from_le_bytes(frame[18..20].try_into().unwrap()), 2);
         let rows = wire::sections(&frame).next().unwrap().1;
         assert_eq!(word(rows, 4), wire::NONE);
-        assert_eq!(frame_string(&frame, word(rows, 88)), "venue-position-7");
-        assert_eq!(frame_string(&frame, word(rows, 92)), "DELISTED");
+        assert_eq!(frame_string(&frame, word(rows, 104)), "venue-position-7");
+        assert_eq!(frame_string(&frame, word(rows, 108)), "DELISTED");
     }
 
     #[test]
@@ -2010,6 +2647,59 @@ mod tests {
             by_index.take_pending().ticker_deltas
         );
         assert_eq!(by_index.tickers()[1].last, 7.);
+    }
+
+    #[test]
+    fn indexed_observed_updates_preserve_reference_times_and_exact_delta_frames() {
+        for export_observations in [false, true] {
+            let mut separate = Store::default();
+            let mut combined = Store::default();
+            for store in [&mut separate, &mut combined] {
+                store.export_ticker_observations = export_observations;
+                store.set_tickers(vec![ticker("B"), ticker("A"), ticker("A")]);
+                store.take_pending();
+            }
+            // Includes an unchanged observation, a changed value, signed zero,
+            // omitted references, and a message with no reference observation.
+            for (now, observed, last, mark) in [
+                (1., 1 << 2, 0., 0.),
+                (2., 1 << 3, 0., 5.),
+                (3., (1 << 2) | (1 << 4), -0., 5.),
+                (4., 0, -0., 5.),
+                (5., 1, -0., 5.),
+            ] {
+                separate.set_clock(now);
+                combined.set_clock(now);
+                let update = |row: &mut Ticker| {
+                    row.last = last;
+                    row.mark = mark;
+                };
+                separate.update_ticker("A", update);
+                separate.observe_ticker_fields("A", observed);
+                combined.update_ticker_at_observed(2, observed, update);
+                assert_eq!(combined.ticker_seen_at, separate.ticker_seen_at);
+                assert_eq!(combined.ticker_observed_at, separate.ticker_observed_at);
+                assert_eq!(combined.ticker_revision, separate.ticker_revision);
+                assert_eq!(combined.tickers()[1].last.to_bits(), 0f64.to_bits());
+                let separate_pending = separate.take_pending();
+                let combined_pending = combined.take_pending();
+                assert_eq!(
+                    combined_pending.ticker_deltas,
+                    separate_pending.ticker_deltas
+                );
+                let mut separate_frame = FrameWriter::new(vec![], now);
+                let mut combined_frame = FrameWriter::new(vec![], now);
+                separate.write(&separate_pending, &mut separate_frame);
+                combined.write(&combined_pending, &mut combined_frame);
+                assert_eq!(combined_frame.finish(), separate_frame.finish());
+            }
+            let times = combined.ticker_observed_at.clone();
+            combined.update_ticker_at_observed(u32::MAX, u16::MAX, |_| {
+                panic!("invalid ticker index reached closure")
+            });
+            assert_eq!(combined.ticker_observed_at, times);
+            assert!(combined.take_pending().ticker_deltas.is_empty());
+        }
     }
 
     #[test]
@@ -2463,14 +3153,14 @@ mod tests {
             let (_, positions) = wire::sections(&frame)
                 .find(|(kind, _)| *kind == section::POSITIONS)
                 .unwrap();
-            // Revision one appends exact ID and symbol after numeric columns.
-            assert_eq!(positions.len(), 96);
+            // Revision two appends exact ID and symbol after numeric columns.
+            assert_eq!(positions.len(), 112);
             assert_eq!(
-                frame_string(&frame, word(positions, 88)),
+                frame_string(&frame, word(positions, 104)),
                 store.positions()[0].id,
             );
             assert_eq!(
-                frame_string(&frame, word(positions, 92)),
+                frame_string(&frame, word(positions, 108)),
                 store.positions()[0].symbol,
             );
         }

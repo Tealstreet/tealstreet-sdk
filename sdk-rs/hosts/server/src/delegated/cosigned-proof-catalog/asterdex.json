@@ -1,0 +1,6 @@
+{
+  "status": "ready",
+  "probeTests": "src/delegated/asterdex_probe_tests.rs",
+  "sessionTests": "src/session/tests/cosigned_venues.rs",
+  "excludedShapes": ["v3"]
+}

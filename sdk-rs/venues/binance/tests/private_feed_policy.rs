@@ -34,6 +34,7 @@ fn reply_reads(h: &mut Harness, variant: Variant, portfolio: bool) -> usize {
             match variant {
                 Variant::CoinM => COIN_INFO.to_owned(),
                 Variant::Spot => SPOT_INFO.to_owned(),
+                Variant::Options => unreachable!("Options REST-only policy has dedicated controls"),
                 Variant::UsdM | Variant::PortfolioMargin => support::EXCHANGE_INFO.to_owned(),
             }
         } else if path.ends_with("ticker/24hr") {

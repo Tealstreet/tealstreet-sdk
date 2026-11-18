@@ -1,0 +1,27 @@
+[package]
+name = "safe-cex-remote-signer"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Native Signer that forwards sign work to the client's device over the hosted ws-auth wire"
+
+[dependencies]
+safe-cex-engine.workspace = true
+safe-cex-crypto = { workspace = true, features = ["admission"] }
+safe-cex-venue-coinbase = { path = "../../venues/coinbase" }
+base64.workspace = true
+getrandom.workspace = true
+serde.workspace = true
+bs58 = "0.5"
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { version = "1.53.3", features = ["sync", "time"] }
+
+[dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }
+safe-cex-crypto = { workspace = true, features = ["ed25519", "schnorr"] }
+safe-cex-venues = { workspace = true, features = ["orderly", "kucoin", "kucoinspot", "hosted-signing", "hosted-wallet", "backpack", "asterdex", "coinbase"] }
+tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "test-util"] }
+
+[lints]
+workspace = true

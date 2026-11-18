@@ -1,0 +1,5 @@
+{
+  "status": "ready",
+  "probeTests": "src/session/tests/lighter_local_proof.rs",
+  "sessionTests": "src/session/tests/lighter_local_proof.rs"
+}

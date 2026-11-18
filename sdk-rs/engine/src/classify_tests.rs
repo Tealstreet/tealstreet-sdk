@@ -119,7 +119,7 @@ fn a_decoded_native_code_overrides_the_status_kind() {
     assert_eq!(verdict, Verdict::RefusedResend(ErrorKind::AuthInvalid));
     assert_eq!(
         classify(400, Some(&int(-1003)), Intent::Place),
-        Verdict::Refused(ErrorKind::RateLimited)
+        Verdict::Unknown(Some(ErrorKind::RateLimited))
     );
 }
 
@@ -127,7 +127,7 @@ fn a_decoded_native_code_overrides_the_status_kind() {
 fn a_bare_status_is_refusal_only_when_the_table_documents_it() {
     assert_eq!(
         classify(429, None, Intent::Place),
-        Verdict::Refused(ErrorKind::RateLimited)
+        Verdict::Unknown(Some(ErrorKind::RateLimited))
     );
     assert_eq!(
         classify(418, None, Intent::Place),
@@ -205,7 +205,7 @@ fn success_codes_and_codeless_envelopes_never_become_refusals() {
     };
     assert_eq!(
         classify(429, Some(&bare), Intent::Place),
-        Verdict::Refused(ErrorKind::RateLimited)
+        Verdict::Unknown(Some(ErrorKind::RateLimited))
     );
     assert_eq!(
         classify(400, Some(&bare), Intent::Place),
@@ -270,9 +270,9 @@ fn errors_keep_the_venue_message_and_native_evidence() {
         Some(&int(-1003)),
         "Too many requests",
     );
-    assert_eq!(verdict, Verdict::Refused(ErrorKind::RateLimited));
+    assert_eq!(verdict, Verdict::Unknown(Some(ErrorKind::RateLimited)));
     assert_eq!(error.message, "Too many requests");
-    assert_eq!(error.outcome, Some(Outcome::Rejected));
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(error.venue_code.as_deref(), Some("-1003"));
     assert_eq!(error.venue_message.as_deref(), Some("native message"));
     assert_eq!(error.retry_after_ms, Some(2_000.0));
@@ -737,5 +737,773 @@ fn a_cdn_refusal_is_a_block_not_a_bad_key() {
             Some(&int(-1022))
         ),
         Verdict::Refused(ErrorKind::AuthInvalid)
+    );
+}
+
+const REUSED: CodeTable = CodeTable {
+    rows: &[
+        // The plain row first, so only the scope rule (not table order) can pick the message row.
+        Row {
+            key: Key::Int(-2010),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::IntMessage(
+                -2010,
+                "Account has insufficient balance for requested action.",
+            ),
+            verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+            only: None,
+        },
+        Row {
+            key: Key::IntMessage(-2020, "Unable to fill."),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+    ],
+    success: &[],
+    unlisted: Verdict::Unknown(None),
+    status: &[],
+};
+
+#[test]
+fn a_code_and_message_row_wins_over_the_plain_code_row_whatever_the_order() {
+    assert_table(&REUSED);
+    let native = |code, message| Native {
+        code: NativeCode::Int(code),
+        message,
+    };
+    let balance = native(
+        -2010,
+        "Account has insufficient balance for requested action.",
+    );
+    assert_eq!(
+        REUSED.verdict(&balance, Intent::Place),
+        Verdict::Refused(ErrorKind::InsufficientBalance)
+    );
+    // Another reason on the same code, or a reworded balance text, keeps the plain row.
+    for other in [
+        "Order would immediately match and take.",
+        "Account has insufficient balance for requested action",
+    ] {
+        assert_eq!(
+            REUSED.verdict(&native(-2010, other), Intent::Place),
+            Verdict::Refused(ErrorKind::Rejected),
+            "{other}"
+        );
+    }
+    // With no plain row, a reworded text falls to `unlisted`, today's behaviour.
+    assert_eq!(
+        REUSED.verdict(&native(-2020, "Unable to fill"), Intent::Place),
+        Verdict::Unknown(None)
+    );
+    // The message never matches a code-less or text-coded native.
+    let codeless = Native {
+        code: NativeCode::None,
+        message: "Account has insufficient balance for requested action.",
+    };
+    assert_eq!(
+        REUSED.verdict(&codeless, Intent::Place),
+        Verdict::Unknown(None)
+    );
+}
+
+#[test]
+#[should_panic(expected = "cannot be Satisfied")]
+fn a_code_and_message_row_cannot_claim_success() {
+    assert_table(&CodeTable {
+        rows: &[Row {
+            key: Key::IntMessage(-2011, "Unknown order sent."),
+            verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+            only: Some(Intent::Cancel),
+        }],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    });
+}
+
+#[test]
+#[should_panic(expected = "overlap")]
+fn a_duplicate_code_and_message_row_is_refused() {
+    const ROW: Row = Row {
+        key: Key::IntMessage(-2010, "x"),
+        verdict: Verdict::Refused(ErrorKind::Rejected),
+        only: None,
+    };
+    assert_table(&CodeTable {
+        rows: &[ROW, ROW],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    });
+}
+
+#[test]
+#[should_panic(expected = "shadows this unscoped message row")]
+fn an_unscoped_code_and_message_row_under_a_scoped_plain_row_is_refused() {
+    assert_table(&CodeTable {
+        rows: &[
+            Row {
+                key: Key::Int(-2010),
+                verdict: Verdict::Refused(ErrorKind::Rejected),
+                only: Some(Intent::Place),
+            },
+            Row {
+                key: Key::IntMessage(
+                    -2010,
+                    "Account has insufficient balance for requested action.",
+                ),
+                verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+                only: None,
+            },
+        ],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    });
+}
+
+#[test]
+fn a_code_and_message_row_in_the_plain_rows_scope_refines_it() {
+    const SCOPED: CodeTable = CodeTable {
+        rows: &[
+            Row {
+                key: Key::Int(-2010),
+                verdict: Verdict::Refused(ErrorKind::Rejected),
+                only: Some(Intent::Place),
+            },
+            Row {
+                key: Key::IntMessage(
+                    -2010,
+                    "Account has insufficient balance for requested action.",
+                ),
+                verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+                only: Some(Intent::Place),
+            },
+        ],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    };
+    assert_table(&SCOPED);
+    let balance = Native {
+        code: NativeCode::Int(-2010),
+        message: "Account has insufficient balance for requested action.",
+    };
+    assert_eq!(
+        SCOPED.verdict(&balance, Intent::Place),
+        Verdict::Refused(ErrorKind::InsufficientBalance)
+    );
+}
+
+#[test]
+fn an_exact_code_before_its_range_refines_it() {
+    const REFINED: CodeTable = CodeTable {
+        rows: &[
+            Row {
+                key: Key::Int(51008),
+                verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+                only: None,
+            },
+            Row {
+                key: Key::Range(51000, 51999),
+                verdict: Verdict::Refused(ErrorKind::Rejected),
+                only: None,
+            },
+        ],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    };
+    assert_table(&REFINED);
+    let native = |code| Native {
+        code: NativeCode::Int(code),
+        message: "",
+    };
+    assert_eq!(
+        REFINED.verdict(&native(51008), Intent::Place),
+        Verdict::Refused(ErrorKind::InsufficientBalance)
+    );
+    assert_eq!(
+        REFINED.verdict(&native(51009), Intent::Place),
+        Verdict::Refused(ErrorKind::Rejected)
+    );
+}
+
+#[test]
+#[should_panic(expected = "overlap")]
+fn an_exact_code_after_its_range_is_dead_and_refused() {
+    assert_table(&CodeTable {
+        rows: &[
+            Row {
+                key: Key::Range(51000, 51999),
+                verdict: Verdict::Refused(ErrorKind::Rejected),
+                only: None,
+            },
+            Row {
+                key: Key::Int(51008),
+                verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+                only: None,
+            },
+        ],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    });
+}
+
+const PHRASED: CodeTable = CodeTable {
+    rows: &[
+        Row {
+            key: Key::Int(40999),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Phrase("Not enough position is available"),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+    ],
+    success: &[],
+    unlisted: Verdict::Refused(ErrorKind::Rejected),
+    status: &[],
+};
+
+#[test]
+fn a_phrase_row_names_a_refusal_under_any_code_and_reports_the_venues_own() {
+    assert_table(&PHRASED);
+    for code in [NativeCode::Int(40999), NativeCode::Int(1), NativeCode::None] {
+        for message in [
+            "Not enough position is available",
+            "not enough position is available.",
+            "only 0.4 is free to close (Not enough position is available)",
+        ] {
+            let native = Native { code, message };
+            assert_eq!(
+                PHRASED.verdict(&native, Intent::Place),
+                Verdict::Refused(ErrorKind::InvalidInput),
+                "{code:?} {message}"
+            );
+            let error = fact(
+                &PHRASED,
+                Intent::Place,
+                Released::Response(&response(400)),
+                Some(&native),
+                "x",
+            );
+            let own = match code {
+                NativeCode::Int(code) => Some(code.to_string()),
+                _ => None,
+            };
+            assert_eq!(error.error().venue_code, own);
+        }
+    }
+    // An unproven or resend-granting code keeps its verdict: the text proves nothing more.
+    for code in [40010, 50008, 40009] {
+        let native = Native {
+            code: NativeCode::Int(code),
+            message: "Not enough position is available",
+        };
+        let plain = Native {
+            code: NativeCode::Int(code),
+            message: "",
+        };
+        assert_eq!(
+            PHRASED_OVER_CODES.verdict(&native, Intent::Place),
+            PHRASED_OVER_CODES.verdict(&plain, Intent::Place),
+            "{code}"
+        );
+        assert!(
+            !matches!(
+                PHRASED_OVER_CODES.verdict(&native, Intent::Place),
+                Verdict::Refused(_)
+            ),
+            "{code}"
+        );
+    }
+    let other = Native {
+        code: NativeCode::Int(40999),
+        message: "Not enough balance",
+    };
+    assert_eq!(
+        PHRASED.verdict(&other, Intent::Place),
+        Verdict::Refused(ErrorKind::Rejected)
+    );
+}
+
+#[test]
+#[should_panic(expected = "no evidence")]
+fn a_phrase_row_needs_real_text() {
+    assert_table(&CodeTable {
+        rows: &[Row {
+            key: Key::Phrase(" ab "),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        }],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    });
+}
+
+const PHRASED_OVER_CODES: CodeTable = CodeTable {
+    rows: &[
+        Row {
+            key: Key::Int(40009),
+            verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(40010),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+        Row {
+            key: Key::Int(50008),
+            verdict: Verdict::Unknown(Some(ErrorKind::Timeout)),
+            only: None,
+        },
+        Row {
+            key: Key::Phrase("Not enough position is available"),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+    ],
+    success: &[],
+    unlisted: Verdict::Refused(ErrorKind::Rejected),
+    status: &[],
+};
+
+#[test]
+fn released_ambiguity_status_overrules_every_native_write_verdict() {
+    for intent in [
+        Intent::Place,
+        Intent::Cancel,
+        Intent::Amend,
+        Intent::Setting,
+    ] {
+        for status in [408, 429, 500, 503] {
+            for code in [-1021, -1022, -2011, -1003] {
+                let fact = fact(
+                    &TABLE,
+                    intent,
+                    Released::Response(&response(status)),
+                    Some(&int(code)),
+                    "native diagnostic",
+                );
+                assert!(
+                    matches!(fact.verdict(), Verdict::Unknown(_)),
+                    "{intent:?}/{status}/{code}: {fact:?}"
+                );
+                assert_eq!(fact.error().outcome, Some(Outcome::Unknown));
+                assert_eq!(
+                    fact.error().venue_code.as_deref(),
+                    Some(code.to_string().as_str())
+                );
+                assert!(
+                    !WriteFact::Failed {
+                        fact,
+                        known_effects: false
+                    }
+                    .resendable()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn released_ambiguity_native_rate_verdict_never_authorizes_a_write() {
+    for intent in [
+        Intent::Place,
+        Intent::Cancel,
+        Intent::Amend,
+        Intent::Setting,
+    ] {
+        let response = Response {
+            status: 200,
+            headers: "Retry-After: 3\r\n",
+            body: "",
+        };
+        let fact = fact(
+            &TABLE,
+            intent,
+            Released::Response(&response),
+            Some(&int(-1003)),
+            "too many requests",
+        );
+        assert_eq!(
+            fact.verdict(),
+            Verdict::Unknown(Some(ErrorKind::RateLimited))
+        );
+        assert_eq!(fact.error().outcome, Some(Outcome::Unknown));
+        assert_eq!(fact.error().retry_after_ms, Some(3000.));
+        assert!(
+            !WriteFact::Failed {
+                fact,
+                known_effects: false
+            }
+            .resendable()
+        );
+    }
+}
+
+#[test]
+fn released_ambiguity_reads_keep_native_retry_and_rate_classification() {
+    assert_eq!(
+        classify(429, Some(&int(-1021)), Intent::Read),
+        Verdict::RefusedResend(ErrorKind::AuthInvalid)
+    );
+    assert_eq!(
+        classify(429, None, Intent::Read),
+        Verdict::Refused(ErrorKind::RateLimited)
+    );
+    assert_eq!(
+        classify(200, Some(&int(-1003)), Intent::Read),
+        Verdict::Refused(ErrorKind::RateLimited)
+    );
+}
+
+#[test]
+fn released_ambiguity_batch_rate_row_keeps_accepted_prefix_unknown() {
+    let response = response(200);
+    let result = batch(
+        &TABLE,
+        Intent::Place,
+        &response,
+        2,
+        &[BatchItem::Accepted("native"), BatchItem::Native(int(-1003))],
+        "rate",
+    )
+    .unwrap();
+    assert!(
+        matches!(&result, crate::request_context::WriteResult::PartialUnknown(error) if error.outcome == Some(Outcome::Unknown))
+    );
+    let crate::request_context::WriteResult::PartialUnknown(error) = result else {
+        panic!("unknown partial")
+    };
+    assert_eq!(error.partial.unwrap().order_ids, ["native"]);
+}
+
+#[test]
+fn batch_code_less_rows_preserve_the_tables_unlisted_verdict() {
+    use crate::request_context::WriteResult;
+    let native = BatchItem::Native(Native {
+        code: NativeCode::None,
+        message: "Invalid TP/SL price.",
+    });
+    for unlisted in [
+        Verdict::Refused(ErrorKind::Rejected),
+        Verdict::Refused(ErrorKind::RateLimited),
+        Verdict::Unknown(None),
+    ] {
+        let table = CodeTable {
+            rows: &[],
+            success: &[],
+            status: &[],
+            unlisted,
+        };
+        for status in [200, 408, 429, 500, 503] {
+            let result = batch(
+                &table,
+                Intent::Place,
+                &response(status),
+                1,
+                &[native],
+                "known batch refusal",
+            )
+            .unwrap();
+            if status == 200 && unlisted == Verdict::Refused(ErrorKind::Rejected) {
+                let WriteResult::Rejected(error) = result else {
+                    panic!("a proven code-less refusal stays Rejected: {result:?}");
+                };
+                assert_eq!(error.outcome, Some(Outcome::Rejected));
+                assert_eq!(error.kind, Some(ErrorKind::Rejected));
+            } else {
+                let WriteResult::Failed(error) = result else {
+                    panic!("ambiguous status or native rate stays Unknown: {result:?}");
+                };
+                assert_eq!(error.outcome, Some(Outcome::Unknown));
+            }
+        }
+        let result = batch(
+            &table,
+            Intent::Place,
+            &response(200),
+            2,
+            &[BatchItem::Accepted("accepted"), native],
+            "partial batch refusal",
+        )
+        .unwrap();
+        let error = if unlisted == Verdict::Refused(ErrorKind::Rejected) {
+            let WriteResult::KnownPartial(error) = result else {
+                panic!("proven partial refusal stays KnownPartial: {result:?}");
+            };
+            error
+        } else {
+            let WriteResult::PartialUnknown(error) = result else {
+                panic!("native ambiguity keeps partial Unknown: {result:?}");
+            };
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            error
+        };
+        assert_eq!(error.partial.unwrap().order_ids, ["accepted"]);
+    }
+}
+
+#[test]
+fn known_partial_evidence_is_reported_without_reclassifying_physical_failure() {
+    use crate::request_context::WriteResult;
+    use crate::write_plan::{Element, ElementResult, WritePlan};
+    let mut plan = WritePlan::new(
+        (0..3)
+            .map(|index| Element {
+                index,
+                client_order_id: None,
+            })
+            .collect(),
+    );
+    let WriteResult::KnownPartial(error) = project(
+        &[
+            BatchItem::Accepted("accepted-native"),
+            BatchItem::Native(int(-1111)),
+        ],
+        2,
+    ) else {
+        panic!("classifier must supply native KnownPartial evidence");
+    };
+    for index in 0..2 {
+        plan.record(
+            index,
+            ElementResult::Unknown {
+                error: Box::new(error.clone().outcome(Outcome::Unknown)),
+            },
+        )
+        .unwrap();
+    }
+    let mut terminal = plan.attach(error.clone());
+    let rows = terminal.elements.take().unwrap();
+    assert_eq!(terminal, error);
+    let partial = terminal.partial.unwrap();
+    assert_eq!(partial.order_ids, ["accepted-native"]);
+    assert_eq!((partial.total, partial.failed_index), (Some(2), Some(1)));
+    assert!(
+        rows[..2]
+            .iter()
+            .all(|row| matches!(row.result, ElementResult::Unknown { .. }))
+    );
+    assert_eq!(rows[2].result, ElementResult::NotSent { error: None });
+}
+
+const NATIVE_RATE_REFUSAL: CodeTable = CodeTable {
+    rows: &[Row {
+        key: Key::Int(6006),
+        verdict: Verdict::RateLimitRefused,
+        only: None,
+    }],
+    success: &[],
+    unlisted: Verdict::Unknown(None),
+    status: &[],
+};
+
+#[test]
+fn exact_native_rate_rejection_is_known_but_never_resendable() {
+    use crate::request_context::{CommandWrites, Error};
+    assert_table(&NATIVE_RATE_REFUSAL);
+    for intent in [
+        Intent::Place,
+        Intent::Cancel,
+        Intent::Amend,
+        Intent::Setting,
+    ] {
+        let response = Response {
+            status: 200,
+            headers: "Retry-After: 3",
+            body: "",
+        };
+        let classified = fact(
+            &NATIVE_RATE_REFUSAL,
+            intent,
+            Released::Response(&response),
+            Some(&int(6006)),
+            "native rate refusal",
+        )
+        .for_attempt(crate::RequestId(2));
+        assert!(classified.verdict().is_refusal());
+        assert_eq!(classified.error().outcome, Some(Outcome::Rejected));
+        assert_eq!(classified.error().kind, Some(ErrorKind::RateLimited));
+        assert_eq!(classified.error().retry_after_ms, Some(3000.));
+        let write = WriteFact::Failed {
+            fact: classified,
+            known_effects: false,
+        };
+        assert!(!write.resendable());
+        let mut journal = CommandWrites::new(4).unwrap();
+        journal.register(crate::RequestId(2), 2).unwrap();
+        journal.released(crate::RequestId(2)).unwrap();
+        journal
+            .result(crate::RequestId(2), write.into_result())
+            .unwrap();
+        assert_eq!(
+            journal.retry(crate::RequestId(2), crate::RequestId(3)),
+            Err(Error::RetryForbidden)
+        );
+        assert_eq!(
+            journal.fail(VenueError::new("terminal")).unwrap().outcome,
+            Some(Outcome::Rejected)
+        );
+    }
+}
+
+#[test]
+fn exact_native_rate_rejection_does_not_override_unproven_status_or_transport() {
+    for status in [408, 429, 500, 502, 503, 504] {
+        let classified = fact(
+            &NATIVE_RATE_REFUSAL,
+            Intent::Place,
+            Released::Response(&response(status)),
+            Some(&int(6006)),
+            "rate",
+        );
+        assert_eq!(
+            classified.error().outcome,
+            Some(Outcome::Unknown),
+            "{status}"
+        );
+    }
+    assert_eq!(
+        fact(
+            &NATIVE_RATE_REFUSAL,
+            Intent::Place,
+            Released::Transport,
+            Some(&int(6006)),
+            "lost"
+        )
+        .error()
+        .outcome,
+        Some(Outcome::Unknown)
+    );
+    let failure = read(
+        &NATIVE_RATE_REFUSAL,
+        Released::Response(&response(200)),
+        Some(&int(6006)),
+        "rate",
+    );
+    assert_eq!(failure.error.outcome, None);
+    assert_eq!(
+        failure.retry,
+        Some(ReadRetry::After(DEFAULT_RATE_LIMIT_DEFERRAL_MS))
+    );
+}
+
+#[test]
+fn native_rate_rejection_requires_one_exact_code_not_a_default_range_message_or_status() {
+    for key in [
+        Key::Range(6000, 6010),
+        Key::Message("native message"),
+        Key::IntMessage(6006, "native message"),
+    ] {
+        let table = match key {
+            Key::Range(..) => CodeTable {
+                rows: &[Row {
+                    key: Key::Range(6000, 6010),
+                    verdict: Verdict::RateLimitRefused,
+                    only: None,
+                }],
+                ..NATIVE_RATE_REFUSAL
+            },
+            Key::Message(_) => CodeTable {
+                rows: &[Row {
+                    key: Key::Message("native message"),
+                    verdict: Verdict::RateLimitRefused,
+                    only: None,
+                }],
+                ..NATIVE_RATE_REFUSAL
+            },
+            _ => CodeTable {
+                rows: &[Row {
+                    key: Key::IntMessage(6006, "native message"),
+                    verdict: Verdict::RateLimitRefused,
+                    only: None,
+                }],
+                ..NATIVE_RATE_REFUSAL
+            },
+        };
+        for native in [
+            int(6006),
+            Native {
+                code: NativeCode::None,
+                message: "native message",
+            },
+        ] {
+            assert!(matches!(
+                verdict(
+                    &table,
+                    Intent::Place,
+                    Released::Response(&response(200)),
+                    Some(&native)
+                ),
+                Verdict::Unknown(_)
+            ));
+        }
+        assert!(std::panic::catch_unwind(|| assert_table(&table)).is_err());
+    }
+    let table = CodeTable {
+        rows: &[],
+        unlisted: Verdict::RateLimitRefused,
+        status: &[(400, Verdict::RateLimitRefused)],
+        ..NATIVE_RATE_REFUSAL
+    };
+    for native in [None, Some(&int(6006))] {
+        assert!(matches!(
+            verdict(
+                &table,
+                Intent::Place,
+                Released::Response(&response(400)),
+                native
+            ),
+            Verdict::Unknown(_)
+        ));
+    }
+    assert!(std::panic::catch_unwind(|| assert_table(&table)).is_err());
+    let text_table = CodeTable {
+        rows: &[Row {
+            key: Key::Text("rateRefused"),
+            verdict: Verdict::RateLimitRefused,
+            only: None,
+        }],
+        ..NATIVE_RATE_REFUSAL
+    };
+    assert_table(&text_table);
+    assert_eq!(
+        text_table.verdict(
+            &Native {
+                code: NativeCode::Text("rateRefused"),
+                message: ""
+            },
+            Intent::Place
+        ),
+        Verdict::RateLimitRefused
+    );
+}
+
+#[test]
+fn native_rate_rejection_cannot_be_granted_by_a_phrase() {
+    let table = CodeTable {
+        rows: &[Row {
+            key: Key::Phrase("native message"),
+            verdict: Verdict::RateLimitRefused,
+            only: None,
+        }],
+        unlisted: Verdict::Refused(ErrorKind::Rejected),
+        ..NATIVE_RATE_REFUSAL
+    };
+    assert!(std::panic::catch_unwind(|| assert_table(&table)).is_err());
+    assert_eq!(
+        table.verdict(&int(6006), Intent::Place),
+        Verdict::Refused(ErrorKind::Rejected)
     );
 }

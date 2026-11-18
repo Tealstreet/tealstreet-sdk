@@ -9,6 +9,12 @@ The grammar that fills `<size>` and `<price>` slots in every trading command.
 
 ---
 
+Order arguments must all belong to the command's grammar. Extra words or
+numbers refuse the command before a write. For entry brackets, use
+`buy $100 at 50000 stop 49500 tp 51000` (or the corresponding `sell` form).
+`stop PRICE` and `tp PRICE` use the price forms below; `sl=PRICE` and
+`tp=PRICE` are refused with a hint.
+
 ## Size
 
 | Form     | Meaning                                                |
@@ -18,6 +24,24 @@ The grammar that fills `<size>` and `<price>` slots in every trading command.
 | `50%`    | Percent — scope depends on command class _(see below)_ |
 | `50%bal` | Explicit percent of **free balance**                   |
 | `50%pos` | Explicit percent of **open position**                  |
+
+A `$` or balance-percent `buy` / `sell` size is converted to coin at the
+order's limit or `best` price, and a `$` size for a sized `stop` at its `at`
+price, rounded to the venue's price tick. Market orders use the last price;
+inverse contracts don't depend on price. An explicit stop size that rounds
+below the lot step is refused; only an omitted size requests a full-position stop.
+
+For a multi-symbol `buy` / `sell`, every leg is sized and validated before
+the first order is sent. A sub-lot size or invalid price on any leg refuses
+the whole command without placing earlier legs.
+
+`scale` gives each rung an equal dollar share, converted at that rung's price,
+so lower bids buy more coin. Position-percent and inverse sizes still split
+evenly in contracts. Each share is allocated before rounding **down** to the
+lot step, so rounding cannot increase its allocation. The remainder stays
+unallocated. If any share is below one lot, the whole ladder is refused before
+placement. For example, `$210 into 3` at a price of `100` with a one-unit lot
+refuses rather than submitting three one-unit orders worth `$300`.
 
 ### Default percent scope
 
@@ -108,10 +132,29 @@ Source: `TradingBaseCommand.ts:166-208`.
 | Form                         | Meaning                                                    |
 | ---------------------------- | ---------------------------------------------------------- |
 | `50000`                      | Absolute price                                             |
-| `+100` / `-100`              | Relative offset (added to last)                            |
-| `1%` / `-0.5%`               | Percent offset (anchor × (1 + pct/100))                    |
+| `+100`                       | Relative offset (added to last)                            |
+| `1%`                         | Percent offset (anchor × (1 + pct/100))                    |
 | `$anchor`                    | Constant — `$entry`, `$last`, etc.                         |
 | `$anchor +N` / `+N%` / `-N%` | Anchor with [inline offset](./variables.md#inline-offsets) |
+
+### Negative offsets
+
+**A token starting with `-` is refused for now on order commands**, and nothing
+is placed: `buy`, `sell`, `close`, `stop`, `be`, `trail`, `move`, `scale`, `bump`,
+`chase`, `twap`, `swarm`, `nuke`, `cancel`, `leverage` and `kill`.
+
+| Refused              | Use instead                                    |
+| -------------------- | ---------------------------------------------- |
+| `buy $100 stop -1%`  | `buy $100 stop $last -1%` or `stop 49500`      |
+| `stop -1%`           | `stop $entry -1%` or `stop 49500`              |
+| `be -0.5%`           | `be $entry -0.5%`                              |
+| `move <id> -5`       | `move <id> 49995`                              |
+| `bump -5`            | No replacement yet; `move` each order          |
+| `stop $entry -3*$ticksize` | `stop $entry-3*$ticksize`                |
+
+An anchor with an offset, such as `$last -1%`, is allowed because it becomes one
+absolute price before the command runs. **Anchors read the focused symbol**, so
+with a symbol override like `buy $250 SOLUSDT at ...` pass an absolute price.
 
 See [Variables](./variables.md) for the full list of price anchors and
 which ones support inline offsets.
@@ -156,7 +199,7 @@ A few full sentences to anchor the grammar:
 ```text
 buy $100 at $bid +0.1% po reduce
 chase sell %all% 20% reduce to 1%
-scale buy $1000 into 10 from -0.25% to -1% reduce
+scale buy $1000 into 10 from $last -0.25% to $last -1% reduce
 twap chase buy $500 into 5 over 30 reduce timeout 30% next fail next
 cancel buys ro from 49000 to 50000
 ```

@@ -1,4 +1,5 @@
 //! Polymarket CLOB V2 outcome tokens on the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod history;
 mod public_read;
@@ -15,6 +16,7 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::request_context::{Context, Operation, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
+use safe_cex_engine::text::JoinWith;
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
@@ -349,14 +351,14 @@ impl Polymarket {
                 .collect::<Vec<_>>(),
         )
         .expect("token list");
-        let context = match cx.http_context(Scope::Background, public_read::policy(Operation::Read))
-        {
-            Ok(context) => context,
-            Err(_) => {
-                self.midpoints_failed(cx, offset, false);
-                return;
-            }
-        };
+        let context =
+            match cx.http_live_context(Scope::Background, public_read::policy(Operation::Read)) {
+                Ok(context) => context,
+                Err(_) => {
+                    self.midpoints_failed(cx, offset, false);
+                    return;
+                }
+            };
         self.midpoint_inflight.insert(offset, context.clone());
         if cx
             .request_managed_with_headers(
@@ -465,13 +467,15 @@ impl Polymarket {
             }
             cx.send(
                 socket,
-                serde_json::to_string(&Subscription {
-                    assets_ids: ids,
-                    kind: operation.is_none().then_some("market"),
-                    operation,
-                    custom_feature_enabled: true,
-                })
-                .expect("subscription"),
+                ControlFrame::subscription(
+                    serde_json::to_string(&Subscription {
+                        assets_ids: ids,
+                        kind: operation.is_none().then_some("market"),
+                        operation,
+                        custom_feature_enabled: true,
+                    })
+                    .expect("subscription"),
+                ),
             );
         }
     }
@@ -761,7 +765,20 @@ fn valid_level(price: f64, size: f64) -> bool {
     (0.0..=1.0).contains(&price) && size >= 0.0
 }
 impl Venue for Polymarket {
+    fn http_plans() -> bool {
+        false
+    }
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Midpoints { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
@@ -797,11 +814,11 @@ impl Venue for Polymarket {
             self.subscription(cx, ids, None);
         } else {
             if let Some(subscription) = self.private_subscription() {
-                cx.send(socket, subscription);
+                cx.send(socket, ControlFrame::subscription(subscription));
             }
             self.account_reconcile(cx);
         }
-        cx.send(socket, "PING");
+        cx.send(socket, ControlFrame::heartbeat("PING"));
         self.connections[i].awaiting_pong = true;
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
@@ -896,7 +913,7 @@ impl Venue for Polymarket {
                         format!(
                             "Skipped {} malformed Polymarket market rows: {}",
                             skipped.len(),
-                            skipped.join(", ")
+                            skipped.join_with(", ")
                         ),
                     );
                     self.walk_skipped_slugs.extend(skipped);
@@ -1077,7 +1094,7 @@ impl Venue for Polymarket {
                     from_ms.is_none_or(|from| c.timestamp >= from)
                         && to_ms.is_none_or(|to| c.timestamp <= to)
                 });
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 rows.dedup_by(|later, earlier| {
                     if later.timestamp == earlier.timestamp {
                         *earlier = *later;
@@ -1253,7 +1270,9 @@ impl Venue for Polymarket {
         _reason: safe_cex_engine::request_context::Error,
         error: VenueError,
     ) {
-        self.on_http_failed(cx, pending, error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.on_http_failed(cx, pending, error);
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
@@ -1337,7 +1356,7 @@ impl Venue for Polymarket {
                 }
                 SocketTick::Ping => {
                     if let Some(socket) = self.connections[i].socket {
-                        cx.send(socket, "PING");
+                        cx.send(socket, ControlFrame::heartbeat("PING"));
                         self.connections[i].awaiting_pong = true;
                     }
                 }
@@ -1355,8 +1374,8 @@ impl Venue for Polymarket {
                     symbol,
                     interval,
                     None,
-                    Some(cx.now - 60000.0),
-                    Some(cx.now),
+                    Some(cx.protocol_now() - 60000.0),
+                    Some(cx.protocol_now()),
                 );
             }
             if !self.candles.is_empty() {
@@ -1366,6 +1385,8 @@ impl Venue for Polymarket {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            // The engine repairs subscriptions itself; it never forwards this.
+            Command::RepairSubscription(_) => {}
             Command::FetchOptionChain { .. }
             | Command::FetchOptionExpiries { .. }
             | Command::FetchAccountGreeks { .. } => {
@@ -1423,8 +1444,8 @@ impl Venue for Polymarket {
                         symbol,
                         interval,
                         None,
-                        Some(cx.now - 60000.0),
-                        Some(cx.now),
+                        Some(cx.protocol_now() - 60000.0),
+                        Some(cx.protocol_now()),
                     );
                 }
                 if self.candle_timer.is_none() {

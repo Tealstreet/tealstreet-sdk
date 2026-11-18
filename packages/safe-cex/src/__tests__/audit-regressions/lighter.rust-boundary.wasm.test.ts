@@ -6,7 +6,7 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
 });
 
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeName, ExchangeOptions, OrderFillEvent } from '../../types';
+import type { ExchangeName, ExchangeOptions, OrderFillEvent, RemoteSignerRequest } from '../../types';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -301,30 +301,37 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('%s real WASM boundary'
     expect(requests.slice(before).some((r) => r.method !== 'GET' || /nextNonce|account\?/.test(r.url))).toBe(false);
   });
 
-  it('polls remote-only account data without remote callbacks, authenticated reads or writes', async () => {
-    let called = false;
-    const { exchange, requests, store, sockets } = await variantStart({
+  it('a remote-signed account signs Lighter statements through its signer and sends nothing it refuses', async () => {
+    // The keyed browser answers auth statements and refuses the transaction.
+    const keyed = new RustEngineExchange(name, options(), new DefaultStore());
+    cleanup.push(() => keyed.dispose());
+    const asked: RemoteSignerRequest[] = [];
+    const { exchange, requests, store } = await variantStart({
       ...options(),
+      key: 'lighter-public-key',
       secret: '',
+      privateOnly: true,
       remoteSigner: {
-        sign: async () => {
-          called = true;
-          throw new Error('unexpected remote signing');
+        sign: async (request) => {
+          asked.push(request);
+          if (JSON.parse(request.wsAuth!.toSign).kind === 'auth') return keyed.signWsAuth(request);
+          throw new Error('remote signer refused');
         },
         isAvailable: () => true,
         onAvailabilityChange: () => () => {},
       },
     });
-    expect(store.positions).toHaveLength(1);
-    expect(store.loaded.orders && store.loaded.balance && store.loaded.positions).toBe(true);
-    expect(sockets).toHaveLength(1);
-    expect(requests.some((r) => new URL(r.url).pathname.endsWith('/account'))).toBe(true);
-    expect(requests.some((r) => /accountActiveOrders|accountLimits|nextNonce/.test(r.url))).toBe(false);
+    expect(store.loaded.orders && store.loaded.positions).toBe(true);
     await expect(
       exchange.placeOrder({ symbol: 'ETH', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.2, price: 90 }),
     ).rejects.toThrow();
-    expect(requests.every((r) => r.method === 'GET')).toBe(true);
-    expect(called).toBe(false);
-    expect(store.markets[0].quote).toBe(name === 'lighter-robinhood' ? 'USDG' : 'USDC');
+    expect(requests.some((r) => new URL(r.url).pathname.endsWith('/sendTx'))).toBe(false);
+    const kinds = asked.map((request) => {
+      expect(request).toMatchObject({ type: 'ws-auth', exchangeName: name, wsAuth: { outputFormat: 'lighter-tx' } });
+      return JSON.parse(request.wsAuth!.toSign).kind;
+    });
+    expect(kinds).toContain('auth');
+    expect(kinds).toContain('txs');
+    expect(keyed.hasStarted).toBe(false);
   });
 });

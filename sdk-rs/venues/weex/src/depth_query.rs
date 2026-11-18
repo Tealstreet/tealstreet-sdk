@@ -259,7 +259,7 @@ impl WeexFutures {
         if response.status == 429 {
             self.paused_until = self
                 .paused_until
-                .max(cx.now + rate::delay(response, cx.now));
+                .max(cx.now + rate::delay(response, cx.protocol_now()));
         }
         let envelope = envelope(response.body);
         let native = envelope.as_ref().ok().and_then(|e| {
@@ -295,7 +295,7 @@ impl WeexFutures {
                 error = error.venue_message(message.into_owned());
             }
             if kind == ErrorKind::RateLimited {
-                error = error.retry_after_ms(rate::delay(response, cx.now));
+                error = error.retry_after_ms(rate::delay(response, cx.protocol_now()));
             }
             request.failed(cx, error);
             return;

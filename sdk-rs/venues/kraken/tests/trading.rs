@@ -1,4 +1,4 @@
-//! Native REST payload and response contracts from Kraken's Futures order docs.
+// Native REST payload and response contracts from Kraken's Futures order docs.
 mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice};
@@ -189,6 +189,74 @@ fn native_limit_precision_symbol_broker_fresh_ids_and_tif() {
         assert_eq!(done(&mut e).unwrap(), format!("[\"order-{i}\"]"));
     }
 }
+// TS: packages/safe-cex/src/__tests__/reference/kraken/kraken.exchange.ts:452-462,514-529.
+// KNOWN-ISSUE: TS sends above-max; venue refuses.
+#[test]
+fn legacy_above_max_sends_one_rounded_payload_and_surfaces_native_refusal() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (amount, maximum, step, expected) in [
+        (26.0, 5.0, 1.0, "26"),
+        (11.0, 5.0, 1.0, "11"),
+        (12.0, 5.0, 1.0, "12"),
+        (10.0, 5.0, 1.0, "10"),
+        (7.0, 3.0, 0.5, "7"),
+        (0.0264, 0.005, 0.001, "0.026"),
+        (5.6, 5.0, 1.0, "6"),
+    ] {
+        for (kind, native) in [
+            (OrderType::Limit, "lmt"),
+            (OrderType::Market, "mkt"),
+            (OrderType::StopLoss, "stp"),
+            (OrderType::TakeProfit, "take_profit"),
+            (OrderType::TrailingStopLoss, "trailing_stop"),
+        ] {
+            let (mut e, _) = ready();
+            e.store_mut().update_markets(|market| {
+                market.precision.amount = step;
+                market.limits.amount.min = step;
+                market.limits.amount.max = maximum;
+            });
+            let mut order = limit();
+            order.kind = kind;
+            order.amount = amount;
+            order.price = Some(90.0);
+            place(&mut e, vec![order]);
+            let writes = requests(&mut e);
+            assert_eq!(writes.len(), 1, "{amount}/{maximum}/{step}: {kind:?}");
+            let request = &writes[0];
+            assert_eq!(request.method, Method::Post);
+            assert!(request.url.ends_with("sendorder"));
+            assert_eq!(param(request, "size").as_deref(), Some(expected));
+            assert_eq!(param(request, "orderType").as_deref(), Some(native));
+            reply(
+                &mut e,
+                request,
+                200,
+                r#"{"result":"success","sendStatus":{"status":"invalidSize"}}"#,
+            );
+            let terminal = e.drain_plain().collect::<Vec<_>>();
+            assert!(!terminal.iter().any(|a| matches!(a, Action::Http(_))));
+            assert!(
+                !terminal
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+            );
+            let errors = terminal
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0].kind, Some(ErrorKind::Rejected));
+            assert_eq!(errors[0].outcome, Some(Outcome::Rejected));
+            assert_eq!(errors[0].venue_code.as_deref(), Some("invalidSize"));
+            assert!(errors[0].legacy_text().contains("invalidSize"));
+        }
+    }
+}
+
 #[test]
 fn missing_or_rejected_semantic_ack_never_sends_bracket() {
     for body in [
@@ -286,96 +354,7 @@ fn trailing_rejects_missing_last_or_zero_distance() {
     }
 }
 #[test]
-fn protective_amend_prevalidates_and_waits_for_cancellation_ack() {
-    let (mut e, _) = ready();
-    inject(
-        &mut e,
-        "old",
-        OrderType::StopLoss,
-        Some(StopTriggerType::MarkPrice),
-    );
-    command(
-        &mut e,
-        Command::AmendOrder {
-            command: 8,
-            id: "old".into(),
-            price: Some(91.1),
-            amount: None,
-        },
-    );
-    let cancel = http(&mut e, "cancelorder");
-    assert_eq!(param(&cancel, "order_id").unwrap(), "old");
-    assert_eq!(e.store().order("old").unwrap().price, 90.0);
-    cancel_ack(&mut e, &cancel, "old");
-    let replacement = http(&mut e, "sendorder");
-    assert_eq!(param(&replacement, "stopPrice").unwrap(), "91");
-    assert_eq!(param(&replacement, "triggerSignal").unwrap(), "mark");
-    assert_ne!(param(&replacement, "cliOrdId").unwrap(), "old-client");
-    ack(&mut e, &replacement, "new", "placed");
-    assert_eq!(done(&mut e).unwrap(), r#"["new"]"#);
-}
-#[test]
-fn protective_amend_without_provenance_trailing_or_invalid_price_never_cancels() {
-    for (kind, trigger, price) in [
-        (OrderType::StopLoss, None, 91.0),
-        (
-            OrderType::TrailingStopLoss,
-            Some(StopTriggerType::MarkPrice),
-            91.0,
-        ),
-        (
-            OrderType::TakeProfit,
-            Some(StopTriggerType::LastPrice),
-            -1.0,
-        ),
-    ] {
-        let (mut e, _) = ready();
-        inject(&mut e, "old", kind, trigger);
-        command(
-            &mut e,
-            Command::AmendOrder {
-                command: 8,
-                id: "old".into(),
-                price: Some(price),
-                amount: None,
-            },
-        );
-        assert!(done(&mut e).is_err());
-        assert!(requests(&mut e).is_empty());
-        assert!(e.store().order("old").is_some());
-    }
-}
-#[test]
-fn rejected_cancel_keeps_old_protection_and_never_replaces() {
-    let (mut e, _) = ready();
-    inject(
-        &mut e,
-        "old",
-        OrderType::StopLoss,
-        Some(StopTriggerType::MarkPrice),
-    );
-    command(
-        &mut e,
-        Command::AmendOrder {
-            command: 8,
-            id: "old".into(),
-            price: Some(91.0),
-            amount: None,
-        },
-    );
-    let r = http(&mut e, "cancelorder");
-    reply(
-        &mut e,
-        &r,
-        200,
-        r#"{"result":"success","cancelStatus":{"status":"notFound","order_id":"old"}}"#,
-    );
-    assert!(done(&mut e).is_err());
-    assert!(e.store().order("old").is_some());
-    assert!(requests(&mut e).is_empty());
-}
-#[test]
-fn ambiguous_write_is_not_retried_and_next_command_is_independent() {
+fn ambiguous_write_is_not_retried_and_queued_command_is_not_sent() {
     let (mut e, _) = ready();
     place(&mut e, vec![limit()]);
     let r = http(&mut e, "sendorder");
@@ -394,16 +373,21 @@ fn ambiguous_write_is_not_retried_and_next_command_is_independent() {
             error: "response lost",
         },
     );
-    let all = e.drain_plain().collect::<Vec<_>>();
-    assert!(
-        all.iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
-    );
+    let all = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(all.iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error })
+                if error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+    ));
+    assert!(all.iter().any(
+        |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 9, error })
+                if error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                    && error.message.contains("Check Open Orders"))
+    ));
     assert_eq!(
         all.iter()
             .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("sendorder")))
             .count(),
-        1
+        0
     );
 }
 #[test]
@@ -411,7 +395,7 @@ fn batch_cancellation_json_strict_count_status_and_identity() {
     for body in [
         json!({"result":"success","batchStatus":[]}),
         json!({"result":"success","batchStatus":[{"status":"cancelled","order_id":"a"},{"status":"cancelled","order_id":"a"}]}),
-        json!({"result":"success","batchStatus":[{"status":"cancelled","order_id":"a"},{"status":"notFound","order_id":"b"}]}),
+        json!({"result":"success","batchStatus":[{"status":"cancelled","order_id":"a"},{"status":"marketSuspended","order_id":"b"}]}),
     ] {
         let (mut e, _) = ready();
         inject(&mut e, "a", OrderType::Limit, None);
@@ -607,43 +591,6 @@ fn index_trigger_uses_documented_futures_enum() {
     assert_eq!(param(&r, "triggerSignal").unwrap(), "index");
 }
 #[test]
-fn execution_or_full_fill_racing_cancel_suppresses_protective_replacement() {
-    for fill in [
-        r#"{"feed":"fills","fills":[{"fill_id":"exec","order_id":"old","instrument":"PF_XBTUSD","buy":false,"qty":0.01,"price":90}]}"#,
-        r#"{"feed":"open_orders","order_id":"old","is_cancel":true,"reason":"full_fill"}"#,
-        r#"{"feed":"open_orders","order_id":"old","is_cancel":true,"reason":"stop_order_triggered"}"#,
-    ] {
-        let (mut e, socket) = ready();
-        inject(
-            &mut e,
-            "old",
-            OrderType::StopLoss,
-            Some(StopTriggerType::MarkPrice),
-        );
-        command(
-            &mut e,
-            Command::AmendOrder {
-                command: 8,
-                id: "old".into(),
-                price: Some(91.0),
-                amount: None,
-            },
-        );
-        let r = http(&mut e, "cancelorder");
-        message(&mut e, socket, NOW, fill);
-        cancel_ack(&mut e, &r, "old");
-        let all = e.drain_plain().collect::<Vec<_>>();
-        assert!(
-            !all.iter()
-                .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
-        );
-        assert!(
-            all.iter()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
-        );
-    }
-}
-#[test]
 fn late_placement_ack_cannot_resurrect_a_ws_terminal_order() {
     let (mut e, socket) = ready();
     place(&mut e, vec![limit()]);
@@ -657,35 +604,6 @@ fn late_placement_ack_cannot_resurrect_a_ws_terminal_order() {
     ack(&mut e, &r, "new", "placed");
     assert!(done(&mut e).is_ok());
     assert!(e.store().order("new").is_none());
-}
-#[test]
-fn queued_protective_amend_rejects_changed_order_before_cancelling() {
-    let (mut e, _) = ready();
-    inject(
-        &mut e,
-        "old",
-        OrderType::StopLoss,
-        Some(StopTriggerType::MarkPrice),
-    );
-    place(&mut e, vec![limit()]);
-    let r = http(&mut e, "sendorder");
-    command(
-        &mut e,
-        Command::AmendOrder {
-            command: 8,
-            id: "old".into(),
-            price: Some(91.0),
-            amount: None,
-        },
-    );
-    e.store_mut().update_order("old", |o| o.filled = 0.01);
-    ack(&mut e, &r, "entry", "placed");
-    let all = e.drain_plain().collect::<Vec<_>>();
-    assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(
-        all.iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, .. })))
-    );
 }
 #[test]
 fn fetch_leverage_missing_preferences_is_a_failure() {
@@ -738,58 +656,6 @@ fn filled_ack_closes_order_without_inventing_fills() {
     assert!(e.store().order("old").is_none());
 }
 #[test]
-fn protective_replacement_error_reports_canceled_original() {
-    let (mut e, _) = ready();
-    inject(
-        &mut e,
-        "old",
-        OrderType::StopLoss,
-        Some(StopTriggerType::MarkPrice),
-    );
-    command(
-        &mut e,
-        Command::AmendOrder {
-            command: 8,
-            id: "old".into(),
-            price: Some(91.0),
-            amount: None,
-        },
-    );
-    let r = http(&mut e, "cancelorder");
-    cancel_ack(&mut e, &r, "old");
-    let r = http(&mut e, "sendorder");
-    ack(&mut e, &r, "bad", "invalidSize");
-    assert!(done(&mut e).unwrap_err().contains("canceled the original"));
-    assert!(e.store().order("old").is_none());
-}
-#[test]
-fn protective_amend_replaces_only_remaining_quantity() {
-    let (mut e, _) = ready();
-    inject(
-        &mut e,
-        "old",
-        OrderType::StopLoss,
-        Some(StopTriggerType::MarkPrice),
-    );
-    e.store_mut().update_order("old", |o| {
-        o.filled = 0.023;
-        o.remaining = 0.1;
-    });
-    command(
-        &mut e,
-        Command::AmendOrder {
-            command: 8,
-            id: "old".into(),
-            price: Some(91.0),
-            amount: None,
-        },
-    );
-    let r = http(&mut e, "cancelorder");
-    cancel_ack(&mut e, &r, "old");
-    let r = http(&mut e, "sendorder");
-    assert_eq!(param(&r, "size").unwrap(), "0.1");
-}
-#[test]
 fn queued_margin_change_uses_latest_accepted_leverage() {
     let (mut e, _) = ready();
     command(
@@ -823,7 +689,7 @@ fn placed_ack_preserves_preceding_ws_order_attributes() {
         &mut e,
         socket,
         NOW,
-        r#"{"feed":"open_orders","order":{"order_id":"new","symbol":"PF_XBTUSD","type":"lmt","direction":0,"qty":0.2,"filled":0.05,"limit_price":102}}"#,
+        r#"{"feed":"open_orders","order":{"order_id":"new","symbol":"PF_XBTUSD","type":"lmt","direction":0,"qty":0.15,"filled":0.05,"limit_price":102}}"#,
     );
     ack(&mut e, &r, "new", "placed");
     assert!(done(&mut e).is_ok());
@@ -849,7 +715,7 @@ fn edit_ack_preserves_newer_ws_order_attributes_and_merges_fills() {
         );
         let r = http(&mut e, "editorder");
         let price = if changed { 102.0 } else { 90.0 };
-        let amount = if changed { 0.3 } else { 0.123 };
+        let amount = if changed { 0.25 } else { 0.073 };
         message(&mut e,socket,NOW,&json!({"feed":"open_orders","order":{"order_id":"old","symbol":"PF_XBTUSD","type":"lmt","direction":1,"qty":amount,"filled":0.05,"limit_price":price}}).to_string());
         reply(
             &mut e,
@@ -1056,7 +922,7 @@ fn zero_bracket_prices_mean_no_leg_on_market_and_limit_entries() {
 }
 
 #[test]
-fn write_failures_are_classified_without_changing_their_text() {
+fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
     use safe_cex_engine::{ErrorKind, Outcome};
     let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
     let unknown = (None, Some(Outcome::Unknown));
@@ -1068,19 +934,19 @@ fn write_failures_are_classified_without_changing_their_text() {
             503,
             "<html>".to_owned(),
             (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
-            "Invalid Kraken trading response",
+            "Kraken write outcome is unknown. Check Open Orders",
         ),
         (
             503,
             r#"{"result":"error"}"#.to_owned(),
             (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
-            "Kraken HTTP 503",
+            "Kraken write outcome is unknown. Check Open Orders",
         ),
         (
             429,
             r#"{"result":"error"}"#.to_owned(),
-            rejected(ErrorKind::RateLimited),
-            "Kraken HTTP 429",
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
+            "Kraken write outcome is unknown. Check Open Orders",
         ),
         (
             400,
@@ -1091,8 +957,8 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             200,
             r#"{"result":"error","error":"apiLimitExceeded"}"#.to_owned(),
-            rejected(ErrorKind::RateLimited),
-            "apiLimitExceeded",
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
+            "Kraken write outcome is unknown. Check Open Orders",
         ),
         (
             200,
@@ -1104,13 +970,13 @@ fn write_failures_are_classified_without_changing_their_text() {
             200,
             r#"{"result":"error","error":"Unavailable"}"#.to_owned(),
             unknown,
-            "Unavailable",
+            "Kraken write outcome is unknown. Check Open Orders: Unavailable",
         ),
         (
             200,
             r#"{"result":"error","error":"somethingNew"}"#.to_owned(),
             unknown,
-            "somethingNew",
+            "Kraken write outcome is unknown. Check Open Orders: somethingNew",
         ),
         (
             200,
@@ -1122,13 +988,13 @@ fn write_failures_are_classified_without_changing_their_text() {
             200,
             send("partiallyFilled"),
             unknown,
-            "Kraken placement rejected or incomplete: partiallyFilled",
+            "Kraken write outcome is unknown. Check Open Orders: Kraken placement rejected or incomplete: partiallyFilled",
         ),
         (
             200,
             r#"{"result":"success"}"#.to_owned(),
             unknown,
-            "Kraken placement missing sendStatus",
+            "Kraken write outcome is unknown. Check Open Orders: Kraken placement missing sendStatus",
         ),
     ] {
         let (mut e, _) = ready();
@@ -1136,11 +1002,22 @@ fn write_failures_are_classified_without_changing_their_text() {
         let r = http(&mut e, "sendorder");
         reply(&mut e, &r, status, &body);
         let [error] = failures(&mut e).try_into().unwrap();
-        assert_eq!(
-            ((error.kind, error.outcome), error.legacy_text().as_str()),
-            (classified, text),
-            "{status} {body}"
-        );
+        if body == r#"{"result":"success"}"# {
+            // Legacy leaves malformed ACK kind unspecified; managed custody types it Internal.
+            assert!(matches!(error.kind, None | Some(ErrorKind::Internal)));
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            assert_eq!(error.legacy_text(), text);
+        } else if classified.1 == Some(Outcome::Unknown) && text.contains("Check Open Orders") {
+            // Managed custody uses the engine's ambiguity wording.
+            assert_eq!((error.kind, error.outcome), classified);
+            assert!(error.legacy_text().contains("Check Open Orders"));
+        } else {
+            assert_eq!(
+                ((error.kind, error.outcome), error.legacy_text().as_str()),
+                (classified, text),
+                "{status} {body}"
+            );
+        }
     }
     // Transport loss on a write is Unknown.
     let (mut e, _) = ready();
@@ -1183,7 +1060,7 @@ fn a_refusal_after_an_accepted_placement_is_never_rejected() {
     let [error] = failures(&mut e).try_into().unwrap();
     assert_eq!(
         error.legacy_text(),
-        r#"{"message":"insufficientFunds","partialOrderIds":["accepted"],"partialOrderCount":1}"#
+        r#"{"message":"Kraken write outcome is unknown. Check Open Orders: insufficientFunds","partialOrderIds":["accepted"],"partialOrderCount":1}"#
     );
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
 }
@@ -1234,13 +1111,13 @@ fn edit_and_cancel_statuses_never_claim_a_refusal_after_an_effect() {
         &mut e,
         &r,
         200,
-        r#"{"result":"success","batchStatus":[{"status":"cancelled"},{"status":"notFound","order_id":"b"}]}"#,
+        r#"{"result":"success","batchStatus":[{"status":"cancelled"},{"status":"marketSuspended","order_id":"b"}]}"#,
     );
     let [error] = failures(&mut e).try_into().unwrap();
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(
         error.legacy_text(),
-        "Kraken cancellation rejected or identity mismatch: notFound"
+        "Kraken write outcome is unknown. Check Open Orders: Kraken cancellation rejected or identity mismatch: cancelled"
     );
 }
 
@@ -1292,7 +1169,7 @@ fn beta_non_success_status_keeps_native_error_classification() {
             400,
             "apiLimitExceeded",
             Some(ErrorKind::RateLimited),
-            Outcome::Rejected,
+            Outcome::Unknown,
         ),
         (
             403,
@@ -1371,6 +1248,13 @@ fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
             symbol: "PF_XBTUSD".into(),
         },
     );
+    let cancel = http(&mut e, "cancelallorders");
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"result":"success","cancelStatus":{"status":"noOrdersToCancel"}}"#,
+    );
     assert!(
         e.drain_plain()
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 82, .. })))
@@ -1378,29 +1262,168 @@ fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
 }
 
 #[test]
-fn beta_mixed_cancel_keeps_confirmed_ids_and_unknown() {
+fn symbol_cancel_hits_the_venue_with_no_order_in_the_store() {
     let (mut e, _) = ready();
-    inject(&mut e, "a", OrderType::Limit, None);
-    inject(&mut e, "b", OrderType::Limit, None);
     command(
         &mut e,
-        Command::CancelOrders {
-            command: 81,
-            ids: vec!["a".into(), "b".into()],
+        Command::CancelSymbolOrders {
+            command: 83,
+            symbol: "PF_XBTUSD".into(),
         },
     );
-    let request = http(&mut e, "batchorder");
+    let cancel = http(&mut e, "cancelallorders");
+    assert!(
+        cancel
+            .body
+            .as_deref()
+            .unwrap_or_default()
+            .contains("symbol=PF_XBTUSD")
+    );
     reply(
         &mut e,
-        &request,
+        &cancel,
         200,
-        r#"{"result":"success","batchStatus":[{"status":"cancelled","order_id":"a"},{"status":"notFound","order_id":"b"}]}"#,
+        r#"{"result":"success","cancelStatus":{"status":"cancelled","cancelledOrders":[]}}"#,
     );
-    let [error] = failures(&mut e).try_into().unwrap();
-    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["a"]);
+    assert!(
+        e.drain_plain()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 83, .. })))
+    );
+}
+
+#[test]
+fn beta_mixed_cancel_keeps_confirmed_ids_and_unknown() {
+    for factory in [ready, ready_provider] {
+        let (mut e, _) = factory();
+        inject(&mut e, "a", OrderType::Limit, None);
+        inject(&mut e, "b", OrderType::Limit, None);
+        command(
+            &mut e,
+            Command::CancelOrders {
+                command: 81,
+                ids: vec!["a".into(), "b".into()],
+            },
+        );
+        let request = http(&mut e, "batchorder");
+        reply(
+            &mut e,
+            &request,
+            200,
+            r#"{"result":"success","batchStatus":[{"status":"cancelled","order_id":"a"},{"status":"marketSuspended","order_id":"b"}]}"#,
+        );
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["a"]);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(e.store().order("a").is_none());
+        assert!(e.store().order("b").is_some());
+    }
+}
+
+#[test]
+fn provider_partial_placement_keeps_unknown_and_fences_until_reconciled() {
+    let (mut e, _) = ready_provider();
+    place(&mut e, vec![limit(), limit()]);
+    let first = http(&mut e, "sendorder");
+    ack(&mut e, &first, "accepted", "placed");
+    let second = http(&mut e, "sendorder");
+    reply(
+        &mut e,
+        &second,
+        200,
+        r#"{"result":"error","error":"insufficientFunds"}"#,
+    );
+    let settled = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    let error = settled
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .unwrap();
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    assert!(e.store().order("a").is_none());
-    assert!(e.store().order("b").is_some());
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted"]);
+    let read = settled
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.ends_with("openorders") => Some(request.clone()),
+            _ => None,
+        })
+        .expect("partial placement must reconcile");
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 8,
+            orders: vec![limit()],
+        },
+    );
+    assert!(
+        !requests(&mut e)
+            .iter()
+            .any(|r| r.url.ends_with("sendorder"))
+    );
+    reply(&mut e, &read, 200, OPEN);
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 9,
+            orders: vec![limit()],
+        },
+    );
+    http(&mut e, "sendorder");
+}
+
+#[test]
+fn provider_native_refusals_keep_documented_status_and_effect_semantics() {
+    use safe_cex_engine::Outcome;
+    for status in [
+        "invalidOrderType",
+        "invalidSide",
+        "clientOrderIdTooLong",
+        "invalidDomainConfiguration",
+    ] {
+        let (mut e, _) = ready_provider();
+        place(&mut e, vec![limit()]);
+        let request = http(&mut e, "sendorder");
+        ack(&mut e, &request, "", status);
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(error.outcome, Some(Outcome::Rejected), "{status}");
+        assert_eq!(error.venue_code.as_deref(), Some(status));
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 8,
+                orders: vec![limit()],
+            },
+        );
+        http(&mut e, "sendorder");
+    }
+    for (status, expected) in [
+        ("invalidSize", Outcome::Rejected),
+        ("postWouldExecute", Outcome::Unknown),
+        ("iocWouldNotExecute", Outcome::Unknown),
+    ] {
+        let (mut e, _) = ready_provider();
+        inject(&mut e, "old", OrderType::Limit, None);
+        command(
+            &mut e,
+            Command::AmendOrder {
+                command: 8,
+                id: "old".into(),
+                price: Some(101.),
+                amount: Some(0.2),
+            },
+        );
+        let request = http(&mut e, "editorder");
+        reply(
+            &mut e,
+            &request,
+            200,
+            &json!({"result":"success","editStatus":{"orderId":"old","status":status}}).to_string(),
+        );
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(error.outcome, Some(expected), "{status}");
+        assert_eq!(error.venue_code.as_deref(), Some(status));
+    }
 }
 
 #[test]
@@ -1465,6 +1488,7 @@ fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
     reply(&mut e, &old, 200, OPEN);
     let fresh = http(&mut e, "openorders");
     assert_ne!(old.id, fresh.id);
+    reply(&mut e, &old, 200, OPEN);
     refused(
         &mut e,
         Command::PlaceOrders {
@@ -1474,6 +1498,30 @@ fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
         83,
     );
     reply(&mut e, &fresh, 200, OPEN);
+    reply(&mut e, &old, 200, OPEN);
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 84,
+            orders: vec![limit()],
+        },
+    );
+    http(&mut e, "sendorder");
+}
+
+#[test]
+fn beta_a_rejected_row_on_another_market_releases_the_fence() {
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit()]);
+    let unknown = http(&mut e, "sendorder");
+    reply(&mut e, &unknown, 503, "<html>");
+    let fresh = http(&mut e, "openorders");
+    reply(
+        &mut e,
+        &fresh,
+        200,
+        r#"{"result":"success","openOrders":[{"order_id":"77","symbol":"PF_ETHUSD"}]}"#,
+    );
     command(
         &mut e,
         Command::PlaceOrders {
@@ -1623,5 +1671,874 @@ fn slow_reconcile(held_completes_cleanly: bool) {
         collect(&mut e)
             .iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("sendorder")))
+    );
+}
+
+// deaws2's live bodies follow.
+#[test]
+fn a_stop_amend_edits_in_place_with_its_stop_price() {
+    let (mut e, _) = ready();
+    inject(
+        &mut e,
+        "old",
+        OrderType::StopLoss,
+        Some(StopTriggerType::LastPrice),
+    );
+    command(
+        &mut e,
+        Command::AmendOrder {
+            command: 8,
+            id: "old".into(),
+            price: Some(85.0),
+            amount: None,
+        },
+    );
+    let r = http(&mut e, "editorder");
+    assert_eq!(param(&r, "stopPrice").unwrap(), "85");
+    assert_eq!(param(&r, "limitPrice"), None);
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"result":"success","editStatus":{"status":"edited","orderId":"old"}}"#,
+    );
+    assert!(done(&mut e).is_ok());
+    assert_eq!(e.store().order("old").unwrap().price, 85.0);
+}
+
+#[test]
+fn a_trailing_stop_amend_still_refuses() {
+    let (mut e, _) = ready();
+    inject(&mut e, "old", OrderType::TrailingStopLoss, None);
+    command(
+        &mut e,
+        Command::AmendOrder {
+            command: 8,
+            id: "old".into(),
+            price: Some(85.0),
+            amount: None,
+        },
+    );
+    assert!(done(&mut e).is_err());
+}
+
+#[test]
+fn an_amend_sends_the_total_under_absolute_quantity_mode() {
+    let (mut e, socket) = ready();
+    inject(&mut e, "old", OrderType::Limit, None);
+    message(&mut e, socket, NOW, &json!({"feed":"open_orders","order":{"order_id":"old","symbol":"PF_XBTUSD","type":"lmt","direction":1,"qty":8.0,"filled":5.0,"limit_price":90}}).to_string());
+    assert_eq!(e.store().order("old").unwrap().amount, 13.0);
+    command(
+        &mut e,
+        Command::AmendOrder {
+            command: 8,
+            id: "old".into(),
+            price: None,
+            amount: Some(13.0),
+        },
+    );
+    let r = http(&mut e, "editorder");
+    assert_eq!(param(&r, "qtyMode").unwrap(), "ABSOLUTE");
+    assert_eq!(param(&r, "size").unwrap(), "13");
+}
+
+#[test]
+fn live_refusal_codes_with_detail_are_refusals_and_leave_no_fence() {
+    for body in [
+        r#"{"result":"error","error":"nonceBelowThreshold: TOO_SMALL"}"#,
+        r#"{"result":"error","error":"invalidArgument: 0"}"#,
+        r#"{"result":"error","error":"invalidSide"}"#,
+        r#"{"status":"BAD_REQUEST","result":"error","errors":[{"code":98,"message":"MAX_LEVERAGE_OUT_OF_BOUNDS"}]}"#,
+    ] {
+        let (mut e, _) = ready();
+        place(&mut e, vec![limit()]);
+        let r = http(&mut e, "sendorder");
+        reply(&mut e, &r, 200, body);
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Rejected),
+            "{body}"
+        );
+        place(&mut e, vec![limit()]);
+        http(&mut e, "sendorder");
+    }
+}
+
+#[test]
+fn a_market_order_placed_with_executions_does_not_rest() {
+    let (mut e, _) = ready();
+    let mut order = limit();
+    order.kind = OrderType::Market;
+    order.price = None;
+    place(&mut e, vec![order]);
+    let r = http(&mut e, "sendorder");
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"result":"success","sendStatus":{"status":"placed","order_id":"m1","orderEvents":[{"type":"EXECUTION","amount":2}]}}"#,
+    );
+    assert!(done(&mut e).is_ok());
+    assert!(e.store().order("m1").is_none());
+}
+
+#[test]
+fn cancelling_a_gone_order_is_done() {
+    let (mut e, _) = ready();
+    inject(&mut e, "a", OrderType::Limit, None);
+    command(
+        &mut e,
+        Command::CancelOrders {
+            command: 8,
+            ids: vec!["a".into()],
+        },
+    );
+    let r = http(&mut e, "cancelorder");
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"result":"success","cancelStatus":{"status":"notFound","order_id":"a"}}"#,
+    );
+    assert!(done(&mut e).is_ok());
+    assert!(e.store().order("a").is_none());
+}
+
+#[test]
+fn order_events_of_any_shape_never_make_a_placed_order_invalid() {
+    for events in [
+        r#"null"#,
+        r#"[{"type":"PLACE","order":{"orderId":"o"},"reducedQuantity":null}]"#,
+        r#"[{"type":"EXECUTION","amount":null},{"type":null}]"#,
+    ] {
+        let (mut e, _) = ready();
+        place(&mut e, vec![limit()]);
+        let r = http(&mut e, "sendorder");
+        let body = format!(
+            r#"{{"result":"success","sendStatus":{{"status":"placed","order_id":"n","orderEvents":{events}}}}}"#
+        );
+        reply(&mut e, &r, 200, &body);
+        assert!(done(&mut e).is_ok(), "{events}");
+    }
+}
+
+fn answer(status: &str) -> (Engine<Kraken>, HttpRequest) {
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit()]);
+    let write = http(&mut e, "sendorder");
+    let body = format!(r#"{{"result":"success","sendStatus":{{"status":"{status}"}}}}"#);
+    reply(&mut e, &write, 200, &body);
+    (e, write)
+}
+fn outcome_of(actions: &[Action]) -> Option<safe_cex_engine::Outcome> {
+    actions.iter().find_map(|a| match a {
+        Action::Notice(Notice::CommandFailed { error, .. }) => error.outcome,
+        _ => None,
+    })
+}
+
+#[test]
+fn documented_send_statuses_refuse_and_leave_no_fence() {
+    for status in [
+        "invalidOrderType",
+        "invalidSide",
+        "clientOrderIdTooLong",
+        "invalidDomainConfiguration",
+    ] {
+        let (mut e, _) = answer(status);
+        let settled = e.drain_plain().collect::<Vec<_>>();
+        assert_eq!(
+            outcome_of(&settled),
+            Some(safe_cex_engine::Outcome::Rejected),
+            "{status}"
+        );
+        place(&mut e, vec![limit()]);
+        http(&mut e, "sendorder");
+    }
+}
+
+#[test]
+fn a_duplicate_client_id_stays_unknown() {
+    let (mut e, _) = answer("clientOrderIdAlreadyExist");
+    let settled = e.drain_plain().collect::<Vec<_>>();
+    assert_eq!(
+        outcome_of(&settled),
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+}
+
+#[test]
+fn a_json_parse_error_in_a_200_refuses_and_leaves_no_fence() {
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit()]);
+    let write = http(&mut e, "sendorder");
+    reply(
+        &mut e,
+        &write,
+        200,
+        r#"{"result":"error","error":"Json Parse Error"}"#,
+    );
+    let settled = e.drain_plain().collect::<Vec<_>>();
+    assert_eq!(
+        outcome_of(&settled),
+        Some(safe_cex_engine::Outcome::Rejected)
+    );
+    place(&mut e, vec![limit()]);
+    http(&mut e, "sendorder");
+}
+
+#[test]
+fn an_unlisted_send_status_stays_unknown_and_clears_on_the_next_read() {
+    let (mut e, _) = answer("wouldProcessAfterSpecifiedTime");
+    let settled = e.drain_plain().collect::<Vec<_>>();
+    assert_eq!(
+        outcome_of(&settled),
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+    let read = settled
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("openorders") => Some(r.clone()),
+            _ => None,
+        })
+        .expect("the read starts with the answer");
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 8,
+            orders: vec![limit()],
+        },
+    );
+    let fenced = e.drain_plain().collect::<Vec<_>>();
+    assert!(
+        !fenced
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("sendorder")))
+    );
+    reply(&mut e, &read, 200, OPEN);
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 9,
+            orders: vec![limit()],
+        },
+    );
+    http(&mut e, "sendorder");
+}
+
+/// Kraken's sendStatus enum lists partiallyFilled: the entry is live, so its brackets follow.
+#[test]
+fn a_partially_filled_entry_still_gets_its_stop() {
+    let (mut e, _) = ready();
+    let mut o = limit();
+    o.stop_loss = Some(90.0);
+    place(&mut e, vec![o]);
+    let entry = http(&mut e, "sendorder");
+    ack(&mut e, &entry, "entry", "partiallyFilled");
+    let sl = http(&mut e, "sendorder");
+    assert_eq!(param(&sl, "orderType").unwrap(), "stp");
+    assert_eq!(param(&sl, "reduceOnly").unwrap(), "true");
+    ack(&mut e, &sl, "stop", "placed");
+    assert_eq!(done(&mut e).unwrap(), r#"["entry","stop"]"#);
+}
+
+#[test]
+fn an_amended_size_is_rounded_to_the_step() {
+    let (mut e, _) = ready();
+    inject(&mut e, "old", OrderType::Limit, None);
+    let mut order = e.store().order("old").unwrap().clone();
+    order.amount = 0.3;
+    order.filled = 0.1;
+    order.remaining = 0.2;
+    e.store_mut().upsert_order(order);
+    command(
+        &mut e,
+        Command::AmendOrder {
+            command: 8,
+            id: "old".into(),
+            price: None,
+            amount: Some(0.3),
+        },
+    );
+    let r = http(&mut e, "editorder");
+    // Kraken's qtyMode ABSOLUTE: the total, fills included, so a fill not yet seen cannot grow it.
+    assert_eq!(param(&r, "qtyMode").unwrap(), "ABSOLUTE");
+    assert_eq!(param(&r, "size").unwrap(), "0.3");
+}
+
+/// An order already filled or gone cannot be cancelled, and that is not a failure.
+#[test]
+fn a_cancel_of_an_order_already_gone_is_done() {
+    for body in [
+        json!({"result":"success","cancelStatus":{"status":"notFound"}}),
+        json!({"result":"success","cancelStatus":{"status":"filled","order_id":"a"}}),
+    ] {
+        let (mut e, _) = ready();
+        inject(&mut e, "a", OrderType::Limit, None);
+        command(
+            &mut e,
+            Command::CancelOrders {
+                command: 8,
+                ids: vec!["a".into()],
+            },
+        );
+        let r = http(&mut e, "cancelorder");
+        reply(&mut e, &r, 200, &body.to_string());
+        assert!(done(&mut e).is_ok(), "{body}");
+    }
+}
+
+#[test]
+fn dispatched_write_ambiguity_matrix() {
+    for (status, body) in [
+        (429, "{}"),
+        (429, r#"{"result":"error","error":"insufficientFunds"}"#),
+        (429, r#"{"result":"error","error":"authenticationError"}"#),
+        (429, r#"{"result":"error","error":"apiLimitExceeded"}"#),
+        (200, r#"{"result":"error","error":"apiLimitExceeded"}"#),
+        (408, r#"{"result":"error","error":"insufficientFunds"}"#),
+        (500, r#"{"result":"error","error":"insufficientFunds"}"#),
+        (503, r#"{"result":"error","error":"apiLimitExceeded"}"#),
+        (408, r#"{"result":"error","error":"authenticationError"}"#),
+        (500, r#"{"result":"error","error":"authenticationError"}"#),
+        (599, r#"{"result":"error","error":"authenticationError"}"#),
+        (400, r#"{"result":"error","error":"apiLimitExceeded"}"#),
+        (404, r#"{"result":"error","error":"apiLimitExceeded"}"#),
+    ] {
+        for operation in [
+            "create",
+            "stop_create",
+            "bracket",
+            "amend",
+            "amend_stop",
+            "cancel",
+            "cancel_stop",
+            "setting",
+        ] {
+            let (mut e, _) = ready();
+            let path = match operation {
+                "create" | "stop_create" | "bracket" => {
+                    let mut o = limit();
+                    if operation == "stop_create" {
+                        o.kind = OrderType::StopLoss;
+                        o.price = Some(90.0);
+                    }
+                    if operation == "bracket" {
+                        o.stop_loss = Some(90.0);
+                        o.take_profit = Some(110.0);
+                    }
+                    place(&mut e, vec![o]);
+                    "sendorder"
+                }
+                "amend" | "amend_stop" => {
+                    inject(
+                        &mut e,
+                        "old",
+                        if operation == "amend_stop" {
+                            OrderType::StopLoss
+                        } else {
+                            OrderType::Limit
+                        },
+                        Some(StopTriggerType::LastPrice),
+                    );
+                    command(
+                        &mut e,
+                        Command::AmendOrder {
+                            command: 7,
+                            id: "old".into(),
+                            price: Some(85.0),
+                            amount: None,
+                        },
+                    );
+                    "editorder"
+                }
+                "cancel" | "cancel_stop" => {
+                    inject(
+                        &mut e,
+                        "old",
+                        if operation == "cancel_stop" {
+                            OrderType::StopLoss
+                        } else {
+                            OrderType::Limit
+                        },
+                        None,
+                    );
+                    command(
+                        &mut e,
+                        Command::CancelOrders {
+                            command: 7,
+                            ids: vec!["old".into()],
+                        },
+                    );
+                    "cancelorder"
+                }
+                _ => {
+                    command(
+                        &mut e,
+                        Command::SetLeverage {
+                            command: 7,
+                            symbol: "PF_XBTUSD".into(),
+                            leverage: 5.0,
+                            side: None,
+                        },
+                    );
+                    "leveragepreferences"
+                }
+            };
+            let mut r = http(&mut e, path);
+            if operation == "bracket" {
+                ack(&mut e, &r, "accepted-entry", "placed");
+                r = http(&mut e, path);
+                assert_eq!(param(&r, "orderType").as_deref(), Some("stp"));
+            }
+            assert_ne!(r.method, Method::Get);
+            reply(&mut e, &r, status, body);
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+            let errors: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(errors.len(), 1, "{operation} {status}: {actions:?}");
+            let error = errors[0];
+            let case = format!("{operation} {status} {body}: {error:?}");
+            assert_eq!(
+                error.outcome,
+                Some(safe_cex_engine::Outcome::Unknown),
+                "{case}"
+            );
+            let text = error.legacy_text().to_lowercase();
+            assert!(
+                text.contains("unknown") && text.contains("check open orders"),
+                "{case}"
+            );
+            assert!(
+                !text.contains("refused") && !text.contains("no stop"),
+                "{case}"
+            );
+            assert_eq!(error.protection, None, "{case}");
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+                "resend/put-back: {case}"
+            );
+        }
+    }
+}
+
+fn futures_queued_write_after_failure(
+    first_kind: &str,
+    next_kind: &str,
+    status: u16,
+    body: &str,
+    unknown: bool,
+) {
+    use safe_cex_engine::Outcome;
+    let (mut e, _) = ready();
+    inject(&mut e, "active-edit", OrderType::Limit, None);
+    inject(&mut e, "active-cancel", OrderType::Limit, None);
+    inject(&mut e, "queued-edit", OrderType::Limit, None);
+    let first_command = match first_kind {
+        "sendorder" => Command::PlaceOrders {
+            command: 901,
+            orders: vec![limit()],
+        },
+        "editorder" => Command::AmendOrder {
+            command: 901,
+            id: "active-edit".into(),
+            price: Some(94.),
+            amount: None,
+        },
+        "cancelorder" => Command::CancelOrders {
+            command: 901,
+            ids: vec!["active-cancel".into()],
+        },
+        _ => unreachable!(),
+    };
+    command(&mut e, first_command);
+    let first = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with(first_kind))
+        .expect("first physical write");
+    let next = if next_kind == "place" {
+        Command::PlaceOrders {
+            command: 902,
+            orders: vec![limit()],
+        }
+    } else {
+        Command::AmendOrder {
+            command: 902,
+            id: "queued-edit".into(),
+            price: Some(95.),
+            amount: None,
+        }
+    };
+    command(&mut e, next);
+    let queued = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(
+        !queued.iter().any(|a| matches!(a, Action::Http(r) if
+        r.url.ends_with("sendorder") || r.url.ends_with("editorder"))),
+        "second command must queue"
+    );
+    assert!(
+        !queued.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { command: 902, .. })
+        )),
+        "queued command was genuinely admitted"
+    );
+    if status == 0 {
+        e.handle(
+            NOW,
+            Event::HttpFailed {
+                request: first.id,
+                error: body,
+            },
+        );
+    } else {
+        reply(&mut e, &first, status, body);
+    }
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    let error = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: 901,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .expect("original write completes");
+    assert_eq!(
+        error.outcome,
+        Some(if unknown {
+            Outcome::Unknown
+        } else {
+            Outcome::Rejected
+        })
+    );
+    let writes: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("sendorder") || r.url.ends_with("editorder") => {
+                Some(r.url.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    if unknown {
+        if first_kind != "cancelorder" {
+            command(
+                &mut e,
+                Command::PlaceOrders {
+                    command: 903,
+                    orders: vec![limit()],
+                },
+            );
+            let blocked = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+            assert!(blocked.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { command: 903, error })
+                    if error.outcome == Some(Outcome::NotSent) && error.message.contains("uncertain"))),
+                "the original uncertainty fence must remain held");
+        }
+        assert!(
+            writes.is_empty(),
+            "{first_kind} released queued {next_kind} before reconciliation: {writes:?}"
+        );
+        assert!(actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { command: 902, error })
+                if error.outcome == Some(Outcome::NotSent) && error.message.contains("Check Open Orders"))));
+        if first_kind != "cancelorder" {
+            let read = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::Http(r) if r.url.ends_with("openorders") => Some(r),
+                    _ => None,
+                })
+                .expect("the original uncertainty starts reconciliation");
+            reply(&mut e, read, 200, OPEN);
+            assert!(
+                requests(&mut e)
+                    .iter()
+                    .all(|r| { !r.url.ends_with("sendorder") && !r.url.ends_with("editorder") }),
+                "reconciliation must not replay refused jobs"
+            );
+            command(
+                &mut e,
+                Command::PlaceOrders {
+                    command: 908,
+                    orders: vec![limit()],
+                },
+            );
+            http(&mut e, "sendorder");
+        }
+    } else {
+        assert_eq!(writes.len(), 1, "definitive refusals may advance the queue");
+    }
+}
+
+fn futures_unknown_queued_writes(first_kind: &str) {
+    for next_kind in ["place", "amend"] {
+        for (status, body) in [
+            (200, r#"{"result":"error","error":"apiLimitExceeded"}"#),
+            (503, "<html>"),
+            (0, "connection reset"),
+        ] {
+            futures_queued_write_after_failure(first_kind, next_kind, status, body, true);
+        }
+    }
+}
+#[test]
+fn futures_unknown_sendorder_refuses_queued_place_and_edit() {
+    futures_unknown_queued_writes("sendorder");
+}
+#[test]
+fn futures_unknown_editorder_refuses_queued_place_and_edit() {
+    futures_unknown_queued_writes("editorder");
+}
+#[test]
+fn futures_unknown_cancel_refuses_queued_place_and_edit() {
+    futures_unknown_queued_writes("cancelorder");
+}
+#[test]
+fn futures_definitive_refusals_advance_queued_writes() {
+    for first_kind in ["sendorder", "editorder", "cancelorder"] {
+        for next_kind in ["place", "amend"] {
+            futures_queued_write_after_failure(
+                first_kind,
+                next_kind,
+                200,
+                r#"{"result":"error","error":"insufficientFunds"}"#,
+                false,
+            );
+        }
+    }
+}
+
+#[test]
+fn futures_unknown_or_partial_result_keeps_queued_cancels_and_settings() {
+    use safe_cex_engine::Outcome;
+    for partial in [false, true] {
+        let (mut e, _) = ready();
+        inject(&mut e, "queued-edit", OrderType::Limit, None);
+        let orders = if partial {
+            vec![limit(), limit()]
+        } else {
+            vec![limit()]
+        };
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 901,
+                orders,
+            },
+        );
+        let mut first = http(&mut e, "sendorder");
+        for next in [
+            Command::PlaceOrders {
+                command: 902,
+                orders: vec![limit()],
+            },
+            Command::AmendOrder {
+                command: 903,
+                id: "queued-edit".into(),
+                price: Some(95.),
+                amount: None,
+            },
+            Command::CancelOrders {
+                command: 904,
+                ids: vec!["safety-cancel".into()],
+            },
+            Command::SetLeverage {
+                command: 905,
+                symbol: "PF_XBTUSD".into(),
+                leverage: 10.,
+                side: None,
+            },
+            Command::FetchLeverage {
+                command: 906,
+                symbol: "PF_XBTUSD".into(),
+            },
+        ] {
+            command(&mut e, next);
+        }
+        assert!(
+            requests(&mut e).is_empty(),
+            "all later jobs wait for the active write"
+        );
+        if partial {
+            ack(&mut e, &first, "accepted-entry", "placed");
+            first = http(&mut e, "sendorder");
+        }
+        reply(
+            &mut e,
+            &first,
+            200,
+            if partial {
+                r#"{"result":"error","error":"insufficientFunds"}"#
+            } else {
+                r#"{"result":"error","error":"apiLimitExceeded"}"#
+            },
+        );
+        let settled = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        let original = settled
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed {
+                    command: 901,
+                    error,
+                }) => Some(error),
+                _ => None,
+            })
+            .expect("original command settles");
+        assert_eq!(original.outcome, Some(Outcome::Unknown));
+        if partial {
+            assert_eq!(
+                original.partial.as_ref().unwrap().order_ids,
+                ["accepted-entry"]
+            );
+        }
+        for refused in [902, 903] {
+            assert!(settled.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { command, error })
+                    if *command == refused && error.outcome == Some(Outcome::NotSent))));
+        }
+        let writes: Vec<_> = settled
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) if r.method != Method::Get => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(writes.len(), 1);
+        assert!(writes[0].url.ends_with("cancelorder"));
+        cancel_ack(&mut e, writes[0], "safety-cancel");
+        let after_cancel = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        assert!(
+            after_cancel
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 904, .. })))
+        );
+        let setting = after_cancel
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r)
+                    if r.method == Method::Put && r.url.ends_with("leveragepreferences") =>
+                {
+                    Some(r)
+                }
+                _ => None,
+            })
+            .expect("queued setting survives");
+        reply(&mut e, setting, 200, r#"{"result":"success"}"#);
+        let after_setting = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        for completed in [905, 906] {
+            assert!(after_setting.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandDone { command, .. }) if *command == completed)));
+        }
+        assert!(!after_setting.iter().any(|a| matches!(a, Action::Http(r)
+            if r.url.ends_with("sendorder") || r.url.ends_with("editorder"))));
+    }
+}
+
+fn postmerge_cancel_failure(body: &str, batch: bool) -> safe_cex_engine::VenueError {
+    let (mut e, _) = ready();
+    if batch {
+        inject(&mut e, "a", OrderType::Limit, None);
+        inject(&mut e, "b", OrderType::Limit, None);
+    }
+    command(
+        &mut e,
+        if batch {
+            Command::CancelOrders {
+                command: 81,
+                ids: vec!["a".into(), "b".into()],
+            }
+        } else {
+            Command::CancelSymbolOrders {
+                command: 81,
+                symbol: "PF_XBTUSD".into(),
+            }
+        },
+    );
+    let request = http(
+        &mut e,
+        if batch {
+            "batchorder"
+        } else {
+            "cancelallorders"
+        },
+    );
+    reply(&mut e, &request, 200, body);
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
+    );
+    out.into_iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("one failure")
+}
+#[test]
+fn postmerge_native_batch_rate_failure_is_actionable() {
+    let error = postmerge_cancel_failure(
+        r#"{"result":"success","batchStatus":[{"status":"apiLimitExceeded","order_id":"a"},{"status":"invalidSize","order_id":"b"}]}"#,
+        true,
+    );
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.venue_code.as_deref(), Some("apiLimitExceeded"));
+    assert!(error.message.contains("apiLimitExceeded"), "{error:?}");
+    assert!(!error.message.contains("invalidSize"), "{error:?}");
+    assert!(
+        error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+        "{error:?}"
+    );
+}
+#[test]
+fn postmerge_cancel_all_rate_status_is_actionable() {
+    let error = postmerge_cancel_failure(
+        r#"{"result":"success","cancelStatus":{"status":"apiLimitExceeded"}}"#,
+        false,
+    );
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+        "{error:?}"
+    );
+}
+#[test]
+fn postmerge_envelope_rate_control_is_actionable() {
+    for batch in [false, true] {
+        let error =
+            postmerge_cancel_failure(r#"{"result":"error","error":"apiLimitExceeded"}"#, batch);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(
+            error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
+fn postmerge_documented_server_error_is_actionable_in_batch_and_cancel_all() {
+    let mut errors = Vec::new();
+    for batch in [false, true] {
+        let error = postmerge_cancel_failure(r#"{"result":"error","error":"Server Error"}"#, batch);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        errors.push((batch, error));
+    }
+    assert!(
+        errors
+            .iter()
+            .all(|(_, error)| error.message.contains("unknown")
+                && error.message.contains("Check Open Orders")),
+        "{errors:?}"
     );
 }

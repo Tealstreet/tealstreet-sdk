@@ -38,6 +38,42 @@ fn count(h: &Harness, text: &str) -> usize {
     h.logs.iter().filter(|log| log.contains(text)).count()
 }
 
+fn assert_venue_code(h: &Harness, message: &str, expected: &str) {
+    let event = h
+        .events
+        .iter()
+        .find(|event| event.message.contains(message))
+        .expect("auth notice");
+    assert_eq!(event.code, safe_cex_engine::log::code::AUTH_REJECTED);
+    assert!(
+        event.fields.iter().any(|(name, value)| *name == "venueCode"
+            && *value == safe_cex_engine::log::Value::from(expected)),
+        "{event:?}"
+    );
+}
+
+#[test]
+fn a_ws_egress_refusal_carries_its_code_as_structured_auth_evidence() {
+    for (frame, code) in [(IP_BOUND, "40018"), (LOCATION, "40024")] {
+        let mut h = pre_login();
+        h.private_message(frame);
+        assert_venue_code(&h, "trying the next route", code);
+    }
+}
+
+#[test]
+fn exhausted_ws_routes_keep_the_last_actual_venue_code() {
+    for (frame, code) in [(IP_BOUND, "40018"), (LOCATION, "40024")] {
+        let mut h = pre_login();
+        h.private_message(frame);
+        let now = h.now;
+        run_until(&mut h, now);
+        let socket = private(&h).last().unwrap().0;
+        h.event(Event::WsRouteExhausted { socket });
+        assert_venue_code(&h, WHITELIST, code);
+    }
+}
+
 /// Fires every armed timer up to `until`, including timers they arm.
 fn run_until(h: &mut Harness, until: f64) {
     for _ in 0..10_000 {

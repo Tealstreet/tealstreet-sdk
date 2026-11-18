@@ -106,7 +106,7 @@ Bybit Brazil accounts use the normal global Bybit REST/WS hosts, but Bybit requi
 Current status for beta:
 
 - Functionally implemented in account shape, account creation/editing, sync/runtime fingerprints, REST headers, and Bybit WS connection options.
-- Brazil-marked WS connections now resolve through the CTO-provided header-injecting route at `wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/...`:
+- Brazil-marked WS connections now resolve through the CTO-provided header-injecting route at `wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/...` (a container on the Vultr tunnel hosts, AWS_EXIT step 5b; the hosted exchange server dials the same host):
   - private: `/bybitbra/v5/private`
   - public linear: `/bybitbra/v5/public/linear`
   - public inverse: `/bybitbra/v5/public/inverse`
@@ -173,6 +173,20 @@ grep for `[WS]subscribe:Request not authorized`.
 to the LINEAR socket only, so hosted bybit USDT worked and hosted BTCUSD did
 not — reported as "impossible to use Tealstreet on Bybit's inverse market"
 (2026-10-01) and fixed for inverse and spot the same day.
+
+**Fast Execution timestamp precision change** (Bybit announcement: 2026-11-05
+02:30 UTC): Bybit's `execution.fast` private WS topic changes `creationTime`
+and item `execTime` from millisecond to microsecond precision without changing
+field names or types. The retained TS Bybit sockets do NOT subscribe to
+`execution.fast` today: linear/demo and inverse subscribe to `order` +
+`position`, and spot subscribes to `order` only. So the announcement does not
+change the current private WS fill path. Still, any execution-row mapper or
+future `execution.fast` consumer must normalize timestamps through
+`normalizeBybitExecutionTimestampMs` / `normalizeBybitExecutionTimestampSeconds`
+so 10-digit seconds, 13-digit milliseconds and 16-digit microseconds all land in
+the same internal seconds/ms units. Demo inherits the linear mapper; inverse has
+its own mapper; spot currently has no historical-fill mapper in the retained TS
+adapter.
 
 **On a failed auth the socket sends NOTHING and reconnects** — it does not
 subscribe. Subscribing anyway was tried and is worse: bybit answers a ping on an
@@ -709,6 +723,34 @@ The rate limit system is VIP-level aware and adjusts batch order limits dynamica
 - Income history: 50 per page (the venue's own cap, clamped), max 10 pages safety limit, 1000-record cap (`fetchBybitIncomeHistory` in `bybit.income.ts`)
 - OHLCV: max 1000 candles per request (`bybit.exchange.ts:773`)
 
+### Terminal order history after 2026-11-12
+
+The Bybit Tech Bot API announcement, effective 2026-11-12 (supplied by
+Tealstreet ops), says unfiltered `/v5/order/history` and
+`/v5/spread/order/history` no longer return recent `Cancelled`, `Rejected` or
+`Deactivated` orders. Each status remains queryable explicitly for 24 hours.
+This announcement is not present in the checked v5 changelog. The standard
+history docs list a single string `orderStatus`; the spread history docs do
+not list that request parameter. Neither stack currently calls spread history.
+
+The TS replay reference's `fetchHistoricalOrders` and Rust's shared Bybit
+history walker read the default history plus separate `Cancelled`, `Rejected`
+and `Deactivated` histories. Each status/category/window owns its cursor and
+page budget. Merge by order ID, sort newest first, then apply the caller's
+global limit. Keep the existing seven-day windows; explicit status requests
+do not extend Bybit's terminal-order retention.
+
+Hyro lost-create recovery checks realtime, default history and all three
+explicit terminal statuses before treating the identity as absent. A matched
+cancelled/deactivated order proves acceptance without restoring an open row;
+a matched rejection follows the existing rejection path. A failed filtered
+lookup leaves the outcome unknown and cannot justify a create retry.
+
+See `docs/plans/callers/bybit-order-history-status.md` for the caller census
+and replay coverage. The separate Bybit history gate checks a result whose
+cancelled orders exist only in filtered pages, including duplicate IDs and
+independent reuse of the same cursor token.
+
 ## State Reconciliation
 
 ### Position Merge Strategy (`bybit.exchange.ts:294-334`)
@@ -753,7 +795,7 @@ attempt that was reverted:
   `positionIdx === 0` through `POSITION_SIDE[p.side] || PositionSide.Long`, and
   `POSITION_SIDE` maps only `Buy`/`Sell`, so a flat frame becomes a phantom
   `BTCUSD:long:oneway` row while the real short keeps stale contracts. Only
-  `addOrUpdatePositionsFull` zeroes unannounced rows, and nothing dedupes the
+  `addOrUpdatePositionsFull` removes unannounced rows while retaining settings separately, and nothing dedupes the
   phantom away — its id differs from the real row's, so `auditPositions()` would
   not remove it even with `removeDupes` on. Linear has
   `dedupePositionsById` for its documented `seq: -1` placeholder rows; inverse
@@ -1103,15 +1145,14 @@ instead of pretending its exchange name is `bybitdemo`:
   `NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL`, and
   `NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL`. The WebSocket URLs are optional
   and derive from the REST origin as `/v5/public/linear` and `/v5/private`.
-  While Hyro's production HTTPS/WSS origin is not live, these accounts fall back
-  to the configured `NEXT_PUBLIC_HYROTRADER_SIMULATOR_*` origins but still stay
-  `hyrotraderMode: 'production'` / `isDemo = false` for grading, journaling and
-  hosted-server nudges. Do not use `bybitdemo` for Hyro simulator keys; it talks
-  to Bybit's demo host, not Hyro.
-- Metadata keeps HyroTrader **dev-only** (`enabled: false`, `enabledInDev: true`,
-  `enableInPreview: false`) until private REST/WS can run from preview/prod via
-  Hyro HTTPS/WSS origins or a Tealstreet relay. Public market-data HTTPS/WSS is
-  not enough to validate/link a private account.
+  The default production/challenge origin is `https://sim-tealstreet.hyro.site`;
+  env vars are now overrides, not required Vercel secrets. Do not use
+  `bybitdemo` for Hyro simulator keys; it talks to Bybit's demo host, not Hyro.
+- Metadata keeps HyroTrader **preview-only** (`enabled: false`,
+  `enabledInDev: true`, `enableInPreview: true`) for beta validation. Hyro now
+  fronts the production simulator with TLS and Tealstreet browser CORS, so
+  preview can run direct without a Tealstreet relay; production remains dark
+  until the beta is explicitly approved.
 - The shared `/hyrotrader-demo` account is explicitly marked with
   `ExchangeAccountConfig.hyrotraderDemo: true`, which maps to
   `options.extra.hyrotraderMode: 'demo'`, sets `isDemo = true`, and uses the
@@ -1119,17 +1160,13 @@ instead of pretending its exchange name is `bybitdemo`:
   bundled shared API key/secret. Production accounts default to
   `hyrotraderMode: 'production'` and may borrow simulator ORIGINS during v1, but
   must never read simulator API keys/secrets as a credential fallback.
-- Hyro's simulator origin may be plain HTTP on port `8012`; WS uses the same
-  host/port with `ws://.../v5/public/linear` and `ws://.../v5/private`. Do not
-  force HTTPS/WSS in probes or config normalization, and keep exact simulator
-  IPs out of committed docs/config. Plain `http://` + `ws://` is unreachable
-  from any HTTPS origin (mixed-content block is non-overridable in production
-  browsers), so direct-browser against the simulator only works from local
-  HTTP dev. Any production path from a Tealstreet HTTPS origin needs either
-  TLS fronting by Hyro or a Tealstreet-origin proxy. Hyro confirmed on
-  2026-10-15 that HTTPS/WSS should already be available on the main deployment;
-  the separate test server was not configured yet and was awaiting their DevOps
-  team, so do not add a relay scaffold unless the TLS route remains unavailable.
+- The old separate test simulator used plain HTTP on port `8012`; keep that
+  shape possible for local probes by not forcing HTTPS/WSS in config
+  normalization. The browser rollout path now uses Hyro's TLS hostname
+  `https://sim-tealstreet.hyro.site`, which answers REST preflights for Tealstreet
+  origins. WebSockets do not need CORS and derive to
+  `wss://sim-tealstreet.hyro.site/v5/{public/linear,private}` unless explicitly
+  overridden.
 - Public market data should use Hyro's own public REST/WS endpoints directly as
   the baseline. Do not proxy public market-data traffic unnecessarily, and do not
   assume direct Bybit L2 is identical to the simulator's served book.
@@ -1165,12 +1202,12 @@ instead of pretending its exchange name is `bybitdemo`:
     endpoint which they'll poll every 30 s and surface revocation
     within 30 s. Preferable to inferring state from `retCode 10003`
     once that lifecycle signal exists.
-  Deferred OAuth/server-held credential design lives in
-  `docs/plans/HYROTRADER_OAUTH_V2.md`; do not implement a browser-held
-  OAuth credential path. Sam's current direction is that OAuth-linked HyroTrader
-  private trading should run through `services/exchange-server` because every
-  private request may need Tealstreet-held signing material. OAuth has no known
-  end-user launch timeline yet.
+    Deferred OAuth/server-held credential design lives in
+    `docs/plans/HYROTRADER_OAUTH_V2.md`; do not implement a browser-held
+    OAuth credential path. Sam's current direction is that OAuth-linked HyroTrader
+    private trading should run through `services/exchange-server` because every
+    private request may need Tealstreet-held signing material. OAuth has no known
+    end-user launch timeline yet.
 - reconciliation is USDT-only (`linear`, `settleCoin=USDT`) because the simulator
   contract does not support Bybit's USDC linear branch
 - order placement sends a generated `orderLinkId` because the simulator requires
@@ -1246,7 +1283,7 @@ Configure the web build before enabling the connector:
 
 | Setting                                                                                    | Purpose                                                                                               |
 | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_HYROTRADER_PROD_REST_URL`                                                     | Required production/challenge REST origin for ordinary `hyrotrader` accounts; no fallback to Bybit    |
+| `NEXT_PUBLIC_HYROTRADER_PROD_REST_URL`                                                     | Optional production/challenge REST origin override; defaults to `https://sim-tealstreet.hyro.site`        |
 | `NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL`                                                | Optional production public socket URL; defaults to REST-derived `/v5/public/linear`                   |
 | `NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL`                                               | Optional production private socket URL; defaults to REST-derived `/v5/private`                        |
 | `NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL`                                                | Shared demo/probe simulator REST origin, including plain `http://<host>:8012`; no fallback to Bybit   |
@@ -1255,9 +1292,12 @@ Configure the web build before enabling the connector:
 | `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_KEY` / `NEXT_PUBLIC_HYROTRADER_SIMULATOR_API_SECRET` | Existing branded-demo defaults, bundled publicly; only a disposable shared demo account belongs here  |
 | `HYROTRADER_ENABLED`                                                                       | App feature flag controlling connector/demo access; runtime overrides may differ from source defaults |
 
-Until Hyro's production origin is live, ordinary `hyrotrader` accounts use the
-simulator origin when `NEXT_PUBLIC_HYROTRADER_PROD_REST_URL` is unset. This is
-still not a Bybit fallback, and only the `/hyrotrader-demo` account reads the
+Rust defaults omitted `extra.hyrotraderMode` to production. Ordinary accounts
+use the production/challenge origin, defaulting to Hyro's hosted simulator.
+Native construction selects only the requested production network and refuses
+missing endpoints with `invalidInput` / `notSent` before I/O; it never falls
+back to Bybit or to the separately configured demo URLs. Only explicit `demo`
+selects those demo URLs, and only the `/hyrotrader-demo` account reads the
 simulator API key/secret envs.
 
 Normal connected accounts supply their own credentials through exchange options,
@@ -2030,7 +2070,6 @@ Shared consumers must refresh their source then restart provider/accounts throug
 the existing identity-change contract. Hyro retains its USDT perpetual filter
 and normal 10 s ping deadline; 5 s watch wakes never imply an early ping.
 
-
 ## Rust private row admission
 
 Ordinary REST order/position snapshots and WS order/position arrays admit healthy
@@ -2049,7 +2088,6 @@ polling. Strict Hyro handshake/account evidence and financial execution/history
 coverage remain separate. Structural/envelope or paging failures never establish
 authoritative empty exposure.
 
-
 Rust acknowledged leverage writes (including native leverage-not-modified replies)
 advance the existing positions revision before publishing the selected leverage.
 An older in-flight positions join cannot restore stale leverage/settings; it
@@ -2066,3 +2104,18 @@ Rust release code generation for the Bybit crate uses `opt-level = "z"` for
 family WASM size. CI still requires the public CPU/memory gates and complete raw replay
 outputs, including caller identities; the source parsers, handlers and financial
 calculations retain their existing behavior.
+
+## Bounded Rust private startup
+
+After account metadata and catalogue readiness start the private snapshot phase,
+Rust Bybit allows 60 seconds for balance, orders and positions to load. Fresh
+public frames do not extend this bound. A missing section emits one typed
+Timeout startup failure naming the missing sections and the last read failure;
+empty wallet lists never become a fabricated zero balance. Valid zero-valued
+wallet rows and empty orders/positions remain successful snapshots.
+Definitive required-read authentication/permission refusals surface immediately;
+read-permission failures do not deactivate an otherwise usable trading key.
+HyroTrader retains its separate private readiness policy. Suspended browsers
+cannot run timers: an expired bound is observed when the host resumes execution.
+Demo uses `api-demo.bybit.com` and `stream-demo.bybit.com/v5/private`; its public
+stream remains on the ordinary mainnet endpoint.

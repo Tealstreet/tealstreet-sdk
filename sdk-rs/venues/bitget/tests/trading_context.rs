@@ -472,3 +472,16 @@ fn ambiguous_codes_are_unknown_and_never_resent() {
         assert_eq!(failure(&h, 1).outcome, Some(Outcome::Unknown), "{code}");
     }
 }
+
+#[test]
+fn an_order_the_store_has_lost_is_cancelled_by_its_id_and_symbol() {
+    let mut h = Harness::classic();
+    h.command(Command::CancelOrdersWithSymbols {
+        command: 1,
+        orders: vec![safe_cex_engine::model::CancelOrderRef {
+            id: "77".into(),
+            symbol: "BTCUSDT".into(),
+        }],
+    });
+    assert_eq!(count(&h, "cancel"), 1, "{:?}", h.done);
+}

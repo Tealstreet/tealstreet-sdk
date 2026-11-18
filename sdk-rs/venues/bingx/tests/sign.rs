@@ -132,3 +132,29 @@ fn invalid_secondary_identity_is_rejected_even_without_a_primary_private_account
         );
     }
 }
+
+/// Legacy's wire over the tunnel for these inputs: sorted, then the signature last.
+#[test]
+fn a_signed_read_matches_legacys_exact_url() {
+    let (url, _, _) = Params::new()
+        .str("symbol", "BTC-USDT")
+        .num("limit", 2.0)
+        .into_request(
+            Method::Get,
+            "/openApi/swap/v2/trade/allOrders",
+            Some(&credentials()),
+            1700000000000.,
+        );
+    let signed = "limit=2&symbol=BTC-USDT&timestamp=1700000000000";
+    let signature = safe_cex_crypto::hmac_sha256(
+        credentials().secret.as_bytes(),
+        signed.as_bytes(),
+        safe_cex_crypto::Encoding::Hex,
+    );
+    assert_eq!(
+        url,
+        format!(
+            "https://open-api.bingx.com/openApi/swap/v2/trade/allOrders?{signed}&signature={signature}"
+        )
+    );
+}

@@ -206,7 +206,7 @@ it('returns partial batch identity through the actual Wasm host SDK Error after 
   );
   expect(failure).toBeInstanceOf(Error);
   expect(failure).toMatchObject({
-    message: 'HTTP transport request failed', partialOrderIds: ['first-accepted'], partialOrderCount: 1, totalOrderCount: 2, failedOrderIndex: 1,
+    message: 'The outcome is unknown. Check Open Orders', partialOrderIds: ['first-accepted'], partialOrderCount: 1, totalOrderCount: 2, failedOrderIndex: 1,
   });
   const diagnostic = `${String(failure)}\n${JSON.stringify(failure)}`;
   for (const secret of [...Object.values(API), transportSecret, 'https://']) expect(diagnostic).not.toContain(secret);

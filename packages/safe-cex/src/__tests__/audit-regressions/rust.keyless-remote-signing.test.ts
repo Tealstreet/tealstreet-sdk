@@ -2,6 +2,7 @@ import type { ExchangeName, ExchangeOptions, RemoteSigner } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { exchangeMetadata } from '../../exchangeMetadata';
 import { exchangeRegistry } from '../../exchanges/registry';
 import { assertBetaAccount } from '../../exchanges/rust/betaVenues';
 import { deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
@@ -18,7 +19,7 @@ const remoteSigner: RemoteSigner = {
 
 // exchange-server's hosted shape: the browser holds the secret and signs every request.
 const hosted = (extra: Partial<ExchangeOptions> = {}): ExchangeOptions => ({
-  key: 'hosted-api-key',
+  key: ['organizations', 'fixture', 'apiKeys', 'hosted'].join('/'),
   secret: '',
   remoteSigner,
   privateOnly: true,
@@ -35,12 +36,12 @@ describe('Rust-only hosted account selection', () => {
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
     for (const name of RUST_VENUES) {
       const options = hosted({ passphrase: 'hosted-passphrase' });
-      if (deriveRemoteSigningPolicy(name)?.enabled === true && name !== 'paradex') {
+      if (deriveRemoteSigningPolicy(name)?.enabled === true) {
         const exchange = await createExchange(name, options);
         expect(exchange).toBeInstanceOf(RustEngineExchange);
         exchange.dispose();
       } else {
-        expect(() => assertBetaAccount(name, options)).toThrow('unsupported in this build');
+        expect(() => assertBetaAccount(name, options)).toThrow(`${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`);
         await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
       }
     }

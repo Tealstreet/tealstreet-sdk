@@ -1,7 +1,7 @@
-import type { BuilderAuthorizationDetail, OrderIdentityReceipt } from '@tealstreet/safe-cex-wasm/host';
+import type { BuilderAuthorizationDetail, HistoryDecodeDetail, OrderIdentityReceipt, VenueErrorDetail } from '@tealstreet/safe-cex-wasm/host';
 import type { ErrorCategory } from './health/errorPatterns';
 
-import { builderAuthorizationOf } from '@tealstreet/safe-cex-wasm/host';
+import { builderAuthorizationOf, historyDecodeOf, writePlanElementsOf } from '@tealstreet/safe-cex-wasm/host';
 
 // Frozen errors must retain their identity and command outcome. Weak membership
 // carries only reporting state and cannot keep completed operations alive.
@@ -36,6 +36,7 @@ export type CommandOutcome = 'notSent' | 'rejected' | 'unknown';
 export type ExchangeErrorKind =
   | 'rejected'
   | 'invalidInput'
+  | 'insufficientBalance'
   | 'authInvalid'
   | 'authExpired'
   | 'authPermission'
@@ -49,6 +50,7 @@ const OUTCOMES: readonly string[] = ['notSent', 'rejected', 'unknown'];
 const KINDS: readonly string[] = [
   'rejected',
   'invalidInput',
+  'insufficientBalance',
   'authInvalid',
   'authExpired',
   'authPermission',
@@ -76,9 +78,13 @@ export type SerializedCommandError = {
   outcome?: CommandOutcome;
   /** Rust venue classification (`ExchangeError`); absent where the venue did not classify. */
   kind?: ExchangeErrorKind;
+  causeCode?: string;
+  historyDecode?: HistoryDecodeDetail;
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
+  /** A stop or take-profit edit refused after its cancel: the old order was put back, or nothing protects the position. */
+  protection?: 'restored' | 'unprotected';
   clientOrderId?: string;
   clientOrderIds?: string[];
   /** Correlates this immutable snapshot with later native receipt events. */
@@ -91,6 +97,8 @@ export type SerializedCommandError = {
   partialOrderCount?: number;
   totalOrderCount?: number;
   failedOrderIndex?: number;
+  /** Complete validated logical outcomes, including the untouched suffix. */
+  elements?: VenueErrorDetail['elements'];
   errorReported?: boolean;
 };
 
@@ -100,6 +108,11 @@ export const serializeCommandError = (value: unknown): SerializedCommandError =>
   const result: SerializedCommandError = {
     message: typeof source.message === 'string' ? source.message : String(value),
   };
+  if (typeof source.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(source.causeCode)) result.causeCode = source.causeCode;
+  const historyDecode = historyDecodeOf(source.historyDecode);
+  if (historyDecode) result.historyDecode = historyDecode;
+  const elements = writePlanElementsOf(source.elements);
+  if (elements) result.elements = elements;
   const errorReported = isErrorReported(value) ? true : source.errorReported;
   if (typeof errorReported === 'boolean') result.errorReported = errorReported;
   for (const key of ['name', 'stack', 'command', 'clientOrderId', 'receiptKey', 'venueCode', 'venueMessage'] as const) {
@@ -128,6 +141,7 @@ export const serializeCommandError = (value: unknown): SerializedCommandError =>
   if (typeof source.retryAfterMs === 'number' && Number.isFinite(source.retryAfterMs) && source.retryAfterMs >= 0) {
     result.retryAfterMs = source.retryAfterMs;
   }
+  if (source.protection === 'restored' || source.protection === 'unprotected') result.protection = source.protection;
   for (const key of ['clientOrderIds', 'actualClientOrderIds', 'partialOrderIds'] as const) {
     const ids = source[key];
     if (Array.isArray(ids) && ids.every((id): id is string => typeof id === 'string')) result[key] = [...ids];
@@ -164,6 +178,7 @@ const isOrderIdentityReceipt = (value: unknown): value is OrderIdentityReceipt =
 const CATEGORIES: Record<ExchangeErrorKind, ErrorCategory> = {
   rejected: 'order_rejected',
   invalidInput: 'order_rejected',
+  insufficientBalance: 'insufficient_balance',
   authInvalid: 'auth_invalid',
   authExpired: 'auth_expired',
   authPermission: 'auth_permissions',
@@ -196,9 +211,65 @@ export const classifiedError = (value: unknown): ClassifiedError | undefined => 
   return Object.keys(result).length ? result : undefined;
 };
 
+const AUTH_KINDS: readonly string[] = ['authInvalid', 'authExpired', 'authPermission'];
+
+/**
+ * The classification an engine diagnostic carries in `fields` (engine
+ * `notice_error`). An auth kind counts only on `auth.rejected`, the
+ * account-level evidence; a read or order refusal never asserts one
+ * (ExchangeHealthMonitor.processEvent). No kind is invented: an IP mismatch is
+ * not a bad key.
+ */
+export const engineEventClassified = (event: {
+  code: string;
+  fields?: Record<string, unknown>;
+}): ClassifiedError | undefined => {
+  const classified = classifiedError(event.fields) ?? {};
+  const accountAuth = event.code === 'auth.rejected';
+  if (!accountAuth && classified.kind && AUTH_KINDS.includes(classified.kind)) delete classified.kind;
+  return Object.keys(classified).length ? classified : undefined;
+};
+
+// Mirrors engine::ErrorCause. A syntax check alone would admit private uppercase values.
+const HISTORY_CAUSES: readonly string[] = [
+  'HISTORY_RATE_LIMITED',
+  'HISTORY_AUTH_INVALID',
+  'HISTORY_AUTH_PERMISSION',
+  'HISTORY_INVALID_PARAMS',
+  'HISTORY_VENUE_ERROR',
+  'HISTORY_HTTP_ERROR',
+  'HISTORY_DECODE',
+  'HISTORY_CURSOR_STALLED',
+  'HISTORY_PAGE_LIMIT',
+  'HISTORY_WINDOW_MISMATCH',
+  'HISTORY_NETWORK',
+  'HISTORY_TIMEOUT',
+];
+
+/** Detached, closed history evidence for diagnostics; never copies a row or request. */
+export const historyErrorDiagnostics = (
+  value: unknown,
+): { causeCode?: string; historyDecode?: HistoryDecodeDetail } => {
+  const result: { causeCode?: string; historyDecode?: HistoryDecodeDetail } = {};
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return result;
+  try {
+    const { causeCode } = value as { causeCode?: unknown };
+    if (typeof causeCode === 'string' && HISTORY_CAUSES.includes(causeCode)) result.causeCode = causeCode;
+  } catch {
+    /* Unreadable metadata is absent. */
+  }
+  try {
+    const detail = historyDecodeOf((value as { historyDecode?: unknown }).historyDecode);
+    if (detail) result.historyDecode = detail;
+  } catch {
+    /* Unreadable metadata is absent. */
+  }
+  return result;
+};
+
 /**
  * Closed-set Sentry tags for a classified failure: kind, its health category,
- * outcome and the venue's code. Never free text, so tags stay low-cardinality.
+ * outcome, venue code and closed history evidence. Never includes row values.
  */
 export const exchangeErrorTags = (value: unknown): Record<string, string> => {
   if (value === null || typeof value !== 'object') return {};
@@ -210,5 +281,11 @@ export const exchangeErrorTags = (value: unknown): Record<string, string> => {
   }
   if (typeof outcome === 'string' && OUTCOMES.includes(outcome)) tags.error_outcome = outcome;
   if (typeof venueCode === 'string' && /^[\w.-]{1,32}$/.test(venueCode)) tags.venue_code = venueCode;
+  const { causeCode, historyDecode } = historyErrorDiagnostics(value);
+  if (causeCode) tags.cause_code = causeCode;
+  if (historyDecode) {
+    tags.history_schema = historyDecode.schema;
+    tags.history_reason = historyDecode.reason;
+  }
   return tags;
 };

@@ -21,7 +21,7 @@ loops, and conditionals, see [Workflow](./workflow.md).
 ### `buy` / `sell` &nbsp; _(aliases `b`, `s`)_ {#buy-sell}
 
 Place a market, limit, or `best`-priced order on the focused symbol, with
-optional reduce-only / post-only / bracket stop.
+optional reduce-only / post-only / bracket stop-loss and take-profit.
 
 | Form                         | Result                                    |
 | ---------------------------- | ----------------------------------------- |
@@ -36,6 +36,28 @@ optional reduce-only / post-only / bracket stop.
 | `buy $100 at 50000 po`       | Post-only limit                           |
 | `buy $100 best`              | Limit at best bid (buy) / best ask (sell) |
 | `buy $100 stop 49500`        | Bracketed entry with attached stop loss   |
+| `buy $100 at 50000 stop 49500 tp 51000` | Entry with both attached brackets |
+| `sell $100 at 50000 stop 50500 tp 49000` | Short entry with both brackets |
+
+**Unknown order arguments refuse the entire command before any order is sent.**
+Symbol overrides must be complete market names, base symbols, or supported
+base+quote aliases; an arbitrary prefix never selects a market. Every member
+of a buy/sell/chase symbol list must resolve. TWAP and swarm accept one symbol
+per command. Repeated targets are refused after resolving aliases, including
+`BTC,BTCUSDT` when both select the same market. A loaded alias such as `NEXT`
+is a symbol in a symbol slot; keywords belong to the command and position
+where they are parsed. Conflicting side selectors such as
+`bump buy +100 --sells` are refused before any amendment. Duplicate or
+conflicting modifiers and numeric operands with trailing text are refused. `po` requires `at PRICE` or `best`; it cannot be
+applied to a market order.
+
+Use `stop PRICE` for an attached stop loss and `tp PRICE` for an attached
+take-profit on `buy`/`sell` (market, limit, or `best`). Relative prices use the
+current ticker, just like `at`. `sl=PRICE` and `tp=PRICE` are not supported:
+they refuse with a syntax hint. Both brackets go through the existing shared
+order preparation and venue bracket handling; venue restrictions still apply.
+For a take-profit on an existing position, use `stop at PRICE`: above the mark
+for a long, below the mark for a short.
 
 **`at` is required for a limit order.** `buy 100$ 50000` is not a limit — there
 is nothing for the price to attach to, so it would be a market order with a
@@ -58,11 +80,15 @@ Reduce-only stop loss or take-profit. Decided by trigger price vs mark.
 | -------------------------------- | -------------------------------------------- |
 | `stop 18500`                     | Market stop for full focused position        |
 | `stop at 18500`                  | Same, with the optional `at`                 |
-| `stop -1%`                       | Relative to entry                            |
+| `stop $entry -1%`                | 1% below entry                               |
 | `stop buy at +100`               | Explicit side (when hedge-mode is ambiguous) |
 | `stop $500 at 1%`                | Partial-size stop                            |
-| `stop sell 0.01 at -100 ETHUSDT` | Symbol override                              |
-| `stop at -1% trigger 18500`      | **Limit** stop — trigger ≠ limit price       |
+| `stop at 3000 ETHUSDT`           | Symbol override                              |
+| `stop at 18400 trigger 18500`    | **Limit** stop — trigger ≠ limit price       |
+
+Bare negative offsets such as `stop -1%` are
+[refused for now](./sizing-and-prices.md#negative-offsets). On Bybit a limit stop
+currently rests as a market stop at the trigger.
 
 Source: `StopCommand.ts`.
 
@@ -93,7 +119,7 @@ than placing it at entry.
 | ------------ | -------------------------------- |
 | `be`         | Stop at your entry price         |
 | `be +3%`     | 3% **above** entry               |
-| `be -0.5%`   | 0.5% **below** entry             |
+| `be $entry -0.5%` | 0.5% **below** entry        |
 | `be +100`    | Absolute offset, same directions |
 | `be ETHUSDT` | Symbol override                  |
 
@@ -101,7 +127,8 @@ An offset is relative to **entry**, not to the mark, and it is a plain
 direction rather than a side-aware one: `+` is always up the price axis. On a
 LONG, `be +3%` is the one you want — it puts the stop above entry and locks a
 little in. On a SHORT the profitable side is DOWN, so the same buffer is
-`be -3%`; `be +3%` there widens the stop instead of tightening it.
+`be $entry -3%`; `be +3%` there widens the stop instead of tightening it. A bare
+`be -3%` is [refused for now](./sizing-and-prices.md#negative-offsets).
 
 **It cancels stop losses only — your take-profits are left alone.** Writing this
 by hand as `cancel stops; stop $entry` does not do the same thing: `cancel
@@ -168,7 +195,18 @@ Global variants (`longs`, `shorts`, `all`, `allpos`) honor the
 
 ### `cancel` &nbsp; _(alias `x`)_
 
-Filters compose: side × kind × reduce-only × position-selector × range × id.
+Use the filter forms below, optionally followed by one market name
+(`cancel buys BTCUSDT`). Filters must come before the market. Unsupported
+combinations, leftover arguments, and incomplete market names return an error
+without cancelling orders; `cancel BTCUSDT buys` is refused.
+
+An unfiltered market token must be its full symbol, a supported bare base, or a
+complete base+quote alias (`cancel BTCUSDC` selects `BTC-PERP` on Hyperliquid).
+Filter keywords and arbitrary market prefixes never select cancel-all.
+
+ID suffixes and comma-separated IDs honor an explicit market:
+`cancel 1234 ETHUSDT` only matches ETHUSDT orders. Without a market, ID matches
+search all open orders on the account.
 
 | Form                          | Result                                          |
 | ----------------------------- | ----------------------------------------------- |
@@ -181,7 +219,7 @@ Filters compose: side × kind × reduce-only × position-selector × range × id
 | `cancel top 3` / `bottom 5`   | Sorted by price (top = highest)                 |
 | `cancel first 2` / `last 1`   | Sorted by last update                           |
 | `cancel from 49000 to 50000`  | Price-range, limits only                        |
-| `cancel <id>` / `<id-prefix>` | Specific order (prefix ≥ 3 chars)               |
+| `cancel <id>` / `<id-suffix>` | Matching open orders (suffix ≥ 3 chars)         |
 | `cancel <id1>,<id2>,…`        | Comma list — what `cancel @capturedVar` becomes |
 
 Source: `CancelCommand.ts`.
@@ -196,7 +234,7 @@ Shift open **limit** orders by a price delta. Stops are untouched.
 | -------------------------- | --------------------------------- |
 | `bump +10`                 | Shift every limit by +10, focused |
 | `bump ETHUSDT +10`         | Symbol override                   |
-| `bump buy +10` / `sell -5` | Side filter                       |
+| `bump buy +10`             | Side filter                       |
 | `bump top 3 +5`            | Top-N price selector              |
 | `bump 100 --buys`          | Legacy flag form — still accepted |
 
@@ -211,7 +249,10 @@ Move a specific limit order by ID (full or unique prefix).
 | Form                        | Result          |
 | --------------------------- | --------------- |
 | `move <orderId> 50000`      | Absolute        |
-| `move <orderId> +10` / `-5` | Relative offset |
+| `move <orderId> +10`        | Relative offset |
+
+Downward offsets are [refused for now](./sizing-and-prices.md#negative-offsets);
+use an absolute price.
 
 Source: `MoveCommand.ts`.
 
@@ -236,7 +277,7 @@ Examples:
 ```text
 scale buy 10 into 10 from 31000 to 32000
 scale sell $1000 into 25 from 50000 to 48500 reduce
-scale buy $1000 into 10 from -0.25% to -1% ETHUSDT
+scale buy $1000 into 10 from 3000 to 2950 ETHUSDT
 ```
 
 Source: `ScaleCommand.ts`.
@@ -339,8 +380,14 @@ Source: `NukeCommand.ts`.
 | Form                  | Result                            |
 | --------------------- | --------------------------------- |
 | `leverage`            | Read (only if a position is open) |
+| `lev BTCUSDT` / `lev show BTCUSDT` | Read a named loaded symbol |
 | `lev 5`               | Set 5x on focused symbol          |
 | `leverage 10 ETHUSDT` | Set 10x on named symbol           |
+
+`lev` changes leverage only. `lev 50 isolated` and `lev 50 cross` are refused
+before changing leverage; they do not request a margin-mode change. The CLI
+has no combined leverage/margin-mode command. Use `lev <n> [SYMBOL]` and
+configure margin mode separately through the venue-supported controls.
 
 Strings like `-5`, `5x`, `2..5` are rejected loudly. Source: `LeverageCommand.ts`.
 
@@ -522,6 +569,9 @@ for the OAuth callback.
 
 ### `audit` &nbsp; _(standalone-only)_ {#audit}
 
+Audit settings belong to the current login. An old chain resuming after a login
+change cannot toggle the new user's audit setting.
+
 Durable, append-only log of **write-ops** (orders / cancels / closes /
 leverage). **Off by default.** When on, each write-op appends a JSON line
 to `~/.tealstreet/audit.log` with timestamp, account, the command, and
@@ -550,6 +600,9 @@ use stays bounded; `audit tail` reads from the end and dips into the
 backup when needed. Source: `audit-log.ts`, `script-adapter.ts`.
 
 ### `footer` &nbsp; _(standalone-only)_ {#footer}
+
+Switching login clears the previous user's footer and loads the new user's saved
+layout. Pending redraws from the old login are discarded.
 
 Controls the persistent **bottom status footer** — a pinned line at the
 bottom of the terminal, above which your prompt and output live, showing
@@ -591,7 +644,7 @@ Example footer script (`~/.tealstreet/scripts/risk.ts`):
 export const meta = { name: 'risk', targets: ['core', 'cli'], capabilities: { accounts: [], writes: [] } };
 export default function (_args, api) {
   const p = api.getPositions()[0];
-  return p ? `risk ${p.notional.toFixed(0)}` : 'flat';
+  return p ? `risk ${typeof p.notional === 'number' && Number.isFinite(p.notional) ? p.notional.toFixed(0) : '—'}` : 'flat';
 }
 ```
 
@@ -746,6 +799,9 @@ Detailed in [Operations → Listener](../operations/listener.md) and
 ---
 
 ## Cross-trade &nbsp; _(standalone-only)_ {#cross-trade}
+
+Changing login during account startup cancels the remaining boots and disposes
+the old connections. It cannot activate the new login's same-named accounts.
 
 Detailed in [Operations → Cross-trade](../operations/cross-trade.md). Top-level
 binary surface:
