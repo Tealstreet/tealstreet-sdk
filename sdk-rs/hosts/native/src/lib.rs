@@ -4,6 +4,8 @@
 //! actions that come out. Transports are pluggable so recorded traffic can
 //! drive the same loop as the network.
 #![cfg(not(target_arch = "wasm32"))]
+#[cfg(test)]
+use safe_cex_engine::ControlFrame;
 
 mod how_pool;
 mod managed_http;
@@ -12,6 +14,10 @@ mod routing;
 mod server;
 mod socket_health;
 mod transport;
+#[cfg(feature = "venues")]
+mod trusted_identities;
+#[cfg(feature = "venues")]
+pub use trusted_identities::TrustedSignerIdentities;
 #[cfg(test)]
 mod websocket_write_tests;
 
@@ -838,9 +844,13 @@ mod timer_tests {
                 );
                 let unsafe_socket = SocketId(safe_cex_engine::resource_ids::MAX_RESOURCE_ID + 1);
                 if during_start {
-                    cx.send_signed(unsafe_socket, "".into(), Box::new(NeverStep));
+                    cx.send_signed(
+                        unsafe_socket,
+                        ControlFrame::authentication(""),
+                        Box::new(NeverStep),
+                    );
                 } else {
-                    cx.send(unsafe_socket, "");
+                    cx.send(unsafe_socket, ControlFrame::subscription(""));
                 }
             });
         let host = Host::new(

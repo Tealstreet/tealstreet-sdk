@@ -772,12 +772,15 @@ impl Venue for PhemexPerpetuals {
             for r in &k.kline_p {
                 cx.record_socket_topic_number(&["2:candle:", &e.symbol, ":"], r.1.0 as u32 as u64);
             }
-            // Subscribe snapshots are history, including their newest row. Only
-            // explicitly incremental frames may enter the live candle path.
-            if k.kind != "incremental" {
-                return;
+            match k.kind.as_str() {
+                "snapshot" => {
+                    // TS listenOHLCV replays wire rows 1 then 0, not all history.
+                    k.kline_p.truncate(2);
+                    k.kline_p.reverse();
+                }
+                "incremental" => k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0)),
+                _ => return,
             }
-            k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
             for r in k.kline_p {
                 for ((s, i), _) in self.candles.iter().filter(|((s, i), _)| {
                     s == &e.symbol.to_ascii_uppercase()

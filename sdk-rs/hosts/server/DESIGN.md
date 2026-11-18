@@ -126,7 +126,8 @@ What it captures:
   on an engine thread never waits on Sentry), sending the code location and
   never the payload;
 - `Log::error` conditions: drain and break-glass deadlines, router-lease
-  fencing, a failing signer, and algo shutdown deadlines;
+  fencing with running algos, a failing signer, and algo shutdown deadlines;
+  zero-running fences are journal-only info, including paused/pending-only work;
 - the native host's account start failures and venue, relay and HTTP-tunnel
   transport failures, through `safe_cex_native::report`. Each account's
   transport is built `with_venue`, so its failures carry `venue` beside `kind`
@@ -141,8 +142,24 @@ Every event is rebuilt from an allowlist:
 - stack frames' function, module, file, line and column only;
 - tags `service`, `box`, `kind`, `error_kind`, `venue_code`, `venue` and
   `target`;
+- `user.id` and tag `user_id` from the account's captured, verified proxy-token
+  `userId`, identical to the web Sentry authentication subject. This explicit
+  identity is never an account label, key digest, credential or token. Only the
+  ID is retained: no email, username, IP address or arbitrary SDK user scope;
 - extras `user_tag` (a hash, never the user ID) and
-  `suppressed_since_last_event`.
+  `suppressed_since_last_event`; `router_lease.fenced` additionally allows unsigned
+  numeric `running_jobs`, `paused_jobs` and `pending_work` from the pre-disposal
+  work snapshot, never job IDs or payloads.
+
+Private startup, admission and transport diagnostics carry that immutable owner
+separately from log labels, through deferred HTTP preparation and socket opens.
+Only the trusted report capture supplies identity, through a private, thread-local
+context matched to that event ID and consumed synchronously by `before_send`.
+The scope copy and final event discard the reserved `_verified_user_id` extra;
+serialized extras and SDK user fields never supply ownership. Nested captures
+restore their caller's context, and returning or unwinding clears it. Shared
+public transports, process-wide errors and panics stay unattributed; they never
+borrow an SDK user scope. Journal labels retain their existing hashed user IDs.
 
 Account names, URLs with their query, auth headers, key-shaped strings and
 payloads do not leave. Events are throttled to one per fingerprint per 60 s
@@ -527,8 +544,8 @@ explicit user action; no speculative restore or automatic cross-box replay runs.
   - At `exp + 30s` the socket closes with 1008. That 30s is the same reconnect grace as `PROXY_TOKEN_RECONNECT_GRACE_MS`.
 - **Use of the token:** it is also the per-socket proxy token behind the account's `ProxyTokenProvider` (see Routing). It is never logged.
 - **Private COSIGNED join proof:** fresh connections use the same isolated native
-  probe and admission path as DELEGATED, independently of `delegated.enabled`.
-  Exact `bybit`, `binance`, `okx`, `bitget`, `blofin` and `kucoin` are proof-ready.
+  probe and admission path as DELEGATED, using shared hosted eligibility.
+  The exact proof-ready names and variant controls are listed in the host contract below.
   Other private COSIGNED venues return an init refusal with
   `kind: "proof-unavailable"`, `initRefused: true`, `transient: false` and
   `outcome: "notSent"`; they do not fall back to registry attachment.
@@ -539,7 +556,7 @@ explicit user action; no speculative restore or automatic cross-box replay runs.
   [the host contract](../../../docs/plans/callers/cosigned-join-proof.md).
 - **Unauthenticated sockets:** they may only `init` the public pseudo-account `__pub_bybit`.
   - The validation is the same as `validateUnauthenticatedPublicInit`.
-  - Only `sendSnapshot` and the subscribe/unsubscribe book and OHLCV `msg` ops are allowed.
+  - Only `sendSnapshot`, the subscribe/unsubscribe book and OHLCV `msg` ops, and connection-local `set-publish-interval` for its admitted public holder are allowed.
   - They can never send `sign-res` or `verbose`, and either one closes the socket with 1008.
 
 ## Envelope
@@ -557,7 +574,7 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 | `echo-res` | `{id}` | Echo RTT sample |
 | `ping` | `{accounts?: string[], link?}` | Replies with `pong`. Then reconciles: when `accounts` is nonempty, any server account not in that list is disposed |
 | `dispose` | `{accountName}` | Disposes the account |
-| `perf` | `{level}` | Session performance level. The server maps it to the engine's `setPollScale` |
+| `perf` | `{level}` | Legacy compatibility message; use `publishIntervalMs` for connection-local output pacing |
 | `verbose` | `{enabled}` | Authenticated sockets only. Diagnostics |
 
 `msg` ops:
@@ -568,8 +585,38 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 | `subscribeOrderBook`, `unsubscribeOrderBook` | `data: {symbol}`. Becomes the engine book subscription |
 | `subscribeOHLCV`, `unsubscribeOHLCV` | `data: {symbol, interval}`. Becomes the engine candle subscription |
 | `sendSnapshot` | Sends a full `snapshot: true` frame to this socket |
+| `set-publish-interval` | `data: {publishIntervalMs}`. Changes public output cadence for this connection’s admitted `accountName` only |
 | `updatePositions` | Answered `updatePositions:done`. Positions are already engine-owned |
 | `exec`, `chaser:*`, `twap:*` | v1 replies `error` "not supported on the Rust exchange server". These are TS worker features; the post-cutover work is listed below |
+
+### Connection-local publication interval
+
+`init.d.publishIntervalMs` is optional. Absent means the existing full-rate
+stream; an integer is clamped to 50–5000 ms. Null, fractional, string, boolean,
+array and object values refuse the init before changing the live holder or proof.
+The live form is `{t:"msg",d:{op:"set-publish-interval",accountName,
+data:{publishIntervalMs}}}`. Missing or invalid live values refuse without
+changing the current rate. Refusals retain `op:"error"` and the usual
+`data:[message,options]`: `publishIntervalRefused:true` plus closed `kind`
+`invalid_publish_interval`, `not_admitted` or `auth_expired`. Invalid init also
+sets `initRefused:true` and `forceToast:true`. No submitted values are echoed.
+A valid update has no acknowledgement and cannot attach an account or change
+its engine settings, identity, transport, signer, proof or publication of other holders.
+
+Each connection/account pump coalesces ticker values, observation timestamps and
+books, retaining the latest value per field/level and encoding book deletions
+against its own last published baseline. It does not drop raw deltas or queue a
+history of frames. The first snapshot is immediate; a catalogue/readiness barrier
+publishes dependent public rows before announcing readiness. Output sequences
+stay contiguous and filtered frames keep their original string references.
+Cadence/deadline maintenance runs after each received item, before another
+receive, so a ready inbox cannot starve publication or live interval updates.
+Orders, positions, fills, balance, command outcomes, signer/control messages,
+settings and all other sections remain immediate for COSIGNED and DELEGATED.
+Re-snapshots and settings rebuilds retain this connection's interval; retired
+pumps only finish pending replies and cannot publish cached public state.
+A resumed socket starts at the absent/default rate until its own init or live
+update reapplies a preference. No preference is inherited from a shared account.
 
 ### Server to client
 
@@ -606,10 +653,54 @@ dropped. This matches Bun's `idleTimeout: 30` with `sendPingsAutomatically`.
 
 ### DELEGATED handover
 
+A private socket always proves its own candidate credentials before crossing a
+resident mode. A COSIGNED join attaches to an existing DELEGATED actor and cannot
+downgrade it. A verified DELEGATED join can upgrade a supported COSIGNED actor,
+including its own parked copy, without restarting the actor or its jobs. Ethereum,
+Stark and Ed25519 candidates match the original provider's completed/canonical
+public binding locally. Initial COSIGNED Schnorr construction pins a routed,
+validated registration before publishing its provider; later joins require the
+current registration and candidate to match that immutable key. After promotion,
+the actual installed resident supplies the binding. Legacy actors without the
+initial binding refuse explicitly, rather than adopting a rotated slot's key.
+Public proof retains only a weak reference to the
+exact resident actor, and captured init, token and lease guards survive the lookup.
+A retired attempt or different actor cannot inherit it, including after settings
+return to their previous values. Existing DELEGATED residents use the same local
+public-key comparison before attachment; unsigned balance reads are not proof.
+An owned signing-work barrier refuses `mode_transition_busy` while any original
+sign future or setup execution remains unsettled. No work is canceled, retried
+or sent to both signers. The original engine dispatch handle, opaque refs,
+address/public-key seals and nonce ownership stay in place. Missing trusted
+bindings refuse `mode_transition_unavailable`. Coinbase COSIGNED uses native
+JWT/private startup; DELEGATED CDP handover still refuses as `proof-unavailable`.
+These refusals leave the candidate unattached.
+
+The future provider, actual mode and protected resident are installed together.
+Only opaque key refs are translated, by primary/secondary identity role; receipt,
+context and literal payload bytes are unchanged. The old browser signer link is
+irreversibly retired for signing while its account-notification identity remains
+usable. The existing protected allocation/erasure rules remain in force.
+
+An attached session receives `msg/op=account-signing-mode` with data
+`{version:1, requestedMode, actualMode, attached:true, reason}`. Modes are
+`cosigned`/`delegated`; reason is `requested` when they match, otherwise
+`delegated-enabled-elsewhere` (another session, not proof of another device).
+An upgrade broadcasts to all confirmed live registrations with their own labels
+and instance IDs. Pending proofs and retired registrations get no confirmation.
+A refused handover uses the existing error envelope with initRefused=true,
+kind=`admission`, reason=`mode_transition_busy` (transient) or
+`mode_transition_unavailable` (permanent), requestedMode, residentMode and
+attached=false; it deliberately omits actualMode.
+
 DELEGATED uses the same hosted eligibility as COSIGNED: a supported parsed
 `remoteSigning` policy and a configured server origin, including the existing
-unhosted refusal. There is no per-venue DELEGATED list. Authenticated connections
-request a handover with `msg` data
+unhosted refusal. There is no per-venue DELEGATED list or feature flag. One
+runtime `DELEGATED` flag supplies the kill switch/per-user pin; the old
+`DELEGATED_BYBIT` name is only its compatibility alias. Bybit was the first test
+account. DELEGATED-only mobile and all DELEGATED clients have no WASM engine or
+local signer; every write is a typed v1 action on the existing hosted WebSocket.
+Authenticated connections request a handover with `msg` data
 `{op:"delegated-key-req", accountName, data:{exchangeName}}`.
 An unjoined caller must supply `data.exchangeName`; a joined account may omit it
 and use its existing venue. Missing or unsupported targets refuse without an
@@ -635,7 +726,12 @@ HKDF-SHA256 and ChaCha20-Poly1305. The application info is
 `tealstreet/delegated-handover/v1`; associated data joins the attempt ID, process
 boot ID, exchange name and init key with `|`. `enc` and `ciphertext` are padded
 standard base64. Decrypted JSON contains `key`, `secret` and optional
-`passphrase` and optional `signingKey`; its public key must match the nonsecret
+`passphrase`, optional `signingKey` and optional ApeX-only `omniKeySeed`; the
+last is a packed 65-byte hex Ethereum signature, never an L2 private scalar.
+The zeroizing credential/pair path transfers that seed directly to canonical
+protected setup as the primary's `zklinkSeed` extra role, never into public JSON.
+Omission preserves monitoring without granting placement-signing capability.
+Other venues and mixed wallet/Omni layouts refuse it. Its public key must match the nonsecret
 init key. The registry's key-only setup takes its private scalar exclusively
 from sealed `signingKey`, with the public init identity equal to `subkeyAddress`.
 Other credential mappings refuse that field and still require their signing
@@ -691,9 +787,13 @@ account keeps its generation. Pending handover replies retain their separate
 registration lifecycle.
 
 Probe refusals use `initRefused`, `kind:"unverified"` and the existing fixed
-message. Auth kinds are permanent refusals; rate, network, timeout and venue
-availability failures are transient. Replies retain the init's registration ID;
-clients without one retain the original envelope bytes. Verified admission does
+message. Optional `error_kind`, `venue_code` and `stage` preserve the probe's
+classified error, exact JS-safe integer venue code and closed actual failure
+stage; unknown kinds/codes stay absent. The same fields survive transient
+refusals and early handover failures without copying venue text or credentials.
+Auth kinds are permanent refusals; rate, network, timeout and venue availability
+failures are transient. Replies retain the initiating init's registration ID;
+clients without one receive the same metadata without an instance ID. Verified admission does
 not replace a running account with different settings. A supported private
 COSIGNED venue without proof readiness returns the permanent `proof-unavailable` init
 refusal before probe I/O or attachment; unsupported names retain `unsupported`.
@@ -702,15 +802,57 @@ Public-only accounts, unsupported/unhosted venues and existing early-subscriptio
 handling retain their previous paths. Fixed synthetic interoperability and RFC
 test data live in `tests/data/`.
 
-The shared startup admission runner makes exact `bybit`, `binance`, `okx`,
-`bitget`, `blofin` and `kucoin` proof-ready for COSIGNED. It runs the selected
+The shared startup admission runner uses exact COSIGNED names generated from
+`src/delegated/cosigned-proof-catalog/<venue>.json`, documented in the host contract
+above. The server build validates the complete roster and derives the runtime
+set and shared test cohorts; a venue promotion changes only its own record. It runs the selected
 venue's existing native private startup with either the remote provider or the
 local provider; it does not build a second set of REST requests. Its result
 classifier uses engine `ErrorKind` values: authentication failures are invalid,
 rate limits and transport failures are transient, and complete private startup
 is accepted.
+Exact `kucoinspot` admission uses the native Spot account and active-order reads
+at `https://api.kucoin.com`, with the existing batch request/passphrase HMAC
+signer and signed private read-feed token. Its production origin is separate
+from Futures; testnet is still refused. Offline proof controls cover other valid
+credentials, wrong signing material, replayed signatures and foreign sockets.
 Unclassified startup failures remain transient refusals. Public-only and
-frame-fed accounts cannot satisfy this check.
+frame-fed accounts cannot satisfy this check. MEXC mainnet proves its normal
+private position-mode, balance, positions and three order-surface reads using
+API-key/timestamp/query HMAC headers; private-stream login is also validated by
+the offline fixture. Wrong-key and replayed signatures fail before attachment,
+foreign sockets cannot settle signing work, and the resident stays unchanged.
+MEXC has no hosted testnet alias; public discovery never proves possession.
+
+Kraken Futures joins combine native private REST startup with its existing
+[signed WebSocket challenge](https://support.kraken.com/articles/360022635652-sign-challenge-websocket-api-derivatives).
+The temporary probe waits for matching primary-key subscriptions and all three
+private-feed acknowledgments on its captured connection. REST remains nonce-free;
+an old challenge signature, partial handshake or retired owner cannot supply proof.
+This observation stays in the server and changes no native venue signing recipe.
+
+Exact `binanceoptions` mainnet uses native signed EAPI margin-account, position
+and open-order reads. Complete private startup is required; public discovery
+cannot prove the key. Its offline suite checks independent HMAC bytes, a valid
+second credential, wrong keys and signatures from earlier attempts, other sockets,
+consumed responses and owner retirement without replacing a resident or signer.
+Hosted Options testnet remains refused and no socket protocol is added.
+
+OKX EEA mainnet and demo authenticate native signed config before keyed catalogue
+discovery, retaining the config authority until market-dependent settings apply.
+Config alone cannot complete the probe. Consecutive signature refusals allow
+one re-signed read then fail permanently; no admission budget is extended.
+Exact EEA demo also proves its simulated-trading header on native startup reads;
+missing, mainnet-valued or duplicate headers cannot satisfy that proof.
+
+Crypto.com uses its native signed JSON startup reads for positions, balance and
+regular/advanced open orders. Hosted routing preserves the native mainnet/UAT
+origins; readiness does not replace per-connection proof or scope checks.
+
+Exact `bitunix` readiness uses that venue round trip, with the existing native
+double-SHA256 secret-suffix request signer. Its synthetic venue independently
+checks nonce/timestamp/key/query signing bytes on the actual private startup
+reads; a public response or a signer result alone never completes admission.
 
 COSIGNED proof readiness is independent of DELEGATED hosted eligibility.
 The COSIGNED catalog does not gate DELEGATED admission. COSIGNED coverage
@@ -721,6 +863,14 @@ handover. The suite verifies the actual native HTTP signatures against synthetic
 venue responses. Existing Bybit session tests additionally cover resident-account
 and registration preservation. These offline checks do not replace live venue
 validation or the existing server-origin and signing requirements for rollout.
+
+Exact WOO uses the existing native startup's v1/v3 account reads and private
+socket authentication. Its offline fixture independently checks HMAC bytes,
+rejects unsigned reads, and accepts only startup reads and read-feed traffic.
+
+Exact ApeX uses native `/api/v3/account`, `account-balance` and `open-orders`
+reads through the existing `apexomni-batch` device signer. API credential proof
+does not prove OmniKey/L2-seed possession or change order-signing coverage.
 
 ## Frames (claude-19pt8s, web hosted client)
 
@@ -1126,7 +1276,11 @@ server by its `callMethod` name, using the same list as LOCAL
   - `fetchOptionChain`, `fetchOptionExpiries`, `fetchAccountGreeks`: options are out of scope;
   - `changeStpMode`: AsterDEX only, not a core venue;
   - `fetchSymbolMaxLeverage` with the `rails` source (Polymarket). The `market` source answers on the mirror.
-- HyroTrader accounts are refused at init (`HYROTRADER_UNHOSTED`): their endpoints are browser build configuration.
+- HyroTrader challenge accounts use the canonical native REST origin and its
+  derived public/private WebSocket paths. The server supplies that map for the
+  probe and resident; client endpoint JSON and browser overrides are never used.
+  Native Bybit-shaped private HMAC startup proves the exact `hyrotrader` name.
+  Testnet remains unsupported, with no Bybit origin fallback or network I/O.
 
 ## Not in v1 (after cutover)
 
@@ -1154,7 +1308,11 @@ Amend/cancel/cancel-all use the existing method translator, native command
 completion and audit. Internal action dispatch carries the original deadline
 through cancel-all symbol reads and command translation. Each native command
 rechecks both expiry bounds and its captured registration after any startup wait and
-immediately before dispatch. Expiry stays unknown without a notSent proof.
+immediately before dispatch. The whole-action guards before translation/dispatch
+have no-send proof and return the real reason with `notSent`; per-leg expiry
+stays unknown when another leg may already have had effects. Expired-token new
+submits/actions receive correlated `notSent` receipts without extending grace;
+queue cancellation retains ordinary expiry errors, never an earlier-intent proof.
 Nuke uses the account's existing native algo-host nuke,
 awaiting cancellation and closing legs; a partial/interrupted action stays
 unknown. Actor-queued nuke work carries the original registration and rechecks

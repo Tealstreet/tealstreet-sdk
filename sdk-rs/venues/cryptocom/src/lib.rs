@@ -1,4 +1,5 @@
 //! Crypto.com Exchange v1 perpetual derivatives on the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod depth_query;
 mod history;
@@ -321,13 +322,13 @@ impl Cryptocom {
             self.message_id += 1;
             cx.send(
                 self.sockets[0].socket.unwrap(),
-                format!(
+                ControlFrame::subscription(format!(
                     "{{\"id\":{},\"method\":{},\"params\":{{\"channels\":{}}},\"nonce\":{}}}",
                     self.message_id,
                     quoted(method),
                     serde_json::to_string(chunk).unwrap(),
                     cx.protocol_now() as u64
-                ),
+                )),
             );
         }
     }
@@ -650,10 +651,10 @@ impl Venue for Cryptocom {
             if envelope.method == "public/heartbeat" {
                 cx.send(
                     socket,
-                    format!(
+                    ControlFrame::heartbeat(format!(
                         "{{\"id\":{},\"method\":\"public/respond-heartbeat\"}}",
                         envelope.id
-                    ),
+                    )),
                 );
             } else if channel == 1 && envelope.method == "public/auth" {
                 let code = serde_json::from_str::<AuthenticationReply>(text)?.code;

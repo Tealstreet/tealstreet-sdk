@@ -1,41 +1,42 @@
-# Rust harness: CPU gate policy
+# Rust harness: replay evidence and WASM budgets
 
-Sam, 2026-11-07: CPU objectives default to failing only when Rust > 1.00x TS after one re-measure;
-missing the 10%-faster target is a warning; nightly certification files cpu-regression issues.
+Sam removed the CPU gate matrix, shared certification, Bitget paired ratio gate,
+planner and nightly monitor on 2026-11-17, for both master and pull requests.
+The root `CLAUDE.md` records that decision; historical CPU thresholds and
+certification instructions are not current CI requirements.
 
-Sam, 2026-11-11 ruling: HyroTrader may run up to 1.20x TS raw steady CPU.
-Only the exact `hyrotrader` venue's raw steady CPU uses this bound: 1.20x passes, above 1.20x fails.
-HyroTrader main-thread/process CPU and every other venue's CPU objectives retain the 1.00x bound.
+- Replay measurement and correctness jobs remain. Public replays retain CPU and
+  memory evidence; private tapes remain correctness-only. Retained CPU metrics
+  are observations, not the removed CPU gate statuses.
+- Required coverage, actually executed combined consumers, strict replay
+  validation and declared-known-failure checks remain required. A fast but
+  incomplete replay cannot replace the audited correctness workload.
+- The retained offline performance helpers still implement their historical
+  comparisons, including the 10% retained-memory rule. Removing CPU gate jobs
+  does not waive correctness, memory validation or WASM artifact budgets.
+- Fingerprint movers need fresh optimized web/Node size evidence with at least
+  10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
-- Verdict: `performance-policy.mjs` (`performanceVerdict`, `remeasuredVerdict`). Each CPU objective (main-thread,
-  steady, process) compares the paired same-runner medians. Retained memory keeps its 10% rule as a failure.
-- Re-measure: `gate.mjs` re-runs the 16 interleaved pairs once, in the same job, only when a CPU objective
-  exceeds its applicable failure bound: 1.20x for HyroTrader raw steady CPU, otherwise 1.00x.
-  It decides only the CPU verdict: the first set's non-CPU failures are kept. Only the re-measured raw set is
-  retained, so recorded revalidation never re-measures.
-- Warnings: `cpu-annotations.mjs` emits `::warning` / `::error` plus a step-summary table; warnings never block.
-- Bitget steady: the paired counterbalanced certificate accepts only when its candidate Rust/TS ratio is at most
-  `1 + BITGET_STEADY_NOISE` (Sam, 2026-11-12: the observed baseline range from runs 43273706928 and
-  43281701341) and its frozen creep bound `q <= 1.023110` also holds; the 0.90 readiness miss is a warning.
-  Master push and nightly runs measure even identical bytes and retain the baseline and landed-master ratios.
-- Checks: correctness is "Rust / replay correctness" and "Rust / replay measurement"; CPU is
-  "Rust / CPU gate (<suite>)" (plan, certify, status). "Rust / required coverage" depends on no CPU job.
-- Certification writes its per-suite results and reasons before failing when any suite is uncertified.
-  Its error annotations name each refused suite; downstream status checks retain their existing guards.
-- Each public performance replay logs `CPU_METRICS` records with exact TS/Rust CPU medians in milliseconds
-  and Rust/TS ratios on success and failure. Private and correctness-only runs emit no measurement records.
-- Nightly: `.github/workflows/rust-cpu-nightly.yml` and `cpu-nightly.mjs` dispatch rust.yml on master, then file
-  or update one `cpu-regression` issue for suites whose CPU gate failed on two adjacent UTC nights (the last run each night).
-  Run discovery paginates until two eligible nights are found or history is exhausted; manual dispatches and
-  multiple runs on one night must not hide the previous night.
+OKX empty-envelope diagnostics retain code-0 cancellation continuation, nonzero
+stop behavior and the original native outcomes. Its scoped ordered-write tests
+pin complete per-order cancellation reporting and the explicit unknown-diagnostic
+fallback; optimized family evidence remains separate from these native controls.
 
 BingX Spot qualification adds independent Spot public/private cases to the `bingx` suite.
 The nondefault `bingx-spot-replay` WASM feature exports a fixed-credential fixture constructor;
 normal factories still refuse Spot. Shipped family size checks run before the fixture build.
+The ordinary BingX family includes the existing book and symbol-cancel input
+codecs. Offline production probes run through the shipped/fixture admission
+entry point and require no dispatch of unadvertised commands; perpetual capability
+flags and the Spot admission/smoke gates remain independent.
 
 WASM venue caps retain both parents' measured floors. Fresh compositions must
 retain at least 10 KiB above their optimized web/Node measurement, rounded up
 to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
+
+BingX history diagnostics inspect failed responses with closed streaming visitors.
+Compact optional detail preserves engine error and socket allocation budgets;
+fresh web/Node artifacts must retain the existing family cap and 10 KiB reserve.
 
 TxFlow agent refresh #3314 at merge 9bb43250830d measures 2,147,684 bytes;
 refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its
@@ -61,3 +62,18 @@ pinned profile and 10 KiB reserve rule; older measured floors remain retained.
 Merge ebeb0b38c973 independently remeasures the same TxFlow and WEEX byte
 counts (2,149,614 and 2,028,106), retaining both floors and the pinned profile.
 The exact merged module hashes are recorded beside their budget entries.
+
+Bybit product parity fixtures service the engine's set/clear timers and retain
+original waiting HTTP permits until release or cancellation. Their monotonic
+virtual clock also validates native signature timestamps; waits never refresh deadlines.
+
+Shared artifact membership is frozen in `sdk-rs/artifact-census.json`. Additions
+and retirements update that independent census explicitly; value-only edits do not.
+Budget imports validate raw duplicate/name membership before evaluating the map.
+The closed source scanner ignores nested template text and expressions, rejecting
+unsupported regex/division syntax instead of guessing their lexical boundaries;
+construction feature checks reject raw duplicate keys and missing policy rows.
+
+Bybit terminal order-history retention is documented in `sdk-rs/venues/bybit/README.md`.
+Its `history.rs` change is a counted beta-WASM input and requires a fresh release/pin;
+this routing correction does not change family caps or construction membership.

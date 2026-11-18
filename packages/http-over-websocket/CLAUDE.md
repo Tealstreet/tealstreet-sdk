@@ -151,6 +151,9 @@ yarn test           # Vitest
   without closing a shared connection or cancelling another request's refresh.
   When the deadline expires, the adapter rejects with
   `TradeTunnelTimeoutError` and must not transmit the now-stale request.
+  Successful token/poll settlement rechecks wall time and cancellation before
+  accepting the result: after suspension, its microtask can beat an overdue timer.
+  Frozen JavaScript cannot reject on time; elapsed diagnostics retain that delay.
 - Socket opening, time sync and authorization share a readiness cap of 30 s,
   bounded by the original request deadline. Exceeding that cap raises
   `TradeTunnelReadinessError`, a timeout subclass; readiness never resets the deadline.
@@ -250,6 +253,9 @@ fired. This reconnects the transport only: no account reload, deadline renewal,
 or replay of HTTP already sent (`HOWWebSocket.connect-timeout.test.ts` and the
 real-stack managed/legacy request-entry controls).
 
+Blob diagnostic URLs unwrap once and require a nonopaque HTTP(S) source without
+userinfo; nested blobs and other sources are refused. Projection clears userinfo
+and keeps only origin/path, omitting queries and fragments.
 Relay failure, readiness, timeout and send-state diagnostics retain only URL
 origin/path; signed queries and outgoing frame bodies/headers are never copied
 into display messages or previews. Original Axios config and signed wire bytes

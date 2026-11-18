@@ -1,4 +1,5 @@
 //! MEXC USDT/USDC perpetual futures, driven by the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod clock;
 mod depth_query;
@@ -293,7 +294,9 @@ impl MexcFutures {
         }
         cx.send(
             socket,
-            serde_json::to_string(&Subscription { method, param }).unwrap(),
+            ControlFrame::subscription(
+                serde_json::to_string(&Subscription { method, param }).unwrap(),
+            ),
         );
     }
     fn reconcile_tickers(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -368,10 +371,11 @@ impl MexcFutures {
             );
             return;
         }
-        self.references
-            .entry(symbol.clone())
-            .or_default()
-            .observe(cx.now, [raw.last_price, raw.fair_price, raw.index_price]);
+        self.references.entry(symbol.clone()).or_default().observe(
+            cx.now,
+            cx.protocol_now(),
+            [raw.last_price, raw.fair_price, raw.index_price],
+        );
         cx.store.update_ticker(&symbol, |t| {
             // A zero price is an unavailable quote (seen in the public feed),
             // not a reason to discard valid mark/index/volume fields.
@@ -414,7 +418,9 @@ impl MexcFutures {
         } else if let Some(socket) = self.public.socket.filter(|_| self.public.open) {
             cx.send(
                 socket,
-                format!(r#"{{"method":"sub.depth","param":{{"symbol":"{id}","compress":false}}}}"#),
+                ControlFrame::subscription(format!(
+                    r#"{{"method":"sub.depth","param":{{"symbol":"{id}","compress":false}}}}"#
+                )),
             );
         }
         true
@@ -832,12 +838,12 @@ impl Venue for MexcFutures {
         self.public.open = true;
         self.public_supervisor.opened(cx);
         self.public.ping_at = cx.now;
-        cx.send(socket, PING);
+        cx.send(socket, ControlFrame::heartbeat(PING));
         // Sparse once-per-second prices cover every listed market. Detailed
         // subscriptions provide funding, index and open-interest quantities.
         cx.send(
             socket,
-            r#"{"method":"sub.tickers","param":{},"gzip":false}"#,
+            ControlFrame::subscription(r#"{"method":"sub.tickers","param":{},"gzip":false}"#),
         );
         self.reconcile_tickers(cx);
         let symbols: Vec<_> = self.books.keys().cloned().collect();
@@ -892,6 +898,7 @@ impl Venue for MexcFutures {
                 ) {
                     self.references.entry(symbol.clone()).or_default().observe(
                         cx.now,
+                        cx.protocol_now(),
                         [
                             Some(raw.last_price),
                             Some(raw.fair_price),
@@ -1000,6 +1007,7 @@ impl Venue for MexcFutures {
                         let mut receipt = trading::protection::References::default();
                         receipt.observe(
                             cx.now,
+                            cx.protocol_now(),
                             [
                                 Some(raw.last_price),
                                 Some(raw.fair_price),
@@ -1336,7 +1344,12 @@ impl Venue for MexcFutures {
         release: &safe_cex_engine::request_context::HttpRelease,
     ) -> Result<(), VenueError> {
         if let Pending::Protective(request) = pending {
-            self.protective_release(store, request, release.time.raw_ms)
+            self.protective_release(
+                store,
+                request,
+                release.time.raw_ms,
+                release.time.protocol_ms,
+            )
         } else {
             Ok(())
         }
@@ -1461,7 +1474,7 @@ impl Venue for MexcFutures {
             socket::Tick::Ping => {
                 if let Some(socket) = self.public.socket {
                     self.public.ping_at = cx.now;
-                    cx.send(socket, PING);
+                    cx.send(socket, ControlFrame::heartbeat(PING));
                 }
             }
             socket::Tick::TimedOut(_) => {

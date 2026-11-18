@@ -201,10 +201,13 @@ describe('manual page writes never fall back to the hosted RPC', () => {
     expect(mirror.calls).toEqual([]);
   });
 
-  it.each(manualMethods)('refuses unsupported page engine before any %s RPC', async (method) => {
+  // #3509/#3517's LOCAL refusals move to rust.cosigned-non-frame-fed's source matrix.
+  // This matrix retains the DELEGATED refusal without granting a source route.
+  it.each(manualMethods)('refuses an unsupported DELEGATED page engine before any %s RPC', async (method) => {
     const fake = fakeEngine({ supported: false });
     const mirror = mirrorWith(fake);
     exchange = mirror.exchange;
+    exchange.options = { ...exchange.options, signingMode: 'delegated' };
     await expect(exchange.frameFedReady).resolves.toBe(false);
     const errors = vi.fn();
     exchange.on('error', errors);

@@ -226,7 +226,7 @@ async fn delegated_rpc_expiry_completion_preserves_request_and_registration() {
         let init = payload(&mut session, instance_id);
         session.init(init).await.unwrap();
         finish(&mut session, &mut results).await;
-        assert!(session.joined["acct"].account.delegated.is_some());
+        assert!(session.joined["acct"].account.delegated().is_some());
         assert_rpc_expiry_completion(&f, &mut session, &mut sent, instance_id).await;
         session.close();
     }
@@ -286,7 +286,7 @@ async fn apply_settings_allows_verified_delegated_settings_reinitialization() {
     finish(&mut session, &mut results).await;
     let rebuilt = &session.joined["acct"].account;
     assert!(!Arc::ptr_eq(rebuilt, &original));
-    assert!(rebuilt.delegated.is_some());
+    assert!(rebuilt.delegated().is_some());
     assert_eq!(rebuilt.fingerprint, fingerprint);
     f.registry.dispose(rebuilt, Disposal::PageDisposed);
     session.close();
@@ -379,7 +379,7 @@ async fn verified_pair_starts_then_reuses_the_resident_account() {
         .held("alice", "acct", session.socket)
         .expect("verified pair becomes resident");
     wait_reads(&f).await;
-    assert!(original.delegated.is_some() && original.link.is_none());
+    assert!(original.delegated().is_some() && original.link.is_none());
     assert!(f.private_reads.load(Ordering::SeqCst) > 0);
     session
         .msg(AccountMsg {
@@ -440,8 +440,24 @@ async fn token_expiry_after_successful_probe_keeps_the_resident_registration() {
 }
 
 #[tokio::test]
-async fn classified_probe_refusals_keep_current_registration_and_legacy_bytes() {
-    for (code, transient) in [(10003, false), (10005, false), (10006, true)] {
+async fn classified_probe_refusals_keep_current_registration_and_metadata() {
+    for (code, transient, reason_class) in [
+        (
+            10003,
+            false,
+            envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+        ),
+        (
+            10005,
+            false,
+            envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+        ),
+        (
+            10006,
+            true,
+            envelope::InitRefusalReasonClass::VenueUnavailable,
+        ),
+    ] {
         for id in [Some("probe-registration"), None] {
             let f = fixture().await;
             f.code.store(code, Ordering::SeqCst);
@@ -458,7 +474,12 @@ async fn classified_probe_refusals_keep_current_registration_and_legacy_bytes() 
                 "refused material is dropped before queueing the reply"
             );
             session.verification_completed(completion).await.unwrap();
-            let expected = envelope::init_unverified("acct", transient);
+            let expected = envelope::init_unverified(
+                "acct",
+                transient,
+                reason_class,
+                private_read_metadata(code as i64),
+            );
             let expected = id.map_or_else(
                 || expected.clone(),
                 |id| envelope::with_instance_id(expected.clone(), id),
@@ -508,10 +529,70 @@ async fn handover_binding_negatives_never_start_a_private_probe() {
         }
         assert_eq!(
             sent.try_recv().unwrap(),
-            envelope::with_instance_id(envelope::init_unverified("acct", false), "negative")
+            envelope::with_instance_id(
+                envelope::init_unverified(
+                    "acct",
+                    false,
+                    envelope::InitRefusalReasonClass::Unknown,
+                    if matches!(case, "key" | "boot") {
+                        envelope::InitRefusalMetadata {
+                            stage: Some(RefusalStage::HandoverOpen),
+                            ..Default::default()
+                        }
+                    } else {
+                        envelope::InitRefusalMetadata {
+                            stage: Some(RefusalStage::HandoverAttempt),
+                            ..Default::default()
+                        }
+                    }
+                ),
+                "negative"
+            )
         );
         assert!(f.registry.held("alice", "acct", session.socket).is_none());
         assert_eq!(f.private_reads.load(Ordering::SeqCst), 0);
         session.close();
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn init_unverified_propagates_classified_private_read_metadata() {
+    for (code, transient, kind) in [(10003, false, "authInvalid"), (10006, true, "rateLimited")] {
+        let f = fixture().await;
+        f.code.store(code, Ordering::SeqCst);
+        let (mut session, mut sent) = user_session(f.registry.clone(), "alice");
+        let mut results = session.take_verified();
+        let init = payload(&mut session, Some("metadata-registration"));
+        session.init(init).await.unwrap();
+        finish(&mut session, &mut results).await;
+        let frame: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(frame["d"]["accountName"], "acct");
+        assert_eq!(frame["d"]["instanceId"], "metadata-registration");
+        assert_eq!(
+            frame["d"]["data"][1],
+            json!({
+                "forceToast":true, "initRefused":true, "kind":"unverified", "transient":transient,
+                "error_kind":kind, "venue_code":code, "stage":"private_read",
+                "reason_class":if transient { "venue_unavailable" } else { "key_rejected_ip_or_permissions" }
+            })
+        );
+        assert!(f.private_reads.load(Ordering::SeqCst) > 0);
+        assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
+        assert!(session.joined.is_empty());
+        session.close();
+    }
+}
+
+fn private_read_metadata(code: i64) -> envelope::InitRefusalMetadata {
+    envelope::InitRefusalMetadata {
+        error_kind: Some(match code {
+            10003 | 10004 => safe_cex_engine::ErrorKind::AuthInvalid,
+            10005 | 10010 => safe_cex_engine::ErrorKind::AuthPermission,
+            10006 => safe_cex_engine::ErrorKind::RateLimited,
+            _ => panic!("unexpected synthetic refusal code"),
+        }),
+        venue_code: Some(code),
+        stage: Some(RefusalStage::PrivateRead),
     }
 }

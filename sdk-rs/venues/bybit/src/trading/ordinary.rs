@@ -557,6 +557,15 @@ impl BybitLinear {
                 effects: Vec::new(),
             });
         }
+        let pacing = legs
+            .iter()
+            .any(|leg| {
+                matches!(
+                    leg.planned.path,
+                    "/v5/order/create-batch" | "/v5/order/cancel-batch"
+                )
+            })
+            .then_some(crate::pacing::BATCH_WRITE);
         let writes = match write_plan::build(&mut legs) {
             Ok(writes) => writes,
             Err(error) => {
@@ -618,7 +627,7 @@ impl BybitLinear {
                     independent_calls: false,
                     operation: Operation::Mutation,
                     credential: entry.write_credential.clone(),
-                    pacing: None,
+                    pacing,
                     retry: RetryPolicy::DefinitiveRefusal,
                 },
             )
@@ -2139,6 +2148,8 @@ impl BybitLinear {
                 | Call::RestorePartialStop { .. }
         ) && probe.verdict().kind() == Some(ErrorKind::RateLimited);
         let weaken = protective_rate_limit
+            || (probe.verdict() == Verdict::RateLimitRefused
+                && ack::clean_rate_limit_refusal(result, ext).is_err())
             || match probe.verdict() {
                 Verdict::Satisfied(_) => {
                     matches!(planned.call, Call::CancelAll { .. })

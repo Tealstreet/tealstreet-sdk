@@ -22,7 +22,7 @@ impl Session {
         self.order_frames_enabled
             && !self.pending_verifications.contains_key(name)
             && self.joined.get(name).is_some_and(|joined| {
-                joined.account.delegated.is_some()
+                joined.account.delegated().is_some()
                     && !joined.account.is_public()
                     && order_contract::enabled_for(&joined.account.venue)
                     && joined.account.running.io_allowed()
@@ -30,6 +30,46 @@ impl Session {
                     && joined.out.order_binding(instance)
             })
             && !self.moved_by_drain()
+    }
+
+    // Expiry refuses this new command; queue cancellation cannot prove the
+    // earlier business intent was unsent and keeps its existing handling.
+    pub(super) fn refuse_expired_order(
+        &mut self,
+        name: &str,
+        instance: Option<&str>,
+        id: &str,
+        seq: u64,
+        action: bool,
+    ) {
+        let out = self.order_out(name, instance);
+        if !out.order_receipt_binding_bounded()
+            || name.len() > 256
+            || id.len() > order_contract::KEY_MAX
+            || instance.is_some_and(|value| value.len() > 128)
+        {
+            out.send(envelope::error(Some(name), crate::auth::TOKEN_EXPIRED));
+            return;
+        }
+        if let Some(joined) = self.joined.get(name) {
+            audit_preflight(
+                &joined.account,
+                self.socket,
+                if action {
+                    "order.action"
+                } else {
+                    "order.submit"
+                },
+                &[],
+                crate::auth::TOKEN_EXPIRED,
+            );
+        }
+        let id = Value::String(id.to_owned());
+        if action {
+            crate::order_actions::refuse(&out, name, &id, seq, crate::auth::TOKEN_EXPIRED);
+        } else {
+            refuse(&out, name, &id, seq, crate::auth::TOKEN_EXPIRED);
+        }
     }
 
     pub(super) async fn order_submit(&mut self, mut submit: OrderSubmit) {
@@ -87,7 +127,16 @@ impl Session {
             );
             return;
         }
-        params.insert("clientOrderId".into(), submit.intent_id.clone().into());
+        // 116aeae12: native Bybit protection refuses caller IDs; omit only
+        // that unsupported venue field, retaining the intent/fingerprint ledger.
+        let method = if order_contract::bybit_protection(&self.joined[&name].account.venue, params)
+        {
+            params.remove("clientOrderId");
+            "placeOrder"
+        } else {
+            params.insert("clientOrderId".into(), submit.intent_id.clone().into());
+            "placeOrderWithClientOrderId"
+        };
         out.send(envelope::order_frame(
             "order.ack",
             &name,
@@ -96,7 +145,7 @@ impl Session {
         self.call_inner(
             &name,
             json!({"requestId":submit.intent_id,
-            "method":"placeOrderWithClientOrderId","args":[submit.params],"intentSeq":submit.seq}),
+            "method":method,"args":[submit.params],"intentSeq":submit.seq}),
             Some(OrderReceipt::Placement(submit.seq)),
         )
         .await;
@@ -190,7 +239,7 @@ pub(super) fn settle_intent(
     out: &Out,
     name: &str,
     id: &Value,
-    client_id: &str,
+    client_id: Option<&str>,
     seq: u64,
     answer: Result<Value, Value>,
 ) {
@@ -246,7 +295,7 @@ mod tests {
                 out,
                 name,
                 &id,
-                id.as_str().unwrap(),
+                Some(id.as_str().unwrap()),
                 1,
                 Err(
                     json!({"message":"𐐀".repeat(20_000),"outcome":"unknown","unused":"large".repeat(20_000)}),

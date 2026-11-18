@@ -1,4 +1,5 @@
 //! Today's `wss /account` JSON envelope (NX `services/exchange-server/src/server.ts`).
+pub use crate::publication::RequestedInterval;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -10,12 +11,21 @@ pub struct InitPayload {
     pub exchange_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signing_mode: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "coinbase_algorithm",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub coinbase_jwt_algorithm: Option<safe_cex_remote_signer::CoinbaseJwtAlgorithm>,
     /// Consumed on this connection; never included in serialized settings.
     #[serde(default, skip_serializing)]
     pub sealed: Option<crate::delegated::Sealed>,
     /// Reply provenance only; never an engine option or account fingerprint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instance_id: Option<String>,
+    /// Output cadence for this connection only; never an engine setting or identity.
+    #[serde(default, skip_serializing)]
+    pub publish_interval_ms: RequestedInterval,
     #[serde(default, deserialize_with = "key")]
     pub key: String,
     #[serde(default, deserialize_with = "text")]
@@ -44,6 +54,9 @@ pub struct InitPayload {
     pub proxy_region: Option<String>,
     pub public_only: Option<bool>,
     pub hyperliquid_builder: Option<HyperliquidBuilder>,
+    /// Actual agent/wallet signer, distinct from the public account read address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hyperliquid_signer_address: Option<String>,
     /// The Hyperliquid vault the account trades; without it orders go to the main wallet.
     #[serde(default, deserialize_with = "text")]
     pub vault: Option<String>,
@@ -83,6 +96,19 @@ fn text<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Stri
 
 fn key<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
     Ok(text(deserializer)?.unwrap_or_default())
+}
+
+fn coinbase_algorithm<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<safe_cex_remote_signer::CoinbaseJwtAlgorithm>, D::Error> {
+    Option::<String>::deserialize(deserializer)?
+        .map(|value| {
+            safe_cex_remote_signer::CoinbaseJwtAlgorithm::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(value),
+            )
+            .map_err(|_| serde::de::Error::custom("Invalid Coinbase JWT algorithm"))
+        })
+        .transpose()
 }
 
 impl InitPayload {
@@ -315,6 +341,28 @@ pub fn init_refused(account_name: &str, message: &str) -> String {
     )
 }
 
+/// A closed refusal for connection-local publication metadata; never echo input.
+pub fn publish_interval_refused(
+    account_name: Option<&str>,
+    kind: &'static str,
+    init: bool,
+) -> String {
+    let message = match kind {
+        "not_admitted" => "Account is not admitted; publish interval was not changed",
+        "auth_expired" => crate::auth::TOKEN_EXPIRED,
+        _ => "Publish interval must be an integer number of milliseconds",
+    };
+    let mut options = json!({"kind":kind,"publishIntervalRefused":true});
+    if init {
+        options["initRefused"] = true.into();
+        options["forceToast"] = true.into();
+    }
+    envelope(
+        "msg",
+        json!({"op":"error","accountName":account_name,"data":[message,options]}),
+    )
+}
+
 /// A pre-probe registry refusal says nothing about credential validity.
 /// Keep the reason opaque on the socket; closed sub-reasons belong in diagnostics.
 pub fn init_signing_mode_refused(account_name: &str) -> String {
@@ -328,12 +376,215 @@ pub fn init_signing_mode_refused(account_name: &str) -> String {
     )
 }
 
-pub fn init_unverified(account_name: &str, transient: bool) -> String {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AccountSigningMode {
+    Cosigned,
+    Delegated,
+}
+
+impl AccountSigningMode {
+    pub fn requested(init: &InitPayload) -> Self {
+        if init.signing_mode.as_deref() == Some("delegated") {
+            Self::Delegated
+        } else {
+            Self::Cosigned
+        }
+    }
+}
+
+/// An attachment acknowledgement, never a requested-mode or pending-proof hint.
+pub fn account_signing_mode(
+    account_name: &str,
+    requested: AccountSigningMode,
+    actual: AccountSigningMode,
+) -> String {
+    msg(
+        account_name,
+        "account-signing-mode",
+        json!({
+            "version": 1,
+            "requestedMode": requested,
+            "actualMode": actual,
+            "attached": true,
+            "reason": if requested == actual { "requested" } else { "delegated-enabled-elsewhere" },
+        }),
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModeTransitionRefusal {
+    Busy,
+    Unavailable,
+}
+
+impl ModeTransitionRefusal {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Busy => "mode_transition_busy",
+            Self::Unavailable => "mode_transition_unavailable",
+        }
+    }
+
+    pub fn transient(self) -> bool {
+        self == Self::Busy
+    }
+}
+
+/// Resident mode describes the account, not authority granted to this candidate.
+pub fn init_mode_transition_refused(
+    account_name: &str,
+    refusal: ModeTransitionRefusal,
+    requested: AccountSigningMode,
+    resident: AccountSigningMode,
+) -> String {
+    let message = match refusal {
+        ModeTransitionRefusal::Busy => {
+            "Delegated handover is busy with existing signing work; account not attached. Existing orders and algos are unchanged."
+        }
+        ModeTransitionRefusal::Unavailable => {
+            "Delegated handover cannot safely change this account's signer; account not attached. Existing orders and algos are unchanged."
+        }
+    };
+    msg(
+        account_name,
+        "error",
+        json!([
+            message,
+            {
+                "forceToast": true,
+                "initRefused": true,
+                "kind": "admission",
+                "reason": refusal.reason(),
+                "transient": refusal.transient(),
+                "requestedMode": requested,
+                "residentMode": resident,
+                "attached": false,
+            }
+        ]),
+    )
+}
+
+/// Coarse v1 admission guidance; private error details never enter the frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InitRefusalReasonClass {
+    KeyRejectedIpOrPermissions,
+    KeyInvalid,
+    VenueUnavailable,
+    Unknown,
+}
+
+impl InitRefusalReasonClass {
+    pub(crate) fn from_error(
+        venue: &str,
+        error_kind: Option<safe_cex_engine::ErrorKind>,
+        venue_code: Option<i64>,
+    ) -> Self {
+        use safe_cex_engine::ErrorKind;
+        match error_kind {
+            Some(ErrorKind::AuthPermission) => Self::KeyRejectedIpOrPermissions,
+            // HyroTrader can return 10003 for a disabled challenge with unchanged
+            // valid credentials; its Bybit CLAUDE contract forbids that inference.
+            Some(ErrorKind::AuthInvalid) if venue == "hyrotrader" && venue_code == Some(10003) => {
+                Self::Unknown
+            }
+            Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired) => {
+                // Venue CLAUDE contracts and native auth tables define these broad
+                // key refusals; the numeric namespace belongs to the exact venue.
+                let broad_key_refusal = matches!(
+                    (venue, venue_code),
+                    (
+                        "binance"
+                            | "binancepm"
+                            | "binanceinverse"
+                            | "binancespot"
+                            | "binanceoptions",
+                        Some(-2015 | -2014)
+                    ) | (
+                        "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo",
+                        Some(10003 | 10010)
+                    ) | (
+                        "okx" | "okxeu" | "okxdemo" | "okxeudemo",
+                        Some(50110 | 50111)
+                    )
+                );
+                if broad_key_refusal {
+                    Self::KeyRejectedIpOrPermissions
+                } else {
+                    Self::KeyInvalid
+                }
+            }
+            Some(
+                ErrorKind::Network
+                | ErrorKind::Timeout
+                | ErrorKind::RateLimited
+                | ErrorKind::VenueUnavailable,
+            ) => Self::VenueUnavailable,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InitRefusalStage {
+    Unverified,
+    PrivateRead,
+    PrivateStartup,
+    Options,
+    Authority,
+    Construction,
+    ProbeJoin,
+    ProbeClosed,
+    SignerSetup,
+    ProbeTimeout,
+    AccountAttach,
+    Authentication,
+    VenuePolicy,
+    PublicAccount,
+    SigningMode,
+    Capacity,
+    Permit,
+    MissingHandover,
+    HandoverAttempt,
+    HandoverOpen,
+    KeyOffer,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct InitRefusalMetadata {
+    pub error_kind: Option<safe_cex_engine::ErrorKind>,
+    pub venue_code: Option<i64>,
+    pub stage: Option<InitRefusalStage>,
+}
+
+pub fn init_unverified(
+    account_name: &str,
+    transient: bool,
+    reason_class: InitRefusalReasonClass,
+    metadata: InitRefusalMetadata,
+) -> String {
+    let mut options = json!({
+        "forceToast": true, "initRefused": true,
+        "kind": "unverified", "transient": transient, "reason_class": reason_class
+    });
+    if let Some(kind) = metadata.error_kind {
+        options["error_kind"] = json!(kind);
+    }
+    if let Some(code) = metadata
+        .venue_code
+        .filter(|code| code.unsigned_abs() <= 9_007_199_254_740_991)
+    {
+        options["venue_code"] = json!(code);
+    }
+    if let Some(stage) = metadata.stage {
+        options["stage"] = json!(stage);
+    }
     envelope(
         "msg",
         json!({"op":"error", "accountName":account_name,
-            "data":["Could not verify your key; account not attached",
-                {"forceToast":true, "initRefused":true, "kind":"unverified", "transient":transient}]}),
+            "data":["Could not verify your key; account not attached", options]}),
     )
 }
 
@@ -384,6 +635,289 @@ mod tests {
     use super::*;
 
     #[test]
+    fn refusal_reason_class_is_a_closed_wire_enum() {
+        for (class, name) in [
+            (
+                InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+                "key_rejected_ip_or_permissions",
+            ),
+            (InitRefusalReasonClass::KeyInvalid, "key_invalid"),
+            (
+                InitRefusalReasonClass::VenueUnavailable,
+                "venue_unavailable",
+            ),
+            (InitRefusalReasonClass::Unknown, "unknown"),
+        ] {
+            let value = serde_json::to_value(class).unwrap();
+            assert_eq!(value, name);
+            assert_eq!(
+                serde_json::from_value::<InitRefusalReasonClass>(value).unwrap(),
+                class
+            );
+            let frame: Value = serde_json::from_str(&init_unverified(
+                "acct",
+                false,
+                class,
+                InitRefusalMetadata::default(),
+            ))
+            .unwrap();
+            assert_eq!(frame["d"]["data"][1]["reason_class"], name);
+        }
+        assert!(
+            serde_json::from_value::<InitRefusalReasonClass>(json!("raw venue detail")).is_err()
+        );
+    }
+
+    #[test]
+    fn refusal_reason_class_scopes_numeric_codes_to_the_venue_family() {
+        use InitRefusalReasonClass::*;
+        use safe_cex_engine::ErrorKind;
+        for (venues, codes) in [
+            (
+                &[
+                    "binance",
+                    "binancepm",
+                    "binanceinverse",
+                    "binancespot",
+                    "binanceoptions",
+                ][..],
+                &[-2015, -2014][..],
+            ),
+            (
+                &["bybit", "bybitinverse", "bybitspot", "bybitdemo"][..],
+                &[10003, 10010][..],
+            ),
+            (
+                &["okx", "okxeu", "okxdemo", "okxeudemo"][..],
+                &[50110, 50111][..],
+            ),
+        ] {
+            for venue in venues {
+                for code in codes {
+                    assert_eq!(
+                        InitRefusalReasonClass::from_error(
+                            venue,
+                            Some(ErrorKind::AuthInvalid),
+                            Some(*code)
+                        ),
+                        KeyRejectedIpOrPermissions
+                    );
+                }
+            }
+        }
+        for venue in [
+            "bybit-compatible",
+            "binance-other",
+            "okx-other",
+            "kucoin",
+            "",
+        ] {
+            for code in [-2015, -2014, 10003, 10010, 50110, 50111] {
+                assert_eq!(
+                    InitRefusalReasonClass::from_error(
+                        venue,
+                        Some(ErrorKind::AuthInvalid),
+                        Some(code)
+                    ),
+                    KeyInvalid
+                );
+            }
+        }
+        for (venue, code) in [("binance", 10003), ("bybit", 50111), ("okx", -2015)] {
+            assert_eq!(
+                InitRefusalReasonClass::from_error(venue, Some(ErrorKind::AuthInvalid), Some(code)),
+                KeyInvalid
+            );
+        }
+    }
+
+    #[test]
+    fn refusal_reason_class_reuses_other_venues_typed_permission_failures() {
+        for (venue, code) in [
+            ("bitget", 40018),
+            ("blofin", 152406),
+            ("kucoin", 400006),
+            ("kucoinspot", 400006),
+        ] {
+            assert_eq!(
+                InitRefusalReasonClass::from_error(
+                    venue,
+                    Some(safe_cex_engine::ErrorKind::AuthPermission),
+                    Some(code)
+                ),
+                InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+            );
+        }
+    }
+
+    #[test]
+    fn refusal_reason_class_missing_or_unrelated_evidence_falls_back_safely() {
+        use InitRefusalReasonClass::*;
+        use safe_cex_engine::ErrorKind;
+        for (kind, expected) in [
+            (ErrorKind::AuthInvalid, KeyInvalid),
+            (ErrorKind::AuthExpired, KeyInvalid),
+            (ErrorKind::AuthPermission, KeyRejectedIpOrPermissions),
+            (ErrorKind::Network, VenueUnavailable),
+            (ErrorKind::Timeout, VenueUnavailable),
+            (ErrorKind::RateLimited, VenueUnavailable),
+            (ErrorKind::VenueUnavailable, VenueUnavailable),
+            (ErrorKind::Rejected, Unknown),
+            (ErrorKind::InvalidInput, Unknown),
+            (ErrorKind::InsufficientBalance, Unknown),
+            (ErrorKind::Unsupported, Unknown),
+            (ErrorKind::Internal, Unknown),
+        ] {
+            assert_eq!(
+                InitRefusalReasonClass::from_error("bybit", Some(kind), None),
+                expected
+            );
+        }
+        assert_eq!(
+            InitRefusalReasonClass::from_error("bybit", None, Some(10003)),
+            Unknown
+        );
+        assert_eq!(
+            InitRefusalReasonClass::from_error("bybit", Some(ErrorKind::Internal), Some(10003)),
+            Unknown
+        );
+        assert_eq!(
+            InitRefusalReasonClass::from_error("bybit", Some(ErrorKind::Network), Some(10003)),
+            VenueUnavailable
+        );
+    }
+
+    #[test]
+    fn refusal_reason_class_hyro_challenge_status_does_not_claim_an_invalid_key() {
+        assert_eq!(
+            InitRefusalReasonClass::from_error(
+                "hyrotrader",
+                Some(safe_cex_engine::ErrorKind::AuthPermission),
+                Some(10010)
+            ),
+            InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+        );
+        assert_eq!(
+            InitRefusalReasonClass::from_error(
+                "hyrotrader",
+                Some(safe_cex_engine::ErrorKind::AuthInvalid),
+                Some(10003)
+            ),
+            InitRefusalReasonClass::Unknown,
+        );
+    }
+
+    #[test]
+    fn refusal_reason_class_unknown_is_additive_and_contains_no_private_details() {
+        let frame: Value = serde_json::from_str(&init_unverified(
+            "acct",
+            false,
+            InitRefusalReasonClass::Unknown,
+            InitRefusalMetadata::default(),
+        ))
+        .unwrap();
+        assert_eq!(
+            frame,
+            json!({"t":"msg", "d":{
+                "op":"error", "accountName":"acct",
+                "data":["Could not verify your key; account not attached", {
+                    "forceToast":true, "initRefused":true, "kind":"unverified",
+                    "transient":false, "reason_class":"unknown"
+                }]
+            }})
+        );
+    }
+
+    #[test]
+    fn init_unverified_preserves_classified_admission_metadata() {
+        let text = with_instance_id(
+            init_unverified(
+                "account",
+                false,
+                InitRefusalReasonClass::KeyRejectedIpOrPermissions,
+                InitRefusalMetadata {
+                    error_kind: Some(safe_cex_engine::ErrorKind::AuthInvalid),
+                    venue_code: Some(-2015),
+                    stage: Some(InitRefusalStage::PrivateRead),
+                },
+            ),
+            "instance",
+        );
+        let frame: Value = serde_json::from_str(&text).unwrap();
+        assert!(text.starts_with(r#"{"t":"msg","d":"#));
+        assert_eq!(frame["d"]["accountName"], "account");
+        assert_eq!(frame["d"]["instanceId"], "instance");
+        assert_eq!(frame["d"]["op"], "error");
+        assert_eq!(
+            frame["d"]["data"][0],
+            "Could not verify your key; account not attached"
+        );
+        assert_eq!(
+            frame["d"]["data"][1],
+            json!({
+                "forceToast": true, "initRefused": true, "kind": "unverified",
+                "transient": false, "error_kind": "authInvalid", "venue_code": -2015,
+                "stage": "private_read", "reason_class": "key_rejected_ip_or_permissions"
+            })
+        );
+    }
+
+    #[test]
+    fn init_unverified_does_not_invent_unknown_metadata() {
+        let frame: Value = serde_json::from_str(&init_unverified(
+            "account",
+            true,
+            InitRefusalReasonClass::Unknown,
+            InitRefusalMetadata::default(),
+        ))
+        .unwrap();
+        assert_eq!(
+            frame["d"]["data"][1],
+            json!({
+                "forceToast": true, "initRefused": true, "kind": "unverified", "transient": true, "reason_class": "unknown"
+            })
+        );
+    }
+
+    #[test]
+    fn init_unverified_keeps_non_auth_classification_and_only_exact_js_codes() {
+        for code in [
+            i64::MIN,
+            -9_007_199_254_740_992,
+            9_007_199_254_740_992,
+            i64::MAX,
+        ] {
+            let frame: Value = serde_json::from_str(&init_unverified(
+                "account",
+                true,
+                InitRefusalReasonClass::VenueUnavailable,
+                InitRefusalMetadata {
+                    error_kind: Some(safe_cex_engine::ErrorKind::Network),
+                    venue_code: Some(code),
+                    stage: Some(InitRefusalStage::ProbeTimeout),
+                },
+            ))
+            .unwrap();
+            let options = &frame["d"]["data"][1];
+            assert_eq!(options["error_kind"], "network");
+            assert_eq!(options["stage"], "probe_timeout");
+            assert!(options.get("venue_code").is_none());
+        }
+        for code in [-9_007_199_254_740_991, 0, 9_007_199_254_740_991] {
+            let frame: Value = serde_json::from_str(&init_unverified(
+                "account",
+                false,
+                InitRefusalReasonClass::Unknown,
+                InitRefusalMetadata {
+                    venue_code: Some(code),
+                    ..Default::default()
+                },
+            ))
+            .unwrap();
+            assert_eq!(frame["d"]["data"][1]["venue_code"], code);
+        }
+    }
+    #[test]
     fn every_envelope_leads_with_its_type() {
         let session = session("r-1", true);
         assert_eq!(
@@ -422,5 +956,54 @@ mod tests {
             "apiKeyIndex": {"index": 3},
         }));
         assert!(refused.is_err());
+    }
+}
+
+#[cfg(test)]
+mod mode_state_tests {
+    use super::*;
+
+    #[test]
+    fn a_mode_confirmation_is_bound_to_the_attached_registration() {
+        for requested in [AccountSigningMode::Cosigned, AccountSigningMode::Delegated] {
+            let frame: Value = serde_json::from_str(&with_instance_id(
+                account_signing_mode("alias", requested, AccountSigningMode::Delegated),
+                "current-registration",
+            ))
+            .unwrap();
+            assert_eq!(frame["t"], "msg");
+            assert_eq!(frame["d"]["op"], "account-signing-mode");
+            assert_eq!(frame["d"]["accountName"], "alias");
+            assert_eq!(frame["d"]["instanceId"], "current-registration");
+            assert_eq!(
+                frame["d"]["data"],
+                json!({"version":1,"requestedMode":requested,"actualMode":"delegated","attached":true,"reason":if requested == AccountSigningMode::Delegated {"requested"} else {"delegated-enabled-elsewhere"}})
+            );
+        }
+    }
+
+    #[test]
+    fn handover_refusals_never_claim_an_actual_attached_mode() {
+        for refusal in [
+            ModeTransitionRefusal::Busy,
+            ModeTransitionRefusal::Unavailable,
+        ] {
+            let frame: Value = serde_json::from_str(&init_mode_transition_refused(
+                "candidate",
+                refusal,
+                AccountSigningMode::Delegated,
+                AccountSigningMode::Cosigned,
+            ))
+            .unwrap();
+            let fields = &frame["d"]["data"][1];
+            assert_eq!(fields["kind"], "admission");
+            assert_eq!(fields["reason"], refusal.reason());
+            assert_eq!(fields["transient"], refusal == ModeTransitionRefusal::Busy);
+            assert_eq!(fields["attached"], false);
+            assert_eq!(fields["initRefused"], true);
+            assert_eq!(fields["requestedMode"], "delegated");
+            assert_eq!(fields["residentMode"], "cosigned");
+            assert!(fields.get("actualMode").is_none());
+        }
     }
 }

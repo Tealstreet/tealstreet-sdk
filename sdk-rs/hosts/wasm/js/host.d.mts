@@ -4,9 +4,23 @@ import type { EngineCapabilities } from './wire.mjs';
 export type { EngineCapabilities };
 export type HistoryDecodeDetail = {
   schema: 'bitgetClassicFills' | 'bitgetUtaFills' | 'bitgetClassicOrders' | 'bitgetUtaOrders'
-    | 'bitgetClassicIncome' | 'bitgetUtaIncome' | 'bitgetPublicTrades' | 'krakenFills' | 'krakenOrders' | 'krakenIncome';
+    | 'bitgetClassicIncome' | 'bitgetUtaIncome' | 'bitgetPublicTrades' | 'krakenFills' | 'krakenOrders' | 'krakenIncome'
+    | 'bingxIncome' | 'bingxOrders';
   reason: 'rowShape' | 'identity' | 'symbol' | 'quantity' | 'filledQuantity' | 'timestamp'
-    | 'timestampOrder' | 'side' | 'orderStatus' | 'orderType' | 'fee' | 'market' | 'economics';
+    | 'timestampOrder' | 'side' | 'orderStatus' | 'orderType' | 'fee' | 'market' | 'economics'
+    | 'quantityNegative' | 'quantityZero' | 'filledQuantityNegative' | 'filledQuantityExceedsQuantity'
+    | 'quantityDecimal' | 'filledQuantityDecimal' | 'timestampDecimal' | 'lastUpdateTimestampDecimal' | 'limitPriceDecimal'
+    | 'fieldType' | 'fieldValue' | 'envelopeShape' | 'envelopeCode' | 'dataShape';
+  shape?: {
+    field: 'root' | 'code' | 'msg' | 'data' | 'data.orders' | 'row' | 'row.symbol' | 'row.incomeType'
+      | 'row.income' | 'row.asset' | 'row.time' | 'row.tranId' | 'row.tradeId' | 'row.orderId'
+      | 'row.side' | 'row.type' | 'row.status' | 'row.price' | 'row.avgPrice' | 'row.origQty'
+      | 'row.executedQty' | 'row.reduceOnly' | 'row.positionSide' | 'row.updateTime';
+    expected: 'object' | 'array' | 'integer' | 'string' | 'numberOrNumericString' | 'stringOrInteger'
+      | 'booleanOrStringOrNull' | 'stringOrNull' | 'stringOrIntegerOrNull' | 'arrayOrObject';
+    actual: 'missing' | 'invalidJson' | 'null' | 'boolean' | 'number' | 'string' | 'array' | 'object';
+    envelopeCode: 'present' | 'absent' | 'unavailable';
+  };
 };
 export function historyDecodeOf(value: unknown): HistoryDecodeDetail | undefined;
 
@@ -26,7 +40,8 @@ export interface HttpResponse {
 
 export class HttpPreparationError extends Error {
   readonly code: string;
-  constructor(reason: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network');
+  readonly cause?: 'info_admission';
+  constructor(reason: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', cause?: 'info_admission');
 }
 
 export interface HttpPacket {
@@ -326,6 +341,7 @@ export interface HostedSigningClock { stampMs: number; revision: string }
 export type HostedSigningInput = { kind: 'credential' }
   | { kind: 'http'; payload: string; stampMs: number; revision: string }
   | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' | 'coinbase-jws' | 'backpack-ed25519' | 'orderly-ed25519' | 'kucoin-batch' | 'apexomni-batch' | 'kraken-sha512' | 'kraken-challenge' };
+export interface HostedJoinProofOutput { readonly id: string; readonly joinProof: { readonly version: 1; readonly signature: string } }
 export interface HostedSigningOutput { credential?: string; signature?: string; headers?: [string, string][] }
 export interface SignRequest {
   receipt: SignReceipt;
@@ -530,7 +546,7 @@ export interface WasmEngineLike {
   httpCommandOwner?(request: number): number | undefined;
   httpPreparationPending?(preparation: string): boolean;
   httpPrepared?(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
-  httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;
+  httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'infoAdmissionTimedOut' | 'stale' | 'invalid' | 'network', now: number): string;
   /** Scalar status only: never drain work before the synchronous handoff. */
   httpClaim?(permit: string, now: number): string;
   httpGroupPending?(permit: string): boolean;
@@ -540,6 +556,7 @@ export interface WasmEngineLike {
   useExternalSigner?(algorithmsJson?: string): void;
   hostedSigningClock?(now: number): string;
   coinbaseSigningMetadata?(): string;
+  prepareJoinProof?(requestJson: string, now: number): string;
   prepareHostedSigning?(inputJson: string, now: number): string;
   localHostedSigning?(id: number, now: number): string;
   finishHostedSigning?(id: number, resultJson: string, now: number): string;
@@ -563,6 +580,7 @@ export class EngineHost {
   /** Sign compatibility bytes without startup, transport actions or account mutation. */
   coinbaseSigningMetadata(): { keyName: string; algorithm: 'es256' | 'edDsa' };
   hostedSigningClock(): HostedSigningClock;
+  hostedJoinProof(requestJson: string): Promise<HostedJoinProofOutput>;
   hostedSigning(input: HostedSigningInput): Promise<HostedSigningOutput>;
   /** Device answer for a keyless server's wallet ws-auth request, signed by the
    * local provider; refuses an injected signer. Returns the venue's encoded result. */
@@ -579,23 +597,26 @@ export class EngineHost {
   snapshot(): ArrayBuffer;
   accountSnapshot(): ArrayBuffer;
   socketHealth(): Record<EngineSocketChannel, EngineSocketStats>;
-  /** Abnormally close the open sockets of `channel` (all when omitted) so the
-   * venue reconnects; returns how many were closed. */
-  reconnectSockets(channel?: EngineSocketChannel): number;
+  /** Abnormally close open sockets of `channel` (all when omitted). Recovery
+   * bounds retain pre-pause physical receipts until stale, preserving
+   * fresh/uninitialized siblings; returns how many sockets were closed. */
+  reconnectSockets(channel?: EngineSocketChannel, recovery?: { staleBefore: number; suspendedBefore?: number }): number;
   /** Sockets waiting out plain backoff redial now; a venue-imposed floor still binds. */
   redialWaitingSockets(): void;
   /** Undefined for an engine without `health()`. */
   health(): EngineHealth | undefined;
   /** Start this account's Rust algos on an `algos` engine build; the host then
    * keeps their timer armed and delivers replies to `onAlgoEmit`.
-   * A false/throwing live owner check permanently retires the entire host before further work. */
+   * Execution under a false/throwing owner check retires the host before further work. */
   algoStart(accountName: string, twapOwner?: Readonly<{ ownerId: string; generation: number }> | null, isOwnerCurrent?: () => boolean): void;
-  /** Started and not yet stopped or disposed. */
+  /** Started, undisposed and still owned. Observation alone never fails or frees the host. */
   readonly algosRunning: boolean;
+  /** Execution admission: a retired/throwing owner fails the host before any algo work. */
+  checkAlgosForExecution(): boolean;
   /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if refused. */
   algoOp(op: string, data: unknown): void;
   /** Stop every algo (chases once their cancels settle, bounded); resolves when
-   * they are gone. Dispose the host after that. */
+   * they are gone. Retired-owner cleanup is a no-op; dispose still releases the host. */
   algoDispose(reason?: string): Promise<void>;
   /** A nuke's first step: stop every TWAP and chase, the algos staying up.
    * Resolves once chase cancels settle (bounded by the engine at 10 s);

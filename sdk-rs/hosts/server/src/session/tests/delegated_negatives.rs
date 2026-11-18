@@ -101,7 +101,7 @@ impl RunningAccount {
         let mut holders = account.live_holders_besides(0);
         holders.sort_unstable();
         Self {
-            provider: account.delegated.as_ref().unwrap().provider(),
+            provider: account.delegated().as_ref().unwrap().provider(),
             fingerprint: account.fingerprint.clone(),
             counts: account.running.counts(),
             account,
@@ -118,7 +118,7 @@ impl RunningAccount {
         assert!(Arc::ptr_eq(&current, &self.account));
         assert!(Arc::ptr_eq(
             &self.provider,
-            &current.delegated.as_ref().unwrap().provider()
+            &current.delegated().as_ref().unwrap().provider()
         ));
         assert_eq!(current.fingerprint, self.fingerprint);
         assert!(current.handle.disposal_cause().is_none());
@@ -213,7 +213,7 @@ async fn delegated_candidates_preserve_the_running_account() {
                 assert!(!Arc::ptr_eq(&other, &resident.account));
                 assert_ne!(other.registry_name(), resident.account.registry_name());
                 assert!(!Arc::ptr_eq(
-                    &other.delegated.as_ref().unwrap().provider(),
+                    &other.delegated().as_ref().unwrap().provider(),
                     &resident.provider,
                 ));
                 candidate.close();
@@ -224,7 +224,28 @@ async fn delegated_candidates_preserve_the_running_account() {
                 f.registry.held("alice", "acct", candidate.socket).is_none(),
                 "candidate refused"
             );
-            let expected = envelope::init_unverified("acct", false);
+            let reason_class = if case == "wrong-secret" {
+                envelope::InitRefusalReasonClass::KeyRejectedIpOrPermissions
+            } else {
+                envelope::InitRefusalReasonClass::Unknown
+            };
+            let expected = envelope::init_unverified(
+                "acct",
+                false,
+                reason_class,
+                match case {
+                    "wrong-secret" => private_read_metadata(10003),
+                    "consumed" => envelope::InitRefusalMetadata {
+                        stage: Some(RefusalStage::HandoverAttempt),
+                        ..Default::default()
+                    },
+                    "new-attempt" => envelope::InitRefusalMetadata {
+                        stage: Some(RefusalStage::HandoverOpen),
+                        ..Default::default()
+                    },
+                    _ => unreachable!(),
+                },
+            );
             let expected = id.filter(|s| !s.is_empty()).map_or_else(
                 || expected.clone(),
                 |id| envelope::with_instance_id(expected.clone(), id),

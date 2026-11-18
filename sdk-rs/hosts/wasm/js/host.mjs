@@ -1,6 +1,7 @@
 import { historyDecodeOf } from './history-decode.mjs';
 export { historyDecodeOf } from './history-decode.mjs';
 import { ManagedHttp, prepareFetch } from './managed-http.mjs';
+import { transportFailureMessage } from './request-failure.mjs';
 export { HttpPreparationError } from './managed-http.mjs';
 
 function signingNonce(value) {
@@ -518,13 +519,15 @@ export class EngineHost {
     finally { this.handlers.onDead?.(this.deadError); }
   }
 
-  checkAlgoOwner() {
+  observeAlgoOwner() {
     if (this.disposed) return false;
     if (!this.algoOwnerCurrent) return true;
-    let current = false;
-    try { current = this.algoOwnerCurrent() === true; } catch { /* An unavailable owner retires this host. */ }
-    if (current) return true;
-    this.failEngine(new Error('TWAP owner changed; recreate the account worker'));
+    try { return this.algoOwnerCurrent() === true; } catch { return false; }
+  }
+
+  checkAlgoOwner() {
+    if (this.observeAlgoOwner()) return true;
+    if (!this.disposed) this.failEngine(new Error('TWAP owner changed; recreate the account worker'));
     return false;
   }
 
@@ -799,15 +802,24 @@ export class EngineHost {
 
   /**
    * Close the open sockets of `channel` (or all) as an abnormal close, so the
-   * venue runs its own reconnect. Returns how many sockets were closed.
+   * venue runs its own reconnect. Optional recovery bounds retain pre-pause
+   * physical receipts until stale, without closing fresh/uninitialized siblings.
    */
-  reconnectSockets(channel) {
+  reconnectSockets(channel, recovery) {
     this.assertHttpHandoffIdle();
     if (this.disposed) return 0;
     let closed = 0;
     for (const [id, record] of [...this.socketRecords]) {
       // A connect in flight is left alone, as in TS: a second connect would leak it.
-      if ((channel !== undefined && !record.channels.includes(channel)) || !record.open || !this.sockets.has(id)) continue;
+      if ((channel !== undefined && !record.channels.includes(channel)) || !record.open ||
+        !this.sockets.has(id) || this.socketRecords.get(id) !== record) continue;
+      if (recovery) {
+        if (!record.initialized || record.lastReceived <= 0) continue;
+        if (recovery.suspendedBefore !== undefined && record.lastReceived <= recovery.suspendedBefore)
+          record.recoveryReceipt = record.lastReceived;
+        if (record.recoveryReceipt !== record.lastReceived || record.lastReceived > recovery.staleBefore) continue;
+        record.recoveryReceipt = undefined;
+      }
       const socket = this.sockets.get(id);
       this.sockets.delete(id);
       this.socketClosed(id, 1006);
@@ -875,7 +887,10 @@ export class EngineHost {
     this.armAlgos();
   }
 
-  get algosRunning() { return this.checkAlgoOwner() && this.algosStarted; }
+  // Status and teardown may observe a retired owner without executing any work.
+  get algosRunning() { return this.observeAlgoOwner() && this.algosStarted; }
+
+  checkAlgosForExecution() { return this.checkAlgoOwner() && this.algosStarted; }
 
   /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if the engine refuses it. */
   algoOp(op, data) {
@@ -903,7 +918,8 @@ export class EngineHost {
    * did not, or the algos ended first. */
   algoStopAll(reason) {
     this.assertHttpHandoffIdle();
-    if (!this.algosRunning) return Promise.resolve({ stoppedChasers: [], stoppedTwaps: [], settled: true });
+    // A user nuke is execution, so keep the strict fence outside the pure getter.
+    if (!this.checkAlgosForExecution()) return Promise.resolve({ stoppedChasers: [], stoppedTwaps: [], settled: true });
     if (typeof this.engine.algoStopAll !== 'function')
       throw new ExchangeError('This engine cannot stop its algos for a nuke', { kind: 'unsupported', outcome: 'notSent' });
     const stopped = new Promise((resolve) => this.algoStopAllWaiters.push(resolve));
@@ -1082,8 +1098,11 @@ export class EngineHost {
         signal: controller.signal,
       });
       if (!this.disposed) await this.receive(id, response);
-    } catch {
-      if (!this.disposed) this.run(this.invoke(this.engine.httpFailed, id, 'HTTP transport request failed', this.transport.now()));
+    } catch (error) {
+      if (!this.disposed) {
+        const message = transportFailureMessage(error);
+        if (!this.disposed) this.run(this.invoke(this.engine.httpFailed, id, message, this.transport.now()));
+      }
     } finally {
       this.requests.delete(id);
       this.stageCauses.delete(`http:${id}`);
@@ -1239,12 +1258,23 @@ export class EngineHost {
   }
 
   hostedSigning(input) {
+    return this.captureHostedSigning('prepareHostedSigning', () => JSON.stringify(input));
+  }
+
+  hostedJoinProof(requestJson) {
+    if (typeof requestJson !== 'string')
+      return Promise.reject(new ExchangeError('Invalid join proof request', { kind: 'invalidInput', outcome: 'notSent' }));
+    return this.captureHostedSigning('prepareJoinProof', () => requestJson);
+  }
+
+  captureHostedSigning(entry, encode) {
     this.assertHttpHandoffIdle();
     if (this.disposed) return Promise.reject(new EngineDisposedError());
-    if (typeof this.engine.prepareHostedSigning !== 'function')
+    const prepare = this.engine[entry];
+    if (typeof prepare !== 'function')
       return Promise.reject(new ExchangeError('Hosted signing is unsupported', { kind: 'unsupported', outcome: 'notSent' }));
     let prepared;
-    try { prepared = JSON.parse(this.invokeHosted(this.engine.prepareHostedSigning, JSON.stringify(input), this.transport.now())); }
+    try { prepared = JSON.parse(this.invokeHosted(prepare, encode(), this.transport.now())); }
     catch (error) { return Promise.reject(error); }
     const { id, work, deadlineMs } = prepared;
     const duration = deadlineMs - this.transport.now();
@@ -1418,10 +1448,12 @@ export class EngineHost {
         const channel = Object.hasOwn(this.socketStats, action.channel) ? action.channel : 'public';
         const channels = action.publicTopics === true && channel !== 'public' ? [channel, 'public'] : [channel];
         const stats = channels.map((role) => this.socketStats[role]);
-        const record = { channels, stats, open: false, initialized: false };
+        const record = { channels, stats, open: false, initialized: false, lastReceived: 0, recoveryReceipt: undefined };
         // One timestamp per carried channel; state changes notify once per socket.
         const received = () => {
           const now = Date.now();
+          record.lastReceived = now;
+          record.recoveryReceipt = undefined;
           for (const stat of stats) stat.lastReceived = now;
           if (record.initialized || !record.open) return;
           record.initialized = true;

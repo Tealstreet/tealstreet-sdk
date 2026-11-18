@@ -2,6 +2,7 @@ import type { EngineEvent } from '@tealstreet/safe-cex-wasm/host';
 import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/wire';
 import type { Axios, AxiosInstance } from 'axios';
 import type { TinyEmitter } from 'tiny-emitter';
+import type { JoinProofResponse } from '../joinProof.types';
 import type { PositionRecord } from '../journal/position.types';
 import type { Store } from '../store/store.interface';
 import type { WorkerFrameRejection } from '../store/workerFrameRecoveryScopes';
@@ -28,6 +29,7 @@ import { forEachSeries, mapSeries } from 'p-iteration';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { classifiedError, deserializeCommandError, exchangeErrorTags, markErrorReported } from '../commandOutcome';
+import { workerErrorProtectionTags } from '../utils/workerErrorProtectionTags';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { withHistoryCompleteness } from '../historyCompleteness';
@@ -392,6 +394,9 @@ export const WORKER_OPTIONAL_METHODS = [
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'refreshMarkets',
+  // Refresh RPCs re-read venue state; reconciliation does not authorize a venue write.
+  'refreshAccountSettings',
+  'refreshAccountOrders',
   'fetchPositions',
   'readPositions',
   'fetchBalance',
@@ -608,6 +613,9 @@ export interface Exchange {
    * Returns the signature string for WebSocket authentication.
    */
   signWsAuth: (request: RemoteSignerRequest) => Promise<RemoteSignerResponse>;
+
+  /** Sign only the closed server admission challenge, preserving its raw JSON. */
+  signJoinProof?: (requestJson: string) => Promise<JoinProofResponse>;
 }
 
 export type AccountMarketOverlay = (markets: Market[]) => Market[];
@@ -2281,6 +2289,7 @@ export class BaseExchange implements Exchange {
       ...(structuredExtraData.engineEvent?.code === 'startup.incomplete'
         ? startupDiagnosticTags(structuredExtraData.engineEvent)
         : {}),
+      ...workerErrorProtectionTags(err),
     };
     const sentryExtra =
       structuredExtraData.sentryExtra && typeof structuredExtraData.sentryExtra === 'object'

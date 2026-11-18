@@ -137,6 +137,13 @@ struct TypedAction<'a> {
 }
 
 impl TxFlow {
+    fn base_size_instrument(&self, asset: u32) -> Result<&crate::wire::Instrument, String> {
+        let instrument = self.instruments.get(&asset).ok_or("Unknown TxFlow asset")?;
+        if instrument.use_notional_margin != Some(false) {
+            return Err("TxFlow notional-margin semantics require testnet measurement".into());
+        }
+        Ok(instrument)
+    }
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         let stp_operation = if matches!(&command, Command::SetStpMode { .. }) {
             safe_cex_engine::request_context::Operation::Mutation
@@ -483,24 +490,18 @@ impl TxFlow {
                 }
             };
             let amount = checked_number(opts.amount, market.precision.amount)?;
-            if let Some(instrument) = self.instruments.get(
-                self.assets
-                    .get(&opts.symbol)
-                    .ok_or("Unknown TxFlow asset")?,
-            ) {
-                let max = if opts.kind == OrderType::Market {
-                    instrument.max_market_order_size
-                } else {
-                    instrument.max_limit_order_size
-                };
-                if max.is_some_and(|max| opts.amount > max) {
-                    return Err("TxFlow order size exceeds native order-type limit".into());
-                }
-                if instrument.use_notional_margin {
-                    return Err(
-                        "TxFlow notional-margin semantics require testnet measurement".into(),
-                    );
-                }
+            let asset = *self
+                .assets
+                .get(&opts.symbol)
+                .ok_or("Unknown TxFlow asset")?;
+            let instrument = self.base_size_instrument(asset)?;
+            let max = if opts.kind == OrderType::Market {
+                instrument.max_market_order_size
+            } else {
+                instrument.max_limit_order_size
+            };
+            if max.is_some_and(|max| opts.amount > max) {
+                return Err("TxFlow order size exceeds native order-type limit".into());
             }
             if opts.amount < market.limits.amount.min || opts.amount > market.limits.amount.max {
                 return Err("TxFlow order size exceeds market limits".into());
@@ -525,10 +526,7 @@ impl TxFlow {
                 return Err("Duplicate TxFlow clientOrderId".into());
             }
             wires.push(OrderWire {
-                a: *self
-                    .assets
-                    .get(&opts.symbol)
-                    .ok_or("Unknown TxFlow asset")?,
+                a: asset,
                 b: opts.side == OrderSide::Buy,
                 p: price,
                 s: amount,
@@ -626,6 +624,11 @@ impl TxFlow {
             .store
             .market(&order.symbol)
             .ok_or("Unknown TxFlow market")?;
+        let asset = *self
+            .assets
+            .get(&order.symbol)
+            .ok_or("Unknown TxFlow asset")?;
+        self.base_size_instrument(asset)?;
         let total = amount.unwrap_or(order.amount);
         if !market.active || total < market.limits.amount.min || total > market.limits.amount.max {
             return Err("Invalid TxFlow amend size or halted market".into());
@@ -700,6 +703,14 @@ impl TxFlow {
                 )),
             );
             return;
+        }
+        if let Action::Order { orders, .. } = &action {
+            for order in orders {
+                if let Err(error) = self.base_size_instrument(order.a) {
+                    self.finish_trade(cx, Err(not_sent(error)));
+                    return;
+                }
+            }
         }
         if let Action::Order { orders, .. } = &action
             && orders.iter().any(|o| {

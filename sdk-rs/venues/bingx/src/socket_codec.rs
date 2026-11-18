@@ -1,5 +1,6 @@
 //! Native wire projection; engine epochs own socket custody and liveness.
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::SocketChannel;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
@@ -233,7 +234,7 @@ impl Bingx {
                     cx.book_changed(symbol);
                 }
             }
-            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), "Ping"),
+            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), ControlFrame::heartbeat("Ping")),
             LifecycleEvent::Reconnect(_) => self.connect_public(cx)?,
             LifecycleEvent::InterestsRefused {
                 error: SocketError::Capacity,

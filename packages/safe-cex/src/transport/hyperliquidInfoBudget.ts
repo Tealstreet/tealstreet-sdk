@@ -19,6 +19,10 @@ const capacity = (readClass: InfoReadClass) =>
   readClass === 'critical' || readClass === 'reconciliation' ? 1000 : 800;
 type DispatchWaiter = { id: string; until: number; readClass?: InfoReadClass };
 let indexedDBOpenedInRealm = false;
+// c0705fca9 replaces d732927cb30's established-store blackout: local admission
+// spends twice the clock debt, halving burst and refill without weakening known pauses.
+const admissionCost = (weight: number, shared: boolean) =>
+  weight * MS_PER_WEIGHT * (!shared && indexedDBOpenedInRealm ? 2 : 1);
 type BudgetState = {
   nextAt: number;
   pausedUntil: number;
@@ -337,6 +341,12 @@ export type InfoBudgetGrant = {
   cancelWait?: () => void;
 };
 
+// Only an existing deadline refusal inside admission gets this diagnostic label.
+const infoAdmissionFailure = (error: unknown): unknown =>
+  error instanceof HttpPreparationError && error.code === 'HTTP_PREPARATION_TIMED_OUT'
+    ? new HttpPreparationError('timedOut', 'info_admission')
+    : error;
+
 /** Admission precedes managed HTTP claim; only a physical handoff consumes tokens. */
 export class HyperliquidInfoBudget {
   constructor(private readonly backend: InfoBudgetStorage = storage()) {}
@@ -348,6 +358,8 @@ export class HyperliquidInfoBudget {
     signal: AbortSignal,
     readClass: InfoReadClass = 'normal',
   ): Promise<InfoBudgetGrant> {
+    // A cancellation predating this stage is not an admission diagnosis.
+    const abortedBeforeAdmission = signal.aborted;
     readClass = readClassFor(body, readClass);
     const weight = hyperliquidInfoWeight(body);
     let waiterId: string | undefined;
@@ -366,12 +378,12 @@ export class HyperliquidInfoBudget {
     try {
       for (;;) {
         signal.throwIfAborted();
-        const grant = await this.backend.update(origin, (state) => {
+        const grant = await this.backend.update(origin, (state, shared) => {
           signal.throwIfAborted();
           const now = Date.now();
           const at = Math.max(
             now,
-            state.nextAt + weight * MS_PER_WEIGHT - capacity(readClass) * MS_PER_WEIGHT,
+            state.nextAt + admissionCost(weight, shared) - capacity(readClass) * MS_PER_WEIGHT,
             state.pausedUntil,
           );
           if (at >= deadline) throw new HttpPreparationError('timedOut');
@@ -405,7 +417,7 @@ export class HyperliquidInfoBudget {
       }
     } catch (error) {
       cancelWait();
-      throw error;
+      throw abortedBeforeAdmission ? error : infoAdmissionFailure(error);
     }
   }
 
@@ -417,24 +429,29 @@ export class HyperliquidInfoBudget {
     send: () => T,
     wasSent: () => boolean = () => true,
   ): Promise<T> {
-    const cost = grant.weight * MS_PER_WEIGHT;
+    // A cancellation predating this stage is not an admission diagnosis.
+    const abortedBeforeAdmission = signal.aborted;
+    let cost = 0;
     const readClass = grant.readClass ?? 'normal';
     const waiterId = grant.waiterId ?? `${dispatchRealm}:${++dispatchSequence}`;
     let charged = false;
     let dispatched = false;
+    let handoffStarted = false;
     const active = () => {
       signal.throwIfAborted();
       if (Date.now() >= deadline) throw new HttpPreparationError('timedOut');
     };
-    const retryStorageAt = () => Math.min(deadline, Date.now() + 1000);
     try {
       for (;;) {
         const reservation = await this.backend.update(origin, (state, shared) => {
           active();
-          // Once this realm joined IDB, local-only sends could exceed the peers' budget.
-          if (!shared && indexedDBOpenedInRealm) return { at: retryStorageAt() };
+          const reservationCost = admissionCost(grant.weight, shared);
           const now = Date.now();
-          const at = Math.max(now, state.nextAt + cost - capacity(readClass) * MS_PER_WEIGHT, state.pausedUntil);
+          const at = Math.max(
+            now,
+            state.nextAt + reservationCost - capacity(readClass) * MS_PER_WEIGHT,
+            state.pausedUntil,
+          );
           if (at >= deadline || state.generation !== grant.generation) throw new HttpPreparationError('timedOut');
           const queue = (state.dispatchQueue ?? []).filter((row) => row.until > now);
           const existing = queue.find((row) => row.id === waiterId);
@@ -455,7 +472,8 @@ export class HyperliquidInfoBudget {
           state.dispatchQueue.sort((a, b) => rank(a.readClass) - rank(b.readClass));
           if (state.dispatchQueue[0]?.id !== waiterId) return { at: Math.min(deadline, now + DISPATCH_POLL_MS) };
           if (at > now) return { at: Math.min(at, now + DISPATCH_POLL_MS) };
-          state.nextAt = Math.max(now, state.nextAt) + cost;
+          state.nextAt = Math.max(now, state.nextAt) + reservationCost;
+          cost = reservationCost;
           state.dispatchQueue = state.dispatchQueue.filter((row) => row.id !== waiterId);
           return undefined;
         });
@@ -472,11 +490,22 @@ export class HyperliquidInfoBudget {
             .update(origin, (state, shared) => {
               if (handoffCalled) return;
               active();
-              if (!shared && indexedDBOpenedInRealm) return { at: retryStorageAt() };
               if (state.pausedUntil > Date.now() || state.generation !== grant.generation)
                 throw new HttpPreparationError('timedOut');
+              // Storage can fail after the reservation: charge its degraded remainder
+              // before the same synchronous handoff, never replaying a physical send.
+              const extraCost = Math.max(0, admissionCost(grant.weight, shared) - cost);
+              if (extraCost) {
+                const now = Date.now();
+                const at = Math.max(now, state.nextAt + extraCost - capacity(readClass) * MS_PER_WEIGHT);
+                if (at >= deadline) throw new HttpPreparationError('timedOut');
+                if (at > now) return { at: Math.min(at, now + DISPATCH_POLL_MS) };
+                state.nextAt = Math.max(now, state.nextAt) + extraCost;
+                cost += extraCost;
+              }
               handoffCalled = true;
               try {
+                handoffStarted = true;
                 resolve({ value: send() });
               } catch (error) {
                 reject(error);
@@ -495,6 +524,8 @@ export class HyperliquidInfoBudget {
         if ('value' in decision) return await decision.value;
         await waitUntil(decision.at, signal);
       }
+    } catch (error) {
+      throw handoffStarted || abortedBeforeAdmission ? error : infoAdmissionFailure(error);
     } finally {
       grant.cancelWait?.();
       if (!dispatched) {

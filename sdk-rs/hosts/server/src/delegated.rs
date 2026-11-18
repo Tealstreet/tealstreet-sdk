@@ -100,6 +100,7 @@ pub struct Credentials {
     pub secret: Zeroizing<String>,
     pub passphrase: Option<Zeroizing<String>>,
     pub signing_key: Option<Zeroizing<String>>,
+    pub omni_key_seed: Option<Zeroizing<String>>,
 }
 
 impl<'de> Deserialize<'de> for Credentials {
@@ -249,6 +250,7 @@ impl Opening {
                 exchange,
                 &fields.secret,
                 fields.signing_key.as_deref().map(String::as_str),
+                fields.omni_key_seed.as_deref().map(String::as_str),
             )
         {
             return Err(Refused);
@@ -261,7 +263,23 @@ fn key_only_mapping(venue: &str) -> bool {
     safe_cex_venues::signer_setup_mapping(venue) == Some(safe_cex_venues::SetupMapping::Paradex)
 }
 
-fn valid_credential_shape(venue: &str, secret: &str, signing_key: Option<&str>) -> bool {
+fn valid_credential_shape(
+    venue: &str,
+    secret: &str,
+    signing_key: Option<&str>,
+    omni_key_seed: Option<&str>,
+) -> bool {
+    if let Some(seed) = omni_key_seed {
+        let hex = seed.strip_prefix("0x").unwrap_or(seed);
+        if safe_cex_venues::signer_setup_mapping(venue)
+            != Some(safe_cex_venues::SetupMapping::ApexOmni)
+            || signing_key.is_some()
+            || hex.len() != 130
+            || !hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return false;
+        }
+    }
     if key_only_mapping(venue) {
         signing_key.is_some_and(|value| !value.is_empty())
     } else {
@@ -419,6 +437,34 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn encrypted_apex_seed_round_trip_preserves_private_fields_and_consumes_offer() {
+        // Keep the wire/schema regression runnable on hosts without Linux's
+        // protected resident-memory implementation.
+        let seed = format!("0x{}", "11".repeat(65));
+        let mut owner = Handovers::default();
+        let offer = owner.issue("fixture", "apexomni", 100).unwrap();
+        let plaintext = Zeroizing::new(
+            serde_json::to_vec(&serde_json::json!({
+                "key": "synthetic-key", "secret": "synthetic-secret",
+                "passphrase": "synthetic-phrase", "omniKeySeed": seed
+            }))
+            .unwrap(),
+        );
+        let sealed = seal(&offer, "apexomni", "synthetic-key", &plaintext);
+        let opened = owner
+            .take("fixture", &sealed, 101)
+            .unwrap()
+            .open("apexomni", "synthetic-key", &sealed, 102)
+            .unwrap();
+        assert!(opened.omni_key_seed.as_deref().map(String::as_str) == Some(seed.as_str()));
+        assert!(opened.secret.as_str() == "synthetic-secret");
+        assert!(opened.passphrase.as_deref().map(String::as_str) == Some("synthetic-phrase"));
+        assert!(opened.signing_key.is_none());
+        assert!(owner.take("fixture", &sealed, 103).is_err());
+        assert!(!format!("{sealed:?}").contains(seed.as_str()));
+    }
+
+    #[test]
     fn fixed_cross_implementation_handover_matches_independent_fixture() {
         let v: serde_json::Value =
             serde_json::from_str(include_str!("../tests/data/delegated-handover-v1.json")).unwrap();
@@ -467,22 +513,37 @@ pub(crate) mod tests {
             "bybitspot",
             "bybitinverse",
             "bybitdemo",
+            "hyrotrader",
             "binance",
+            "binanceoptions",
             "okx",
             "kucoin",
+            "kucoinspot",
         ] {
             assert!(enabled(venue), "{venue}");
         }
-        for venue in [
-            "hyrotrader",
-            "binanceoptions",
-            "kucoinspot",
-            "",
-            "BYBIT",
-            "unknown",
-        ] {
+        for venue in ["txflow", "bingxspot", "", "BYBIT", "unknown"] {
             assert!(!enabled(venue), "{venue}");
         }
+    }
+
+    #[test]
+    fn binanceoptions_hosted_mainnet_support_keeps_testnet_closed() {
+        assert!(enabled("binanceoptions"));
+        assert_eq!(
+            safe_cex_native::resolve::rest_base_url("binanceoptions", false),
+            Ok("https://eapi.binance.com")
+        );
+        assert_eq!(
+            safe_cex_native::resolve::rest_base_url("binanceoptions", true),
+            Err(safe_cex_native::resolve::RoutingError::NoBaseUrl(
+                "binanceoptions".into()
+            ))
+        );
+        assert!(probe::cosigned_ready(&crate::envelope::InitPayload {
+            exchange_name: "binanceoptions".into(),
+            ..Default::default()
+        }));
     }
 
     #[test]

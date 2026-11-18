@@ -123,7 +123,13 @@ async fn health_and_capabilities_answer_without_venue_io() {
 async fn capability_discovery_is_scoped_to_the_requested_account_venue() {
     let address = server().await;
     for route in ["/capabilities", "/account/capabilities"] {
-        for (venue, supported) in [("binance", true), ("hyrotrader", false), ("unknown", false)] {
+        // Hyro is now hosted; retain an explicit unhosted venue and unknown-name control.
+        for (venue, supported) in [
+            ("binance", true),
+            ("hyrotrader", true),
+            ("bitrue", false),
+            ("unknown", false),
+        ] {
             let (status, body) = get(&address, &format!("{route}?exchangeName={venue}")).await;
             assert_eq!(status, 200);
             let body: serde_json::Value = serde_json::from_str(&body).unwrap();

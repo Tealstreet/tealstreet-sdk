@@ -13,6 +13,8 @@ dispatch-signing = ["dep:safe-cex-crypto"]
 hosted-signing = ["dispatch-signing"]
 # Device-side wallet signing for keyless servers, without the HMAC capture codec.
 hosted-wallet = ["dispatch-signing"]
+# Closed device-only admission challenges; no server readiness activation.
+hosted-join-proof = ["dispatch-signing", "safe-cex-crypto/admission", "dep:serde_json"]
 default = [
     "bitunix",
     "grvt",
@@ -114,3 +116,7 @@ serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "hosted_join_proof"
+required-features = ["hosted-join-proof", "backpack", "hyperliquid", "paradex", "lighter"]

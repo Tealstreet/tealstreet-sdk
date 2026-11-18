@@ -1,0 +1,88 @@
+{
+  "/api/v2/mix/market/contracts": {
+    "code": "00000",
+    "data": [
+      {
+        "symbol": "BTCUSD",
+        "baseCoin": "BTC",
+        "quoteCoin": "USD",
+        "symbolStatus": "normal",
+        "pricePlace": "1",
+        "priceEndStep": "1",
+        "sizeMultiplier": "1",
+        "minTradeNum": "1",
+        "maxOrderQty": "2000",
+        "maxTradeNum": "2000",
+        "maxLever": "125"
+      }
+    ]
+  },
+  "/api/v2/mix/market/tickers": {
+    "code": "00000",
+    "data": [
+      {
+        "symbol": "BTCUSD",
+        "bidPr": "59999.9",
+        "askPr": "60000.1",
+        "lastPr": "60000",
+        "markPrice": "60000",
+        "indexPrice": "60000",
+        "changeUtc24h": "0.01",
+        "baseVolume": "10",
+        "quoteVolume": "600000",
+        "fundingRate": "0.0001"
+      }
+    ]
+  },
+  "/api/v3/account/settings": {
+    "code": "40084",
+    "msg": "Classic Account mode",
+    "data": null
+  },
+  "/api/v2/mix/account/accounts": {
+    "code": "00000",
+    "data": [
+      {
+        "marginCoin": "BTC",
+        "unionTotalMargin": "2",
+        "unionAvailable": "1.5",
+        "accountEquity": "2",
+        "available": "1.5",
+        "unrealizedPL": "0",
+        "locked": "0.5",
+        "usdtEquity": "120000",
+        "crossedMaxAvailable": "1.5",
+        "isolatedMaxAvailable": "1.5"
+      }
+    ]
+  },
+  "/api/v2/mix/position/all-position": {
+    "code": "00000",
+    "data": []
+  },
+  "/api/v2/mix/order/orders-pending": {
+    "code": "00000",
+    "data": {
+      "entrustedList": [],
+      "endId": ""
+    }
+  },
+  "/api/v2/mix/order/orders-plan-pending": {
+    "code": "00000",
+    "data": {
+      "entrustedList": [],
+      "endId": ""
+    }
+  },
+  "/api/v2/mix/account/account": {
+    "code": "00000",
+    "data": {
+      "marginCoin": "BTC",
+      "posMode": "one_way_mode",
+      "marginMode": "crossed",
+      "crossedMarginLeverage": "20",
+      "isolatedLongLever": "20",
+      "isolatedShortLever": "20"
+    }
+  }
+}

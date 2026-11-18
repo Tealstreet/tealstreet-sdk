@@ -501,6 +501,7 @@ impl MexcFutures {
         store: &safe_cex_engine::Store,
         request: &ManagedRequest,
         now: f64,
+        utc: f64,
     ) -> Result<(), VenueError> {
         let job = self
             .trading
@@ -537,10 +538,12 @@ impl MexcFutures {
             .ok_or_else(|| not_sent("MEXC protection provenance missing"))?;
         match request.native.call {
             Call::Cancel { .. } | Call::NativeEdit => {
-                protection::guard_at(store, now, &self.references, edit, false).map_err(not_sent)
+                protection::guard_at(store, now, utc, &self.references, edit, false)
+                    .map_err(not_sent)
             }
             Call::ProtectivePlace { restore: true } => {
-                protection::guard_at(store, now, &self.references, edit, true).map_err(not_sent)
+                protection::guard_at(store, now, utc, &self.references, edit, true)
+                    .map_err(not_sent)
             }
             Call::ProtectivePlace { restore: false } => {
                 if !edit.cancel_proven {
@@ -548,7 +551,7 @@ impl MexcFutures {
                         "MEXC cancellation is not proven; replacement withheld",
                     ));
                 }
-                protection::replacement_guard_at(store, now, &self.references, edit)
+                protection::replacement_guard_at(store, now, utc, &self.references, edit)
                     .map_err(not_sent)
             }
             _ => Ok(()),

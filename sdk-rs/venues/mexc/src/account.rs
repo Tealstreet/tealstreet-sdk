@@ -1,6 +1,7 @@
 //! Private stream and paged account reconciliation. Live revisions win over
 //! snapshots that started before them; failed pages never replace store data.
 use crate::{Connection, MexcFutures, Pending, WS, sign, wire::*};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::error::{ErrorKind, VenueError};
@@ -234,12 +235,13 @@ impl MexcFutures {
             ]);
         }
         if matches!(snapshot.scope, Scope::Plan | Scope::Stop) {
+            let end = cx.protocol_stamp_ms();
             params.extend([
                 (
                     "start_time",
-                    safe_cex_engine::num::format(cx.protocol_now() - 89.0 * 86400000.0),
+                    safe_cex_engine::num::format(end - 89.0 * 86400000.0),
                 ),
-                ("end_time", safe_cex_engine::num::format(cx.protocol_now())),
+                ("end_time", safe_cex_engine::num::format(end)),
             ]);
             params.push(if snapshot.scope == Scope::Plan {
                 ("states", "1".into())
@@ -282,10 +284,10 @@ impl MexcFutures {
         };
         self.account.private.open = true;
         self.account.supervisor.opened(cx);
-        cx.send(socket, r#"{"method":"ping"}"#);
+        cx.send(socket, ControlFrame::heartbeat(r#"{"method":"ping"}"#));
         cx.send_signed(
             socket,
-            String::new(),
+            ControlFrame::authentication(String::new()),
             Box::new(sign::dispatch::Login::new(identity.clone(), socket)),
         );
     }
@@ -305,7 +307,7 @@ impl MexcFutures {
                 self.account.authenticated = true;
                 self.account.supervisor.authenticated(cx);
                 if let Some(socket) = self.account.private.socket {
-                    cx.send(socket,r#"{"method":"personal.filter","param":{"filters":[{"filter":"order"},{"filter":"order.deal"},{"filter":"position"},{"filter":"asset"},{"filter":"plan.order"},{"filter":"stop.order"},{"filter":"stop.planorder"}]}}"#);
+                    cx.send(socket,ControlFrame::subscription(r#"{"method":"personal.filter","param":{"filters":[{"filter":"order"},{"filter":"order.deal"},{"filter":"position"},{"filter":"asset"},{"filter":"plan.order"},{"filter":"stop.order"},{"filter":"stop.planorder"}]}}"#));
                 }
                 if self.account.mode_ready {
                     self.refresh_account(cx, true);
@@ -1524,7 +1526,7 @@ impl MexcFutures {
             Tick::Reconnect => self.connect_private(cx),
             Tick::Ping => {
                 if let Some(socket) = self.account.private.socket {
-                    cx.send(socket, r#"{"method":"ping"}"#);
+                    cx.send(socket, ControlFrame::heartbeat(r#"{"method":"ping"}"#));
                 }
             }
             Tick::TimedOut(_) => {

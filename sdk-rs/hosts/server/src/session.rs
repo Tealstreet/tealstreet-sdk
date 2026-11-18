@@ -73,6 +73,7 @@ struct Client {
     pending: Arc<Mutex<HashMap<u32, Pending>>>,
     /// After a re-snapshot the old client only finishes its pending replies.
     draining: Arc<AtomicBool>,
+    publish_interval: tokio::sync::watch::Sender<u16>,
 }
 
 /// Subscribers one socket can stack on a book or candle key before extras stop counting.
@@ -80,6 +81,8 @@ const MAX_SUBSCRIBERS_PER_KEY: u32 = 64;
 
 struct Joined {
     account: Arc<Account>,
+    /// This socket's admitted mode, independent of later resident upgrades.
+    admitted_mode: envelope::AccountSigningMode,
     out: Out,
     client: Client,
     old: Vec<Client>,
@@ -487,10 +490,23 @@ impl Session {
         }
         if !self.admission_token_valid() {
             self.drop_early(&completed.account_name, "verification refused");
-            out.send(envelope::init_unverified(&completed.account_name, false));
+            out.send(envelope::init_unverified(
+                &completed.account_name,
+                false,
+                envelope::InitRefusalReasonClass::Unknown,
+                ProbeRefusal::INVALID
+                    .at(RefusalStage::Authentication)
+                    .into(),
+            ));
             return Ok(());
         }
         if let Some(probe) = completed.probe {
+            let requested_mode = envelope::AccountSigningMode::requested(&probe.init);
+            let interval = probe
+                .init
+                .publish_interval_ms
+                .millis()
+                .expect("validated init");
             let candidate = completed.candidate.ok();
             out = out.account(&completed.account_name);
             let account = match probe.permit {
@@ -530,10 +546,12 @@ impl Session {
                     if let Some(joined) = self.joined.get_mut(&completed.account_name)
                         && Arc::ptr_eq(&joined.account, &account)
                     {
+                        joined.admitted_mode = requested_mode;
                         let previous = std::mem::replace(&mut joined.out, out.clone());
                         previous.retire_order_receipts();
                         previous.finish_registration(&out);
-                        self.resnapshot(&completed.account_name).await;
+                        self.resnapshot(&completed.account_name, Some(interval))
+                            .await;
                     } else {
                         if let Some(previous) = self.joined.remove(&completed.account_name) {
                             previous.out.retire_registration();
@@ -546,12 +564,21 @@ impl Session {
                                 Disposal::SettingsChanged,
                             );
                         }
-                        self.join(account, out.clone()).await;
+                        self.join(account, out.clone(), requested_mode, interval)
+                            .await;
                     }
                     if self.joined.contains_key(&completed.account_name) {
+                        self.joined[&completed.account_name]
+                            .account
+                            .confirm_signing_mode(
+                                self.socket,
+                                &completed.account_name,
+                                requested_mode,
+                                out.outbox(),
+                            );
                         if self.joined[&completed.account_name]
                             .account
-                            .delegated
+                            .delegated()
                             .is_some()
                         {
                             self.registry.interruptions.delegated_status(
@@ -583,10 +610,28 @@ impl Session {
                         diagnostic.refused(refusal);
                     }
                     self.drop_early(&completed.account_name, "verification refused");
-                    out.send(envelope::init_unverified(
-                        &completed.account_name,
-                        refusal.transient,
-                    ));
+                    out.send(if refusal.unavailable {
+                        envelope::init_proof_unavailable(&completed.account_name)
+                    } else {
+                        match refusal.transition {
+                            Some(reason) => envelope::init_mode_transition_refused(
+                                &completed.account_name,
+                                reason,
+                                requested_mode,
+                                envelope::AccountSigningMode::Cosigned,
+                            ),
+                            None => envelope::init_unverified(
+                                &completed.account_name,
+                                refusal.transient,
+                                envelope::InitRefusalReasonClass::from_error(
+                                    &probe.init.exchange_name,
+                                    refusal.error_kind,
+                                    refusal.venue_code,
+                                ),
+                                refusal.into(),
+                            ),
+                        }
+                    });
                 }
             }
             return Ok(());
@@ -597,6 +642,13 @@ impl Session {
         out.send(envelope::init_unverified(
             &completed.account_name,
             transient,
+            envelope::InitRefusalReasonClass::Unknown,
+            ProbeRefusal {
+                transient,
+                ..ProbeRefusal::INVALID
+            }
+            .at(RefusalStage::HandoverOpen)
+            .into(),
         ));
         Ok(())
     }
@@ -613,6 +665,8 @@ impl Session {
     fn admission_init(&mut self, init: InitPayload) {
         self.cancel_verification(&init.account_name);
         let delegated = init.signing_mode.as_deref() == Some("delegated");
+        let cdp_unavailable =
+            delegated && matches!(init.exchange_name.as_str(), "coinbase" | "coinbasespot");
         let diagnostic = delegated.then(|| {
             self.handovers
                 .refusal_context(&init.account_name, &init.exchange_name)
@@ -624,9 +678,15 @@ impl Session {
             Some(RefusalStage::VenuePolicy)
         } else if init.public_only == Some(true) || init.account_name.starts_with("__pub_") {
             Some(RefusalStage::PublicAccount)
-        } else if let Some((reason, _)) =
-            self.registry
-                .signing_mode_refusal_detail(self.user(), &init, false, delegated)
+        } else if let Some((reason, _)) = self
+            .registry
+            .signing_mode_refusal_detail(self.user(), &init, false, delegated)
+            .filter(|(reason, _)| {
+                !matches!(
+                    reason,
+                    crate::accounts::SigningModeRefusalReason::ResidentModeConflict
+                )
+            })
         {
             signing_mode_reason = Some(reason);
             Some(RefusalStage::SigningMode)
@@ -646,8 +706,11 @@ impl Session {
             if signing_mode_reason.is_some() {
                 self.handover_out(&init.account_name)
                     .send(envelope::init_signing_mode_refused(&init.account_name));
+            } else if cdp_unavailable && matches!(kind, RefusalStage::VenuePolicy) {
+                self.handover_out(&init.account_name)
+                    .send(envelope::init_proof_unavailable(&init.account_name));
             } else {
-                self.refuse_handover(&init.account_name, false);
+                self.refuse_handover(&init.account_name, ProbeRefusal::INVALID.at(kind));
             }
             return;
         }
@@ -657,10 +720,16 @@ impl Session {
             }
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "verification capacity reached");
-            self.refuse_handover(&init.account_name, true);
+            self.refuse_handover(
+                &init.account_name,
+                ProbeRefusal::TRANSIENT.at(RefusalStage::Capacity),
+            );
             return;
         }
-        if !delegated && !crate::delegated::probe::cosigned_ready(&init.exchange_name) {
+        // DELEGATED CDP handover remains separate from COSIGNED JWT proof readiness.
+        if (!delegated && !self.registry.cosigned_proof_ready(self.user(), &init))
+            || cdp_unavailable
+        {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "proof unavailable");
             self.handover_out(&init.account_name)
@@ -677,7 +746,10 @@ impl Session {
         } else if init.sealed.is_some() {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "verification refused");
-            self.refuse_handover(&init.account_name, false);
+            self.refuse_handover(
+                &init.account_name,
+                ProbeRefusal::INVALID.at(RefusalStage::HandoverOpen),
+            );
         } else {
             self.handovers.forget(&init.account_name);
             self.open_probed_cosigned(init);
@@ -692,6 +764,7 @@ impl Session {
         let registry = self.registry.clone();
         let user = self.user().to_owned();
         let token = self.identity.token.clone();
+        let socket = self.socket;
         self.start_probe_verification(
             init.account_name.clone(),
             Some((link.clone(), lifetime)),
@@ -699,7 +772,7 @@ impl Session {
                 let permit = match permit {
                     Ok(permit) => {
                         registry
-                            .probe_join(&user, &init, token, None, Some(link), permit)
+                            .probe_join(&user, &init, token, None, Some(link), socket, permit)
                             .await
                     }
                     Err(refusal) => Err(refusal),
@@ -726,7 +799,7 @@ impl Session {
                 diagnostic.refused(refusal.at(RefusalStage::Permit));
                 self.handovers.forget(&init.account_name);
                 self.drop_early(&init.account_name, "verification refused");
-                self.refuse_handover(&init.account_name, refusal.transient);
+                self.refuse_handover(&init.account_name, refusal.at(RefusalStage::Permit));
                 return;
             }
         };
@@ -734,7 +807,10 @@ impl Session {
             diagnostic.refused(ProbeRefusal::INVALID.at(RefusalStage::MissingHandover));
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "delegated init refused");
-            self.refuse_handover(&init.account_name, false);
+            self.refuse_handover(
+                &init.account_name,
+                ProbeRefusal::INVALID.at(RefusalStage::MissingHandover),
+            );
             return;
         };
         let opening =
@@ -746,13 +822,17 @@ impl Session {
                 Err(_) => {
                     diagnostic.refused(ProbeRefusal::INVALID.at(RefusalStage::HandoverAttempt));
                     self.drop_early(&init.account_name, "delegated init refused");
-                    self.refuse_handover(&init.account_name, false);
+                    self.refuse_handover(
+                        &init.account_name,
+                        ProbeRefusal::INVALID.at(RefusalStage::HandoverAttempt),
+                    );
                     return;
                 }
             };
         let registry = self.registry.clone();
         let user = self.user().to_owned();
         let token = self.identity.token.clone();
+        let socket = self.socket;
         self.start_probe_verification(init.account_name.clone(), None, async move {
             let candidate = opening.open(
                 &init.exchange_name,
@@ -764,7 +844,7 @@ impl Session {
                 Ok(candidate) => Some(ProbedInit {
                     diagnostic: Some(diagnostic.clone()),
                     permit: registry
-                        .probe_join(&user, &init, token, Some(candidate), None, permit)
+                        .probe_join(&user, &init, token, Some(candidate), None, socket, permit)
                         .await,
                     init,
                 }),
@@ -788,7 +868,10 @@ impl Session {
         let Some(sealed) = init.sealed.take() else {
             self.handovers.forget(&init.account_name);
             self.drop_early(&init.account_name, "delegated init refused");
-            self.refuse_handover(&init.account_name, false);
+            self.refuse_handover(
+                &init.account_name,
+                ProbeRefusal::INVALID.at(RefusalStage::MissingHandover),
+            );
             return;
         };
         let opening =
@@ -799,7 +882,10 @@ impl Session {
                 Ok(opening) => opening,
                 Err(_) => {
                     self.drop_early(&init.account_name, "delegated init refused");
-                    self.refuse_handover(&init.account_name, false);
+                    self.refuse_handover(
+                        &init.account_name,
+                        ProbeRefusal::INVALID.at(RefusalStage::HandoverAttempt),
+                    );
                     return;
                 }
             };
@@ -841,7 +927,7 @@ impl Session {
         ));
         self.rejoined_at
             .insert(name.to_owned(), std::time::Instant::now());
-        self.resnapshot(name).await;
+        self.resnapshot(name, None).await;
     }
 
     /// A held client's account loaded: its client gets a full snapshot now.
@@ -851,7 +937,7 @@ impl Session {
             .get(name)
             .is_some_and(|joined| joined.client.id == client)
         {
-            self.resnapshot(name).await;
+            self.resnapshot(name, None).await;
         }
     }
 
@@ -887,9 +973,13 @@ impl Session {
             .unwrap_or_else(|| self.account_out(name))
     }
 
-    fn refuse_handover(&self, name: &str, transient: bool) {
-        self.handover_out(name)
-            .send(envelope::init_unverified(name, transient));
+    fn refuse_handover(&self, name: &str, refusal: ProbeRefusal) {
+        self.handover_out(name).send(envelope::init_unverified(
+            name,
+            refusal.transient,
+            envelope::InitRefusalReasonClass::Unknown,
+            refusal.into(),
+        ));
     }
 
     /// Exercise the trusted construction entry point from this authenticated
@@ -987,7 +1077,13 @@ impl Session {
                     } else {
                         out.with_account_label(&label)
                     };
-                    self.join(account.clone(), out).await;
+                    self.join(
+                        account.clone(),
+                        out,
+                        envelope::AccountSigningMode::Cosigned,
+                        0,
+                    )
+                    .await;
                 }
             }
         }
@@ -1004,6 +1100,45 @@ impl Session {
             let name = envelope::account_name(text);
             let out = match serde_json::from_str::<Inbound>(text) {
                 Ok(Inbound::Init(init)) => self.out.with_instance_id(init.instance_id.as_deref()),
+                Ok(Inbound::Msg(msg)) if msg.op == "set-publish-interval" => {
+                    let out = msg
+                        .account_name
+                        .as_deref()
+                        .map(|name| self.account_out(name))
+                        .unwrap_or_else(|| self.out.clone());
+                    out.send(envelope::publish_interval_refused(
+                        msg.account_name.as_deref(),
+                        "auth_expired",
+                        false,
+                    ));
+                    return Ok(());
+                }
+                Ok(Inbound::OrderSubmit(submit))
+                    if self.identity.user.is_some()
+                        && text.len() <= crate::order_contract::SUBMIT_MAX =>
+                {
+                    self.refuse_expired_order(
+                        &submit.account_name,
+                        submit.instance_id.as_deref(),
+                        &submit.intent_id,
+                        submit.seq,
+                        false,
+                    );
+                    return Ok(());
+                }
+                Ok(Inbound::OrderAction(request))
+                    if self.identity.user.is_some()
+                        && text.len() <= crate::order_contract::SUBMIT_MAX =>
+                {
+                    self.refuse_expired_order(
+                        &request.account_name,
+                        request.instance_id.as_deref(),
+                        &request.intent_id,
+                        request.seq,
+                        true,
+                    );
+                    return Ok(());
+                }
                 Ok(Inbound::Msg(AccountMsg {
                     op,
                     account_name: Some(name),
@@ -1102,6 +1237,10 @@ impl Session {
                 self.reset_settings(request);
             }
             Inbound::Msg(msg) => {
+                if msg.op == "set-publish-interval" {
+                    self.set_publish_interval(msg);
+                    return Ok(());
+                }
                 if !authenticated
                     && !(msg.account_name.as_deref() == Some(PUBLIC_ACCOUNT)
                         && PUBLIC_OPS.contains(&msg.op.as_str()))
@@ -1118,11 +1257,17 @@ impl Session {
                         "Unauthenticated exchange-server sessions cannot sign",
                     ));
                 }
+                #[derive(serde::Deserialize)]
+                struct RawResponse {
+                    d: Box<serde_json::value::RawValue>,
+                }
+                let raw = serde_json::from_str::<RawResponse>(text).ok();
                 if self.pending_verifications.values().any(|pending| {
-                    pending
-                        .cosigned_link
-                        .as_ref()
-                        .is_some_and(|link| link.resolve(self.socket, response.clone()))
+                    pending.cosigned_link.as_ref().is_some_and(|link| {
+                        raw.as_ref()
+                            .is_some_and(|raw| link.resolve_join_proof(self.socket, raw.d.get()))
+                            || link.resolve(self.socket, response.clone())
+                    })
                 }) {
                     return Ok(());
                 }
@@ -1222,6 +1367,14 @@ impl Session {
             self.moved = true;
             return Err(Close::Moved);
         }
+        let Some(interval) = init.publish_interval_ms.millis() else {
+            out.send(envelope::publish_interval_refused(
+                Some(&init.account_name),
+                "invalid_publish_interval",
+                true,
+            ));
+            return Ok(());
+        };
         self.registration_outputs
             .insert(init.account_name.clone(), out.clone());
         Log::info(&format!(
@@ -1254,13 +1407,16 @@ impl Session {
         self.handovers.forget(&init.account_name);
         if init.sealed.is_some() {
             self.drop_early(&init.account_name, "sealed init requires delegated signing");
-            self.refuse_handover(&init.account_name, false);
+            self.refuse_handover(
+                &init.account_name,
+                ProbeRefusal::INVALID.at(RefusalStage::SigningMode),
+            );
             return Ok(());
         }
         self.forget_disposed();
         if let Some(joined) = self.joined.get(&init.account_name)
-            && joined.account.delegated.is_some()
-            && (public_only || joined.account.matches_init(self.user(), &init))
+            && joined.account.delegated().is_some()
+            && public_only
         {
             out.account(&init.account_name).send(envelope::init_refused(
                 &init.account_name,
@@ -1268,34 +1424,46 @@ impl Session {
             ));
             return Ok(());
         }
+        let requested_mode = envelope::AccountSigningMode::requested(&init);
+        let fingerprint = init.fingerprint();
+        // #3535: passphrase normalization is safe only because this snapshot path
+        // reuses the proved account/provider and never installs or forwards init credentials.
+        let snapshot_only = self.joined.get(&init.account_name).is_some_and(|joined| {
+            joined.admitted_mode == requested_mode
+                && joined.account.matches_init(self.user(), &init)
+                && (joined.account.fingerprint == fingerprint
+                    || joined.account.delegated().is_some()
+                        && crate::accounts::same_handover_settings(
+                            &joined.account.fingerprint,
+                            &fingerprint,
+                        ))
+        });
         let admission_enabled = self.registry.private_join_requires_proof();
         if !public_only && admission_enabled {
             if !self.admission_token_valid() {
                 self.drop_early(&init.account_name, "verification refused");
-                self.refuse_handover(&init.account_name, false);
+                self.refuse_handover(
+                    &init.account_name,
+                    ProbeRefusal::INVALID.at(RefusalStage::Authentication),
+                );
                 return Ok(());
             }
-            if self.joined.get(&init.account_name).is_none_or(|joined| {
-                joined.account.fingerprint != init.fingerprint()
-                    || !joined.account.matches_init(self.user(), &init)
-            }) {
+            if !snapshot_only {
                 self.admission_init(init);
                 return Ok(());
             }
         }
-        if let Some(refusal) =
-            self.registry
-                .signing_mode_refusal(self.user(), &init, public_only, false)
+        if !snapshot_only
+            && let Some(refusal) =
+                self.registry
+                    .signing_mode_refusal(self.user(), &init, public_only, false)
         {
             out.account(&init.account_name)
                 .send(envelope::init_refused(&init.account_name, &refusal));
             self.drop_early(&init.account_name, "init refused for signing mode");
             return Ok(());
         }
-        if let Some(joined) = self.joined.get(&init.account_name)
-            && joined.account.fingerprint == init.fingerprint()
-            && joined.account.matches_init(self.user(), &init)
-        {
+        if snapshot_only {
             // Resumed (or repeated) with what it was built from: a fresh snapshot only.
             let out = out.account(&init.account_name);
             let joined = self.joined.get_mut(&init.account_name).unwrap();
@@ -1313,7 +1481,15 @@ impl Session {
                 account.update_reply_outbox(self.socket, out.outbox(), &init.account_name);
             }
             previous.finish_registration(&out);
-            self.resnapshot(&init.account_name).await;
+            self.resnapshot(&init.account_name, Some(interval)).await;
+            if !account.is_public() {
+                account.confirm_signing_mode(
+                    self.socket,
+                    &init.account_name,
+                    envelope::AccountSigningMode::requested(&init),
+                    out.outbox(),
+                );
+            }
             return Ok(());
         }
         // Existing private settings stay until an admitted client explicitly resets them.
@@ -1367,7 +1543,8 @@ impl Session {
             Ok(account) => {
                 self.metrics.note_init();
                 let private = !account.is_public();
-                self.join(account, out.clone()).await;
+                self.join(account, out.clone(), requested_mode, interval)
+                    .await;
                 if private && self.joined.contains_key(&init.account_name) {
                     self.registry
                         .interruptions
@@ -1404,9 +1581,15 @@ impl Session {
         Ok(())
     }
 
-    async fn join(&mut self, account: Arc<Account>, out: Out) {
+    async fn join(
+        &mut self,
+        account: Arc<Account>,
+        out: Out,
+        admitted_mode: envelope::AccountSigningMode,
+        interval: u16,
+    ) {
         let name = out.account_label(&account.name).to_owned();
-        match self.client(&account, out.clone()).await {
+        match self.client(&account, out.clone(), interval).await {
             Ok(client) => {
                 if let Some(algos) = &account.algos {
                     let _ = algos.send(crate::algos::AlgoInput::Joined);
@@ -1415,6 +1598,7 @@ impl Session {
                     name.clone(),
                     Joined {
                         account,
+                        admitted_mode,
                         out,
                         client,
                         old: Vec::new(),
@@ -1433,7 +1617,12 @@ impl Session {
         }
     }
 
-    async fn client(&self, account: &Arc<Account>, out: Out) -> Result<Client, &'static str> {
+    async fn client(
+        &self,
+        account: &Arc<Account>,
+        out: Out,
+        interval: u16,
+    ) -> Result<Client, &'static str> {
         crate::auth::Verifier::check_expiry(self.token_expires_at_ms(), now_ms())?;
         let id = self.registry.next_id();
         let link = account.handle.join(id, true).await?;
@@ -1447,6 +1636,7 @@ impl Session {
             client: id,
             loaded: self.loaded.clone(),
         });
+        let (publish_interval, publish_rx) = tokio::sync::watch::channel(interval);
         let pump = tokio::spawn(pump(
             link,
             id,
@@ -1457,30 +1647,34 @@ impl Session {
             pending.clone(),
             draining.clone(),
             hold,
+            publish_rx,
         ));
         Ok(Client {
             id,
             pump,
             pending,
             draining,
+            publish_interval,
         })
     }
 
     /// A new client on the same account takes a full snapshot (seq 1); the old
     /// one stops forwarding frames and leaves once its replies are in. False when
     /// no new client could join.
-    async fn resnapshot(&mut self, name: &str) -> bool {
+    async fn resnapshot(&mut self, name: &str, requested_interval: Option<u16>) -> bool {
         if self.token_expired() {
             return false;
         }
-        let Some((account, out)) = self
-            .joined
-            .get(name)
-            .map(|joined| (joined.account.clone(), joined.out.clone()))
-        else {
+        let Some((account, out, interval)) = self.joined.get(name).map(|joined| {
+            (
+                joined.account.clone(),
+                joined.out.clone(),
+                requested_interval.unwrap_or(*joined.client.publish_interval.borrow()),
+            )
+        }) else {
             return false;
         };
-        match self.client(&account, out.clone()).await {
+        match self.client(&account, out.clone(), interval).await {
             Ok(client) => {
                 let joined = self.joined.get_mut(name).unwrap();
                 // Before the old client leaves, so the venue never unsubscribes in between.
@@ -1557,7 +1751,42 @@ impl Session {
         }
     }
 
+    fn set_publish_interval(&self, msg: AccountMsg) {
+        let name = msg.account_name.as_deref();
+        let out = name
+            .map(|name| self.account_out(name))
+            .unwrap_or_else(|| self.out.clone());
+        let joined = name.and_then(|name| self.joined.get(name));
+        let Some(joined) = joined.filter(|joined| {
+            self.registry.holds(&joined.account, self.socket)
+                && !joined.client.draining.load(Ordering::Relaxed)
+                && !self.pending_verifications.contains_key(name.unwrap())
+        }) else {
+            out.send(envelope::publish_interval_refused(
+                name,
+                "not_admitted",
+                false,
+            ));
+            return;
+        };
+        let Some(interval) =
+            envelope::RequestedInterval::parse(&msg.data["publishIntervalMs"]).millis()
+        else {
+            out.send(envelope::publish_interval_refused(
+                name,
+                "invalid_publish_interval",
+                false,
+            ));
+            return;
+        };
+        joined.client.publish_interval.send_replace(interval);
+    }
+
     async fn msg(&mut self, msg: AccountMsg) {
+        if msg.op == "set-publish-interval" {
+            self.set_publish_interval(msg);
+            return;
+        }
         let Some(name) = msg.account_name.clone() else {
             return;
         };
@@ -1575,7 +1804,7 @@ impl Session {
                     .refused(ProbeRefusal::INVALID.at(RefusalStage::VenuePolicy));
                 self.handovers.forget(&name);
                 self.drop_early(&name, "delegated init refused");
-                self.refuse_handover(&name, false);
+                self.refuse_handover(&name, ProbeRefusal::INVALID.at(RefusalStage::VenuePolicy));
             }
             return;
         }
@@ -1667,7 +1896,7 @@ impl Session {
             .map(str::to_owned);
         match (msg.op.as_str(), symbol, interval) {
             ("sendSnapshot", _, _) => {
-                self.resnapshot(&name).await;
+                self.resnapshot(&name, None).await;
             }
             _ if topic.is_some() => self.apply_topic(&name, topic.as_ref().unwrap()),
             ("callMethod", _, _) => self.call(&name, msg.data).await,
@@ -1678,7 +1907,7 @@ impl Session {
                 json!({"requestId": msg.data.get("requestId"), "success": true}),
             )),
             (op, _, _)
-                if self.joined[&name].account.delegated.is_some()
+                if self.joined[&name].account.delegated().is_some()
                     && (matches!(op, "exec" | "chaser:start" | "twap:start" | "twap:resume")
                         || op == "twap:state"
                             && msg.data.as_array().is_some_and(|rows| {
@@ -1763,15 +1992,20 @@ impl Session {
     async fn apply_settings(&mut self, name: &str, data: Value) {
         let out = self.account_out(name);
         let request_id = data.get("requestId").cloned().unwrap_or(Value::Null);
+        let interval = *self.joined[name].client.publish_interval.borrow();
         let result = match serde_json::from_value::<InitPayload>(data["settings"].clone()) {
             Ok(init) if init.account_name == name => {
-                let account = self.joined[name].account.clone();
-                self.settings_change(init, account).await
+                let joined = &self.joined[name];
+                let account = joined.account.clone();
+                let admitted_mode = joined.admitted_mode;
+                self.settings_change(init, account)
+                    .await
+                    .map(|account| (account, admitted_mode))
             }
             _ => Err("Apply settings requires settings for this account label".into()),
         };
         let result = match result {
-            Ok(account) => {
+            Ok((account, admitted_mode)) => {
                 if let Some(previous) = self.joined.remove(name) {
                     Self::leave_engine(previous);
                 }
@@ -1783,7 +2017,8 @@ impl Session {
                     *fallback = replacement.clone();
                 }
                 account.update_reply_outbox(self.socket, replacement.outbox(), name);
-                self.join(account, replacement).await;
+                self.join(account, replacement, admitted_mode, interval)
+                    .await;
                 if self.joined.contains_key(name) {
                     Ok(())
                 } else {
@@ -1831,7 +2066,7 @@ impl Session {
             Err(_) => {
                 diagnostic.refused(ProbeRefusal::INVALID.at(RefusalStage::KeyOffer));
                 self.drop_early(name, "delegated init refused");
-                self.refuse_handover(name, false);
+                self.refuse_handover(name, ProbeRefusal::INVALID.at(RefusalStage::KeyOffer));
             }
         }
     }
@@ -2019,7 +2254,7 @@ impl Session {
         let dispatch_out = self.account_out(name);
         let action_expires_at_ms = self.token_expires_at_ms();
         let symbols = if method == "cancelAllOrders"
-            && (account.delegated.is_none()
+            && (account.delegated().is_none()
                 || matches!(order_frame, Some(OrderReceipt::Action { .. })))
         {
             let mut symbols: Vec<String> = account
@@ -2058,13 +2293,16 @@ impl Session {
             )
             .check()
         {
+            // 116aeae12 proves expiry here precedes every native command.
+            // Later per-leg guards retain uncertainty after possible effects.
+            audit_preflight(&account, self.socket, &method, &args, message);
             crate::order_actions::settle(
                 &dispatch_out,
                 name,
                 &request_id,
                 seq,
                 kind,
-                Err(json!({"message":message,"outcome":"unknown"})),
+                Err(json!({"message":message,"outcome":"notSent"})),
             );
             return;
         }
@@ -2085,7 +2323,7 @@ impl Session {
                         message: "Account closed before leverage dispatch".into(),
                     })
                 })
-        } else if account.delegated.is_some() {
+        } else if account.delegated().is_some() {
             let translate = if matches!(order_frame, Some(OrderReceipt::Action { .. })) {
                 methods::translate_delegated_action
             } else {
@@ -2141,13 +2379,16 @@ impl Session {
             )
             .check()
         {
+            // 116aeae12 proves expiry here precedes every native command.
+            // Later per-leg guards retain uncertainty after possible effects.
+            audit_preflight(&account, self.socket, &method, &args, message);
             crate::order_actions::settle(
                 &dispatch_out,
                 name,
                 &request_id,
                 seq,
                 kind,
-                Err(json!({"message":message,"outcome":"unknown"})),
+                Err(json!({"message":message,"outcome":"notSent"})),
             );
             return;
         }
@@ -2159,7 +2400,11 @@ impl Session {
                 {
                     *reply = match receipt {
                         OrderReceipt::Placement(seq) => methods::Reply::Intent {
-                            client_order_id: request_id.as_str().unwrap_or_default().to_owned(),
+                            client_order_id: command["orders"]
+                                .as_array()
+                                .filter(|orders| orders.len() == 1)
+                                .and_then(|orders| orders[0]["clientOrderId"].as_str())
+                                .map(str::to_owned),
                             seq,
                         },
                         OrderReceipt::Action { seq, kind, .. } => methods::Reply::Action {
@@ -2285,7 +2530,7 @@ impl Session {
                     });
                 }
                 Plan::Resnapshot(result) => {
-                    if self.resnapshot(name).await {
+                    if self.resnapshot(name, None).await {
                         self.send(envelope::msg(
                             name,
                             "callMethod:done",
@@ -2505,7 +2750,10 @@ impl Session {
                 && let Some(pending) = pending.lock().unwrap().remove(&id)
             {
                 let mut detail = failure_detail("Error", &message, false);
-                if matches!(pending.reply, methods::Reply::Action { .. }) {
+                if matches!(
+                    pending.reply,
+                    methods::Reply::Intent { .. } | methods::Reply::Action { .. }
+                ) {
                     detail["outcome"] = "notSent".into();
                 }
                 settle(&out, &name, pending, Err(detail));
@@ -2659,6 +2907,17 @@ const WRITE_METHODS: [&str; 9] = [
     "setAllLeverage",
 ];
 
+fn audit_preflight(account: &Account, socket: u64, method: &str, args: &[Value], message: &str) {
+    let mut fields = crate::audit::refused_call(method, args);
+    fields.insert("stage".into(), "preflight".into());
+    crate::audit::log(
+        &audit_who(account),
+        &format!("socket:{socket}/preflight"),
+        &fields,
+        crate::audit::result(&Err(json!({"message":message,"outcome":"notSent"}))),
+    );
+}
+
 fn audit_who(account: &Account) -> crate::audit::Who {
     crate::audit::Who {
         user: account.user.clone(),
@@ -2681,10 +2940,21 @@ fn after_load_pool<'a>(
 
 fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>) {
     if let Some(audit) = &pending.audit {
+        let mut fields = audit.fields.clone();
+        if matches!(
+            pending.reply,
+            methods::Reply::Intent { .. } | methods::Reply::Action { .. }
+        ) && let Ok(value) = &outcome
+        {
+            fields.insert(
+                "result_shape".into(),
+                crate::audit::result_shape(value).into(),
+            );
+        }
         crate::audit::log(
             &audit.who,
             &audit.origin,
-            &audit.fields,
+            &fields,
             crate::audit::result(&outcome),
         );
     }
@@ -2751,7 +3021,7 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             out,
             name,
             &pending.request_id,
-            client_order_id,
+            client_order_id.as_deref(),
             *seq,
             outcome,
         );
@@ -2859,6 +3129,16 @@ async fn release_hold(
     }
 }
 
+fn publish_frames(out: &Out, name: &str, seq: &mut u64, frames: Vec<Arc<[u8]>>) -> bool {
+    for bytes in frames {
+        *seq += 1;
+        if !out.send(envelope::frame(name, *seq, *seq == 1, &bytes)) {
+            return false;
+        }
+    }
+    true
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn pump(
     mut link: ClientLink,
@@ -2870,10 +3150,16 @@ async fn pump(
     pending: Arc<Mutex<HashMap<u32, Pending>>>,
     draining: Arc<AtomicBool>,
     mut hold: Option<Hold>,
+    mut publish_interval: tokio::sync::watch::Receiver<u16>,
 ) {
     // Set while frames are withheld: when holding began.
     let mut held: Option<std::time::Instant> = None;
     let mut seq = 0u64;
+    let mut publisher = crate::publication::Publisher::new(
+        *publish_interval.borrow(),
+        safe_cex_native::ServerConfig::default().max_frame_bytes,
+    );
+    let mut configuration_open = true;
     let mut health_tick = tokio::time::interval(SOCKET_HEALTH_EVERY);
     let mut hold_tick = tokio::time::interval(SNAPSHOT_HOLD_CHECK);
     let mut sent_health = (Value::Null, std::time::Instant::now());
@@ -2904,6 +3190,33 @@ async fn pump(
         ))
     };
     loop {
+        // Service cadence after each received item, even with a permanently ready inbox.
+        // The preceding item's private sections/notices have already been sent.
+        if !draining.load(Ordering::Relaxed) {
+            let interval = *publish_interval.borrow_and_update();
+            let ready = publisher.set_interval(interval).and_then(|mut frames| {
+                if publisher
+                    .deadline()
+                    .is_some_and(|at| at <= tokio::time::Instant::now())
+                {
+                    frames.extend(publisher.flush()?);
+                }
+                Ok(frames)
+            });
+            match ready {
+                Ok(frames) => {
+                    if !publish_frames(&out, &name, &mut seq, frames) {
+                        break;
+                    }
+                }
+                Err(_) => {
+                    Log::warn("public publication baseline unavailable; requesting snapshot");
+                    let _ = dropped.send((name.clone(), client));
+                    break;
+                }
+            }
+        }
+        let deadline = publisher.deadline();
         let item = tokio::select! {
             item = link.outgoing.recv() => match item {
                 Some(item) => item,
@@ -2915,6 +3228,13 @@ async fn pump(
                     break;
                 }
             },
+            changed = publish_interval.changed(), if configuration_open => {
+                if changed.is_err() { configuration_open = false; }
+                continue;
+            }
+            _ = async { match deadline { Some(at) => tokio::time::sleep_until(at).await, None => std::future::pending::<()>().await } }, if !draining.load(Ordering::Relaxed) => {
+                continue;
+            }
             _ = hold_tick.tick(), if held.is_some() && hold.is_some() => {
                 release_hold(&handle, &name, &mut hold, held.expect("holding")).await;
                 continue;
@@ -2945,11 +3265,20 @@ async fn pump(
                 if held.is_some() {
                     continue;
                 }
-                seq += 1;
-                if !out.send(envelope::frame(&name, seq, seq == 1, &bytes)) {
-                    break;
+                let initial = seq == 0;
+                match publisher.receive(bytes, initial) {
+                    Ok(frames) => {
+                        if !publish_frames(&out, &name, &mut seq, frames) {
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        Log::warn("public publication baseline invalid; requesting snapshot");
+                        let _ = dropped.send((name.clone(), client));
+                        break;
+                    }
                 }
-                if seq == 1 && !report_health(&mut sent_health) {
+                if initial && seq > 0 && !report_health(&mut sent_health) {
                     break;
                 }
             }
@@ -3130,9 +3459,18 @@ mod tests {
     use super::*;
     use safe_cex_remote_signer::Outbox;
 
+    mod apexomni_batch_bridge;
     mod apply_settings;
+    mod backpack_local_proof;
+    mod cosigned_coinbase;
     mod cosigned_venues;
     mod delegated_probe;
+    mod grvt_proof;
+    mod hyperliquid_local_proof;
+    mod lighter_local_proof;
+    mod local_proof;
+    mod provider_handover_refusals;
+    mod publish_interval;
     mod token_expiry;
 
     fn synthetic_candidate() -> crate::delegated::Credentials {
@@ -4149,7 +4487,10 @@ mod tests {
                 assert_eq!(original.drain_close(), Some(Close::Moved));
                 original.close();
                 let (mut late, mut frames) = user_session(registry, "u");
-                late.join(account, late.out.clone()).await;
+                // Keep this stopped-actor fixture's original non-DELEGATED admission.
+                late.join(
+                    account, late.out.clone(), envelope::AccountSigningMode::Cosigned, 0,
+                ).await;
                 let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
                 assert_eq!(frame["d"]["data"], json!(["account stopped"]),
                     "{mode}: closing a draining session must not relabel an earlier actor crash: {frame}");
@@ -4191,7 +4532,14 @@ mod tests {
                     .await
                     .expect("the account really ended");
                     let (mut late, mut frames) = user_session(registry, "u");
-                    late.join(account, late.out.clone()).await;
+                    // Keep this stopped-actor fixture's original non-DELEGATED admission.
+                    late.join(
+                        account,
+                        late.out.clone(),
+                        envelope::AccountSigningMode::Cosigned,
+                        0,
+                    )
+                    .await;
                     let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
                     assert_eq!(frame["d"]["op"], "error");
                     assert_eq!(frame["d"]["data"][0], "account stopped");
@@ -5392,6 +5740,7 @@ mod tests {
                     Arc::default(),
                     Arc::default(),
                     Some(Hold { client: 1, loaded }),
+                    tokio::sync::watch::channel(0).1,
                 ));
                 let mut accepted = 0;
                 for _ in 0..100 {
@@ -5643,6 +5992,7 @@ mod tests {
                 Arc::default(),
                 Arc::default(),
                 Some(Hold { client, loaded }),
+                tokio::sync::watch::channel(0).1,
             ));
             (sent, task)
         }
@@ -5893,6 +6243,7 @@ mod tests {
                         Arc::default(),
                         Arc::default(),
                         Some(Hold { client: 1, loaded }),
+                        tokio::sync::watch::channel(0).1,
                     ));
                     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                     while let Ok(text) = sent.try_recv() {

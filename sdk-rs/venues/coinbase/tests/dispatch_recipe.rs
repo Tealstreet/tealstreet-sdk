@@ -5,6 +5,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use p256::pkcs8::EncodePrivateKey;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::signing::{
     Algorithm, CredentialSetupPolicy, Identities, IdentitySetupPolicy, KeyEncoding, KeyRef,
@@ -107,7 +108,7 @@ impl Venue for Issuer {
                     let socket = *socket.get_or_insert_with(|| {
                         cx.connect("wss://advanced-trade-ws-user.coinbase.com")
                     });
-                    cx.send_signed(socket, String::new(), step);
+                    cx.send_signed(socket, ControlFrame::authentication(String::new()), step);
                 }
             }
         }

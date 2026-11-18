@@ -1,4 +1,5 @@
 //! Bybit V5 products and compatible HyroTrader accounts on the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod candles;
 mod closed;
@@ -8,6 +9,7 @@ mod hyro;
 mod identity;
 mod leverage;
 mod options;
+mod pacing;
 mod paths;
 mod policy;
 mod refresh;
@@ -228,6 +230,8 @@ struct Connection {
     feed: Option<FeedId>,
     /// Whether this Ready's ticker cap was already reported.
     tickers_capped: bool,
+    /// Reference values established by this socket's ticker snapshot lineage.
+    ticker_references: HashMap<String, [Option<f64>; 3]>,
 }
 
 impl Connection {
@@ -237,6 +241,7 @@ impl Connection {
             open: false,
             feed: None,
             tickers_capped: false,
+            ticker_references: HashMap::new(),
         }
     }
 }
@@ -1959,9 +1964,18 @@ impl BybitLinear {
         {
             return;
         }
-        if topic.starts_with("tickers.") {
+        if let Some(symbol) = topic.strip_prefix("tickers.") {
             if let Ok(event) = serde_json::from_str::<TickerEvent>(text) {
+                if symbol != event.data.symbol.as_ref() {
+                    self.public.ticker_references.remove(symbol);
+                    return;
+                }
+                let inherited = self.inherited_ticker_references(cx, &event);
                 on_ticker(cx, &event.data, self.variant);
+                cx.store
+                    .observe_ticker_fields(&event.data.symbol, inherited);
+            } else {
+                self.public.ticker_references.remove(symbol);
             }
         } else if topic.starts_with("orderbook.") {
             if let Ok(event) = self.book_levels.decode(text) {
@@ -1975,6 +1989,61 @@ impl BybitLinear {
             && let Ok(event) = serde_json::from_str::<TradeEvent>(text)
         {
             self.on_trades(cx, &event);
+        }
+    }
+
+    fn inherited_ticker_references(
+        &mut self,
+        cx: &Cx<'_, Pending>,
+        event: &TickerEvent<'_>,
+    ) -> u16 {
+        if self.variant.is_spot() || self.variant.is_hyro() || self.category == Category::Option {
+            return 0;
+        }
+        let symbol = event.data.symbol.as_ref();
+        if cx.store.ticker(symbol).is_none() {
+            return 0;
+        }
+        let updates = [
+            event.data.last_price,
+            event.data.mark_price,
+            event.data.index_price,
+        ];
+        let valid = |value: f64| value.is_finite() && value > 0.0;
+        match event.kind.as_deref() {
+            Some("snapshot") => {
+                self.public.ticker_references.insert(
+                    symbol.to_owned(),
+                    updates.map(|update| update.value.filter(|value| valid(*value))),
+                );
+                0
+            }
+            Some("delta") => {
+                let Some(known) = self.public.ticker_references.get_mut(symbol) else {
+                    return 0;
+                };
+                let Some(ticker) = cx.store.ticker(symbol) else {
+                    return 0;
+                };
+                let prices = [ticker.last, ticker.mark, ticker.index];
+                let mut inherited = 0;
+                // Bybit omits unchanged fields. Only this socket's snapshot lineage,
+                // still matching the stored value, can confirm an omitted reference.
+                for (slot, update) in updates.into_iter().enumerate() {
+                    if update.present {
+                        known[slot] = update.value.filter(|value| valid(*value));
+                    } else if known[slot].is_some_and(|value| value == prices[slot]) {
+                        inherited |= 1 << (slot + 2);
+                    } else {
+                        known[slot] = None;
+                    }
+                }
+                inherited
+            }
+            _ => {
+                self.public.ticker_references.remove(symbol);
+                0
+            }
         }
     }
 
@@ -2463,9 +2532,9 @@ fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerDelta<'_>, variant: Variant) {
         };
         set(&mut t.bid, d.bid1_price.or(d.bid_price));
         set(&mut t.ask, d.ask1_price.or(d.ask_price));
-        set(&mut t.last, d.last_price);
-        set(&mut t.mark, d.mark_price);
-        set(&mut t.index, d.index_price);
+        set(&mut t.last, d.last_price.value);
+        set(&mut t.mark, d.mark_price.value);
+        set(&mut t.index, d.index_price.value);
         set(&mut t.percentage, percentage);
         set(&mut t.open_interest, open_interest);
         set(&mut t.funding_rate, funding_rate);
@@ -2473,12 +2542,16 @@ fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerDelta<'_>, variant: Variant) {
         set(&mut t.volume, volume);
         set(&mut t.quote_volume, quote_volume);
     });
-    // A field this message carries is an observation even when unchanged; an
-    // omitted one (a delta) is not.
-    let observed = [(2, d.last_price), (3, d.mark_price), (4, d.index_price)]
-        .into_iter()
-        .filter(|(_, value)| value.is_some())
-        .fold(0u16, |mask, (bit, _)| mask | (1 << bit));
+    // Explicit fields are observations even when unchanged. The caller separately
+    // attests omitted references only when their stream snapshot proves them.
+    let observed = [
+        (2, d.last_price.value),
+        (3, d.mark_price.value),
+        (4, d.index_price.value),
+    ]
+    .into_iter()
+    .filter(|(_, value)| value.is_some())
+    .fold(0u16, |mask, (bit, _)| mask | (1 << bit));
     cx.store.observe_ticker_fields(&d.symbol, observed);
 }
 
@@ -2723,7 +2796,16 @@ impl BybitLinear {
 
 impl Venue for BybitLinear {
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
-        &[history::ORDER_HISTORY_PACING]
+        &[history::ORDER_HISTORY_PACING, pacing::WRITE, pacing::BATCH]
+    }
+    fn http_pacing_sets(&self) -> &[safe_cex_engine::request_context::PacingSet] {
+        &[pacing::BATCH_SET]
+    }
+    fn http_release_domain() -> Option<safe_cex_engine::request_context::ReleaseDomain> {
+        Some(safe_cex_engine::request_context::ReleaseDomain {
+            pacings: &pacing::ADMITTED,
+            members: safe_cex_engine::request_context::DomainMembers::Mutations,
+        })
     }
     fn http_release_veto(
         &self,
@@ -3103,6 +3185,7 @@ impl Venue for BybitLinear {
                 }
             }
             LifecycleEvent::Ready { .. } if channel == Channel::Public => {
+                self.public.ticker_references.clear();
                 let category = self.category;
                 let spot = self.variant.is_spot();
                 for (symbol, state) in &mut self.books {
@@ -3119,7 +3202,9 @@ impl Venue for BybitLinear {
                 self.public.tickers_capped = false;
                 self.sync_public_interests(cx);
             }
-            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), r#"{"op":"ping"}"#),
+            LifecycleEvent::Ping(epoch) => {
+                cx.send(epoch.socket(), ControlFrame::heartbeat(r#"{"op":"ping"}"#))
+            }
             LifecycleEvent::Reconnect(_) => self.open_feed(cx, channel),
             LifecycleEvent::Retired {
                 reason, close_code, ..

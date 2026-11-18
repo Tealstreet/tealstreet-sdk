@@ -1,5 +1,5 @@
 import type { CommandProgress, OrderIdentityReceipt, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { ExchangeOptions, Market, StoreData } from '../types';
+import type { ExchangeName, ExchangeOptions, Market, StoreData } from '../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -170,12 +170,12 @@ const transport: Transport = {
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 const workers: ExchangeWorker[] = [];
-const createWorker = (options: Partial<ExchangeOptions> = {}, account = 'same-name', getTwapOwner?: () => { ownerId: string; generation: number } | null) => {
+const createWorker = (options: Partial<ExchangeOptions> = {}, account = 'same-name', getTwapOwner?: () => { ownerId: string; generation: number } | null, venue: ExchangeName = 'binance') => {
   const messages: Array<{ op: string; data?: any }> = [];
   const worker = new ExchangeWorker(
     { postMessage: (message: any) => messages.push(message), ...(getTwapOwner && { getTwapOwner }) } as unknown as Worker,
     account,
-    'binance',
+    venue,
     { key: '', secret: '', engine: 'rust', publicDataOnly: true, ...options },
     {} as never,
     {} as never,
@@ -240,6 +240,48 @@ afterEach(() => {
 });
 
 describe('Rust worker engine ownership', () => {
+  it.each(['unchanged', 'owner', 'generation', 'returning', 'logout', 'throw'] as const)(
+    'normal Hyperliquid worker disposal does not manufacture an engine death: %s',
+    async (transition) => {
+      algosBuild = true;
+      let owner: { ownerId: string; generation: number } | null = { ownerId: 'synthetic-A', generation: 7 };
+      let unavailable = false;
+      const { worker, messages } = createWorker({}, 'same-name', () => {
+        if (unavailable) throw new Error('owner context retired');
+        return owner;
+      }, 'hyperliquid');
+      expect(await start(worker)).toBe(true);
+      const exchange = worker.exchange;
+      if (!(exchange instanceof RustEngineExchange)) throw new Error('Fixture must construct the real Rust adapter');
+      const source = sources[0];
+      let running = true;
+      source.algoRunning = () => running;
+      source.algoDispose = () => { source.algoDisposals++; running = false; return '[]'; };
+      const dead = vi.fn();
+      exchange.on('engine-dead', dead);
+      if (transition === 'owner' || transition === 'returning') owner = { ownerId: 'synthetic-B', generation: 8 };
+      if (transition === 'returning') owner = { ownerId: 'synthetic-A', generation: 9 };
+      if (transition === 'generation') owner = { ownerId: 'synthetic-A', generation: 8 };
+      if (transition === 'logout') owner = null;
+      if (transition === 'throw') unavailable = true;
+      const boundary = messages.length;
+      worker.dispose();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect({
+        disposed: exchange.isDisposed,
+        engineDead: exchange.isEngineDead,
+        terminalEvents: dead.mock.calls.length,
+        freed: source.freed,
+        nativeCleanup: source.algoDisposals,
+        constructed: sources.length,
+      }).toEqual({
+        disposed: true, engineDead: false, terminalEvents: 0, freed: true,
+        nativeCleanup: transition === 'unchanged' ? 1 : 0, constructed: 1,
+      });
+      expect(messages.slice(boundary).filter((message) => message.op === 'warning' || message.op === 'error')).toEqual([]);
+    },
+  );
+
   it('reconstructs once with a fresh store, fences old callbacks and replays only live public demand', async () => {
     const { worker, messages } = createWorker();
     expect(await start(worker)).toBe(true);

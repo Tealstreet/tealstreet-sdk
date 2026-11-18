@@ -31,6 +31,123 @@ function rig(options = {}, overrides = {}, handlers = {}) {
 
 const done = (host, id, result = '"done"') => host.run(JSON.stringify([{ op: 'done', command: id, result }]));
 
+function ownedAlgos(transition) {
+  const created = { ownerId: 'synthetic-A', generation: 7 };
+  let current = { ...created };
+  let unavailable = false;
+  let running = true;
+  const events = [];
+  const deaths = [];
+  let frees = 0;
+  const replies = [];
+  const r = rig({ ownsEngine: true }, {
+    algoStart() {}, algoStartOwned() {},
+    algoRunning: () => running,
+    algoDeadline: () => undefined,
+    algoEmits: () => JSON.stringify(replies.splice(0)),
+    algoOp() { events.push('op'); return '[]'; },
+    algoAdvance() { events.push('advance'); return '[]'; },
+    algoDispose() { events.push('dispose'); running = false; return '[]'; },
+    algoStopAll() {
+      events.push('stop-all');
+      replies.push({ op: 'algos:stopped', data: { stoppedChasers: [], stoppedTwaps: [], settled: true } });
+      return '[]';
+    },
+    health: () => '{"ticks":1}',
+    free() { frees++; },
+  }, { onDead: (error) => deaths.push(error) });
+  r.host.algoStart('same-account', created, () => {
+    if (unavailable) throw new Error('owner unavailable');
+    return current?.ownerId === created.ownerId && current?.generation === created.generation;
+  });
+  const retire = () => {
+    if (transition === 'owner' || transition === 'returning') current = { ownerId: 'synthetic-B', generation: 8 };
+    if (transition === 'returning') current = { ownerId: 'synthetic-A', generation: 9 };
+    if (transition === 'generation') current = { ownerId: 'synthetic-A', generation: 8 };
+    if (transition === 'logout') current = null;
+    if (transition === 'throw') unavailable = true;
+  };
+  return { ...r, events, deaths, retire, frees: () => frees };
+}
+
+for (const transition of ['unchanged', 'owner', 'generation', 'returning', 'logout', 'throw']) {
+  test(`algo status observation is nonterminal: ${transition}`, () => {
+    const r = ownedAlgos(transition);
+    try {
+      r.retire();
+      assert.equal(r.host.algosRunning, transition === 'unchanged');
+      assert.equal(r.host.algosRunning, transition === 'unchanged');
+      assert.equal(r.host.dead, false);
+      assert.equal(r.host.disposed, false);
+      assert.deepEqual(r.host.health(), { ticks: 1 });
+      assert.equal(typeof r.host.socketHealth().private, 'object');
+      assert.deepEqual(r.events, []);
+      assert.deepEqual(r.deaths, []);
+      assert.equal(r.frees(), 0);
+    } finally { r.host.dispose(); }
+  });
+
+  test(`algo cleanup is ordinary disposal after ownership observation: ${transition}`, async () => {
+    const r = ownedAlgos(transition);
+    try {
+      r.retire();
+      await r.host.algoDispose('account reload');
+      r.host.dispose();
+      assert.equal(r.host.dead, false);
+      assert.deepEqual(r.deaths, []);
+      assert.deepEqual(r.events, transition === 'unchanged' ? ['dispose'] : []);
+      assert.equal(r.frees(), 1);
+    } finally { r.host.dispose(); }
+  });
+
+  test(`status reads leave pending write disposal provenance intact: ${transition}`, async () => {
+    const r = ownedAlgos(transition);
+    const pending = r.host.command({ op: 'placeOrders', orders: [{ clientOrderId: 'synthetic-client' }] })
+      .then((value) => ({ value }), (error) => ({ error }));
+    try {
+      r.retire();
+      assert.equal(r.host.algosRunning, transition === 'unchanged');
+      assert.equal(r.host.commands.size, 1);
+      assert.equal(r.host.dead, false);
+      assert.equal(r.frees(), 0);
+      r.host.dispose();
+      const { error } = await pending;
+      assert.ok(error instanceof EngineDisposedError);
+      assert.equal(error.code, 'ENGINE_DISPOSED');
+      assert.equal(error.outcome, 'unknown');
+      assert.deepEqual(error.clientOrderIds, ['synthetic-client']);
+      assert.deepEqual(r.deaths, []);
+      assert.equal(r.frees(), 1);
+    } finally { r.host.dispose(); await pending; }
+  });
+
+  for (const action of ['op', 'stop-all', 'command', 'timer']) {
+    test(`real algo execution retains its strict owner fence: ${action}/${transition}`, async () => {
+      const r = ownedAlgos(transition);
+      try {
+        r.retire();
+        if (action === 'op') {
+          if (transition === 'unchanged') r.host.algoOp('exec', {});
+          else assert.throws(() => r.host.algoOp('exec', {}), EngineDeadError);
+        } else if (action === 'stop-all') await r.host.algoStopAll('user nuke');
+        else if (action === 'timer') r.host.advanceAlgos();
+        else {
+          const pending = r.host.command({ op: 'setLeverage', symbol: 'BTC', leverage: 2 });
+          if (transition === 'unchanged') { done(r.host, 1); await pending; }
+          else await assert.rejects(pending, EngineDeadError);
+        }
+        assert.equal(r.host.dead, transition !== 'unchanged');
+        assert.equal(r.deaths.length, transition === 'unchanged' ? 0 : 1);
+        assert.equal(r.frees(), transition === 'unchanged' ? 0 : 1);
+        assert.deepEqual(r.events, transition === 'unchanged'
+          ? action === 'op' ? ['op'] : action === 'stop-all' ? ['stop-all'] : action === 'timer' ? ['advance'] : []
+          : []);
+        assert.equal(r.calls.length, action === 'command' && transition === 'unchanged' ? 1 : 0);
+      } finally { r.host.dispose(); }
+    });
+  }
+}
+
 test('algoStart selects bound ownership only when the optional owner is provided', () => {
   for (const owner of [undefined, { ownerId: 'A', generation: 7 }]) {
     const calls = [];

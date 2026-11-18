@@ -35,12 +35,15 @@ async fn proof_queue_serializes_modes_across_sockets_and_labels() {
     f.gate.add_permits(1000);
     finish(&mut first, &mut first_done).await;
     let resident = first.joined["acct"].account.clone();
+    let resident_signer = resident.delegated().unwrap().provider();
+    let mut challenges = 0;
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             tokio::select! {
                 Some(text) = sent.recv() => {
                     let frame: Value = serde_json::from_str(&text).unwrap();
                     assert_eq!(frame["t"], "sign-req");
+                    challenges += 1;
                     assert_eq!(frame["d"]["accountName"], "renamed");
                     assert_eq!(frame["d"]["instanceId"], "second");
                     let preimage = frame["d"]["wsAuth"]["toSign"].as_str().unwrap();
@@ -58,14 +61,33 @@ async fn proof_queue_serializes_modes_across_sockets_and_labels() {
             }
         }
     }).await.expect("waiting proof starts and independently verifies");
-    // Identity-keyed actors refuse cross-mode attachment even after a valid proof;
-    // the queued COSIGNED proof cannot replace the existing DELEGATED resident.
-    assert!(second.joined.is_empty());
-    assert_eq!(
-        sent.try_recv().unwrap(),
-        envelope::with_instance_id(envelope::init_unverified("renamed", false), "second"),
+    // A proved COSIGNED join attaches to the existing DELEGATED actor.
+    // Queue serialization cannot downgrade or replace its protected signer.
+    assert!(
+        challenges > 0,
+        "the queued connection proves its own credentials"
     );
+    assert!(Arc::ptr_eq(&second.joined["renamed"].account, &resident));
     assert!(Arc::ptr_eq(&first.joined["acct"].account, &resident));
+    assert!(resident.delegated().is_some());
+    assert!(resident.link.is_none());
+    assert!(Arc::ptr_eq(
+        &resident.delegated().unwrap().provider(),
+        &resident_signer
+    ));
+    let confirmations: Vec<Value> = std::iter::from_fn(|| sent.try_recv().ok())
+        .map(|text| serde_json::from_str::<Value>(&text).unwrap())
+        .filter(|frame| frame["d"]["op"] == "account-signing-mode")
+        .collect();
+    assert_eq!(
+        confirmations,
+        vec![json!({"t":"msg","d":{
+            "op":"account-signing-mode", "accountName":"renamed", "instanceId":"second",
+            "data":{"version":1,"requestedMode":"cosigned","actualMode":"delegated",
+                "attached":true,"reason":"delegated-enabled-elsewhere"}
+        }})]
+    );
+    assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
     assert_eq!(f.registry.account_count(), 1);
     second.close();
     first.close();
@@ -201,7 +223,12 @@ async fn proof_queue_rechecks_the_captured_expiry_after_waiting() {
     assert_eq!(
         sent.try_recv().unwrap(),
         envelope::with_instance_id(
-            envelope::init_unverified("expired-waiter", false),
+            envelope::init_unverified(
+                "expired-waiter",
+                false,
+                envelope::InitRefusalReasonClass::Unknown,
+                Default::default()
+            ),
             "expired"
         )
     );
@@ -228,7 +255,15 @@ async fn proof_queue_session_capacity_refuses_transiently_in_both_modes() {
         assert_eq!(
             sent.try_recv().unwrap(),
             envelope::with_instance_id(
-                envelope::init_unverified("acct", true),
+                envelope::init_unverified(
+                    "acct",
+                    true,
+                    envelope::InitRefusalReasonClass::Unknown,
+                    envelope::InitRefusalMetadata {
+                        stage: Some(RefusalStage::Capacity),
+                        ..Default::default()
+                    }
+                ),
                 "overflow-registration"
             )
         );
@@ -262,7 +297,15 @@ async fn proof_queue_identity_overflow_keeps_registration_and_refuses_both_modes
         assert_eq!(
             sent.try_recv().unwrap(),
             envelope::with_instance_id(
-                envelope::init_unverified("acct", true),
+                envelope::init_unverified(
+                    "acct",
+                    true,
+                    envelope::InitRefusalReasonClass::Unknown,
+                    envelope::InitRefusalMetadata {
+                        stage: (mode == "delegated").then_some(RefusalStage::Permit),
+                        ..Default::default()
+                    }
+                ),
                 "identity-overflow"
             )
         );

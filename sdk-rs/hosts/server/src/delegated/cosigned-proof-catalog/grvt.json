@@ -1,0 +1,5 @@
+{
+  "status": "ready",
+  "probeTests": "src/session/tests/grvt_proof.rs",
+  "sessionTests": "src/session/tests/grvt_proof.rs"
+}

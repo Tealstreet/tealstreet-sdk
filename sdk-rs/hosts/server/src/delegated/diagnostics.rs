@@ -43,7 +43,12 @@ impl RefusalContext {
     }
 
     pub(crate) fn refused(&self, refusal: ProbeRefusal) {
-        crate::state::Log::warn(&self.fields(refusal).to_string());
+        let mut fields = self.fields(refusal);
+        if let Some(reason) = refusal.transition {
+            fields["kind"] = "admission".into();
+            fields["reason"] = reason.reason().into();
+        }
+        crate::state::Log::warn(&fields.to_string());
     }
 }
 
@@ -63,6 +68,8 @@ mod tests {
         handovers.forget("synthetic-account-secret");
         let fields = context.fields(ProbeRefusal {
             transient: false,
+            unavailable: false,
+            transition: None,
             stage: RefusalStage::PrivateRead,
             error_kind: Some(safe_cex_engine::ErrorKind::AuthPermission),
             venue_code: Some(10010),

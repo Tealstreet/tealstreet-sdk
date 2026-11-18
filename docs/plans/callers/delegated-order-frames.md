@@ -3,7 +3,11 @@
 This opt-in protocol uses the existing authenticated account socket and the
 existing method translation, native completion and order audit. It places one
 order per submit through the joined venue's existing native plan. LOCAL and
-COSIGNED retain their existing call protocol.
+COSIGNED on web retain their existing call protocol. DELEGATED uses every
+hosted-supported venue under the single runtime `DELEGATED` flag;
+`DELEGATED_BYBIT` is a compatibility alias, not a venue restriction. Mobile is
+DELEGATED-only, with no client WASM/local signer; writes use typed v1 actions on
+this existing hosted WebSocket.
 The frozen frame fixture is
 `sdk-rs/hosts/server/tests/data/delegated-orders-v1.json`; synthetic router replies
 are in `sdk-rs/hosts/server/tests/data/delegated-router-replies-v1.json`.

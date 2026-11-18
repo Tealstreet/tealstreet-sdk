@@ -595,7 +595,7 @@ fn subscription_receipts(frame: &[u8]) -> Vec<(String, u32, f64)> {
 }
 
 #[test]
-fn subscription_receipt_counts_candle_snapshots_without_emitting_live_history() {
+fn subscription_receipt_counts_candle_snapshots_alongside_ts_replay() {
     let (mut e, socket) = started();
     e.handle(
         1.,
@@ -612,9 +612,15 @@ fn subscription_receipt_counts_candle_snapshots_without_emitting_live_history() 
     );
     e.handle(2., Event::WsMessage { socket, text: r#"{"symbol":"BTCUSDT","type":"snapshot","kline_p":[[1700000000,60,0,"100","110","90","105","2",0]]}"# });
     let frame = e.take_frame(2.).unwrap_or_default();
-    assert!(
-        !safe_cex_engine::wire::sections(frame)
-            .any(|(kind, _)| kind == safe_cex_engine::wire::section::CANDLES)
+    // TS listenOHLCV publishes this single snapshot row; #3213's ban is superseded.
+    // Receipt counts below still describe ingress, not the emitted candle count.
+    let (_, candles) = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == safe_cex_engine::wire::section::CANDLES)
+        .expect("TS-compatible snapshot candle");
+    assert_eq!(u32::from_le_bytes(candles[..4].try_into().unwrap()), 1);
+    assert_eq!(
+        f64::from_le_bytes(candles[candles.len() - 48..][..8].try_into().unwrap()),
+        1700000000.
     );
     let rows = subscription_receipts(e.snapshot_frame(3.));
     let candle = rows

@@ -1,8 +1,10 @@
 # DELEGATED memory
 
-`delegated_memory::DelegatedMemory::prepare(venue, enabled)` requires the
-caller's resolved per-venue DELEGATED policy flag. Memory preparation is the
-same for every venue and adds no separate venue allowlist. Call it before
+`delegated_memory::DelegatedMemory::prepare(venue, hosted_supported)` consumes
+the caller's shared hosted-support result, not a per-venue DELEGATED flag.
+Availability uses the global runtime `DELEGATED` flag at admission;
+`DELEGATED_BYBIT` is only its compatibility alias. Memory preparation is the
+same for every hosted venue and adds no separate venue allowlist. Call it before
 receiving or opening key material. It does not enable DELEGATED admission or
 change account construction. The handover and account-build changes consume
 this helper separately.

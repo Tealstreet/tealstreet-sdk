@@ -1,0 +1,8 @@
+{
+  "/derivatives/api/v3/instruments": {"result":"success","instruments":[{"symbol":"PF_XBTUSD","base":"BTC","quote":"USD","tradeable":true,"tickSize":0.5,"contractSize":1,"contractValueTradePrecision":3,"marginLevels":[{"initialMargin":0.02}]}]},
+  "/derivatives/api/v3/tickers": {"result":"success","tickers":[{"symbol":"PF_XBTUSD","last":100,"markPrice":101,"indexPrice":102,"bid":99,"ask":101,"vol24h":2,"volumeQuote":200,"openInterest":4,"fundingRate":0.01}]},
+  "/derivatives/api/v3/accounts": {"result":"success","accounts":{"flex":{"type":"multiCollateralMarginAccount","portfolioValue":1000,"availableMargin":900,"balanceValue":1000,"pnl":0,"initialMargin":100,"maintenanceMargin":0}}},
+  "/derivatives/api/v3/openorders": {"result":"success","openOrders":[]},
+  "/derivatives/api/v3/openpositions": {"result":"success","openPositions":[]},
+  "/derivatives/api/v3/leveragepreferences": {"result":"success","leveragePreferences":[]}
+}

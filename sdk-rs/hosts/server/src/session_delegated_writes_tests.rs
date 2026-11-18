@@ -366,7 +366,7 @@ fn delegated_account_with_algo_inbox(
     inner.handle.dispose();
     inner.handle = handle;
     inner.link = None;
-    inner.delegated = Some(prepared.resident);
+    inner.signing.set_test_resident(prepared.resident);
     if venue == "bybit" {
         testing::bind_identity(&mut account, &setup);
     }
@@ -453,10 +453,18 @@ async fn joined_without_runtime_opt_in(
         out.clone(),
     );
     crate::accounts::tests::hold_live(&account, session.socket, out.outbox());
+    // Preserve the supplied fixture's original COSIGNED/DELEGATED account kind.
+    // The new argument records that provenance without changing its construction.
+    let admitted_mode = account.actual_signing_mode();
     session
-        .join(account.clone(), out.with_instance_id(None))
+        .join(
+            account.clone(),
+            out.with_instance_id(None),
+            admitted_mode,
+            0,
+        )
         .await;
-    if account.delegated.is_some() {
+    if account.delegated().is_some() {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if account
@@ -516,7 +524,8 @@ async fn delegated_manual_writes_require_hosted_venue_support() {
         .run_until(async {
             let registry = crate::accounts::tests::registry();
             let tape = Tape::default();
-            let account = delegated_account(&registry, "A", "hyrotrader", tape.clone());
+            // Hyro is now hosted; TxFlow retains the missing-native-origin refusal control.
+            let account = delegated_account(&registry, "A", "txflow", tape.clone());
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
             call(&mut session, "flag", "placeOrder", json!([placement()])).await;
             let result = reply(&mut sent, "flag").await;
@@ -709,7 +718,7 @@ async fn cosigned_call_method_reply_keeps_its_existing_bytes() {
                 reply(&mut sent, "legacy").await.to_string(),
                 r#"{"requestId":"legacy","result":["o-0"],"success":true}"#
             );
-            assert!(account.delegated.is_none());
+            assert!(account.delegated().is_none());
             assert!(account.link.is_some());
             registry.dispose(&account, Disposal::PageDisposed);
         })

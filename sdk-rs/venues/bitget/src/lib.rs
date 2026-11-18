@@ -1,4 +1,5 @@
 //! Bitget perpetual futures: a deterministic, sans-I/O venue engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod book;
 mod history;
@@ -26,7 +27,7 @@ use safe_cex_engine::{
     num,
 };
 use serde::{Serialize, de::IgnoredAny};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wire::*;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -86,6 +87,8 @@ pub enum Discovered {
 }
 
 const DISCOVERY_HEADERS: &[(&str, &str)] = &[("X-CHANNEL-API-CODE", "Tealstreet")];
+// Classic V2 bounds the encoded subscription, not the number of instruments.
+const MAX_PUBLIC_SUBSCRIPTION_BYTES: usize = 4096;
 
 fn discovery_context(pending: &Pending) -> Option<&Context> {
     match pending {
@@ -145,6 +148,8 @@ pub struct BitgetFutures {
     candles: HashMap<(String, Interval), usize>,
     /// Topics Bitget answered with event:error, by (channel, instId): retries made, pending timer.
     refused_topics: HashMap<(String, String), (u32, Option<TimerId>)>,
+    /// Exact native missing ticker topics retired for this engine's lifetime.
+    refused_ticker_topics: HashSet<String>,
     /// When an unreadable public message was last logged; at most one per minute.
     public_parse_logged_at: Option<f64>,
     order_caps: HashMap<String, OrderCaps>,
@@ -270,6 +275,7 @@ impl BitgetFutures {
             books: HashMap::new(),
             candles: HashMap::new(),
             refused_topics: HashMap::new(),
+            refused_ticker_topics: HashSet::new(),
             public_parse_logged_at: None,
             order_caps: HashMap::new(),
         }
@@ -486,25 +492,53 @@ impl BitgetFutures {
             channel: &'a str,
             inst_id: &'a str,
         }
-        #[derive(Serialize)]
-        struct Subscription<'a> {
-            op: &'a str,
-            args: Vec<Topic<'a>>,
-        }
         let product = self.product().to_uppercase();
-        for chunk in topics.chunks(100) {
-            let args = chunk
-                .iter()
-                .map(|(channel, symbol)| Topic {
-                    inst_type: &product,
-                    channel,
-                    inst_id: symbol,
-                })
-                .collect();
-            cx.send(
-                socket,
-                serde_json::to_string(&Subscription { op, args }).expect("subscription"),
-            );
+        let prefix = format!(
+            r#"{{"op":{},"args":["#,
+            serde_json::to_string(op).expect("subscription operation")
+        );
+        let mut payload = prefix.clone();
+        let overhead = (prefix.len() + 2).max(r#"{"op":"unsubscribe","args":[]}"#.len());
+        for (channel, symbol) in topics {
+            if op == "subscribe"
+                && channel == "ticker"
+                && self.refused_ticker_topics.contains(symbol)
+            {
+                continue;
+            }
+            let topic = serde_json::to_string(&Topic {
+                inst_type: &product,
+                channel,
+                inst_id: symbol,
+            })
+            .expect("subscription topic");
+            // A topic must also fit its later unsubscribe, whose envelope is
+            // two bytes longer. Never send an unencodable catalogue ID or let
+            // it prevent the remaining valid topics from being subscribed.
+            if overhead + topic.len() > MAX_PUBLIC_SUBSCRIPTION_BYTES {
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
+                    "Bitget public subscription topic exceeds 4096 bytes; not sent",
+                );
+                continue;
+            }
+            let separator = usize::from(payload.len() > prefix.len());
+            if payload.len() + separator + topic.len() + 2 > MAX_PUBLIC_SUBSCRIPTION_BYTES {
+                payload.push_str("]}");
+                cx.send(
+                    socket,
+                    ControlFrame::subscription(std::mem::replace(&mut payload, prefix.clone())),
+                );
+            }
+            if payload.len() > prefix.len() {
+                payload.push(',');
+            }
+            payload.push_str(&topic);
+        }
+        if payload.len() > prefix.len() {
+            payload.push_str("]}");
+            cx.send(socket, ControlFrame::subscription(payload));
         }
     }
 
@@ -524,6 +558,44 @@ impl BitgetFutures {
                 state.reset();
             }
         }
+    }
+
+    fn known_ticker_refusal(
+        &self,
+        cx: &Cx<'_, Pending>,
+        message: &PublicMessage<'_>,
+        text: &str,
+    ) -> bool {
+        #[derive(serde::Deserialize)]
+        struct Refusal<'a> {
+            #[serde(borrow)]
+            code: Option<&'a serde_json::value::RawValue>,
+            #[serde(borrow)]
+            arg: ProductArgument<'a>,
+        }
+        #[derive(serde::Deserialize)]
+        struct ProductArgument<'a> {
+            #[serde(rename = "instType")]
+            product: &'a str,
+        }
+        let symbol = message.arg.inst_id.as_ref();
+        if message.arg.channel != "ticker" || cx.store.market(symbol).is_none() {
+            return false;
+        }
+        let product = self.product().to_uppercase();
+        let Some(native) = message.msg.strip_suffix(" doesn't exist") else {
+            return false;
+        };
+        let topic = format!("instType:{product},channel:ticker,instId:{symbol}");
+        if native != symbol && native != topic && native != format!("{topic},precision:null") {
+            return false;
+        }
+        serde_json::from_str::<Refusal<'_>>(text).is_ok_and(|refusal| {
+            refusal.arg.product == product
+                && refusal
+                    .code
+                    .is_some_and(|code| matches!(code.get(), "30001" | r#""30001""#))
+        })
     }
 
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
@@ -561,6 +633,19 @@ impl BitgetFutures {
                 message.arg.channel.to_string(),
                 message.arg.inst_id.to_string(),
             );
+            if self.known_ticker_refusal(cx, &message, text) {
+                if let Some((_, Some(timer))) = self.refused_topics.remove(&topic) {
+                    cx.clear_timer(timer);
+                }
+                if self.refused_ticker_topics.insert(topic.1) {
+                    cx.notice(
+                        Level::Warn,
+                        code::SUBSCRIPTION_REJECTED,
+                        "Bitget ticker subscription refused for a known market",
+                    );
+                }
+                return;
+            }
             let retry = (!topic.0.is_empty() && !topic.1.is_empty())
                 .then(|| {
                     self.refused_topics
@@ -1003,7 +1088,7 @@ impl Venue for BitgetFutures {
             self.account.login_answered = false;
             self.account.supervisor.opened(cx);
             self.private_open(cx, socket);
-            cx.send(socket, "ping");
+            cx.send(socket, ControlFrame::heartbeat("ping"));
             return;
         }
         connection.supervisor.opened(cx);
@@ -1027,7 +1112,7 @@ impl Venue for BitgetFutures {
             );
         }
         self.send_topics(cx, socket, "subscribe", &topics);
-        cx.send(socket, "ping");
+        cx.send(socket, ControlFrame::heartbeat("ping"));
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         let Some(index) = self.channel(socket) else {
@@ -1486,7 +1571,7 @@ impl Venue for BitgetFutures {
                 Tick::Reconnect => self.open_feed(cx, index),
                 Tick::Ping => {
                     if let Some(socket) = self.sockets[index].socket {
-                        cx.send(socket, "ping");
+                        cx.send(socket, ControlFrame::heartbeat("ping"));
                         self.sockets[index].ping_at = cx.now;
                     }
                 }

@@ -37,8 +37,24 @@ fn startup_on(
     });
     e.start(0.0);
     let mut initial = prepared(&mut e, 0.0);
-    // Instruments answer at 1 ms (EEA also lists futures), tickers at 2 ms.
-    for (path, now) in [("/instruments?", 1.0), ("/market/tickers", 2.0)] {
+    if eea {
+        let config = initial.remove(
+            initial
+                .iter()
+                .position(|a| is_get(a, "/api/v5/account/config"))
+                .unwrap(),
+        );
+        reply(
+            &mut e,
+            &config,
+            &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+            0.5,
+        );
+        initial.extend(prepared(&mut e, 0.5));
+    }
+    // EEA applies early config at catalogue completion, preserving the 3 ms census.
+    let times = if eea { (3.0, 3.5) } else { (1.0, 2.0) };
+    for (path, now) in [("/instruments?", times.0), ("/market/tickers", times.1)] {
         while let Some(at) = initial.iter().position(|a| url(a).contains(path)) {
             let a = initial.remove(at);
             let body = if url(&a).contains("instType=FUTURES") {
@@ -62,17 +78,21 @@ fn startup_on(
             _ => None,
         })
         .unwrap();
-    let config = initial
-        .iter()
-        .find(|a| is_get(a, "/api/v5/account/config"))
-        .unwrap();
-    reply(
-        &mut e,
-        config,
-        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
-        3.0,
-    );
-    let pending = prepared(&mut e, 3.0);
+    let pending = if eea {
+        initial
+    } else {
+        let config = initial
+            .iter()
+            .find(|a| is_get(a, "/api/v5/account/config"))
+            .unwrap();
+        reply(
+            &mut e,
+            config,
+            &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+            3.0,
+        );
+        prepared(&mut e, 3.0)
+    };
     let private = pending
         .iter()
         .find_map(|a| match a {

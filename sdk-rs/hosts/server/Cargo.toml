@@ -49,6 +49,8 @@ delegated-order-frames = []
 test-support = ["safe-cex-engine/test-support"]
 
 [dev-dependencies]
+p256.workspace = true
+safe-cex-venue-coinbase = { path = "../../venues/coinbase" }
 safe-cex-venue-backpack = { path = "../../venues/backpack" }
 proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
 safe-cex-exchange-server = { path = ".", features = ["test-support"] }
@@ -57,6 +59,10 @@ tokio = { version = "1.53.3", features = ["test-util"] }
 safe-cex-venues = { workspace = true, features = ["hyperliquid"] }
 tokio-tungstenite = "0.30.0"
 sentry = { version = "0.49.5", default-features = false, features = ["test", "panic"] }
+
+[build-dependencies]
+serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

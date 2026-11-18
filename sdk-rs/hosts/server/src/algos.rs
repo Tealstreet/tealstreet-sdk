@@ -1386,6 +1386,7 @@ pub(crate) async fn run_with_identity(
             &crate::telemetry::Report {
                 kind: "algos.shutdown_deadline_passed",
                 summary: "chaser shutdown passed its deadline; cancels may be unsettled and orders may rest",
+                user_id: Some(&who.user),
                 user_tag: Some(crate::accounts::user_tag(&who.user)),
                 venue: Some(&who.venue),
                 ..Default::default()

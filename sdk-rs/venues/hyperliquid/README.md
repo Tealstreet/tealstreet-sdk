@@ -49,3 +49,22 @@ publication; one correlated event retains the actual Unknown indices and placed 
 store effects and empty created IDs, and pins journal, terminal guidance and
 diagnostics independently with the Unknown row first, middle and last. Confirmed
 and already-gone cancellations remain successful without Unknown diagnostics.
+
+## Candle catalogue readiness
+
+The first nonempty catalogue opens MARKETS before all HIP-3 DEX and optional spot
+rows arrive. A candle read for a missing row waits only while its catalogue is
+unresolved; an existing core row can read immediately. A completed relevant
+catalogue or explicit exclusion refuses with `Market not found`, even if an
+unrelated DEX is still loading. Failed/malformed discovery is not proof of absence.
+Optional spot publication is not completion: every universe row must resolve to
+a usable market or explicit exclusion. A malformed or missing context keeps the
+original read bound; usable siblings publish and explicit exclusions still refuse.
+Standalone spot records the same per-row exclusion facts as merged spot, so an
+excluded row refuses immediately even while a malformed sibling remains unresolved.
+
+The wait owns its original command Context and timer, capped at 20 seconds and
+any shorter caller bound. Discovery and HTTP share that deadline; neither arrival
+nor an early host timer renews it. Deferred release runs outside the discovery
+HTTP callback and rechecks the original Context. Retired generations cannot send
+or complete a reused command ID. Candle time geometry is captured at receipt.

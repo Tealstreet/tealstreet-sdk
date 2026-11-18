@@ -2,6 +2,8 @@
 //! embedding application; clients can neither create accounts nor set credentials.
 use crate::{Host, Transport};
 use futures_util::{SinkExt, StreamExt};
+#[cfg(test)]
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::command::HostInput;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::{Command, Event, Level, Notice, SubscriptionTopic, Value, Venue, VenueError};
@@ -81,6 +83,8 @@ pub struct ServerConfig {
     /// Names the account in log lines this actor writes (a user tag, account and
     /// venue, never credentials); None for listener and test accounts.
     pub log_label: Option<String>,
+    /// Captured verified subject, used only by the host's diagnostic sink.
+    pub report_user: Option<crate::report::ReportUser>,
     /// Who signs this account (`hosted_cosign`, or `public` with no key), named on
     /// its start-failure line; None outside the Hosted server.
     pub signing_mode: Option<&'static str>,
@@ -89,6 +93,9 @@ pub struct ServerConfig {
     /// In-process facts from trusted local setup, never deserialized from account JSON.
     #[cfg(feature = "venues")]
     pub trusted_signer_state: Option<safe_cex_venues::TrustedSignerState>,
+    /// Original identity facts bound to the exact trusted provider and venue.
+    #[cfg(feature = "venues")]
+    pub trusted_signer_identities: Option<crate::TrustedSignerIdentities>,
 }
 
 impl Default for ServerConfig {
@@ -106,10 +113,13 @@ impl Default for ServerConfig {
             max_frame_bytes: 16 * 1024 * 1024,
             io_timeout: Duration::from_secs(5),
             log_label: None,
+            report_user: None,
             signing_mode: None,
             interest_observer: None,
             #[cfg(feature = "venues")]
             trusted_signer_state: None,
+            #[cfg(feature = "venues")]
+            trusted_signer_identities: None,
         }
     }
 }
@@ -466,6 +476,9 @@ pub fn spawn_venue_account<T: Transport + 'static>(
     }
     let mut options = serde_json::from_str(options_json)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    if let Some(identities) = &config.trusted_signer_identities {
+        identities.apply(venue, signer.as_ref(), &mut options)?;
+    }
     if let Some(state) = &config.trusted_signer_state {
         state
             .apply(venue, &mut options)
@@ -1219,6 +1232,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
         );
         crate::report::report(&crate::report::ErrorReport {
             kind: crate::report::ErrorKind::AccountStartFailed,
+            user: self.config.report_user.as_ref(),
             label: Some(label),
             target: None,
             error_kind: error.kind.map(|kind| kind.as_str()),
@@ -2378,7 +2392,7 @@ mod tests {
             if matches!(&command, Command::FetchLeverage {symbol, ..} if symbol == "fatal") {
                 cx.send(
                     SocketId(safe_cex_engine::resource_ids::MAX_RESOURCE_ID + 1),
-                    "unsafe",
+                    ControlFrame::subscription("unsafe"),
                 );
                 return;
             }

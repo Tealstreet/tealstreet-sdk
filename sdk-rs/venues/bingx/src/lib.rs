@@ -1,4 +1,5 @@
 //! BingX stablecoin-margined perpetual swaps on the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 pub mod account;
 pub mod account_wire;
 mod clock;
@@ -469,7 +470,7 @@ impl Bingx {
             return;
         };
         if text == "Ping" {
-            cx.send(socket, "Pong");
+            cx.send(socket, ControlFrame::heartbeat("Pong"));
             return;
         }
         if text == "Pong" {
@@ -479,7 +480,7 @@ impl Bingx {
             return;
         };
         if message.ping.is_some() {
-            cx.send(socket, "Pong");
+            cx.send(socket, ControlFrame::heartbeat("Pong"));
             return;
         }
         if message.pong.is_some() {
@@ -1546,6 +1547,26 @@ impl Venue for Bingx {
             }
         }
     }
+    fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        status: u16,
+        headers: &str,
+        error: &str,
+    ) {
+        match pending {
+            Pending::History(request) => self
+                .history
+                .on_stream_malformed(cx, request, status, headers, error),
+            pending => self.on_http_failed(
+                cx,
+                pending,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Internal),
+            ),
+        }
+    }
+
     fn on_http_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,

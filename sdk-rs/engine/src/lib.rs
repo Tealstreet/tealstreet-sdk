@@ -6,6 +6,7 @@ pub mod candle_output;
 pub mod capabilities;
 pub mod classify;
 pub mod command;
+mod control_frame;
 pub mod coverage;
 pub mod credential_selection;
 pub mod credentials;
@@ -82,6 +83,7 @@ pub use capabilities::{
     AccountLookup, CancelAll, Capabilities, ClosedPositionFormat, FillHistoryTime, LeverageQuery,
     MaxLeverage, PositionHistory, QuantityUnits,
 };
+pub use control_frame::ControlFrame;
 pub use credentials::{READ_CREDENTIALS_INVALID, ReadCredentials};
 pub use engine::{
     AccountReadScope, Action, AuthOutcome, Command, CommandId, CommandWait, CredentialSlot, Cx,
@@ -98,7 +100,10 @@ pub use error::{
     VenueError,
 };
 #[cfg(feature = "history-row-diagnostics")]
-pub use error::{HistoryDecode, HistoryDecodeReason, HistorySchema};
+pub use error::{
+    HistoryDecode, HistoryDecodeField, HistoryDecodeReason, HistoryDecodeShape,
+    HistoryEnvelopeCode, HistoryExpectedType, HistoryJsonType, HistorySchema,
+};
 pub use log::{Health, Level, LogEvent, Redacted, Value};
 pub use model::{OrderIdentityKind, OrderIdentityReceipt};
 pub use store::{OrderSnapshotToken, Store};

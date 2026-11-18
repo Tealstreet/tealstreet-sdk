@@ -12,7 +12,7 @@ import {
   setWasmEngineLoader,
 } from '@tealstreet/safe-cex/src/exchanges/rust/rust.exchange';
 
-import { PublicExchangeFactory } from './PublicExchangeFactory';
+import { PublicExchangeFactory, type PublicExchangeFactoryOptions } from './PublicExchangeFactory';
 import { type RedisLikeMarketCacheClient, writeMarketCacheSnapshot } from './marketCache';
 
 class MemoryRedis implements RedisLikeMarketCacheClient {
@@ -40,25 +40,40 @@ const deferred = () => {
 };
 
 describe('PublicExchangeFactory with the real native engine', () => {
+  const factories: PublicExchangeFactory[] = [];
   let factory: PublicExchangeFactory | undefined;
   let input: ReturnType<typeof realVenue> | undefined;
   let release: (() => void) | undefined;
 
   afterEach(async () => {
-    await factory?.dispose();
     release?.();
     release = undefined;
-    input?.dispose();
-    setWasmEngineLoader(loadNodeEngine);
-    vi.restoreAllMocks();
+    try {
+      for (const source of factories) await source.dispose();
+    } finally {
+      factories.length = 0;
+      factory = undefined;
+      input?.dispose();
+      input = undefined;
+      setRustEngineTransport();
+      setWasmEngineLoader(loadNodeEngine);
+      vi.restoreAllMocks();
+    }
   });
+
+  const createFactory = (options: PublicExchangeFactoryOptions) => {
+    // Warm-cache cases stay in one UTC-hour bucket even if the host clock rolls over.
+    const source = new PublicExchangeFactory({ now: () => Date.UTC(2026, 9, 20, 12), ...options });
+    factories.push(source);
+    return source;
+  };
 
   const setup = (wrap?: (transport: Transport) => Transport) => {
     input = realVenue('binance');
     const transport = wrap?.(input.transport) ?? input.transport;
     setRustEngineTransport(() => transport);
     setWasmEngineLoader(loadNodeEngine);
-    factory = new PublicExchangeFactory({ exchangeOptions: { engine: 'rust' } });
+    factory = createFactory({ exchangeOptions: { engine: 'rust' } });
     return factory;
   };
 
@@ -130,31 +145,41 @@ describe('PublicExchangeFactory with the real native engine', () => {
     expect(input!.requests.filter((url) => url.includes(catalog))).toHaveLength(2);
   });
 
-  it('hydrates a warm Rust cache without network and refetches after an externally started handle', async () => {
-    const redis = new MemoryRedis();
-    setup();
-    factory = new PublicExchangeFactory({ redis, exchangeOptions: { engine: 'rust' } });
-    const first = await factory.get('binance');
-    const originalMarkets = first.markets;
-    await factory.dispose();
-    const count = input!.requests.length;
-    factory = new PublicExchangeFactory({ redis, exchangeOptions: { engine: 'rust' } });
-    const cached = await factory.get('binance');
-    expect(cached.markets).toEqual(originalMarkets);
-    expect(input!.requests).toHaveLength(count);
-    expect((cached.exchange as RustEngineExchange).hasStarted).toBe(false);
-    await cached.exchange.start();
-    const externallyStarted = cached.exchange;
-    await cached.forceRefreshMarkets('metadata-after-live-start');
-    expect(cached.exchange).not.toBe(externallyStarted);
-    expect(externallyStarted.isDisposed).toBe(true);
-    expect(input!.requests.filter((url) => url.includes(catalog))).toHaveLength(3);
-  });
+  it.each([
+    ['stable wall clock', 0],
+    ['UTC hour rolls forward', 1],
+    ['wall clock moves backward', -3_600_000],
+  ] as const)(
+    'hydrates a warm Rust cache without network (%s) and refetches after an externally started handle',
+    async (_label, delta) => {
+      let wallTime = Date.UTC(2026, 10, 15, 21, 59, 59, 999);
+      vi.spyOn(Date, 'now').mockImplementation(() => wallTime);
+      const redis = new MemoryRedis();
+      setup();
+      factory = createFactory({ redis, exchangeOptions: { engine: 'rust' } });
+      const first = await factory.get('binance');
+      const originalMarkets = first.markets;
+      await factory.dispose();
+      const count = input!.requests.length;
+      wallTime += delta;
+      factory = createFactory({ redis, exchangeOptions: { engine: 'rust' } });
+      const cached = await factory.get('binance');
+      expect(cached.markets).toEqual(originalMarkets);
+      expect(input!.requests).toHaveLength(count);
+      expect((cached.exchange as RustEngineExchange).hasStarted).toBe(false);
+      await cached.exchange.start();
+      const externallyStarted = cached.exchange;
+      await cached.forceRefreshMarkets('metadata-after-live-start');
+      expect(cached.exchange).not.toBe(externallyStarted);
+      expect(externallyStarted.isDisposed).toBe(true);
+      expect(input!.requests.filter((url) => url.includes(catalog))).toHaveLength(3);
+    },
+  );
 
   it('preserves the last successful engine and metadata if cache persistence fails', async () => {
     const redis = new MemoryRedis();
     setup();
-    factory = new PublicExchangeFactory({ redis, exchangeOptions: { engine: 'rust' } });
+    factory = createFactory({ redis, exchangeOptions: { engine: 'rust' } });
     const handle = await factory.get('binance');
     const previous = handle.exchange;
     const markets = handle.markets;
@@ -171,10 +196,10 @@ describe('PublicExchangeFactory with the real native engine', () => {
   it('keeps a lazy cached engine and store intact when forced-refresh persistence fails', async () => {
     const redis = new MemoryRedis();
     setup();
-    factory = new PublicExchangeFactory({ redis, exchangeOptions: { engine: 'rust' } });
+    factory = createFactory({ redis, exchangeOptions: { engine: 'rust' } });
     await factory.get('binance');
     await factory.dispose();
-    factory = new PublicExchangeFactory({ redis, exchangeOptions: { engine: 'rust' } });
+    factory = createFactory({ redis, exchangeOptions: { engine: 'rust' } });
     const handle = await factory.get('binance');
     const previous = handle.exchange as RustEngineExchange;
     const markets = handle.markets;
@@ -219,7 +244,7 @@ describe('PublicExchangeFactory with the real native engine', () => {
         return transport.request(request);
       },
     }));
-    factory = new PublicExchangeFactory({ nativeStartupTimeoutMs: 10_000, exchangeOptions: { engine: 'rust' } });
+    factory = createFactory({ nativeStartupTimeoutMs: 10_000, exchangeOptions: { engine: 'rust' } });
     const handle = await factory.get('binance');
     const previous = handle.exchange;
     const markets = handle.markets;
@@ -271,7 +296,7 @@ describe('PublicExchangeFactory with the real native engine', () => {
       refreshedAt: 1,
     });
     held = true;
-    factory = new PublicExchangeFactory({
+    factory = createFactory({
       redis,
       nativeStartupTimeoutMs: 100,
       now: () => Date.UTC(2026, 9, 20, 12),
@@ -326,7 +351,7 @@ describe('PublicExchangeFactory with the real native engine', () => {
       const markets = (await factory!.get('binance')).markets;
       await factory!.dispose();
       held = true;
-      factory = new PublicExchangeFactory({
+      factory = createFactory({
         redis,
         nativeStartupTimeoutMs: 100,
         now: () => Date.UTC(2026, 9, 20, 12),

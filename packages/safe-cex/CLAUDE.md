@@ -63,6 +63,19 @@ Core exchange integration library. See also exchange-specific `CLAUDE.md` files 
 For exchange migrations that add first-class opening trigger/conditional orders,
 read `CONDITIONAL_ORDERS.md` before changing mapper or order lifecycle code.
 
+Hyperliquid, Hyperliquid Spot and Bitunix metadata explicitly declare
+`supportsTunnel: true` alongside their existing `enforceWsTunnel: true`.
+Enforcement still wins over disabled user preferences; inconsistent declarations
+remain observable through the general account-construction warning.
+
+Hyperliquid `/info` admission falls back after bounded IndexedDB failures to
+half-rate memory admission per JavaScript realm (500 weight/minute; burst 500
+for critical/reconciliation, 400 for normal/bulk). Known debt and 429 pauses remain;
+the existing 30-second cooldown retries shared storage and max-merges local spend.
+Independent fallback realms can exceed the shared cap: the maintainer chose chart
+availability over a perfect shared cap. A realm that never opened IndexedDB keeps
+its existing local policy; request deadlines, cancellation and single-send guards remain.
+
 ## DELEGATED handover
 
 `sealDelegatedHandover` is an additive, synchronous, host-neutral sender for
@@ -80,6 +93,11 @@ the private scalar. The optional private field is not copied into the result or
 HPKE context. The receiver rejects scalar-in-init layouts, foreign credential
 layouts and empty CEX secrets; existing trusted setup validates actual material.
 HMAC callers omit `signingKey` and retain byte-identical envelopes.
+ApeX additionally seals optional `omniKeySeed`, a packed 65-byte Ethereum
+signature encoded as hex. It never enters public init settings or HPKE context,
+and cannot be used as wallet `signingKey` or supplied to another venue. The
+receiver transfers it through zeroizing credentials into the canonical protected
+`primary.extra.zklinkSeed` role; native reconfiguration retains that provider.
 The sender uses RFC 9180 base mode with X25519/HKDF-SHA256/ChaCha20-Poly1305 and
 one fresh encapsulation per call. Deterministic RFC and shared synthetic handover
 fixtures exercise the same production sender. The shared fixture lives with
@@ -128,7 +146,8 @@ the host-owned feature flag, the captured box/router transport proofs, and only
 the advertised `delegatedActivationScopeV1` place/close capabilities. Discover
 box capabilities using `?exchangeName=<joined venue>` and retain its
 `delegatedVenueV1`; activation refuses a missing or mismatched venue. The neutral
-`DELEGATED` flag replaces `DELEGATED_BYBIT`, and `delegatedDisabled` replaces
+`DELEGATED` flag is venue-generic; `DELEGATED_BYBIT` is only its host/DB
+compatibility alias, not a separate switch. `delegatedDisabled` replaces
 `delegatedBybitDisabled`. `requireDelegatedActivation` takes the connection venue
 as its third argument. `OutboxConnection.venue` is an `ExchangeName`; its trusted
 low-level connection still requires a remote-signing-supported venue. Amend, venue
@@ -448,6 +467,13 @@ Callers must provision worker/hosted providers separately rather than copy
 of checking `options.key`. Raw legacy native/WASM input is a trusted compatibility
 adapter until those cutover callers migrate; it converges on the same provider
 path and must be removed before TS venue/reference deletion.
+
+`Exchange.signJoinProof` is an optional raw-JSON admission-only entry implemented
+by `RustEngineExchange`. It reuses the original owned signing host and capture
+runner, fences worker owner/generation and host replacement across awaits, and
+returns only the frozen proof response. It performs no HTTP/WS fallback or venue
+activation. The NX transport must retain its original registration and socket;
+see `docs/plans/callers/public-key-admission.md` for the closed dispatch contract.
 
 For families with enabled hosted-signing admission, browser-facing `signHttpRequest`
 and `signWsAuth` use the same owned provider through bounded signing-only captures, without
@@ -775,8 +801,21 @@ alone do not establish it. Callers must handle typed readiness failures.
 `frameFedSupported` builds its own engine with `frameFed: true`, the account's
 key and route, and starts it only when `construction().frameFed` is true (no
 venue streams, no account reads). `frameFedReady` resolves whether it did;
-otherwise manual writes refuse locally with `unsupported/notSent`, never an RPC
-to the source. Every manual write waits within the existing startup deadline for
+otherwise manual writes refuse locally with `unsupported/notSent`. The sole
+exception is a non-DELEGATED worker mirror whose loaded module explicitly
+reports `frameFedSupported(venue) === false`: it uses the existing owning-source
+`callMethod` writer, including protective amendments. LOCAL (including the legacy
+absent mode) uses its account worker and keeps keys local; COSIGNED uses its
+existing hosted source. The host supplies the actual mode, including reused
+mirrors; DELEGATED never opts into this route. A missing
+module/capability or a failed supported page engine never falls back. No failed
+or Unknown write is retried or sent through a second writer. The roster-derived
+`rust.beta-manual-write-routing.test.ts` exercises every `BETA_VENUES` entry
+outside native `FRAME_FED_VENUES`, in explicit/absent LOCAL and COSIGNED through
+both manual entry points; DELEGATED cannot borrow either source sender.
+Both routes retain the initiating owner and bridge admission across readiness
+waits; #3513's
+page-engine preflight remains unchanged. Every manual write waits within the existing startup deadline for
 this page engine, including leverage/settings and calls through `callMethodInWorker`;
 expiry returns `notSent` and cannot send when startup later finishes. The host feeds it
 the data source's SCXF frames with `ingestSourceFrame(bytes, snapshot)` (a
@@ -857,6 +896,15 @@ amend with older WASM lacking this metadata refuses `unsupported` / `notSent`;
 consume matching SDK and WASM together. Owner loss after a committed cancel
 retains Unknown and the existing placement fence.
 
+A DELEGATED `workerMirror` never loads a page WASM engine or signs locally,
+even when its retained account options contain credentials. Generic manual writes
+refuse `unsupported` / `notSent`; the host's typed DELEGATED transport owns them.
+Public candles and private reads use the owning source. Startup and command guards
+also reject a mode change while page readiness is pending; a kept engine cannot
+execute new commands after the host changes the mirror to DELEGATED.
+Signing adapters retain that host and recheck at each credential/signature handoff
+and before publishing results, including later HTTP interceptor continuations.
+
 A `workerMirror` instance keeps the account's own options, credentials
 included, because the web starts the worker from
 `{ ...exchange.options, workerMirror: undefined }`; its signing host and any
@@ -869,7 +917,10 @@ worker, mirror-local, unsupported, or a write (moving to the main-thread writer
 engine); an unclassified method fails typecheck. Engine reads forward
 (`WORKER_FORWARDED_METHODS`, plus the Rust-only `fetchStpMode` and
 `fetchOrderBook`). `fetchLeverageForSymbol` and `fetchSymbolMaxLeverage` answer
-from frame-fed rails and ask the worker only for a venue read. On a mirror,
+from frame-fed rails and ask the worker only for a venue read. A private query-only
+maximum (Bitrue) also uses that source read, freezing its entry route and retaining
+its original owner before capability waits and before/after the private read.
+Public-only market ceilings remain local. On a mirror,
 `validateAccount`, `fetchEngineSnapshot` and `snapshotFrame` throw a named
 `unsupported` error, and `fetchFillsForOrderIds` is never adopted;
 `WorkerMirrorExchange` is the type without them. Forwarding decides a method is
@@ -994,12 +1045,19 @@ change confers no ingestion completion or new history capability.
 
 Bitget and Kraken row refusals carry `causeCode: HISTORY_DECODE` and a closed
 `historyDecode: { schema, reason }` record through host and worker errors. The
-record contains no row values, identities or response text. Only Bitget and
-Kraken enable the non-default `history-row-diagnostics` engine feature; the JS
+record contains no row values, identities or response text. Bitget, Kraken and
+BingX enable the non-default `history-row-diagnostics` engine feature; the JS
 validator remains available when native detail is absent. Bitget rejects a
 proven invalid row immediately instead of replaying the same page; transport
 and envelope failures retain their bounded retry policy. Native strict checks
 and Kraken's existing accepted-prefix incomplete policy remain unchanged.
+
+BingX income-ledger and order-history decode evidence adds a closed `shape`:
+fixed field path (row-relative for `row.*`), expected/actual JSON types and
+envelope-code presence. Hosts validate and copy each categorical field; no row
+value or raw parser text crosses this diagnostic boundary. Existing Bitget/Kraken
+schema/reason objects retain their wire shape. NX history-window reporting needs
+the companion allowlisted forwarding change after the SDK mirror import.
 
 ## Rust incomplete history
 
@@ -1025,6 +1083,10 @@ and leave historical coverage uncompleted. Raw native/DO clients correlate the
 translated event command themselves; this SDK transport does not change their
 wire protocol. See B11 in `docs/plans/RUST_CUTOVER_CALLERS.md`.
 
+The fatal symbol-scoped income wrapper retains shared engine classification
+(`kind`, `outcome`, `venueCode`) alongside its existing name and cause. Failed
+income still stops the fold before any fill reads; no empty account is invented.
+
 ## Rust socket health
 
 Engine venues own their sockets and reconnect policy; the wasm host only
@@ -1038,14 +1100,37 @@ only when their public topics are direct; separate sockets remain independent.
 `BaseWebSocket` fields, so `getAllSockets`, `reconnect`, `recoverAfterOffline`,
 CLI `ConnectionMonitor` and the base `dispose` work unchanged. It writes
 `store.socketHealth` through the shared `summarizeSocketHealth`, on socket
-changes and every 5 s, never through the TS watchdog. A private socket is healthy
-for 60 s of silence, the engine venues' own idle limit. Reconnecting closes only
+changes and every 5 s, never through the TS watchdog. Channel health uses a
+60 s silence threshold. Reconnecting closes only
 open sockets; a connect in flight is left alone, as in TS. `Deactivate` and
 `auth.rejected` events raise `authFailureStreak`; a private stream delivering
 again resets it. Private `privateLastMessage` retains the last received frame's
 page-clock timestamp while the socket is uninitialized or reconnecting; a feed
 that has never received a frame still has no timestamp. Health/initialization
 flags remain independent of this diagnostic age.
+
+The existing five-second health check compares elapsed wall time with the exact
+scheduling clock retained by this engine. If wall time gained more than the
+clock's existing one-second correction margin, it retains recovery evidence for
+OPEN, initialized pre-pause channels, then retires them when their last frame
+reaches 60 s of wall age. A 50 s sleep may still be fresh at the first check;
+normal engine ticks afterward must not consume that pending recovery. Receipt
+timestamp and physical host record fence each obligation. Fresh traffic,
+replacement or disposal cancels it, and retirement consumes it before reconnect.
+Already resumed traffic is not enrolled; within a mixed sampling interval the
+pre-pause receipt must be provable from the elapsed gap and active engine time.
+`EngineHost.reconnectSockets` applies recovery bounds per physical record, not
+aggregate channel handles: a fresh sibling cannot hide a stale socket, and an
+uninitialized sibling keeps its connect grace. Ordinary channel reconnect callers
+omit the bounds and retain their existing behavior.
+Laptop sleep can pause `performance.now()` while wall-clock health ages; ordinary
+callback delays with advancing engine time do not activate this fallback. Normal native
+90 s/180 s silence allowances remain authoritative. The check uses the engine
+reconnect path, retaining its epochs, uncertainty and retry policy. Fresh traffic,
+uninitialized replacements and connects in flight are left alone. It neither
+moves command deadlines nor retries writes, rebuilds the engine or reloads the
+chart. Its self-rescheduling timeout keeps one handle and stops on disposal.
+Regression: `rust.socket-health.test.ts`.
 
 `store.latency` is nullable: null means no measurement, including on reset.
 STATUS keeps its fixed layout and uses `LATENCY_MEASURED` to distinguish an
@@ -1180,6 +1265,9 @@ read. These reads establish current access, not future availability: cancellatio
 still precedes replacement as in the legacy adapter, and fresh post-cancel proof
 remains mandatory. A failure first occurring after cancellation stays Unknown
 and fences further placement; the preflight never grants replay or restoration.
+Ordinary peer orders may omit or null their irrelevant `triggerBy`; the captured
+protective target must still carry its exact known trigger source before cancel
+and in fresh terminal proof. Peer lineage and completeness checks remain required.
 
 ## Automatic retries are for reads only
 
@@ -2166,7 +2254,7 @@ The Rust polling helpers preserve wildcard fallback, finite-value clamping,
 and replacement of the entire map. `get_tick_interval` takes the resolved base
 and auth-failure streak so the multiplier precedes the same backoff cap.
 
-Every Rust SDK account sends `setPollScale` before native startup and when the
+Each current Rust SDK account sends `setPollScale` before native startup and when the
 multiplier or Base auth streak changes: its resolved Base `getTickInterval()`
 over the metadata `tickInterval`. Each venue keeps its own reconcile cadence
 (Bybit 5s, Kraken 5-10s, Paradex 10s), so the scale slows or speeds those
@@ -2178,6 +2266,8 @@ scale `null`; venue constructor options do not carry a second polling policy. Un
 eligible for retry, and disposal removes the multiplier listener. These controls
 govern periodic reconciliation, not socket supervision or explicit reads. Base
 auth-streak propagation alone does not prove classified native auth feedback.
+Background owner retirement follows
+[`src/exchanges/CLAUDE.md`](src/exchanges/CLAUDE.md#rust-background-polling-policy-ownership).
 
 ## Debugging exchange REST traffic
 
@@ -2313,6 +2403,10 @@ Cancellation or Claim without dispatch refunds only that token generation; a
 request handed to fetch is never refunded. Once IDB has worked in a realm,
 storage failure waits within the original read deadline rather than sending from
 an unshared memory budget. Never-opened IDB keeps the memory-only behavior.
+A proven pre-send `/info` admission deadline keeps `HTTP_PREPARATION_TIMED_OUT`
+and carries only closed cause `info_admission` / `HTTP admission deadline expired`.
+After handoff begins, errors retain their original classification and identity;
+this diagnostic distinction cannot extend budgets, change retries or suppress reports.
 Role/mode startup reads
 stay single-flight until their managed completion or deadline, including quota wait.
 Each Hyperliquid engine issues at most three routine account reads at once, with
@@ -2432,3 +2526,8 @@ Other models and host-owned capabilities retain their owning modules. Regenerate
 with `corepack yarn types:generate`; the scoped compiler gate is
 `node --test sdk-rs/safe-cex-types/tests/store-contract.cjs`.
 Opaque legacy config members and userData are unknown and require narrowing.
+
+Join-proof v1 wire declarations live in `src/joinProof.types.ts`, re-exported
+from `src/types.ts`. They do not widen the legacy remote-signer dispatch or
+enable a venue. Rust owns closed payload decoding/public identity projection;
+see `docs/plans/callers/public-key-admission.md` and the admission contract tests.

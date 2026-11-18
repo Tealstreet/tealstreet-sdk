@@ -1,0 +1,5 @@
+{
+  "status": "ready",
+  "probeTests": "src/delegated/coinbase_probe_tests.rs",
+  "sessionTests": "src/session/tests/cosigned_coinbase.rs"
+}

@@ -14,6 +14,7 @@ import type {
   WasmEngineLike,
 } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeErrorKind } from '../../commandOutcome';
+import type { JoinProofResponse } from '../../joinProof.types';
 import type { Store } from '../../store/store.interface';
 import type {
   AccountGreeks,
@@ -154,7 +155,7 @@ import {
   rustPublicFeedIdentity,
   serveInProcessPublicData,
 } from './publicFeed';
-import { RustSocketHandle } from './rustSockets';
+import { RUST_SOCKET_STALE_MS, RustSocketHandle } from './rustSockets';
 import { failedPrivateReadKind, startupDiagnosticTags } from './startupDiagnostics';
 
 /** The public registry and direct construction share the same beta policy. */
@@ -507,6 +508,7 @@ const NUKE_ALGO_STOP_GRACE_MS = 1_000;
 const MAX_QUEUED_ALGO_OPS = 100;
 
 type AlgoRows = { activeChasers: ActiveChaser[]; activeTWAPs: ActiveTWAP[] };
+type WorkerAdmission = ((method: string, args: unknown[]) => void) | undefined;
 
 /** Store sections flush at the worker's store cadence. */
 const STORE_FLUSH_MS = 250;
@@ -521,6 +523,7 @@ const SOCKET_HEALTH_SYNC_MS = 5_000;
 const VALIDATE_ACCOUNT_TIMEOUT_MS = 45_000;
 
 export class RustEngineExchange extends BaseExchange {
+  private readonly sourceWorkerCall: typeof this.callMethodInWorker;
   private workerOwnerSource?: () => { ownerId: string; generation: number } | undefined;
 
   /** Optional owner fencing; hosts without a binding retain legacy bridge dispatch behavior. */
@@ -578,17 +581,65 @@ export class RustEngineExchange extends BaseExchange {
     this.publicFeedDisabled = true;
   }
   private sharedPublicFeed?: RustPublicFeedClient;
+  private signingHost = (): Pick<EngineHostType,
+    'hostedSigning' | 'hostedJoinProof' | 'hostedWalletSigning' | 'hostedSigningClock' | 'coinbaseSigningMetadata'
+  > & { assertCurrent(): void } => {
+    const host = this.host;
+    if (!host) throw this.pageWriterUnavailable('signing');
+    const assertCurrent = () => {
+      if (this.isDelegatedMirror || this.isDisposed || this.host !== host)
+        throw this.pageWriterUnavailable('signing');
+    };
+    return {
+      assertCurrent,
+      hostedSigning: async (input) => {
+        assertCurrent();
+        const result = await host.hostedSigning(input);
+        assertCurrent();
+        return result;
+      },
+      hostedJoinProof: async (input) => {
+        assertCurrent();
+        const result = await host.hostedJoinProof(input);
+        assertCurrent();
+        return result;
+      },
+      hostedWalletSigning: (input) => { assertCurrent(); return host.hostedWalletSigning(input); },
+      hostedSigningClock: () => { assertCurrent(); return host.hostedSigningClock(); },
+      coinbaseSigningMetadata: () => { assertCurrent(); return host.coinbaseSigningMetadata(); },
+    };
+  };
+  signJoinProof = async (requestJson: string): Promise<JoinProofResponse> => {
+    const admitted = this.captureWorkerAdmission();
+    admitted?.('signJoinProof', []);
+    if (!this.bridgeConstruction.dispatchSigning || this.isDelegatedMirror || this.isDisposed)
+      throw this.pageWriterUnavailable('signing');
+    const initialization = this.ensureSigningHost();
+    await initialization;
+    admitted?.('signJoinProof', []);
+    if (this.hostInitialization !== initialization) throw this.pageWriterUnavailable('signing');
+    const host = this.signingHost();
+    const result = await host.hostedJoinProof(requestJson);
+    host.assertCurrent();
+    admitted?.('signJoinProof', []);
+    if (this.hostInitialization !== initialization) throw this.pageWriterUnavailable('signing');
+    return result;
+  };
   override signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
     if (this.bridgeConstruction.dispatchSigning) {
       try {
         await this.ensureSigningHost();
-        return await signHostedHttp(
+        if (this.isDelegatedMirror) throw this.pageWriterUnavailable('signing');
+        const host = this.signingHost();
+        const result = await signHostedHttp(
           this.name,
           this.engineOptions,
           Boolean(this.signerSetup?.primaryComplete),
-          this.host!,
+          host,
           request,
         );
+        host.assertCurrent();
+        return result;
       } catch {
         return { id: request.id, error: 'Hosted HTTP signing failed' };
       }
@@ -600,7 +651,11 @@ export class RustEngineExchange extends BaseExchange {
     if (this.bridgeConstruction.dispatchSigning) {
       try {
         await this.ensureSigningHost();
-        return await signHostedWsAuth(this.host!, request);
+        if (this.isDelegatedMirror) throw this.pageWriterUnavailable('signing');
+        const host = this.signingHost();
+        const result = await signHostedWsAuth(host, request);
+        host.assertCurrent();
+        return result;
       } catch {
         return { id: request.id, error: 'Hosted WS auth signing failed' };
       }
@@ -635,6 +690,8 @@ export class RustEngineExchange extends BaseExchange {
   private readonly attemptedPlacementSymbols = new Set<string>();
   private readonly startupWaiters = new Set<() => void>();
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
+  private socketHealthTimer?: ReturnType<typeof setTimeout>;
+  private socketHealthClock?: () => number;
   private readonly applier: FrameApplier;
   private readonly bookListeners = new Map<string, Map<number, (book: OrderBook) => void>>();
   private nextBookListenerId = 0;
@@ -669,6 +726,7 @@ export class RustEngineExchange extends BaseExchange {
   readonly frameFedReady: Promise<boolean>;
   private frameFed = false;
   private frameFedSettled = false;
+  private pageWriteSupported?: boolean;
   private frameFedEngine = false;
   private sourceBaseline = false;
   /** Recent (source write time - arrival) samples, and the offset last handed to the engine. */
@@ -1037,6 +1095,8 @@ export class RustEngineExchange extends BaseExchange {
     this.frameFedReady.then(frameFedSettled, frameFedSettled);
     // Hosts that write through `callMethodInWorker` reach the frame-fed engine too.
     const viaWorker = this.callMethodInWorker;
+    // Source dispatch must not re-enter the mirror's manual-write router.
+    this.sourceWorkerCall = viaWorker;
     const members = this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
     this.callMethodInWorker = ((method: string, ...args: unknown[]) =>
       this.isWorkerMirror && FRAME_FED_WRITES.has(method)
@@ -1171,7 +1231,7 @@ export class RustEngineExchange extends BaseExchange {
     this.updatePollingPolicy();
   };
 
-  private syncPollingPolicy = (): Promise<void> | undefined => {
+  private syncPollingPolicy = (mode: 'startup' | 'background'): Promise<void> | undefined => {
     if (!this.host || this.isDisposed || this.engineFailure) return;
     const resolved = this.getTickInterval();
     if (resolved === undefined) return;
@@ -1182,6 +1242,9 @@ export class RustEngineExchange extends BaseExchange {
     // The resolved tick still bounds a slowdown (auth backoff and server multiplier
     // caps), unless a venue's native cadence is already slower.
     const ceiling = scale === null ? undefined : resolved;
+    // Background policy has no user intent; the replacement applies its own policy.
+    // Startup still requires delivery, and user commands retain their handoff fence.
+    if (mode === 'background' && !this.algoOwnerCurrent(this.twapOwnerBinding)) return;
     if (this.pollingPolicy?.scale === scale && this.pollingPolicy.ceiling === ceiling)
       return this.pollingPolicy.promise;
     // Install before dispatch: native actions can synchronously change policy again.
@@ -1197,7 +1260,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private updatePollingPolicy = (): void => {
-    void this.syncPollingPolicy()?.catch(() => {
+    void this.syncPollingPolicy('background')?.catch(() => {
       /* command() owns error reporting; the next check can retry. */
     });
   };
@@ -1208,10 +1271,12 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private startFrameFed = async (): Promise<boolean> => {
+    if (this.isDelegatedMirror) return false;
     try {
       // Asked before any engine exists: a family without it builds nothing on main.
       const wasm = await loadWasmEngine(this.name);
-      if (!frameFedSupported(wasm, this.name) || this.isDisposed) return false;
+      this.pageWriteSupported = wasm.WasmEngine.frameFedSupported?.(this.name);
+      if (this.pageWriteSupported !== true || this.isDisposed || this.isDelegatedMirror) return false;
       await this.ensureSigningHost();
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -1224,7 +1289,7 @@ export class RustEngineExchange extends BaseExchange {
     if (!host || this.isDisposed || !this.frameFedEngine || typeof host.applyFrame !== 'function') return false;
     if (construction?.frameFed !== true) return false;
     if (this.signerSetup instanceof DelegatedSignerSetup) await host.prepareAddressSetup();
-    if (this.isDisposed || this.host !== host) return false;
+    if (this.isDisposed || this.host !== host || this.isDelegatedMirror) return false;
     this.frameFed = true;
     host.start();
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
@@ -1401,7 +1466,7 @@ export class RustEngineExchange extends BaseExchange {
   /** The account's running chasers and TWAPs, stopped before a nuke run elsewhere: the
    * worker's run in its Rust algos; an in-process CLI's run in the TS algos. */
   stopAccountAlgos = async (): Promise<AlgoStopWithPlacements> => {
-    const stopped: AlgoStopWithPlacements = this.runsRustAlgos
+    const stopped: AlgoStopWithPlacements = this.host?.checkAlgosForExecution()
       ? await this.stopRustAlgos()
       : await stopLocalAccountAlgos(this);
     return { ...stopped, placedSymbols: [...(stopped.placedSymbols ?? []), ...this.attemptedPlacementSymbols] };
@@ -1440,7 +1505,7 @@ export class RustEngineExchange extends BaseExchange {
   startAlgos = (accountName: string): boolean => {
     const host = this.host;
     if (!host || this.isDisposed || this.engineFailure) return false;
-    if (this.algoRoute) return this.algoRoute === 'rust' && this.runsRustAlgos;
+    if (this.algoRoute) return this.algoRoute === 'rust' && host.checkAlgosForExecution();
     try {
       const owner = this.twapOwnerBinding;
       host.algoStart(accountName, owner, owner === undefined ? undefined : () => this.algoOwnerCurrent(owner));
@@ -1468,7 +1533,7 @@ export class RustEngineExchange extends BaseExchange {
       }
     }
     if (this.algoRoute === 'rust') {
-      if (this.runsRustAlgos) rust();
+      if (this.host?.checkAlgosForExecution()) rust();
       else refuse(`${op} was not run: the ${this.name} engine stopped before it could run algos`);
       return;
     }
@@ -1494,7 +1559,7 @@ export class RustEngineExchange extends BaseExchange {
     for (const { op, rust, refuse, owner } of queued) {
       try {
         if (!this.algoOwnerCurrent(owner)) refuse(`${op} cancelled-for-owner-change`);
-        else if (this.algoRoute === 'rust' && this.runsRustAlgos) rust();
+        else if (this.algoRoute === 'rust' && this.host?.checkAlgosForExecution()) rust();
         else if (this.algoRoute === 'unsupported') refuse(this.noAlgosMessage(op));
         else refuse(`${op} was not run: the ${this.name} engine never started`);
       } catch (error) {
@@ -1507,7 +1572,7 @@ export class RustEngineExchange extends BaseExchange {
   algoOp = (op: string, data: unknown): void => {
     try {
       if (!this.host) throw new Error(`${this.name} engine is not started`);
-      if (!this.runsRustAlgos) throw new Error(`${this.name} algos are not running`);
+      if (!this.host.checkAlgosForExecution()) throw new Error(`${this.name} algos are not running`);
       this.host.algoOp(op, data);
     } catch (error) {
       this.emitter.emit('error', `${op} failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -1580,6 +1645,8 @@ export class RustEngineExchange extends BaseExchange {
 
   /** Hosted signing builds the engine without starting it; a mirror still drops its frames. */
   private ensureSigningHost = (): Promise<void> => {
+    if (this.isDelegatedMirror)
+      return Promise.reject(this.pageWriterUnavailable('signing'));
     if (this.isDisposed) return Promise.reject(new Error('Exchange disposed during startup'));
     return (this.hostInitialization ??= this.createHost().catch((error: unknown) => {
       this.signerSetup?.dispose();
@@ -1651,6 +1718,8 @@ export class RustEngineExchange extends BaseExchange {
       }
     });
     if (this.isDisposed) throw new Error('Exchange disposed during startup');
+    if (this.isDelegatedMirror)
+      throw this.pageWriterUnavailable('startup');
     const { WasmEngine } = wasm;
     // Decided with the build, so a signing host built first is the same frame-fed engine.
     this.frameFedEngine = this.isWorkerMirror && !this.isPublicDataOnly && frameFedSupported(wasm, this.name);
@@ -1697,6 +1766,7 @@ export class RustEngineExchange extends BaseExchange {
       (event, message) => this.emitter.emit(event, message),
       (event) => this.emitter.emit('ws-diagnostic', event),
     );
+    this.socketHealthClock = () => transport.now();
     const engine = constructEngine(
       WasmEngine,
       this.name,
@@ -1899,6 +1969,10 @@ export class RustEngineExchange extends BaseExchange {
     return this.options.workerMirror === true;
   }
 
+  private get isDelegatedMirror(): boolean {
+    return this.isWorkerMirror && this.options.signingMode === 'delegated';
+  }
+
   /** Calls a worker method by name, including Rust-only ones absent from the base `Exchange`. */
   private callWorker = (method: string, ...args: unknown[]): Promise<unknown> =>
     this.callWorkerForOwner(this.captureWorkerAdmission(), method, ...args);
@@ -1911,7 +1985,7 @@ export class RustEngineExchange extends BaseExchange {
     }), { code: 'WORKER_STOPPED', command: method, ...(clientOrderIds ? { clientOrderIds } : {}) });
   };
 
-  private captureWorkerAdmission = (): ((method: string, args: unknown[]) => void) | undefined => {
+  private captureWorkerAdmission = (): WorkerAdmission => {
     const source = this.workerOwnerSource;
     if (!source) return undefined;
     const readOwner = () => {
@@ -1943,7 +2017,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private callWorkerForOwner = async (
-    admitted: ((method: string, args: unknown[]) => void) | undefined, method: string, ...args: unknown[]
+    admitted: WorkerAdmission, method: string, ...args: unknown[]
   ): Promise<unknown> => {
     const timing = TIMED_WRITE_METHODS.has(method) ? new WriteTiming(method) : undefined;
     timing?.mark('called');
@@ -1953,7 +2027,9 @@ export class RustEngineExchange extends BaseExchange {
     if (admitted && (this.isDisposed || !bridgeIsCurrent())) {
       throw this.workerOwnerChanged(method, args);
     }
-    const call = () => (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
+    const workerCall = this.isWorkerMirror && FRAME_FED_WRITES.has(method)
+      ? this.sourceWorkerCall : this.callMethodInWorker;
+    const call = () => (workerCall as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
     return timing ? runWithWriteTiming(timing, call) : call();
   };
 
@@ -1992,17 +2068,41 @@ export class RustEngineExchange extends BaseExchange {
     });
 
   private pageWriterUnavailable = (method: string): ExchangeError => {
-    const message = `${this.name} ${method} was not sent: this page cannot run the account's manual-write engine. Reconnect to retry.`;
+    let reason: string;
+    if (this.isDelegatedMirror) {
+      reason = 'this account uses DELEGATED server-only execution; its writes must use its delegated server connection, not the page manual-write engine.';
+    } else if (this.pageWriteSupported === false) {
+      reason = 'this venue does not support a frame-fed manual-write engine on this page, and this operation has no source-writer route.';
+    } else if (this.pageWriteSupported === true) {
+      reason = "the account's page manual-write engine did not initialize.";
+    } else {
+      reason = "this page could not load or verify the venue's frame-fed manual-write support.";
+    }
+    const message = `${this.name} ${method} was not sent: ${reason}`;
     return new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
   };
 
-  private withPageWriter = async <T>(method: string, args: unknown[], send: () => Promise<T>): Promise<T> => {
+  private withPageWriter = async <T>(
+    method: string, args: unknown[], send: () => Promise<T>, sendSource?: (admitted: WorkerAdmission) => Promise<T>,
+  ): Promise<T> => {
     try {
+      if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
       const admitted = this.captureWorkerAdmission();
       if (!this.frameFedSettled) await this.untilFrameFedSettled(method);
       admitted?.(method, args);
       if (this.isDisposed) throw this.workerOwnerChanged(method, args);
-      if (!this.frameFed) throw this.pageWriterUnavailable(method);
+      if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
+      if (!this.frameFed) {
+        // A structurally unsupported LOCAL/COSIGNED mirror keeps its existing source writer.
+        // A missing module/capability or a failed supported page engine must never reroute.
+        if (this.pageWriteSupported === false && sendSource) {
+          return await sendSource((sourceMethod, sourceArgs) => {
+            admitted?.(sourceMethod, sourceArgs);
+            if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
+          });
+        }
+        throw this.pageWriterUnavailable(method);
+      }
       return await send();
     } catch (error) {
       const callerReports = this.options.callerReportsPlacementFailures &&
@@ -2070,27 +2170,27 @@ export class RustEngineExchange extends BaseExchange {
         // The explicit flag, not isPublicDataOnly: a keyed account's mirror holds no key and derives public.
         if (this.routesToWorker && this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method))
           return Promise.reject(notReadOnPublicData(method));
-        if (method === 'fetchOHLCV' && this.routesToWorker && !getExchangeMetadata(this.name).fetchOHLCVInWorker)
+        if (method === 'fetchOHLCV' && this.routesToWorker && !this.isDelegatedMirror &&
+          !getExchangeMetadata(this.name).fetchOHLCVInWorker)
           return Reflect.apply(this.fetchPageCandles, this, args);
         if (!this.routesToWorker) return local(...args);
-        if (this.isWorkerMirror && FRAME_FED_WRITES.has(method)) {
-          return this.withPageWriter(method, args, () => local(...args));
-        }
-        if (this.frameFed && FRAME_FED_WRITES.has(method)) return local(...args);
-        const admitted = this.captureWorkerAdmission();
-        const viaWorker = () =>
+        const viaWorker = (admitted: WorkerAdmission) =>
           this.callWorkerForOwner(admitted, method, ...args).then(
             (result) =>
               // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
               method === 'updateOrder' ? decodeWorkerOrderIds(result) : rowsFromAccountFrame(method, result, args[0]),
             (error: unknown) => {
-              // Never passed through `command` here, and the hosted server marks no failure as
-              // reported. A LOCAL worker's report arrives marked, so this says nothing twice.
-              if (FRAME_FED_WRITES.has(method)) this.reportCommandError(error);
+              // Mirrors report in withPageWriter, which honors caller-owned placement errors.
+              // A LOCAL worker's marked failure is not reported twice by other forwarders.
+              if (FRAME_FED_WRITES.has(method) && !this.isWorkerMirror) this.reportCommandError(error);
               throw error;
             },
           );
-        return viaWorker();
+        if (this.isWorkerMirror && FRAME_FED_WRITES.has(method)) {
+          return this.withPageWriter(method, args, () => local(...args), viaWorker);
+        }
+        if (this.frameFed && FRAME_FED_WRITES.has(method)) return local(...args);
+        return viaWorker(this.captureWorkerAdmission());
       };
       const forwarded = FRAME_FED_WRITES.has(method)
         ? (...args: Args[M]) => this.trackWrite(() => route(...args))
@@ -2223,7 +2323,7 @@ export class RustEngineExchange extends BaseExchange {
     try {
       let applied: Promise<void> | undefined;
       for (;;) {
-        const latest = this.syncPollingPolicy();
+        const latest = this.syncPollingPolicy('startup');
         if (!latest || latest === applied) break;
         await latest;
         applied = latest;
@@ -2252,8 +2352,7 @@ export class RustEngineExchange extends BaseExchange {
         this.host?.flush();
       }, STORE_FLUSH_MS * multiplier),
     );
-    // Staleness has no socket event of its own; re-derive health on a slow clock.
-    this.flushTimers.push(setInterval(this.syncSocketHealthToStore, SOCKET_HEALTH_SYNC_MS));
+    this.startSocketHealthCheck();
     if (bookMs < STORE_FLUSH_MS * multiplier) {
       this.flushTimers.push(setInterval(() => this.host?.flush(true), bookMs));
     }
@@ -2358,9 +2457,9 @@ export class RustEngineExchange extends BaseExchange {
         await this.fetchSymbolMaxLeverage(symbol);
         return;
       }
-      const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
+      const rails = await this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol }, { report: false });
       this.host?.flush();
-      this.applier.applyLeverage(symbol, rails);
+      if (rails) this.applier.applyLeverage(symbol, rails);
     } catch (error) {
       this.log(`Error refreshing leverage for ${symbol}: ${error}`, LogSeverity.Warning);
     }
@@ -2639,7 +2738,41 @@ export class RustEngineExchange extends BaseExchange {
     return this.host;
   }
 
-  /** Engine sockets replace the TS watchdog: venues own their reconnect policy. */
+  private startSocketHealthCheck = () => {
+    if (this.isDisposed || this.socketHealthTimer !== undefined) return;
+    let previousWall = Date.now();
+    let previousEngine = this.socketHealthClock?.();
+    const schedule = () => {
+      this.socketHealthTimer = setTimeout(check, SOCKET_HEALTH_SYNC_MS);
+      this.socketHealthTimer.unref?.();
+    };
+    const check = () => {
+      this.socketHealthTimer = undefined;
+      if (this.isDisposed) return;
+      try {
+        const now = Date.now();
+        const engineNow = this.socketHealthClock?.();
+        const engineElapsed = previousEngine !== undefined && engineNow !== undefined
+          ? engineNow - previousEngine : undefined;
+        const gap = engineElapsed === undefined ? 0 : (now - previousWall) - engineElapsed;
+        // Receipts before the sample predate the pause. Within the sample,
+        // a pause longer than all active time also proves receipts at least gap-old.
+        const suspendedBefore = gap > 1_000 ? Math.max(previousWall,
+          engineElapsed !== undefined && gap > engineElapsed ? now - gap : previousWall) : undefined;
+        previousWall = now;
+        previousEngine = engineNow;
+        // The host retains each physical socket's obligation across normal ticks;
+        // aggregate channel handles cannot distinguish fresh/uninitialized siblings.
+        this.host?.reconnectSockets(undefined, { staleBefore: now - RUST_SOCKET_STALE_MS, suspendedBefore });
+        this.syncSocketHealthToStore();
+      } finally {
+        if (!this.isDisposed) schedule();
+      }
+    };
+    schedule();
+  };
+
+  /** Publish engine socket observations; the engine still owns reconnection. */
   override syncSocketHealthToStore = () => {
     if (this.isDisposed) return;
     const shared = this.sharedPublicFeed
@@ -2783,6 +2916,8 @@ export class RustEngineExchange extends BaseExchange {
     if (this.options.publicDataOnly === true && PRIVATE_HISTORY_OPS.has(command.op))
       return Promise.reject(notReadOnPublicData(command.op));
     try {
+      if (this.isDelegatedMirror)
+        throw this.pageWriterUnavailable(command.op);
       if (this.engineFailure) throw this.engineFailure;
       if (this.isDisposed) throw new Error(`${this.name} engine disposed`);
       // A cold wasm fetch: the worker takes calls before its engine is built. Reads wait.
@@ -3558,19 +3693,32 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   fetchSymbolMaxLeverage = async (symbol: string): Promise<number> => {
+    const mirrored = this.routesToWorker;
+    const admitted = this.captureWorkerAdmission();
     const ready = this.capabilitiesFor('fetchSymbolMaxLeverage');
     const capabilities = ready instanceof Promise ? await ready : ready;
     const source = capabilities.maxLeverage;
     if (source === 'unsupported') throw new Error('Not implemented');
     if (source === 'rails') {
-      if (this.routesToWorker) return (await this.callWorker('fetchSymbolMaxLeverage', symbol)) as number;
-      const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
+      if (mirrored) {
+        const leverage = (await this.callWorkerForOwner(admitted, 'fetchSymbolMaxLeverage', symbol)) as number;
+        admitted?.('fetchSymbolMaxLeverage', [symbol]);
+        return leverage;
+      }
+      const rails = await this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol });
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
+      if (!rails) throw new Error(`Leverage is not available for ${symbol}`);
       return Math.max(rails.buyLeverage, rails.sellLeverage);
     }
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market not found for symbol: ${symbol}`);
     if (source === 'query' && !this.isPublicDataOnly) {
-      const leverage = await this.command<number>({ op: 'fetchMaxLeverage', symbol });
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
+      const leverage = mirrored
+        ? (await this.callWorkerForOwner(admitted, 'fetchSymbolMaxLeverage', symbol)) as number
+        : await this.command<number>({ op: 'fetchMaxLeverage', symbol });
+      admitted?.('fetchSymbolMaxLeverage', [symbol]);
       if (!Number.isFinite(leverage) || leverage < 1) throw new Error('Invalid Bitrue maximum leverage');
       this.host?.flush();
       return leverage;
@@ -3784,9 +3932,9 @@ export class RustEngineExchange extends BaseExchange {
       // The venue read needs the engine; the worker's frames bring the result back.
       if (this.routesToWorker)
         return (await this.callWorker('fetchLeverageForSymbol', symbol)) as FetchedLeverage | null;
-      const leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol }, { report: false });
+      const leverage = await this.command<FetchedLeverage | null>({ op: 'fetchLeverage', symbol }, { report: false });
       this.host?.flush();
-      this.applier.applyLeverage(symbol, leverage);
+      if (leverage) this.applier.applyLeverage(symbol, leverage);
       return leverage;
     } catch (error) {
       this.log(`Error fetching leverage for ${symbol}: ${error}`, LogSeverity.Warning);
@@ -4092,6 +4240,9 @@ export class RustEngineExchange extends BaseExchange {
     this.feedCandleListeners.clear();
     this.stopPollingConfig?.();
     this.stopPollingConfig = undefined;
+    clearTimeout(this.socketHealthTimer);
+    this.socketHealthTimer = undefined;
+    this.socketHealthClock = undefined;
     this.flushTimers.forEach(clearInterval);
     this.flushTimers = [];
     const host = this.host;

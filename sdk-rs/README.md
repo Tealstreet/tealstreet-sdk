@@ -6,6 +6,20 @@ patterns are in [`docs/plans/RUST_REWRITE.md`](../docs/plans/RUST_REWRITE.md).
 
 ## Crates
 
+### Host ownership observation and teardown
+
+`EngineHost.algosRunning` is a nonterminal ownership observation: a retired or
+unavailable owner returns false without failing the engine, freeing resources,
+settling commands or emitting `onDead`. Normal account teardown can therefore
+observe status and dispose once, without manufacturing an engine death. Retired
+cleanup sends no algo cancellation; already-dispatched writes keep their unknown
+outcome and identity when normal disposal settles them.
+
+Real algo operations, nuke/stop-all, timer execution, commands and I/O still use
+the strict owner guard. A retired or throwing owner prevents execution and fails
+the host. Native data reads retain their execution fence; observing status is
+not permission to resume work or rebind an old host.
+
 Local worker TWAP restore ownership is optional for compatibility with existing
 JS hosts. `EngineHost.algoStart(accountName, twapOwner?)` accepts a trusted
 `{ ownerId: string, generation: number }` snapshot (nonempty owner and a safe,
@@ -51,6 +65,32 @@ cargo build --locked --workspace --target wasm32-unknown-unknown
 
 CI runs all of these (`.github/workflows/rust.yml`).
 
+## WebSocket control and mutation frames
+
+`Cx::send` and `Cx::send_signed` consume `ControlFrame`. Venue encoding helpers
+declare subscriptions (including unsubscriptions and subscription snapshots),
+session authentication or heartbeats with `ControlFrame::subscription`,
+`ControlFrame::authentication` or `ControlFrame::heartbeat`. These declarations
+are protocol contracts: neither the engine nor the host infers authority from
+JSON method strings. Signed control recipes must preserve the declared purpose.
+Raw text and `WebSocketWrite` cannot enter either control-send API.
+
+Order and setting mutations use `Cx::websocket_write` with a live command
+Mutation Context, followed by `Cx::send_websocket_write`. The host must enable
+the typed write handoff and consume its single-use binding through
+`Engine::claim_websocket_write` immediately before the physical send. The shared
+write lifecycle reports transport-neutral timeout and unproven-outcome errors.
+
+## Bybit ticker reference freshness
+
+Bybit derivatives omit unchanged fields from ticker deltas. Only references
+established by the current socket's snapshot lineage, still matching the store,
+are confirmed by that symbol's subsequent deltas. Reconnects, malformed or
+untyped ticker frames, and explicitly unknown references retire that proof.
+REST seeds and other symbols' traffic cannot supply it. The protective-amend
+freshness limit remains five seconds without confirmation; unknown prices stay
+unknown. Spot, options and Hyro retain their existing snapshot/observation rules.
+
 ## Browser request-failure diagnostics
 
 The JS host emits `http.request_failed` at Debug for failed managed HTTP work,
@@ -62,6 +102,18 @@ fixed API vocabulary survives, all other segments become `:segment`, at most eig
 segments plus `:more`. Origins, queries, fragments, bodies and headers are excluded.
 The SDK adds the actual venue; consumers may retain a bounded recent breadcrumb.
 These diagnostics neither retry requests nor add a second user-facing error.
+
+Post-release JS HTTP failures retain a closed cause label in the existing engine
+error string (timeout, disconnect, direct-fetch, response-decode, aborted, disposed,
+tunnel or unknown). Raw errors, configs, URLs and nested causes never cross that
+boundary; group failures are classified only after every physical handoff.
+This diagnostic summary does not alter native error kind, retry or owner policy.
+
+Hyperliquid `/info` quota admission tags a proven pre-send deadline refusal with
+closed cause `info_admission` and fixed title `HTTP admission deadline expired`.
+It retains Timeout/NotSent and the original deadline, budget, retry and delivery.
+Generic relay readiness failures and errors after handoff keep their existing paths;
+`phase=preparing` alone does not prove an admission failure.
 
 ## Startup discovery deadlines
 
@@ -224,8 +276,10 @@ selected time window so later depth resynchronizations remain reproducible.
 Legacy contract families stay filtered as in TypeScript. `Triggered` displays
 as Closed but remains nonterminal; a later native New update can reopen it.
 Public books request full depth and replace periodic snapshots.
-Live candles accept only `kline_p` incremental frames; subscription snapshots
-and backfill never publish live candles. Candle timestamps remain in seconds.
+Kline subscription snapshots replay only wire rows 1 then 0, matching the legacy
+TS `listenOHLCV` callback; the remaining history is not replayed. Explicit
+incremental frames continue streaming; unclassified/backfill frames are refused.
+Candle timestamps remain in seconds.
 Each public frame parse failure emits a `stream.malformed` warning with
 the raw frame's byte count and wire `type` (`unknown` for unreadable JSON).
 

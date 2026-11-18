@@ -230,9 +230,46 @@ export const engineEventClassified = (event: {
   return Object.keys(classified).length ? classified : undefined;
 };
 
+// Mirrors engine::ErrorCause. A syntax check alone would admit private uppercase values.
+const HISTORY_CAUSES: readonly string[] = [
+  'HISTORY_RATE_LIMITED',
+  'HISTORY_AUTH_INVALID',
+  'HISTORY_AUTH_PERMISSION',
+  'HISTORY_INVALID_PARAMS',
+  'HISTORY_VENUE_ERROR',
+  'HISTORY_HTTP_ERROR',
+  'HISTORY_DECODE',
+  'HISTORY_CURSOR_STALLED',
+  'HISTORY_PAGE_LIMIT',
+  'HISTORY_WINDOW_MISMATCH',
+  'HISTORY_NETWORK',
+  'HISTORY_TIMEOUT',
+];
+
+/** Detached, closed history evidence for diagnostics; never copies a row or request. */
+export const historyErrorDiagnostics = (
+  value: unknown,
+): { causeCode?: string; historyDecode?: HistoryDecodeDetail } => {
+  const result: { causeCode?: string; historyDecode?: HistoryDecodeDetail } = {};
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return result;
+  try {
+    const { causeCode } = value as { causeCode?: unknown };
+    if (typeof causeCode === 'string' && HISTORY_CAUSES.includes(causeCode)) result.causeCode = causeCode;
+  } catch {
+    /* Unreadable metadata is absent. */
+  }
+  try {
+    const detail = historyDecodeOf((value as { historyDecode?: unknown }).historyDecode);
+    if (detail) result.historyDecode = detail;
+  } catch {
+    /* Unreadable metadata is absent. */
+  }
+  return result;
+};
+
 /**
  * Closed-set Sentry tags for a classified failure: kind, its health category,
- * outcome and the venue's code. Never free text, so tags stay low-cardinality.
+ * outcome, venue code and closed history evidence. Never includes row values.
  */
 export const exchangeErrorTags = (value: unknown): Record<string, string> => {
   if (value === null || typeof value !== 'object') return {};
@@ -244,5 +281,11 @@ export const exchangeErrorTags = (value: unknown): Record<string, string> => {
   }
   if (typeof outcome === 'string' && OUTCOMES.includes(outcome)) tags.error_outcome = outcome;
   if (typeof venueCode === 'string' && /^[\w.-]{1,32}$/.test(venueCode)) tags.venue_code = venueCode;
+  const { causeCode, historyDecode } = historyErrorDiagnostics(value);
+  if (causeCode) tags.cause_code = causeCode;
+  if (historyDecode) {
+    tags.history_schema = historyDecode.schema;
+    tags.history_reason = historyDecode.reason;
+  }
   return tags;
 };

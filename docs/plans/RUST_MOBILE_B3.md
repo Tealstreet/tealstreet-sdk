@@ -1,5 +1,14 @@
 # Mobile (B3): what the device sends, and how to cut it over
 
+**Superseded architecture decision aid.** The 2026-11-13 policy is settled:
+mobile is DELEGATED-only on every hosted-supported venue. It runs no client
+WASM engine or local signer; every write is a typed v1 action over the existing
+hosted WebSocket. Availability uses the single runtime `DELEGATED` flag/per-user
+pin; `DELEGATED_BYBIT` is only its compatibility alias. Bybit was the first test
+account, not a venue limit. The old alternatives, venue inventory and pinned
+observations below remain historical evidence, not current mode choices or a
+request to reopen that decision.
+
 Status: decision aid for owner decision 3; nothing here is implemented.
 
 **Question.** tealstreet-mobile runs React Native on Hermes, which has no

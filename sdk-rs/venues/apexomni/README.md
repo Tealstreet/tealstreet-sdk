@@ -1,5 +1,8 @@
 # ApeX Omni signing and socket liveness
 
+No-body REST requests use `application/json; charset=utf-8`. Form and multipart
+requests retain their own media types; unsigned klines retain no signing headers.
+
 ## Hosted and delegated signing
 
 RemoteSigner accounts use the same dispatch recipes as local accounts for every
@@ -42,6 +45,17 @@ socket login. Tests retain the independent npm zkLink golden signatures.
 Malformed/canceled delegate results cannot publish partial signing batches or
 send a write; dispatched Unknown outcomes retain the existing reconciliation
 and no-replay behavior. Details: `docs/plans/callers/apexomni-hosted-signing.md`.
+
+## Order status mapping
+
+The [official open-order and history status catalogue](https://api-docs.omni.apex.exchange/#get-open-orders)
+uses `PENDING`, `OPEN` (including partial fills), `UNTRIGGERED`, `FILLED`,
+`EXPIRED` and `CANCELED`. The mapper accepts those exact values in REST snapshots
+and private stream rows. Cancellation uses one `L`; no documented `CANCELLED`
+alias is assumed. Canceled and expired rows retain their reported fill quantities.
+Unknown statuses produce `row.skipped` and preserve the existing live order;
+they cannot establish cancellation or another terminal outcome. A new mapping
+requires the actual venue value and evidence of its meaning.
 
 ## Socket supervision
 

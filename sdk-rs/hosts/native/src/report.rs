@@ -1,9 +1,30 @@
 //! Error reports for a host's telemetry. The native host logs to stderr only;
 //! a host that reports errors elsewhere (the exchange server's Sentry) installs
-//! one sink. Reports carry hosts, routes and codes only, never error text, a URL
-//! query, token, credential or payload, and are already rate-limited where they
-//! are raised.
+//! one sink. Reports carry hosts, routes, codes and an optional captured verified
+//! subject, never error text, a URL query, token, credential or payload. They are
+//! already rate-limited where raised; the subject never enters journal lines.
 use std::sync::OnceLock;
+
+/// Captured authentication subject for diagnostics only; the host verifies it.
+/// This is not authorization, and its Debug form never exposes the subject.
+#[derive(Clone)]
+pub struct ReportUser(std::sync::Arc<str>);
+
+impl ReportUser {
+    pub fn new(verified_subject: &str) -> Self {
+        Self(verified_subject.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for ReportUser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ReportUser([redacted])")
+    }
+}
 
 /// What failed. Each kind is one alertable condition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +51,7 @@ impl ErrorKind {
 /// where there is one.
 pub struct ErrorReport<'a> {
     pub kind: ErrorKind,
+    pub user: Option<&'a ReportUser>,
     pub label: Option<&'a str>,
     /// A host or route (`host` or `host via HTTP tunnel`), never a URL.
     pub target: Option<&'a str>,

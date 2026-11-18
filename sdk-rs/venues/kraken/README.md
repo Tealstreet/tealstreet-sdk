@@ -84,6 +84,14 @@ derived from reported old/new balances. They do not fail the streamed history
 page or discard later trade rows. Nonnullable ledger identity, asset, date and
 description fields remain strict; no economic values are invented for nulls.
 
+Order-event refusals identify a closed identity, time, or economics predicate in
+the message and `historyDecode` reason, including the affected decimal field.
+No row values, order/account IDs, symbols, amounts or raw deserializer errors
+enter these diagnostics. The [order-events schema](https://docs.kraken.com/api-reference/account-history/get-order-events)
+controls remain strict: one invalid row rejects its whole page. Only earlier
+accepted pages may be returned with `history.incomplete` / `laterPageFailed`;
+rows staged from the failed page are discarded rather than silently skipped.
+
 ## Kraken Spot hosted signing
 
 Kraken Spot remains local-only, with hosted/remote signing deferred and the existing
@@ -203,3 +211,14 @@ All Futures Unknown trading failures include reconciliation guidance, including
 HTTP 200 native server errors and unproven cancellation statuses. Batch errors
 retain an unknown leg's message and native diagnostics together when a later
 leg is definitively refused.
+
+## Public read refusal diagnostics
+
+Futures public response refusals name only the endpoint class (`instruments`,
+`tickers` or `candles`), HTTP status and a closed reason. The first refused
+predicate is `http_status`, `invalid_envelope`, `result_not_success`,
+`error_present` or `status_not_success`; missing streamed arrays and malformed
+JSON use `missing_list` and `malformed_json`. `unknown` is the defensive fallback.
+No response values, bodies, symbols, headers or parser previews enter these messages.
+The existing acceptance tests, chart-envelope exemption, startup failure kinds,
+context delivery checks and discovery backoff remain unchanged.

@@ -10,7 +10,7 @@ import { captureTwapOwner } from './twap/TwapOwner';
 import throttle from 'lodash/throttle';
 
 import { onTunnelLaneFallback, tunnelLanePort } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
-import { classifiedError, exchangeErrorTags, isErrorReported } from '../commandOutcome';
+import { classifiedError, exchangeErrorTags, historyErrorDiagnostics, isErrorReported } from '../commandOutcome';
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
 import { assertBetaAccount } from '../exchanges/rust/betaVenues';
@@ -20,6 +20,7 @@ import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { unsupportedVenueError } from '../unsupportedVenue';
 import { diagnosticConsole, diagnosticText, redactDiagnosticData } from '../utils/diagnosticRedaction';
 import { virtualClock } from '../utils/virtualClock';
+import { workerErrorProtectionTags } from '../utils/workerErrorProtectionTags';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
 import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
 import { mainAcceptsFrames } from './frameForwarding';
@@ -257,11 +258,13 @@ export class ExchangeWorker {
             message: error.message,
             name: error.name,
             stack: error.stack,
+            ...historyErrorDiagnostics(error),
           }
         : {
             message: String(error),
             name: 'UnknownError',
             stack: new Error().stack,
+            ...historyErrorDiagnostics(error),
           };
 
     try {
@@ -286,6 +289,7 @@ export class ExchangeWorker {
                   tunnel_port: tunnelLanePort(),
                   ...splitExtra.sentryTags,
                   ...workerSentryControl.tags,
+                  ...workerErrorProtectionTags(error),
                 },
                 extra: {
                   ...splitExtra.extra,

@@ -549,3 +549,69 @@ for (const [priorityCode, readClass] of ['normal', 'critical', 'bulk', 'reconcil
     });
   }
 }
+
+for (const phase of ['prepare', 'admission']) {
+  test(`proven info admission expiry during ${phase} retains timeout and never claims or sends`, async () => {
+    const error = new HttpPreparationError('timedOut', 'info_admission');
+    const r = rig(() => {
+      if (phase === 'prepare') throw error;
+      return { bind: () => ({ ready: () => true,
+        admitDispatch: () => Promise.reject(error),
+        dispatch() { assert.fail('admission refusal sent'); },
+      }) };
+    });
+    const events = [];
+    r.host.handlers.onEvent = (event) => events.push(event);
+    r.host.execute(prepare); await tick();
+    assert.equal(error.code, 'HTTP_PREPARATION_TIMED_OUT');
+    assert.equal(error.cause, 'info_admission');
+    assert.equal(error.message, 'HTTP admission deadline expired');
+    assert.deepEqual(r.events.filter(([kind]) => kind === 'failed'), [['failed', token, 'infoAdmissionTimedOut']]);
+    assert.equal(r.events.some(([kind]) => kind === 'claim' || kind === 'httpFailed'), false);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].message, 'HTTP admission deadline expired');
+    assert.equal(events[0].fields.kind, 'timeout');
+    assert.equal(events[0].fields.cause, 'info_admission');
+    assert.equal(events[0].fields.phase, phase === 'prepare' ? 'preparing' : 'bound');
+    assert.equal(r.host.managedHttp.resources.size, 0);
+    r.host.dispose();
+  });
+}
+
+test('generic readiness expiry and untrusted admission labels keep the transport diagnosis', async () => {
+  for (const cause of [undefined, 'PRIVATE https://venue.invalid?signature=SECRET']) {
+    const error = new HttpPreparationError('timedOut', cause);
+    const r = rig(() => { throw error; });
+    const events = [];
+    r.host.handlers.onEvent = (event) => events.push(event);
+    r.host.execute(prepare); await tick();
+    assert.equal(error.message, 'Relay or network request timed out');
+    assert.equal(error.cause, undefined);
+    assert.deepEqual(r.events, [['failed', token, 'timedOut']]);
+    assert.equal(events[0].fields.cause, undefined);
+    assert.doesNotMatch(JSON.stringify(events), /PRIVATE|SECRET|venue.invalid/);
+    r.host.dispose();
+  }
+});
+
+test('admission marker accessors are not invoked or serialized', async () => {
+  let reads = 0;
+  const error = new HttpPreparationError('timedOut');
+  Object.defineProperty(error, 'cause', { get() { reads++; throw new Error('PRIVATE'); } });
+  const r = rig(() => { throw error; });
+  r.host.execute(prepare); await tick();
+  assert.equal(reads, 0);
+  assert.deepEqual(r.events, [['failed', token, 'timedOut']]);
+  r.host.dispose();
+});
+
+test('an admission-looking error after handoff keeps the post-release failure path', async () => {
+  const r = rig(() => ({ bind: () => ({ ready: () => true,
+    dispatch() { throw new HttpPreparationError('timedOut', 'info_admission'); },
+  }) }));
+  r.host.execute(prepare); await tick();
+  assert.equal(r.events.filter(([kind]) => kind === 'claim').length, 1);
+  assert.equal(r.events.filter(([kind]) => kind === 'httpFailed').length, 1);
+  assert.equal(r.events.some(([kind]) => kind === 'failed'), false);
+  r.host.dispose();
+});

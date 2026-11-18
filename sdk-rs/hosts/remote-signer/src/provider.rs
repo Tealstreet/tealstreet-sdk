@@ -1,9 +1,13 @@
 //! The Rust twin of packages/safe-cex/src/exchanges/rust/remoteSignerProvider.ts:
 //! engine sign work becomes today's ws-auth `RemoteSignerRequest`, so the
 //! browser's existing signing host answers it unchanged.
+mod apexomni;
+mod coinbase;
+mod kraken;
 mod orderly;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
 use tokio::time::Instant;
@@ -30,8 +34,11 @@ pub const FATAL_MIN_STREAK: std::time::Duration = std::time::Duration::from_mill
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Family {
     Hmac,
+    ApexOmni,
     Backpack,
+    Coinbase,
     Kucoin,
+    Kraken,
     DoubleSha256,
     Hyperliquid,
     Grvt,
@@ -42,21 +49,26 @@ pub(crate) enum Family {
 impl Family {
     pub(crate) fn of(venue: &str) -> Self {
         match venue {
+            "apexomni" => Self::ApexOmni,
             "backpack" => Self::Backpack,
+            "coinbase" | "coinbasespot" => Self::Coinbase,
             "kucoin" | "kucoinspot" => Self::Kucoin,
+            "kraken" => Self::Kraken,
             "bitunix" => Self::DoubleSha256,
             "hyperliquid" | "hyperliquidspot" => Self::Hyperliquid,
             "grvt" => Self::Grvt,
             "lighter" | "lighter-robinhood" => Self::Lighter,
             "paradex" => Self::Paradex,
-            "kodiakfi" | "mode" | "what" | "woofi" => Self::Orderly,
+            "orderly" | "kodiakfi" | "mode" | "what" | "woofi" => Self::Orderly,
             _ => Self::Hmac,
         }
     }
     fn algorithm(self) -> Algorithm {
         match self {
-            Self::Hmac | Self::Kucoin => Algorithm::HmacSha256,
+            Self::Hmac | Self::Kucoin | Self::ApexOmni => Algorithm::HmacSha256,
+            Self::Kraken => Algorithm::HmacSha512,
             Self::Backpack => Algorithm::Ed25519,
+            Self::Coinbase => Algorithm::Es256,
             Self::DoubleSha256 => Algorithm::Sha256SecretSuffix,
             Self::Hyperliquid | Self::Grvt => Algorithm::Secp256k1Digest,
             Self::Lighter => Algorithm::SchnorrDigest,
@@ -74,6 +86,7 @@ pub(crate) struct Owned {
     pub passphrase: Option<KeyRef>,
     pub passphrase_value: Option<Vec<u8>>,
     pub broker: Option<KeyRef>,
+    pub zklink_seed: Option<KeyRef>,
 }
 
 #[derive(Default)]
@@ -90,7 +103,9 @@ pub(crate) struct Inner {
     pub account_name: Option<String>,
     pub link: Arc<SignerLink>,
     pub primary: Owned,
+    coinbase: Option<safe_cex_venue_coinbase::sign::Binding>,
     bound: Mutex<Option<Vec<u8>>>,
+    published: AtomicBool,
     streak: Mutex<Streak>,
     on_fatal: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     /// When each signer warning last reached stderr, so a looping account logs once a minute.
@@ -270,7 +285,90 @@ fn sha256(bytes: &[u8]) -> Vec<u8> {
     Sha256::digest(bytes).to_vec()
 }
 
+/// Read-only public facts from one original remote provider and its opaque ref.
+/// Cloning this source cannot install a key, complete setup or authorize signing.
+#[derive(Clone)]
+pub struct PublicBindingSource(pub(crate) Arc<Inner>);
+impl PublicBindingSource {
+    /// `None` means an older Schnorr provider has no trusted initial binding.
+    pub fn public_key(
+        &self,
+        key: &KeyRef,
+        algorithm: Algorithm,
+    ) -> Result<Option<Vec<u8>>, SignError> {
+        let inner = &self.0;
+        if !inner.owns_signing(key) || algorithm != inner.family.algorithm() {
+            return Err(SignError::Unsupported);
+        }
+        let bytes = match inner.family {
+            Family::Hyperliquid | Family::Grvt | Family::Paradex => {
+                inner.bound().ok_or(SignError::Unavailable)?
+            }
+            Family::Backpack => {
+                let text = utf8(&inner.primary.public)?;
+                if text.len() != 44 {
+                    return refused();
+                }
+                let encoding = base64::engine::general_purpose::STANDARD;
+                let bytes = encoding.decode(&text).map_err(|_| SignError::Refused)?;
+                if bytes.len() != 32 || encoding.encode(&bytes) != text {
+                    return refused();
+                }
+                bytes
+            }
+            Family::Orderly => {
+                let text = utf8(&inner.primary.public)?;
+                let text = text.strip_prefix("ed25519:").ok_or(SignError::Refused)?;
+                if !(32..=44).contains(&text.len()) {
+                    return refused();
+                }
+                let bytes = bs58::decode(text)
+                    .into_vec()
+                    .map_err(|_| SignError::Refused)?;
+                if bytes.len() != 32 || bs58::encode(&bytes).into_string() != text {
+                    return refused();
+                }
+                bytes
+            }
+            Family::Lighter => return Ok(inner.bound()),
+            _ => return Err(SignError::Unsupported),
+        };
+        Ok(Some(bytes))
+    }
+}
+
 impl Inner {
+    pub(crate) fn publish(&self) {
+        self.published.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn bind_registered_public_key(
+        &self,
+        public: &safe_cex_crypto::admission::PublicKey,
+    ) -> Result<(), SignError> {
+        if self.published.load(Ordering::Acquire)
+            || self.family != Family::Lighter
+            || public.family() != safe_cex_crypto::admission::Family::Schnorr
+        {
+            return Err(SignError::Unsupported);
+        }
+        self.bind(public.as_bytes())
+    }
+
+    pub(crate) fn bind_public_metadata(
+        &self,
+        options: &Map<String, Value>,
+    ) -> Result<(), SignError> {
+        if self.family == Family::Grvt
+            && let Some(address) = options
+                .get("grvtSignerAddress")
+                .and_then(|value| prefixed(value, 20).ok())
+        {
+            self.bind(&address)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn new(
         venue: String,
         policy: Policy,
@@ -285,11 +383,21 @@ impl Inner {
             account_name,
             link,
             primary,
+            coinbase: None,
             bound: Mutex::new(None),
+            published: AtomicBool::new(false),
             streak: Mutex::new(Streak::default()),
             on_fatal: Mutex::new(None),
             warned: Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    pub(crate) fn with_coinbase_binding(
+        mut self,
+        binding: Option<safe_cex_venue_coinbase::sign::Binding>,
+    ) -> Self {
+        self.coinbase = binding;
+        self
     }
 
     /// A signer problem the server could not otherwise see: the browser answers or
@@ -465,10 +573,18 @@ impl Inner {
         self: Arc<Self>,
         request: SignRequest,
     ) -> Result<SignResult, SignError> {
+        if self.family == Family::Coinbase {
+            return self.sign_coinbase(&request).await;
+        }
         if self.family == Family::Orderly {
             return self.sign_orderly(&request).await;
         }
         let receipt = request.receipt;
+        if self.family == Family::ApexOmni
+            && (receipt.validate().is_err() || receipt.nonce.is_some())
+        {
+            return refused();
+        }
         if request.operations.is_empty() || request.operations.len() > MAX_OPERATIONS {
             return refused();
         }
@@ -479,10 +595,16 @@ impl Inner {
             Family::Lighter => self.sign_lighter(&operations).await?,
             Family::Paradex => self.sign_stark(&operations).await?,
             Family::DoubleSha256 => self.sign_double_sha256(&operations).await?,
+            Family::Hmac if self.venue == "asterdex" => {
+                self.sign_aster_v1(&operations, receipt).await?
+            }
             Family::Hmac => self.sign_hmac(&operations, receipt).await?,
+            Family::ApexOmni => self.sign_apexomni(&operations).await?,
             Family::Orderly => return refused(),
             Family::Kucoin => self.sign_kucoin(&operations).await?,
+            Family::Kraken => self.sign_kraken(&operations, receipt).await?,
             Family::Backpack => self.sign_backpack(&operations).await?,
+            Family::Coinbase => return refused(),
         };
         Ok(SignResult::new(values, receipt))
     }
@@ -618,6 +740,7 @@ impl Inner {
                     .device(utf8(preimage)?, "grvt-order", |value| prefixed(value, 85))
                     .await?;
                 let (address, signature) = joined.split_at(20);
+                self.bind(address)?;
                 Ok(vec![sha256(preimage), address.to_vec(), signature.to_vec()])
             }
             _ => refused(),
@@ -834,6 +957,71 @@ impl Inner {
         .await
     }
 
+    async fn sign_aster_v1(
+        &self,
+        operations: &[Operation],
+        receipt: SignReceipt,
+    ) -> Result<Vec<Vec<u8>>, SignError> {
+        let primary = &self.primary;
+        if let [Operation::Present { key }] = operations {
+            return if *key == primary.credential {
+                Ok(vec![primary.public.clone()])
+            } else {
+                refused()
+            };
+        }
+        let [
+            Operation::Present { key: credential },
+            Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key: signing,
+                payload,
+            },
+        ] = operations
+        else {
+            return refused();
+        };
+        if *credential != primary.credential
+            || !self.owns_signing(signing)
+            || receipt.nonce.is_some()
+        {
+            return refused();
+        }
+        let [PayloadPart::Bytes { bytes }] = payload.as_slice() else {
+            return refused();
+        };
+        if bytes.is_empty() || bytes.len() > MAX_PAYLOAD {
+            return refused();
+        }
+        let descriptor = json!({"slot":"primary","payload":utf8(bytes)?}).to_string();
+        // The device limit includes the JSON envelope and escaping expansion.
+        if descriptor.len() > MAX_PAYLOAD {
+            return refused();
+        }
+        self.device(descriptor, "asterdex-hmac", |value| {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Batch {
+                credential: String,
+                signature: String,
+            }
+            let text = value.as_str().ok_or(SignError::Refused)?;
+            let batch: Batch = serde_json::from_str(text).map_err(|_| SignError::Refused)?;
+            if batch.credential.as_bytes() != primary.public
+                || batch.signature.len() != 64
+                || !batch
+                    .signature
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                return refused();
+            }
+            let signature = hex_bytes(&batch.signature).ok_or(SignError::Refused)?;
+            Ok(vec![primary.public.clone(), signature])
+        })
+        .await
+    }
+
     async fn sign_hmac(
         &self,
         operations: &[Operation],
@@ -981,10 +1169,31 @@ impl Signer for PublicProvider {
 
 impl Signer for RemoteProvider {
     fn sign(&self, request: SignRequest) -> SignFuture {
+        self.inner.publish();
         Box::pin(self.inner.clone().sign(request))
     }
 
     fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.inner.publish();
+        if self.inner.family == Family::Coinbase {
+            return if self.inner.owns_signing(key)
+                && self
+                    .inner
+                    .coinbase
+                    .as_ref()
+                    .is_some_and(|binding| algorithm == coinbase::algorithm(binding.algorithm))
+            {
+                Capability::Supported
+            } else {
+                Capability::Unsupported
+            };
+        }
+        if self.inner.family == Family::ApexOmni
+            && self.inner.primary.zklink_seed.as_ref() == Some(key)
+            && algorithm == Algorithm::ZkLinkContract
+        {
+            return Capability::Supported;
+        }
         if (self.inner.owns_signing(key) || self.inner.primary.broker.as_ref() == Some(key))
             && algorithm == self.inner.family.algorithm()
         {

@@ -4,6 +4,7 @@ use crate::delegated::{DelegatedPair, PreparedDelegated, ResidentCopy, prepare_d
 use crate::envelope::InitPayload;
 use crate::state::Log;
 use crate::threads::EngineThreads;
+use safe_cex_crypto::admission::Family;
 use safe_cex_native::DisposalCause;
 use safe_cex_native::resolve::{self, AccountTransport, Provider};
 use safe_cex_native::{
@@ -18,6 +19,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 mod admission;
+mod signing;
+use signing::AccountSigner;
 mod proof_queue;
 mod retention;
 pub(crate) use admission::ProbePermit;
@@ -85,9 +88,8 @@ pub struct Account {
     pub handle: AccountHandle,
     /// Explicit construction mode, independent of a remote signer link.
     public_only: bool,
-    /// Present for a DELEGATED private account.
-    pub delegated: Option<Arc<ResidentCopy>>,
-    /// Present for COSIGNED private accounts only.
+    pub(crate) signing: Arc<AccountSigner>,
+    /// Original browser link; permanently retired for signing after handover.
     pub link: Option<Arc<SignerLink>>,
     pub token: ProxyToken,
     pub fingerprint: String,
@@ -263,6 +265,7 @@ struct Holders {
     /// Live holders in init/resume order; socket IDs do not order later reinits.
     init_order: Vec<u64>,
     labels: HashMap<u64, std::collections::BTreeMap<String, Option<Live>>>,
+    confirmed: HashMap<(u64, String), (crate::envelope::AccountSigningMode, Outbox)>,
     /// The socket the signer and proxy token follow.
     signing: Option<u64>,
 }
@@ -277,6 +280,7 @@ impl Holders {
     }
 
     fn remove(&mut self, id: u64) {
+        self.confirmed.retain(|(holder, _), _| *holder != id);
         self.init_order.retain(|holder| *holder != id);
         self.by_id.remove(&id);
     }
@@ -298,6 +302,72 @@ impl Holders {
 }
 
 impl Account {
+    pub fn delegated(&self) -> Option<Arc<ResidentCopy>> {
+        self.signing.resident()
+    }
+
+    pub(crate) fn actual_signing_mode(&self) -> crate::envelope::AccountSigningMode {
+        if self.delegated().is_some() {
+            crate::envelope::AccountSigningMode::Delegated
+        } else {
+            crate::envelope::AccountSigningMode::Cosigned
+        }
+    }
+
+    pub(crate) fn confirm_signing_mode(
+        &self,
+        holder: u64,
+        label: &str,
+        requested: crate::envelope::AccountSigningMode,
+        outbox: Outbox,
+    ) {
+        // Serialize confirmations with broadcasts, so an old COSIGNED
+        // confirmation cannot follow the newer DELEGATED state.
+        let mut holders = self.holders.lock().unwrap();
+        if holders
+            .labels
+            .get(&holder)
+            .and_then(|labels| labels.get(label))
+            .and_then(Option::as_ref)
+            .is_none_or(|live| {
+                live.token
+                    .as_ref()
+                    .is_some_and(|(_, expiry)| *expiry <= now_ms())
+            })
+        {
+            return;
+        }
+        let actual = self.actual_signing_mode();
+        holders
+            .confirmed
+            .insert((holder, label.into()), (requested, outbox.clone()));
+        outbox(crate::envelope::account_signing_mode(
+            label, requested, actual,
+        ));
+    }
+
+    fn broadcast_signing_mode(&self) {
+        let holders = self.holders.lock().unwrap();
+        let actual = self.actual_signing_mode();
+        for ((holder, label), (requested, outbox)) in &holders.confirmed {
+            if holders
+                .labels
+                .get(holder)
+                .and_then(|labels| labels.get(label))
+                .and_then(Option::as_ref)
+                .is_some_and(|live| {
+                    live.token
+                        .as_ref()
+                        .is_none_or(|(_, expiry)| *expiry > now_ms())
+                })
+            {
+                outbox(crate::envelope::account_signing_mode(
+                    label, *requested, actual,
+                ));
+            }
+        }
+    }
+
     pub(crate) fn registry_name(&self) -> &str {
         self.identity.as_deref().unwrap_or(&self.name)
     }
@@ -361,7 +431,7 @@ impl Account {
 
     fn hold_label(&self, id: u64, live: Live, label: &str) -> bool {
         let mut holders = self.holders.lock().unwrap();
-        if self.delegated.as_ref().is_some_and(|resident| {
+        if self.delegated().as_ref().is_some_and(|resident| {
             holders.disposed
                 || holders
                     .retention
@@ -372,6 +442,7 @@ impl Account {
             return false;
         }
         holders.cancel_retention();
+        holders.confirmed.remove(&(id, label.into()));
         holders
             .labels
             .entry(id)
@@ -538,6 +609,8 @@ struct InitAuthority {
     probe_lease: Option<crate::router_lease::Permit>,
     admission_expires_at: Option<u64>,
     probe_current: Option<Arc<AtomicBool>>,
+    probe_deadline: Option<tokio::time::Instant>,
+    proved_registration: Option<Arc<safe_cex_crypto::admission::PublicKey>>,
 }
 
 impl InitAuthority {
@@ -567,6 +640,12 @@ impl InitAuthority {
 
     fn check_admission(&self) -> Result<(), String> {
         self.check()?;
+        if self
+            .probe_deadline
+            .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+        {
+            return Err("Account verification expired; initialization stopped".into());
+        }
         if self
             .admission_expires_at
             .is_some_and(|expiry| expiry <= now_ms())
@@ -665,11 +744,14 @@ pub struct Registry {
     /// Seeded test accounts can retain their pre-admission fixture setup.
     #[cfg(any(test, feature = "test-support"))]
     join_admission_override: Option<bool>,
-    /// Unit-test loopback routing; the normal construction and transport run unchanged.
-    #[cfg(test)]
+    /// Test-only loopback routing; normal construction and transport run unchanged.
+    #[cfg(any(test, feature = "test-support"))]
     construction_test_plans: HashMap<String, RoutingPlan>,
     #[cfg(test)]
     e2e_venue: Option<crate::delegated_e2e_io::MockVenue>,
+    #[cfg(test)]
+    local_proof_bindings:
+        HashMap<(String, String), Arc<safe_cex_crypto::admission::identity::Projection>>,
 }
 
 /// A chart's forced reset repairs its upstream stream at most this often per account and topic.
@@ -741,14 +823,13 @@ type Notices = Arc<Mutex<HashMap<NoticeKey, StopRecord>>>;
 /// How long an undelivered stop notice waits for the account's next init.
 pub const NOTICE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// Engine options for a hosted account: non-secret init fields only.
-/// HyroTrader's origins are browser build configuration the server does not have;
-/// without them its engine would start with no endpoints.
+/// Hyro's hosted endpoint map is derived only from the native canonical origin.
+/// If that origin is absent, refuse instead of falling back to Bybit.
 pub const HYROTRADER_UNHOSTED: &str = "HyroTrader accounts cannot run on the hosted server: its HyroTrader endpoints are not configured. Turn hosted mode off for this account.";
 
 /// A venue the server cannot run correctly is refused at init, never started degraded.
 pub fn refuse_unhosted(venue: &str) -> Result<(), String> {
-    if venue == "hyrotrader" {
+    if venue == "hyrotrader" && resolve::rest_base_url(venue, false).is_err() {
         return Err(HYROTRADER_UNHOSTED.into());
     }
     Ok(())
@@ -778,8 +859,18 @@ pub fn refuse_misplaced_site(init: &InitPayload) -> Result<(), String> {
 
 pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     let mut options = Map::new();
+    if !public_only && matches!(init.exchange_name.as_str(), "coinbase" | "coinbasespot") {
+        options.insert(
+            "coinbaseJwtAlgorithm".into(),
+            serde_json::to_value(init.coinbase_jwt_algorithm.unwrap_or_default())
+                .expect("Coinbase algorithm is a closed enum"),
+        );
+    }
     if !public_only {
         options.insert("key".into(), init.key.clone().into());
+        if crate::delegated::probe::asterdex_v1_init(init) {
+            options.insert("asterdex".into(), json!({"apiVersion":"v1"}));
+        }
     }
     let text = [
         ("passphrase", &init.passphrase),
@@ -806,6 +897,21 @@ pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     }
     if init.testnet == Some(true) {
         options.insert("testnet".into(), true.into());
+    }
+    // Use the same canonical challenge origin as native routing; init JSON and
+    // browser build overrides never select the hosted endpoint map.
+    if init.exchange_name == "hyrotrader"
+        && let Ok(rest) = resolve::rest_base_url("hyrotrader", init.testnet.unwrap_or(false))
+        && let Some(authority) = rest.strip_prefix("https://")
+    {
+        options.insert(
+            "endpoints".into(),
+            json!({
+                "rest": rest,
+                "publicWs": format!("wss://{authority}/v5/public/linear"),
+                "privateWs": format!("wss://{authority}/v5/private")
+            }),
+        );
     }
     // The page sets this in production; BloFin refuses orders without its broker id.
     options.insert("brokerAttribution".into(), true.into());
@@ -922,6 +1028,15 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
         _ => Map::new(),
     };
     fields.insert("venue".into(), init.exchange_name.clone().into());
+    if matches!(
+        init.exchange_name.as_str(),
+        "hyperliquid" | "hyperliquidspot"
+    ) {
+        fields.insert(
+            "hyperliquidSignerAddress".into(),
+            init.hyperliquid_signer_address.clone().into(),
+        );
+    }
     // An init that cannot route is refused at build; its raw flags still tell inits apart.
     let routing = match routing_plan(init, public_only) {
         Ok(plan) => serde_json::to_value(plan).unwrap_or(Value::Null),
@@ -1021,10 +1136,12 @@ impl Registry {
             repairs: Mutex::default(),
             #[cfg(any(test, feature = "test-support"))]
             join_admission_override: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             construction_test_plans: HashMap::new(),
             #[cfg(test)]
             e2e_venue: None,
+            #[cfg(test)]
+            local_proof_bindings: HashMap::new(),
         }
     }
 
@@ -1048,16 +1165,36 @@ impl Registry {
                 continue;
             }
             let tag = user_tag(&account.user);
-            Log::error(
-                &format!("router lease fenced user_tag={tag}"),
-                &crate::telemetry::Report {
-                    kind: "router_lease.fenced",
-                    summary: "router lease fenced; the account's algos stop on this box",
-                    user_tag: Some(tag.clone()),
-                    venue: Some(&account.venue),
-                    ..Default::default()
-                },
+            let (jobs, pending_work) = account.running.jobs();
+            let paused_jobs = jobs.iter().filter(|job| job.parked).count();
+            let running_jobs = jobs.len() - paused_jobs;
+            let summary = if running_jobs > 0 {
+                "router lease fenced; running algos stopped on this box"
+            } else {
+                "router lease fenced; no running algos on this box"
+            };
+            let message = format!(
+                "{summary} user_tag={tag} running_jobs={running_jobs} paused_jobs={paused_jobs} pending_work={pending_work}"
             );
+            // Only running algos are alertable; paused/pending work remains diagnostic context.
+            if running_jobs == 0 {
+                Log::info(&message);
+            } else {
+                Log::error(
+                    &message,
+                    &crate::telemetry::Report {
+                        kind: "router_lease.fenced",
+                        summary,
+                        user_id: (!account.public_only).then_some(account.user.as_str()),
+                        user_tag: Some(tag.clone()),
+                        venue: Some(&account.venue),
+                        running_jobs: Some(running_jobs),
+                        paused_jobs: Some(paused_jobs),
+                        pending_work: Some(pending_work),
+                        ..Default::default()
+                    },
+                );
+            }
             account.handle.begin_disposal(DisposalCause::Stopped);
             let stopped = self.keep_notice(&account, "router-lease");
             if !account.algos.as_ref().is_some_and(|sender| {
@@ -1181,14 +1318,14 @@ impl Registry {
             }
             accounts.values().find(|account| {
                 account.user == user
-                    && account.delegated.is_some()
+                    && account.delegated().is_some()
                     && account.has_label(&init.account_name)
             })
         })?;
-        if public_only && account.delegated.is_none() {
+        if public_only && account.delegated().is_none() {
             return None;
         }
-        (!account.is_public() && account.delegated.is_some() != delegated).then(|| {
+        (!account.is_public() && account.delegated().is_some() != delegated).then(|| {
             (
                 SigningModeRefusalReason::ResidentModeConflict,
                 "Account signing mode differs; account not attached".to_owned(),
@@ -1281,6 +1418,8 @@ impl Registry {
             probe_lease: None,
             admission_expires_at: None,
             probe_current: None,
+            probe_deadline: None,
+            proved_registration: None,
         };
         authority.check_admission()?;
         let key = (user.to_owned(), name.to_owned());
@@ -1359,7 +1498,7 @@ impl Registry {
             || !account.matches_init(user, init)
             || !self.holds(&account, holder)
             || init.sealed.is_some()
-            || account.delegated.is_some() != (init.signing_mode.as_deref() == Some("delegated"))
+            || account.delegated().is_some() != (init.signing_mode.as_deref() == Some("delegated"))
         {
             return Err("Settings can only be applied to the joined account identity".into());
         }
@@ -1369,7 +1508,7 @@ impl Registry {
         {
             return Err("Tealstreet proxy token expired; settings were not applied".into());
         }
-        let setup = if let Some(resident) = &account.delegated {
+        let setup = if let Some(resident) = &account.delegated() {
             resident.reconfigure(init)?;
             Some(DelegatedSetup::Resident(resident.clone()))
         } else {
@@ -1435,7 +1574,11 @@ impl Registry {
             return Err("The server is restarting; reconnecting".into());
         }
         let delegated = setup.is_some();
-        if let Some(refusal) = self.signing_mode_refusal(user, init, public_only, delegated) {
+        let probed = proof.is_some();
+        if let Some((reason, refusal)) =
+            self.signing_mode_refusal_detail(user, init, public_only, delegated)
+            && (!probed || !matches!(reason, SigningModeRefusalReason::ResidentModeConflict))
+        {
             return Err(refusal);
         }
         if public_only
@@ -1464,7 +1607,6 @@ impl Registry {
         if apply.is_some() {
             attempt.authority.admission_expires_at = token.as_ref().map(|(_, expiry)| *expiry);
         }
-        let probed = proof.is_some();
         if let Some(proof) = proof {
             proof
                 .check(user, init)
@@ -1472,10 +1614,23 @@ impl Registry {
             attempt.authority.probe_lease = proof.lease.clone();
             attempt.authority.admission_expires_at = proof.token_expires_at;
             attempt.authority.probe_current = Some(proof.current.clone());
+            attempt.authority.probe_deadline = proof.local_deadline;
+            attempt.authority.proved_registration = proof.registered_public.clone();
             attempt._probe = Some(proof);
         }
         let key = attempt.key.clone();
         let existing = self.accounts.lock().unwrap().get(&key).cloned();
+        let public = attempt
+            ._probe
+            .as_ref()
+            .and_then(|proof| proof.public_join.as_ref());
+        if public.is_some_and(|proof| {
+            existing
+                .as_ref()
+                .is_none_or(|current| !proof.account.ptr_eq(&Arc::downgrade(current)))
+        }) {
+            return Err("Account verification expired".into());
+        }
         if let Some(expected) = &apply
             && (expected.identity.is_none()
                 || !self.holds(expected, holder)
@@ -1486,13 +1641,59 @@ impl Registry {
             return Err("The account registration changed; settings were not applied".into());
         }
         if let Some(account) = existing {
-            if probed && (account.fingerprint != fingerprint || account.is_public()) {
-                return Err("Account settings differ; account not attached".into());
-            }
             if probed {
+                if account.is_public()
+                    || !same_handover_settings(&account.fingerprint, &fingerprint)
+                {
+                    return Err("Account settings differ; account not attached".into());
+                }
                 attempt.authority.check_admission()?;
+                crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;
+                if let Some(proof) = attempt._probe.as_ref() {
+                    proof.check_resident_public(&account)?;
+                }
+                if let Some(expected) = &attempt.authority.proved_registration {
+                    let actual = account
+                        .signing
+                        .public_binding(Family::Schnorr)
+                        .map_err(|_| "Signer registration unavailable")?
+                        .ok_or("Signer registration unavailable")?;
+                    if actual.as_bytes() != expected.as_bytes() {
+                        return Err("Signer registration changed during verification".into());
+                    }
+                }
+                if delegated && account.delegated().is_none() {
+                    let resident = match setup {
+                        Some(DelegatedSetup::Pair(pair)) => prepare_delegated(init, pair)?.resident,
+                        _ => {
+                            return Err(crate::envelope::ModeTransitionRefusal::Unavailable
+                                .reason()
+                                .into());
+                        }
+                    };
+                    attempt.authority.check_admission()?;
+                    if account.handle.disposal_cause().is_some() || !account.running.io_allowed() {
+                        return Err("Account is retiring; account not attached".into());
+                    }
+                    let upgraded = match (public, attempt.authority.proved_registration.as_deref())
+                    {
+                        (Some(proof), _) => account
+                            .signing
+                            .upgrade_proven(resident, Some(&proof.public)),
+                        (None, Some(public)) => {
+                            account.signing.upgrade_proven(resident, Some(public))
+                        }
+                        (None, None) => account.signing.upgrade(resident),
+                    }
+                    .map_err(|reason| reason.reason().to_owned())?;
+                    if upgraded {
+                        account.broadcast_signing_mode();
+                    }
+                }
+                account.hold_label(holder, Live { outbox, token }, &init.account_name);
+                return Ok(account);
             }
-            if !account.is_public() && account.delegated.is_some() != delegated {
+            if !account.is_public() && account.delegated().is_some() != delegated {
                 return Err("Account signing mode differs; account not attached".into());
             }
             if account.fingerprint == fingerprint && account.is_public() == public_only {
@@ -1598,6 +1799,60 @@ impl Registry {
         Ok(account)
     }
 
+    async fn registered_key_for_build(
+        &self,
+        user: &str,
+        init: &InitPayload,
+        plan: &RoutingPlan,
+        token: Option<(String, u64)>,
+        authority: &InitAuthority,
+    ) -> Result<safe_cex_crypto::admission::PublicKey, String> {
+        let account_index = init
+            .application_id
+            .as_deref()
+            .and_then(|value| value.parse().ok())
+            .ok_or("Missing signer registration account")?;
+        let index = init
+            .api_key_index
+            .as_deref()
+            .and_then(|value| value.parse().ok())
+            .ok_or("Missing signer registration index")?;
+        let captured = authority.clone();
+        let expiry = token.as_ref().map(|(_, expiry)| *expiry);
+        let allowed: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
+            captured.check_admission().is_ok() && expiry.is_none_or(|expiry| expiry > now_ms())
+        });
+        let proxy_token = ProxyToken::new();
+        proxy_token.set(token);
+        let transport = NetworkTransport::with_routing(plan.clone(), proxy_token.provider())
+            .with_venue(&init.exchange_name)
+            .with_report_user(safe_cex_native::report::ReportUser::new(user))
+            .with_io_guard(allowed.clone());
+        #[cfg(test)]
+        let transport = crate::delegated_e2e_io::Io::new(transport, self.e2e_venue.clone());
+        let network = safe_cex_venues::lighter_registration::Network::from_options(
+            init.exchange_name == "lighter-robinhood",
+            init.testnet == Some(true),
+        );
+        let public = crate::admission::fetch_lighter_registered_key(
+            &transport,
+            network,
+            account_index,
+            index,
+            allowed,
+        )
+        .await
+        .map_err(|_| "Signer registration unavailable")?;
+        authority.check_admission()?;
+        crate::auth::Verifier::check_expiry(expiry, now_ms())?;
+        if let Some(expected) = &authority.proved_registration
+            && expected.as_bytes() != public.as_bytes()
+        {
+            return Err("Signer registration changed during verification".into());
+        }
+        Ok(public)
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn build(
         &self,
@@ -1625,6 +1880,24 @@ impl Registry {
                 DelegatedSetup::Pair(pair) => prepare_delegated(init, pair)?,
                 DelegatedSetup::Resident(resident) => resident.reconfigure(init)?,
             };
+            if authority.proved_registration.is_some() {
+                let public = self
+                    .registered_key_for_build(user, init, &plan, token.clone(), authority)
+                    .await?;
+                let reference = resident
+                    .identities()
+                    .primary
+                    .as_ref()
+                    .ok_or("Signer registration unavailable")?
+                    .signing_ref()
+                    .map_err(|_| "Signer registration unavailable")?;
+                if !public
+                    .matches_provider(&resident.provider(), reference)
+                    .map_err(|_| "Signer registration unavailable")?
+                {
+                    return Err("Signer registration changed during verification".into());
+                }
+            }
             let signer = Some(resident.provider());
             (None, plan, options, None, signer, Some(resident))
         } else {
@@ -1634,8 +1907,47 @@ impl Registry {
                 options,
                 remote,
             } = prepare(init, public_only, link.clone())?;
+            let remote = match remote {
+                Some(remote) if Family::for_venue(&venue) == Some(Family::Schnorr) => {
+                    let public = self
+                        .registered_key_for_build(user, init, &plan, token.clone(), authority)
+                        .await?;
+                    Some(
+                        remote
+                            .with_registered_public_key(&public)
+                            .map_err(|error| error.to_string())?,
+                    )
+                }
+                remote => remote,
+            };
             let signer = remote.as_ref().map(|remote| remote.provider.clone());
             (link, plan, options, remote, signer, None)
+        };
+        let identities = if let Some(resident) = &delegated {
+            resident.identities().clone()
+        } else {
+            serde_json::from_str::<Value>(&options)
+                .ok()
+                .and_then(|options| options.get("signing").cloned())
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|_| "Invalid signer identities".to_owned())?
+                .unwrap_or_default()
+        };
+        let signing = AccountSigner::new_bound(
+            signer.clone(),
+            identities,
+            link.clone(),
+            delegated.clone(),
+            remote
+                .as_ref()
+                .and_then(|remote| remote.public_binding_source()),
+        );
+        let signer: Option<safe_cex_engine::signing::Provider> = if !delegated_build && !public_only
+        {
+            Some(signing.provider())
+        } else {
+            signer
         };
         let proxy_token = ProxyToken::new();
         // Preserve COSIGNED keyed construction; DELEGATED supplies its own provider.
@@ -1653,10 +1965,12 @@ impl Registry {
         let tokens = proxy_token.provider();
         let mut config = self.engine_config.clone();
         config.trusted_signer_state = None;
+        config.trusted_signer_identities = None;
         if let Some(resident) = &delegated {
             resident.configure(&mut config);
         }
         config.log_label = Some(self.account_log_label(user, &init.account_name, &venue));
+        config.report_user = (!public_only).then(|| safe_cex_native::report::ReportUser::new(user));
         // Public and COSIGNED diagnostic modes retain their original values.
         config.signing_mode = Some(if public_only {
             "public"
@@ -1708,7 +2022,7 @@ impl Registry {
             config.interest_observer = Some(self.public_topics.observer(&venue));
         }
         let (spawned, receive) = tokio::sync::oneshot::channel();
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         let plan = self
             .construction_test_plans
             .get(user)
@@ -1723,6 +2037,9 @@ impl Registry {
                 return;
             }
             let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
+            if let Some(user) = &config.report_user {
+                transport = transport.with_report_user(user.clone());
+            }
             transport = transport.with_io_guard(Arc::new(move || authority.check().is_ok()));
             #[cfg(test)]
             let transport = crate::delegated_e2e_io::Io::new(transport, e2e_venue);
@@ -1767,7 +2084,7 @@ impl Registry {
             handle,
             link,
             public_only,
-            delegated,
+            signing,
             token: proxy_token,
             fingerprint,
             holders: Mutex::default(),
@@ -1823,18 +2140,18 @@ impl Registry {
             if let Some(held) = holders.labels.remove(&holder) {
                 labels.extend(held.into_keys());
             }
-            if removed.is_none() && account.delegated.is_some() {
+            if removed.is_none() && account.delegated().is_some() {
                 return;
             }
             account.hand_over(&mut holders, holder);
-            let last = if account.delegated.is_some() {
+            let last = if account.delegated().is_some() {
                 holders.by_id.values().all(Option::is_none)
             } else {
                 holders.by_id.is_empty()
             };
             (last, holders.disposed)
         };
-        if account.delegated.is_some() {
+        if account.delegated().is_some() {
             if matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned) {
                 self.dispose_for(account, disposal, "account disposed", None);
                 return;
@@ -1858,6 +2175,7 @@ impl Registry {
     ) {
         let still_held = {
             let mut holders = account.holders.lock().unwrap();
+            holders.confirmed.remove(&(holder, label.into()));
             let (remaining, removed) = if let Some(labels) = holders.labels.get_mut(&holder) {
                 let removed = labels.remove(label).is_some();
                 (labels.values().find_map(Clone::clone), removed)
@@ -1866,7 +2184,7 @@ impl Registry {
             };
             if removed
                 && disposal == Disposal::SocketClosed
-                && account.delegated.is_some()
+                && account.delegated().is_some()
                 && !holders.disposed
             {
                 holders.departed_labels.insert(label.to_owned());
@@ -2013,7 +2331,7 @@ impl Registry {
         stopped: Option<crate::algos::StopNotice>,
         cause: DisposalCause,
     ) {
-        if let Some(resident) = &account.delegated {
+        if let Some(resident) = &account.delegated() {
             let mut accounts = self.accounts.lock().unwrap();
             let mut holders = account.holders.lock().unwrap();
             holders.cancel_retention();
@@ -2021,8 +2339,7 @@ impl Registry {
             let key = (account.user.clone(), account.registry_name().to_owned());
             let transferred = accounts.get(&key).is_some_and(|current| {
                 !Arc::ptr_eq(current, account)
-                    && current
-                        .delegated
+                    && current.delegated()
                         .as_ref()
                         .is_some_and(|next| Arc::ptr_eq(next, resident))
             });
@@ -2076,6 +2393,7 @@ impl Registry {
             &crate::telemetry::Report {
                 kind: "signer.failing",
                 summary: "signer keeps failing; account disposed",
+                user_id: Some(&account.user),
                 user_tag: Some(user_tag(&account.user)),
                 venue: Some(&account.venue),
                 ..Default::default()
@@ -2200,7 +2518,7 @@ impl Registry {
         {
             accounts.remove(&key);
         }
-        if account.delegated.is_some() {
+        if account.delegated().is_some() {
             let mut holders = account.holders.lock().unwrap();
             holders.cancel_retention();
             *holders = Holders {
@@ -2209,7 +2527,7 @@ impl Registry {
             };
         }
         drop(accounts);
-        if account.delegated.is_none() {
+        if account.delegated().is_none() {
             *account.holders.lock().unwrap() = Holders::default();
         }
         let stopped = if stopped.is_none() && !account.running.io_allowed() {
@@ -2410,7 +2728,7 @@ impl Registry {
             let park_holder = self.next_id();
             {
                 let mut holders = account.holders.lock().unwrap();
-                if account.delegated.is_some() {
+                if account.delegated().is_some() {
                     if !holders.by_id.get(&holder).is_some_and(Option::is_some) {
                         continue;
                     }
@@ -2472,7 +2790,7 @@ impl Registry {
                         account.hand_over(&mut holders, park_holder);
                         holders.by_id.is_empty()
                     };
-                    if last && account.delegated.is_none() {
+                    if last && account.delegated().is_none() {
                         let stopped = registry.keep_notice(&account, &resume_id);
                         registry.dispose_for(&account, Disposal::NoBrowser, &reason, Some(stopped));
                     }
@@ -2553,7 +2871,7 @@ impl Registry {
         }
         let accounts = entry
             .accounts
-            .extract_if(.., |(account, _)| account.delegated.is_none())
+            .extract_if(.., |(account, _)| account.delegated().is_none())
             .collect::<Vec<_>>();
         entry.alias_until = Some(now_ms() + 2 * self.resume_grace.as_millis() as u64);
         drop(parked);
@@ -2595,6 +2913,18 @@ impl Registry {
     }
 }
 
+/// Engine/routing settings after possession proof; mode and passphrase are
+/// handled by admission and can differ between COSIGNED and sealed DELEGATED init.
+pub(crate) fn same_handover_settings(old: &str, new: &str) -> bool {
+    fn normalized(text: &str) -> Option<Map<String, Value>> {
+        let mut fields: Map<String, Value> = serde_json::from_str(text).ok()?;
+        fields.remove("hostedSigningMode");
+        fields.remove("passphrase");
+        Some(fields)
+    }
+    matches!((normalized(old), normalized(new)), (Some(old), Some(new)) if old == new)
+}
+
 /// The top-level init fields (names only) on which two fingerprints differ.
 fn differing_fields(old: &str, new: &str) -> Vec<String> {
     let parse = |text: &str| {
@@ -2623,6 +2953,16 @@ pub fn resume_id() -> String {
 /// (`tests/boxes.rs`); built only for tests or the `test-support` feature.
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing {
+    /// Integration fixtures route real probe and resident transports to loopback.
+    /// This does not disable admission, replace proof strategies or inject outcomes.
+    pub fn set_routing(
+        registry: &mut super::Registry,
+        user: &str,
+        plan: safe_cex_native::RoutingPlan,
+    ) {
+        registry.construction_test_plans.insert(user.into(), plan);
+    }
+
     /// Synthetic venue fixtures have no real private-startup transport. The
     /// production proof requirement remains the default; legacy fixtures opt out explicitly.
     pub fn set_join_admission(registry: &mut super::Registry, enabled: bool) {
@@ -2630,6 +2970,45 @@ pub mod testing {
     }
 
     use super::*;
+
+    #[cfg(test)]
+    pub(crate) fn local_proof_binding(
+        registry: &mut Registry,
+        user: &str,
+        init: &InitPayload,
+        facts: &str,
+    ) {
+        let projection =
+            safe_cex_crypto::admission::identity::Projection::from_json(user, facts).unwrap();
+        registry.local_proof_bindings.insert(
+            (user.into(), admission::admission_fingerprint(init)),
+            Arc::new(projection),
+        );
+        let http = safe_cex_native::HttpRoute {
+            prefix: "in-memory://local-proof-fixture".into(),
+            ..Default::default()
+        };
+        let ws = safe_cex_native::WsRoute {
+            host: Some("in-memory://local-proof-fixture".into()),
+            ..Default::default()
+        };
+        registry.construction_test_plans.insert(
+            user.into(),
+            RoutingPlan {
+                http: http.clone(),
+                public_http: Some(http.clone()),
+                read_http: Some(http.clone()),
+                read_public_http: Some(http.clone()),
+                public_read_http: Some(http),
+                ws: safe_cex_native::WsRoutes {
+                    public: ws.clone(),
+                    private: ws.clone(),
+                    business: ws,
+                },
+                ..Default::default()
+            },
+        );
+    }
 
     pub fn bind_identity(account: &mut Arc<Account>, init: &InitPayload) {
         let identity = identity::digest(&account.user, init).unwrap();
@@ -2726,7 +3105,7 @@ pub mod testing {
             venue: venue_name.into(),
             handle,
             public_only: link.is_none(),
-            delegated: None,
+            signing: AccountSigner::new(None, Default::default(), link.clone(), None),
             link,
             token: ProxyToken::new(),
             fingerprint,
@@ -2768,6 +3147,49 @@ pub mod testing {
             running,
         );
         bind_identity(&mut account, init);
+        let account = run_algos(account, link, inbox);
+        register(registry, &account);
+        account
+    }
+
+    #[cfg(test)]
+    pub(crate) fn registered_lighter_account(
+        registry: &Registry,
+        user: &str,
+        init: &InitPayload,
+        public: &safe_cex_crypto::admission::PublicKey,
+    ) -> Arc<Account> {
+        let link = SignerLink::new(0, Arc::new(|_| false));
+        let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
+        let (mut account, inbox) = account_on(
+            HeldLoad {
+                placed: Arc::default(),
+                load_after_ms: Some(0.),
+                ticker: true,
+            },
+            (user, &init.account_name, &init.exchange_name),
+            Some(link.clone()),
+            init.fingerprint(),
+            running,
+        );
+        let remote = remote_account(
+            link.clone(),
+            &init.exchange_name,
+            Some(init.account_name.clone()),
+            &engine_options(init, false).to_string(),
+        )
+        .unwrap()
+        .with_registered_public_key(public)
+        .unwrap();
+        let options: Value = serde_json::from_str(&remote.options_json).unwrap();
+        let identities = serde_json::from_value(options["signing"].clone()).unwrap();
+        Arc::get_mut(&mut account).unwrap().signing = AccountSigner::new_bound(
+            Some(remote.provider.clone()),
+            identities,
+            Some(link.clone()),
+            None,
+            remote.public_binding_source(),
+        );
         let account = run_algos(account, link, inbox);
         register(registry, &account);
         account
@@ -3075,6 +3497,155 @@ pub(crate) mod tests {
             .unwrap();
     }
 
+    async fn router_lease_fence_log(chase: bool, twaps: &[Value], pending: usize) -> Value {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = Arc::new(
+                    Registry::new(
+                        EngineThreads::start(1).unwrap(),
+                        Duration::from_millis(1),
+                        Duration::from_secs(60),
+                    )
+                    .with_router_lease(crate::router_lease::Config {
+                        box_id: Some("01".into()),
+                        enforce: true,
+                        ..Default::default()
+                    }),
+                );
+                grant_init_owner(&registry, 1);
+                let (account, mut inputs) = held_account();
+                testing::register(&registry, &account);
+                let chases = if chase {
+                    vec![safe_cex_chaser::ActiveChaser {
+                        id: "synthetic-chase".into(),
+                        symbol: "BTCUSDT".into(),
+                        size: 1.,
+                        side: safe_cex_engine::model::OrderSide::Buy,
+                        max_attempts: 10.,
+                        reduce_only: false,
+                        attempts: 0,
+                        is_stopped: false,
+                        stop_reason: String::new(),
+                        current_order_ids: Vec::new(),
+                        origin: None,
+                        twap_id: None,
+                    }]
+                } else {
+                    Vec::new()
+                };
+                account.running.refresh(&chases, twaps, pending);
+                let capture = crate::state::log_capture::capture();
+                registry.park_expired_router_leases();
+                assert!(
+                    inputs.try_recv().is_err(),
+                    "a live grant must not stop work"
+                );
+                tokio::time::advance(Duration::from_secs(46)).await;
+                registry.park_expired_router_leases();
+                registry.park_expired_router_leases();
+                assert!(matches!(
+                    inputs.try_recv().unwrap(),
+                    crate::algos::AlgoInput::RouterFence { .. }
+                ));
+                assert!(inputs.try_recv().is_err(), "fencing remains exactly once");
+                assert_eq!(registry.account_count(), 0);
+                assert!(account.running.parked_by_lease());
+                grant_init_owner(&registry, 2);
+                assert!(
+                    !account.running.io_allowed(),
+                    "renewal cannot revive old work"
+                );
+                let lines: Vec<Value> = capture
+                    .finish()
+                    .into_iter()
+                    .map(|line| serde_json::from_str::<Value>(&line).unwrap())
+                    .filter(|line| {
+                        line["msg"]
+                            .as_str()
+                            .is_some_and(|msg| msg.starts_with("router lease fenced"))
+                    })
+                    .collect();
+                assert_eq!(lines.len(), 1);
+                lines.into_iter().next().unwrap()
+            })
+            .await
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn router_lease_fence_empty_account_is_info() {
+        let line = router_lease_fence_log(false, &[], 0).await;
+        assert_eq!(line["level"], "info");
+        let msg = line["msg"].as_str().unwrap();
+        assert!(msg.starts_with("router lease fenced; no running algos on this box "));
+        for field in ["running_jobs=0", "paused_jobs=0", "pending_work=0"] {
+            assert!(msg.contains(field), "{msg}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn router_lease_fence_chase_is_error_with_work_counts() {
+        let line = router_lease_fence_log(true, &[], 0).await;
+        assert_eq!(line["level"], "error");
+        let msg = line["msg"].as_str().unwrap();
+        assert!(msg.starts_with("router lease fenced; running algos stopped on this box "));
+        assert!(msg.contains("running_jobs=1"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn router_lease_fence_running_twap_is_error_with_work_counts() {
+        let line = router_lease_fence_log(
+            false,
+            &[serde_json::json!({"id":"synthetic-twap","status":"running"})],
+            0,
+        )
+        .await;
+        assert_eq!(line["level"], "error");
+        let msg = line["msg"].as_str().unwrap();
+        assert!(msg.starts_with("router lease fenced; running algos stopped on this box "));
+        assert!(msg.contains("running_jobs=1"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn router_lease_fence_paused_twap_is_info_with_work_counts() {
+        let line = router_lease_fence_log(
+            false,
+            &[serde_json::json!({"id":"synthetic-twap","status":"paused"})],
+            0,
+        )
+        .await;
+        assert_eq!(line["level"], "info");
+        let msg = line["msg"].as_str().unwrap();
+        assert!(msg.starts_with("router lease fenced; no running algos on this box "));
+        assert!(msg.contains("running_jobs=0"));
+        assert!(msg.contains("paused_jobs=1"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn router_lease_fence_pending_exec_is_info_with_work_counts() {
+        let line = router_lease_fence_log(false, &[], 1).await;
+        assert_eq!(line["level"], "info");
+        let msg = line["msg"].as_str().unwrap();
+        assert!(msg.starts_with("router lease fenced; no running algos on this box "));
+        assert!(msg.contains("running_jobs=0"));
+        assert!(msg.contains("pending_work=1"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn router_lease_fence_mixed_work_is_error_only_for_running_jobs() {
+        let line = router_lease_fence_log(
+            true,
+            &[serde_json::json!({"id":"synthetic-twap","status":"paused"})],
+            1,
+        )
+        .await;
+        assert_eq!(line["level"], "error");
+        let msg = line["msg"].as_str().unwrap();
+        assert!(msg.starts_with("router lease fenced; running algos stopped on this box "));
+        for field in ["running_jobs=1", "paused_jobs=1", "pending_work=1"] {
+            assert!(msg.contains(field), "{msg}");
+        }
+    }
+
     #[tokio::test(start_paused = true)]
     async fn paced_private_init_drops_its_retired_router_generation() {
         use std::future::Future;
@@ -3094,9 +3665,10 @@ pub(crate) mod tests {
         let old_permit = registry.router_leases.get("u").unwrap().permit();
         assert!(old_permit.allowed());
         registry.pacer.admit().await;
+        // Hyro now has hosted endpoints; TxFlow retains the unhosted preparation control.
         let init = InitPayload {
             account_name: "acct".into(),
-            exchange_name: "hyrotrader".into(),
+            exchange_name: "txflow".into(),
             ..Default::default()
         };
         let expected_control = prepare(&init, false, Some(SignerLink::new(8, Arc::new(|_| true))))
@@ -3151,9 +3723,10 @@ pub(crate) mod tests {
         registry.pacer = crate::pacing::Pacer::new(1, Duration::ZERO);
         let registry = Arc::new(registry);
         registry.pacer.admit().await;
+        // Hyro now has hosted endpoints; TxFlow retains the unhosted preparation control.
         let old = InitPayload {
             account_name: "acct".into(),
-            exchange_name: "hyrotrader".into(),
+            exchange_name: "txflow".into(),
             key: "synthetic-A".into(),
             ..Default::default()
         };
@@ -3757,9 +4330,10 @@ pub(crate) mod tests {
         let registry = Arc::new(registry);
         registry.pacer.admit().await;
         // This venue's ordinary preparation refuses locally, with no venue IO.
+        // Hyro now has hosted endpoints; TxFlow retains the unhosted preparation control.
         let init = InitPayload {
             account_name: "acct".into(),
-            exchange_name: "hyrotrader".into(),
+            exchange_name: "txflow".into(),
             key: "synthetic".into(),
             ..Default::default()
         };
@@ -4720,25 +5294,105 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_venue_with_no_hosted_origin_is_refused_in_plain_words() {
+    fn asterdex_origins_use_existing_hosted_japan_how_route() {
+        for testnet in [false, true] {
+            let init = InitPayload {
+                account_name: "fixture-asterdex".into(),
+                exchange_name: "asterdex".into(),
+                testnet: Some(testnet),
+                tealstreet_proxy: Some(false),
+                tealstreet_tunnel: Some(false),
+                ..InitPayload::default()
+            };
+            for public_only in [false, true] {
+                let plan = routing_plan(&init, public_only).unwrap();
+                assert_eq!(plan.http.mode, safe_cex_native::HttpRouteMode::How);
+                assert_eq!(
+                    plan.http.tunnel_url,
+                    Some(resolve::route_bases().unwrap().tunnel["jp"].clone())
+                );
+                assert!(plan.http.prefix.is_empty());
+                assert!(!plan.http.authorize);
+                assert!(plan.http.header_aliases.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn binanceoptions_hosted_testnet_is_refused_in_plain_words() {
+        // Mainnet gains an origin; hosted Options testnet remains deliberately closed.
         let init = InitPayload {
             account_name: "a".into(),
-            exchange_name: "asterdex".into(),
+            exchange_name: "binanceoptions".into(),
+            testnet: Some(true),
             ..InitPayload::default()
         };
         let refusal = routing_plan(&init, true).unwrap_err();
         assert_eq!(
             refusal,
-            "asterdex cannot run on the Hosted server. Turn Hosted off to use this account."
+            "binanceoptions cannot run on the Hosted server. Turn Hosted off to use this account."
         );
     }
 
     #[test]
-    fn hosted_hyrotrader_is_refused_visibly() {
+    fn binanceoptions_hosted_mainnet_preserves_existing_japan_and_public_routes() {
+        let init = InitPayload {
+            account_name: "fixture-options".into(),
+            exchange_name: "binanceoptions".into(),
+            tealstreet_proxy: Some(true),
+            tealstreet_tunnel: Some(false),
+            ..InitPayload::default()
+        };
+        let bases = resolve::route_bases().unwrap();
+        for public in [false, true] {
+            let plan = routing_plan(&init, public).unwrap();
+            assert_eq!(plan.http.mode, safe_cex_native::HttpRouteMode::Direct);
+            assert_eq!(
+                plan.http.prefix,
+                if public {
+                    &bases.public_proxy
+                } else {
+                    &bases.private_proxy["jp"]
+                }
+                .as_str()
+            );
+            assert!(plan.http.authorize);
+            assert!(plan.http.header_aliases.is_empty());
+            assert!(plan.http.tunnel_url.is_none());
+        }
+    }
+
+    #[test]
+    fn hosted_hyrotrader_endpoints_are_server_owned_and_testnet_stays_refused() {
+        let mut init: InitPayload = serde_json::from_value(json!({
+            "exchangeName":"hyrotrader", "accountName":"fixture", "key":"synthetic-key",
+            "endpoints":{"rest":"https://client.invalid","publicWs":"wss://client.invalid/public","privateWs":"wss://client.invalid/private"},
+            "hyrotrader":{"mode":"demo","production":{"rest":{"livenet":"https://client.invalid"}}}
+        })).unwrap();
+        let options = engine_options(&init, false);
         assert_eq!(
-            refuse_unhosted("hyrotrader"),
-            Err(HYROTRADER_UNHOSTED.to_owned())
+            options["endpoints"],
+            json!({
+                "rest":"https://sim-tealstreet.hyro.site",
+                "publicWs":"wss://sim-tealstreet.hyro.site/v5/public/linear",
+                "privateWs":"wss://sim-tealstreet.hyro.site/v5/private"
+            })
         );
+        assert!(!options.to_string().contains("client.invalid"));
+        assert!(routing_plan(&init, false).is_ok());
+        init.testnet = Some(true);
+        assert!(engine_options(&init, false).get("endpoints").is_none());
+        assert!(routing_plan(&init, false).is_err());
+        let other = InitPayload {
+            exchange_name: "bybit".into(),
+            ..Default::default()
+        };
+        assert!(engine_options(&other, false).get("endpoints").is_none());
+    }
+
+    #[test]
+    fn hosted_hyrotrader_uses_the_native_origin_gate() {
+        assert_eq!(refuse_unhosted("hyrotrader"), Ok(()));
         assert_eq!(refuse_unhosted("bybit"), Ok(()));
     }
 

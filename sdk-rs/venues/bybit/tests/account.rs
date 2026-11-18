@@ -3451,6 +3451,7 @@ fn an_unknown_placement_refuses_a_retry_on_its_symbol_until_reconciled() {
         34,
         vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
     );
+    h.await_request("/v5/order/create-batch");
     assert!(
         h.has_request("/v5/order/create-batch"),
         "a fresh read clears the fence: {:?}",
@@ -3543,6 +3544,7 @@ fn cancel_all_after_an_unknown_placement_waits_for_the_fresh_read() {
         command: 63,
         symbol: "BTCUSDT".into(),
     });
+    h.await_request("/v5/order/cancel-all");
     assert!(
         h.has_request("/v5/order/cancel-all"),
         "the fresh read admits cancel-all: {:?}",
@@ -4600,9 +4602,9 @@ fn explicit_terminal_history_failure_retains_rows_with_incomplete_marker() {
 }
 
 #[test]
-fn terminal_order_history_reuses_the_requested_windows_for_each_status() {
+fn terminal_order_history_preserves_default_windows_and_clips_each_status() {
     let mut h = ready();
-    let to = 1_672_300_000_000.0;
+    let to = h.engine.signing_clock(h.now).0;
     h.command(Command::Query {
         command: 913,
         query: Query::OrderHistory {
@@ -4612,30 +4614,24 @@ fn terminal_order_history_reuses_the_requested_windows_for_each_status() {
             limit: None,
         },
     });
-    let mut original = Vec::new();
+    // V5 retains these statuses only for 24h; the old seven-day reuse was invalid.
     for status in [
         None,
         Some("Cancelled"),
         Some("Rejected"),
         Some("Deactivated"),
     ] {
-        for window in 0..2 {
+        for _ in 0..if status.is_none() { 2 } else { 1 } {
             let request = h.take("/v5/order/history");
             assert_eq!(request.url.contains("orderStatus="), status.is_some());
             if let Some(status) = status {
                 assert!(request.url.contains(&format!("orderStatus={status}")));
-            }
-            let bounds: Vec<_> = request
-                .url
-                .split('&')
-                .filter(|part| part.starts_with("startTime=") || part.starts_with("endTime="))
-                .map(str::to_owned)
-                .collect();
-            assert_eq!(bounds.len(), 2);
-            if status.is_none() {
-                original.push(bounds);
-            } else {
-                assert_eq!(bounds, original[window]);
+                assert!(
+                    request
+                        .url
+                        .contains(&format!("startTime={}", to - 86_400_000.0))
+                );
+                assert!(request.url.contains(&format!("endTime={to}")));
             }
             h.reply(request.id, 200, EMPTY_LIST);
         }

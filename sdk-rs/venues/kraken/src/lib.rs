@@ -9,6 +9,7 @@ mod public_trades;
 pub mod sign;
 mod trading;
 mod wire;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::book::{Book, BookSide};
@@ -70,6 +71,30 @@ pub enum Pending {
         page: CandlePage,
     },
 }
+fn public_read_message(pending: &Pending, status: u16, reason: &'static str) -> String {
+    let endpoint = match pending {
+        Pending::Markets { .. } => "instruments",
+        Pending::Tickers { .. } => "tickers",
+        Pending::Candles { .. } => "candles",
+        _ => "other",
+    };
+    format!("Kraken public read failed: endpoint={endpoint} http_status={status} reason={reason}")
+}
+
+fn public_response_message(
+    pending: &Pending,
+    response: Response<'_>,
+    fallback: &'static str,
+) -> String {
+    let reason =
+        if matches!(pending, Pending::Candles { .. }) && (200..300).contains(&response.status) {
+            fallback
+        } else {
+            public_response_rejection(response).unwrap_or(fallback)
+        };
+    public_read_message(pending, response.status, reason)
+}
+
 /// Kraken serves at most 2000 bars from `from`; later pages resume after the last bar.
 #[derive(Clone, Copy)]
 pub struct CandlePage {
@@ -778,7 +803,10 @@ impl Venue for Kraken {
         }
         self.public.open = true;
         self.ticker_received.clear();
-        cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
+        cx.send(
+            socket,
+            ControlFrame::subscription(r#"{"event":"subscribe","feed":"heartbeat"}"#),
+        );
         self.sync_public_interests(cx);
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
@@ -1081,7 +1109,10 @@ impl Venue for Kraken {
         if !(200..300).contains(&response.status)
             || (!matches!(pending, Pending::Candles { .. }) && !success(response))
         {
-            self.public_failed(cx, pending, "Kraken public read failed");
+            // Report closed facts only; venue bodies and parse errors can contain payload data.
+            // Keep the refusal predicate, including the chart-envelope exemption, unchanged.
+            let message = public_response_message(&pending, response, "unknown");
+            self.public_failed(cx, pending, &message);
             return;
         }
         match pending {
@@ -1318,6 +1349,12 @@ impl Venue for Kraken {
         match pending {
             Pending::History(request) => self.history_stream_error(cx, *request, response),
             Pending::Account(request) => self.account_http(cx, request, response),
+            pending @ (Pending::Markets { .. }
+            | Pending::Tickers { .. }
+            | Pending::Candles { .. }) => {
+                let message = public_response_message(&pending, response, "missing_list");
+                self.on_request_failed(cx, pending, &message);
+            }
             pending => self.on_request_failed(
                 cx,
                 pending,
@@ -1327,6 +1364,29 @@ impl Venue for Kraken {
                 ),
             ),
         }
+    }
+
+    fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        status: u16,
+        _headers: &str,
+        error: &str,
+    ) {
+        let message = if matches!(
+            pending,
+            Pending::Markets { .. } | Pending::Tickers { .. } | Pending::Candles { .. }
+        ) {
+            public_read_message(&pending, status, "malformed_json")
+        } else {
+            error.to_owned()
+        };
+        self.on_http_failed(
+            cx,
+            pending,
+            safe_cex_engine::VenueError::new(message).kind(safe_cex_engine::ErrorKind::Internal),
+        );
     }
 
     fn on_http_preparation_failed(

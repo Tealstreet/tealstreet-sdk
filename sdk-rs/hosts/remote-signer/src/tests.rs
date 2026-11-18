@@ -11,7 +11,11 @@ use tokio::sync::mpsc;
 
 use super::*;
 
+mod apexomni;
+mod asterdex;
+mod coinbase;
 mod grvt;
+mod kraken;
 
 type Answer = Box<dyn Fn(&Value) -> Value + Send + Sync>;
 
@@ -1123,3 +1127,5 @@ async fn enabled_bybit_requests_carry_the_public_key_id_and_other_variants_keep_
         assert_eq!(sent["wsAuth"]["toSign"], "GET/realtime1700000000000");
     }
 }
+
+mod bindings;

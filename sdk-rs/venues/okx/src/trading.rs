@@ -415,8 +415,12 @@ struct Ack<'a> {
     algo_id: &'a str,
     #[serde(default)]
     s_code: &'a str,
-    #[serde(default)]
-    s_msg: &'a str,
+    #[serde(borrow, default = "empty_ack_message")]
+    s_msg: std::borrow::Cow<'a, str>,
+}
+
+fn empty_ack_message<'a>() -> std::borrow::Cow<'a, str> {
+    std::borrow::Cow::Borrowed("")
 }
 
 impl Okx {
@@ -1675,20 +1679,28 @@ impl Okx {
             Ok(envelope) => envelope,
             Err(e) => return self.unproven(cx, request, &e.to_string()),
         };
-        let Some(acks) = envelope
+        let acks = envelope
             .data
             .and_then(|data| serde_json::from_str::<Vec<Ack<'_>>>(data.get()).ok())
-        else {
+            .filter(|acks| {
+                // Owned text is the existing failed-empty-envelope recovery only.
+                // Success and nonempty-msg envelopes still refuse escaped messages.
+                (envelope.code != "0" && envelope.msg.is_empty())
+                    || acks
+                        .iter()
+                        .all(|ack| matches!(&ack.s_msg, std::borrow::Cow::Borrowed(_)))
+            });
+        let Some(acks) = acks else {
             if matches!(envelope.code, "0" | "2") {
                 return self.unproven(cx, request, "Malformed OKX write response");
             }
-            let message = format!("OKX {}: {}", envelope.code, envelope.msg);
+            let message = write_failure_message(&envelope);
             return self.failure(cx, request, Some(envelope.code), message, response.status);
         };
         // A refused envelope with no failing rows is one whole native failure.
         if !matches!(envelope.code, "0" | "2") && acks.iter().all(|a| matches!(a.s_code, "" | "0"))
         {
-            let message = format!("OKX {}: {}", envelope.code, envelope.msg);
+            let message = write_failure_message(&envelope);
             return self.failure(cx, request, Some(envelope.code), message, response.status);
         }
         let Some(job) = self.trading.jobs.get_mut(&request.command) else {
@@ -1698,7 +1710,7 @@ impl Okx {
         step.unknown_row = acks.iter().position(|ack| {
             (!matches!(ack.s_code, "" | "0")
                 && matches!(
-                    CODES.verdict(&native(ack.s_code, ack.s_msg), Intent::Place),
+                    CODES.verdict(&native(ack.s_code, ack.s_msg.as_ref()), Intent::Place),
                     Verdict::Unknown(_)
                 ))
                 || (matches!(ack.s_code, "" | "0")
@@ -1886,7 +1898,26 @@ impl Okx {
             .collect();
         let (expected, continue_cancel_errors) = (step.expected, job.continue_cancel_errors);
         if expected == 0 && envelope.code != "0" {
-            let message = format!("OKX {}: {}", envelope.code, envelope.msg);
+            // Settings have no order IDs, but a sole refused row still names the
+            // native failure. Never infer a whole-call refusal from mixed rows.
+            if envelope.msg.is_empty()
+                && let [ack] = acks.as_slice()
+                && !matches!(ack.s_code, "" | "0")
+                && !ack.s_msg.is_empty()
+            {
+                return self.failure(
+                    cx,
+                    request,
+                    Some(ack.s_code),
+                    ack.s_msg.to_string(),
+                    response.status,
+                );
+            }
+            let message = if envelope.msg.is_empty() && !errors.is_empty() {
+                errors.join_with("; ")
+            } else {
+                write_failure_message(&envelope)
+            };
             return self.failure(cx, request, Some(envelope.code), message, response.status);
         }
         // Record the call's fact before any continuation or terminal.
@@ -1905,7 +1936,7 @@ impl Okx {
                             requested.get(index).map_or("", Requested::id)
                         })
                     } else {
-                        BatchItem::Native(native(ack.s_code, ack.s_msg))
+                        BatchItem::Native(native(ack.s_code, ack.s_msg.as_ref()))
                     }
                 })
                 .collect();
@@ -1949,7 +1980,7 @@ impl Okx {
         };
         if unproven {
             let message = if errors.is_empty() {
-                format!("OKX {}: {}", envelope.code, envelope.msg)
+                write_failure_message(&envelope)
             } else {
                 errors.join_with("; ")
             };
@@ -1969,9 +2000,26 @@ impl Okx {
             continue_cancel_errors && acks.iter().any(|a| !matches!(a.s_code, "" | "0"));
         // Legacy TS's response interceptor throws on every nonzero envelope.
         if envelope.code != "0" {
-            let error = if errors.is_empty() {
-                let error = format!("OKX {}: {}", envelope.code, envelope.msg);
-                rejection(error, Some(envelope.code), response.status)
+            let mut error = if errors.is_empty() {
+                // A satisfied cancel row stays quiet unless the empty envelope
+                // would otherwise erase its only available native diagnostic.
+                if envelope.msg.is_empty()
+                    && let Some(ack) = acks.iter().find(|ack| !matches!(ack.s_code, "" | "0"))
+                {
+                    rejection(
+                        format!("{} (code {})", ack.s_msg, ack.s_code),
+                        Some(envelope.code),
+                        response.status,
+                    )
+                    .venue_code(ack.s_code)
+                    .venue_message(ack.s_msg.as_ref())
+                } else {
+                    rejection(
+                        write_failure_message(&envelope),
+                        Some(envelope.code),
+                        response.status,
+                    )
+                }
             } else {
                 refused(rejection(
                     errors.join_with("; "),
@@ -1979,6 +2027,12 @@ impl Okx {
                     response.status,
                 ))
             };
+            if matches!(
+                step.path,
+                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+            ) {
+                error.elements = Some(Box::new(cancel_outcomes(&response, &acks, &requested)));
+            }
             self.end(cx, request.command, Some(&request), error, false);
             if continue_cancel_errors && acks.iter().any(|a| a.s_code == "51400") {
                 self.account_refresh(cx);
@@ -2389,7 +2443,7 @@ fn cancel_outcomes(
                     &CODES,
                     Intent::Cancel,
                     Released::Response(response),
-                    Some(&native(ack.s_code, ack.s_msg)),
+                    Some(&native(ack.s_code, ack.s_msg.as_ref())),
                 );
                 let result = if matches!(ack.s_code, "" | "0")
                     || verdict == Verdict::Satisfied(SatisfiedIntent::Cancel)
@@ -2407,7 +2461,7 @@ fn cancel_outcomes(
                         ack.s_code
                     ))
                     .venue_code(ack.s_code)
-                    .venue_message(ack.s_msg);
+                    .venue_message(ack.s_msg.as_ref());
                     if let Some(kind) = verdict.kind() {
                         error.kind = Some(kind);
                     }
@@ -2433,6 +2487,18 @@ fn cancel_outcomes(
             })
             .collect(),
     )
+}
+
+/// A missing native reason is explicit; never invent one from a malformed row.
+fn write_failure_message(envelope: &wire::Envelope<'_>) -> String {
+    if envelope.msg.is_empty() {
+        format!(
+            "OKX {}: operation failed without per-order diagnostics",
+            envelope.code
+        )
+    } else {
+        format!("OKX {}: {}", envelope.code, envelope.msg)
+    }
 }
 
 /// A definitive OKX refusal. Its kind comes from the table (the native code,
@@ -2484,8 +2550,8 @@ fn native_refusal(
         .classify_write(
             context,
             &CODES,
-            Some(&native(ack.s_code, ack.s_msg)),
-            ack.s_msg,
+            Some(&native(ack.s_code, ack.s_msg.as_ref())),
+            ack.s_msg.as_ref(),
         )
         .map_err(|error| error.venue_error())?;
     let error = fact.error().clone();

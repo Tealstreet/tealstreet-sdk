@@ -3,6 +3,7 @@
 use safe_cex_crypto::signer::{
     LocalExtra, LocalExtras, LocalIdentity, LocalSetup, LocalSigner, Secret,
 };
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::signing::{
     CredentialSetupPolicy, ExtraFieldPolicy, ExtraKey, ExtraKeyPolicy, Identity,
@@ -96,7 +97,7 @@ impl Venue for Issue {
                 }
                 None => {
                     let socket = cx.connect("wss://quote.omni.apex.exchange/realtime_private");
-                    cx.send_signed(socket, String::new(), step);
+                    cx.send_signed(socket, ControlFrame::authentication(String::new()), step);
                 }
             }
         }
@@ -199,6 +200,16 @@ fn rest_recipes_match_legacy_headers_and_bodies_for_every_body_kind_and_legacy_r
             legacy,
         )
         .unwrap();
+        if matches!(requests[index % requests.len()].body, sign::Body::None) {
+            assert_eq!(
+                http.headers
+                    .iter()
+                    .find(|(key, _)| *key == "Content-Type")
+                    .unwrap()
+                    .1,
+                "application/json; charset=utf-8"
+            );
+        }
         assert_eq!(http.headers, expected.headers, "case {index}");
         assert_eq!(http.body, expected.body, "case {index}");
         assert!(http.url.ends_with(&expected.path), "case {index}");

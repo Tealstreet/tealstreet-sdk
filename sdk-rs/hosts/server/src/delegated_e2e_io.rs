@@ -14,6 +14,7 @@ pub(crate) struct Observed {
     pub requests: usize,
     pub sockets: usize,
     pub reads: usize,
+    pub registration_urls: Vec<String>,
     pub refused: usize,
     pub writes: Vec<Value>,
 }
@@ -24,6 +25,14 @@ pub(crate) struct MockVenue {
     material: String,
     pub observed: Arc<Mutex<Observed>>,
     admission: Option<crate::delegated::probe::venue_tests::VenueIo>,
+    registration: Option<Registration>,
+    coinbase: Option<crate::delegated::probe::coinbase_tests::CoinbaseIo>,
+    hyperliquid: bool,
+}
+#[derive(Clone)]
+struct Registration {
+    body: Arc<Mutex<Value>>,
+    gate: Arc<tokio::sync::Semaphore>,
 }
 
 impl MockVenue {
@@ -33,6 +42,24 @@ impl MockVenue {
             material,
             observed: Arc::default(),
             admission: None,
+            registration: None,
+            coinbase: None,
+            hyperliquid: false,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn for_hyperliquid(key: String, material: String) -> Self {
+        Self {
+            hyperliquid: true,
+            ..Self::new(key, material)
+        }
+    }
+
+    pub(crate) fn for_coinbase(io: crate::delegated::probe::coinbase_tests::CoinbaseIo) -> Self {
+        Self {
+            coinbase: Some(io),
+            ..Self::new("synthetic".into(), "synthetic".into())
         }
     }
 
@@ -46,6 +73,20 @@ impl MockVenue {
             seen: Arc::clone(&seen),
         });
         (mock, seen)
+    }
+
+    pub(crate) fn registered_key(body: Value, gate: Arc<tokio::sync::Semaphore>) -> Self {
+        Self::registered_key_state(Arc::new(Mutex::new(body)), gate)
+    }
+
+    pub(crate) fn registered_key_state(
+        body: Arc<Mutex<Value>>,
+        gate: Arc<tokio::sync::Semaphore>,
+    ) -> Self {
+        Self {
+            registration: Some(Registration { body, gate }),
+            ..Self::new("synthetic".into(), "synthetic".into())
+        }
     }
 
     fn accepts(&self, request: &HttpRequest) -> bool {
@@ -94,12 +135,37 @@ impl Transport for MockVenue {
         request: HttpRequest,
         intent: safe_cex_engine::request_context::RoutingIntent,
     ) -> HttpPrepareFuture {
+        if let Some(io) = &self.coinbase {
+            return io.prepare_http(request, intent);
+        }
         if let Some(io) = &self.admission {
             return io.prepare_http(request, intent);
         }
         self.observed.lock().unwrap().preparations += 1;
         let venue = self.clone();
-        Box::pin(async move { Ok(Box::new(Prepared(venue)) as Box<dyn PreparedHttp>) })
+        Box::pin(async move {
+            if let Some(registration) = &venue.registration {
+                venue
+                    .observed
+                    .lock()
+                    .unwrap()
+                    .registration_urls
+                    .push(request.url.clone());
+                assert_eq!(
+                    intent,
+                    safe_cex_engine::request_context::RoutingIntent::Public
+                );
+                assert_eq!(request.method, Method::Get);
+                assert!(
+                    request
+                        .url
+                        .ends_with("/api/v1/apikeys?account_index=42&api_key_index=1")
+                );
+                assert!(request.headers.is_empty() && request.body.is_none());
+                registration.gate.acquire().await.unwrap().forget();
+            }
+            Ok(Box::new(Prepared(venue)) as Box<dyn PreparedHttp>)
+        })
     }
 
     fn connect(
@@ -108,6 +174,9 @@ impl Transport for MockVenue {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        if let Some(io) = &self.coinbase {
+            return io.connect(socket, url, events);
+        }
         if let Some(io) = &self.admission {
             return io.connect(socket, url, events);
         }
@@ -125,10 +194,61 @@ impl Transport for MockVenue {
     }
 
     fn request(&self, request: HttpRequest, events: Events) {
+        if let Some(io) = &self.coinbase {
+            io.request(request, events);
+            return;
+        }
         if let Some(io) = &self.admission {
             return io.request(request, events);
         }
         self.observed.lock().unwrap().requests += 1;
+        if let Some(registration) = &self.registration {
+            self.observed.lock().unwrap().reads += 1;
+            answer(
+                &events,
+                request.id,
+                registration.body.lock().unwrap().clone(),
+            );
+            return;
+        }
+        if self.hyperliquid {
+            let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+            let reply = if request.url.ends_with("/exchange") {
+                assert_eq!(body["action"]["type"], "order");
+                assert!(body["nonce"].as_u64().is_some());
+                for part in ["r", "s"] {
+                    let text = body["signature"][part].as_str().unwrap();
+                    assert_eq!(text.len(), 66);
+                    assert!(text.starts_with("0x"));
+                    assert!(text[2..].bytes().all(|b| b.is_ascii_hexdigit()));
+                }
+                assert!(matches!(body["signature"]["v"].as_u64(), Some(27 | 28)));
+                self.observed.lock().unwrap().writes.push(body);
+                json!({"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":77}}]}}})
+            } else {
+                assert!(request.url.ends_with("/info"));
+                self.observed.lock().unwrap().reads += 1;
+                match body["type"].as_str().unwrap() {
+                    "metaAndAssetCtxs" => json!([
+                        {"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50}]},
+                        [{"midPx":"55000","markPx":"55000","oraclePx":"55000","prevDayPx":"54000"}]
+                    ]),
+                    "perpDexs" => json!([null]),
+                    "userAbstraction" => json!("disabled"),
+                    "maxBuilderFee" => json!(30),
+                    "userFees" => json!({"userCrossRate":"0.00045","userAddRate":"0.00015"}),
+                    "clearinghouseState" => {
+                        assert_eq!(body["user"], self.key);
+                        json!({"assetPositions":[],"marginSummary":{"accountValue":"1000","totalMarginUsed":"0"},"time":1})
+                    }
+                    "spotClearinghouseState" => json!({"balances":[]}),
+                    "frontendOpenOrders" => json!([]),
+                    other => panic!("unexpected Hyperliquid fixture read {other}"),
+                }
+            };
+            answer(&events, request.id, reply);
+            return;
+        }
         let path = request.url.split('?').next().unwrap();
         let private = request
             .headers

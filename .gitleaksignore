@@ -146,3 +146,22 @@ c231996640e10820a0e8d777b51eb0c52e12789d:packages/safe-cex/src/__tests__/audit-r
 
 # Synthetic Crypto.com WS replay HMAC, independently recomputed from literal test inputs; PR #3298.
 e2df6efb8bc2ee3299f4ed473cf8ed93b686a3cc:packages/safe-cex/src/__tests__/audit-regressions/rust.cryptocom-hosted-signing.test.ts:generic-api-key:175
+
+# Public synthetic dynamic-key/JWT canaries in #3512; current tests assemble identical bytes.
+# Exact historical commit/path/rule/line only; future changes remain scanned.
+9d9769c4b092d78896b68c940d579c48bc2687ed:packages/service-telemetry/src/diagnosticRedaction.test.ts:generic-api-key:370
+9d9769c4b092d78896b68c940d579c48bc2687ed:packages/service-telemetry/src/diagnosticRedaction.test.ts:generic-api-key:371
+9d9769c4b092d78896b68c940d579c48bc2687ed:packages/service-telemetry/src/diagnosticRedaction.test.ts:jwt:410
+
+# Synthetic CDP public names only, not signing material; current fixtures build
+# organizations/synthetic/apiKeys/synthetic from explicit public segments.
+# Exact historical fingerprints only; production and future changes stay scanned.
+49bdb3c28aa59a4042e22b7837e9733be189619d:sdk-rs/hosts/server/src/accounts/provider_lifetimes.rs:generic-api-key:323
+9552becb53db1487e1e1398685c4e48bd4f18220:sdk-rs/hosts/server/src/session/tests/provider_handover_refusals.rs:generic-api-key:13
+9552becb53db1487e1e1398685c4e48bd4f18220:sdk-rs/hosts/server/src/session/tests/provider_handover_refusals.rs:generic-api-key:44
+
+# Public synthetic CDP names in #3569 init tests, not signing material.
+# Current fixtures assemble identical public segments; exact historical hits only.
+33cb8041b37e0d9a7d627a7d9eddcaa982e68110:sdk-rs/hosts/server/tests/coinbase_jwt_binding.rs:generic-api-key:7
+eca6d2b298b82cc8d67908f8021b791b7818072d:sdk-rs/hosts/server/tests/coinbase_jwt_binding.rs:generic-api-key:30
+e58c09fb7eb25c7fe1fee848d0ece2bdef59e52c:sdk-rs/hosts/server/tests/coinbase_jwt_binding.rs:generic-api-key:57

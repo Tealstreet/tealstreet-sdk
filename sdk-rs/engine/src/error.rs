@@ -116,6 +116,8 @@ pub enum HistorySchema {
     KrakenFills,
     KrakenOrders,
     KrakenIncome,
+    BingxIncome,
+    BingxOrders,
 }
 
 #[cfg(feature = "history-row-diagnostics")]
@@ -135,14 +137,383 @@ pub enum HistoryDecodeReason {
     Fee,
     Market,
     Economics,
+    QuantityNegative,
+    QuantityZero,
+    FilledQuantityNegative,
+    FilledQuantityExceedsQuantity,
+    QuantityDecimal,
+    FilledQuantityDecimal,
+    TimestampDecimal,
+    LastUpdateTimestampDecimal,
+    LimitPriceDecimal,
+    FieldType,
+    FieldValue,
+    EnvelopeShape,
+    EnvelopeCode,
+    DataShape,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum HistoryDecodeField {
+    #[serde(rename = "root")]
+    Root,
+    #[serde(rename = "code")]
+    Code,
+    #[serde(rename = "msg")]
+    Message,
+    #[serde(rename = "data")]
+    Data,
+    #[serde(rename = "data.orders")]
+    DataOrders,
+    #[serde(rename = "row")]
+    Row,
+    #[serde(rename = "row.symbol")]
+    Symbol,
+    #[serde(rename = "row.incomeType")]
+    IncomeType,
+    #[serde(rename = "row.income")]
+    Income,
+    #[serde(rename = "row.asset")]
+    Asset,
+    #[serde(rename = "row.time")]
+    Time,
+    #[serde(rename = "row.tranId")]
+    TranId,
+    #[serde(rename = "row.tradeId")]
+    TradeId,
+    #[serde(rename = "row.orderId")]
+    OrderId,
+    #[serde(rename = "row.side")]
+    Side,
+    #[serde(rename = "row.type")]
+    OrderType,
+    #[serde(rename = "row.status")]
+    Status,
+    #[serde(rename = "row.price")]
+    Price,
+    #[serde(rename = "row.avgPrice")]
+    AveragePrice,
+    #[serde(rename = "row.origQty")]
+    Quantity,
+    #[serde(rename = "row.executedQty")]
+    FilledQuantity,
+    #[serde(rename = "row.reduceOnly")]
+    ReduceOnly,
+    #[serde(rename = "row.positionSide")]
+    PositionSide,
+    #[serde(rename = "row.updateTime")]
+    UpdateTime,
 }
 
 #[cfg(feature = "history-row-diagnostics")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct HistoryDecode {
-    pub schema: HistorySchema,
-    pub reason: HistoryDecodeReason,
+pub enum HistoryExpectedType {
+    Object,
+    Array,
+    Integer,
+    String,
+    NumberOrNumericString,
+    StringOrInteger,
+    BooleanOrStringOrNull,
+    StringOrNull,
+    StringOrIntegerOrNull,
+    ArrayOrObject,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryJsonType {
+    Missing,
+    InvalidJson,
+    Null,
+    Boolean,
+    Number,
+    String,
+    Array,
+    Object,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryEnvelopeCode {
+    Present,
+    Absent,
+    Unavailable,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryDecodeShape {
+    pub field: HistoryDecodeField,
+    pub expected: HistoryExpectedType,
+    pub actual: HistoryJsonType,
+    pub envelope_code: HistoryEnvelopeCode,
+}
+
+// Preserve the original two-byte optional detail in every VenueError queue.
+// BingX's expected type is fixed by its field/schema, never response content.
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HistoryDecode(std::num::NonZeroU16);
+
+#[cfg(feature = "history-row-diagnostics")]
+impl HistoryDecode {
+    pub fn new(schema: HistorySchema, reason: HistoryDecodeReason) -> Self {
+        Self(
+            std::num::NonZeroU16::new(((schema as u16) << 5 | reason as u16) + 1)
+                .expect("closed schema/reason fits below the shape tag"),
+        )
+    }
+
+    pub fn with_shape(
+        schema: HistorySchema,
+        reason: HistoryDecodeReason,
+        shape: HistoryDecodeShape,
+    ) -> Option<Self> {
+        use HistorySchema as S;
+        if !matches!(schema, S::BingxIncome | S::BingxOrders)
+            || shape.expected != Self::expected(schema, shape.field)
+        {
+            return None;
+        }
+        let reason = Self::SHAPE_REASONS.iter().position(|r| *r == reason)? as u16;
+        let bits = 0x8000
+            | (u16::from(schema == S::BingxOrders) << 14)
+            | reason << 10
+            | (shape.envelope_code as u16) << 8
+            | (shape.actual as u16) << 5
+            | shape.field as u16;
+        std::num::NonZeroU16::new(bits).map(Self)
+    }
+
+    const SHAPE_REASONS: [HistoryDecodeReason; 9] = {
+        use HistoryDecodeReason as R;
+        [
+            R::RowShape,
+            R::FieldType,
+            R::FieldValue,
+            R::EnvelopeShape,
+            R::EnvelopeCode,
+            R::DataShape,
+            R::Side,
+            R::OrderType,
+            R::OrderStatus,
+        ]
+    };
+
+    /// The fixed BingX schema determines the expected type, never response values.
+    pub fn expected(schema: HistorySchema, field: HistoryDecodeField) -> HistoryExpectedType {
+        use HistoryDecodeField as F;
+        use HistoryExpectedType as E;
+        match field {
+            F::Root | F::Row => E::Object,
+            F::Code => E::Integer,
+            F::Data if schema == HistorySchema::BingxOrders => E::ArrayOrObject,
+            F::Data | F::DataOrders => E::Array,
+            F::TranId | F::OrderId => E::StringOrInteger,
+            F::TradeId => E::StringOrIntegerOrNull,
+            F::ReduceOnly => E::BooleanOrStringOrNull,
+            F::PositionSide => E::StringOrNull,
+            F::Income
+            | F::Time
+            | F::Price
+            | F::AveragePrice
+            | F::Quantity
+            | F::FilledQuantity
+            | F::UpdateTime => E::NumberOrNumericString,
+            F::Message
+            | F::Symbol
+            | F::IncomeType
+            | F::Asset
+            | F::Side
+            | F::OrderType
+            | F::Status => E::String,
+        }
+    }
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+impl HistoryDecode {
+    // One concrete JSON encoder avoids duplicating this cold detail across sinks.
+    #[inline(never)]
+    fn wire_json(&self) -> serde_json::Result<Box<serde_json::value::RawValue>> {
+        use HistoryDecodeField as F;
+        use HistorySchema as H;
+        const SCHEMAS: &[&str] = &[
+            "bitgetClassicFills",
+            "bitgetUtaFills",
+            "bitgetClassicOrders",
+            "bitgetUtaOrders",
+            "bitgetClassicIncome",
+            "bitgetUtaIncome",
+            "bitgetPublicTrades",
+            "krakenFills",
+            "krakenOrders",
+            "krakenIncome",
+            "bingxIncome",
+            "bingxOrders",
+        ];
+        const REASONS: &[&str] = &[
+            "rowShape",
+            "identity",
+            "symbol",
+            "quantity",
+            "filledQuantity",
+            "timestamp",
+            "timestampOrder",
+            "side",
+            "orderStatus",
+            "orderType",
+            "fee",
+            "market",
+            "economics",
+            "quantityNegative",
+            "quantityZero",
+            "filledQuantityNegative",
+            "filledQuantityExceedsQuantity",
+            "quantityDecimal",
+            "filledQuantityDecimal",
+            "timestampDecimal",
+            "lastUpdateTimestampDecimal",
+            "limitPriceDecimal",
+            "fieldType",
+            "fieldValue",
+            "envelopeShape",
+            "envelopeCode",
+            "dataShape",
+        ];
+        const FIELDS: &[F] = &[
+            F::Root,
+            F::Code,
+            F::Message,
+            F::Data,
+            F::DataOrders,
+            F::Row,
+            F::Symbol,
+            F::IncomeType,
+            F::Income,
+            F::Asset,
+            F::Time,
+            F::TranId,
+            F::TradeId,
+            F::OrderId,
+            F::Side,
+            F::OrderType,
+            F::Status,
+            F::Price,
+            F::AveragePrice,
+            F::Quantity,
+            F::FilledQuantity,
+            F::ReduceOnly,
+            F::PositionSide,
+            F::UpdateTime,
+        ];
+        const PATHS: &[&str] = &[
+            "root",
+            "code",
+            "msg",
+            "data",
+            "data.orders",
+            "row",
+            "row.symbol",
+            "row.incomeType",
+            "row.income",
+            "row.asset",
+            "row.time",
+            "row.tranId",
+            "row.tradeId",
+            "row.orderId",
+            "row.side",
+            "row.type",
+            "row.status",
+            "row.price",
+            "row.avgPrice",
+            "row.origQty",
+            "row.executedQty",
+            "row.reduceOnly",
+            "row.positionSide",
+            "row.updateTime",
+        ];
+        const EXPECTED: &[&str] = &[
+            "object",
+            "array",
+            "integer",
+            "string",
+            "numberOrNumericString",
+            "stringOrInteger",
+            "booleanOrStringOrNull",
+            "stringOrNull",
+            "stringOrIntegerOrNull",
+            "arrayOrObject",
+        ];
+        const ACTUAL: &[&str] = &[
+            "missing",
+            "invalidJson",
+            "null",
+            "boolean",
+            "number",
+            "string",
+            "array",
+            "object",
+        ];
+        const CODES: &[&str] = &["present", "absent", "unavailable"];
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Shape {
+            field: &'static str,
+            expected: &'static str,
+            actual: &'static str,
+            envelope_code: &'static str,
+        }
+        #[derive(Serialize)]
+        struct Wire {
+            schema: &'static str,
+            reason: &'static str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            shape: Option<Shape>,
+        }
+        let bits = self.0.get();
+        let wire = if bits & 0x8000 == 0 {
+            let bits = bits - 1;
+            Wire {
+                schema: SCHEMAS[(bits >> 5) as usize],
+                reason: REASONS[(bits & 31) as usize],
+                shape: None,
+            }
+        } else {
+            let schema = if bits & 0x4000 == 0 {
+                H::BingxIncome
+            } else {
+                H::BingxOrders
+            };
+            let field_index = (bits & 31) as usize;
+            Wire {
+                schema: SCHEMAS[schema as usize],
+                reason: REASONS[Self::SHAPE_REASONS[((bits >> 10) & 15) as usize] as usize],
+                shape: Some(Shape {
+                    field: PATHS[field_index],
+                    expected: EXPECTED[Self::expected(schema, FIELDS[field_index]) as usize],
+                    actual: ACTUAL[((bits >> 5) & 7) as usize],
+                    envelope_code: CODES[((bits >> 8) & 3) as usize],
+                }),
+            }
+        };
+        serde_json::value::to_raw_value(&wire)
+    }
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+impl Serialize for HistoryDecode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.wire_json()
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -235,7 +606,7 @@ impl VenueError {
     pub fn history_decode(mut self, schema: HistorySchema, reason: HistoryDecodeReason) -> Self {
         self.kind = Some(ErrorKind::Internal);
         self.cause_code = Some(ErrorCause::HistoryDecode);
-        self.history_decode = Some(HistoryDecode { schema, reason });
+        self.history_decode = Some(HistoryDecode::new(schema, reason));
         self
     }
 

@@ -52,7 +52,9 @@ struct NativeStop {
     qty: String,
     cum_exec_qty: String,
     trigger_price: String,
-    trigger_by: String,
+    // Ordinary peer orders have no trigger source; target matching still requires it.
+    #[serde(default)]
+    trigger_by: Option<String>,
     order_type: String,
     price: String,
     position_idx: i64,
@@ -142,7 +144,7 @@ fn original_mismatch(row: &NativeStop, guard: &PartialStopGuard) -> Option<&'sta
             "triggerBy",
             order
                 .trigger_type
-                .is_some_and(|by| row.trigger_by == reference(by)),
+                .is_some_and(|by| row.trigger_by.as_deref() == Some(reference(by))),
         ),
         (
             "orderType",
