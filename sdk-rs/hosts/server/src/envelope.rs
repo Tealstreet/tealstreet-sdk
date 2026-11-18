@@ -1,4 +1,5 @@
 //! Today's `wss /account` JSON envelope (NX `services/exchange-server/src/server.ts`).
+pub use crate::publication::RequestedInterval;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -22,6 +23,9 @@ pub struct InitPayload {
     /// Reply provenance only; never an engine option or account fingerprint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instance_id: Option<String>,
+    /// Output cadence for this connection only; never an engine setting or identity.
+    #[serde(default, skip_serializing)]
+    pub publish_interval_ms: RequestedInterval,
     #[serde(default, deserialize_with = "key")]
     pub key: String,
     #[serde(default, deserialize_with = "text")]
@@ -334,6 +338,28 @@ pub fn init_refused(account_name: &str, message: &str) -> String {
             "accountName": account_name,
             "data": [message, {"forceToast": true, "initRefused": true}],
         }),
+    )
+}
+
+/// A closed refusal for connection-local publication metadata; never echo input.
+pub fn publish_interval_refused(
+    account_name: Option<&str>,
+    kind: &'static str,
+    init: bool,
+) -> String {
+    let message = match kind {
+        "not_admitted" => "Account is not admitted; publish interval was not changed",
+        "auth_expired" => crate::auth::TOKEN_EXPIRED,
+        _ => "Publish interval must be an integer number of milliseconds",
+    };
+    let mut options = json!({"kind":kind,"publishIntervalRefused":true});
+    if init {
+        options["initRefused"] = true.into();
+        options["forceToast"] = true.into();
+    }
+    envelope(
+        "msg",
+        json!({"op":"error","accountName":account_name,"data":[message,options]}),
     )
 }
 

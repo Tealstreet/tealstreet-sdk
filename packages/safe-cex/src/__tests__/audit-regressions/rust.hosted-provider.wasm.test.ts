@@ -184,7 +184,7 @@ it('actual WASM public capture strips auth, preserves caller query and never sta
   }));
   expect(output.error).toBeUndefined();
   expect(output.config?.params).toEqual({ symbol: 'BTCUSDT' });
-  expect(output.config?.headers).toEqual({ 'Content-Type': 'application/json, charset=utf-8' });
+  expect(output.config?.headers).toEqual({ 'Content-Type': 'application/json; charset=utf-8' });
   expect(io).toEqual([]);
   expect(Object.values(store.loaded).some(Boolean)).toBe(false);
 });

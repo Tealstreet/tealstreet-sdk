@@ -25,6 +25,24 @@ pub fn success(response: safe_cex_engine::Response<'_>) -> bool {
                 && (s.status.is_empty() || s.status == "success")
         })
 }
+/// The first refused envelope predicate, without values or deserializer details.
+pub fn public_response_rejection(response: safe_cex_engine::Response<'_>) -> Option<&'static str> {
+    if !(200..300).contains(&response.status) {
+        return Some("http_status");
+    }
+    let Ok(envelope) = serde_json::from_str::<Envelope<'_>>(response.body) else {
+        return Some("invalid_envelope");
+    };
+    if envelope.result != "success" {
+        Some("result_not_success")
+    } else if !envelope.error.is_empty() {
+        Some("error_present")
+    } else if !envelope.status.is_empty() && envelope.status != "success" {
+        Some("status_not_success")
+    } else {
+        None
+    }
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Instrument<'a> {

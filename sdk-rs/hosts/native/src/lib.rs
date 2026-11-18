@@ -14,6 +14,10 @@ mod routing;
 mod server;
 mod socket_health;
 mod transport;
+#[cfg(feature = "venues")]
+mod trusted_identities;
+#[cfg(feature = "venues")]
+pub use trusted_identities::TrustedSignerIdentities;
 #[cfg(test)]
 mod websocket_write_tests;
 
