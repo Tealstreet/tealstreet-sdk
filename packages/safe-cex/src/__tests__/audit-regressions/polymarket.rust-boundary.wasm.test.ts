@@ -498,7 +498,8 @@ it('reports immutable one-times prediction-market leverage without any private r
   const requestCount = requests.length;
   await expect(exchange.fetchSymbolMaxLeverage(SYMBOL)).resolves.toBe(1);
   await expect(exchange.fetchLeverageForSymbol(SYMBOL)).resolves.toEqual({ buyLeverage: 1, sellLeverage: 1 });
-  expect(store.fetchedLeverage[SYMBOL]).toEqual({ buyLeverage: 1, sellLeverage: 1 });
+  // Rule 5 / #3640: fa8264e8d6 publishes native SETTINGS, including the fixed one-way mode.
+  expect(store.fetchedLeverage[SYMBOL]).toEqual({ buyLeverage: 1, sellLeverage: 1, positionMode: 'oneway' });
   expect(requests).toHaveLength(requestCount);
   const discovery = new URL(requests.find((request) => new URL(request.url).pathname === '/markets/keyset')!.url);
   expect(discovery.searchParams.getAll('slug')).toEqual(['cafe-open']);
