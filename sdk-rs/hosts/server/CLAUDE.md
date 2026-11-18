@@ -443,3 +443,15 @@ For a selected proxy transport, token expiry has an explicitly interim terminal
 stop/erase with recorded reason `proxy-token-expired`; no issuer renewal, direct
 fallback or authority extension is implied. Sam still owns the long-term policy.
 See `DELEGATED_RETENTION.md` for the retention and restart contracts.
+
+
+## DELEGATED intent clock skew
+
+UUIDv7 intent time permits at most 5 seconds ahead of the box clock. Past age
+still refuses at 10 seconds. Accepted positive skew emits journal-only INFO
+`order.intent_clock_skew` with only closed `skew_bucket`: `le_1s`,
+`gt_1s_le_3s` or `gt_3s_le_5s`; never add identifiers or raw clock values.
+Action deadlines use the same bounded age, clamp future-key wall expiry to
+arrival-time plus 10 seconds and retain the client-age monotonic bound. Deferred
+work cannot renew that budget. The paired router policy must preserve its
+coverage-quarantine and cross-clock safety bounds when adopting this tolerance.
