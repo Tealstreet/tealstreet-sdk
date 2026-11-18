@@ -1,5 +1,6 @@
 import type { StoreData } from '../../generated/StoreData';
 
+import { TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { FrameStore } from '../../store/frameStore';
 import { nativeFixture } from './nativeFixture';
 
@@ -64,7 +65,35 @@ export function applyReferenceFixture(
         latency: data.latency === undefined ? store.latency : data.latency,
       }
     : { ...data, loaded: undefined };
-  store.apply(nativeFixture(frameData, symbols));
+  // High-volume references are native producers too: a sparse ticker change
+  // should emit section 4 rather than re-encoding the whole catalogue per tick.
+  const tickers = data.tickers;
+  const previous = store.tickers;
+  const sparse =
+    data.markets === undefined &&
+    tickers !== undefined &&
+    store.hasTickerState &&
+    tickers.length === previous.length &&
+    tickers.every(
+      (row, i) =>
+        row.id === previous[i].id && row.symbol === previous[i].symbol && row.observedAt === previous[i].observedAt,
+    );
+  if (sparse) {
+    const deltas: number[] = [];
+    for (let i = 0; i < tickers.length; i++) {
+      if (tickers[i] === previous[i]) continue;
+      let mask = 0;
+      const values: number[] = [];
+      for (let field = 0; field < TICKER_FIELDS.length; field++) {
+        const key = TICKER_FIELDS[field];
+        if (Object.is(tickers[i][key], previous[i][key])) continue;
+        mask |= 1 << field;
+        values.push(tickers[i][key] ?? NaN);
+      }
+      if (mask) deltas.push(i, mask, ...values);
+    }
+    store.apply(nativeFixture({ ...frameData, tickers: undefined }, symbols, deltas));
+  } else store.apply(nativeFixture(frameData, symbols));
   for (const field of ['markets', 'orders', 'positions'] as const) {
     const rows = data[field];
     if (!rows) continue;

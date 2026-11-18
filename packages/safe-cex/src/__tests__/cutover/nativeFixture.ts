@@ -52,6 +52,7 @@ export function nativeStoreFrame(
   data: Partial<StoreData>,
   symbols?: readonly string[],
   accountRead = false,
+  tickerDeltas?: number[],
 ): ArrayBuffer {
   const identities = symbols ?? [
     ...new Set([
@@ -62,7 +63,7 @@ export function nativeStoreFrame(
       ...Object.keys(data.fetchedLeverage ?? {}),
     ]),
   ];
-  const base = consumerFrame(data, undefined, false, identities, 0, accountRead);
+  const base = consumerFrame(data, tickerDeltas, false, identities, 0, accountRead);
   return withNativeSections(base, data);
 }
 
@@ -119,7 +120,11 @@ export function withNativeSections(base: ArrayBuffer, data: Partial<StoreData>):
 }
 
 /** Test producer: encode generated section data into real SCXF bytes. */
-export function nativeFixture(data: Partial<StoreData>, baselineSymbols: readonly string[] = []): Frame {
+export function nativeFixture(
+  data: Partial<StoreData>,
+  baselineSymbols: readonly string[] = [],
+  tickerDeltas?: number[],
+): Frame {
   const symbols = [
     ...new Set([
       ...(data.markets?.map((row) => row.symbol) ?? baselineSymbols),
@@ -129,5 +134,5 @@ export function nativeFixture(data: Partial<StoreData>, baselineSymbols: readonl
       ...Object.keys(data.fetchedLeverage ?? {}),
     ]),
   ];
-  return new Frame(nativeStoreFrame(data, symbols));
+  return new Frame(nativeStoreFrame(data, symbols, false, tickerDeltas));
 }

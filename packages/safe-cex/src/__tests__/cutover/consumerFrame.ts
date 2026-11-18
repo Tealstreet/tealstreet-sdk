@@ -166,7 +166,7 @@ export function consumerFrame(
         ]),
       ],
     );
-  if (delta) table(4, [], [delta]);
+  if (delta) table(4, [], [delta], [], 1);
   if (data.orders) {
     const rows = data.orders;
     const columns: (keyof Pick<

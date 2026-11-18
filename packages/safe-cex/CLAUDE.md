@@ -16,6 +16,9 @@ survive consumer readiness clamping until all account datasets arrive. Raw REST
 fixtures stay raw; generated native fixture builders seed only canonical rows.
 Terminal admission remains at the reference producer before it emits frames.
 No production mutable Store API or RPC-result publication is restored.
+High-volume ticker references emit SCXF section 4 deltas when the ordered identity
+catalogue and observation metadata stay unchanged; catalogue/freshness replacements
+retain full sections. This keeps unchanged row identities and bounded replay work.
 
 # CLAUDE.md - safe-cex Package
 
