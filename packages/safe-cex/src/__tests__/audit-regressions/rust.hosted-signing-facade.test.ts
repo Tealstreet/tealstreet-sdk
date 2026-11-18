@@ -37,7 +37,7 @@ describe('standalone Rust hosted signing facade', () => {
       id: 'request-id', config: {
         url: '/private', data: undefined,
         params: { qty: '0.0100', ids: ['2', '1'], timestamp: 1234, recvWindow: 777, signature: 'opaque-mac' },
-        headers: { Accept: 'application/json, text/plain, */*', 'Content-Type': 'application/json, charset=utf-8', 'X-MBX-APIKEY': 'owned-key' },
+        headers: { Accept: 'application/json, text/plain, */*', 'Content-Type': 'application/json; charset=utf-8', 'X-MBX-APIKEY': 'owned-key' },
       },
     });
     expect(input.config!.data).toEqual({ qty: '0.0100', ids: ['2', '1'], signature: 'stale' });
@@ -81,7 +81,7 @@ describe('standalone Rust hosted signing facade', () => {
       p.hostedSigning.mockRejectedValue(new Error('provider-refused'));
       const output = await signHostedHttp(name, { key: '', secret: '' }, true, p.host, request(name, path, 'get'));
       expect(output.error).toBeUndefined();
-      expect(output.config?.headers).toEqual(name === 'bybit' ? {} : { 'Content-Type': 'application/json, charset=utf-8' });
+      expect(output.config?.headers).toEqual(name === 'bybit' ? {} : { 'Content-Type': 'application/json; charset=utf-8' });
       expect(p.hostedSigning).not.toHaveBeenCalled();
       expect(p.hostedSigningClock).not.toHaveBeenCalled();
     }

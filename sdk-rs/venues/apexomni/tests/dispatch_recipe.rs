@@ -200,6 +200,16 @@ fn rest_recipes_match_legacy_headers_and_bodies_for_every_body_kind_and_legacy_r
             legacy,
         )
         .unwrap();
+        if matches!(requests[index % requests.len()].body, sign::Body::None) {
+            assert_eq!(
+                http.headers
+                    .iter()
+                    .find(|(key, _)| *key == "Content-Type")
+                    .unwrap()
+                    .1,
+                "application/json; charset=utf-8"
+            );
+        }
         assert_eq!(http.headers, expected.headers, "case {index}");
         assert_eq!(http.body, expected.body, "case {index}");
         assert!(http.url.ends_with(&expected.path), "case {index}");
