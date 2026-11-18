@@ -211,6 +211,8 @@ pub enum Disposal {
     NoBrowser,
     /// No admitted client returned during DELEGATED retention.
     NoClient48h,
+    /// Interim #3424: retained proxy authority expired; erase and stop.
+    ProxyTokenExpired,
     /// The page disposed it: the user removed or deactivated it, or the page dropped it.
     PageDisposed,
     /// The page's ping stopped listing it.
@@ -232,6 +234,7 @@ impl Disposal {
             Self::SignerFailures => "signer_failures",
             Self::NoBrowser => "no_browser",
             Self::NoClient48h => "no_client_48h",
+            Self::ProxyTokenExpired => "proxy_token_expired",
             Self::PageDisposed => "page_disposed",
             Self::Orphaned => "orphaned",
             Self::JoinFailed => "join_failed",
@@ -383,7 +386,7 @@ impl Account {
         self.handle.disposal_cause() == Some(DisposalCause::Moving)
     }
 
-    pub fn proxy_authority_required(&self) -> bool {
+    fn proxy_authority_required(&self) -> bool {
         self.proxy_authority_required
     }
 

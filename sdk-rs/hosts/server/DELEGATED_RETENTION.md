@@ -1,7 +1,7 @@
 # DELEGATED retention
 
-Enabled Bybit DELEGATED accounts keep running for 48 hours after their last
-admitted client disconnects. The session resume ID still has its normal 60-second
+Hosted-supported DELEGATED accounts retain their protected provider for up to
+48 hours after their last admitted client disconnects. The session resume ID still has its normal 60-second
 grace. After that grace a client uses a fresh verified handover to join the same
 running account. Pending or refused handovers do not renew retention.
 
@@ -31,3 +31,17 @@ persisted by this module, and chases are never automatically restored.
 Retained running or paused jobs continue to refuse idle release after the session
 resume grace ends. Drain and router-lease fences remain authoritative throughout
 retention.
+
+## Interim proxy-authority limit
+
+For a retained account whose resolved transport needs the socket-issued proxy
+authority, that token is not renewed or extended by retention. On its expiry the
+interim maintainer policy is a terminal actor stop and immediate key erase, with
+recorded reason `proxy-token-expired`. Expired/missing authority cannot silently
+fall back to a direct route. Direct accounts keep the independent 48-hour clock.
+An admitted reconnect cancels the old timer and supplies its own checked token;
+a later final disconnect starts a fresh interval under that authority.
+
+**Open decision for Sam:** issuer-backed retained-token renewal versus a permanent
+earlier-stop contract. The interim fail-closed guard chooses neither long-term
+policy and makes no full-48-hour availability promise for a proxied account.

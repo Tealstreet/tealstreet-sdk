@@ -117,7 +117,7 @@ with server-owned claims and a signature-only reply. DELEGATED CDP handover
 remains explicitly proof-unavailable; no fallback selects another signing mode.
 Legacy and typed full-write method admission both use this shared eligibility.
 
-DELEGATED uses `prepare_local_signer_for`, including wallet key-only/agent
+DELEGATED uses `prepare_protected_local_signer_for`, including wallet key-only/agent
 layouts. Guarded handover strings move into the zeroizing native options for
 that setup; only its provider, identities and required public metadata remain.
 Hyperliquid wallet addresses survive construction and resident reconfiguration.
@@ -427,3 +427,12 @@ ApeX protected setup, which installs `primary.extra.zklinkSeed` with hex encodin
 The field is never public init/engine JSON, a fingerprint or wallet signingKey.
 Other venues, mixed wallet layouts and non-65-byte hex seeds refuse. Monitoring
 without a seed remains unchanged and supplies no placement-signing capability.
+
+Retained DELEGATED accounts share the canonical protected owner through the sole
+`AccountSigner`; escaped engine handles have no independent erasure authority.
+The 48-hour clock starts only after the last admitted holder disconnects and is
+cancelled only by admitted reconnect. Removal/off/key removal erase immediately.
+For a selected proxy transport, token expiry has an explicitly interim terminal
+stop/erase with recorded reason `proxy-token-expired`; no issuer renewal, direct
+fallback or authority extension is implied. Sam still owns the long-term policy.
+See `DELEGATED_RETENTION.md` for the retention and restart contracts.

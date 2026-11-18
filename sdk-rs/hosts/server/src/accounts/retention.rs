@@ -7,6 +7,7 @@ pub(super) const DELEGATED_RETENTION: Duration = Duration::from_secs(48 * 60 * 6
 pub(super) struct Retention {
     generation: u64,
     pub deadline: Instant,
+    proxy_expired: bool,
     pub(super) labels: std::collections::BTreeSet<String>,
     task: tokio::task::AbortHandle,
 }
@@ -53,7 +54,29 @@ impl Registry {
         {
             return;
         }
-        let deadline = Instant::now() + DELEGATED_RETENTION;
+        let now = Instant::now();
+        // Interim #3424 / 8625fd869: unusable proxy authority stops and erases.
+        // Issuer-backed renewal versus long-term early stop remains Sam's choice.
+        let (deadline, proxy_expired) = if account.proxy_authority_required() {
+            let maximum_ms = DELEGATED_RETENTION.as_secs() * 1000;
+            let remaining_ms = account
+                .token
+                .0
+                .read()
+                .ok()
+                .and_then(|current| {
+                    current
+                        .as_ref()
+                        .map(|(_, expiry)| expiry.saturating_sub(now_ms()).min(maximum_ms))
+                })
+                .unwrap_or(0);
+            (
+                now + Duration::from_millis(remaining_ms),
+                remaining_ms < maximum_ms,
+            )
+        } else {
+            (now + DELEGATED_RETENTION, false)
+        };
         let generation = self.next_id();
         resident.retain_until(deadline);
         let registry = Arc::downgrade(self);
@@ -80,6 +103,7 @@ impl Registry {
             generation,
             labels,
             deadline,
+            proxy_expired,
             task: task.abort_handle(),
         });
     }
@@ -104,6 +128,15 @@ impl Registry {
         {
             return;
         }
+        let (disposal, reason) = if holders
+            .retention
+            .as_ref()
+            .is_some_and(|state| state.proxy_expired)
+        {
+            (Disposal::ProxyTokenExpired, "proxy-token-expired")
+        } else {
+            (Disposal::NoClient48h, "no client for 48 h")
+        };
         holders.disposed = true;
         holders.retention = None;
         if let Some(resident) = &account.delegated() {
@@ -113,12 +146,7 @@ impl Registry {
         drop(holders);
         drop(accounts);
         let stopped = self.keep_notice(account, "delegated-retention");
-        self.dispose_for(
-            account,
-            Disposal::NoClient48h,
-            "no client for 48 h",
-            Some(stopped),
-        );
+        self.dispose_for(account, disposal, reason, Some(stopped));
     }
 
     /// Explicit removal/disable also applies while this user's account is retained.
