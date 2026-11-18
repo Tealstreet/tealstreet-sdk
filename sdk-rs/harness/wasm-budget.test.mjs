@@ -4073,6 +4073,34 @@ test('BingX shared command codecs retain the measured optimized reserve', () => 
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
 });
 
+// #3638 Rule 5: Rust SDK run 44220118208, artifact 14390662738.
+// Exact source 06c5b32372b7eb047af0039b861e3b58dc8bc0cd; equal optimized web/Node/replay modules.
+// Coordinator: measured + 10 KiB rounded up, preserving historical floors.
+test('#3638 diagnostic composition retains the fresh MEXC reserve and boundary', () => {
+  const measured = 1_962_854;
+  const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.mexc;
+  assert.equal(requiredCap, 1_973_248);
+  assert.ok(cap >= Math.max(requiredCap, 1_971_200), `${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'mexc'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'mexc'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'mexc'), /exceeds/);
+});
+
+// #3638 object envelopes: source c2455ca0e799, run 44255752536, artifact 14406113023.
+// Five optimized web/Node/replay copies: 1,963,086 B; SHA256 b13413acd4d81fae3b088fb69ad69776d0ae0c513d657f49565f4399e2e67b0f.
+// Rule 17: fresh measured + 10 KiB rounded up, retaining the earlier approved floor.
+test('#3638 object-envelope guard retains the fresh MEXC reserve and boundaries', () => {
+  const measured = 1_963_086;
+  const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.mexc;
+  assert.equal(requiredCap, 1_974_272);
+  assert.ok(cap >= Math.max(requiredCap, 1_973_248), `${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'mexc'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'mexc'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'mexc'), /exceeds/);
+});
+
 // #3639 Rule 5: Rust SDK run 44220127210, artifact 14390881543.
 // Exact source 85a85576995b511750553a16337a8ea4d53dfcc5; equal optimized web/Node/replay modules.
 // Coordinator: measured + 10 KiB rounded up, preserving historical floors.

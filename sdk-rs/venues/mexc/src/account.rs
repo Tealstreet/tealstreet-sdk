@@ -46,6 +46,21 @@ pub enum Request {
     Mode,
     Snapshot(Box<Snapshot>),
 }
+impl Request {
+    pub(super) fn http_class(&self) -> &'static str {
+        match self {
+            Self::Leverage { .. } => "accountLeverage",
+            Self::Mode => "accountMode",
+            Self::Snapshot(snapshot) => match snapshot.scope {
+                Scope::Assets => "accountAssets",
+                Scope::Positions => "accountPositions",
+                Scope::Regular => "accountOrders",
+                Scope::Plan => "accountPlans",
+                Scope::Stop => "accountStops",
+            },
+        }
+    }
+}
 pub struct Snapshot {
     pub symbol: Option<String>,
     pub scope: Scope,
@@ -1054,7 +1069,7 @@ impl MexcFutures {
         let result = if response.status == 200 {
             Envelope::checked(response.body)
         } else {
-            Err(format!("MEXC HTTP {}", response.status))
+            Err(http_failure(request.http_class(), response))
         };
         let envelope = match result {
             Ok(e) => e,
