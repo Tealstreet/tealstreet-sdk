@@ -17,6 +17,10 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
+WOO's exact signature-error auth classification changes diagnostics only. Fresh
+WOO family artifacts still need the unchanged cap and reserve; socket recovery,
+signing, retry and write behavior remain covered by the lifecycle controls.
+
 BingX Spot qualification adds independent Spot public/private cases to the `bingx` suite.
 The nondefault `bingx-spot-replay` WASM feature exports a fixed-credential fixture constructor;
 normal factories still refuse Spot. Shipped family size checks run before the fixture build.

@@ -144,6 +144,25 @@ fn malformed_message_field_does_not_discard_existing_numeric_evidence() {
 }
 
 #[test]
+fn duplicate_message_does_not_change_authentication_or_numeric_evidence() {
+    let actions = auth_reply_actions(
+        r#"{"event":"auth","success":false,"code":-1002,"status":403,"errorMsg":"signature error","errorMsg":"private-marker"}"#,
+    );
+    let event = auth_notice(&actions);
+    assert!(
+        event.message.ends_with(
+            "unauthorized: invalid key, insufficient permission, expired or revoked key"
+        )
+    );
+    assert!(!format!("{actions:?}").contains("private-marker"));
+    let accepted = auth_reply_actions(ACCEPTED);
+    let duplicated = auth_reply_actions(
+        r#"{"event":"auth","success":true,"errorMsg":"signature error","errorMsg":null}"#,
+    );
+    assert_eq!(format!("{accepted:?}"), format!("{duplicated:?}"));
+}
+
+#[test]
 fn message_class_changes_neither_rejection_actions_nor_success_admission() {
     let non_diagnostics = |actions: Vec<Action>| {
         format!(
