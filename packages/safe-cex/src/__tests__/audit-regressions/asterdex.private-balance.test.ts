@@ -2,40 +2,40 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { PositionSide } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativePosition } from '../cutover/nativePosition';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 
 const createExchange = (includeNonUsdtCurrency = false) => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      {
-        balance: {
-          total: 100,
-          free: 80,
-          used: 20,
-          upnl: 2,
-          info: { retained: true },
-          currencies: {
-            USDT: { total: 100, free: 80, used: 20, upnl: 2 },
-            ...(includeNonUsdtCurrency ? { BUSD: { total: 5, free: 5, used: 0, upnl: 0 } } : {}),
-          },
+  applyReferenceFixture(
+    store,
+    {
+      balance: {
+        total: 100,
+        free: 80,
+        used: 20,
+        upnl: 2,
+        info: { retained: true },
+        currencies: {
+          USDT: { total: 100, free: 80, used: 20, upnl: 2 },
+          ...(includeNonUsdtCurrency ? { BUSD: { total: 5, free: 5, used: 0, upnl: 0 } } : {}),
         },
-        positions: [
-          {
-            id: 'BTCUSDT-long',
-            symbol: 'BTCUSDT',
-            side: PositionSide.Long,
-            contracts: 1,
-            entryPrice: 100,
-            notional: 102,
-            unrealizedPnl: 2,
-            realizedPnl: 0,
-          },
-        ] as any,
       },
-      store.markets.map((row) => row.symbol),
-    ),
+      positions: [
+        nativePosition({
+          id: 'BTCUSDT-long',
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          contracts: 1,
+          entryPrice: 100,
+          notional: 102,
+          unrealizedPnl: 2,
+          realizedPnl: 0,
+        }),
+      ] as any,
+    },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new AsterDEXExchange('asterdex', { key: 'test-key', secret: 'test-secret' }, store);
   return { exchange, store, websocket: exchange.privateWebsocket };

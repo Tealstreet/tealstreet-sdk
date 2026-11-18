@@ -17,7 +17,7 @@ import { v } from '../../../utils/get-key';
 import { cleanFloat, createIncrementalFills } from '../../../utils/incrementalFills';
 import { virtualClock } from '../../../utils/virtualClock';
 import { WsDirectFallback } from '../../../utils/wsDirectFallback';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { resolveBybitExecution } from './bybit.fill-event';
 
 export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExchange> {
@@ -238,19 +238,18 @@ export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExch
         }
         (() => {
           const incoming: StoreData['orders'] = orders;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -262,19 +261,18 @@ export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExch
       ) {
         (() => {
           const incoming: StoreData['orders'] = orders;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -290,16 +288,15 @@ export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExch
       const nativeUpdates: Array<
         [Pick<StoreData['positions'][number], 'id'>, Partial<StoreData['positions'][number]>]
       > = updates;
-      return this.store.apply(
-        nativeFixture(
-          {
-            positions: this.store.positions.map((row) => {
-              const change = nativeUpdates.find(([target]) => target.id === row.id);
-              return change ? { ...row, ...change[1] } : row;
-            }),
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        {
+          positions: this.store.positions.map((row) => {
+            const change = nativeUpdates.find(([target]) => target.id === row.id);
+            return change ? { ...row, ...change[1] } : row;
+          }),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
     this.parent.lastWebsocketPositionsUpdate = virtualClock.getCurrentTimeMs();

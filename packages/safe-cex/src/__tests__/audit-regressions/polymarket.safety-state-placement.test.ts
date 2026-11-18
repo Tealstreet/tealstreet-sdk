@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { PolymarketExchange } from '../reference/polymarket/polymarket.exchange';
 
 const PRIVATE_KEY = `0x${'11'.repeat(32)}`;
@@ -23,25 +23,24 @@ function createExchange(store = new FrameStore()) {
     } as any,
     store,
   );
-  store.apply(
-    nativeFixture(
-      {
-        markets: [
-          {
-            id: TOKEN_ID,
-            symbol: SYMBOL,
-            base: 'safe-market',
-            quote: 'pUSD',
-            active: true,
-            precision: { amount: 2, price: 2 },
-            limits: { amount: { min: 5, max: 1_000_000 }, leverage: { min: 1, max: 1 } },
-            contractSize: 1,
-            info: { tickSize: 0.01, negRisk: false },
-          },
-        ],
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        {
+          id: TOKEN_ID,
+          symbol: SYMBOL,
+          base: 'safe-market',
+          quote: 'pUSD',
+          active: true,
+          precision: { amount: 2, price: 2 },
+          limits: { amount: { min: 5, max: 1_000_000 }, leverage: { min: 1, max: 1 } },
+          contractSize: 1,
+          info: { tickSize: 0.01, negRisk: false },
+        },
+      ],
+    },
+    store.markets.map((row) => row.symbol),
   );
   (exchange as any).symbolToToken.set(SYMBOL, TOKEN_ID);
   (exchange as any).tokenToSymbol.set(TOKEN_ID, SYMBOL);
@@ -84,7 +83,7 @@ describe('Polymarket private-state safety', () => {
       leverage: 1,
       unrealizedPnl: 1,
       contracts: 5,
-      liquidationPrice: 0,
+      liquidationPrice: null,
       positionMode: PositionMode.OneWay,
       info: { tokenId: TOKEN_ID },
     };

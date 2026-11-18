@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
 import { FrameStore } from '../../store/frameStore';
 import { MarginType, PositionMode, PositionSide } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 
@@ -142,31 +142,30 @@ describe('Bybit position pagination', () => {
       unrealizedPnl: 0,
       realizedPnl: 0,
       contracts: 0,
-      liquidationPrice: 0,
+      liquidationPrice: null,
       positionMode: PositionMode.OneWay,
       marginType: MarginType.Cross,
       info: {},
       lastUpdate: 1,
     };
-    store.apply(
-      nativeFixture(
-        {
-          markets: [
-            {
-              id: 'BTCUSDT',
-              symbol: 'BTCUSDT',
-              base: 'BTC',
-              quote: 'USDT',
-              active: true,
-              precision: { amount: 0.001, price: 0.1 },
-              limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
-              info: {},
-            },
-          ],
-          positions: [{ ...refreshedPosition, leverage: 5 }],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'BTCUSDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+            info: {},
+          },
+        ],
+        positions: [{ ...refreshedPosition, leverage: 5 }],
+      },
+      store.markets.map((row) => row.symbol),
     );
     exchange.xhr = {
       post: vi.fn().mockResolvedValue({

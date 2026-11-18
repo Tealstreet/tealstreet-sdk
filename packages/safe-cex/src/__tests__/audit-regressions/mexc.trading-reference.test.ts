@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PlaceOrderOpts } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { MexcExchange } from '../reference/mexc/mexc.exchange';
 import { ENDPOINTS } from '../reference/mexc/mexc.types';
 import { normalizeMarket, normalizeOrder } from '../reference/mexc/mexc.utils';
@@ -45,11 +45,10 @@ const opts = (): PlaceOrderOpts => ({
 const setup = () => {
   const exchange = new MexcExchange('mexc', { key: 'key', secret: 'secret' }, new FrameStore());
   const order = normalizeOrder(wireOrder(), market)!;
-  exchange.store.apply(
-    nativeFixture(
-      { markets: [market], orders: [order] },
-      exchange.store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    exchange.store,
+    { markets: [market], orders: [order] },
+    exchange.store.markets.map((row) => row.symbol),
   );
   return { exchange, order };
 };
@@ -118,29 +117,27 @@ describe('MEXC trading reference safety', () => {
     const { exchange, order } = setup();
     const plan = { ...order, id: 'plan', type: OrderType.StopLoss, side: OrderSide.Sell };
     const stop = { ...plan, id: 'position-stop', amount: 0, remaining: 0 };
-    exchange.store.apply(
-      nativeFixture(
-        { orders: [order, plan, stop] },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      { orders: [order, plan, stop] },
+      exchange.store.markets.map((row) => row.symbol),
     );
     const post = vi.fn(async (path: string) => {
       if (path === ENDPOINTS.ORDER_CANCEL_ALL)
         (() => {
           const incoming: StoreData['orders'] = [{ ...order, status: OrderStatus.Closed, filled: order.amount }];
-          return exchange.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...exchange.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              exchange.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            exchange.store,
+            {
+              orders: [
+                ...exchange.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            exchange.store.markets.map((row) => row.symbol),
           );
         })();
       return ok();
@@ -162,11 +159,10 @@ describe('MEXC trading reference safety', () => {
   it('commits only acknowledged cancel-all scopes when a later common envelope rejects', async () => {
     const { exchange, order } = setup();
     const plan = { ...order, id: 'plan', type: OrderType.StopLoss };
-    exchange.store.apply(
-      nativeFixture(
-        { orders: [order, plan] },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      { orders: [order, plan] },
+      exchange.store.markets.map((row) => row.symbol),
     );
     const post = vi
       .fn()
@@ -214,19 +210,18 @@ describe('MEXC trading reference safety', () => {
       const post = vi.fn(async () => {
         (() => {
           const incoming: StoreData['orders'] = [newer];
-          return exchange.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...exchange.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              exchange.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            exchange.store,
+            {
+              orders: [
+                ...exchange.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            exchange.store.markets.map((row) => row.symbol),
           );
         })();
         return ok([{ orderId: 'original', errorCode: 0 }]);
@@ -290,19 +285,18 @@ describe('MEXC trading reference safety', () => {
     const { exchange } = setup();
     (() => {
       const incoming: StoreData['orders'] = [normalizeOrder(wireOrder(4, 40), market)!];
-      return exchange.store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...exchange.store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          exchange.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          orders: [
+            ...exchange.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
       );
     })();
     exchange.privateWebsocket.onMessage({
@@ -373,11 +367,10 @@ describe('MEXC trading reference safety', () => {
   it('withholds a stop replacement when its execution frame beats the cancel acknowledgement', async () => {
     const { exchange, order } = setup();
     const plan = { ...order, type: OrderType.StopLoss, side: OrderSide.Sell, reduceOnly: true };
-    exchange.store.apply(
-      nativeFixture(
-        { orders: [plan] },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      { orders: [plan] },
+      exchange.store.markets.map((row) => row.symbol),
     );
     const post = vi.fn(async () => {
       exchange.privateWebsocket.onMessage({
@@ -432,19 +425,18 @@ describe('MEXC trading reference safety', () => {
         if (condition === 'newer filled')
           (() => {
             const incoming: StoreData['orders'] = [{ ...order, status: OrderStatus.Closed, filled: order.amount }];
-            return exchange.store.apply(
-              nativeFixture(
-                {
-                  orders: [
-                    ...exchange.store.orders.map((row) => {
-                      const change = incoming.find((item) => item.id === row.id);
-                      return change ? { ...row, ...change } : row;
-                    }),
-                    ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
-                  ],
-                },
-                exchange.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              exchange.store,
+              {
+                orders: [
+                  ...exchange.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              exchange.store.markets.map((row) => row.symbol),
             );
           })();
         return ok(wireOrder(condition === 'invalid' ? 5 : 4, condition === 'zero remaining' ? 60 : 30));

@@ -45,7 +45,8 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI } from './paradex.api';
 import { mapParadexFillToIncomeRecords } from './paradex.income';
 import { mapParadexHistoricalOrder } from './paradex.order-history';
@@ -349,14 +350,13 @@ export class ParadexExchange extends BaseExchange {
         if (this.isDisposed) return;
         this.log(`Fetched ${markets.length} markets`, LogSeverity.Debug);
 
-        this.store.apply(
-          nativeFixture(
-            {
-              markets,
-              loaded: { ...this.store.loaded, markets: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            markets,
+            loaded: { ...this.store.loaded, markets: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         this.log('Fetching tickers...', LogSeverity.Debug);
@@ -366,14 +366,13 @@ export class ParadexExchange extends BaseExchange {
 
         this.log(`Loaded ${Math.min(tickers.length, markets.length)} Paradex markets`, LogSeverity.Info);
 
-        this.store.apply(
-          nativeFixture(
-            {
-              tickers,
-              loaded: { ...this.store.loaded, tickers: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            tickers,
+            loaded: { ...this.store.loaded, tickers: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         this.log('Connecting to public WebSocket...', LogSeverity.Debug);
@@ -381,13 +380,12 @@ export class ParadexExchange extends BaseExchange {
       }
 
       if (publicDataOnly) {
-        this.store.apply(
-          nativeFixture(
-            {
-              loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
         this.log('Paradex exchange started in public-only mode', LogSeverity.Info);
         return;
@@ -424,14 +422,13 @@ export class ParadexExchange extends BaseExchange {
 
       this.log(`Loaded Paradex orders`, LogSeverity.Info);
 
-      this.store.apply(
-        nativeFixture(
-          {
-            orders,
-            loaded: { ...this.store.loaded, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          orders,
+          loaded: { ...this.store.loaded, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       this.log('Paradex exchange started successfully', LogSeverity.Info);
@@ -448,11 +445,10 @@ export class ParadexExchange extends BaseExchange {
         const positions = await this.fetchPositions();
         if (this.isDisposed) return;
         this.log(`Tick: Fetched ${positions.length} positions`, LogSeverity.Debug);
-        this.store.apply(
-          nativeFixture(
-            { positions, loaded: { ...this.store.loaded, positions: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { positions, loaded: { ...this.store.loaded, positions: true } },
+          this.store.markets.map((row) => row.symbol),
         );
 
         this.log(`Tick: Fetching balance...`, LogSeverity.Debug);
@@ -463,14 +459,13 @@ export class ParadexExchange extends BaseExchange {
         const upnl = positions.length > 0 ? sumBy(positions, 'unrealizedPnl') : 0;
         (balance as Writable<Balance>).upnl = upnl;
 
-        this.store.apply(
-          nativeFixture(
-            {
-              balance,
-              loaded: { ...this.store.loaded, balance: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: { ...this.store.loaded, balance: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         // Fetch orders periodically (every 4th tick = every 40 seconds with 10s interval)
@@ -479,11 +474,10 @@ export class ParadexExchange extends BaseExchange {
         const orders = await this.fetchOrders();
         if (this.isDisposed) return;
         this.log(`Tick: Fetched ${orders.length} orders`, LogSeverity.Debug);
-        this.store.apply(
-          nativeFixture(
-            { orders, loaded: { ...this.store.loaded, orders: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { orders, loaded: { ...this.store.loaded, orders: true } },
+          this.store.markets.map((row) => row.symbol),
         );
 
         // Fetch leverage settings to refresh our local cache
@@ -1285,7 +1279,7 @@ export class ParadexExchange extends BaseExchange {
           notional: contracts * entryPrice,
           leverage,
           entryPrice,
-          liquidationPrice: parseFloat(p.liquidation_price || '0'),
+          liquidationPrice: nativeLiquidationPrice(parseFloat(p.liquidation_price || '0')),
           marginType: MarginType.Cross, // Paradex uses cross margin
           positionMode: PositionMode.OneWay, // Paradex only supports one-way mode
           lastUpdate: p.last_updated_at,
@@ -1325,7 +1319,7 @@ export class ParadexExchange extends BaseExchange {
           leverage: this.leverageSettings.get(market.symbol) || 10, // Use stored leverage or default to 10
           unrealizedPnl: 0,
           contracts: 0,
-          liquidationPrice: 0,
+          liquidationPrice: null,
           marginType: MarginType.Cross, // Paradex default
           positionMode: PositionMode.OneWay, // Paradex uses one-way mode
           info: {},
@@ -2414,19 +2408,18 @@ export class ParadexExchange extends BaseExchange {
         }));
         (() => {
           const incoming: StoreData['positions'] = updatedPositions;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: [
-                  ...this.store.positions.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         this.log(`Updated leverage in existing positions for ${symbol}`, LogSeverity.Debug);
@@ -2443,25 +2436,24 @@ export class ParadexExchange extends BaseExchange {
           leverage,
           unrealizedPnl: 0,
           contracts: 0,
-          liquidationPrice: 0,
+          liquidationPrice: null,
           marginType: MarginType.Cross,
           positionMode: PositionMode.OneWay,
         };
         (() => {
           const incoming: StoreData['positions'] = [fakePosition];
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: [
-                  ...this.store.positions.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         this.log(`Created fake position with leverage ${leverage}x for ${symbol}`, LogSeverity.Debug);

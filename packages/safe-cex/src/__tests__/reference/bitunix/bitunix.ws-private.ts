@@ -22,7 +22,7 @@ import { cleanFloat, createIncrementalFills } from '../../../utils/incrementalFi
 import { subtract } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, ORDER_SIDE, ORDER_TRIGGER_TYPE, ORDER_TYPE, TIME_IN_FORCE } from './bitunix.types';
 import { sha256Hex } from './bitunix.utils';
 
@@ -200,19 +200,18 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
               // Add the new order to the store
               (() => {
                 const incoming: StoreData['orders'] = [newOrder];
-                return this.parent.store.apply(
-                  nativeFixture(
-                    {
-                      orders: [
-                        ...this.parent.store.orders.map((row) => {
-                          const change = incoming.find((item) => item.id === row.id);
-                          return change ? { ...row, ...change } : row;
-                        }),
-                        ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
-                      ],
-                    },
-                    this.parent.store.markets.map((row) => row.symbol),
-                  ),
+                return applyReferenceFixture(
+                  this.parent.store,
+                  {
+                    orders: [
+                      ...this.parent.store.orders.map((row) => {
+                        const change = incoming.find((item) => item.id === row.id);
+                        return change ? { ...row, ...change } : row;
+                      }),
+                      ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+                    ],
+                  },
+                  this.parent.store.markets.map((row) => row.symbol),
                 );
               })();
               break;
@@ -258,19 +257,18 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
                 // Update the order in the store
                 (() => {
                   const incoming: StoreData['orders'] = [updatedOrder];
-                  return this.parent.store.apply(
-                    nativeFixture(
-                      {
-                        orders: [
-                          ...this.parent.store.orders.map((row) => {
-                            const change = incoming.find((item) => item.id === row.id);
-                            return change ? { ...row, ...change } : row;
-                          }),
-                          ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
-                        ],
-                      },
-                      this.parent.store.markets.map((row) => row.symbol),
-                    ),
+                  return applyReferenceFixture(
+                    this.parent.store,
+                    {
+                      orders: [
+                        ...this.parent.store.orders.map((row) => {
+                          const change = incoming.find((item) => item.id === row.id);
+                          return change ? { ...row, ...change } : row;
+                        }),
+                        ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+                      ],
+                    },
+                    this.parent.store.markets.map((row) => row.symbol),
                   );
                 })();
               }
@@ -306,19 +304,18 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
                 // Update the order in the store
                 (() => {
                   const incoming: StoreData['orders'] = [finalOrder];
-                  return this.parent.store.apply(
-                    nativeFixture(
-                      {
-                        orders: [
-                          ...this.parent.store.orders.map((row) => {
-                            const change = incoming.find((item) => item.id === row.id);
-                            return change ? { ...row, ...change } : row;
-                          }),
-                          ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
-                        ],
-                      },
-                      this.parent.store.markets.map((row) => row.symbol),
-                    ),
+                  return applyReferenceFixture(
+                    this.parent.store,
+                    {
+                      orders: [
+                        ...this.parent.store.orders.map((row) => {
+                          const change = incoming.find((item) => item.id === row.id);
+                          return change ? { ...row, ...change } : row;
+                        }),
+                        ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+                      ],
+                    },
+                    this.parent.store.markets.map((row) => row.symbol),
                   );
                 })();
               }
@@ -444,19 +441,18 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
               if (newOrders.length > 0) {
                 (() => {
                   const incoming: StoreData['orders'] = newOrders;
-                  return this.parent.store.apply(
-                    nativeFixture(
-                      {
-                        orders: [
-                          ...this.parent.store.orders.map((row) => {
-                            const change = incoming.find((item) => item.id === row.id);
-                            return change ? { ...row, ...change } : row;
-                          }),
-                          ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
-                        ],
-                      },
-                      this.parent.store.markets.map((row) => row.symbol),
-                    ),
+                  return applyReferenceFixture(
+                    this.parent.store,
+                    {
+                      orders: [
+                        ...this.parent.store.orders.map((row) => {
+                          const change = incoming.find((item) => item.id === row.id);
+                          return change ? { ...row, ...change } : row;
+                        }),
+                        ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+                      ],
+                    },
+                    this.parent.store.markets.map((row) => row.symbol),
                   );
                 })();
               } else {
@@ -490,19 +486,18 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
                 // Update orders in the store
                 (() => {
                   const incoming: StoreData['orders'] = updatedOrders;
-                  return this.parent.store.apply(
-                    nativeFixture(
-                      {
-                        orders: [
-                          ...this.parent.store.orders.map((row) => {
-                            const change = incoming.find((item) => item.id === row.id);
-                            return change ? { ...row, ...change } : row;
-                          }),
-                          ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
-                        ],
-                      },
-                      this.parent.store.markets.map((row) => row.symbol),
-                    ),
+                  return applyReferenceFixture(
+                    this.parent.store,
+                    {
+                      orders: [
+                        ...this.parent.store.orders.map((row) => {
+                          const change = incoming.find((item) => item.id === row.id);
+                          return change ? { ...row, ...change } : row;
+                        }),
+                        ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+                      ],
+                    },
+                    this.parent.store.markets.map((row) => row.symbol),
                   );
                 })();
               }
@@ -522,19 +517,18 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
                       status,
                     };
                   });
-                return this.parent.store.apply(
-                  nativeFixture(
-                    {
-                      orders: [
-                        ...this.parent.store.orders.map((row) => {
-                          const change = incoming.find((item) => item.id === row.id);
-                          return change ? { ...row, ...change } : row;
-                        }),
-                        ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
-                      ],
-                    },
-                    this.parent.store.markets.map((row) => row.symbol),
-                  ),
+                return applyReferenceFixture(
+                  this.parent.store,
+                  {
+                    orders: [
+                      ...this.parent.store.orders.map((row) => {
+                        const change = incoming.find((item) => item.id === row.id);
+                        return change ? { ...row, ...change } : row;
+                      }),
+                      ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+                    ],
+                  },
+                  this.parent.store.markets.map((row) => row.symbol),
                 );
               })();
               break;
@@ -644,19 +638,18 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
     this.balanceThrottleTimeout = undefined;
     if (!this.isDisposed) {
       const { balance, positions } = await this.parent.fetchBalance();
-      this.parent.store.apply(
-        nativeFixture(
-          {
-            balance,
-            positions,
-            loaded: {
-              ...this.parent.store.loaded,
-              balance: true,
-              positions: true,
-            },
+      applyReferenceFixture(
+        this.parent.store,
+        {
+          balance,
+          positions,
+          loaded: {
+            ...this.parent.store.loaded,
+            balance: true,
+            positions: true,
           },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.parent.store.markets.map((row) => row.symbol),
       );
     }
   };
@@ -672,17 +665,16 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
     this.ordersThrottleTimeout = undefined;
     if (!this.isDisposed) {
       const orders = await this.parent.fetchOrders();
-      this.parent.store.apply(
-        nativeFixture(
-          {
-            orders,
-            loaded: {
-              ...this.parent.store.loaded,
-              orders: true,
-            },
+      applyReferenceFixture(
+        this.parent.store,
+        {
+          orders,
+          loaded: {
+            ...this.parent.store.loaded,
+            orders: true,
           },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.parent.store.markets.map((row) => row.symbol),
       );
     }
   };
@@ -698,17 +690,16 @@ export class BitunixPrivateWebsocket extends BaseWebSocket<BitunixExchange> {
     this.positionsThrottleTimeout = undefined;
     if (!this.isDisposed) {
       const positions = await this.parent.fetchPositions();
-      this.parent.store.apply(
-        nativeFixture(
-          {
-            positions,
-            loaded: {
-              ...this.parent.store.loaded,
-              positions: true,
-            },
+      applyReferenceFixture(
+        this.parent.store,
+        {
+          positions,
+          loaded: {
+            ...this.parent.store.loaded,
+            positions: true,
           },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.parent.store.markets.map((row) => row.symbol),
       );
     }
   };

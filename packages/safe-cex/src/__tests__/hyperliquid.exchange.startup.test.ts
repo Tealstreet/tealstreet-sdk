@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../store/frameStore';
 import { ExchangeOptions, PositionSide } from '../types';
-import { nativeFixture } from './cutover/nativeFixture';
+import { applyReferenceFixture } from './cutover/referenceFixture';
 import { HyperliquidExchange } from './reference/hyperliquid/hyperliquid.exchange';
 
 type Deferred<T> = {
@@ -305,14 +305,13 @@ describe('HyperliquidExchange startup sequencing', () => {
   it('uses aggregate spot collateral as the unified USDC margin slice', () => {
     const exchange = createExchange();
 
-    exchange.store.apply(
-      nativeFixture(
-        {
-          markets: coreMarkets as any,
-          tickers: coreTickers as any,
-        },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: coreMarkets as any,
+        tickers: coreTickers as any,
+      },
+      exchange.store.markets.map((row) => row.symbol),
     );
 
     (exchange as any).userAbstractionMode = 'unifiedAccount';
@@ -650,27 +649,26 @@ describe('HyperliquidExchange startup sequencing', () => {
 
   it('parses irregular HIP-3 orderbook gaps without deriving grouping levels', () => {
     const exchange = createExchange();
-    exchange.store.apply(
-      nativeFixture(
-        {
-          markets: [
-            {
-              id: 'xyz:BRENTOIL',
-              symbol: 'XYZ|BRENTOIL-PERP',
-              base: 'BRENTOIL',
-              quote: 'USDC',
-              active: true,
-              precision: { amount: 0.01, price: 0.01 },
-              limits: {
-                amount: { min: 0.01, max: 1_000_000 },
-                leverage: { min: 1, max: 20 },
-              },
-              info: { hyperliquidId: 110049, hip3Dex: 'xyz' },
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: [
+          {
+            id: 'xyz:BRENTOIL',
+            symbol: 'XYZ|BRENTOIL-PERP',
+            base: 'BRENTOIL',
+            quote: 'USDC',
+            active: true,
+            precision: { amount: 0.01, price: 0.01 },
+            limits: {
+              amount: { min: 0.01, max: 1_000_000 },
+              leverage: { min: 1, max: 20 },
             },
-          ] as any,
-        },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+            info: { hyperliquidId: 110049, hip3Dex: 'xyz' },
+          },
+        ] as any,
+      },
+      exchange.store.markets.map((row) => row.symbol),
     );
 
     const callback = vi.fn();

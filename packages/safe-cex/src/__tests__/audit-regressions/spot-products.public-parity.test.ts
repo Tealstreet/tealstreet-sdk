@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { HyperliquidSpotExchange } from '../reference/hyperliquid/hyperliquidspot.exchange';
 import { KrakenSpotExchange } from '../reference/kraken/krakenspot.exchange';
 import { normalizeAsset } from '../reference/kraken/krakenspot.types';
@@ -77,11 +77,10 @@ describe('documented spot public payloads and native placement acknowledgements'
     expect(normalizeAsset('XXDG')).toBe('DOGE');
     const row = market({ id: 'DOGE/USD', symbol: 'XDG/USD', base: 'DOGE' });
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        { markets: [row], tickers: [ticker(row)] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [row], tickers: [ticker(row)] },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new KrakenSpotExchange('krakenspot', { key: '', secret: '', publicDataOnly: true }, store);
     exchanges.push(exchange);
@@ -99,11 +98,10 @@ describe('documented spot public payloads and native placement acknowledgements'
   it('maps Kraken WS v2 BTC back to REST XBT and removes levels falling beyond subscribed depth', () => {
     const store = new FrameStore();
     const row = market();
-    store.apply(
-      nativeFixture(
-        { markets: [row], tickers: [ticker(row)] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [row], tickers: [ticker(row)] },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new KrakenSpotExchange('krakenspot', { key: '', secret: '', publicDataOnly: true }, store);
     exchanges.push(exchange);
@@ -160,11 +158,10 @@ describe('documented spot public payloads and native placement acknowledgements'
   it('values Kraken XXBT holdings through the normalized market identity and REST-facing XBT symbol', async () => {
     const store = new FrameStore();
     const row = market();
-    store.apply(
-      nativeFixture(
-        { markets: [row], tickers: [ticker(row)] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [row], tickers: [ticker(row)] },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new KrakenSpotExchange('krakenspot', { key: '', secret: '', publicDataOnly: true }, store);
     exchanges.push(exchange);
@@ -243,11 +240,10 @@ describe('documented spot public payloads and native placement acknowledgements'
     const quoted = market({ id: '@1', symbol: 'FOO/BAR', base: 'FOO', quote: 'BAR', info: { tokens: [1, 2] } });
     const conversion = market({ id: '@2', symbol: 'BAR/USDC', base: 'BAR', quote: 'USDC', info: { tokens: [2, 0] } });
     const rows = [quoted, conversion];
-    store.apply(
-      nativeFixture(
-        { markets: rows, tickers: rows.map((row, i) => ({ ...ticker(row), last: i ? 2 : 3, mark: i ? 2 : 3 })) },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: rows, tickers: rows.map((row, i) => ({ ...ticker(row), last: i ? 2 : 3, mark: i ? 2 : 3 })) },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new HyperliquidSpotExchange(
       'hyperliquidspot',
@@ -267,11 +263,10 @@ describe('documented spot public payloads and native placement acknowledgements'
       coins: { UNPRICED: { amount: 7, notional: 0 } },
     });
     const direct = market({ id: '@3', symbol: 'FOO/USDC', base: 'FOO', quote: 'USDC', info: { tokens: [1, 0] } });
-    store.apply(
-      nativeFixture(
-        { markets: [...rows, direct], tickers: [...store.tickers, { ...ticker(direct), last: 8, mark: 8 }] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [...rows, direct], tickers: [...store.tickers, { ...ticker(direct), last: 8, mark: 8 }] },
+      store.markets.map((row) => row.symbol),
     );
     exchange.applySpotBalances(balances);
     expect(store.balance).toMatchObject({ total: 16, used: 8, free: 8 });
@@ -284,11 +279,10 @@ describe('documented spot public payloads and native placement acknowledgements'
       market({ id: '@3', symbol: 'B/A', base: 'B', quote: 'A', info: { tokens: [2, 1] } }),
     ];
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        { markets: rows, tickers: rows.map((row, i) => ({ ...ticker(row), mark: [2, 3, 4][i], last: [2, 3, 4][i] })) },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: rows, tickers: rows.map((row, i) => ({ ...ticker(row), mark: [2, 3, 4][i], last: [2, 3, 4][i] })) },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new HyperliquidSpotExchange(
       'hyperliquidspot',
@@ -300,11 +294,10 @@ describe('documented spot public payloads and native placement acknowledgements'
       exchange.applySpotBalances([{ coin, token: 1, total: '1', hold: '0' }]);
       expect(store.balance.total).toBe(3);
     }
-    store.apply(
-      nativeFixture(
-        { markets: [rows[0], rows[2]], tickers: [store.tickers[0], store.tickers[2]] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [rows[0], rows[2]], tickers: [store.tickers[0], store.tickers[2]] },
+      store.markets.map((row) => row.symbol),
     );
     exchange.applySpotBalances([{ coin: 'A', token: 1, total: '1', hold: '0' }]);
     expect(store.balance).toMatchObject({ total: 0, coins: { A: { amount: 1, notional: 0 } } });
@@ -315,11 +308,10 @@ describe('documented spot public payloads and native placement acknowledgements'
     { price: 91, price_type: 'static' },
   ])('retains Kraken v2 trigger prices and SDK symbols from current native payloads: %j', (triggers) => {
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        { markets: [market()] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [market()] },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new KrakenSpotExchange('krakenspot', { key: '', secret: '', publicDataOnly: true }, store);
     exchanges.push(exchange);
@@ -348,11 +340,10 @@ describe('documented spot public payloads and native placement acknowledgements'
         info: { hyperliquidId: 10001 },
       });
       const store = new FrameStore();
-      store.apply(
-        nativeFixture(
-          { markets: [row], tickers: [ticker(row)] },
-          store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        store,
+        { markets: [row], tickers: [ticker(row)] },
+        store.markets.map((row) => row.symbol),
       );
       const exchange = new HyperliquidSpotExchange(
         'hyperliquidspot',

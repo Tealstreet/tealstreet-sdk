@@ -9,7 +9,7 @@ import { resolveTransportRouting } from '../../../transport/registry';
 import { LogSeverity, OrderStatus, Position, PositionSide } from '../../../types';
 import { v } from '../../../utils/get-key';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import {
   calculateLighterPrivateReconnectDelay,
   classifyLighterPrivateClose,
@@ -493,16 +493,15 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
         if (this.isDisposed || this.parent.isDisposed) return;
         (() => {
           const incoming: StoreData['orders'] = orders;
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                orders: incoming.map((row) => ({
-                  ...this.parent.store.orders.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              orders: incoming.map((row) => ({
+                ...this.parent.store.orders.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
       },
@@ -518,16 +517,15 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
         const positions = await this.parent.fetchPositions();
         (() => {
           const incoming: StoreData['positions'] = positions;
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.parent.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.parent.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
         this.parent.lastWebsocketPositionsUpdate = virtualClock.getCurrentTimeMs();
@@ -604,7 +602,7 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
         notional: 0,
         unrealizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
         realizedPnl: Number.isFinite(parsedRealized) ? parsedRealized : position.realizedPnl,
         info: rawPosition,
         lastUpdate: now,
@@ -1235,11 +1233,10 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
           const idsToRemove = orders.map((safeCexOrder) => ({ id: safeCexOrder.id }));
           (() => {
             const removed: Array<Pick<StoreData['orders'][number], 'id'>> = idsToRemove;
-            return this.store.apply(
-              nativeFixture(
-                { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         } else {
@@ -1249,28 +1246,8 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
               ...safeCexOrder,
               status: OrderStatus.Closed,
             }));
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: [
-                    ...this.store.orders.map((row) => {
-                      const change = incoming.find((item) => item.id === row.id);
-                      return change ? { ...row, ...change } : row;
-                    }),
-                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                  ],
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
-            );
-          })();
-        }
-      } else if (isOpenLikeStatus) {
-        // Only add open/pending orders
-        (() => {
-          const incoming: StoreData['orders'] = orders;
-          return this.store.apply(
-            nativeFixture(
+            return applyReferenceFixture(
+              this.store,
               {
                 orders: [
                   ...this.store.orders.map((row) => {
@@ -1281,7 +1258,25 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
                 ],
               },
               this.store.markets.map((row) => row.symbol),
-            ),
+            );
+          })();
+        }
+      } else if (isOpenLikeStatus) {
+        // Only add open/pending orders
+        (() => {
+          const incoming: StoreData['orders'] = orders;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -1316,16 +1311,15 @@ export class LighterPrivateWebsocket extends BaseWebSocket<LighterExchange> {
       const nativeUpdates: Array<
         [Pick<StoreData['positions'][number], 'id'>, Partial<StoreData['positions'][number]>]
       > = updates;
-      return this.store.apply(
-        nativeFixture(
-          {
-            positions: this.store.positions.map((row) => {
-              const change = nativeUpdates.find(([target]) => target.id === row.id);
-              return change ? { ...row, ...change[1] } : row;
-            }),
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        {
+          positions: this.store.positions.map((row) => {
+            const change = nativeUpdates.find(([target]) => target.id === row.id);
+            return change ? { ...row, ...change[1] } : row;
+          }),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
     this.parent.lastWebsocketPositionsUpdate = virtualClock.getCurrentTimeMs();

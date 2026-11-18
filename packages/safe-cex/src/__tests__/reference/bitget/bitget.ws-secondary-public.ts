@@ -7,7 +7,7 @@ import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { BASE_WS_URL } from '../../../exchanges/bitget/bitget.types';
 import { resolveTransportRouting } from '../../../transport/registry';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 type Data = Record<string, unknown>;
 type MessageHandlers = {
@@ -211,11 +211,10 @@ export class BitgetSecondaryPublicWebsocket extends BaseWebSocket<BitgetExchange
       (() => {
         const target = ticker;
         const changes: Partial<StoreData['tickers'][number]> = update;
-        return this.parent.store.apply(
-          nativeFixture(
-            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
     }

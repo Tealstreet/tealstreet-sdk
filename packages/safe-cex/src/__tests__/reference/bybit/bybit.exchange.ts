@@ -86,7 +86,7 @@ import { adjust, subtract } from '../../../utils/safe-math';
 import { splitTimeRange } from '../../../utils/splitTimeRange';
 import { isUnknownOutcome } from '../../../utils/unknownSendOutcome';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import { createAPI } from './bybit.api';
 import { mapBybitClosedPnl } from './bybit.closed-pnl';
@@ -731,11 +731,10 @@ export class BybitExchange extends BaseExchange {
         this.markOrderSeen(orderId);
         (() => {
           const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
-          return this.store.apply(
-            nativeFixture(
-              { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         return;
@@ -748,14 +747,13 @@ export class BybitExchange extends BaseExchange {
 
       const orders = await this.fetchOrders();
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          {
-            orders,
-            loaded: { ...this.store.loaded, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          orders,
+          loaded: { ...this.store.loaded, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (error: any) {
       this.log(
@@ -805,19 +803,18 @@ export class BybitExchange extends BaseExchange {
     if (this.shouldUseLocalRestOrderLifecycleFallback()) {
       (() => {
         const incoming: StoreData['orders'] = [order];
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: [
-                ...this.store.orders.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
       this.scheduleLocalReduceOnlyLimitOrderReconciliation(order);
@@ -861,11 +858,10 @@ export class BybitExchange extends BaseExchange {
     if (this.shouldUseLocalRestOrderLifecycleFallback()) {
       (() => {
         const removed: Array<Pick<StoreData['orders'][number], 'id'>> = orders.map(({ id }) => ({ id }));
-        return this.store.apply(
-          nativeFixture(
-            { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -899,19 +895,18 @@ export class BybitExchange extends BaseExchange {
 
     (() => {
       const incoming: StoreData['orders'] = [nextOrder];
-      return this.store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...this.store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        {
+          orders: [
+            ...this.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -1052,14 +1047,13 @@ export class BybitExchange extends BaseExchange {
         this.fetchMarkets().then((markets) => {
           if (this.isDisposed) return [];
           this.log(`Loaded ${markets.length} Bybit markets`);
-          this.store.apply(
-            nativeFixture(
-              {
-                markets,
-                loaded: { ...this.store.loaded, markets: true },
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            {
+              markets,
+              loaded: { ...this.store.loaded, markets: true },
+            },
+            this.store.markets.map((row) => row.symbol),
           );
 
           // start public websocket streams as soon as markets loaded.
@@ -1075,14 +1069,13 @@ export class BybitExchange extends BaseExchange {
 
       if (this.isDisposed) return;
 
-      this.store.apply(
-        nativeFixture(
-          {
-            tickers,
-            loaded: { ...this.store.loaded, tickers: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { ...this.store.loaded, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     }
 
@@ -1105,13 +1098,12 @@ export class BybitExchange extends BaseExchange {
     // start ticking live data
     // balance, tickers, positions
     if (publicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       return;
     }
@@ -1135,14 +1127,13 @@ export class BybitExchange extends BaseExchange {
       const [, , rawBalance] = await Promise.all([
         this.fetchOrders().then((orders) => {
           if (this.isDisposed) return [];
-          this.store.apply(
-            nativeFixture(
-              {
-                orders,
-                loaded: { ...this.store.loaded, orders: true },
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            {
+              orders,
+              loaded: { ...this.store.loaded, orders: true },
+            },
+            this.store.markets.map((row) => row.symbol),
           );
           return orders;
         }),
@@ -1156,25 +1147,23 @@ export class BybitExchange extends BaseExchange {
               : fetchedPositions;
           (() => {
             const incoming: StoreData['positions'] = positions;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  positions: incoming.map((row) => ({
-                    ...this.store.positions.find((old) => old.id === row.id),
-                    ...row,
-                  })),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
-            );
-          })();
-          this.store.apply(
-            nativeFixture(
+            return applyReferenceFixture(
+              this.store,
               {
-                loaded: { ...this.store.loaded, positions: true },
+                positions: incoming.map((row) => ({
+                  ...this.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
               },
               this.store.markets.map((row) => row.symbol),
-            ),
+            );
+          })();
+          applyReferenceFixture(
+            this.store,
+            {
+              loaded: { ...this.store.loaded, positions: true },
+            },
+            this.store.markets.map((row) => row.symbol),
           );
           return positions;
         }),
@@ -1183,15 +1172,14 @@ export class BybitExchange extends BaseExchange {
 
       if (this.isDisposed) return;
       const balance = this.formatBalance(rawBalance);
-      this.store.apply(
-        nativeFixture(
-          {
-            balance,
-            // All three source reads completed; partial consumer flags are clamped.
-            loaded: { ...this.store.loaded, balance: true, orders: true, positions: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          // All three source reads completed; partial consumer flags are clamped.
+          loaded: { ...this.store.loaded, balance: true, orders: true, positions: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err: any) {
       this.emitAndLogError(err);
@@ -1234,13 +1222,12 @@ export class BybitExchange extends BaseExchange {
         const orders = await ordersPromise;
         if (this.isDisposed) return;
 
-        this.store.apply(
-          nativeFixture(
-            {
-              orders,
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            orders,
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       }
 
@@ -1255,35 +1242,33 @@ export class BybitExchange extends BaseExchange {
 
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
 
       const balance = await balancePromise;
 
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          {
-            balance,
-            // FrameStore clamps account flags until every dataset has decoded.
-            // Publish source completion together; copying partial clamped flags
-            // would erase the orders/positions reads that already completed.
-            loaded: {
-              ...this.store.loaded,
-              balance: true,
-              positions: true,
-              orders: fetchOrders || this.store.loaded.orders,
-            },
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          // FrameStore clamps account flags until every dataset has decoded.
+          // Publish source completion together; copying partial clamped flags
+          // would erase the orders/positions reads that already completed.
+          loaded: {
+            ...this.store.loaded,
+            balance: true,
+            positions: true,
+            orders: fetchOrders || this.store.loaded.orders,
           },
-          this.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err: any) {
       this.emitAndLogError(err);
@@ -1343,13 +1328,12 @@ export class BybitExchange extends BaseExchange {
       return;
     }
 
-    this.store.apply(
-      nativeFixture(
-        {
-          balance,
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        balance,
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -1452,15 +1436,14 @@ export class BybitExchange extends BaseExchange {
       await this.fetchApiKeyInfo();
       if (this.apiKeyInfo) {
         this.updateBatchLimitBasedOnVipLevel();
-        this.store.apply(
-          nativeFixture(
-            {
-              userData: {
-                bybitApiKeyInfo: this.apiKeyInfo,
-              },
+        applyReferenceFixture(
+          this.store,
+          {
+            userData: {
+              bybitApiKeyInfo: this.apiKeyInfo,
             },
-            this.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       }
       this.log(
@@ -3600,19 +3583,18 @@ export class BybitExchange extends BaseExchange {
       foundPositions = await this.fetchPositions([symbol]);
       (() => {
         const incoming: StoreData['positions'] = foundPositions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -3636,19 +3618,18 @@ export class BybitExchange extends BaseExchange {
       const positions = await this.fetchPositions([symbol]);
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -3679,29 +3660,27 @@ export class BybitExchange extends BaseExchange {
     });
 
     const positions = await this.fetchPositions();
-    this.store.apply(
-      nativeFixture(
-        { positions },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { positions },
+      this.store.markets.map((row) => row.symbol),
     );
     if (symbol) {
       const symbolPos = await this.fetchPositions([symbol]);
       (() => {
         const incoming: StoreData['positions'] = symbolPos;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -3737,11 +3716,10 @@ export class BybitExchange extends BaseExchange {
 
     this.marginType = isolated ? MarginType.Isolated : MarginType.Cross;
     const positions = await this.fetchPositions();
-    this.store.apply(
-      nativeFixture(
-        { positions },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { positions },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -3960,19 +3938,18 @@ export class BybitExchange extends BaseExchange {
     const formattedData = positionsList.map(this.mapPosition.bind(this));
     (() => {
       const incoming: StoreData['positions'] = formattedData;
-      return this.store.apply(
-        nativeFixture(
-          {
-            positions: [
-              ...this.store.positions.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-            ],
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        {
+          positions: [
+            ...this.store.positions.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+          ],
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
     return formattedData?.length > 0 ? formattedData[0].positionMode : PositionMode.OneWay;

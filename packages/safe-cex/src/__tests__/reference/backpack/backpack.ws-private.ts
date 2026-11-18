@@ -13,7 +13,8 @@ import {
   PositionSide,
 } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BackpackExchange } from './backpack.exchange';
 import { generateWsAuthSignature } from './backpack.signing';
 import { BackpackWsOrderUpdate, BackpackWsPositionUpdate, WSS_URLS } from './backpack.types';
@@ -230,19 +231,18 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
 
       (() => {
         const incoming: StoreData['orders'] = [order];
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: [
-                ...this.store.orders.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
 
@@ -292,11 +292,10 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
           (position) => position.id !== positionId && position.id !== oppositePositionId,
         );
         if (updatedPositions.length !== this.store.positions.length) {
-          this.store.apply(
-            nativeFixture(
-              { positions: updatedPositions },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            { positions: updatedPositions },
+            this.store.markets.map((row) => row.symbol),
           );
         }
         return;
@@ -305,11 +304,10 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
       // Backpack reports one signed net quantity per symbol. Evict the stale
       // internal side before applying a flip that crosses through zero.
       if (this.store.positions.some((position) => position.id === oppositePositionId)) {
-        this.store.apply(
-          nativeFixture(
-            { positions: this.store.positions.filter((position) => position.id !== oppositePositionId) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { positions: this.store.positions.filter((position) => position.id !== oppositePositionId) },
+          this.store.markets.map((row) => row.symbol),
         );
       }
 
@@ -328,7 +326,7 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
         leverage,
         unrealizedPnl: parseFloat(data.P),
         contracts: size,
-        liquidationPrice: parseFloat(data.l) || 0,
+        liquidationPrice: nativeLiquidationPrice(parseFloat(data.l) || 0),
         lastUpdate: Math.floor(data.E / 1000), // Convert microseconds to milliseconds
         // Backpack is always cross-margin hedged mode
         positionMode,
@@ -337,19 +335,18 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
 
       (() => {
         const incoming: StoreData['positions'] = [position];
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } catch (error) {
@@ -475,11 +472,10 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
       this.hasPendingPositionEvents = false;
       const positions = await this.parent.fetchPositions();
       if (!this.isDisposed) {
-        this.store.apply(
-          nativeFixture(
-            { positions },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { positions },
+          this.store.markets.map((row) => row.symbol),
         );
       }
     } catch {
@@ -501,17 +497,16 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
     if (!this.isDisposed) {
       try {
         const orders = await this.parent.fetchOrders();
-        this.parent.store.apply(
-          nativeFixture(
-            {
-              orders,
-              loaded: {
-                ...this.parent.store.loaded,
-                orders: true,
-              },
+        applyReferenceFixture(
+          this.parent.store,
+          {
+            orders,
+            loaded: {
+              ...this.parent.store.loaded,
+              orders: true,
             },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       } catch {
         // Silent failure, will retry on next event
@@ -558,11 +553,10 @@ export class BackpackPrivateWebSocket extends BaseWebSocket<BackpackExchange> {
       this.hasPendingBalanceEvents = false;
       const balance = await this.parent.fetchBalance();
       if (!this.isDisposed) {
-        this.store.apply(
-          nativeFixture(
-            { balance },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { balance },
+          this.store.markets.map((row) => row.symbol),
         );
       }
     } catch {

@@ -12,7 +12,7 @@ import {
   HYROTRADER_SIMULATOR_WS_URL,
 } from '../../../exchanges/bybit/bybit.types';
 import { PositionMode } from '../../../types';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BybitExchange } from './bybit.exchange';
 import { getBybitResponseMeta } from './bybit.response';
 import { HyroOrderRecovery, hyroSubmissionKey } from './hyrotrader.order-recovery';
@@ -110,11 +110,10 @@ export class HyrotraderExchange extends BybitExchange {
   fetchMarginAccountInfos = async () => {
     const balance = await this.fetchBalance();
     if (!this.isDisposed)
-      this.store.apply(
-        nativeFixture(
-          { balance },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { balance },
+        this.store.markets.map((row) => row.symbol),
       );
   };
 
@@ -274,16 +273,15 @@ export class HyrotraderExchange extends BybitExchange {
         return false;
       const formatted = this.formatBalance(rawBalance);
       const upnl = positions.reduce((sum, position) => sum + position.unrealizedPnl, 0);
-      this.store.apply(
-        nativeFixture(
-          {
-            ...(orders ? { orders } : {}),
-            positions,
-            balance: { ...formatted, total: formatted.total + formatted.upnl - upnl, upnl },
-            loaded: { ...this.store.loaded, ...(orders ? { orders: true } : {}), positions: true, balance: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          ...(orders ? { orders } : {}),
+          positions,
+          balance: { ...formatted, total: formatted.total + formatted.upnl - upnl, upnl },
+          loaded: { ...this.store.loaded, ...(orders ? { orders: true } : {}), positions: true, balance: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       if (orders) this.ordersSnapshotVersion++;
       return true;
@@ -412,29 +410,27 @@ export class HyrotraderExchange extends BybitExchange {
               { id: `${id}__stop_loss` },
               { id: `${id}__take_profit` },
             ];
-            return this.store.apply(
-              nativeFixture(
-                { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         } else if (response.recoveredOrder) {
           (() => {
             const incoming: StoreData['orders'] = this.mapValidatedOrders([response.recoveredOrder]);
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: [
-                    ...this.store.orders.map((row) => {
-                      const change = incoming.find((item) => item.id === row.id);
-                      return change ? { ...row, ...change } : row;
-                    }),
-                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                  ],
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         } else if (!response.reconciled && !this.store.orders.some((order) => order.id === id)) {

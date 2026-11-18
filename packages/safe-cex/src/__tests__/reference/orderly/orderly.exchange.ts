@@ -38,7 +38,8 @@ import { loop } from '../../../utils/loop';
 import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust, subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI } from './orderly.api';
 import {
   ACCOUNT_RESPONSE,
@@ -204,14 +205,13 @@ export class OrderlyExchange extends BaseExchange {
     const markets = await this.fetchMarkets();
     if (this.isDisposed) return;
 
-    this.store.apply(
-      nativeFixture(
-        {
-          markets,
-          loaded: { ...this.store.loaded, markets: true },
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        markets,
+        loaded: { ...this.store.loaded, markets: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
 
     const tickers = await this.fetchTickers();
@@ -230,26 +230,24 @@ export class OrderlyExchange extends BaseExchange {
 
     this.log(`Loaded ${Math.min(tickers.length, markets.length)} ${this.orderlyExchangeName} markets`);
 
-    this.store.apply(
-      nativeFixture(
-        {
-          tickers,
-          loaded: { ...this.store.loaded, tickers: true },
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        tickers,
+        loaded: { ...this.store.loaded, tickers: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
 
     this.publicWebsocket.connectAndSubscribe();
 
     if (publicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       return;
     }
@@ -266,14 +264,13 @@ export class OrderlyExchange extends BaseExchange {
 
     this.log(`Loaded ${this.orderlyExchangeName} orders`);
 
-    this.store.apply(
-      nativeFixture(
-        {
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        orders,
+        loaded: { ...this.store.loaded, orders: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -285,11 +282,10 @@ export class OrderlyExchange extends BaseExchange {
         // after fetch account in case positionMode or leverage updated
         const positions = await this.fetchPositions();
         if (this.isDisposed) return;
-        this.store.apply(
-          nativeFixture(
-            { positions, loaded: { ...this.store.loaded, positions: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { positions, loaded: { ...this.store.loaded, positions: true } },
+          this.store.markets.map((row) => row.symbol),
         );
 
         // positions will provide the following update:
@@ -297,32 +293,30 @@ export class OrderlyExchange extends BaseExchange {
         // used: total_collateral_value - free_collateral,
         // total: total_collateral_value,
         const upnl = positions.length > 0 ? Math.round(sumBy(positions, 'unrealizedPnl') * 100) / 100 : 0;
-        this.store.apply(
-          nativeFixture(
-            {
-              balance: {
-                total: this.store.balance.total - upnl,
-                used: this.store.balance.used - upnl,
-                free: this.store.balance.free,
-                upnl,
-              },
-              loaded: {
-                ...this.store.loaded,
-                balance: true,
-              },
+        applyReferenceFixture(
+          this.store,
+          {
+            balance: {
+              total: this.store.balance.total - upnl,
+              used: this.store.balance.used - upnl,
+              free: this.store.balance.free,
+              upnl,
             },
-            this.store.markets.map((row) => row.symbol),
-          ),
+            loaded: {
+              ...this.store.loaded,
+              balance: true,
+            },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         if (count % 4 === 0) {
           const orders = await this.fetchOrders();
           if (this.isDisposed) return;
-          this.store.apply(
-            nativeFixture(
-              { orders, loaded: { ...this.store.loaded, orders: true } },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            { orders, loaded: { ...this.store.loaded, orders: true } },
+            this.store.markets.map((row) => row.symbol),
           );
         }
 
@@ -527,7 +521,7 @@ export class OrderlyExchange extends BaseExchange {
             leverage: this.accountLeverage,
             unrealizedPnl: 0,
             contracts: 0,
-            liquidationPrice: 0,
+            liquidationPrice: null,
             positionMode: positionMode,
             marginType,
           },
@@ -540,7 +534,7 @@ export class OrderlyExchange extends BaseExchange {
             leverage: this.accountLeverage,
             unrealizedPnl: 0,
             contracts: 0,
-            liquidationPrice: 0,
+            liquidationPrice: null,
             positionMode: positionMode,
             marginType,
           },
@@ -550,18 +544,17 @@ export class OrderlyExchange extends BaseExchange {
         return acc;
       }, []);
 
-      this.store.apply(
-        nativeFixture(
-          {
-            balance: {
-              ...this.store.balance,
-              free: free_collateral,
-              used: total_collateral_value - free_collateral,
-              total: total_collateral_value,
-            },
+      applyReferenceFixture(
+        this.store,
+        {
+          balance: {
+            ...this.store.balance,
+            free: free_collateral,
+            used: total_collateral_value - free_collateral,
+            total: total_collateral_value,
           },
-          this.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       return uniqBy([...realPositions, ...fakePositions], 'id');
@@ -642,7 +635,7 @@ export class OrderlyExchange extends BaseExchange {
       leverage,
       unrealizedPnl: upnl,
       contracts,
-      liquidationPrice: Number(v(p, 'est_liq_price')) || 0,
+      liquidationPrice: nativeLiquidationPrice(Number(v(p, 'est_liq_price')) || 0),
       marginSize: Number.isFinite(rawMargin) && rawMargin > 0 ? rawMargin : leverage > 0 ? notional / leverage : 0,
       positionMode,
       marginType,
@@ -1041,15 +1034,14 @@ export class OrderlyExchange extends BaseExchange {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       } else {
@@ -1344,16 +1336,15 @@ export class OrderlyExchange extends BaseExchange {
           this.store.positions
             .filter((position) => position.symbol === symbol && position.marginType === marginType)
             .map((position) => [position, { leverage }] as [Position, Partial<Position>]);
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: this.store.positions.map((row) => {
-                const change = updates.find(([target]) => target.id === row.id);
-                return change ? { ...row, ...change[1] } : row;
-              }),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: this.store.positions.map((row) => {
+              const change = updates.find(([target]) => target.id === row.id);
+              return change ? { ...row, ...change[1] } : row;
+            }),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } catch (err: any) {

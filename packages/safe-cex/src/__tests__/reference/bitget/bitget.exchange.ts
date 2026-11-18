@@ -73,7 +73,8 @@ import { adjust, multiply, subtract } from '../../../utils/safe-math';
 import { splitTimeRange } from '../../../utils/splitTimeRange';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI, isBitgetUtaStrategyOrderNotFound } from './bitget.api';
 import { mapBitgetFills, mapBitgetUtaFills } from './bitget.fills';
 import { mapBitgetBills } from './bitget.income';
@@ -359,40 +360,38 @@ export class BitgetExchange extends BaseExchange {
     this.isPrivateStreamDegraded = false;
     this.lastPrivateStreamMessageAt = Date.now();
     this.hasWarnedPrivateStreamDegraded = false;
-    this.store.apply(
-      nativeFixture(
-        {
-          socketHealth: {
-            publicHealthy: false,
-            privateHealthy: false,
-            publicInitialized: false,
-            privateInitialized: false,
-            ...this.store.socketHealth,
-            ...{ privateDegradedReason: undefined },
-          },
+    applyReferenceFixture(
+      this.store,
+      {
+        socketHealth: {
+          publicHealthy: false,
+          privateHealthy: false,
+          publicInitialized: false,
+          privateInitialized: false,
+          ...this.store.socketHealth,
+          ...{ privateDegradedReason: undefined },
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
     this.stopPrivateStreamDegradedReconcile();
   };
 
   private markPrivateStreamDegraded = (reason = BITGET_PRIVATE_STREAM_DEGRADED_MESSAGE, forceToast = false) => {
     this.isPrivateStreamDegraded = true;
-    this.store.apply(
-      nativeFixture(
-        {
-          socketHealth: {
-            publicHealthy: false,
-            privateHealthy: false,
-            publicInitialized: false,
-            privateInitialized: false,
-            ...this.store.socketHealth,
-            ...{ privateDegradedReason: reason },
-          },
+    applyReferenceFixture(
+      this.store,
+      {
+        socketHealth: {
+          publicHealthy: false,
+          privateHealthy: false,
+          publicInitialized: false,
+          privateInitialized: false,
+          ...this.store.socketHealth,
+          ...{ privateDegradedReason: reason },
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
     this.log(reason, LogSeverity.Warning);
     this.privateWebsocket.recoverMissingPrivateStream(reason);
@@ -451,16 +450,15 @@ export class BitgetExchange extends BaseExchange {
       if (positionsResult.status === 'fulfilled') {
         (() => {
           const incoming: StoreData['positions'] = positionsResult.value;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         loaded.positions = true;
@@ -476,14 +474,13 @@ export class BitgetExchange extends BaseExchange {
         loaded.balance = true;
       }
 
-      this.store.apply(
-        nativeFixture(
-          {
-            ...update,
-            loaded,
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          ...update,
+          loaded,
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } finally {
       this.privateStreamDegradedReconcileRunning = false;
@@ -518,14 +515,13 @@ export class BitgetExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      this.store.apply(
-        nativeFixture(
-          {
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          markets,
+          loaded: { ...this.store.loaded, markets: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       // start public websocket streams as soon as markets loaded.
@@ -542,14 +538,13 @@ export class BitgetExchange extends BaseExchange {
 
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} Bitget markets`);
 
-      this.store.apply(
-        nativeFixture(
-          {
-            tickers,
-            loaded: { ...this.store.loaded, tickers: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { ...this.store.loaded, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       // start additional public ticker websocket streams
@@ -558,13 +553,12 @@ export class BitgetExchange extends BaseExchange {
     }
 
     if (this.isPublicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       return;
     }
@@ -585,14 +579,13 @@ export class BitgetExchange extends BaseExchange {
 
     this.log(`Loaded Bitget orders`);
 
-    this.store.apply(
-      nativeFixture(
-        {
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        orders,
+        loaded: { ...this.store.loaded, orders: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -605,16 +598,15 @@ export class BitgetExchange extends BaseExchange {
         if (this.isDisposed) return;
         (() => {
           const incoming: StoreData['positions'] = positions;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
 
@@ -639,20 +631,19 @@ export class BitgetExchange extends BaseExchange {
           orders = [...existingNonVirtualTPSLOrders, ...virtualTPSLOrders];
         }
 
-        this.store.apply(
-          nativeFixture(
-            {
-              ...(balance && { balance }),
-              ...(orders && { orders }),
-              loaded: {
-                ...this.store.loaded,
-                ...(balance && { balance: true }),
-                positions: true,
-                ...(orders && { orders: true }),
-              },
+        applyReferenceFixture(
+          this.store,
+          {
+            ...(balance && { balance }),
+            ...(orders && { orders }),
+            loaded: {
+              ...this.store.loaded,
+              ...(balance && { balance: true }),
+              positions: true,
+              ...(orders && { orders: true }),
             },
-            this.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.msg || err?.message);
@@ -1012,7 +1003,7 @@ export class BitgetExchange extends BaseExchange {
           unrealizedPnl: 0,
           realizedPnl: 0,
           contracts: 0,
-          liquidationPrice: 0,
+          liquidationPrice: null,
         };
       });
     return uniqBy([...openPositionsForSymbols, ...fakePositions], (position) => position.id);
@@ -2771,19 +2762,18 @@ export class BitgetExchange extends BaseExchange {
         const positions = await this.fetchPositions([symbol]);
         (() => {
           const incoming: StoreData['positions'] = positions;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: [
-                  ...this.store.positions.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
 
@@ -2828,19 +2818,18 @@ export class BitgetExchange extends BaseExchange {
         const positions = await this.fetchPositions([symbol]);
         (() => {
           const incoming: StoreData['positions'] = positions;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: [
-                  ...this.store.positions.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         return;
@@ -2863,19 +2852,18 @@ export class BitgetExchange extends BaseExchange {
       const positions = await this.fetchPositions([symbol]);
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } catch (err: any) {
@@ -2899,11 +2887,10 @@ export class BitgetExchange extends BaseExchange {
         this._positioningCache = {};
         this._positioningInflight = {};
         const positions = await this.fetchPositions();
-        this.store.apply(
-          nativeFixture(
-            { positions },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { positions },
+          this.store.markets.map((row) => row.symbol),
         );
         return;
       }
@@ -2922,11 +2909,10 @@ export class BitgetExchange extends BaseExchange {
       this._positioningCache = {};
       this._positioningInflight = {};
       const positions = await this.fetchPositions();
-      this.store.apply(
-        nativeFixture(
-          { positions },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { positions },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err: any) {
       this.emitAndLogError(err, err?.response?.data?.msg || err?.message);
@@ -3088,9 +3074,8 @@ export class BitgetExchange extends BaseExchange {
         this.toFiniteNumber(p.closeFeeTotal) -
         this.toFiniteNumber(p.deductedFee),
       contracts,
-      liquidationPrice: this.resolveLiquidationPrice(
-        positionId,
-        p.liquidationPrice ?? p.liqPrice ?? (p as Record<string, any>).liqPx,
+      liquidationPrice: nativeLiquidationPrice(
+        this.resolveLiquidationPrice(positionId, p.liquidationPrice ?? p.liqPrice ?? (p as Record<string, any>).liqPx),
       ),
       marginSize: marginSize > 0 ? marginSize : undefined,
       positionMode,
@@ -3116,7 +3101,7 @@ export class BitgetExchange extends BaseExchange {
         unrealizedPnl: 0,
         realizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
         positionMode,
         marginType: MarginType.Cross,
         info: p,
@@ -3158,7 +3143,9 @@ export class BitgetExchange extends BaseExchange {
       realizedPnl:
         this.toFiniteNumber(p.achievedProfits) + this.toFiniteNumber(p.totalFee) - this.toFiniteNumber(p.deductedFee),
       contracts,
-      liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice ?? p.liqPrice ?? p.liqPx),
+      liquidationPrice: nativeLiquidationPrice(
+        this.resolveLiquidationPrice(positionId, p.liquidationPrice ?? p.liqPrice ?? p.liqPx),
+      ),
       marginSize: marginSize && marginSize > 0 ? marginSize : undefined,
       positionMode,
       marginType: marginMode,

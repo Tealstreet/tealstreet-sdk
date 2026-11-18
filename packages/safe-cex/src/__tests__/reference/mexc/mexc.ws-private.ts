@@ -7,7 +7,7 @@ import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { LogSeverity, Order, OrderStatus } from '../../../types';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { signMexcWsLogin } from './mexc.api';
 import { BASE_WS_URL, isMexcControlChannel, MEXC_WS_HEARTBEAT_INTERVAL_MS } from './mexc.types';
 import {
@@ -270,19 +270,18 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     if (orders.length) {
       (() => {
         const incoming: StoreData['orders'] = orders as any;
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: [
-                ...this.store.orders.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
       for (const order of orders) {
@@ -290,15 +289,14 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
           (() => {
             const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
             const nativeStatus: StoreData['orders'][number]['status'] = order.status;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: this.store.orders.map((row) =>
-                    targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
-                  ),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -374,19 +372,18 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     if (positions.length) {
       (() => {
         const incoming: StoreData['positions'] = positions as any;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -465,19 +462,18 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     // for the same terminal transition — skip it.
     (() => {
       const incoming: StoreData['orders'] = orders as any;
-      return this.store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...this.store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        {
+          orders: [
+            ...this.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
     // Intentionally no REST fan-out. The plan/stop frame is a full-row
@@ -491,11 +487,10 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
       try {
         const balance = await this.parent.fetchBalance();
         if (!this.isDisposed)
-          this.store.apply(
-            nativeFixture(
-              { balance },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            { balance },
+            this.store.markets.map((row) => row.symbol),
           );
       } catch (_err) {}
     }, 1000);

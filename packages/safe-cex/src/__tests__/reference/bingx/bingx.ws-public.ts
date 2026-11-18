@@ -10,7 +10,7 @@ import { v } from '../../../utils/get-key';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { readBlob } from '../../../utils/readBlob';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL } from './bingx.types';
 
 type Data = Array<Record<string, any>>;
@@ -158,11 +158,10 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
                 fundingRate: parseFloat(v(contract, 'fundingRate')) / 100,
                 fundingTime: 0,
               };
-              return this.store.apply(
-                nativeFixture(
-                  { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.store,
+                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
               );
             })();
           }

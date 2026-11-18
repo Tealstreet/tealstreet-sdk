@@ -9,7 +9,7 @@ import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { BASE_WS_URL, ENDPOINTS } from '../../../exchanges/binance/binance.types';
 import { v } from '../../../utils/get-key';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import {
   applyBinanceDepthUpdate,
   getBufferedBinanceDepthUpdates,
@@ -178,11 +178,10 @@ export class BinanceMarketWebsocket extends BaseWebSocket<BinanceExchange> {
           volume: parseFloat(v(event, 'v')),
           quoteVolume: parseFloat(v(event, 'q')),
         };
-        return this.store.apply(
-          nativeFixture(
-            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -202,11 +201,10 @@ export class BinanceMarketWebsocket extends BaseWebSocket<BinanceExchange> {
           fundingRate: parseFloat(v(event, 'r')),
           fundingTime: parseFloat(v(event, 'T')),
         };
-        return this.store.apply(
-          nativeFixture(
-            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -366,11 +364,10 @@ export class BinancePublicWebsocket extends BaseWebSocket<BinanceExchange> {
           bid: parseFloat(v(event, 'b')),
           ask: parseFloat(v(event, 'a')),
         };
-        return this.store.apply(
-          nativeFixture(
-            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }

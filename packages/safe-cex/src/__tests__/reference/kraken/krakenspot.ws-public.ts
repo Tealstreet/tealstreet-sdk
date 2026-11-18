@@ -3,7 +3,7 @@ import type { Candle, OHLCVOptions, OrderBook, Timeframe } from '../../../types'
 import type { KrakenSpotExchange } from './krakenspot.exchange';
 
 import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, INTERVAL } from './krakenspot.types';
 
 // Kraken Spot WebSocket v2 protocol:
@@ -183,11 +183,10 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
       (() => {
         const target = ticker;
         const nativeChanges: Partial<StoreData['tickers'][number]> = changes;
-        return this.store.apply(
-          nativeFixture(
-            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...nativeChanges } : row)) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...nativeChanges } : row)) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }

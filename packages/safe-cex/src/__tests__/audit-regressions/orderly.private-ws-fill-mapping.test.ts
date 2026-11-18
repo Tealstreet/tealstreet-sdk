@@ -2,25 +2,25 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeMarket } from '../cutover/nativeMarket';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
 
 const createExchange = () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      {
-        markets: [
-          {
-            id: 'BTC/USDC:USDC',
-            symbol: 'BTCUSDC',
-            precision: { amount: 0.001, price: 0.1 },
-            limits: { amount: { min: 0.001, max: 1_000 } },
-          },
-        ] as any,
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        nativeMarket({
+          id: 'BTC/USDC:USDC',
+          symbol: 'BTCUSDC',
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 1_000 }, leverage: { min: 1, max: 100 } },
+        }),
+      ] as any,
+    },
+    store.markets.map((row) => row.symbol),
   );
 
   return {

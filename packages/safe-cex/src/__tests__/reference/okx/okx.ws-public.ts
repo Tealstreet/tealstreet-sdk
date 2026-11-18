@@ -14,7 +14,7 @@ import { roundUSD } from '../../../utils/roundUSD';
 import { multiply } from '../../../utils/safe-math';
 import { updateOrderBook } from '../../../utils/updateOrderBook';
 import { WsDirectFallback } from '../../../utils/wsDirectFallback';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 const tickerNumber = (value: unknown): number =>
   value === '' || value === undefined || value === null ? 0 : Number.parseFloat(String(value));
@@ -246,11 +246,10 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
         volume: tickerNumber(update.volCcy24h),
         quoteVolume: tickerNumber(update.vol24h),
       };
-      return this.store.apply(
-        nativeFixture(
-          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -260,11 +259,10 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
     (() => {
       const target = { id: update.instId };
       const changes: Partial<StoreData['tickers'][number]> = { mark: parseFloat(update.markPx) };
-      return this.store.apply(
-        nativeFixture(
-          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -276,11 +274,10 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
       (() => {
         const target = { id: market.id };
         const changes: Partial<StoreData['tickers'][number]> = { index: indexPrice };
-        return this.store.apply(
-          nativeFixture(
-            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -290,11 +287,10 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
     (() => {
       const target = { id: update.instId };
       const changes: Partial<StoreData['tickers'][number]> = { openInterest: parseFloat(update.oiCcy) };
-      return this.store.apply(
-        nativeFixture(
-          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -306,11 +302,10 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
         fundingRate: parseFloat(update.fundingRate),
         fundingTime: parseFloat(update.fundingTime),
       };
-      return this.store.apply(
-        nativeFixture(
-          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };

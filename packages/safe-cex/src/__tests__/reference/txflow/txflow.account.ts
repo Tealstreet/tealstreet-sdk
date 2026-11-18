@@ -11,7 +11,8 @@ import {
   PositionMode,
   PositionSide,
 } from '../../../types';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 // TxFlow account reads are unsigned. The subject is applicationId (the main
 // wallet), never the locally held approved agent's address.
@@ -151,11 +152,10 @@ export class TxflowAccount {
     if (this.started) return;
     this.started = true;
     this.startupAt = Math.max(0, Math.floor(Date.now()));
-    this.cx.store.apply(
-      nativeFixture(
-        { options: { ...this.cx.store.options, ['isHedged']: false } },
-        this.cx.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.cx.store,
+      { options: { ...this.cx.store.options, ['isHedged']: false } },
+      this.cx.store.markets.map((row) => row.symbol),
     );
     await this.refresh();
   };
@@ -245,7 +245,7 @@ export class TxflowAccount {
         positionMode: type.toLowerCase() === 'hedge' ? PositionMode.Hedged : PositionMode.OneWay,
         unrealizedPnl: num(p.unrealizedPnl),
         contracts: Math.abs(size),
-        liquidationPrice: p.liquidationPx == null ? 0 : num(p.liquidationPx),
+        liquidationPrice: nativeLiquidationPrice(p.liquidationPx == null ? 0 : num(p.liquidationPx)),
         marginSize: num(p.marginUsed),
         ...(p.updateTime == null ? {} : { lastUpdate: num(p.updateTime) }),
       });
@@ -287,33 +287,30 @@ export class TxflowAccount {
     applyMode: boolean,
   ): void {
     if (time !== undefined) this.stateTime = time;
-    this.cx.store.apply(
-      nativeFixture(
-        { balance: mapped.balance, loaded: { ...this.cx.store.loaded, balance: true, positions: true } },
-        this.cx.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.cx.store,
+      { balance: mapped.balance, loaded: { ...this.cx.store.loaded, balance: true, positions: true } },
+      this.cx.store.markets.map((row) => row.symbol),
     );
     if (applyMode && mapped.positions[0])
-      this.cx.store.apply(
-        nativeFixture(
-          {
-            options: {
-              ...this.cx.store.options,
-              ['isHedged']: mapped.positions[0].positionMode === PositionMode.Hedged,
-            },
+      applyReferenceFixture(
+        this.cx.store,
+        {
+          options: {
+            ...this.cx.store.options,
+            ['isHedged']: mapped.positions[0].positionMode === PositionMode.Hedged,
           },
-          this.cx.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.cx.store.markets.map((row) => row.symbol),
       );
     (() => {
       const incoming: StoreData['positions'] = mapped.positions;
-      return this.cx.store.apply(
-        nativeFixture(
-          {
-            positions: incoming.map((row) => ({ ...this.cx.store.positions.find((old) => old.id === row.id), ...row })),
-          },
-          this.cx.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.cx.store,
+        {
+          positions: incoming.map((row) => ({ ...this.cx.store.positions.find((old) => old.id === row.id), ...row })),
+        },
+        this.cx.store.markets.map((row) => row.symbol),
       );
     })();
   }
@@ -397,18 +394,16 @@ export class TxflowAccount {
       for (const order of orders) this.rememberOrder(order);
       (() => {
         const incoming: StoreData['orders'] = orders.filter((o) => !this.terminal.has(o.id));
-        return this.cx.store.apply(
-          nativeFixture(
-            { orders: incoming.map((row) => ({ ...this.cx.store.orders.find((old) => old.id === row.id), ...row })) },
-            this.cx.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.cx.store,
+          { orders: incoming.map((row) => ({ ...this.cx.store.orders.find((old) => old.id === row.id), ...row })) },
+          this.cx.store.markets.map((row) => row.symbol),
         );
       })();
-      this.cx.store.apply(
-        nativeFixture(
-          { loaded: { ...this.cx.store.loaded, orders: true } },
-          this.cx.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.cx.store,
+        { loaded: { ...this.cx.store.loaded, orders: true } },
+        this.cx.store.markets.map((row) => row.symbol),
       );
       this.trimOrderMemo();
       this.cx.onOrders?.();
@@ -490,20 +485,18 @@ export class TxflowAccount {
     const fetchedLeverage = { ...this.cx.store.fetchedLeverage };
     for (const [symbol, s] of settings) {
       if (s.positionMode !== undefined)
-        this.cx.store.apply(
-          nativeFixture(
-            { options: { ...this.cx.store.options, ['isHedged']: s.positionMode === PositionMode.Hedged } },
-            this.cx.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.cx.store,
+          { options: { ...this.cx.store.options, ['isHedged']: s.positionMode === PositionMode.Hedged } },
+          this.cx.store.markets.map((row) => row.symbol),
         );
       this.settings.set(symbol, s);
       fetchedLeverage[symbol] = s;
     }
-    this.cx.store.apply(
-      nativeFixture(
-        { fetchedLeverage },
-        this.cx.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.cx.store,
+      { fetchedLeverage },
+      this.cx.store.markets.map((row) => row.symbol),
     );
   }
 
@@ -582,42 +575,39 @@ export class TxflowAccount {
             (() => {
               const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
               const nativeStatus: StoreData['orders'][number]['status'] = order.status;
-              return this.cx.store.apply(
-                nativeFixture(
-                  {
-                    orders: this.cx.store.orders.map((row) =>
-                      targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
-                    ),
-                  },
-                  this.cx.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.cx.store,
+                {
+                  orders: this.cx.store.orders.map((row) =>
+                    targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+                  ),
+                },
+                this.cx.store.markets.map((row) => row.symbol),
               );
             })();
             (() => {
               const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
-              return this.cx.store.apply(
-                nativeFixture(
-                  { orders: this.cx.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-                  this.cx.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.cx.store,
+                { orders: this.cx.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+                this.cx.store.markets.map((row) => row.symbol),
               );
             })();
           } else
             (() => {
               const incoming: StoreData['orders'] = [order];
-              return this.cx.store.apply(
-                nativeFixture(
-                  {
-                    orders: [
-                      ...this.cx.store.orders.map((row) => {
-                        const change = incoming.find((item) => item.id === row.id);
-                        return change ? { ...row, ...change } : row;
-                      }),
-                      ...incoming.filter((row) => !this.cx.store.orders.some((old) => old.id === row.id)),
-                    ],
-                  },
-                  this.cx.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.cx.store,
+                {
+                  orders: [
+                    ...this.cx.store.orders.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.cx.store.orders.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.cx.store.markets.map((row) => row.symbol),
               );
             })();
         }

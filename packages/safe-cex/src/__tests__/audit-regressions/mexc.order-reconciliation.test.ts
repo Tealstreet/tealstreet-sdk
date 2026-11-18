@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionMode } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { MexcExchange } from '../reference/mexc/mexc.exchange';
 import { ENDPOINTS } from '../reference/mexc/mexc.types';
 import { normalizeMarket, normalizeOrder, normalizePosition } from '../reference/mexc/mexc.utils';
@@ -35,11 +35,10 @@ const wireOrder = (state = 2, dealVol = 0) => ({
 const ok = (data?: unknown) => ({ data: { success: true, code: 0, data } });
 const setup = () => {
   const exchange = new MexcExchange('mexc', { key: 'key', secret: 'secret' }, new FrameStore());
-  exchange.store.apply(
-    nativeFixture(
-      { markets: [market] },
-      exchange.store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    exchange.store,
+    { markets: [market] },
+    exchange.store.markets.map((row) => row.symbol),
   );
   return exchange;
 };
@@ -289,11 +288,10 @@ describe('MEXC snapshot and bracket reconciliation', () => {
     async (field) => {
       const exchange = setup();
       const original = normalizeOrder({ ...wireOrder(), ...brackets }, market)!;
-      exchange.store.apply(
-        nativeFixture(
-          { orders: [original] },
-          exchange.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        exchange.store,
+        { orders: [original] },
+        exchange.store.markets.map((row) => row.symbol),
       );
       const updated = { stopLossPrice: '56000', takeProfitPrice: '66000', lossTrend: 3, profitTrend: 2 };
       const get = vi.fn().mockResolvedValue(ok({ ...wireOrder(4, 10), ...updated }));
@@ -324,11 +322,10 @@ describe('MEXC snapshot and bracket reconciliation', () => {
   it('retains known bracket references when the final read omits those native fields', async () => {
     const exchange = setup();
     const original = normalizeOrder({ ...wireOrder(), ...brackets }, market)!;
-    exchange.store.apply(
-      nativeFixture(
-        { orders: [original] },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      { orders: [original] },
+      exchange.store.markets.map((row) => row.symbol),
     );
     const get = vi.fn().mockResolvedValue(ok(wireOrder(4, 0)));
     const post = vi
@@ -343,11 +340,10 @@ describe('MEXC snapshot and bracket reconciliation', () => {
   it('honors an explicitly cleared stop-loss while carrying the updated take-profit', async () => {
     const exchange = setup();
     const original = normalizeOrder({ ...wireOrder(), ...brackets }, market)!;
-    exchange.store.apply(
-      nativeFixture(
-        { orders: [original] },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      { orders: [original] },
+      exchange.store.markets.map((row) => row.symbol),
     );
     const get = vi
       .fn()
@@ -426,28 +422,27 @@ describe('MEXC snapshot and bracket reconciliation', () => {
       vi.useFakeTimers();
       const exchange = setup();
       const nativePosition = '739113577038255616';
-      exchange.store.apply(
-        nativeFixture(
-          {
-            positions: [
-              normalizePosition(
-                {
-                  positionId: nativePosition,
-                  symbol: 'BTC_USDT',
-                  positionType: 1,
-                  positionMode: 1,
-                  holdVol: 60,
-                  holdAvgPrice: 60000,
-                  leverage: 10,
-                  openType: 2,
-                },
-                market,
-                PositionMode.Hedged,
-              )!,
-            ],
-          },
-          exchange.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        exchange.store,
+        {
+          positions: [
+            normalizePosition(
+              {
+                positionId: nativePosition,
+                symbol: 'BTC_USDT',
+                positionType: 1,
+                positionMode: 1,
+                holdVol: 60,
+                holdAvgPrice: 60000,
+                leverage: 10,
+                openType: 2,
+              },
+              market,
+              PositionMode.Hedged,
+            )!,
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
       );
       exchange.privateWebsocket.onMessage({
         data: JSON.stringify({

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { Market } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
 
 const market: Market = {
@@ -31,11 +31,10 @@ const row = {
 const make = (rows: unknown[]) => {
   vi.useFakeTimers();
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { markets: [market] },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { markets: [market] },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new BitrueExchange('bitrue', { key: 'key', secret: 'secret' }, store);
   vi.spyOn(exchange as any, 'emitAndLogError').mockImplementation(() => undefined);

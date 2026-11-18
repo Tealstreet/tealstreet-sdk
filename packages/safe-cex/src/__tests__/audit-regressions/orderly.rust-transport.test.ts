@@ -15,7 +15,7 @@ import { setDefaultTransport } from '../../transport/registry';
 import { tealstreetTransport } from '../../transport/tealstreet/tealstreetTransport';
 import { OrderStatus } from '../../types';
 import { consumerFrame } from '../cutover/consumerFrame';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { adoptEngineCapabilities, engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
@@ -181,11 +181,10 @@ describe('Orderly Rust transport boundary', () => {
     });
     const store = new FrameStore();
     installNativeStartupFrames(engine, store);
-    store.apply(
-      nativeFixture(
-        { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new RustEngineExchange(
       'mode',

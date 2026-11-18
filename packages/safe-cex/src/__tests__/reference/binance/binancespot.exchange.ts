@@ -44,7 +44,7 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust, subtract } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI } from './binancespot.api';
 import { BinancePrivateWebsocket } from './binancespot.ws-private';
 import { BinancePublicWebsocket } from './binancespot.ws-public';
@@ -105,14 +105,13 @@ export class BinanceSpotExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      this.store.apply(
-        nativeFixture(
-          {
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          markets,
+          loaded: { ...this.store.loaded, markets: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       // load initial tickers data
@@ -122,14 +121,13 @@ export class BinanceSpotExchange extends BaseExchange {
 
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} Binance markets`);
 
-      this.store.apply(
-        nativeFixture(
-          {
-            tickers,
-            loaded: { ...this.store.loaded, tickers: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { ...this.store.loaded, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       // start websocket streams
@@ -159,14 +157,13 @@ export class BinanceSpotExchange extends BaseExchange {
 
     this.log(`Loaded Binance orders`);
 
-    this.store.apply(
-      nativeFixture(
-        {
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        orders,
+        loaded: { ...this.store.loaded, orders: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -176,21 +173,20 @@ export class BinanceSpotExchange extends BaseExchange {
     if (this.isDisposed) return;
 
     this.log(`Ready to watch public data on Binance`);
-    this.store.apply(
-      nativeFixture(
-        {
-          orders: [],
-          balance: {
-            used: 0,
-            free: 0,
-            total: 0,
-            upnl: 0,
-          },
-          positions: [],
-          loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
+    applyReferenceFixture(
+      this.store,
+      {
+        orders: [],
+        balance: {
+          used: 0,
+          free: 0,
+          total: 0,
+          upnl: 0,
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+        positions: [],
+        loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -200,19 +196,18 @@ export class BinanceSpotExchange extends BaseExchange {
         const { balance, positions } = await this.fetchPositionsAndBalance();
         if (this.isDisposed) return;
 
-        this.store.apply(
-          nativeFixture(
-            {
-              balance,
-              positions,
-              loaded: {
-                ...this.store.loaded,
-                balance: true,
-                positions: true,
-              },
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            positions,
+            loaded: {
+              ...this.store.loaded,
+              balance: true,
+              positions: true,
             },
-            this.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       } catch (err: any) {
         this.emitAndLogError(err?.message);
@@ -447,15 +442,14 @@ export class BinanceSpotExchange extends BaseExchange {
             id,
           }));
           const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       });
@@ -476,15 +470,14 @@ export class BinanceSpotExchange extends BaseExchange {
           (o) => o.symbol === symbol,
         );
         const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: this.store.orders.map((row) =>
-                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-              ),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } catch (err: any) {

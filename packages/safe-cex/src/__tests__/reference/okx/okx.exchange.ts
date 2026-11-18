@@ -70,7 +70,8 @@ import { roundUSD } from '../../../utils/roundUSD';
 import { add, adjust, multiply, subtract } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import { parseAccountEquity } from './okx.account-equity';
 import { createAPI } from './okx.api';
@@ -283,14 +284,13 @@ export class OKXExchange extends BaseExchange {
     if (!useExternalPublicData) {
       const [markets, rawTickers] = await Promise.all([
         this.fetchMarkets().then((markets) => {
-          this.store.apply(
-            nativeFixture(
-              {
-                markets,
-                loaded: { ...this.store.loaded, markets: true },
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            {
+              markets,
+              loaded: { ...this.store.loaded, markets: true },
+            },
+            this.store.markets.map((row) => row.symbol),
           );
           return markets;
         }),
@@ -299,14 +299,13 @@ export class OKXExchange extends BaseExchange {
 
       if (this.isDisposed) return;
       const tickers = this.parseTickers(rawTickers);
-      this.store.apply(
-        nativeFixture(
-          {
-            tickers,
-            loaded: { ...this.store.loaded, tickers: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { ...this.store.loaded, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} OKX markets`);
@@ -336,26 +335,24 @@ export class OKXExchange extends BaseExchange {
         if (this.accountEquityUsd !== undefined) {
           balance = this.calculateBalanceUsedAvail(balance.info, positions, this.store.orders, this._accountLevel || 2);
         }
-        this.store.apply(
-          nativeFixture(
-            {
-              balance,
-              positions,
-              loaded: { ...this.store.loaded, balance: true, positions: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            positions,
+            loaded: { ...this.store.loaded, balance: true, positions: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       }),
       this.fetchOrders().then((orders) => {
-        this.store.apply(
-          nativeFixture(
-            {
-              orders,
-              loaded: { ...this.store.loaded, orders: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            orders,
+            loaded: { ...this.store.loaded, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       }),
     ]);
@@ -374,11 +371,10 @@ export class OKXExchange extends BaseExchange {
       );
       if (this.isDisposed) return;
       if (equityRevision === this.accountEquityRevision)
-        this.store.apply(
-          nativeFixture(
-            { balance },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { balance },
+          this.store.markets.map((row) => row.symbol),
         );
       loop(() => this.tick(), this.getTickInterval());
     }
@@ -589,7 +585,7 @@ export class OKXExchange extends BaseExchange {
         notional: 0,
         unrealizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
       };
     });
     const positions = [...openPositionsForSymbols, ...fakePositions];
@@ -658,11 +654,10 @@ export class OKXExchange extends BaseExchange {
       this.store.orders,
       this._accountLevel || 2,
     );
-    this.store.apply(
-      nativeFixture(
-        { balance },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { balance },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -1686,11 +1681,10 @@ export class OKXExchange extends BaseExchange {
         });
 
         const positions = await this.fetchPositions();
-        this.store.apply(
-          nativeFixture(
-            { positions },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { positions },
+          this.store.markets.map((row) => row.symbol),
         );
       }
     } catch (err: any) {
@@ -1698,19 +1692,18 @@ export class OKXExchange extends BaseExchange {
       const positions = await this.fetchPositions();
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
       throw new Error(err?.response?.data?.msg || err?.message);
@@ -1771,11 +1764,10 @@ export class OKXExchange extends BaseExchange {
       if (data.msg === '') {
         this._accountPositionMode = hedged ? PositionMode.Hedged : PositionMode.OneWay;
         const positions = await this.fetchPositions();
-        this.store.apply(
-          nativeFixture(
-            { positions },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { positions },
+          this.store.markets.map((row) => row.symbol),
         );
       } else {
         throw new Error(data.msg);
@@ -1785,19 +1777,18 @@ export class OKXExchange extends BaseExchange {
       const positions = await this.fetchPositions();
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
       throw new Error(err?.response?.data?.msg || err?.message);
@@ -2193,7 +2184,7 @@ export class OKXExchange extends BaseExchange {
         leverage: parseFloat(p.lever || existingPosition?.leverage || '0'),
         unrealizedPnl: contracts ? adjust(unrealizedPnl, market.precision.price) : 0,
         contracts: sizeInBase,
-        liquidationPrice: parseFloat(p.liqPx || '0'),
+        liquidationPrice: nativeLiquidationPrice(parseFloat(p.liqPx || '0')),
         marginType: p.mgnMode === 'cross' ? MarginType.Cross : MarginType.Isolated,
         positionMode: this._accountPositionMode || PositionMode.OneWay,
         extra: {

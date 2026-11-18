@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { ENDPOINTS } from '../reference/paradex/paradex.types';
 
@@ -103,11 +103,10 @@ describe('Paradex single-order client identity', () => {
 
   it('turns slippage-bounded market orders into crossing IOC limits', async () => {
     const { exchange, signOrder } = createExchange();
-    exchange.store.apply(
-      nativeFixture(
-        { markets: [MARKET] },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      { markets: [MARKET] },
+      exchange.store.markets.map((row) => row.symbol),
     );
     vi.spyOn(exchange, 'fetchOrderBook').mockResolvedValue({
       bids: [{ price: 99, amount: 10, total: 990 }],
@@ -140,30 +139,29 @@ describe('Paradex single-order client identity', () => {
 
   it('keeps slippage-bounded sell market orders inside Paradex price bands', async () => {
     const { exchange, signOrder } = createExchange();
-    exchange.store.apply(
-      nativeFixture(
-        {
-          markets: [DOGE_MARKET],
-          tickers: [
-            {
-              id: 'DOGE-USD-PERP',
-              symbol: 'DOGE-USD-PERP',
-              bid: 0.087,
-              ask: 0.088,
-              last: 0.0875,
-              mark: 0.0875,
-              index: 0.0875,
-              percentage: 0,
-              openInterest: 0,
-              fundingRate: 0,
-              fundingTime: 0,
-              volume: 0,
-              quoteVolume: 0,
-            } as any,
-          ],
-        },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: [DOGE_MARKET],
+        tickers: [
+          {
+            id: 'DOGE-USD-PERP',
+            symbol: 'DOGE-USD-PERP',
+            bid: 0.087,
+            ask: 0.088,
+            last: 0.0875,
+            mark: 0.0875,
+            index: 0.0875,
+            percentage: 0,
+            openInterest: 0,
+            fundingRate: 0,
+            fundingTime: 0,
+            volume: 0,
+            quoteVolume: 0,
+          } as any,
+        ],
+      },
+      exchange.store.markets.map((row) => row.symbol),
     );
     vi.spyOn(exchange, 'fetchOrderBook').mockResolvedValue({
       bids: [{ price: 0.076, amount: 1000, total: 76 }],
@@ -200,30 +198,29 @@ describe('Paradex single-order client identity', () => {
 
   it('rounds sell-side band clamps up so Paradex IOC prices stay inside bands', async () => {
     const { exchange, signOrder } = createExchange();
-    exchange.store.apply(
-      nativeFixture(
-        {
-          markets: [DOGE_MARKET],
-          tickers: [
-            {
-              id: 'DOGE-USD-PERP',
-              symbol: 'DOGE-USD-PERP',
-              bid: 0.0783,
-              ask: 0.089,
-              last: 0.08931,
-              mark: 0.0869682,
-              index: 0.0869682,
-              percentage: 0,
-              openInterest: 0,
-              fundingRate: 0,
-              fundingTime: 0,
-              volume: 0,
-              quoteVolume: 0,
-            } as any,
-          ],
-        },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: [DOGE_MARKET],
+        tickers: [
+          {
+            id: 'DOGE-USD-PERP',
+            symbol: 'DOGE-USD-PERP',
+            bid: 0.0783,
+            ask: 0.089,
+            last: 0.08931,
+            mark: 0.0869682,
+            index: 0.0869682,
+            percentage: 0,
+            openInterest: 0,
+            fundingRate: 0,
+            fundingTime: 0,
+            volume: 0,
+            quoteVolume: 0,
+          } as any,
+        ],
+      },
+      exchange.store.markets.map((row) => row.symbol),
     );
     vi.spyOn(exchange, 'fetchOrderBook').mockResolvedValue({
       bids: [{ price: 0.0783, amount: 1000, total: 78.3 }],

@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { MarginType } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeMarket } from '../cutover/nativeMarket';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 
 describe('GRVT private native values', () => {
@@ -20,11 +21,10 @@ describe('GRVT private native values', () => {
   });
   it('preserves CROSS margin and uses entry price rather than ep1 exit price', () => {
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        { markets: [{ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' } as any] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [nativeMarket({ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' }) as any] },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new GrvtExchange('grvt', {} as any, store);
     const position = (exchange.privateWebsocket as any).parsePosition({

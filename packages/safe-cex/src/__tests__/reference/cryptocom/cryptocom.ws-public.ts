@@ -16,7 +16,7 @@ import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { LogSeverity } from '../../../types';
 import { calcOrderBookTotal, sortOrderBook } from '../../../utils/orderbook';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { CryptocomExchange } from './cryptocom.exchange';
 import {
   CRYPTOCOM_WS_IDLE_PING_THRESHOLD_MS,
@@ -336,11 +336,10 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
         (() => {
           const target = ticker;
           const changes: Partial<StoreData['tickers'][number]> = tickerUpdate;
-          return this.store.apply(
-            nativeFixture(
-              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       } catch (error) {
@@ -368,11 +367,10 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
           (() => {
             const target = ticker;
             const changes: Partial<StoreData['tickers'][number]> = { index: value };
-            return this.store.apply(
-              nativeFixture(
-                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
       }
@@ -389,11 +387,10 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
       (() => {
         const target = ticker;
         const changes: Partial<StoreData['tickers'][number]> = { mark: value };
-        return this.store.apply(
-          nativeFixture(
-            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } else if (update.channel === 'funding') {
@@ -402,11 +399,10 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
       (() => {
         const target = ticker;
         const changes: Partial<StoreData['tickers'][number]> = { fundingRate: value };
-        return this.store.apply(
-          nativeFixture(
-            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -445,11 +441,10 @@ export class CryptocomPublicWebSocket extends BaseWebSocket<CryptocomExchange> {
               bid: data.bids[0] ? parseFloat(data.bids[0][0]) : 0,
               ask: data.asks[0] ? parseFloat(data.asks[0][0]) : 0,
             };
-            return this.store.apply(
-              nativeFixture(
-                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }

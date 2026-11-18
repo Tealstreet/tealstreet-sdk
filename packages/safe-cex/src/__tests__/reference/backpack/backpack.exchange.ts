@@ -38,7 +38,8 @@ import {
 import { createPositionId } from '../../../utils/createPositionId';
 import { loop } from '../../../utils/loop';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI } from './backpack.api';
 import {
   BackpackAccount,
@@ -133,14 +134,13 @@ export class BackpackExchange extends BaseExchange {
     const markets = await this.fetchMarkets();
     if (this.isDisposed) return;
 
-    this.store.apply(
-      nativeFixture(
-        {
-          markets,
-          loaded: { ...this.store.loaded, markets: true },
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        markets,
+        loaded: { ...this.store.loaded, markets: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
 
     const tickers = await this.fetchTickers();
@@ -148,14 +148,13 @@ export class BackpackExchange extends BaseExchange {
 
     this.log(`Loaded ${Math.min(tickers.length, markets.length)} Backpack markets`);
 
-    this.store.apply(
-      nativeFixture(
-        {
-          tickers,
-          loaded: { ...this.store.loaded, tickers: true },
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        tickers,
+        loaded: { ...this.store.loaded, tickers: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
 
     // Connect public WebSocket for real-time market data
@@ -163,13 +162,12 @@ export class BackpackExchange extends BaseExchange {
     this.subscribeToAllMarkets(markets);
 
     if (this.isPublicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       return;
     }
@@ -183,14 +181,13 @@ export class BackpackExchange extends BaseExchange {
 
     this.log(`Loaded Backpack orders`);
 
-    this.store.apply(
-      nativeFixture(
-        {
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        orders,
+        loaded: { ...this.store.loaded, orders: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
 
     this.log(`Ready to trade on Backpack`);
@@ -229,11 +226,10 @@ export class BackpackExchange extends BaseExchange {
 
         const positions = await this.fetchPositions();
         if (this.isDisposed) return;
-        this.store.apply(
-          nativeFixture(
-            { positions, loaded: { ...this.store.loaded, positions: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { positions, loaded: { ...this.store.loaded, positions: true } },
+          this.store.markets.map((row) => row.symbol),
         );
 
         const balance = await this.fetchBalance();
@@ -242,23 +238,21 @@ export class BackpackExchange extends BaseExchange {
         const upnl = positions.length > 0 ? sumBy(positions, 'unrealizedPnl') : 0;
         (balance as Writable<Balance>).upnl = upnl;
 
-        this.store.apply(
-          nativeFixture(
-            {
-              balance,
-              loaded: { ...this.store.loaded, balance: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: { ...this.store.loaded, balance: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         const orders = await this.fetchOrders();
         if (this.isDisposed) return;
-        this.store.apply(
-          nativeFixture(
-            { orders, loaded: { ...this.store.loaded, orders: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { orders, loaded: { ...this.store.loaded, orders: true } },
+          this.store.markets.map((row) => row.symbol),
         );
       } catch (err: any) {
         this.log(`Error in tick: ${err?.message}`, LogSeverity.Error);
@@ -664,7 +658,7 @@ export class BackpackExchange extends BaseExchange {
             leverage, // Use account-level leverage
             unrealizedPnl: parseFloat(p.pnlUnrealized),
             contracts: Math.abs(netQuantity),
-            liquidationPrice: parseFloat(p.estLiquidationPrice) || 0,
+            liquidationPrice: nativeLiquidationPrice(parseFloat(p.estLiquidationPrice) || 0),
             lastUpdate: virtualClock.getCurrentTimeMs(),
             // Backpack is always cross-margin hedged mode
             positionMode,
@@ -690,7 +684,7 @@ export class BackpackExchange extends BaseExchange {
               leverage, // Use account-level leverage
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               lastUpdate: virtualClock.getCurrentTimeMs(),
               positionMode,
               marginType: MarginType.Cross,
@@ -704,7 +698,7 @@ export class BackpackExchange extends BaseExchange {
               leverage, // Use account-level leverage
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               lastUpdate: virtualClock.getCurrentTimeMs(),
               positionMode,
               marginType: MarginType.Cross,
@@ -1193,11 +1187,10 @@ export class BackpackExchange extends BaseExchange {
 
       // Refetch positions to update all positions with the new leverage
       const positions = await this.fetchPositions();
-      this.store.apply(
-        nativeFixture(
-          { positions },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { positions },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err) {
       const errorMessage = `Failed to set leverage: ${err}`;

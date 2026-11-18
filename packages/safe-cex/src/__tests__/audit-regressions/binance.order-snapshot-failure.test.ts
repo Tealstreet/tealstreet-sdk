@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { BinancePrivateWebsocket } from '../reference/binance/binance.ws-private';
 
@@ -15,11 +15,10 @@ const transientFailures = [
 
 const createExchange = () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { orders: preservedOrders as any },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { orders: preservedOrders as any },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, store);
   return { exchange, store };

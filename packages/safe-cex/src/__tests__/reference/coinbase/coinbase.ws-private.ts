@@ -6,7 +6,7 @@ import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { resolveTransportRouting } from '../../../transport/registry';
 import { add, multiply } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, ORDER_EVENT } from './coinbase.types';
 import {
   formatOrderState,
@@ -146,19 +146,18 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
       } else {
         (() => {
           const incoming: StoreData['orders'] = orders;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -210,14 +209,13 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
     // snapshot that yielded no orders only contained quarantined records, so it
     // must not replace last-known-good state or mark orders as loaded.
     if (snapshotRawOrderCount === 0 || snapshotOrders.length > 0) {
-      this.store.apply(
-        nativeFixture(
-          {
-            orders: snapshotOrders,
-            loaded: { ...this.store.loaded, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          orders: snapshotOrders,
+          loaded: { ...this.store.loaded, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     }
   };

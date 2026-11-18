@@ -7,7 +7,7 @@ import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { LogSeverity } from '../../../types';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../../utils/updateOrderBook';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, INTERVAL, SUPPORTED_WS_INTERVALS } from './weex.types';
 import { normalizeCandle, toIntegerString, toNumber } from './weex.utils';
 
@@ -304,11 +304,10 @@ export class WeexPublicWebsocket extends BaseWebSocket<WeexExchange> {
         volume: toNumber(update.v, ticker.volume),
         quoteVolume: toNumber(update.q, ticker.quoteVolume),
       };
-      return this.store.apply(
-        nativeFixture(
-          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { ExchangeOptions, LogSeverity, Market, OrderSide, OrderStatus, OrderType } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 import { ENDPOINTS } from '../reference/coinbase/coinbase.types';
 
@@ -59,11 +59,10 @@ const makeRestOrder = (
 
 const createExchange = (markets: Market[] = [SPOT_MARKET]) => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { markets },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { markets },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new CoinbaseExchange(
     'coinbase' as any,
@@ -221,11 +220,10 @@ describe('Coinbase REST open-order polling', () => {
       info: {},
       lastUpdate: 1,
     };
-    store.apply(
-      nativeFixture(
-        { orders: [existingOrder] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { orders: [existingOrder] },
+      store.markets.map((row) => row.symbol),
     );
 
     const rateLimitError = new Error('GET /orders/historical/batch failed with 429') as Error & {
@@ -357,11 +355,10 @@ describe('Coinbase REST open-order polling', () => {
       // Older than the 5s REST-lag tolerance; treat REST as authoritative.
       lastUpdate: now - 10_000,
     };
-    store.apply(
-      nativeFixture(
-        { orders: [freshWsOrder, staleWsOrder] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { orders: [freshWsOrder, staleWsOrder] },
+      store.markets.map((row) => row.symbol),
     );
 
     const restOrder = makeRestOrder({ order_id: 'rest-only-order', filled_size: '0' });

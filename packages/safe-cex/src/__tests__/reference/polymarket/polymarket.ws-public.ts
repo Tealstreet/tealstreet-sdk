@@ -20,7 +20,7 @@ import { BaseWebSocket } from '../../../exchanges/base.ws';
  */
 
 import { LogSeverity, OrderBook, Ticker } from '../../../types';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { POLYMARKET_CONFIG, WS_CONFIG, WS_MESSAGE_TYPES } from './polymarket.constants';
 
 type Data = Record<string, any>;
@@ -302,11 +302,10 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
       (() => {
         const target = { id: tokenId };
         const changes: Partial<StoreData['tickers'][number]> = update;
-        return this.store.apply(
-          nativeFixture(
-            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -323,11 +322,10 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
     (() => {
       const target = { id: tokenId };
       const changes: Partial<StoreData['tickers'][number]> = { id: tokenId, symbol, last };
-      return this.store.apply(
-        nativeFixture(
-          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -379,11 +377,10 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
         info: { ...market.info, tickSize },
         precision: { ...market.precision, price: (String(tickSize).split('.')[1] ?? '').length },
       };
-      return this.store.apply(
-        nativeFixture(
-          { markets: this.store.markets.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { markets: this.store.markets.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -395,11 +392,10 @@ export class PolymarketPublicWebSocket extends BaseWebSocket<PolymarketExchange>
         (() => {
           const target = { id: tokenId };
           const changes: Partial<StoreData['markets'][number]> = { active: false };
-          return this.store.apply(
-            nativeFixture(
-              { markets: this.store.markets.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            { markets: this.store.markets.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
     }

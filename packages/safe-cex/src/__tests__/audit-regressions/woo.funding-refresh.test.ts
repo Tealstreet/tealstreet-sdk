@@ -3,7 +3,7 @@ import type { Ticker } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { WOOXExchange } from '../reference/woo/woo.exchange';
 import { ENDPOINTS } from '../reference/woo/woo.types';
 
@@ -30,11 +30,10 @@ const makeTicker = (symbol: string, id = `${symbol}-id`): Ticker => ({
 
 const makeExchange = (tickers = [makeTicker('BTCUSDT')], optionOverrides: Record<string, unknown> = {}) => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { tickers },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { tickers },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new WOOXExchange(
     'woo',
@@ -323,11 +322,10 @@ describe('WOO legacy funding refresh', () => {
     expect(listeners.size).toBe(1);
 
     exchange.dispose();
-    store.apply(
-      nativeFixture(
-        { latency: 42 },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { latency: 42 },
+      store.markets.map((row) => row.symbol),
     );
     exchange.emitter.emit('log', 'after-dispose');
 

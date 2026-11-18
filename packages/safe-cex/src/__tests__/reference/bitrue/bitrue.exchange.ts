@@ -42,7 +42,8 @@ import { loop } from '../../../utils/loop';
 import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI } from './bitrue.api';
 import {
   ENDPOINTS,
@@ -149,11 +150,10 @@ export class BitrueExchange extends BaseExchange {
           },
         },
       };
-      return this.store.apply(
-        nativeFixture(
-          { markets: this.store.markets.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { markets: this.store.markets.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -327,20 +327,18 @@ export class BitrueExchange extends BaseExchange {
       if (this.isDisposed) return;
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
-      this.store.apply(
-        nativeFixture(
-          { balance, loaded: { ...this.store.loaded, balance: true, positions: true } },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { balance, loaded: { ...this.store.loaded, balance: true, positions: true } },
+        this.store.markets.map((row) => row.symbol),
       );
 
       const symbolsToRefresh = Array.from(this.pendingOrderRefreshSymbols);
@@ -394,15 +392,14 @@ export class BitrueExchange extends BaseExchange {
         volume: 0,
         quoteVolume: 0,
       }));
-      this.store.apply(
-        nativeFixture(
-          {
-            markets,
-            tickers,
-            loaded: { ...this.store.loaded, markets: true, tickers: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          markets,
+          tickers,
+          loaded: { ...this.store.loaded, markets: true, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       this.publicWebsocket.connectAndSubscribe();
@@ -412,19 +409,17 @@ export class BitrueExchange extends BaseExchange {
       this.privateWebsocket.connectAndSubscribe();
       const { balance, positions } = await this.fetchBalanceAndPositions();
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          { balance, positions, loaded: { ...this.store.loaded, balance: true, positions: true } },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { balance, positions, loaded: { ...this.store.loaded, balance: true, positions: true } },
+        this.store.markets.map((row) => row.symbol),
       );
       const orders = await this.fetchOrders();
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          { orders, loaded: { ...this.store.loaded, orders: true } },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { orders, loaded: { ...this.store.loaded, orders: true } },
+        this.store.markets.map((row) => row.symbol),
       );
       this.tick();
       // this.fetchAndEmitOrders();
@@ -470,23 +465,21 @@ export class BitrueExchange extends BaseExchange {
 
         (() => {
           const incoming: StoreData['positions'] = positions;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
-        this.store.apply(
-          nativeFixture(
-            { balance, loaded: { ...this.store.loaded, balance: true, positions: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { balance, loaded: { ...this.store.loaded, balance: true, positions: true } },
+          this.store.markets.map((row) => row.symbol),
         );
 
         // if any positions were closed, fetch orders for those symbols stops should be removed, but dont come over ws
@@ -636,7 +629,7 @@ export class BitrueExchange extends BaseExchange {
         notional: 0,
         unrealizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
       };
     });
     return [...openPositionsForSymbols, ...fakePositions];
@@ -742,7 +735,7 @@ export class BitrueExchange extends BaseExchange {
                 leverage,
                 unrealizedPnl,
                 contracts,
-                liquidationPrice,
+                liquidationPrice: nativeLiquidationPrice(liquidationPrice),
                 info: position,
               };
             });
@@ -822,19 +815,18 @@ export class BitrueExchange extends BaseExchange {
       if (this.isDisposed) return;
       (() => {
         const incoming: StoreData['orders'] = orders;
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: [
-                ...this.store.orders.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
       await sleep(100);

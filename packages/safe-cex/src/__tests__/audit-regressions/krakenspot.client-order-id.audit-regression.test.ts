@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { ExchangeOptions, Market, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { createAPI } from '../reference/kraken/krakenspot.api';
 import { KrakenSpotExchange } from '../reference/kraken/krakenspot.exchange';
 import { ENDPOINTS } from '../reference/kraken/krakenspot.types';
@@ -26,11 +26,10 @@ const MARKET: Market = {
 
 const createExchange = () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { markets: [MARKET] },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { markets: [MARKET] },
+    store.markets.map((row) => row.symbol),
   );
 
   const exchange = new KrakenSpotExchange(

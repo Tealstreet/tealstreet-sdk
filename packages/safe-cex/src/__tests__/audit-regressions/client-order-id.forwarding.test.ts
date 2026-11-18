@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { RustEngineExchange as OrderlyExchange } from '../../exchanges/rust/rust.exchange';
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 import { BackpackExchange } from '../reference/backpack/backpack.exchange';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
@@ -50,11 +50,10 @@ const OPTIONS = { key: 'key', secret: 'secret', passphrase: 'passphrase', tealst
 
 const create = <T>(Ctor: new (name: any, options: any, store: FrameStore) => T, name: string, options = OPTIONS) => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { markets: [MARKET] },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { markets: [MARKET] },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new Ctor(name, options, store);
   vi.spyOn(exchange as any, 'log').mockImplementation(() => undefined);
@@ -405,11 +404,14 @@ describe('Binance Spot clientOrderId charset (Spot rejects . : / that USD-M acce
 describe('generated IDs are untouched when no caller ID is supplied', () => {
   it('keeps the Binance broker-prefixed IDs, one per split payload', () => {
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        { markets: [{ ...MARKET, limits: { ...MARKET.limits, amount: { min: 0.001, max: 0.5 } } }] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          { ...MARKET, limits: { ...MARKET.limits, amount: { min: 0.001, max: 0.5 }, leverage: { min: 1, max: 100 } } },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new BinanceExchange('binance', OPTIONS, store) as any;
 

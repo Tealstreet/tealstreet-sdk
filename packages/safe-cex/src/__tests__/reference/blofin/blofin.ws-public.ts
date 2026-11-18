@@ -13,7 +13,7 @@ import { getCandleStartTime } from '../../../utils/getCandleStartTime';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { roundUSD } from '../../../utils/roundUSD';
 import { updateOrderBook } from '../../../utils/updateOrderBook';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -253,11 +253,10 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
         volume: parseFloat(update.volCurrency24h),
         quoteVolume: parseFloat(update.vol24h),
       };
-      return this.store.apply(
-        nativeFixture(
-          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -269,11 +268,10 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
         fundingRate: parseFloat(update.fundingRate),
         fundingTime: parseFloat(update.fundingTime),
       };
-      return this.store.apply(
-        nativeFixture(
-          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };

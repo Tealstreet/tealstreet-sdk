@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { FrameStore } from '../../store/frameStore';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
@@ -49,11 +49,10 @@ it('the tier reaches balance.info.lighterAccountLimits in the TS shape the setti
   };
   vi.spyOn(boundary, 'command').mockResolvedValueOnce('standard').mockResolvedValueOnce(null);
   try {
-    store.apply(
-      nativeFixture(
-        { balance: { used: 1, free: 2, total: 3, upnl: 0 } },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { balance: { used: 1, free: 2, total: 3, upnl: 0 } },
+      store.markets.map((row) => row.symbol),
     );
     await boundary.syncLighterTier();
     expect(store.balance.info.lighterAccountLimits).toEqual({ user_tier_name: 'standard' });

@@ -15,7 +15,8 @@ import {
 } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { GrvtExchange } from './grvt.exchange';
 import { getGrvtOrderTimeInForce, getGrvtTriggerMetadata } from './grvt.order-semantics';
 
@@ -435,24 +436,22 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                orders: this.parent.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              orders: this.parent.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
         (() => {
           const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
-          return this.parent.store.apply(
-            nativeFixture(
-              { orders: this.parent.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            { orders: this.parent.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
 
@@ -462,24 +461,22 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                orders: this.parent.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              orders: this.parent.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
         (() => {
           const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
-          return this.parent.store.apply(
-            nativeFixture(
-              { orders: this.parent.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            { orders: this.parent.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
 
@@ -489,19 +486,18 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         // Order is OPEN/PENDING - add or update in store
         (() => {
           const incoming: StoreData['orders'] = [order];
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.parent.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              orders: [
+                ...this.parent.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
 
@@ -545,18 +541,17 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
                 contracts: 0,
                 notional: 0,
                 unrealizedPnl: 0,
-                liquidationPrice: 0,
+                liquidationPrice: null,
                 lastUpdate: virtualClock.getCurrentTimeMs(),
               };
-              return this.parent.store.apply(
-                nativeFixture(
-                  {
-                    positions: this.parent.store.positions.map((row) =>
-                      row.id === target.id ? { ...row, ...changes } : row,
-                    ),
-                  },
-                  this.parent.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.parent.store,
+                {
+                  positions: this.parent.store.positions.map((row) =>
+                    row.id === target.id ? { ...row, ...changes } : row,
+                  ),
+                },
+                this.parent.store.markets.map((row) => row.symbol),
               );
             })();
           });
@@ -594,27 +589,25 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         (() => {
           const target = existingPosition;
           const changes: Partial<StoreData['positions'][number]> = position;
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                positions: this.parent.store.positions.map((row) =>
-                  row.id === target.id ? { ...row, ...changes } : row,
-                ),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              positions: this.parent.store.positions.map((row) =>
+                row.id === target.id ? { ...row, ...changes } : row,
+              ),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
       } else {
         // Add new position
         this.parent.log(`Adding new position for ${position.symbol}`, LogSeverity.Debug);
-        this.parent.store.apply(
-          nativeFixture(
-            {
-              positions: [...this.parent.store.positions, position],
-            },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.parent.store,
+          {
+            positions: [...this.parent.store.positions, position],
+          },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       }
 
@@ -906,7 +899,7 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         entryPrice,
         unrealizedPnl,
         contracts,
-        liquidationPrice,
+        liquidationPrice: nativeLiquidationPrice(liquidationPrice),
         marginType: (feed.mt ?? feed.margin_type) === 'CROSS' ? MarginType.Cross : MarginType.Isolated,
       };
     } catch (error) {
@@ -947,17 +940,16 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
           return;
         }
 
-        this.parent.store.apply(
-          nativeFixture(
-            {
-              orders,
-              loaded: {
-                ...this.parent.store.loaded,
-                orders: true,
-              },
+        applyReferenceFixture(
+          this.parent.store,
+          {
+            orders,
+            loaded: {
+              ...this.parent.store.loaded,
+              orders: true,
             },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       } catch (error) {
         this.parent.log(`Throttled fetch error: ${error}`, LogSeverity.Warning);
@@ -1012,17 +1004,16 @@ export class GrvtPrivateWebSocket extends BaseWebSocket<GrvtExchange> {
         return;
       }
 
-      this.parent.store.apply(
-        nativeFixture(
-          {
-            positions,
-            loaded: {
-              ...this.parent.store.loaded,
-              positions: true,
-            },
+      applyReferenceFixture(
+        this.parent.store,
+        {
+          positions,
+          loaded: {
+            ...this.parent.store.loaded,
+            positions: true,
           },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.parent.store.markets.map((row) => row.symbol),
       );
       this.parent.syncBalanceUpnlFromPositions(positions);
     } catch {

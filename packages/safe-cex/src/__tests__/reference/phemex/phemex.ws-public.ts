@@ -10,7 +10,7 @@ import { BASE_WS_URL, ENDPOINTS } from '../../../exchanges/phemex/phemex.types';
 import { LogSeverity } from '../../../types';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../../utils/updateOrderBook';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 type Data = Array<Record<string, any>>;
 type MessageHandlers = {
@@ -212,41 +212,39 @@ export class BinancePublicWebsocket extends BaseWebSocket<PhemexExchange> {
             (() => {
               const target = ticker;
               const changes: Partial<StoreData['tickers'][number]> = tickerChanges;
-              return this.store.apply(
-                nativeFixture(
-                  { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.store,
+                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
               );
             })();
           } else {
             const market = this.parent.store.marketsBySymbol[symbol];
             if (!market) continue;
 
-            this.store.apply(
-              nativeFixture(
-                {
-                  tickers: [
-                    ...this.store.tickers.filter((existingTicker) => existingTicker.symbol !== symbol),
-                    {
-                      id: market.id,
-                      symbol,
-                      bid: tickerChanges.bid ?? tickerChanges.last,
-                      ask: tickerChanges.ask ?? tickerChanges.last,
-                      last: tickerChanges.last,
-                      mark: tickerChanges.mark,
-                      index: tickerChanges.index,
-                      percentage: tickerChanges.percentage,
-                      openInterest: tickerChanges.openInterest,
-                      fundingRate: tickerChanges.fundingRate,
-                      fundingTime: 0,
-                      volume: tickerChanges.volume,
-                      quoteVolume: tickerChanges.quoteVolume,
-                    } as Ticker,
-                  ],
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            applyReferenceFixture(
+              this.store,
+              {
+                tickers: [
+                  ...this.store.tickers.filter((existingTicker) => existingTicker.symbol !== symbol),
+                  {
+                    id: market.id,
+                    symbol,
+                    bid: tickerChanges.bid ?? tickerChanges.last,
+                    ask: tickerChanges.ask ?? tickerChanges.last,
+                    last: tickerChanges.last,
+                    mark: tickerChanges.mark,
+                    index: tickerChanges.index,
+                    percentage: tickerChanges.percentage,
+                    openInterest: tickerChanges.openInterest,
+                    fundingRate: tickerChanges.fundingRate,
+                    fundingTime: 0,
+                    volume: tickerChanges.volume,
+                    quoteVolume: tickerChanges.quoteVolume,
+                  } as Ticker,
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           }
         }

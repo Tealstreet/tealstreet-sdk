@@ -13,7 +13,8 @@ import {
   PositionSide,
 } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { ParadexExchange } from './paradex.exchange';
 import { decodeParadexMessage } from './paradex.sbe';
 import { BASE_WS_URL, isParadexTriggerOrderType, ORDER_SIDE, paradexTimeInForce } from './paradex.types';
@@ -217,34 +218,32 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
       // The store will handle removing old orders automatically
       (() => {
         const incoming: StoreData['orders'] = [update];
-        return this.parent.store.apply(
-          nativeFixture(
-            {
-              orders: [
-                ...this.parent.store.orders.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
-              ],
-            },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          {
+            orders: [
+              ...this.parent.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
       if (status === OrderStatus.Closed || status === OrderStatus.Canceled) {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [update];
           const nativeStatus: StoreData['orders'][number]['status'] = status;
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                orders: this.parent.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
-                ),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              orders: this.parent.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+              ),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -320,16 +319,15 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
         (() => {
           const updates: Array<[Pick<StoreData['positions'][number], 'id'>, Partial<StoreData['positions'][number]>]> =
             [[{ id }, { contracts: 0, notional: 0, unrealizedPnl: 0 }]];
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                positions: this.parent.store.positions.map((row) => {
-                  const change = updates.find(([target]) => target.id === row.id);
-                  return change ? { ...row, ...change[1] } : row;
-                }),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              positions: this.parent.store.positions.map((row) => {
+                const change = updates.find(([target]) => target.id === row.id);
+                return change ? { ...row, ...change[1] } : row;
+              }),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
         this.hasPendingPositionEvents = true;
@@ -358,7 +356,7 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
         realizedPnl: parseFloat(position.realized_positional_pnl || '0'),
         leverage: parseFloat(position.leverage || '0'),
         entryPrice,
-        liquidationPrice: parseFloat(position.liquidation_price || '0'),
+        liquidationPrice: nativeLiquidationPrice(parseFloat(position.liquidation_price || '0')),
         marginType: MarginType.Cross,
         positionMode: PositionMode.OneWay,
         lastUpdate: position.last_updated_at || position.created_at,
@@ -372,19 +370,18 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
 
       (() => {
         const incoming: StoreData['positions'] = [update];
-        return this.parent.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.parent.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.parent.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          {
+            positions: [
+              ...this.parent.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.parent.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
 
@@ -457,11 +454,10 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
         // upnl will be calculated elsewhere as it's readonly
       }
 
-      this.parent.store.apply(
-        nativeFixture(
-          { balance },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.parent.store,
+        { balance },
+        this.parent.store.markets.map((row) => row.symbol),
       );
 
       // Balance update stored
@@ -511,16 +507,15 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
       if (this.isDisposed || this.parent.isDisposed) return;
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.parent.store.apply(
-          nativeFixture(
-            {
-              positions: incoming.map((row) => ({
-                ...this.parent.store.positions.find((old) => old.id === row.id),
-                ...row,
-              })),
-            },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          {
+            positions: incoming.map((row) => ({
+              ...this.parent.store.positions.find((old) => old.id === row.id),
+              ...row,
+            })),
+          },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
     } catch {
@@ -653,17 +648,16 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
     if (!this.isDisposed) {
       try {
         const orders = await this.parent.fetchOrders();
-        this.parent.store.apply(
-          nativeFixture(
-            {
-              orders,
-              loaded: {
-                ...this.parent.store.loaded,
-                orders: true,
-              },
+        applyReferenceFixture(
+          this.parent.store,
+          {
+            orders,
+            loaded: {
+              ...this.parent.store.loaded,
+              orders: true,
             },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       } catch {
         // Silent failure, will retry on next event

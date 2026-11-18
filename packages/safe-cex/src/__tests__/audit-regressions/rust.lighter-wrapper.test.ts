@@ -8,7 +8,7 @@ import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exch
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { consumerFrame } from '../cutover/consumerFrame';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
@@ -54,11 +54,10 @@ const setup = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'lig
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
   const store = new FrameStore();
   installNativeStartupFrames(engine, store);
-  store.apply(
-    nativeFixture(
-      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new RustEngineExchange(name, { key: '', secret: '', ...options }, store);
   exchanges.push(exchange);

@@ -3,7 +3,7 @@ import type { Market, OrderBook, Ticker } from '../../types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { PolymarketExchange } from '../reference/polymarket/polymarket.exchange';
 
 const cleanup: Array<() => void> = [];
@@ -20,46 +20,45 @@ afterEach(() => {
 });
 const setup = () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      {
-        markets: ['111', '222'].map(
-          (id) =>
-            ({
-              id,
-              symbol: `cafe-${id}`,
-              base: 'cafe',
-              quote: 'pUSD',
-              active: true,
-              precision: { price: 2, amount: 2 },
-              limits: { amount: { min: 5, max: 1000000 }, leverage: { min: 1, max: 1 } },
-              info: {
-                tokenId: id,
-                conditionId: '0xcondition',
-                tickSize: 0.01,
-                negRisk: true,
-                outcome: id === '111' ? 'Yes' : 'No',
-              },
-            }) as Market,
-        ),
-        tickers: ['111', '222'].map((id): Ticker => ({
-          id,
-          symbol: `cafe-${id}`,
-          last: 0.5,
-          bid: 0.4,
-          ask: 0.6,
-          mark: 0.5,
-          index: 0.5,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-        })),
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: ['111', '222'].map(
+        (id) =>
+          ({
+            id,
+            symbol: `cafe-${id}`,
+            base: 'cafe',
+            quote: 'pUSD',
+            active: true,
+            precision: { price: 2, amount: 2 },
+            limits: { amount: { min: 5, max: 1000000 }, leverage: { min: 1, max: 1 } },
+            info: {
+              tokenId: id,
+              conditionId: '0xcondition',
+              tickSize: 0.01,
+              negRisk: true,
+              outcome: id === '111' ? 'Yes' : 'No',
+            },
+          }) as Market,
+      ),
+      tickers: ['111', '222'].map((id): Ticker => ({
+        id,
+        symbol: `cafe-${id}`,
+        last: 0.5,
+        bid: 0.4,
+        ask: 0.6,
+        mark: 0.5,
+        index: 0.5,
+        percentage: 0,
+        openInterest: 0,
+        fundingRate: 0,
+        fundingTime: 0,
+        volume: 0,
+        quoteVolume: 0,
+      })),
+    },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new PolymarketExchange(
     'polymarket',

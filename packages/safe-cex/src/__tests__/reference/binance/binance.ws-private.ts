@@ -16,7 +16,8 @@ import { LogSeverity, OrderRejectReason, OrderStatus, OrderType, PositionMode, P
 import { createPositionId } from '../../../utils/createPositionId';
 import { v } from '../../../utils/get-key';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 // Binance expires a listenKey 60 minutes after the last keepalive.
 const LISTEN_KEY_REFRESH_MS = 30 * 60 * 1000;
@@ -186,11 +187,10 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
             remaining: amount - filled,
             lastUpdate: virtualClock.getCurrentTimeMs(),
           };
-          return this.store.apply(
-            nativeFixture(
-              { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -216,19 +216,18 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
               ...(ORDER_TYPE[data.ot] === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
             },
           ];
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -238,15 +237,14 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
 
@@ -261,11 +259,10 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
                 rejectReason,
               },
             };
-            return this.store.apply(
-              nativeFixture(
-                { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -275,15 +272,14 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: data.i?.toString() }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -319,15 +315,14 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -353,19 +348,18 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
               ...(orderType === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[data.wt] }),
             },
           ];
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -379,15 +373,14 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -396,15 +389,14 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -463,7 +455,7 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
               notional: Math.abs(signedContracts * entryPrice + upnl),
               unrealizedPnl: upnl,
               leverage,
-              liquidationPrice: position?.liquidationPrice ?? null,
+              liquidationPrice: nativeLiquidationPrice(position?.liquidationPrice ?? null),
               marginType: position?.marginType ?? confirmed?.marginType ?? closedSettings?.marginType,
               positionMode,
               info: {
@@ -472,19 +464,18 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
               },
             },
           ];
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: [
-                  ...this.store.positions.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       });
@@ -538,16 +529,15 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
       if (!this.isDisposed && eventVersionAtStart === this.parent.getPositionStateVersion()) {
         (() => {
           const incoming: StoreData['positions'] = positions;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -606,17 +596,16 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         const orders = await this.parent.fetchOrders();
         // A failed fetch returns the current store; do not mark it freshly loaded.
         if (this.isDisposed || this.parent.ordersSnapshotStale) return;
-        this.parent.store.apply(
-          nativeFixture(
-            {
-              orders,
-              loaded: {
-                ...this.parent.store.loaded,
-                orders: true,
-              },
+        applyReferenceFixture(
+          this.parent.store,
+          {
+            orders,
+            loaded: {
+              ...this.parent.store.loaded,
+              orders: true,
             },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       } catch {
         // Silent failure, will retry on next event

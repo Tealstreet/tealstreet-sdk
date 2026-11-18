@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ENDPOINTS } from '../exchanges/lighter/lighter.types';
 import { FrameStore } from '../store/frameStore';
 import { MarginType, PositionSide } from '../types';
-import { nativeFixture } from './cutover/nativeFixture';
+import { applyReferenceFixture } from './cutover/referenceFixture';
 import { LighterExchange } from './reference/lighter/lighter.exchange';
 
 type Deferred<T> = {
@@ -168,11 +168,10 @@ describe('LighterExchange startup sequencing', () => {
     };
 
     const markets = await exchange.fetchMarkets();
-    exchange.store.apply(
-      nativeFixture(
-        { markets },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      { markets },
+      exchange.store.markets.map((row) => row.symbol),
     );
     (exchange as any).ensureSignerAdapter = vi.fn().mockResolvedValue({ updateLeverage });
     vi.spyOn(exchange as any, 'syncLeverageFromExchange').mockResolvedValue(undefined);
@@ -229,11 +228,10 @@ describe('LighterExchange startup sequencing', () => {
 
   it('does not treat account position initial margin as the market max leverage cap', async () => {
     const exchange = createExchange();
-    exchange.store.apply(
-      nativeFixture(
-        { markets: coreMarkets },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      { markets: coreMarkets },
+      exchange.store.markets.map((row) => row.symbol),
     );
     (exchange as any).fetchAccountSnapshot = vi.fn().mockResolvedValue({
       positions: [
@@ -255,33 +253,32 @@ describe('LighterExchange startup sequencing', () => {
 
   it('derives isolated Lighter liquidation price when API returns a profit-side value', async () => {
     const exchange = createExchange();
-    exchange.store.apply(
-      nativeFixture(
-        {
-          markets: [
-            {
-              id: '183',
-              symbol: 'CTR',
-              base: 'CTR',
-              quote: 'USDC',
-              active: true,
-              precision: { amount: 0.1, price: 0.00001 },
-              limits: {
-                amount: { min: 20, max: 5000000 },
-                leverage: { min: 1, max: 3 },
-              },
-              isExpiring: false,
-              isSpot: false,
-              info: {
-                amountDecimals: 1,
-                priceDecimals: 5,
-                maintenance_margin_fraction: 2000,
-              },
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: [
+          {
+            id: '183',
+            symbol: 'CTR',
+            base: 'CTR',
+            quote: 'USDC',
+            active: true,
+            precision: { amount: 0.1, price: 0.00001 },
+            limits: {
+              amount: { min: 20, max: 5000000 },
+              leverage: { min: 1, max: 3 },
             },
-          ],
-        },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+            isExpiring: false,
+            isSpot: false,
+            info: {
+              amountDecimals: 1,
+              priceDecimals: 5,
+              maintenance_margin_fraction: 2000,
+            },
+          },
+        ],
+      },
+      exchange.store.markets.map((row) => row.symbol),
     );
 
     const position = exchange.mapPosition({
@@ -342,14 +339,13 @@ describe('LighterExchange startup sequencing', () => {
   it('coalesces account snapshots and can defer account limits during startup balance fetch', async () => {
     const exchange = createExchange();
     (exchange as any).accountIndex = 123n;
-    exchange.store.apply(
-      nativeFixture(
-        {
-          markets: coreMarkets,
-          tickers: [],
-        },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: coreMarkets,
+        tickers: [],
+      },
+      exchange.store.markets.map((row) => row.symbol),
     );
     const getMock = vi.fn().mockImplementation((endpoint: string) => {
       if (endpoint === ENDPOINTS.ACCOUNT) {

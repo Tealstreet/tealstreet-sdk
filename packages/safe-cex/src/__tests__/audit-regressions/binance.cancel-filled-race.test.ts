@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 
@@ -52,11 +52,10 @@ for (const profile of ['binance', 'binancepm'] as const) {
         const { store, exchange } = subject(profile);
         const closed = { ...order('filled', type), status: OrderStatus.Closed, filled: 3, remaining: 0 };
         const live = order('live', type);
-        store.apply(
-          nativeFixture(
-            { orders: [closed, live] },
-            store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          store,
+          { orders: [closed, live] },
+          store.markets.map((row) => row.symbol),
         );
         transport(exchange, vi.fn().mockResolvedValue({ data: { code: 200 } }));
         await exchange.cancelSymbolOrders('BTCUSDT');
@@ -74,11 +73,10 @@ for (const profile of ['binance', 'binancepm'] as const) {
       async (type) => {
         const { store, exchange } = subject(profile);
         const original = order('racing', type);
-        store.apply(
-          nativeFixture(
-            { orders: [original] },
-            store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          store,
+          { orders: [original] },
+          store.markets.map((row) => row.symbol),
         );
         let resolve!: (value: unknown) => void;
         transport(
@@ -95,25 +93,23 @@ for (const profile of ['binance', 'binancepm'] as const) {
         (() => {
           const target = { id: original.id };
           const changes: Partial<StoreData['orders'][number]> = { filled: 3, remaining: 0 };
-          return store.apply(
-            nativeFixture(
-              { orders: store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-              store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            store,
+            { orders: store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            store.markets.map((row) => row.symbol),
           );
         })();
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [original];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
-          return store.apply(
-            nativeFixture(
-              {
-                orders: store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            store,
+            {
+              orders: store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            store.markets.map((row) => row.symbol),
           );
         })();
         resolve({
@@ -135,11 +131,10 @@ for (const profile of ['binance', 'binancepm'] as const) {
       const { store, exchange } = subject(profile);
       const original = order('original');
       const later = order('created-later');
-      store.apply(
-        nativeFixture(
-          { orders: [original] },
-          store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        store,
+        { orders: [original] },
+        store.markets.map((row) => row.symbol),
       );
       const replies: Array<(value: unknown) => void> = [];
       transport(
@@ -150,19 +145,18 @@ for (const profile of ['binance', 'binancepm'] as const) {
       await vi.waitFor(() => expect(replies.length).toBe(profile === 'binance' ? 2 : 1));
       (() => {
         const incoming: StoreData['orders'] = [later];
-        return store.apply(
-          nativeFixture(
-            {
-              orders: [
-                ...store.orders.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
-              ],
-            },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
         );
       })();
       // USD-M dispatches both families together; PM sends them in sequence.
@@ -182,11 +176,10 @@ for (const profile of ['binance', 'binancepm'] as const) {
           const { store, exchange } = subject(profile);
           const local = { ...order('local'), status };
           const closed = { ...order('filled'), status: OrderStatus.Closed, filled: 3, remaining: 0 };
-          store.apply(
-            nativeFixture(
-              { orders: [local, closed] },
-              store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            store,
+            { orders: [local, closed] },
+            store.markets.map((row) => row.symbol),
           );
           transport(exchange, vi.fn().mockResolvedValue({ data: {} }));
           if (symbolCancellation) {
@@ -204,11 +197,10 @@ for (const profile of ['binance', 'binancepm'] as const) {
       const { store, exchange } = subject(profile);
       const first = order('accepted');
       const failed = order('rejected', OrderType.StopLoss);
-      store.apply(
-        nativeFixture(
-          { orders: [first, failed] },
-          store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        store,
+        { orders: [first, failed] },
+        store.markets.map((row) => row.symbol),
       );
       transport(exchange, vi.fn().mockResolvedValueOnce({ data: {} }).mockRejectedValueOnce(new Error('rejected')));
       await expect(exchange.cancelOrders([first, failed])).rejects.toThrow('rejected');
@@ -221,11 +213,10 @@ for (const profile of ['binance', 'binancepm'] as const) {
 it('keeps immediate PM client-ID reuse available after a successful cancellation', async () => {
   const { store, exchange } = subject('binancepm');
   const first = { ...order('caller-id'), info: { orderId: 12 } };
-  store.apply(
-    nativeFixture(
-      { orders: [first] },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { orders: [first] },
+    store.markets.map((row) => row.symbol),
   );
   transport(exchange, vi.fn().mockResolvedValue({ data: {} }));
   await exchange.cancelOrders([first]);
@@ -233,19 +224,18 @@ it('keeps immediate PM client-ID reuse available after a successful cancellation
   const replacement = { ...order('caller-id'), amount: 5, remaining: 5, info: { orderId: 13 } };
   (() => {
     const incoming: StoreData['orders'] = [replacement];
-    return store.apply(
-      nativeFixture(
-        {
-          orders: [
-            ...store.orders.map((row) => {
-              const change = incoming.find((item) => item.id === row.id);
-              return change ? { ...row, ...change } : row;
-            }),
-            ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    return applyReferenceFixture(
+      store,
+      {
+        orders: [
+          ...store.orders.map((row) => {
+            const change = incoming.find((item) => item.id === row.id);
+            return change ? { ...row, ...change } : row;
+          }),
+          ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
   })();
   expect(store.orders.find((row) => row.id === first.id)).toMatchObject({

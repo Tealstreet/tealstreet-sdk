@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { ExchangeOptions, Market, Order, OrderSide, OrderStatus, OrderType } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 import { ENDPOINTS, LIST_ORDERS_RESPONSE, ORDER_EVENT } from '../reference/coinbase/coinbase.types';
 
@@ -92,11 +92,10 @@ const makeOrder = (overrides: Partial<Order> = {}): Order => ({
 
 const createExchange = (market: Market | Market[] = SPOT_MARKET, order: Order = makeOrder()) => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { markets: Array.isArray(market) ? market : [market], orders: [order] },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { markets: Array.isArray(market) ? market : [market], orders: [order] },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new CoinbaseExchange(
     'coinbase',

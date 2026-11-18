@@ -17,7 +17,7 @@ import { ethers } from 'ethers';
 
 import { BaseExchange } from '../../../exchanges/base';
 import { FrameStore } from '../../../store/frameStore';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { TxflowAccount } from './txflow.account';
 import { createAPI, createPublicAPI } from './txflow.api';
 import {
@@ -132,34 +132,31 @@ export class TxFlowExchange extends BaseExchange {
     if (!external) {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          { markets, loaded: { ...this.store.loaded, markets: true } },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { markets, loaded: { ...this.store.loaded, markets: true } },
+        this.store.markets.map((row) => row.symbol),
       );
       const tickers = await this.fetchTickers();
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          { tickers, loaded: { ...this.store.loaded, tickers: true } },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { tickers, loaded: { ...this.store.loaded, tickers: true } },
+        this.store.markets.map((row) => row.symbol),
       );
       this.apiSocket.connectAndSubscribe();
       this.nodeSocket.connectAndSubscribe();
     }
     if (this.options.publicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            orders: [],
-            positions: [],
-            balance: { free: 0, used: 0, total: 0, upnl: 0 },
-            loaded: { ...this.store.loaded, orders: true, positions: true, balance: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          orders: [],
+          positions: [],
+          balance: { free: 0, used: 0, total: 0, upnl: 0 },
+          loaded: { ...this.store.loaded, orders: true, positions: true, balance: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } else {
       await this.account.start();

@@ -41,7 +41,7 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI } from './mexc.api';
 import {
   ENDPOINTS,
@@ -217,26 +217,24 @@ export class MexcExchange extends BaseExchange {
     if (!useExternalPublicData) {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          {
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          markets,
+          loaded: { ...this.store.loaded, markets: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       const tickers = await this.fetchTickers();
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          {
-            tickers,
-            loaded: { ...this.store.loaded, tickers: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { ...this.store.loaded, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       this.publicWebsocket.connectAndSubscribe();
@@ -244,13 +242,12 @@ export class MexcExchange extends BaseExchange {
     }
 
     if (this.isPublicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       return;
     }
@@ -259,11 +256,10 @@ export class MexcExchange extends BaseExchange {
 
     try {
       this.accountPositionMode = await this.fetchPositionMode();
-      this.store.apply(
-        nativeFixture(
-          { options: { ...this.store.options, ['isHedged']: this.accountPositionMode === PositionMode.Hedged } },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { options: { ...this.store.options, ['isHedged']: this.accountPositionMode === PositionMode.Hedged } },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err: any) {
       this.log(
@@ -275,27 +271,25 @@ export class MexcExchange extends BaseExchange {
     await Promise.all([
       this.fetchBalanceAndPositions().then(({ balance, positions }) => {
         if (this.isDisposed) return;
-        this.store.apply(
-          nativeFixture(
-            {
-              balance,
-              positions,
-              loaded: { ...this.store.loaded, balance: true, positions: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            positions,
+            loaded: { ...this.store.loaded, balance: true, positions: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       }),
       this.fetchOrders().then((orders) => {
         if (this.isDisposed) return;
-        this.store.apply(
-          nativeFixture(
-            {
-              orders,
-              loaded: { ...this.store.loaded, orders: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            orders,
+            loaded: { ...this.store.loaded, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       }),
     ]);
@@ -312,23 +306,21 @@ export class MexcExchange extends BaseExchange {
       if (this.isDisposed) return;
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
-        );
-      })();
-      this.store.apply(
-        nativeFixture(
+        return applyReferenceFixture(
+          this.store,
           {
-            balance,
-            loaded: { ...this.store.loaded, balance: true, positions: true },
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
           },
           this.store.markets.map((row) => row.symbol),
-        ),
+        );
+      })();
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          loaded: { ...this.store.loaded, balance: true, positions: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.message || err?.message);
@@ -532,11 +524,10 @@ export class MexcExchange extends BaseExchange {
             [...symbolOrders, ...existingOpenOrders, ...shieldedStopLikeOrders],
             'id',
           );
-          return this.store.apply(
-            nativeFixture(
-              { orders: [...this.store.orders.filter((row) => row.symbol !== nativeSymbol), ...incoming] },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            { orders: [...this.store.orders.filter((row) => row.symbol !== nativeSymbol), ...incoming] },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -554,14 +545,13 @@ export class MexcExchange extends BaseExchange {
           !this.isRecentlyCanceledStopLikeOrder(order) &&
           this.isRecentlyPlacedStopLikeOrder(order),
       );
-      this.store.apply(
-        nativeFixture(
-          {
-            orders: uniqBy([...orders, ...shieldedStopLikeOrders], 'id'),
-            loaded: { ...this.store.loaded, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          orders: uniqBy([...orders, ...shieldedStopLikeOrders], 'id'),
+          loaded: { ...this.store.loaded, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     }
 
@@ -630,11 +620,10 @@ export class MexcExchange extends BaseExchange {
             [...symbolStopLikeOrders, ...preservedRegularOrders, ...symbolRegularOrders],
             'id',
           );
-          return this.store.apply(
-            nativeFixture(
-              { orders: [...this.store.orders.filter((row) => row.symbol !== nativeSymbol), ...incoming] },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            { orders: [...this.store.orders.filter((row) => row.symbol !== nativeSymbol), ...incoming] },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -644,14 +633,13 @@ export class MexcExchange extends BaseExchange {
       const preservedRegularOrders = this.store.orders.filter((order) =>
         this.shouldPreserveRecentRegularOrder(order, fetchedIds),
       );
-      this.store.apply(
-        nativeFixture(
-          {
-            orders: uniqBy([...stopLikeOrders, ...preservedRegularOrders, ...regularOrders], 'id'),
-            loaded: { ...this.store.loaded, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          orders: uniqBy([...stopLikeOrders, ...preservedRegularOrders, ...regularOrders], 'id'),
+          loaded: { ...this.store.loaded, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     }
 
@@ -815,11 +803,10 @@ export class MexcExchange extends BaseExchange {
         (() => {
           const target = { id: orderId };
           const changes: Partial<StoreData['orders'][number]> = { timeInForce: OrderTimeInForce.PostOnly };
-          return this.store.apply(
-            nativeFixture(
-              { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -1145,19 +1132,18 @@ export class MexcExchange extends BaseExchange {
     // take precedence; only metadata omitted on the wire falls back to intent.
     (() => {
       const incoming: StoreData['orders'] = [existing ? this.mergeOrderSnapshot(existing, optimistic) : optimistic];
-      return this.store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...this.store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        {
+          orders: [
+            ...this.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -1203,19 +1189,18 @@ export class MexcExchange extends BaseExchange {
           },
         } as Order,
       ];
-      return this.store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...this.store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        {
+          orders: [
+            ...this.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
     // Shield the id so a rapid subsequent `fetchAndSetOrders([symbol])` won't
@@ -1370,11 +1355,10 @@ export class MexcExchange extends BaseExchange {
           (() => {
             const target = { id: orderId };
             const changes: Partial<StoreData['orders'][number]> = { timeInForce: OrderTimeInForce.PostOnly };
-            return this.store.apply(
-              nativeFixture(
-                { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -1490,45 +1474,8 @@ export class MexcExchange extends BaseExchange {
         if (current?.status !== OrderStatus.Closed || current.filled < order.filled)
           (() => {
             const incoming: StoreData['orders'] = [order];
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: [
-                    ...this.store.orders.map((row) => {
-                      const change = incoming.find((item) => item.id === row.id);
-                      return change ? { ...row, ...change } : row;
-                    }),
-                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                  ],
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
-            );
-          })();
-        (() => {
-          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
-          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
-          );
-        })();
-        throw new Error('MEXC original order filled during amend');
-      }
-      if (current?.status === OrderStatus.Closed) throw new Error('MEXC original order filled during amend');
-      const state = toNumber(raw.state, Number.NaN);
-      if (state === 4) {
-        const reconciled = this.mergeOrderSnapshot(order, current ?? original);
-        (() => {
-          const incoming: StoreData['orders'] = [reconciled];
-          return this.store.apply(
-            nativeFixture(
+            return applyReferenceFixture(
+              this.store,
               {
                 orders: [
                   ...this.store.orders.map((row) => {
@@ -1539,21 +1486,54 @@ export class MexcExchange extends BaseExchange {
                 ],
               },
               this.store.markets.map((row) => row.symbol),
-            ),
+            );
+          })();
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
+        throw new Error('MEXC original order filled during amend');
+      }
+      if (current?.status === OrderStatus.Closed) throw new Error('MEXC original order filled during amend');
+      const state = toNumber(raw.state, Number.NaN);
+      if (state === 4) {
+        const reconciled = this.mergeOrderSnapshot(order, current ?? original);
+        (() => {
+          const incoming: StoreData['orders'] = [reconciled];
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         return reconciled;
@@ -1621,15 +1601,14 @@ export class MexcExchange extends BaseExchange {
         )
         .map((order) => ({ id: order.id }));
       const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-      return this.store.apply(
-        nativeFixture(
-          {
-            orders: this.store.orders.map((row) =>
-              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-            ),
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        {
+          orders: this.store.orders.map((row) =>
+            targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+          ),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -1723,15 +1702,14 @@ export class MexcExchange extends BaseExchange {
       (() => {
         const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: cleanId }];
         const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: this.store.orders.map((row) =>
-                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-              ),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -1790,15 +1768,14 @@ export class MexcExchange extends BaseExchange {
       (() => {
         const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders.map((order) => ({ id: order.id }));
         const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: this.store.orders.map((row) =>
-                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-              ),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -1811,15 +1788,14 @@ export class MexcExchange extends BaseExchange {
         id: order.id,
       }));
       const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-      return this.store.apply(
-        nativeFixture(
-          {
-            orders: this.store.orders.map((row) =>
-              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-            ),
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        {
+          orders: this.store.orders.map((row) =>
+            targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+          ),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -1864,11 +1840,10 @@ export class MexcExchange extends BaseExchange {
                 },
               },
             };
-            return this.store.apply(
-              nativeFixture(
-                { markets: this.store.markets.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { markets: this.store.markets.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -1880,16 +1855,15 @@ export class MexcExchange extends BaseExchange {
           marginType,
           positionMode: config.positionMode,
         };
-        this.store.apply(
-          nativeFixture(
-            {
-              fetchedLeverage: {
-                ...this.store.fetchedLeverage,
-                [symbol]: fetchedLeverage,
-              },
+        applyReferenceFixture(
+          this.store,
+          {
+            fetchedLeverage: {
+              ...this.store.fetchedLeverage,
+              [symbol]: fetchedLeverage,
             },
-            this.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
         return fetchedLeverage;
       }
@@ -1906,16 +1880,15 @@ export class MexcExchange extends BaseExchange {
       marginType: config.marginType,
       positionMode: config.positionMode,
     };
-    this.store.apply(
-      nativeFixture(
-        {
-          fetchedLeverage: {
-            ...this.store.fetchedLeverage,
-            [symbol]: fetchedLeverage,
-          },
+    applyReferenceFixture(
+      this.store,
+      {
+        fetchedLeverage: {
+          ...this.store.fetchedLeverage,
+          [symbol]: fetchedLeverage,
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
     return fetchedLeverage;
   };
@@ -1959,20 +1932,18 @@ export class MexcExchange extends BaseExchange {
       this.symbolSettings.set(symbol, nextConfig);
       this.updateFetchedLeverage(symbol, nextConfig);
     }
-    this.store.apply(
-      nativeFixture(
-        { options: { ...this.store.options, ['isHedged']: hedged } },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { options: { ...this.store.options, ['isHedged']: hedged } },
+      this.store.markets.map((row) => row.symbol),
     );
     const positions = await this.fetchPositions();
     (() => {
       const incoming: StoreData['positions'] = positions;
-      return this.store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -2013,21 +1984,20 @@ export class MexcExchange extends BaseExchange {
   };
 
   private updateFetchedLeverage = (symbol: string, config: MexcSymbolConfig): void => {
-    this.store.apply(
-      nativeFixture(
-        {
-          fetchedLeverage: {
-            ...this.store.fetchedLeverage,
-            [symbol]: {
-              buyLeverage: config.buyLeverage,
-              sellLeverage: config.sellLeverage,
-              marginType: config.marginType,
-              positionMode: config.positionMode,
-            },
+    applyReferenceFixture(
+      this.store,
+      {
+        fetchedLeverage: {
+          ...this.store.fetchedLeverage,
+          [symbol]: {
+            buyLeverage: config.buyLeverage,
+            sellLeverage: config.sellLeverage,
+            marginType: config.marginType,
+            positionMode: config.positionMode,
           },
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 

@@ -2,25 +2,25 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderTimeInForce, OrderType } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeMarket } from '../cutover/nativeMarket';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 
 const createExchange = (apiVersion: 'v1' | 'v3') => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      {
-        markets: [
-          {
-            symbol: 'BTCUSDT',
-            precision: { amount: 0.001, price: 0.1 },
-            limits: { amount: { max: 100 } },
-            info: { filters: [{ filterType: 'PRICE_FILTER', tickSize: '0.1' }] },
-          } as any,
-        ],
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        nativeMarket({
+          symbol: 'BTCUSDT',
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { max: 100 }, leverage: { min: 1, max: 100 } },
+          info: { filters: [{ filterType: 'PRICE_FILTER', tickSize: '0.1' }] },
+        }) as any,
+      ],
+    },
+    store.markets.map((row) => row.symbol),
   );
 
   return new AsterDEXExchange(

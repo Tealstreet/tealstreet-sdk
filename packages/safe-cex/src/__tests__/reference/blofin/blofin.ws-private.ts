@@ -16,7 +16,7 @@ import { cleanFloat, createIncrementalFills } from '../../../utils/incrementalFi
 import { roundUSD } from '../../../utils/roundUSD';
 import { multiply, subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
   // BloFin's private stream goes long idle stretches between user events and
@@ -210,15 +210,14 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
           (() => {
             const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders;
             const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: this.store.orders.map((row) =>
-                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                  ),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -226,15 +225,14 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
           (() => {
             const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders;
             const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: this.store.orders.map((row) =>
-                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                  ),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -242,15 +240,14 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
           (() => {
             const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders;
             const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: this.store.orders.map((row) =>
-                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                  ),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -258,15 +255,14 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
           (() => {
             const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders;
             const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: this.store.orders.map((row) =>
-                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                  ),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -279,19 +275,18 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
               latest.set(order.id, order);
               return true;
             });
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: [
-                    ...this.store.orders.map((row) => {
-                      const change = incoming.find((item) => item.id === row.id);
-                      return change ? { ...row, ...change } : row;
-                    }),
-                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                  ],
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -348,17 +343,16 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
     if (!this.isDisposed) {
       try {
         const orders = await this.parent.fetchOrders();
-        this.store.apply(
-          nativeFixture(
-            {
-              orders,
-              loaded: {
-                ...this.store.loaded,
-                orders: true,
-              },
+        applyReferenceFixture(
+          this.store,
+          {
+            orders,
+            loaded: {
+              ...this.store.loaded,
+              orders: true,
             },
-            this.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       } catch {
         // Silent failure, will retry on next event or tick
@@ -371,11 +365,10 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
     const positions = this.parent.mapPositions(blofinPositions);
     (() => {
       const incoming: StoreData['positions'] = positions;
-      return this.store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
 
@@ -383,13 +376,12 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
       const used = roundUSD(sumBy(blofinPositions, (p) => parseFloat(p.maintenanceMargin)));
       const upnl = roundUSD(sumBy(blofinPositions, (p) => parseFloat(p.unrealizedPnl)));
 
-      this.store.apply(
-        nativeFixture(
-          {
-            balance: { ...this.store.balance, used: used || 0, upnl: upnl || 0 },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          balance: { ...this.store.balance, used: used || 0, upnl: upnl || 0 },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     }
   };
@@ -397,18 +389,17 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
   handleAccountTopic = ({ data }: { data: Record<string, any> }) => {
     const totalCollateral = roundUSD(parseFloat(data.totalEquity));
 
-    this.store.apply(
-      nativeFixture(
-        {
-          balance: {
-            ...this.store.balance,
-            free: subtract(totalCollateral, this.store.balance.used),
-            total: subtract(totalCollateral, this.store.balance.upnl),
-            info: data,
-          },
+    applyReferenceFixture(
+      this.store,
+      {
+        balance: {
+          ...this.store.balance,
+          free: subtract(totalCollateral, this.store.balance.used),
+          total: subtract(totalCollateral, this.store.balance.upnl),
+          info: data,
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 }

@@ -44,7 +44,7 @@ import { validateWalletAndPrivateKey } from '../../../utils/ethereum/validateWal
 import { v } from '../../../utils/get-key';
 import { loop } from '../../../utils/loop';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI } from './hyperliquid.api';
 import {
   orderRequestToOrderWire,
@@ -178,11 +178,10 @@ export class HyperliquidSpotExchange extends BaseExchange {
       storeUpdate.loaded.tickers = true;
     }
 
-    this.store.apply(
-      nativeFixture(
-        storeUpdate,
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      storeUpdate,
+      this.store.markets.map((row) => row.symbol),
     );
 
     if (publicDataOnly) {
@@ -421,13 +420,12 @@ export class HyperliquidSpotExchange extends BaseExchange {
       return;
     }
 
-    this.store.apply(
-      nativeFixture(
-        {
-          balance: this.buildSpotBalance(balances),
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        balance: this.buildSpotBalance(balances),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -579,7 +577,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
               notional: 0,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               ...marketConfig,
             },
           ]
@@ -592,7 +590,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
               notional: 0,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               ...marketConfig,
             },
             {
@@ -603,7 +601,7 @@ export class HyperliquidSpotExchange extends BaseExchange {
               notional: 0,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               ...marketConfig,
             },
           ];

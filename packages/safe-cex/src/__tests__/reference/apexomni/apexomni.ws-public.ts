@@ -13,7 +13,7 @@ import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { add, divide } from '../../../utils/safe-math';
 import { updateOrderBook } from '../../../utils/updateOrderBook';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { ApexOmniExchange } from './apexomni.exchange';
 import { BASE_WS_URL, INTERVAL } from './apexomni.types';
 
@@ -194,13 +194,12 @@ export class ApexOmniPublicWebsocket extends BaseWebSocket<ApexOmniExchange> {
         (() => {
           const target = ticker;
           const changes: Partial<StoreData['tickers'][number]> = update;
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
 
@@ -220,13 +219,12 @@ export class ApexOmniPublicWebsocket extends BaseWebSocket<ApexOmniExchange> {
             (() => {
               const target = position;
               const changes: Partial<StoreData['positions'][number]> = { unrealizedPnl };
-              return this.store.apply(
-                nativeFixture(
-                  {
-                    positions: this.store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
-                  },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.store,
+                {
+                  positions: this.store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+                },
+                this.store.markets.map((row) => row.symbol),
               );
             })();
           }

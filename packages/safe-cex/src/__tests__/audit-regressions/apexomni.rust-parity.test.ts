@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionSide } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativePosition } from '../cutover/nativePosition';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
 import { ENDPOINTS } from '../reference/apexomni/apexomni.types';
 
@@ -40,54 +41,52 @@ const execution = (id: string, extra: Record<string, unknown> = {}) => ({
 
 const fixture = () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      {
-        markets: [
-          {
-            id: 'BTC-USDT',
-            symbol: 'BTCUSDT',
-            base: 'BTC',
-            quote: 'USDT',
-            active: true,
-            precision: { amount: 0.001, price: 0.1 },
-            limits: { amount: { min: 0.001, max: 1 }, leverage: { min: 1, max: 100 } },
-            info: { initialMarginRate: '0.01', defaultInitialMarginRate: '0.05' },
-          },
-        ] as any,
-        tickers: [
-          {
-            id: 'BTC-USDT',
-            symbol: 'BTCUSDT',
-            bid: 100,
-            ask: 100,
-            last: 102,
-            mark: 100,
-            index: 100,
-            percentage: 0,
-            openInterest: 0,
-            fundingRate: 0,
-            fundingTime: 0,
-            volume: 0,
-            quoteVolume: 0,
-          },
-        ],
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        {
+          id: 'BTC-USDT',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 1 }, leverage: { min: 1, max: 100 } },
+          info: { initialMarginRate: '0.01', defaultInitialMarginRate: '0.05' },
+        },
+      ] as any,
+      tickers: [
+        {
+          id: 'BTC-USDT',
+          symbol: 'BTCUSDT',
+          bid: 100,
+          ask: 100,
+          last: 102,
+          mark: 100,
+          index: 100,
+          percentage: 0,
+          openInterest: 0,
+          fundingRate: 0,
+          fundingTime: 0,
+          volume: 0,
+          quoteVolume: 0,
+        },
+      ],
+    },
+    store.markets.map((row) => row.symbol),
   );
-  store.apply(
-    nativeFixture(
-      {
-        zkLinkConfig: {
-          id: '1',
-          l2Key: 'key',
-          contractAccount: { makerFeeRate: '0.001', takerFeeRate: '0.001' },
-          contractConfig: { perpetualContract: [{ symbol: 'BTC-USDT', l2PairId: '1' }] },
-        } as any,
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      zkLinkConfig: {
+        id: '1',
+        l2Key: 'key',
+        contractAccount: { makerFeeRate: '0.001', takerFeeRate: '0.001' },
+        contractConfig: { perpetualContract: [{ symbol: 'BTC-USDT', l2PairId: '1' }] },
+      } as any,
+    },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new ApexOmniExchange(
     'apexomni' as any,
@@ -122,7 +121,9 @@ describe('ApeX Omni Rust parity corrections', () => {
         data: {
           data: {
             id: '1',
-            positions: [{ symbol: 'BTC-USDT', side: 'LONG', size: '2', entryPrice: '100', customImr: '0.1' }],
+            positions: [
+              nativePosition({ symbol: 'BTC-USDT', side: 'LONG', size: '2', entryPrice: '100', customImr: '0.1' }),
+            ],
           },
         },
       })),
@@ -156,7 +157,9 @@ describe('ApeX Omni Rust parity corrections', () => {
     await expect(exchange.fetchOrders()).rejects.toThrow('invalid quantities');
     exchange.xhr = {
       get: vi.fn(async () => ({
-        data: { data: { positions: [{ symbol: 'BTC-USDT', side: 'LONG', size: 'NaN', entryPrice: '100' }] } },
+        data: {
+          data: { positions: [nativePosition({ symbol: 'BTC-USDT', side: 'LONG', size: 'NaN', entryPrice: '100' })] },
+        },
       })),
     } as any;
     await expect(exchange.fetchPositions()).rejects.toThrow('invalid quantities');
@@ -310,11 +313,10 @@ describe('ApeX Omni Rust parity corrections', () => {
 
   it('retains the last known balance when numeric fields are malformed', async () => {
     const { exchange, store } = fixture();
-    store.apply(
-      nativeFixture(
-        { balance: { total: 1000, free: 900, used: 20, upnl: 4 } },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { balance: { total: 1000, free: 900, used: 20, upnl: 4 } },
+      store.markets.map((row) => row.symbol),
     );
     exchange.xhr = {
       get: vi.fn(async () => ({
@@ -329,11 +331,10 @@ describe('ApeX Omni Rust parity corrections', () => {
     const initial = exchange.mapPosition({ symbol: 'BTC-USDT', side: 'LONG', size: '1', entryPrice: '100' })!;
     (() => {
       const incoming: StoreData['positions'] = [initial];
-      return store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
       );
     })();
     expect(() =>
@@ -350,29 +351,27 @@ describe('ApeX Omni Rust parity corrections', () => {
     const withLegs = row({ openSlParam: { triggerPrice: '90' }, openTpParams: { triggerPrice: '110' } });
     (() => {
       const incoming: StoreData['orders'] = exchange.mapOrder(withLegs);
-      return store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        {
+          orders: [
+            ...store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        store.markets.map((row) => row.symbol),
       );
     })();
     websocket.handleOrderTopic([row({ status: 'CANCELED' })] as any);
     (() => {
       const incoming: StoreData['orders'] = exchange.mapOrder(withLegs);
-      return store.apply(
-        nativeFixture(
-          { orders: incoming.map((row) => ({ ...store.orders.find((old) => old.id === row.id), ...row })) },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        { orders: incoming.map((row) => ({ ...store.orders.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
       );
     })();
     expect(store.orders).toHaveLength(0);
@@ -389,19 +388,18 @@ describe('ApeX Omni Rust parity corrections', () => {
     );
     (() => {
       const incoming: StoreData['orders'] = orders;
-      return store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        {
+          orders: [
+            ...store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        store.markets.map((row) => row.symbol),
       );
     })();
     vi.spyOn(exchange, 'cancelOrders').mockResolvedValue(undefined);
@@ -449,28 +447,26 @@ describe('ApeX snapshot identifiers and execution range precision', () => {
     const initialPosition = exchange.mapPosition({ symbol: 'BTC-USDT', side: 'LONG', size: '2', entryPrice: '100' })!;
     (() => {
       const incoming: StoreData['positions'] = [initialPosition];
-      return store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
       );
     })();
     (() => {
       const incoming: StoreData['orders'] = exchange.mapOrder(row());
-      return store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        {
+          orders: [
+            ...store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        store.markets.map((row) => row.symbol),
       );
     })();
     exchange.xhr = {

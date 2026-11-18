@@ -15,7 +15,7 @@ import { ChaserOrderManager, chaserOrderManagerInstance } from '../../webworker/
 import { TwapInstance } from '../../webworker/twap/TwapInstance';
 import { twapManager } from '../../webworker/twap/TwapManager';
 import { consumerFrame } from '../cutover/consumerFrame';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { engineCapabilities, quantityUnitsCode } from '../fixtures/engineCapabilities';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
@@ -392,11 +392,10 @@ describe('Rust native current-account reads', () => {
     try {
       await vi.advanceTimersByTimeAsync(1000);
       // Establish the tracked order under the actual manager's update listener.
-      r.store.apply(
-        nativeFixture(
-          { latency: 1 },
-          r.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        r.store,
+        { latency: 1 },
+        r.store.markets.map((row) => row.symbol),
       );
       await vi.advanceTimersByTimeAsync(0);
       expect(instance.isStopped).toBe(false);
@@ -421,11 +420,10 @@ describe('Rust native current-account reads', () => {
 
   it('rejects unstarted or merely JS-seeded synchronous reads', async () => {
     const r = fixture('bybit', { ...loaded, markets: false });
-    r.store.apply(
-      nativeFixture(
-        { loaded },
-        r.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      r.store,
+      { loaded },
+      r.store.markets.map((row) => row.symbol),
     );
     expect(() => r.exchange.syncAccountState()).toThrow('not started');
     const starting = r.exchange.start().catch(() => {});
@@ -440,11 +438,10 @@ describe('Rust native current-account reads', () => {
     const r = fixture();
     await r.start();
     delete r.native.accountSnapshotFrame;
-    r.store.apply(
-      nativeFixture(
-        { orders: [order()] },
-        r.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      r.store,
+      { orders: [order()] },
+      r.store.markets.map((row) => row.symbol),
     );
     await expect(r.exchange.fetchOrders()).rejects.toThrow('does not support private account snapshots');
   });
@@ -471,11 +468,10 @@ describe('Rust native current-account reads', () => {
 
   it('wakes a cold account read on disposal instead of answering from its JS seed', async () => {
     const r = fixture('bybit', { ...loaded, orders: false }, false);
-    r.store.apply(
-      nativeFixture(
-        { loaded, orders: [order()] },
-        r.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      r.store,
+      { loaded, orders: [order()] },
+      r.store.markets.map((row) => row.symbol),
     );
     const reading = r.exchange.fetchOrders();
     const rejected = expect(reading).rejects.toThrow('disposed');
@@ -528,11 +524,10 @@ describe('Rust native current-account reads', () => {
   it('selects cancel-all symbols and set-all leverage positions from native state', async () => {
     const r = fixture();
     await r.start();
-    r.store.apply(
-      nativeFixture(
-        { orders: [order('stale', 'ETHUSDT')], positions: [position('ETHUSDT')] },
-        r.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      r.store,
+      { orders: [order('stale', 'ETHUSDT')], positions: [position('ETHUSDT')] },
+      r.store.markets.map((row) => row.symbol),
     );
     r.update({ orders: [order('a'), order('b')], positions: [position()] });
     await r.exchange.cancelAllOrders();
@@ -559,11 +554,10 @@ describe('Rust native current-account reads', () => {
   it('closes one native preflush snapshot with native linear quantities and separate hedge legs', async () => {
     const r = fixture('mexc');
     await r.start();
-    r.store.apply(
-      nativeFixture(
-        { positions: [{ ...position(), contracts: 9999 }] },
-        r.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      r.store,
+      { positions: [{ ...position(), contracts: 9999 }] },
+      r.store.markets.map((row) => row.symbol),
     );
     r.update({
       positions: [
@@ -602,11 +596,10 @@ describe('Rust native current-account reads', () => {
     r.exchange.on('log', (message: string) => logs.push(message));
     r.exchange.fetchPositions = () => Promise.reject(new Error('positions did not load within 30s'));
     r.exchange.syncAccountState = () => undefined;
-    r.store.apply(
-      nativeFixture(
-        { loaded: { ...r.store.loaded, positions: false } },
-        r.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      r.store,
+      { loaded: { ...r.store.loaded, positions: false } },
+      r.store.markets.map((row) => row.symbol),
     );
     await expect(r.exchange.nukePositions()).rejects.toThrow('positions did not load');
     expect(logs.join()).toContain('Open positions: unknown, not loaded');
@@ -861,11 +854,10 @@ describe('Rust native current-account reads', () => {
   it('does not invent a close for empty native positions despite a stale JS row', async () => {
     const r = fixture();
     await r.start();
-    r.store.apply(
-      nativeFixture(
-        { positions: [position()] },
-        r.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      r.store,
+      { positions: [position()] },
+      r.store.markets.map((row) => row.symbol),
     );
     await r.exchange.nukePositions(3);
     expect(r.commands.filter((c) => c.op === 'placeOrders')).toEqual([]);
@@ -1088,11 +1080,10 @@ describe('Rust native current-account reads', () => {
   it('reports a missing market without closing anything for it', async () => {
     const r = fixture();
     await r.start();
-    r.store.apply(
-      nativeFixture(
-        { markets: [] },
-        r.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      r.store,
+      { markets: [] },
+      r.store.markets.map((row) => row.symbol),
     );
     r.update({ positions: [position()] });
     await expect(r.exchange.nukePositions()).rejects.toThrow('BTCUSDT: market not found');

@@ -29,7 +29,8 @@ import {
 } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { hasSeenFill, markFillSeen } from './hyperliquid.cross-cache';
 import { HyperliquidExchange } from './hyperliquid.exchange';
 import {
@@ -364,11 +365,10 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
           // Just record latency, don't schedule next ping (handled by interval)
           if (this.pingAt) {
             const diff = performance.now() - this.pingAt;
-            this.store.apply(
-              nativeFixture(
-                { latency: Math.round(diff / 2) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            applyReferenceFixture(
+              this.store,
+              { latency: Math.round(diff / 2) },
+              this.store.markets.map((row) => row.symbol),
             );
           }
           return;
@@ -450,15 +450,14 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
                   marginType: isOpenPosition ? position.marginType : symbolConfiguration.marginType,
                   leverage: isOpenPosition ? position.leverage : symbolConfiguration.leverage,
                 };
-                return this.parent.store.apply(
-                  nativeFixture(
-                    {
-                      positions: this.parent.store.positions.map((row) =>
-                        row.id === target.id ? { ...row, ...changes } : row,
-                      ),
-                    },
-                    this.parent.store.markets.map((row) => row.symbol),
-                  ),
+                return applyReferenceFixture(
+                  this.parent.store,
+                  {
+                    positions: this.parent.store.positions.map((row) =>
+                      row.id === target.id ? { ...row, ...changes } : row,
+                    ),
+                  },
+                  this.parent.store.markets.map((row) => row.symbol),
                 );
               })();
             }
@@ -542,11 +541,10 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
       (() => {
         const target = ticker;
         const changes: Partial<StoreData['tickers'][number]> = updateBuf;
-        return this.parent.store.apply(
-          nativeFixture(
-            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
       if (updatedSymbols) updatedSymbols.add(ticker.symbol);
@@ -651,7 +649,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
           unrealizedPnl: +assetPosition.position.unrealizedPnl,
           ...(realizedPnl !== undefined ? { realizedPnl } : {}),
           contracts: Math.abs(+assetPosition.position.szi),
-          liquidationPrice: +assetPosition.position.liquidationPx,
+          liquidationPrice: nativeLiquidationPrice(+assetPosition.position.liquidationPx),
           marginSize: assetPosition.position.marginUsed != null ? +assetPosition.position.marginUsed : undefined,
           positionMode,
           marginType: assetPosition.position.leverage.type === 'cross' ? MarginType.Cross : MarginType.Isolated,
@@ -678,16 +676,15 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         }
         (() => {
           const incoming: StoreData['positions'] = Array.from(merged.values());
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.parent.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.parent.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
       } else {
@@ -696,19 +693,18 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         // to fake/default values between updates.
         (() => {
           const incoming: StoreData['positions'] = corePositions;
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                positions: [
-                  ...this.parent.store.positions.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.parent.store.positions.some((old) => old.id === row.id)),
-                ],
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              positions: [
+                ...this.parent.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.parent.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -769,7 +765,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         unrealizedPnl: +assetPosition.position.unrealizedPnl,
         ...(realizedPnl !== undefined ? { realizedPnl } : {}),
         contracts: Math.abs(+assetPosition.position.szi),
-        liquidationPrice: +assetPosition.position.liquidationPx,
+        liquidationPrice: nativeLiquidationPrice(+assetPosition.position.liquidationPx),
         marginSize: assetPosition.position.marginUsed != null ? +assetPosition.position.marginUsed : undefined,
         positionMode,
         marginType: assetPosition.position.leverage.type === 'cross' ? MarginType.Cross : MarginType.Isolated,
@@ -792,16 +788,15 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     }
     (() => {
       const incoming: StoreData['positions'] = Array.from(merged.values());
-      return this.parent.store.apply(
-        nativeFixture(
-          {
-            positions: incoming.map((row) => ({
-              ...this.parent.store.positions.find((old) => old.id === row.id),
-              ...row,
-            })),
-          },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.parent.store,
+        {
+          positions: incoming.map((row) => ({
+            ...this.parent.store.positions.find((old) => old.id === row.id),
+            ...row,
+          })),
+        },
+        this.parent.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -987,7 +982,7 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         leverage,
         unrealizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
         positionMode,
         marginType,
       }),
@@ -1001,24 +996,23 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
       positionMode,
       unrealizedPnl: nextContracts === 0 ? 0 : existingPosition?.unrealizedPnl || 0,
       contracts: nextContracts,
-      liquidationPrice: nextContracts === 0 ? 0 : existingPosition?.liquidationPrice || 0,
+      liquidationPrice: nativeLiquidationPrice(nextContracts === 0 ? 0 : existingPosition?.liquidationPrice || 0),
     };
 
     (() => {
       const incoming: StoreData['positions'] = [optimisticPosition];
-      return this.parent.store.apply(
-        nativeFixture(
-          {
-            positions: [
-              ...this.parent.store.positions.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !this.parent.store.positions.some((old) => old.id === row.id)),
-            ],
-          },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.parent.store,
+        {
+          positions: [
+            ...this.parent.store.positions.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !this.parent.store.positions.some((old) => old.id === row.id)),
+          ],
+        },
+        this.parent.store.markets.map((row) => row.symbol),
       );
     })();
   }
@@ -1107,11 +1101,10 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
         this.parent.suppressCancelledOrder(orderId);
         (() => {
           const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
-          return this.parent.store.apply(
-            nativeFixture(
-              { orders: this.parent.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            { orders: this.parent.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
         this.parent.forgetLimitOrderTimeInForce(orderId);
@@ -1360,19 +1353,18 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
 
         (() => {
           const incoming: StoreData['orders'] = [order];
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.parent.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              orders: [
+                ...this.parent.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -1452,13 +1444,12 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     (() => {
       const target = currentPosition;
       const changes: Partial<StoreData['positions'][number]> = { realizedPnl };
-      return this.parent.store.apply(
-        nativeFixture(
-          {
-            positions: this.parent.store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
-          },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.parent.store,
+        {
+          positions: this.parent.store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+        },
+        this.parent.store.markets.map((row) => row.symbol),
       );
     })();
   }

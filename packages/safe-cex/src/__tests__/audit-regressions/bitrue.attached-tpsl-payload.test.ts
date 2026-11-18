@@ -11,7 +11,7 @@ import {
   PositionMode,
   PositionSide,
 } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
 import { ENDPOINTS } from '../reference/bitrue/bitrue.types';
 
@@ -40,20 +40,19 @@ const POSITION: Position = {
   positionMode: PositionMode.OneWay,
   unrealizedPnl: 0,
   contracts: 0.01,
-  liquidationPrice: 0,
+  liquidationPrice: null,
 };
 
 const createExchange = () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      {
-        markets: [MARKET],
-        positions: [POSITION],
-        tickers: [{ symbol: MARKET.symbol, mark: 60_000, last: 60_000, bid: 59_999, ask: 60_001 } as any],
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: [MARKET],
+      positions: [POSITION],
+      tickers: [{ symbol: MARKET.symbol, mark: 60_000, last: 60_000, bid: 59_999, ask: 60_001 } as any],
+    },
+    store.markets.map((row) => row.symbol),
   );
   return new BitrueExchange('bitrue', { key: 'test-key', secret: 'test-secret' }, store);
 };

@@ -5,7 +5,7 @@ import throttle from 'lodash/throttle';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { FrameStore } from '../../../store/frameStore';
 import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker, timeframeToSeconds } from '../../../types';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { ParadexExchange } from './paradex.exchange';
 import { decodeParadexMessage } from './paradex.sbe';
 import { BASE_WS_URL } from './paradex.types';
@@ -306,11 +306,10 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
       (() => {
         const target = { id: symbol };
         const changes: Partial<StoreData['tickers'][number]> = update;
-        return this.parent.store.apply(
-          nativeFixture(
-            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
     } catch (err) {
@@ -355,13 +354,12 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
             ...(Number.isFinite(openInterest) ? { openInterest } : {}),
             ...(Number.isFinite(fundingRate) ? { fundingRate } : {}),
           };
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -406,11 +404,10 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
           bid: orderbook.bids[0].price,
           ask: orderbook.asks[0].price,
         };
-        return this.parent.store.apply(
-          nativeFixture(
-            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -538,15 +535,12 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
               last: tradePrice,
               mark: tradePrice,
             };
-            return this.parent.store.apply(
-              nativeFixture(
-                {
-                  tickers: this.parent.store.tickers.map((row) =>
-                    row.id === target.id ? { ...row, ...changes } : row,
-                  ),
-                },
-                this.parent.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.parent.store,
+              {
+                tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+              },
+              this.parent.store.markets.map((row) => row.symbol),
             );
           })();
 

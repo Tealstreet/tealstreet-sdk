@@ -13,7 +13,7 @@ import {
   PositionMode,
   PositionSide,
 } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { createAPI as createKrakenAPI } from '../reference/kraken/kraken.api';
 import { KrakenExchange } from '../reference/kraken/kraken.exchange';
 import { ENDPOINTS } from '../reference/kraken/kraken.types';
@@ -50,30 +50,29 @@ const SPOT_MARKET = {
 
 const createFuturesExchange = () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      {
-        markets: [FUTURES_MARKET],
-        tickers: [
-          {
-            id: FUTURES_MARKET.id,
-            symbol: FUTURES_MARKET.symbol,
-            bid: 49_999,
-            ask: 50_001,
-            last: 50_000,
-            mark: 50_000,
-            index: 50_000,
-            percentage: 0,
-            fundingRate: 0,
-            fundingTime: 0,
-            volume: 0,
-            quoteVolume: 0,
-            openInterest: 0,
-          },
-        ],
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: [FUTURES_MARKET],
+      tickers: [
+        {
+          id: FUTURES_MARKET.id,
+          symbol: FUTURES_MARKET.symbol,
+          bid: 49_999,
+          ask: 50_001,
+          last: 50_000,
+          mark: 50_000,
+          index: 50_000,
+          percentage: 0,
+          fundingRate: 0,
+          fundingTime: 0,
+          volume: 0,
+          quoteVolume: 0,
+          openInterest: 0,
+        },
+      ],
+    },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new KrakenExchange('kraken', { key: 'key', secret: 'c2VjcmV0' }, store);
   return { exchange, store };
@@ -81,30 +80,29 @@ const createFuturesExchange = () => {
 
 const createSpotExchange = () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      {
-        markets: [SPOT_MARKET],
-        tickers: [
-          {
-            id: SPOT_MARKET.id,
-            symbol: SPOT_MARKET.symbol,
-            bid: 49_999,
-            ask: 50_001,
-            last: 50_000,
-            mark: 50_000,
-            index: 50_000,
-            percentage: 0,
-            fundingRate: 0,
-            fundingTime: 0,
-            volume: 0,
-            quoteVolume: 0,
-            openInterest: 0,
-          },
-        ],
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: [SPOT_MARKET],
+      tickers: [
+        {
+          id: SPOT_MARKET.id,
+          symbol: SPOT_MARKET.symbol,
+          bid: 49_999,
+          ask: 50_001,
+          last: 50_000,
+          mark: 50_000,
+          index: 50_000,
+          percentage: 0,
+          fundingRate: 0,
+          fundingTime: 0,
+          volume: 0,
+          quoteVolume: 0,
+          openInterest: 0,
+        },
+      ],
+    },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new KrakenSpotExchange('krakenspot', { key: 'key', secret: 'c2VjcmV0' }, store);
   return { exchange, store };
@@ -275,27 +273,26 @@ describe('Kraken remaining July audit regressions', () => {
 
   it('maps the documented unrealizedPnl field and preserves WS-only position values', async () => {
     const { exchange, store } = createFuturesExchange();
-    store.apply(
-      nativeFixture(
-        {
-          positions: [
-            {
-              id: 'PF_XBTUSD:long',
-              symbol: 'PF_XBTUSD',
-              side: PositionSide.Long,
-              entryPrice: 48_000,
-              notional: 123_456,
-              leverage: 10,
-              unrealizedPnl: 200,
-              contracts: 2,
-              liquidationPrice: 42_000,
-              marginType: MarginType.Cross,
-              positionMode: PositionMode.OneWay,
-            },
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        positions: [
+          {
+            id: 'PF_XBTUSD:long',
+            symbol: 'PF_XBTUSD',
+            side: PositionSide.Long,
+            entryPrice: 48_000,
+            notional: 123_456,
+            leverage: 10,
+            unrealizedPnl: 200,
+            contracts: 2,
+            liquidationPrice: 42_000,
+            marginType: MarginType.Cross,
+            positionMode: PositionMode.OneWay,
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({

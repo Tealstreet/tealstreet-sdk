@@ -8,7 +8,7 @@ import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exch
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { consumerFrame } from '../cutover/consumerFrame';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
@@ -77,11 +77,10 @@ describe('Rust Paradex account boundary', () => {
     setWasmEngineLoader(load);
     const store = new FrameStore();
     installNativeStartupFrames(engine, store);
-    store.apply(
-      nativeFixture(
-        { markets: [market], loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [market], loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new RustEngineExchange('paradex', { ...credentials, secret: '', ...options }, store);
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});

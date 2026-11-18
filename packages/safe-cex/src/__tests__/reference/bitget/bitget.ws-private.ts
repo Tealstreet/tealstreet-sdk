@@ -15,7 +15,7 @@ import { LogSeverity, OrderStatus, OrderType } from '../../../types';
 import { subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
 import { WsDirectFallback } from '../../../utils/wsDirectFallback';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 /** Login refusals about where the connection comes from: 40018 key bound to other IPs, 40024 restricted location. */
 const BITGET_EGRESS_REFUSAL_CODES = new Set(['40018', '40024']);
@@ -477,15 +477,14 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
           (() => {
             const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [order];
             const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: this.store.orders.map((row) =>
-                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                  ),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
           this.markOrderAsTerminal(order.id);
@@ -500,15 +499,14 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
           (() => {
             const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [order];
             const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: this.store.orders.map((row) =>
-                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                  ),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
           this.markOrderAsTerminal(order.id);
@@ -519,19 +517,18 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         orders.forEach((order) => {
           (() => {
             const incoming: StoreData['orders'] = [order];
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: [
-                    ...this.store.orders.map((row) => {
-                      const change = incoming.find((item) => item.id === row.id);
-                      return change ? { ...row, ...change } : row;
-                    }),
-                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                  ],
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
           this.markOrderAsOpenFromWs(order.id);
@@ -575,19 +572,18 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       if (mappedStatus === OrderStatus.Open) {
         (() => {
           const incoming: StoreData['orders'] = [parentOrder];
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         this.markOrderAsOpenFromWs(parentOrder.id);
@@ -595,15 +591,14 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [parentOrder];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         this.markOrderAsTerminal(parentOrder.id);
@@ -611,15 +606,14 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [parentOrder];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         this.markOrderAsTerminal(parentOrder.id);
@@ -662,16 +656,15 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         this.markWsPositions([], action);
         (() => {
           const incoming: StoreData['positions'] = [];
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -688,32 +681,30 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     if (action === 'snapshot') {
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } else {
       for (const position of positions) {
         (() => {
           const incoming: StoreData['positions'] = [position];
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: [
-                  ...this.store.positions.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -735,16 +726,15 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         this.markWsPositions([], action);
         (() => {
           const incoming: StoreData['positions'] = [];
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -759,32 +749,30 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     if (action === 'snapshot') {
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } else {
       for (const position of positions) {
         (() => {
           const incoming: StoreData['positions'] = [position];
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: [
-                  ...this.store.positions.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -813,19 +801,18 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     // Bitget account WS unrealizedPL can be stale/empty; derive from positions + last price when possible.
     const upnl = this.parent.calculateAccountUpnl(apiUpnl);
 
-    this.store.apply(
-      nativeFixture(
-        {
-          balance: {
-            used: subtract(unionTotalMargin, unionAvailable),
-            free: unionAvailable,
-            total: subtract(unionTotalMargin, upnl),
-            upnl,
-            info: acct,
-          },
+    applyReferenceFixture(
+      this.store,
+      {
+        balance: {
+          used: subtract(unionTotalMargin, unionAvailable),
+          free: unionAvailable,
+          total: subtract(unionTotalMargin, upnl),
+          upnl,
+          info: acct,
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -847,19 +834,18 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     }
 
     const upnl = this.parent.calculateAccountUpnl(apiUpnl);
-    this.store.apply(
-      nativeFixture(
-        {
-          balance: {
-            used: subtract(accountEquity, available),
-            free: available,
-            total: subtract(accountEquity, upnl),
-            upnl,
-            info: raw,
-          },
+    applyReferenceFixture(
+      this.store,
+      {
+        balance: {
+          used: subtract(accountEquity, available),
+          free: available,
+          total: subtract(accountEquity, upnl),
+          upnl,
+          info: raw,
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
     this.hasPendingBalanceEvents = true;
     this.throttledFetchBalance();
@@ -907,16 +893,15 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       if (!this.isDisposed) {
         (() => {
           const incoming: StoreData['positions'] = this.mergeRestPositionsWithFreshWsState(positions, requestStartedAt);
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -958,17 +943,16 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       this.hasPendingBalanceEvents = false;
       const balance = await this.parent.fetchBalance({ preferFast: true });
       if (!this.isDisposed) {
-        this.store.apply(
-          nativeFixture(
-            {
-              balance,
-              loaded: {
-                ...this.store.loaded,
-                balance: true,
-              },
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: {
+              ...this.store.loaded,
+              balance: true,
             },
-            this.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       }
     } catch {
@@ -1062,11 +1046,10 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
 
       (() => {
         const incoming: StoreData['orders'] = [...reconciledFetchedOrders, ...preservedOrders];
-        return this.store.apply(
-          nativeFixture(
-            { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } catch {

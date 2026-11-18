@@ -66,7 +66,8 @@ import { createPositionId } from '../../../utils/createPositionId';
 import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI, createEdgeAPI, createTradingAPI } from './grvt.api';
 import { grvtNanoseconds, grvtScaledUint64, grvtUint64 } from './grvt.integer';
 import { getGrvtOrderTimeInForce, getGrvtTriggerMetadata } from './grvt.order-semantics';
@@ -276,14 +277,13 @@ export class GrvtExchange extends BaseExchange {
         const balance = await this.fetchBalance();
         if (this.isDisposed) return;
 
-        this.store.apply(
-          nativeFixture(
-            {
-              balance,
-              loaded: { ...this.store.loaded, balance: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: { ...this.store.loaded, balance: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         // Re-derive upnl from live ticker prices so the REST API's
@@ -392,31 +392,29 @@ export class GrvtExchange extends BaseExchange {
       (() => {
         const updates: Array<[Pick<StoreData['positions'][number], 'id'>, Partial<StoreData['positions'][number]>]> =
           positionUpdates;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: this.store.positions.map((row) => {
-                const change = updates.find(([target]) => target.id === row.id);
-                return change ? { ...row, ...change[1] } : row;
-              }),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: this.store.positions.map((row) => {
+              const change = updates.find(([target]) => target.id === row.id);
+              return change ? { ...row, ...change[1] } : row;
+            }),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
 
     if (Math.abs((this.store.balance.upnl || 0) - totalUpnl) > 1e-9) {
-      this.store.apply(
-        nativeFixture(
-          {
-            balance: {
-              ...this.store.balance,
-              upnl: totalUpnl,
-            },
+      applyReferenceFixture(
+        this.store,
+        {
+          balance: {
+            ...this.store.balance,
+            upnl: totalUpnl,
           },
-          this.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     }
   };
@@ -685,11 +683,10 @@ export class GrvtExchange extends BaseExchange {
         // Fetch and set markets in store with loaded flag
         const markets = await this.fetchMarkets();
 
-        this.store.apply(
-          nativeFixture(
-            { markets, loaded: { ...this.store.loaded, markets: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { markets, loaded: { ...this.store.loaded, markets: true } },
+          this.store.markets.map((row) => row.symbol),
         );
 
         // Connect WebSocket now that markets are loaded
@@ -698,22 +695,20 @@ export class GrvtExchange extends BaseExchange {
 
         // Fetch and set tickers in store with loaded flag
         const tickers = await this.fetchTickers();
-        this.store.apply(
-          nativeFixture(
-            { tickers, loaded: { ...this.store.loaded, tickers: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { tickers, loaded: { ...this.store.loaded, tickers: true } },
+          this.store.markets.map((row) => row.symbol),
         );
       }
 
       if (publicDataOnly) {
-        this.store.apply(
-          nativeFixture(
-            {
-              loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
         this.log('GRVT exchange started in public-only mode', LogSeverity.Info);
         return;
@@ -723,20 +718,18 @@ export class GrvtExchange extends BaseExchange {
       // Note: fetchBalance() also auto-detects grvtTradingAccountId if not provided
       try {
         const balance = await this.fetchBalance();
-        this.store.apply(
-          nativeFixture(
-            { balance, loaded: { ...this.store.loaded, balance: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { balance, loaded: { ...this.store.loaded, balance: true } },
+          this.store.markets.map((row) => row.symbol),
         );
       } catch (err) {
         this.log(`Error fetching balance: ${err}`, LogSeverity.Warning);
         // Set loaded flag even if fetch fails (empty balance)
-        this.store.apply(
-          nativeFixture(
-            { loaded: { ...this.store.loaded, balance: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { loaded: { ...this.store.loaded, balance: true } },
+          this.store.markets.map((row) => row.symbol),
         );
       }
 
@@ -747,11 +740,10 @@ export class GrvtExchange extends BaseExchange {
       // so startup and the balance-loaded safety contract stay intact.
       if (!useExternalPublicData && this.grvtTradingAccountId) {
         const markets = await this.updateMarketLeverageLimits(this.store.markets);
-        this.store.apply(
-          nativeFixture(
-            { markets, loaded: { ...this.store.loaded, markets: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { markets, loaded: { ...this.store.loaded, markets: true } },
+          this.store.markets.map((row) => row.symbol),
         );
       }
 
@@ -776,41 +768,37 @@ export class GrvtExchange extends BaseExchange {
       // Fetch positions and set loaded flag
       try {
         const positions = await this.fetchPositions();
-        this.store.apply(
-          nativeFixture(
-            { positions, loaded: { ...this.store.loaded, positions: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { positions, loaded: { ...this.store.loaded, positions: true } },
+          this.store.markets.map((row) => row.symbol),
         );
         this.syncBalanceUpnlFromPositions(positions);
       } catch (err) {
         this.log(`Error fetching positions: ${err}`, LogSeverity.Warning);
         // Set loaded flag even if fetch fails (empty positions)
-        this.store.apply(
-          nativeFixture(
-            { loaded: { ...this.store.loaded, positions: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { loaded: { ...this.store.loaded, positions: true } },
+          this.store.markets.map((row) => row.symbol),
         );
       }
 
       // Fetch open orders and set loaded flag
       try {
         const orders = await this.fetchOpenOrders();
-        this.store.apply(
-          nativeFixture(
-            { orders, loaded: { ...this.store.loaded, orders: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { orders, loaded: { ...this.store.loaded, orders: true } },
+          this.store.markets.map((row) => row.symbol),
         );
       } catch (err) {
         this.log(`Error fetching orders: ${err}`, LogSeverity.Warning);
         // Set loaded flag even if fetch fails (empty orders)
-        this.store.apply(
-          nativeFixture(
-            { loaded: { ...this.store.loaded, orders: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { loaded: { ...this.store.loaded, orders: true } },
+          this.store.markets.map((row) => row.symbol),
         );
       }
 
@@ -893,11 +881,10 @@ export class GrvtExchange extends BaseExchange {
       (market) => !newMarkets.some((newMarket) => newMarket.id === market.id),
     );
 
-    this.store.apply(
-      nativeFixture(
-        { markets: newMarkets },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { markets: newMarkets },
+      this.store.markets.map((row) => row.symbol),
     );
 
     if (added.length > 0 || removed.length > 0) {
@@ -1137,7 +1124,7 @@ export class GrvtExchange extends BaseExchange {
         leverage,
         unrealizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
         positionMode: PositionMode.OneWay,
         marginType: MarginType.Isolated,
       };
@@ -1231,7 +1218,7 @@ export class GrvtExchange extends BaseExchange {
           leverage,
           unrealizedPnl,
           realizedPnl,
-          liquidationPrice,
+          liquidationPrice: nativeLiquidationPrice(liquidationPrice),
           marginType: (grvtPos.mt ?? grvtPos.margin_type) === 'CROSS' ? MarginType.Cross : MarginType.Isolated,
           positionMode,
           lastUpdate: virtualClock.getCurrentTimeMs(),
@@ -2366,16 +2353,15 @@ export class GrvtExchange extends BaseExchange {
           sellLeverage: this.defaultLeverage,
         };
 
-        this.store.apply(
-          nativeFixture(
-            {
-              fetchedLeverage: {
-                ...this.store.fetchedLeverage,
-                [symbol]: defaultLeverageObj,
-              },
+        applyReferenceFixture(
+          this.store,
+          {
+            fetchedLeverage: {
+              ...this.store.fetchedLeverage,
+              [symbol]: defaultLeverageObj,
             },
-            this.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         return defaultLeverageObj;
@@ -2400,16 +2386,15 @@ export class GrvtExchange extends BaseExchange {
           sellLeverage: this.defaultLeverage,
         };
 
-        this.store.apply(
-          nativeFixture(
-            {
-              fetchedLeverage: {
-                ...this.store.fetchedLeverage,
-                [symbol]: defaultLeverageObj,
-              },
+        applyReferenceFixture(
+          this.store,
+          {
+            fetchedLeverage: {
+              ...this.store.fetchedLeverage,
+              [symbol]: defaultLeverageObj,
             },
-            this.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         return defaultLeverageObj;
@@ -2433,16 +2418,15 @@ export class GrvtExchange extends BaseExchange {
           sellLeverage: this.defaultLeverage,
         };
 
-        this.store.apply(
-          nativeFixture(
-            {
-              fetchedLeverage: {
-                ...this.store.fetchedLeverage,
-                [symbol]: defaultLeverageObj,
-              },
+        applyReferenceFixture(
+          this.store,
+          {
+            fetchedLeverage: {
+              ...this.store.fetchedLeverage,
+              [symbol]: defaultLeverageObj,
             },
-            this.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         return defaultLeverageObj;
@@ -2458,16 +2442,15 @@ export class GrvtExchange extends BaseExchange {
       };
 
       // FrameStore the fetched leverage in the store for UI access
-      this.store.apply(
-        nativeFixture(
-          {
-            fetchedLeverage: {
-              ...this.store.fetchedLeverage,
-              [symbol]: leverageObj,
-            },
+      applyReferenceFixture(
+        this.store,
+        {
+          fetchedLeverage: {
+            ...this.store.fetchedLeverage,
+            [symbol]: leverageObj,
           },
-          this.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       return leverageObj;
@@ -2483,16 +2466,15 @@ export class GrvtExchange extends BaseExchange {
         sellLeverage: this.defaultLeverage,
       };
 
-      this.store.apply(
-        nativeFixture(
-          {
-            fetchedLeverage: {
-              ...this.store.fetchedLeverage,
-              [symbol]: defaultLeverageObj,
-            },
+      applyReferenceFixture(
+        this.store,
+        {
+          fetchedLeverage: {
+            ...this.store.fetchedLeverage,
+            [symbol]: defaultLeverageObj,
           },
-          this.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       return defaultLeverageObj;
@@ -2544,19 +2526,18 @@ export class GrvtExchange extends BaseExchange {
       this.log(`Leverage set successfully for ${symbol}: ${leverage}`, LogSeverity.Info);
 
       // Update the fetchedLeverage cache
-      this.store.apply(
-        nativeFixture(
-          {
-            fetchedLeverage: {
-              ...this.store.fetchedLeverage,
-              [symbol]: {
-                buyLeverage: leverage,
-                sellLeverage: leverage,
-              },
+      applyReferenceFixture(
+        this.store,
+        {
+          fetchedLeverage: {
+            ...this.store.fetchedLeverage,
+            [symbol]: {
+              buyLeverage: leverage,
+              sellLeverage: leverage,
             },
           },
-          this.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       // Update the position's leverage in the store
@@ -2565,11 +2546,10 @@ export class GrvtExchange extends BaseExchange {
         (() => {
           const target = position;
           const changes: Partial<StoreData['positions'][number]> = { leverage };
-          return this.store.apply(
-            nativeFixture(
-              { positions: this.store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            { positions: this.store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }

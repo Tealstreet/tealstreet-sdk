@@ -45,7 +45,7 @@ import {
 } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import {
   createAPI,
   isCryptocomAuthenticationErrorCode,
@@ -139,14 +139,13 @@ export class CryptocomExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      this.store.apply(
-        nativeFixture(
-          {
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          markets,
+          loaded: { ...this.store.loaded, markets: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       const tickers = await this.fetchTickers();
@@ -154,14 +153,13 @@ export class CryptocomExchange extends BaseExchange {
 
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} Crypto.com markets`);
 
-      this.store.apply(
-        nativeFixture(
-          {
-            tickers,
-            loaded: { ...this.store.loaded, tickers: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { ...this.store.loaded, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       // Connect WebSockets
@@ -170,13 +168,12 @@ export class CryptocomExchange extends BaseExchange {
 
     const publicDataOnly = this.isPublicDataOnly;
     if (publicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       return;
     }
@@ -222,14 +219,13 @@ export class CryptocomExchange extends BaseExchange {
 
     this.log(`Loaded Crypto.com orders`);
 
-    this.store.apply(
-      nativeFixture(
-        {
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        orders,
+        loaded: { ...this.store.loaded, orders: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -240,11 +236,10 @@ export class CryptocomExchange extends BaseExchange {
       try {
         const positions = await this.fetchPositions();
         if (this.isDisposed) return;
-        this.store.apply(
-          nativeFixture(
-            { positions, loaded: { ...this.store.loaded, positions: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { positions, loaded: { ...this.store.loaded, positions: true } },
+          this.store.markets.map((row) => row.symbol),
         );
 
         const balance = await this.fetchBalance();
@@ -253,24 +248,22 @@ export class CryptocomExchange extends BaseExchange {
         const upnl = positions.length > 0 ? sumBy(positions, 'unrealizedPnl') : 0;
         (balance as Writable<Balance>).upnl = upnl;
 
-        this.store.apply(
-          nativeFixture(
-            {
-              balance,
-              loaded: { ...this.store.loaded, balance: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: { ...this.store.loaded, balance: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         if (count % 4 === 0) {
           const orders = await this.fetchOrders();
           if (this.isDisposed) return;
-          this.store.apply(
-            nativeFixture(
-              { orders, loaded: { ...this.store.loaded, orders: true } },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            { orders, loaded: { ...this.store.loaded, orders: true } },
+            this.store.markets.map((row) => row.symbol),
           );
         }
       } catch (err: any) {
@@ -470,7 +463,7 @@ export class CryptocomExchange extends BaseExchange {
             leverage: 1,
             unrealizedPnl: parseFloat(p.open_position_pnl) || 0,
             contracts,
-            liquidationPrice: 0,
+            liquidationPrice: null,
             marginType: p.isolation_type === 'ISOLATED_MARGIN' ? MarginType.Isolated : MarginType.Cross,
             positionMode,
             info: { isolationId: p.isolation_id },
@@ -495,7 +488,7 @@ export class CryptocomExchange extends BaseExchange {
               leverage: 1,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               lastUpdate: virtualClock.getCurrentTimeMs(),
               positionMode,
               marginType: MarginType.Cross,
@@ -509,7 +502,7 @@ export class CryptocomExchange extends BaseExchange {
               leverage: 1,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               lastUpdate: virtualClock.getCurrentTimeMs(),
               positionMode,
               marginType: MarginType.Cross,

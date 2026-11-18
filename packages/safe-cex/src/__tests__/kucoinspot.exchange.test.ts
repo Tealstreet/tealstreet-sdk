@@ -13,7 +13,7 @@ import {
   PositionSide,
   Ticker,
 } from '../types';
-import { nativeFixture } from './cutover/nativeFixture';
+import { applyReferenceFixture } from './cutover/referenceFixture';
 import { KucoinSpotExchange } from './reference/kucoin/kucoinspot.exchange';
 import { KUCOIN_SPOT_ENDPOINTS } from './reference/kucoin/kucoinspot.types';
 
@@ -133,11 +133,10 @@ describe('KucoinSpotExchange', () => {
   });
 
   it('maps KuCoin all-ticker rows into spot tickers', async () => {
-    store.apply(
-      nativeFixture(
-        { markets: [btcMarket] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [btcMarket] },
+      store.markets.map((row) => row.symbol),
     );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({
@@ -187,11 +186,10 @@ describe('KucoinSpotExchange', () => {
 
   it('applies /market/ticker:all updates by resolving the symbol from json.subject', () => {
     // Clone: updateTicker mutates the ticker in place, so don't taint the shared fixture.
-    store.apply(
-      nativeFixture(
-        { tickers: [{ ...btcTicker }] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { tickers: [{ ...btcTicker }] },
+      store.markets.map((row) => row.symbol),
     );
     const updateTicker = (() => {
       const observed = vi.fn<(value: typeof store.tickers) => void>();
@@ -214,14 +212,13 @@ describe('KucoinSpotExchange', () => {
   });
 
   it('aggregates trade account balances with ticker-derived USD values', async () => {
-    store.apply(
-      nativeFixture(
-        {
-          markets: [btcMarket],
-          tickers: [btcTicker],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        markets: [btcMarket],
+        tickers: [btcTicker],
+      },
+      store.markets.map((row) => row.symbol),
     );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({
@@ -386,11 +383,10 @@ describe('KucoinSpotExchange', () => {
   });
 
   it('formats KuCoin HF limit order placement payloads', async () => {
-    store.apply(
-      nativeFixture(
-        { markets: [btcMarket] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [btcMarket] },
+      store.markets.map((row) => row.symbol),
     );
     exchange.unlimitedXHR = {
       post: vi.fn().mockResolvedValue({
@@ -430,11 +426,10 @@ describe('KucoinSpotExchange', () => {
   });
 
   it('branches spot order WS events on the event type, not the collapsed status', () => {
-    store.apply(
-      nativeFixture(
-        { markets: [btcMarket] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [btcMarket] },
+      store.markets.map((row) => row.symbol),
     );
     // any background refetch is a harmless mock
     exchange.xhr = { get: vi.fn().mockResolvedValue({ data: { code: '200000', data: { symbols: [] } } }) } as any;
@@ -479,11 +474,10 @@ describe('KucoinSpotExchange', () => {
   });
 
   it('emits before throwing on unsupported spot orders (TP/SL)', async () => {
-    store.apply(
-      nativeFixture(
-        { markets: [btcMarket] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [btcMarket] },
+      store.markets.map((row) => row.symbol),
     );
     const emitSpy = vi.spyOn(exchange, 'emitAndLogError');
     await expect(
@@ -579,22 +573,21 @@ describe('KucoinSpotExchange', () => {
   });
 
   it('generates zero-size one-way positions for active spot markets', async () => {
-    store.apply(
-      nativeFixture(
-        {
-          markets: [
-            btcMarket,
-            {
-              ...btcMarket,
-              id: 'ETH-USDT',
-              symbol: 'ETH-USDT',
-              base: 'ETH',
-              active: false,
-            },
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          btcMarket,
+          {
+            ...btcMarket,
+            id: 'ETH-USDT',
+            symbol: 'ETH-USDT',
+            base: 'ETH',
+            active: false,
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
 
     const positions = await exchange.fetchPositions();
@@ -609,7 +602,7 @@ describe('KucoinSpotExchange', () => {
       leverage: 1,
       unrealizedPnl: 0,
       contracts: 0,
-      liquidationPrice: 0,
+      liquidationPrice: null,
       marginType: MarginType.Isolated,
       positionMode: PositionMode.OneWay,
       info: { spot: true },

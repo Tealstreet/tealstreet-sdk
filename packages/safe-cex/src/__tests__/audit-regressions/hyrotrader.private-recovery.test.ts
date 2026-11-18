@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { Order, OrderSide, OrderType, Position, PositionMode, PositionSide } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
 
 class TestHyroExchange extends HyrotraderExchange {
@@ -128,11 +128,10 @@ describe('HyroTrader authoritative private snapshots', () => {
   it('rejects failed recovery without publishing any sibling snapshot', async () => {
     const { exchange, store } = setup();
     const old = { id: 'old' } as Order;
-    store.apply(
-      nativeFixture(
-        { orders: [old] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { orders: [old] },
+      store.markets.map((row) => row.symbol),
     );
     vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([{ id: 'new' } as Order]);
     vi.spyOn(exchange, 'fetchPositions').mockRejectedValue(new Error('positions unavailable'));
@@ -144,11 +143,10 @@ describe('HyroTrader authoritative private snapshots', () => {
   });
   it('publishes one complete snapshot using the new positions for wallet upnl', async () => {
     const { exchange, store } = setup();
-    store.apply(
-      nativeFixture(
-        { positions: [{ id: 'old', unrealizedPnl: 10 } as Position] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { positions: [{ id: 'old', unrealizedPnl: 10 } as Position] },
+      store.markets.map((row) => row.symbol),
     );
     vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
     vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([{ id: 'new', unrealizedPnl: 20 } as Position]);
@@ -179,11 +177,10 @@ describe('HyroTrader authoritative private snapshots', () => {
     ]);
     const pending = exchange.reconcilePrivateState();
     exchange.privateWebsocket.stateRevision++;
-    store.apply(
-      nativeFixture(
-        { orders: [{ id: 'newer' } as Order] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { orders: [{ id: 'newer' } as Order] },
+      store.markets.map((row) => row.symbol),
     );
     resolve([{ id: 'stale' } as Order]);
     expect(await pending).toBe(false);
@@ -205,27 +202,26 @@ const attach = (exchange: TestHyroExchange) => {
 describe('HyroTrader private stream recovery ordering', () => {
   it('accepts zero-size flat position updates without leverage after a close', () => {
     const { exchange, store } = setup();
-    store.apply(
-      nativeFixture(
-        {
-          positions: [
-            {
-              id: 'BTCUSDT',
-              symbol: 'BTCUSDT',
-              side: PositionSide.Short,
-              entryPrice: 83000,
-              notional: 165.75,
-              leverage: 3,
-              unrealizedPnl: 0,
-              realizedPnl: 0,
-              contracts: 0.002,
-              liquidationPrice: 0,
-              positionMode: PositionMode.OneWay,
-            } as Position,
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        positions: [
+          {
+            id: 'BTCUSDT',
+            symbol: 'BTCUSDT',
+            side: PositionSide.Short,
+            entryPrice: 83000,
+            notional: 165.75,
+            leverage: 3,
+            unrealizedPnl: 0,
+            realizedPnl: 0,
+            contracts: 0.002,
+            liquidationPrice: null,
+            positionMode: PositionMode.OneWay,
+          } as Position,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     const { socket } = attach(exchange);
     socket.ready = true;

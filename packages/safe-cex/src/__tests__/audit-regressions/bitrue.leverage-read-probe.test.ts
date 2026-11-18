@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { MarginType, Market, PositionMode, PositionSide } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
 import { ENDPOINTS } from '../reference/bitrue/bitrue.types';
 
@@ -51,11 +51,10 @@ const accountWithLeverage = (leverageLevel: number) =>
 describe('audit regression: Bitrue leverage read probe', () => {
   it('reads account metadata without placing an order or changing leverage', async () => {
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        { markets: [MARKET] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new BitrueExchange('bitrue', { key: 'test-key', secret: 'test-secret' }, store);
     const placeOrder = vi.fn();
@@ -75,11 +74,10 @@ describe('audit regression: Bitrue leverage read probe', () => {
 
   it('uses the account snapshot without placing an order or changing leverage', async () => {
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        { markets: [MARKET] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new BitrueExchange('bitrue', { key: 'test-key', secret: 'test-secret' }, store);
     const placeOrder = vi.fn();
@@ -100,28 +98,27 @@ describe('audit regression: Bitrue leverage read probe', () => {
     const currentPosition = {
       ...accountWithLeverage(11).data.account[0].positionVos[0].positions[0],
     };
-    store.apply(
-      nativeFixture(
-        {
-          markets: [MARKET],
-          positions: [
-            {
-              id: `${MARKET.symbol}-long-one-way`,
-              symbol: MARKET.symbol,
-              side: PositionSide.Long,
-              positionMode: PositionMode.OneWay,
-              marginType: MarginType.Cross,
-              leverage: 11,
-              entryPrice: currentPosition.openPrice,
-              notional: currentPosition.positionBalance,
-              unrealizedPnl: 0,
-              contracts: currentPosition.volume,
-              liquidationPrice: 0,
-            },
-          ] as any,
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        markets: [MARKET],
+        positions: [
+          {
+            id: `${MARKET.symbol}-long-one-way`,
+            symbol: MARKET.symbol,
+            side: PositionSide.Long,
+            positionMode: PositionMode.OneWay,
+            marginType: MarginType.Cross,
+            leverage: 11,
+            entryPrice: currentPosition.openPrice,
+            notional: currentPosition.positionBalance,
+            unrealizedPnl: 0,
+            contracts: currentPosition.volume,
+            liquidationPrice: null,
+          },
+        ] as any,
+      },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new BitrueExchange('bitrue', { key: 'test-key', secret: 'test-secret' }, store);
     const placeOrder = vi.fn();
@@ -147,28 +144,27 @@ describe('audit regression: Bitrue leverage read probe', () => {
     ],
   ])('does not turn %s into a clearing position snapshot', async (_name, account) => {
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        {
-          markets: [MARKET],
-          positions: [
-            {
-              id: `${MARKET.symbol}-long-one-way`,
-              symbol: MARKET.symbol,
-              side: PositionSide.Long,
-              positionMode: PositionMode.OneWay,
-              marginType: MarginType.Cross,
-              leverage: 11,
-              entryPrice: 60_000,
-              notional: 600,
-              unrealizedPnl: 0,
-              contracts: 0.01,
-              liquidationPrice: 0,
-            },
-          ] as any,
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        markets: [MARKET],
+        positions: [
+          {
+            id: `${MARKET.symbol}-long-one-way`,
+            symbol: MARKET.symbol,
+            side: PositionSide.Long,
+            positionMode: PositionMode.OneWay,
+            marginType: MarginType.Cross,
+            leverage: 11,
+            entryPrice: 60_000,
+            notional: 600,
+            unrealizedPnl: 0,
+            contracts: 0.01,
+            liquidationPrice: null,
+          },
+        ] as any,
+      },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new BitrueExchange('bitrue', { key: 'test-key', secret: 'test-secret' }, store);
 
@@ -183,28 +179,27 @@ describe('audit regression: Bitrue leverage read probe', () => {
 
   it('accepts documented empty position arrays and clears positions', async () => {
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        {
-          markets: [MARKET],
-          positions: [
-            {
-              id: `${MARKET.symbol}-long-one-way`,
-              symbol: MARKET.symbol,
-              side: PositionSide.Long,
-              positionMode: PositionMode.OneWay,
-              marginType: MarginType.Cross,
-              leverage: 11,
-              entryPrice: 60_000,
-              notional: 600,
-              unrealizedPnl: 0,
-              contracts: 0.01,
-              liquidationPrice: 0,
-            },
-          ] as any,
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        markets: [MARKET],
+        positions: [
+          {
+            id: `${MARKET.symbol}-long-one-way`,
+            symbol: MARKET.symbol,
+            side: PositionSide.Long,
+            positionMode: PositionMode.OneWay,
+            marginType: MarginType.Cross,
+            leverage: 11,
+            entryPrice: 60_000,
+            notional: 600,
+            unrealizedPnl: 0,
+            contracts: 0.01,
+            liquidationPrice: null,
+          },
+        ] as any,
+      },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new BitrueExchange('bitrue', { key: 'test-key', secret: 'test-secret' }, store);
 
@@ -226,13 +221,12 @@ describe('audit regression: Bitrue leverage read probe', () => {
       notional: 600,
       unrealizedPnl: 0,
       contracts: 0.01,
-      liquidationPrice: 0,
+      liquidationPrice: null,
     };
-    store.apply(
-      nativeFixture(
-        { markets: [MARKET], positions: [currentPosition] as any },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [MARKET], positions: [currentPosition] as any },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new BitrueExchange('bitrue', { key: 'test-key', secret: 'test-secret' }, store);
     exchange.xhr = {
@@ -257,28 +251,27 @@ describe('audit regression: Bitrue leverage read probe', () => {
 
   it('keeps the current position snapshot when the account read fails', async () => {
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        {
-          markets: [MARKET],
-          positions: [
-            {
-              id: `${MARKET.symbol}-long-one-way`,
-              symbol: MARKET.symbol,
-              side: PositionSide.Long,
-              positionMode: PositionMode.OneWay,
-              marginType: MarginType.Cross,
-              leverage: 11,
-              entryPrice: 60_000,
-              notional: 600,
-              unrealizedPnl: 0,
-              contracts: 0.01,
-              liquidationPrice: 0,
-            },
-          ] as any,
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        markets: [MARKET],
+        positions: [
+          {
+            id: `${MARKET.symbol}-long-one-way`,
+            symbol: MARKET.symbol,
+            side: PositionSide.Long,
+            positionMode: PositionMode.OneWay,
+            marginType: MarginType.Cross,
+            leverage: 11,
+            entryPrice: 60_000,
+            notional: 600,
+            unrealizedPnl: 0,
+            contracts: 0.01,
+            liquidationPrice: null,
+          },
+        ] as any,
+      },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new BitrueExchange('bitrue', { key: 'test-key', secret: 'test-secret' }, store);
     const placeOrder = vi.fn();

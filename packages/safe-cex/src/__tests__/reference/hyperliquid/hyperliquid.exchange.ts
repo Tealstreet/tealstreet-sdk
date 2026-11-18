@@ -95,7 +95,8 @@ import { v } from '../../../utils/get-key';
 import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createExchangeAPI, createInfoAPI } from './hyperliquid.api';
 import { getCrossCache, hasSeenFill, markFillSeen } from './hyperliquid.cross-cache';
 import {
@@ -710,25 +711,24 @@ export class HyperliquidExchange extends BaseExchange {
         },
       };
 
-      this.store.apply(
-        nativeFixture(
-          {
-            balance: {
-              total,
-              used,
-              free,
-              upnl,
-              currencies: currencies as any,
-              coins: spotSnapshot.coins,
-              info: {
-                userAbstractionMode: this.userAbstractionMode,
-                source: 'spotClearinghouseState+clearinghouseState',
-                spotCollateralCurrencies: spotSnapshot.spotCurrencies,
-              },
+      applyReferenceFixture(
+        this.store,
+        {
+          balance: {
+            total,
+            used,
+            free,
+            upnl,
+            currencies: currencies as any,
+            coins: spotSnapshot.coins,
+            info: {
+              userAbstractionMode: this.userAbstractionMode,
+              source: 'spotClearinghouseState+clearinghouseState',
+              spotCollateralCurrencies: spotSnapshot.spotCurrencies,
             },
           },
-          this.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       return;
     }
@@ -746,24 +746,23 @@ export class HyperliquidExchange extends BaseExchange {
         ? this.buildUnifiedSpotCollateralSnapshot(this.cachedSpotCollateralState.balances)
         : null;
 
-    this.store.apply(
-      nativeFixture(
-        {
-          balance: {
-            total: accountValue - upnl,
-            used,
-            free: accountValue - used,
-            upnl,
-            ...(spotSnapshot ? { coins: spotSnapshot.coins } : {}),
-            info: {
-              userAbstractionMode: this.userAbstractionMode,
-              source: spotSnapshot ? 'clearinghouseState+spotHoldings' : 'clearinghouseState',
-              ...(spotSnapshot ? { spotCollateralCurrencies: spotSnapshot.spotCurrencies } : {}),
-            },
+    applyReferenceFixture(
+      this.store,
+      {
+        balance: {
+          total: accountValue - upnl,
+          used,
+          free: accountValue - used,
+          upnl,
+          ...(spotSnapshot ? { coins: spotSnapshot.coins } : {}),
+          info: {
+            userAbstractionMode: this.userAbstractionMode,
+            source: spotSnapshot ? 'clearinghouseState+spotHoldings' : 'clearinghouseState',
+            ...(spotSnapshot ? { spotCollateralCurrencies: spotSnapshot.spotCurrencies } : {}),
           },
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -1301,11 +1300,10 @@ export class HyperliquidExchange extends BaseExchange {
       storeUpdate.loaded.tickers = true;
     }
 
-    this.store.apply(
-      nativeFixture(
-        storeUpdate,
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      storeUpdate,
+      this.store.markets.map((row) => row.symbol),
     );
 
     if (shouldStartPrivateData) {
@@ -1359,14 +1357,13 @@ export class HyperliquidExchange extends BaseExchange {
     const [orders, coreState] = await Promise.all([this.fetchOrders(), this.fetchCorePerpsState()]);
     if (this.isDisposed) return;
 
-    this.store.apply(
-      nativeFixture(
-        {
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        orders,
+        loaded: { ...this.store.loaded, orders: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
     if (coreState) this.privateWebsocket.applyCoreClearinghouseState(coreState, true);
   };
@@ -2259,17 +2256,16 @@ export class HyperliquidExchange extends BaseExchange {
       return;
     }
 
-    this.store.apply(
-      nativeFixture(
-        {
-          balance: {
-            ...balance,
-            upnl: nextUpnl,
-            free: nextFree,
-          },
+    applyReferenceFixture(
+      this.store,
+      {
+        balance: {
+          ...balance,
+          upnl: nextUpnl,
+          free: nextFree,
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -2337,7 +2333,7 @@ export class HyperliquidExchange extends BaseExchange {
               notional: 0,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               ...marketConfig,
             },
           ]
@@ -2350,7 +2346,7 @@ export class HyperliquidExchange extends BaseExchange {
               notional: 0,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               ...marketConfig,
             },
             {
@@ -2361,7 +2357,7 @@ export class HyperliquidExchange extends BaseExchange {
               notional: 0,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               ...marketConfig,
             },
           ];
@@ -2445,16 +2441,15 @@ export class HyperliquidExchange extends BaseExchange {
         const allPositions = uniqBy([...currentPositions, ...this.getFakePositions()], 'id');
         (() => {
           const incoming: StoreData['positions'] = allPositions;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         this.log(`Cleared HIP-3 positions for dex: ${dexName} (empty response)`, LogSeverity.Info);
@@ -2515,7 +2510,7 @@ export class HyperliquidExchange extends BaseExchange {
           leverage: pos.leverage.value,
           unrealizedPnl: parseFloat(pos.unrealizedPnl),
           contracts: Math.abs(szi),
-          liquidationPrice: pos.liquidationPx ? parseFloat(pos.liquidationPx) : 0,
+          liquidationPrice: nativeLiquidationPrice(pos.liquidationPx ? parseFloat(pos.liquidationPx) : 0),
           marginSize: pos.marginUsed ? parseFloat(pos.marginUsed) : undefined,
           positionMode: PositionMode.OneWay,
           marginType: pos.leverage.type === 'cross' ? MarginType.Cross : MarginType.Isolated,
@@ -2552,13 +2547,12 @@ export class HyperliquidExchange extends BaseExchange {
       const allPositions = uniqBy([...currentPositions, ...newPositions, ...this.getFakePositions()], 'id');
       (() => {
         const incoming: StoreData['positions'] = allPositions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
 
@@ -2750,11 +2744,10 @@ export class HyperliquidExchange extends BaseExchange {
         const existing = currentOrdersById.get(newOrder.id);
         if (!existing) {
           // New order - add it
-          this.store.apply(
-            nativeFixture(
-              { orders: [...this.store.orders, newOrder] },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            { orders: [...this.store.orders, newOrder] },
+            this.store.markets.map((row) => row.symbol),
           );
         } else if (
           existing.status !== newOrder.status ||
@@ -2769,11 +2762,10 @@ export class HyperliquidExchange extends BaseExchange {
           (() => {
             const target = { id: newOrder.id };
             const changes: Partial<StoreData['orders'][number]> = newOrder;
-            return this.store.apply(
-              nativeFixture(
-                { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -2797,11 +2789,10 @@ export class HyperliquidExchange extends BaseExchange {
 
           (() => {
             const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: currentOrder.id }];
-            return this.store.apply(
-              nativeFixture(
-                { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -3874,19 +3865,18 @@ export class HyperliquidExchange extends BaseExchange {
         };
         (() => {
           const incoming: StoreData['orders'] = [optimisticOrder];
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -4237,19 +4227,18 @@ export class HyperliquidExchange extends BaseExchange {
           };
           (() => {
             const incoming: StoreData['orders'] = [optimisticOrder];
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: [
-                    ...this.store.orders.map((row) => {
-                      const change = incoming.find((item) => item.id === row.id);
-                      return change ? { ...row, ...change } : row;
-                    }),
-                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                  ],
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -4370,11 +4359,10 @@ export class HyperliquidExchange extends BaseExchange {
 
     (() => {
       const removed: Array<Pick<StoreData['orders'][number], 'id'>> = orders.map((o) => ({ id: o.id }));
-      return this.store.apply(
-        nativeFixture(
-          { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -4526,19 +4514,18 @@ export class HyperliquidExchange extends BaseExchange {
       };
       (() => {
         const incoming: StoreData['orders'] = [updatingOrder];
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: [
-                ...this.store.orders.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }

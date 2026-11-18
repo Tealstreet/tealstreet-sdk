@@ -8,7 +8,8 @@ import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exch
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { consumerFrame } from '../cutover/consumerFrame';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeOrder } from '../cutover/nativeOrder';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
@@ -83,11 +84,10 @@ const fixture = (
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
   const store = new FrameStore();
   installNativeStartupFrames(engine, store, () => ({ options: nativeSettings }));
-  store.apply(
-    nativeFixture(
-      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new RustEngineExchange(
     name,
@@ -289,23 +289,22 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
 
   it('serves engine-owned public metadata and the account alias query', async () => {
     const { exchange, store, commands, setNativeHedged, engine } = fixture();
-    store.apply(
-      nativeFixture(
-        {
-          markets: [
-            {
-              id: 'BTCUSDT',
-              symbol: 'BTCUSDT',
-              base: 'BTC',
-              quote: 'USDT',
-              active: true,
-              precision: { price: 0.01, amount: 0.001 },
-              limits: { amount: { min: 0.001, max: 2 }, leverage: { min: 1, max: 125 } },
-            },
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'BTCUSDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { price: 0.01, amount: 0.001 },
+            limits: { amount: { min: 0.001, max: 2 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     setNativeHedged(true);
     await exchange.start();
@@ -332,31 +331,36 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
     await exchange.cancelOrders([{ id, symbol: 'BTCUSDT', type: OrderType.Limit } as Order]);
     await exchange.cancelOrders([{ id: 'external', symbol: 'ETHUSDT', type: OrderType.StopLoss } as Order]);
     expect(commands.slice(-2)).toMatchObject([
-      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'newly-acked', symbol: 'BTCUSDT', type: OrderType.Limit }] },
-      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'external', symbol: 'ETHUSDT', type: OrderType.StopLoss }] },
+      {
+        op: 'cancelOrdersWithSymbols',
+        orders: [nativeOrder({ id: 'newly-acked', symbol: 'BTCUSDT', type: OrderType.Limit })],
+      },
+      {
+        op: 'cancelOrdersWithSymbols',
+        orders: [nativeOrder({ id: 'external', symbol: 'ETHUSDT', type: OrderType.StopLoss })],
+      },
     ]);
     expect(store.orders).toEqual([]);
   });
 
   it('loads account leverage 10 rather than the market maximum 125 into fetched leverage', async () => {
     const { exchange, store, commands } = fixture();
-    store.apply(
-      nativeFixture(
-        {
-          markets: [
-            {
-              id: 'BTCUSDT',
-              symbol: 'BTCUSDT',
-              base: 'BTC',
-              quote: 'USDT',
-              active: true,
-              precision: { price: 0.01, amount: 0.001 },
-              limits: { amount: { min: 0.001, max: 2 }, leverage: { min: 1, max: 125 } },
-            },
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'BTCUSDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { price: 0.01, amount: 0.001 },
+            limits: { amount: { min: 0.001, max: 2 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     await exchange.start();
     expect(await exchange.fetchSymbolMaxLeverage('BTCUSDT')).toBe(125);

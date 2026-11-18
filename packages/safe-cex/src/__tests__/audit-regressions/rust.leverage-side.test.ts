@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { FrameStore } from '../../store/frameStore';
 import { PositionSide } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativePosition } from '../cutover/nativePosition';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
@@ -34,20 +35,18 @@ describe('Rust leverage command side boundary', () => {
         : [];
       (() => {
         const incoming: StoreData['positions'] = [...closed, ...positions];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       const exchange = new RustEngineExchange('bingx', { key: '', secret: '' }, store);
@@ -70,20 +69,18 @@ describe('Rust leverage command side boundary', () => {
       const incoming: StoreData['positions'] = [
         { id: 'ETH-long', symbol: 'ETHUSDT', side: PositionSide.Long, leverage: 5 },
       ] as Position[];
-      return store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
       );
     })();
     (() => {
       const incoming: StoreData['positions'] = [];
-      return store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
       );
     })();
     const exchange = new RustEngineExchange('bingx', { key: '', secret: '' }, store);
@@ -106,20 +103,18 @@ describe('Rust leverage command side boundary', () => {
           { id: 'ETH-long', symbol: 'ETHUSDT', side: PositionSide.Long, leverage: 5 },
           { id: 'SOL-long', symbol: 'SOLUSDT', side: PositionSide.Long, leverage: 7 },
         ] as Position[];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const incoming: StoreData['positions'] = [];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       const ownerA = new RustEngineExchange('bingx', { key: '', secret: '' }, store);
@@ -146,20 +141,18 @@ describe('Rust leverage command side boundary', () => {
         const incoming: StoreData['positions'] = [
           { id: 'XRP-long', symbol: 'XRPUSDT', side: PositionSide.Long, leverage: 3 },
         ] as Position[];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const incoming: StoreData['positions'] = [];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       const ownerB = new RustEngineExchange('bingx', { key: '', secret: '' }, store);
@@ -193,11 +186,10 @@ describe('Rust leverage command side boundary', () => {
       limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
       info: {},
     };
-    store.apply(
-      nativeFixture(
-        { markets: [market], fetchedLeverage: { BTCUSDT: { buyLeverage: 5, sellLeverage: 7 } } },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [market], fetchedLeverage: { BTCUSDT: { buyLeverage: 5, sellLeverage: 7 } } },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new RustEngineExchange(name, { key: '', secret: '' }, store);
     exchanges.push(exchange);
@@ -241,16 +233,15 @@ describe('Rust leverage command side boundary', () => {
 
   it('sets leverage for both open hedge legs without dropping their sides', async () => {
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        {
-          positions: [
-            { id: 'long', symbol: 'BTCUSDT', side: PositionSide.Long },
-            { id: 'short', symbol: 'BTCUSDT', side: PositionSide.Short },
-          ] as Position[],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        positions: [
+          nativePosition({ id: 'long', symbol: 'BTCUSDT', side: PositionSide.Long }),
+          nativePosition({ id: 'short', symbol: 'BTCUSDT', side: PositionSide.Short }),
+        ] as Position[],
+      },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new RustEngineExchange('bingx', { key: '', secret: '' }, store);
     exchanges.push(exchange);
@@ -276,11 +267,10 @@ describe('Rust leverage command side boundary', () => {
       limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
       info: {},
     };
-    store.apply(
-      nativeFixture(
-        { markets: [market] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [market] },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new RustEngineExchange('bybit', { key: 'read-test', secret: 'read-secret' }, store);
     exchanges.push(exchange);
@@ -291,11 +281,10 @@ describe('Rust leverage command side boundary', () => {
     Object.defineProperty(exchange, 'command', { value: command });
     const pending = exchange.updateSymbolMetadata('BTCUSDT');
     if (!remains)
-      store.apply(
-        nativeFixture(
-          { markets: [] },
-          store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        store,
+        { markets: [] },
+        store.markets.map((row) => row.symbol),
       );
     ready.resolve();
     await pending;

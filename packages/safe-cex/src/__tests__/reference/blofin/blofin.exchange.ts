@@ -77,7 +77,8 @@ import { roundUSD } from '../../../utils/roundUSD';
 import { add, adjust, multiply, subtract } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import { createAPI } from './blofin.api';
 import { mapBlofinClosedPosition } from './blofin.closed-pnl';
@@ -223,14 +224,13 @@ export class BlofinExchange extends BaseExchange {
     if (!useExternalPublicData) {
       const [, rawTickers] = await Promise.all([
         this.fetchMarkets().then((markets) => {
-          this.store.apply(
-            nativeFixture(
-              {
-                markets,
-                loaded: { ...this.store.loaded, markets: true },
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            {
+              markets,
+              loaded: { ...this.store.loaded, markets: true },
+            },
+            this.store.markets.map((row) => row.symbol),
           );
 
           // start public websocket streams as soon as markets loaded.
@@ -243,14 +243,13 @@ export class BlofinExchange extends BaseExchange {
 
       if (this.isDisposed) return;
       const tickers = this.formatTickers(rawTickers);
-      this.store.apply(
-        nativeFixture(
-          {
-            tickers,
-            loaded: { ...this.store.loaded, tickers: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { ...this.store.loaded, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     }
 
@@ -261,26 +260,24 @@ export class BlofinExchange extends BaseExchange {
 
     await Promise.all([
       this.fetchBalanceAndPositions().then(({ balance, positions }) => {
-        this.store.apply(
-          nativeFixture(
-            {
-              balance,
-              positions,
-              loaded: { ...this.store.loaded, balance: true, positions: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            positions,
+            loaded: { ...this.store.loaded, balance: true, positions: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       }),
       this.fetchOrders().then((orders) => {
-        this.store.apply(
-          nativeFixture(
-            {
-              orders,
-              loaded: { ...this.store.loaded, orders: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            orders,
+            loaded: { ...this.store.loaded, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       }),
     ]);
@@ -307,30 +304,28 @@ export class BlofinExchange extends BaseExchange {
         // jitter because the React fallback would briefly land on 1x between tick and WS update.
         (() => {
           const incoming: StoreData['positions'] = positions;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
-          );
-        })();
-        this.store.apply(
-          nativeFixture(
+          return applyReferenceFixture(
+            this.store,
             {
-              balance,
-              loaded: {
-                ...this.store.loaded,
-                balance: true,
-                positions: true,
-              },
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
             },
             this.store.markets.map((row) => row.symbol),
-          ),
+          );
+        })();
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: {
+              ...this.store.loaded,
+              balance: true,
+              positions: true,
+            },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.msg || err?.message);
@@ -343,11 +338,10 @@ export class BlofinExchange extends BaseExchange {
         if (this.isDisposed) return;
         // Only update if we got valid orders (fetchOrders now returns existing on failure)
         if (orders.length > 0 || this.store.orders.length === 0) {
-          this.store.apply(
-            nativeFixture(
-              { orders },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            { orders },
+            this.store.markets.map((row) => row.symbol),
           );
         }
       } catch (err: any) {
@@ -493,7 +487,7 @@ export class BlofinExchange extends BaseExchange {
           notional: 0,
           unrealizedPnl: 0,
           contracts: 0,
-          liquidationPrice: 0,
+          liquidationPrice: null,
           info: {},
         }));
       }
@@ -704,16 +698,15 @@ export class BlofinExchange extends BaseExchange {
       const newer = this.fetchedLeverageObservations.get(symbol);
       if (newer && newer.sequence > sequence) return this.store.fetchedLeverage[symbol] ?? null;
       this.fetchedLeverageObservations.set(symbol, { buyLeverage, sellLeverage, sequence });
-      this.store.apply(
-        nativeFixture(
-          {
-            fetchedLeverage: {
-              ...this.store.fetchedLeverage,
-              [symbol]: leverageObj,
-            },
+      applyReferenceFixture(
+        this.store,
+        {
+          fetchedLeverage: {
+            ...this.store.fetchedLeverage,
+            [symbol]: leverageObj,
           },
-          this.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       return leverageObj;
@@ -1634,23 +1627,22 @@ export class BlofinExchange extends BaseExchange {
       sequence: ++this.leverageSequence,
     });
     const currentPositions = this.store.positions;
-    this.store.apply(
-      nativeFixture(
-        {
-          ...(currentPositions.some((position) => position.symbol === symbol)
-            ? {
-                positions: currentPositions.map((position) =>
-                  position.symbol === symbol ? { ...position, leverage } : position,
-                ),
-              }
-            : {}),
-          fetchedLeverage: {
-            ...this.store.fetchedLeverage,
-            [symbol]: { buyLeverage: leverage, sellLeverage: leverage, marginType, positionMode },
-          },
+    applyReferenceFixture(
+      this.store,
+      {
+        ...(currentPositions.some((position) => position.symbol === symbol)
+          ? {
+              positions: currentPositions.map((position) =>
+                position.symbol === symbol ? { ...position, leverage } : position,
+              ),
+            }
+          : {}),
+        fetchedLeverage: {
+          ...this.store.fetchedLeverage,
+          [symbol]: { buyLeverage: leverage, sellLeverage: leverage, marginType, positionMode },
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -1911,7 +1903,7 @@ export class BlofinExchange extends BaseExchange {
         leverage,
         unrealizedPnl: contracts ? adjust(parseFloat(p.unrealizedPnl), market.precision.price) : 0,
         contracts: Math.abs(contracts),
-        liquidationPrice,
+        liquidationPrice: nativeLiquidationPrice(liquidationPrice),
         marginType: p.marginMode === 'isolated' ? MarginType.Isolated : MarginType.Cross,
         positionMode,
         extra: {
@@ -1993,19 +1985,18 @@ export class BlofinExchange extends BaseExchange {
       const positions = await this.fetchPositions([symbol]);
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -2052,26 +2043,25 @@ export class BlofinExchange extends BaseExchange {
       return;
     }
 
-    this.store.apply(
-      nativeFixture(
-        {
-          ...(fetchedLeverageEntries.length
-            ? {
-                fetchedLeverage: Object.fromEntries(
-                  fetchedLeverageEntries.map(([symbol, leverage]) => [symbol, { ...leverage, marginType }]),
-                ),
-              }
-            : {}),
-          ...(hasFlatPositionUpdates
-            ? {
-                positions: positions.map((position) =>
-                  Number(position.contracts) === 0 ? { ...position, marginType } : position,
-                ),
-              }
-            : {}),
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        ...(fetchedLeverageEntries.length
+          ? {
+              fetchedLeverage: Object.fromEntries(
+                fetchedLeverageEntries.map(([symbol, leverage]) => [symbol, { ...leverage, marginType }]),
+              ),
+            }
+          : {}),
+        ...(hasFlatPositionUpdates
+          ? {
+              positions: positions.map((position) =>
+                Number(position.contracts) === 0 ? { ...position, marginType } : position,
+              ),
+            }
+          : {}),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -2080,35 +2070,34 @@ export class BlofinExchange extends BaseExchange {
 
     const fetchedLeverageEntries = Object.entries(this.store.fetchedLeverage);
     const positions = this.store.positions;
-    if (!fetchedLeverageEntries.length && !positions.length) {
-      return;
-    }
 
-    this.store.apply(
-      nativeFixture(
-        {
-          ...(fetchedLeverageEntries.length
-            ? {
-                fetchedLeverage: Object.fromEntries(
-                  fetchedLeverageEntries.map(([symbol, leverage]) => [symbol, { ...leverage, positionMode }]),
-                ),
-              }
-            : {}),
-          ...(positions.length
-            ? {
-                positions: uniqBy(
-                  positions.map((position) => ({
-                    ...position,
-                    id: createPositionId(position.symbol, position.side, positionMode),
-                    positionMode,
-                  })),
-                  'id',
-                ),
-              }
-            : {}),
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        // Native SETTINGS reads account mode from STATUS, including flat accounts.
+        loaded: this.store.loaded,
+        options: { ...this.store.options, isHedged: positionMode === PositionMode.Hedged },
+        ...(fetchedLeverageEntries.length
+          ? {
+              fetchedLeverage: Object.fromEntries(
+                fetchedLeverageEntries.map(([symbol, leverage]) => [symbol, { ...leverage, positionMode }]),
+              ),
+            }
+          : {}),
+        ...(positions.length
+          ? {
+              positions: uniqBy(
+                positions.map((position) => ({
+                  ...position,
+                  id: createPositionId(position.symbol, position.side, positionMode),
+                  positionMode,
+                })),
+                'id',
+              ),
+            }
+          : {}),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -2615,11 +2604,10 @@ export class BlofinExchange extends BaseExchange {
           if (this.isAlreadyGoneCancelRow(row) && row.orderId) {
             (() => {
               const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: row.orderId }];
-              return this.store.apply(
-                nativeFixture(
-                  { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.store,
+                { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+                this.store.markets.map((row) => row.symbol),
               );
             })();
           } else {
@@ -2668,11 +2656,10 @@ export class BlofinExchange extends BaseExchange {
             if (storeIds.length)
               (() => {
                 const removed: Array<Pick<StoreData['orders'][number], 'id'>> = storeIds;
-                return this.store.apply(
-                  nativeFixture(
-                    { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-                    this.store.markets.map((row) => row.symbol),
-                  ),
+                return applyReferenceFixture(
+                  this.store,
+                  { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+                  this.store.markets.map((row) => row.symbol),
                 );
               })();
           } else {
@@ -2718,11 +2705,10 @@ export class BlofinExchange extends BaseExchange {
       if (this.isAlreadyGoneCancelRow(row) && row?.algoId === payload.algoId) {
         (() => {
           const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: payload.algoId }];
-          return this.store.apply(
-            nativeFixture(
-              { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       } else if (

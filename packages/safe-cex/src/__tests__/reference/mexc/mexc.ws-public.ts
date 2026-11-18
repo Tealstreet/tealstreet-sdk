@@ -7,7 +7,7 @@ import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { LogSeverity } from '../../../types';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../../utils/updateOrderBook';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, INTERVAL, isMexcControlChannel, MEXC_WS_HEARTBEAT_INTERVAL_MS } from './mexc.types';
 import { fromMexcSymbol, normalizeCandle, normalizeTicker, toMexcSymbol } from './mexc.utils';
 
@@ -342,11 +342,10 @@ export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
         volume: next.volume,
         quoteVolume: next.quoteVolume,
       };
-      return this.store.apply(
-        nativeFixture(
-          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };

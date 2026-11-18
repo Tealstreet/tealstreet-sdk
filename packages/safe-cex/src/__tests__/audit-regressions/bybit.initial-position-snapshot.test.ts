@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FrameStore } from '../../store/frameStore';
 import { MarginType, Position, PositionMode, PositionSide } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 
@@ -49,16 +49,15 @@ describe('Bybit initial position snapshot reconciliation', () => {
       const websocketPosition = createPosition(symbol);
       (() => {
         const incoming: StoreData['positions'] = [websocketPosition];
-        return exchange.store.apply(
-          nativeFixture(
-            {
-              positions: incoming.map((row) => ({
-                ...exchange.store.positions.find((old) => old.id === row.id),
-                ...row,
-              })),
-            },
-            exchange.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          exchange.store,
+          {
+            positions: incoming.map((row) => ({
+              ...exchange.store.positions.find((old) => old.id === row.id),
+              ...row,
+            })),
+          },
+          exchange.store.markets.map((row) => row.symbol),
         );
       })();
       exchange.lastWebsocketPositionsUpdate = 10_000;

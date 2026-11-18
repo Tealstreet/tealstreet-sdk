@@ -11,7 +11,7 @@ import { resolveTransportRouting } from '../../../transport/registry';
 import { LogSeverity, OrderStatus, Position } from '../../../types';
 import { v } from '../../../utils/get-key';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, ORDER_CANCEL_REASON, ORDER_STATUS, ORDER_TIME_IN_FORCE, ORDER_TYPE } from './apexomni.types';
 
 type WsZkAccountsV3Message = {
@@ -162,16 +162,15 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
           if (this.isDisposed || this.parent.isDisposed) return;
           (() => {
             const incoming: StoreData['orders'] = orders;
-            return this.parent.store.apply(
-              nativeFixture(
-                {
-                  orders: incoming.map((row) => ({
-                    ...this.parent.store.orders.find((old) => old.id === row.id),
-                    ...row,
-                  })),
-                },
-                this.parent.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.parent.store,
+              {
+                orders: incoming.map((row) => ({
+                  ...this.parent.store.orders.find((old) => old.id === row.id),
+                  ...row,
+                })),
+              },
+              this.parent.store.markets.map((row) => row.symbol),
             );
           })();
         } catch (err: any) {
@@ -195,16 +194,15 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
           const positions = await this.parent.fetchPositions();
           (() => {
             const incoming: StoreData['positions'] = positions;
-            return this.parent.store.apply(
-              nativeFixture(
-                {
-                  positions: incoming.map((row) => ({
-                    ...this.parent.store.positions.find((old) => old.id === row.id),
-                    ...row,
-                  })),
-                },
-                this.parent.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.parent.store,
+              {
+                positions: incoming.map((row) => ({
+                  ...this.parent.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
+              },
+              this.parent.store.markets.map((row) => row.symbol),
             );
           })();
         } catch (err: any) {
@@ -442,25 +440,23 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = ids;
           const status: StoreData['orders'][number]['status'] = terminal;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         if (order.status === 'CANCELED') {
           (() => {
             const removed: Array<Pick<StoreData['orders'][number], 'id'>> = ids;
-            return this.store.apply(
-              nativeFixture(
-                { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
           const fresh = Date.now() - order.updatedAt <= 5000;
@@ -477,27 +473,8 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
         } else {
           (() => {
             const incoming: StoreData['orders'] = orders.map((mapped) => ({ ...mapped, status: OrderStatus.Closed }));
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: [
-                    ...this.store.orders.map((row) => {
-                      const change = incoming.find((item) => item.id === row.id);
-                      return change ? { ...row, ...change } : row;
-                    }),
-                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                  ],
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
-            );
-          })();
-        }
-      } else if (order.status === 'OPEN' || order.status === 'UNTRIGGERED' || order.status === 'PENDING') {
-        (() => {
-          const incoming: StoreData['orders'] = orders;
-          return this.store.apply(
-            nativeFixture(
+            return applyReferenceFixture(
+              this.store,
               {
                 orders: [
                   ...this.store.orders.map((row) => {
@@ -508,7 +485,24 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
                 ],
               },
               this.store.markets.map((row) => row.symbol),
-            ),
+            );
+          })();
+        }
+      } else if (order.status === 'OPEN' || order.status === 'UNTRIGGERED' || order.status === 'PENDING') {
+        (() => {
+          const incoming: StoreData['orders'] = orders;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -528,16 +522,15 @@ export class ApexOmniPrivateWebsocket extends BaseWebSocket<ApexOmniExchange> {
       const nativeUpdates: Array<
         [Pick<StoreData['positions'][number], 'id'>, Partial<StoreData['positions'][number]>]
       > = updates;
-      return this.store.apply(
-        nativeFixture(
-          {
-            positions: this.store.positions.map((row) => {
-              const change = nativeUpdates.find(([target]) => target.id === row.id);
-              return change ? { ...row, ...change[1] } : row;
-            }),
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        {
+          positions: this.store.positions.map((row) => {
+            const change = nativeUpdates.find(([target]) => target.id === row.id);
+            return change ? { ...row, ...change[1] } : row;
+          }),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
     this.parent.lastWebsocketPositionsUpdate = virtualClock.getCurrentTimeMs();

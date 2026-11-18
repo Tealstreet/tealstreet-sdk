@@ -8,7 +8,7 @@ import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { AllMids, HyperliquidCandle, WsBbo, WsBook, WSS_URLS } from '../../../exchanges/hyperliquid/hyperliquid.types';
 import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker, Writable } from '../../../types';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { HyperliquidExchange } from './hyperliquid.exchange';
 import { decodeHyperliquidFastAssetCtxs } from './hyperliquid.fast-asset-ctxs';
 import {
@@ -208,11 +208,10 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
             // Just record latency, don't schedule next ping (handled by ping loop)
             if (this.pingAt) {
               const diff = performance.now() - this.pingAt;
-              this.store.apply(
-                nativeFixture(
-                  { latency: Math.round(diff / 2) },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              applyReferenceFixture(
+                this.store,
+                { latency: Math.round(diff / 2) },
+                this.store.markets.map((row) => row.symbol),
               );
             }
             break;
@@ -334,11 +333,10 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
       (() => {
         const target = ticker;
         const changes: Partial<StoreData['tickers'][number]> = updateBuf;
-        return this.parent.store.apply(
-          nativeFixture(
-            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
       if (updatedSymbols) updatedSymbols.add(ticker.symbol);
@@ -377,13 +375,12 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
         (() => {
           const target = ticker;
           const changes: Partial<StoreData['tickers'][number]> = update;
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
         if (updatedSymbols) updatedSymbols.add(ticker.symbol);
@@ -393,13 +390,12 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
         (() => {
           const target = ticker;
           const changes: Partial<StoreData['tickers'][number]> = update;
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
       } else if (hasMid) {
@@ -409,13 +405,12 @@ export class HyperliquidPublicWebSocket extends BaseWebSocket<HyperliquidExchang
         (() => {
           const target = ticker;
           const changes: Partial<StoreData['tickers'][number]> = update;
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
         if (updatedSymbols) updatedSymbols.add(ticker.symbol);

@@ -4,7 +4,8 @@ import { ENDPOINTS } from '../../exchanges/binance/binance.types';
 import { FrameStore } from '../../store/frameStore';
 import { PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativePosition } from '../cutover/nativePosition';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 
 const createExchange = () => {
@@ -30,31 +31,29 @@ describe('Binance position mode synchronization', () => {
 
   it('mirrors worker position mode changes into the main-thread store', () => {
     const { exchange, store } = createExchange();
-    store.apply(
-      nativeFixture(
-        { options: { ...store.options, ['isHedged']: true } },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { options: { ...store.options, ['isHedged']: true } },
+      store.markets.map((row) => row.symbol),
     );
 
-    store.apply(
-      nativeFixture(
-        {
-          fetchedLeverage: {
-            DOGEUSDT: { buyLeverage: 20, sellLeverage: 20, positionMode: PositionMode.Hedged },
-          },
-          positions: [
-            {
-              id: createPositionId('DOGEUSDT', PositionSide.Long, PositionMode.Hedged),
-              symbol: 'DOGEUSDT',
-              side: PositionSide.Long,
-              contracts: 0,
-              positionMode: PositionMode.Hedged,
-            } as any,
-          ],
+    applyReferenceFixture(
+      store,
+      {
+        fetchedLeverage: {
+          DOGEUSDT: { buyLeverage: 20, sellLeverage: 20, positionMode: PositionMode.Hedged },
         },
-        store.markets.map((row) => row.symbol),
-      ),
+        positions: [
+          nativePosition({
+            id: createPositionId('DOGEUSDT', PositionSide.Long, PositionMode.Hedged),
+            symbol: 'DOGEUSDT',
+            side: PositionSide.Long,
+            contracts: 0,
+            positionMode: PositionMode.Hedged,
+          }) as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
 
     exchange.afterMethodCalledInWorker(Promise.resolve(), 'changePositionMode', false, 'DOGEUSDT');

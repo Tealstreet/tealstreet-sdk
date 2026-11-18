@@ -6,7 +6,7 @@ import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
 import { FrameStore } from '../../store/frameStore';
 import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 // The fallback-route assertion is about Tealstreet's routing, which only exists once registered.
 import '../../transport/registerTealstreetTransport';
@@ -166,19 +166,18 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     const wsPosition = exchange.mapPosition(rawPosition({ total: '2', openPriceAvg: '51000', uTime: '2000' }));
     (() => {
       const incoming: StoreData['positions'] = [wsPosition];
-      return exchange.store.apply(
-        nativeFixture(
-          {
-            positions: [
-              ...exchange.store.positions.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !exchange.store.positions.some((old) => old.id === row.id)),
-            ],
-          },
-          exchange.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          positions: [
+            ...exchange.store.positions.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.positions.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
       );
     })();
     (exchange.privateWebsocket as any).markWsPositions([wsPosition], 'update');
@@ -204,34 +203,32 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
 
     (() => {
       const incoming: StoreData['positions'] = [staleRestPosition];
-      return exchange.store.apply(
-        nativeFixture(
-          {
-            positions: [
-              ...exchange.store.positions.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !exchange.store.positions.some((old) => old.id === row.id)),
-            ],
-          },
-          exchange.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          positions: [
+            ...exchange.store.positions.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.positions.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
       );
     })();
     (exchange.privateWebsocket as any).markWsPositions([], 'snapshot');
     (() => {
       const incoming: StoreData['positions'] = [];
-      return exchange.store.apply(
-        nativeFixture(
-          {
-            positions: incoming.map((row) => ({
-              ...exchange.store.positions.find((old) => old.id === row.id),
-              ...row,
-            })),
-          },
-          exchange.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          positions: incoming.map((row) => ({
+            ...exchange.store.positions.find((old) => old.id === row.id),
+            ...row,
+          })),
+        },
+        exchange.store.markets.map((row) => row.symbol),
       );
     })();
     exchange.fetchPositions = vi.fn().mockResolvedValue([staleRestPosition]);
@@ -404,19 +401,18 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
       const incoming: StoreData['orders'] = [
         exchange.mapOrder(rawAlgoOrder({ orderId: 'tp-1', status: 'not_trigger', triggerPrice: '51000' }))[0],
       ];
-      return exchange.store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...exchange.store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          exchange.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          orders: [
+            ...exchange.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
       );
     })();
 
@@ -442,19 +438,18 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
       const incoming: StoreData['orders'] = [
         exchange.mapOrder(rawAlgoOrder({ orderId: 'tp-1', status: 'not_trigger', triggerPrice: '51000' }))[0],
       ];
-      return exchange.store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...exchange.store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          exchange.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          orders: [
+            ...exchange.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
       );
     })();
 
@@ -494,19 +489,18 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
           size: '1',
         })[0],
       ];
-      return exchange.store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...exchange.store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          exchange.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          orders: [
+            ...exchange.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
       );
     })();
 

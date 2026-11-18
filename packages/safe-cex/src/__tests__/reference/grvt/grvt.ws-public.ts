@@ -4,7 +4,7 @@ import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { GrvtCandlestickInterval, WSS_URLS } from '../../../exchanges/grvt/grvt.types';
 import { Candle, OHLCVOptions, OrderBook } from '../../../types';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { GrvtExchange } from './grvt.exchange';
 
 /**
@@ -502,15 +502,14 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
       (() => {
         const target = { id: market.id };
         const nativeChanges: Partial<StoreData['tickers'][number]> = changes;
-        return this.parent.store.apply(
-          nativeFixture(
-            {
-              tickers: this.parent.store.tickers.map((row) =>
-                row.id === target.id ? { ...row, ...nativeChanges } : row,
-              ),
-            },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          {
+            tickers: this.parent.store.tickers.map((row) =>
+              row.id === target.id ? { ...row, ...nativeChanges } : row,
+            ),
+          },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
 
@@ -570,15 +569,12 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
           (() => {
             const target = { id: market.id };
             const changes: Partial<StoreData['tickers'][number]> = { last: closePrice };
-            return this.parent.store.apply(
-              nativeFixture(
-                {
-                  tickers: this.parent.store.tickers.map((row) =>
-                    row.id === target.id ? { ...row, ...changes } : row,
-                  ),
-                },
-                this.parent.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.parent.store,
+              {
+                tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+              },
+              this.parent.store.markets.map((row) => row.symbol),
             );
           })();
         }

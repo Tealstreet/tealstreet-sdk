@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { parseAccountEquity } from '../reference/okx/okx.account-equity';
 import { OKXExchange } from '../reference/okx/okx.exchange';
 
@@ -51,27 +51,26 @@ const fixture = () => {
     lastUpdate: 1,
     info: { ccy: 'BTC', lever: '10' },
   };
-  store.apply(
-    nativeFixture(
-      {
-        markets: [market],
-        tickers: [{ id: market.id, symbol: market.symbol, last: 40000, mark: 40000 } as never],
-        positions: [position],
-        orders: [order],
-        balance: {
-          used: 50,
-          free: 40017,
-          total: 40087.18,
-          upnl: 12.82,
-          info: [
-            { ccy: 'BTC', eq: '1' },
-            { ccy: 'USD', eq: '100' },
-          ],
-        },
-        loaded: { markets: true, tickers: true, positions: true, balance: true, orders: true },
+  applyReferenceFixture(
+    store,
+    {
+      markets: [market],
+      tickers: [{ id: market.id, symbol: market.symbol, last: 40000, mark: 40000 } as never],
+      positions: [position],
+      orders: [order],
+      balance: {
+        used: 50,
+        free: 40017,
+        total: 40087.18,
+        upnl: 12.82,
+        info: [
+          { ccy: 'BTC', eq: '1' },
+          { ccy: 'USD', eq: '100' },
+        ],
       },
-      store.markets.map((row) => row.symbol),
-    ),
+      loaded: { markets: true, tickers: true, positions: true, balance: true, orders: true },
+    },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new OKXExchange('okx', { key: 'key', secret: 'secret', passphrase: 'pass' }, store);
   exchange._accountLevel = 2;

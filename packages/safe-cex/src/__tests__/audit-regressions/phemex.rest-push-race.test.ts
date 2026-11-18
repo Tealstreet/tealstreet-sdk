@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { PositionMode, PositionSide } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeMarket } from '../cutover/nativeMarket';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 
 const deferred = <T>() => {
@@ -32,25 +33,24 @@ const stale = () => ({
 const exchanges: PhemexExchange[] = [];
 const setup = () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      {
-        markets: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', quote: 'USDT' }],
-        tickers: [{ symbol: 'BTCUSDT', last: 70000 }],
-        positions: [position(0.01)],
-        balance: {
-          total: 1200,
-          free: 1131,
-          used: 69,
-          upnl: 10,
-          currencies: {
-            USDT: { total: 1000, free: 931, used: 69, upnl: 10 },
-            USDC: { total: 200, free: 200, used: 0, upnl: 0 },
-          },
+  applyReferenceFixture(
+    store,
+    {
+      markets: [nativeMarket({ id: 'BTCUSDT', symbol: 'BTCUSDT', quote: 'USDT' })],
+      tickers: [{ symbol: 'BTCUSDT', last: 70000 }],
+      positions: [position(0.01)],
+      balance: {
+        total: 1200,
+        free: 1131,
+        used: 69,
+        upnl: 10,
+        currencies: {
+          USDT: { total: 1000, free: 931, used: 69, upnl: 10 },
+          USDC: { total: 200, free: 200, used: 0, upnl: 0 },
         },
-      } as any,
-      store.markets.map((row) => row.symbol),
-    ),
+      },
+    } as any,
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new PhemexExchange(
     'phemex',

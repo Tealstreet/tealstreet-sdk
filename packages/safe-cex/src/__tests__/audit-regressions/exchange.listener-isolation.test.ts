@@ -6,7 +6,7 @@ import { ExchangeEmitter } from '../../exchanges/exchangeEmitter';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { FrameStore } from '../../store/frameStore';
 import { consumerFrame } from '../cutover/consumerFrame';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
@@ -58,11 +58,10 @@ describe('exchange event listener isolation', () => {
     exchange.on('update', later);
 
     expect(() =>
-      store.apply(
-        nativeFixture(
-          { latency: 15 },
-          store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        store,
+        { latency: 15 },
+        store.markets.map((row) => row.symbol),
       ),
     ).not.toThrow();
     expect(later).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ latency: 15 }));

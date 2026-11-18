@@ -26,7 +26,8 @@ import { MarginType, OrderSide, OrderTimeInForce, OrderType, PositionMode, Posit
 import { createPositionId } from '../../../utils/createPositionId';
 import { adjust, multiply, subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE, BitgetExchange } from './bitget.exchange';
 
 /**
@@ -275,7 +276,7 @@ export class BitgetInverseExchange extends BitgetExchange {
               (p.achievedProfits ? parseFloat(p.achievedProfits) : 0) +
               (p.totalFee ? parseFloat(p.totalFee) : 0) -
               (p.deductedFee ? parseFloat(p.deductedFee) : 0),
-            liquidationPrice: this.resolveLiquidationPrice(positionId, p.liquidationPrice),
+            liquidationPrice: nativeLiquidationPrice(this.resolveLiquidationPrice(positionId, p.liquidationPrice)),
             marginSize: marginSize && marginSize > 0 ? marginSize : undefined,
             positionMode,
             marginType: marginMode,
@@ -581,19 +582,18 @@ export class BitgetInverseExchange extends BitgetExchange {
         const positions = await this.fetchPositions([symbol]);
         (() => {
           const incoming: StoreData['positions'] = positions;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: [
-                  ...this.store.positions.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       } catch (err: any) {
@@ -627,19 +627,18 @@ export class BitgetInverseExchange extends BitgetExchange {
       const positions = await this.fetchPositions([symbol]);
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } catch (err: any) {

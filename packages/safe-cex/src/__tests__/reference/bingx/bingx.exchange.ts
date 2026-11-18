@@ -48,7 +48,8 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { add, adjust, subtract } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI, FETCH_POSITIONS_RESPONSE } from './bingx.api';
 import {
   BINGX_BALANCE,
@@ -199,14 +200,13 @@ export class BingxExchange extends BaseExchange {
       const [markets, rawTickers] = await Promise.all([
         this.fetchMarkets().then((markets) => {
           if (this.isDisposed) return [];
-          this.store.apply(
-            nativeFixture(
-              {
-                markets,
-                loaded: { ...this.store.loaded, markets: true },
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            {
+              markets,
+              loaded: { ...this.store.loaded, markets: true },
+            },
+            this.store.markets.map((row) => row.symbol),
           );
 
           // start public websocket streams as soon as markets loaded.
@@ -220,27 +220,25 @@ export class BingxExchange extends BaseExchange {
       if (this.isDisposed) return;
 
       const tickers = this.formatTickers(rawTickers);
-      this.store.apply(
-        nativeFixture(
-          {
-            tickers,
-            loaded: { ...this.store.loaded, tickers: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { ...this.store.loaded, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} Bingx markets`);
     }
 
     if (publicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       return;
     }
@@ -253,14 +251,13 @@ export class BingxExchange extends BaseExchange {
     await Promise.all([
       this.fetchOrders().then((orders) => {
         if (this.isDisposed) return [];
-        this.store.apply(
-          nativeFixture(
-            {
-              orders,
-              loaded: { ...this.store.loaded, orders: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            orders,
+            loaded: { ...this.store.loaded, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
         return orders;
       }),
@@ -268,38 +265,35 @@ export class BingxExchange extends BaseExchange {
         if (this.isDisposed) return [];
         (() => {
           const incoming: StoreData['positions'] = positions;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
-          );
-        })();
-        this.store.apply(
-          nativeFixture(
+          return applyReferenceFixture(
+            this.store,
             {
-              loaded: { ...this.store.loaded, positions: true },
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
             },
             this.store.markets.map((row) => row.symbol),
-          ),
+          );
+        })();
+        applyReferenceFixture(
+          this.store,
+          {
+            loaded: { ...this.store.loaded, positions: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
         return positions;
       }),
       this.fetchBalance().then((balance) => {
         if (this.isDisposed) return;
-        this.store.apply(
-          nativeFixture(
-            {
-              balance,
-              loaded: { ...this.store.loaded, balance: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: { ...this.store.loaded, balance: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
         return balance;
       }),
@@ -319,34 +313,32 @@ export class BingxExchange extends BaseExchange {
         if ((count + 2) % 4 === 0) {
           orders = await this.fetchOrders();
           if (this.isDisposed) return;
-          this.store.apply(
-            nativeFixture(
-              {
-                orders,
-                loaded: {
-                  ...this.store.loaded,
-                  orders: true,
-                },
+          applyReferenceFixture(
+            this.store,
+            {
+              orders,
+              loaded: {
+                ...this.store.loaded,
+                orders: true,
               },
-              this.store.markets.map((row) => row.symbol),
-            ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         }
         let balance: Balance | undefined;
         if (count % 4 === 0) {
           balance = await this.fetchBalance();
           if (this.isDisposed) return;
-          this.store.apply(
-            nativeFixture(
-              {
-                balance,
-                loaded: {
-                  ...this.store.loaded,
-                  balance: true,
-                },
+          applyReferenceFixture(
+            this.store,
+            {
+              balance,
+              loaded: {
+                ...this.store.loaded,
+                balance: true,
               },
-              this.store.markets.map((row) => row.symbol),
-            ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         }
 
@@ -354,16 +346,15 @@ export class BingxExchange extends BaseExchange {
         if (this.isDisposed) return;
         (() => {
           const incoming: StoreData['positions'] = positions;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       } catch (err: any) {
@@ -493,11 +484,10 @@ export class BingxExchange extends BaseExchange {
     const { dailys, prices } = await this.fetchTickersRaw();
     if (this.isDisposed) return [];
     const tickers = this.formatTickers({ dailys, prices });
-    this.store.apply(
-      nativeFixture(
-        { tickers },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { tickers },
+      this.store.markets.map((row) => row.symbol),
     );
     return tickers;
   };
@@ -516,7 +506,7 @@ export class BingxExchange extends BaseExchange {
         notional: 0,
         unrealizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
       };
     });
     return [...openPositionsForSymbols, ...fakePositions];
@@ -568,7 +558,7 @@ export class BingxExchange extends BaseExchange {
           leverage,
           unrealizedPnl: upnl,
           contracts: Math.abs(contracts),
-          liquidationPrice: parseFloat(v(p, 'liquidationPrice')),
+          liquidationPrice: nativeLiquidationPrice(parseFloat(v(p, 'liquidationPrice'))),
           marginSize,
           marginType,
           positionMode,
@@ -760,16 +750,15 @@ export class BingxExchange extends BaseExchange {
         sellLeverage: data.data.shortLeverage,
       };
 
-      this.store.apply(
-        nativeFixture(
-          {
-            fetchedLeverage: {
-              ...this.store.fetchedLeverage,
-              [symbol]: leverageObj,
-            },
+      applyReferenceFixture(
+        this.store,
+        {
+          fetchedLeverage: {
+            ...this.store.fetchedLeverage,
+            [symbol]: leverageObj,
           },
-          this.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       return leverageObj;
@@ -919,11 +908,10 @@ export class BingxExchange extends BaseExchange {
       }
       await this.getOrFetchPositionMode(true);
       const positions = await this.fetchPositions();
-      this.store.apply(
-        nativeFixture(
-          { positions },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { positions },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
@@ -953,19 +941,18 @@ export class BingxExchange extends BaseExchange {
       const positions = await this.fetchPositions([symbol]);
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } catch (err: any) {
@@ -1007,19 +994,18 @@ export class BingxExchange extends BaseExchange {
       const positions = await this.fetchPositions([symbol]);
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } catch (err: any) {
@@ -1078,15 +1064,14 @@ export class BingxExchange extends BaseExchange {
           (() => {
             const targets: Array<Pick<StoreData['orders'][number], 'id'>> = canceledOrderIds.map((id) => ({ id }));
             const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: this.store.orders.map((row) =>
-                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                  ),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -1121,15 +1106,14 @@ export class BingxExchange extends BaseExchange {
           (o) => o.symbol === symbol,
         );
         const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: this.store.orders.map((row) =>
-                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-              ),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } catch (err: any) {
@@ -1555,33 +1539,31 @@ export class BingxExchange extends BaseExchange {
       (() => {
         const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderToReplace.id }];
         const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: this.store.orders.map((row) =>
-                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-              ),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
       if (replacementOrder) {
         (() => {
           const incoming: StoreData['orders'] = [replacementOrder];
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -2020,19 +2002,18 @@ export class BingxExchange extends BaseExchange {
           if (acceptedOrder?.status === OrderStatus.Open && acceptedOrder.type !== OrderType.Market) {
             (() => {
               const incoming: StoreData['orders'] = [acceptedOrder];
-              return this.store.apply(
-                nativeFixture(
-                  {
-                    orders: [
-                      ...this.store.orders.map((row) => {
-                        const change = incoming.find((item) => item.id === row.id);
-                        return change ? { ...row, ...change } : row;
-                      }),
-                      ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                    ],
-                  },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.store,
+                {
+                  orders: [
+                    ...this.store.orders.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
               );
             })();
           }

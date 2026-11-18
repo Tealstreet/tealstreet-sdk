@@ -35,7 +35,7 @@ import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { buildOptionChain, optionExpiries } from '../bybit/bybit.options';
 import { createAPI } from './binanceoptions.api';
 import {
@@ -87,34 +87,31 @@ export class BinanceOptionsExchange extends BaseExchange {
   start = async () => {
     const markets = await this.fetchMarkets();
     if (this.isDisposed) return;
-    this.store.apply(
-      nativeFixture(
-        { markets, loaded: { ...this.store.loaded, markets: true } },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { markets, loaded: { ...this.store.loaded, markets: true } },
+      this.store.markets.map((row) => row.symbol),
     );
 
     const tickers = await this.fetchTickers();
     if (this.isDisposed) return;
-    this.store.apply(
-      nativeFixture(
-        { tickers, loaded: { ...this.store.loaded, tickers: true } },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { tickers, loaded: { ...this.store.loaded, tickers: true } },
+      this.store.markets.map((row) => row.symbol),
     );
     this.log(`Loaded ${markets.length} Binance option markets`);
 
     if (this.isPublicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            orders: [],
-            positions: [],
-            balance: { used: 0, free: 0, total: 0, upnl: 0 },
-            loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          orders: [],
+          positions: [],
+          balance: { used: 0, free: 0, total: 0, upnl: 0 },
+          loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       return;
     }
@@ -123,11 +120,10 @@ export class BinanceOptionsExchange extends BaseExchange {
     if (this.isDisposed) return;
     const orders = await this.fetchOrders();
     if (this.isDisposed) return;
-    this.store.apply(
-      nativeFixture(
-        { orders, loaded: { ...this.store.loaded, orders: true } },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { orders, loaded: { ...this.store.loaded, orders: true } },
+      this.store.markets.map((row) => row.symbol),
     );
     this.log('Ready to trade on Binance Options');
   };
@@ -142,16 +138,15 @@ export class BinanceOptionsExchange extends BaseExchange {
         this.fetchTickers(),
       ]);
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          {
-            balance,
-            positions,
-            tickers,
-            loaded: { ...this.store.loaded, balance: true, positions: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          positions,
+          tickers,
+          loaded: { ...this.store.loaded, balance: true, positions: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err: any) {
       this.emitAndLogError(err?.message);
@@ -318,15 +313,14 @@ export class BinanceOptionsExchange extends BaseExchange {
       (() => {
         const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [order];
         const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: this.store.orders.map((row) =>
-                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-              ),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -339,15 +333,14 @@ export class BinanceOptionsExchange extends BaseExchange {
         (o) => o.symbol === symbol,
       );
       const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-      return this.store.apply(
-        nativeFixture(
-          {
-            orders: this.store.orders.map((row) =>
-              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-            ),
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        {
+          orders: this.store.orders.map((row) =>
+            targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+          ),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };

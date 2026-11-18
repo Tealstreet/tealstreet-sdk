@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { OrderStatus } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import fixture from '../fixtures/paradex-sbe.json';
 import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { decodeParadexMessage } from '../reference/paradex/paradex.sbe';
@@ -176,11 +176,10 @@ it('handles CLOSED SBE orders as final and prevents an older snapshot reopening 
   exchange.privateWebsocket.onMessage({ data } as MessageEvent);
   const current = exchange.store.orders[0];
   expect(current).toMatchObject({ id: 'order-123', status: OrderStatus.Canceled, remaining: 0.5 });
-  exchange.store.apply(
-    nativeFixture(
-      { orders: [{ ...current, status: OrderStatus.Open }] },
-      exchange.store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    exchange.store,
+    { orders: [{ ...current, status: OrderStatus.Open }] },
+    exchange.store.markets.map((row) => row.symbol),
   );
   expect(exchange.store.orders[0].status).toBe(OrderStatus.Canceled);
   exchange.dispose();
@@ -190,29 +189,28 @@ it.each(['bbo', 'summary'])('applies every %s update across different markets in
   vi.useFakeTimers();
   const exchange = new ParadexExchange('paradex', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
   const symbols = ['BTC-USD-PERP', 'ETH-USD-PERP'];
-  exchange.store.apply(
-    nativeFixture(
-      {
-        tickers: symbols.map((symbol) => ({
-          id: symbol,
-          symbol,
-          bid: 0,
-          ask: 0,
-          last: 0,
-          mark: 0,
-          index: 0,
-          percentage: 0,
-          volume: 0,
-          quoteVolume: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          timestamp: 0,
-          info: {},
-        })),
-      },
-      exchange.store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    exchange.store,
+    {
+      tickers: symbols.map((symbol) => ({
+        id: symbol,
+        symbol,
+        bid: 0,
+        ask: 0,
+        last: 0,
+        mark: 0,
+        index: 0,
+        percentage: 0,
+        volume: 0,
+        quoteVolume: 0,
+        openInterest: 0,
+        fundingRate: 0,
+        fundingTime: 0,
+        timestamp: 0,
+        info: {},
+      })),
+    },
+    exchange.store.markets.map((row) => row.symbol),
   );
   const template = bytes(fixture.cases.find((row) => row.name === name)!.base64);
   const send = (symbol: string, price: number) => {

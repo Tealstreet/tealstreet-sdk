@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { FrameStore } from '../../store/frameStore';
 import { MarginType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
 import { CRYPTOCOM_WS_IDLE_RECONNECT_THRESHOLD_MS } from '../reference/cryptocom/cryptocom.types';
 
@@ -37,21 +37,20 @@ describe('audit regression: Crypto.com WebSocket protocol', () => {
 
   it('processes every order and position in documented batched private frames', async () => {
     const exchange = createExchange();
-    exchange.store.apply(
-      nativeFixture(
-        {
-          markets: ['BTC', 'ETH'].map((base) => ({
-            id: `${base}USD-PERP`,
-            symbol: `${base}USD-PERP`,
-            base,
-            quote: 'USD',
-            active: true,
-            precision: { amount: 0.001, price: 0.5 },
-            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
-          })),
-        },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: ['BTC', 'ETH'].map((base) => ({
+          id: `${base}USD-PERP`,
+          symbol: `${base}USD-PERP`,
+          base,
+          quote: 'USD',
+          active: true,
+          precision: { amount: 0.001, price: 0.5 },
+          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
+        })),
+      },
+      exchange.store.markets.map((row) => row.symbol),
     );
 
     exchange.privateWebsocket.onMessage({
@@ -182,23 +181,22 @@ describe('audit regression: Crypto.com WebSocket protocol', () => {
     vi.useFakeTimers();
     const exchange = createExchange();
     const callback = vi.fn();
-    exchange.store.apply(
-      nativeFixture(
-        {
-          markets: [
-            {
-              id: 'BTCUSD-PERP',
-              symbol: 'BTCUSD-PERP',
-              base: 'BTC',
-              quote: 'USD',
-              active: true,
-              precision: { amount: 0.001, price: 0.5 },
-              limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
-            },
-          ],
-        },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: [
+          {
+            id: 'BTCUSD-PERP',
+            symbol: 'BTCUSD-PERP',
+            base: 'BTC',
+            quote: 'USD',
+            active: true,
+            precision: { amount: 0.001, price: 0.5 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
+          },
+        ],
+      },
+      exchange.store.markets.map((row) => row.symbol),
     );
     exchange.publicWebsocket.ws = { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebSocket;
     exchange.listenOrderBook('BTCUSD-PERP', callback);

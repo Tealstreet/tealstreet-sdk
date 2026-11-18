@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeOrder } from '../cutover/nativeOrder';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
@@ -46,11 +47,10 @@ const order = (extra: Partial<PlaceOrderOpts> = {}): PlaceOrderOpts => ({
 const running: RustEngineExchange[] = [];
 const setup = (name: ExchangeName) => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { markets: [market] },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { markets: [market] },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new RustEngineExchange(
     name,
@@ -148,16 +148,15 @@ describe('Rust cancel-all placement scopes', () => {
 
   it('unions stored and attempted scopes, deduplicates them, and awaits cancellations in order', async () => {
     const { exchange, command, store } = setup('okx');
-    store.apply(
-      nativeFixture(
-        {
-          orders: [
-            { id: 'external', symbol: 'ETHUSDT' },
-            { id: 'existing', symbol: 'BTCUSDT' },
-          ] as Order[],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        orders: [
+          nativeOrder({ id: 'external', symbol: 'ETHUSDT' }),
+          nativeOrder({ id: 'existing', symbol: 'BTCUSDT' }),
+        ] as Order[],
+      },
+      store.markets.map((row) => row.symbol),
     );
     await exchange.placeOrders([order(), order({ symbol: 'SOLUSDT' })]);
     let finish!: () => void;
@@ -215,11 +214,10 @@ describe('Rust cancel-all placement scopes', () => {
     async (name) => {
       const { exchange, command, store } = setup(name);
       await exchange.cancelAllOrders();
-      store.apply(
-        nativeFixture(
-          { orders: [{ id: 'unrelated', symbol: 'ETHUSDT' }] as Order[] },
-          store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        store,
+        { orders: [nativeOrder({ id: 'unrelated', symbol: 'ETHUSDT' })] as Order[] },
+        store.markets.map((row) => row.symbol),
       );
       await exchange.cancelAllOrders();
       expect(command.mock.calls.map(([call]) => call)).toEqual([

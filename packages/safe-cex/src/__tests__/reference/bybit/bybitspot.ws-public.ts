@@ -18,7 +18,7 @@ import { inverseObj } from '../../../utils/inverseObj';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../../utils/updateOrderBook';
 import { WsDirectFallback } from '../../../utils/wsDirectFallback';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL } from './bybitspot.types';
 
 // Module-level cache. `inverseObj` runs `Object.entries` + a quadratic
@@ -257,11 +257,10 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitSpotExchange> {
     (() => {
       const target = ticker;
       const changes: Partial<StoreData['tickers'][number]> = update;
-      return this.parent.store.apply(
-        nativeFixture(
-          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.parent.store,
+        { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.parent.store.markets.map((row) => row.symbol),
       );
     })();
   };

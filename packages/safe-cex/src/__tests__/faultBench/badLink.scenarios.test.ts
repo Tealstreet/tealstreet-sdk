@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { OKXExchange } from '../reference/okx/okx.exchange';
 import { deferred } from './deferred';
 import { createFakeVenue } from './fakeVenue';
@@ -41,11 +41,10 @@ const filledOnVenue = new Set<number>();
 
 const setup = () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { markets: [MARKET] },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { markets: [MARKET] },
+    store.markets.map((row) => row.symbol),
   );
   const options = { key: 'key', secret: 'secret', passphrase: 'passphrase', tealstreetTunnel: false };
   const exchange = new OKXExchange('okx', options as any, store);
@@ -176,11 +175,10 @@ describe('bad link: finding an order whose response was lost', () => {
 
   it('answers from the store without asking the venue when the stream already has it', async () => {
     const { exchange, store, venue } = setup();
-    store.apply(
-      nativeFixture(
-        { orders: [openOrder({ id: 'okx-9', info: { clOrdId: 'tealStored1' } })] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { orders: [openOrder({ id: 'okx-9', info: { clOrdId: 'tealStored1' } })] },
+      store.markets.map((row) => row.symbol),
     );
 
     await expect(exchange.findOrderByClientOrderId(MARKET.symbol, 'tealStored1')).resolves.toMatchObject({
@@ -244,11 +242,10 @@ describe('bad link: a REST snapshot racing the private stream (real BaseExchange
   const raceSnapshotAgainst = async (state: 'canceled' | 'filled') => {
     const { exchange, store } = setup();
     const order = openOrder();
-    store.apply(
-      nativeFixture(
-        { orders: [order] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { orders: [order] },
+      store.markets.map((row) => row.symbol),
     );
 
     // A second apart, so a fix comparing times is not decided by a tie.

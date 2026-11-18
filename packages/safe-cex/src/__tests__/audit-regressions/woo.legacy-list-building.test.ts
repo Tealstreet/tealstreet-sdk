@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { MarginType, OrderType, PositionMode, PositionSide } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeMarket } from '../cutover/nativeMarket';
+import { nativePosition } from '../cutover/nativePosition';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { WOOXExchange } from '../reference/woo/woo.exchange';
 
 const makeExchange = () => {
@@ -17,20 +19,29 @@ const makeExchange = () => {
     } as any,
     store,
   );
-  store.apply(
-    nativeFixture(
-      {
-        markets: [
-          { id: 'btc-market', symbol: 'BTCUSDT', precision: { amount: 0.001, price: 0.1 }, limits: {} } as any,
-          { id: 'eth-market', symbol: 'ETHUSDT', precision: { amount: 0.001, price: 0.1 }, limits: {} } as any,
-        ],
-        tickers: [
-          { id: 'btc-market', symbol: 'BTCUSDT', mark: 110, last: 110 } as any,
-          { id: 'eth-market', symbol: 'ETHUSDT', mark: 190, last: 190 } as any,
-        ],
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        nativeMarket({
+          id: 'btc-market',
+          symbol: 'BTCUSDT',
+          precision: { amount: 0.001, price: 0.1 },
+          limits: {},
+        }) as any,
+        nativeMarket({
+          id: 'eth-market',
+          symbol: 'ETHUSDT',
+          precision: { amount: 0.001, price: 0.1 },
+          limits: {},
+        }) as any,
+      ],
+      tickers: [
+        { id: 'btc-market', symbol: 'BTCUSDT', mark: 110, last: 110 } as any,
+        { id: 'eth-market', symbol: 'ETHUSDT', mark: 190, last: 190 } as any,
+      ],
+    },
+    store.markets.map((row) => row.symbol),
   );
   vi.spyOn(exchange, 'getPositionMode').mockResolvedValue(PositionMode.OneWay);
   return { exchange, store };
@@ -102,24 +113,24 @@ describe('WOO legacy allocation-conscious list building', () => {
           success: true,
           data: {
             positions: [
-              { symbol: 'PERP_UNKNOWN_USDT', holding: 1, averageOpenPrice: 1 },
-              { symbol: 'PERP_BTC_USDT', holding: 0, averageOpenPrice: 100 },
-              {
+              nativePosition({ symbol: 'PERP_UNKNOWN_USDT', holding: 1, averageOpenPrice: 1 }),
+              nativePosition({ symbol: 'PERP_BTC_USDT', holding: 0, averageOpenPrice: 100 }),
+              nativePosition({
                 symbol: 'PERP_ETH_USDT',
                 holding: -2,
                 averageOpenPrice: 200,
                 leverage: 3,
                 estLiqPrice: 250,
                 marginMode: 'ISOLATED',
-              },
-              {
+              }),
+              nativePosition({
                 symbol: 'PERP_BTC_USDT',
                 holding: 1,
                 averageOpenPrice: 100,
                 leverage: 5,
                 estLiqPrice: 50,
                 marginMode: 'CROSS',
-              },
+              }),
             ],
           },
         },

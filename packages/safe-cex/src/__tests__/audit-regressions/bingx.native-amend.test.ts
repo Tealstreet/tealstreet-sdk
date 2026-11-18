@@ -15,7 +15,7 @@ import {
   PositionMode,
   PositionSide,
 } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BingxExchange } from '../reference/bingx/bingx.exchange';
 import { ENDPOINTS } from '../reference/bingx/bingx.types';
 
@@ -61,11 +61,10 @@ const createOrder = (overrides: Partial<Order> = {}): Order => ({
 
 const createExchange = () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { markets: [MARKET] },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { markets: [MARKET] },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new BingxExchange('bingx', { key: 'key', secret: 'secret' }, store);
   const amendPost = vi.fn().mockImplementation(async (_endpoint, payload) => ({
@@ -151,19 +150,18 @@ describe('BingX native amend safety boundary', () => {
     vi.spyOn(exchange as any, 'createClientOrderId').mockReturnValue('tsreplacement1');
     (() => {
       const incoming: StoreData['orders'] = [createOrder()];
-      return exchange.store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...exchange.store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          exchange.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          orders: [
+            ...exchange.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
       );
     })();
 
@@ -218,27 +216,26 @@ describe('BingX native amend safety boundary', () => {
       },
     });
     exchange.xhr = { post: amendPost, delete: deleteOrder } as unknown as Axios;
-    exchange.store.apply(
-      nativeFixture(
-        {
-          positions: [
-            {
-              id: 'BTCUSDT-long',
-              symbol: MARKET.symbol,
-              side: PositionSide.Long,
-              entryPrice: 50_000,
-              notional: 1_350_000,
-              leverage: 20,
-              marginType: MarginType.Cross,
-              positionMode: PositionMode.Hedged,
-              unrealizedPnl: 0,
-              contracts: 27,
-              liquidationPrice: 0,
-            },
-          ],
-        },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      {
+        positions: [
+          {
+            id: 'BTCUSDT-long',
+            symbol: MARKET.symbol,
+            side: PositionSide.Long,
+            entryPrice: 50_000,
+            notional: 1_350_000,
+            leverage: 20,
+            marginType: MarginType.Cross,
+            positionMode: PositionMode.Hedged,
+            unrealizedPnl: 0,
+            contracts: 27,
+            liquidationPrice: null,
+          },
+        ],
+      },
+      exchange.store.markets.map((row) => row.symbol),
     );
     (exchange as any)._accountPositionMode = PositionMode.Hedged;
     const stopLoss = createOrder({
@@ -270,19 +267,18 @@ describe('BingX native amend safety boundary', () => {
     });
     (() => {
       const incoming: StoreData['orders'] = [stopLoss];
-      return exchange.store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...exchange.store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          exchange.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          orders: [
+            ...exchange.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
       );
     })();
 
@@ -340,27 +336,26 @@ describe('BingX native amend safety boundary', () => {
       },
     });
     exchange.xhr = { post: amendPost, delete: deleteOrder } as unknown as Axios;
-    exchange.store.apply(
-      nativeFixture(
-        {
-          positions: [
-            {
-              id: 'BTCUSDT-long',
-              symbol: MARKET.symbol,
-              side: PositionSide.Long,
-              entryPrice: 50_000,
-              notional: 1_350_000,
-              leverage: 20,
-              marginType: MarginType.Cross,
-              positionMode: PositionMode.Hedged,
-              unrealizedPnl: 0,
-              contracts: 27,
-              liquidationPrice: 0,
-            },
-          ],
-        },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      {
+        positions: [
+          {
+            id: 'BTCUSDT-long',
+            symbol: MARKET.symbol,
+            side: PositionSide.Long,
+            entryPrice: 50_000,
+            notional: 1_350_000,
+            leverage: 20,
+            marginType: MarginType.Cross,
+            positionMode: PositionMode.Hedged,
+            unrealizedPnl: 0,
+            contracts: 27,
+            liquidationPrice: null,
+          },
+        ],
+      },
+      exchange.store.markets.map((row) => row.symbol),
     );
     (exchange as any)._accountPositionMode = PositionMode.Hedged;
     const misclassifiedStopLoss = createOrder({

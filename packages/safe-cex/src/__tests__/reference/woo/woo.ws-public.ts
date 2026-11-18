@@ -12,7 +12,7 @@ import { getCandleStartTime } from '../../../utils/getCandleStartTime';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { add } from '../../../utils/safe-math';
 import { updateOrderBookByPrice } from '../../../utils/updateOrderBook';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, ENDPOINTS } from './woo.types';
 import { normalizeSymbol, reverseSymbol } from './woo.utils';
 
@@ -121,11 +121,10 @@ export class WooPublicWebsocket extends BaseWebSocket<WOOXExchange> {
               quoteVolume: row.amount,
               volume: row.volume,
             };
-            return this.store.apply(
-              nativeFixture(
-                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -146,11 +145,10 @@ export class WooPublicWebsocket extends BaseWebSocket<WOOXExchange> {
               bid: row.bid,
               ask: row.ask,
             };
-            return this.store.apply(
-              nativeFixture(
-                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -170,11 +168,10 @@ export class WooPublicWebsocket extends BaseWebSocket<WOOXExchange> {
             const changes: Partial<StoreData['tickers'][number]> = {
               mark: row.price,
             };
-            return this.store.apply(
-              nativeFixture(
-                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }

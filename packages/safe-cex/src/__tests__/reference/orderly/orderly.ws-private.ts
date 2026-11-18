@@ -7,7 +7,7 @@ import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { OrderStatus } from '../../../types';
 import { v } from '../../../utils/get-key';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { orderlySign } from './orderly.encryption';
 import { BASE_WS_URL, ORDER_SIDE } from './orderly.types';
 import { normalizeSymbol } from './orderly.utils';
@@ -108,19 +108,18 @@ export class OrderlyPrivateWebSocket extends BaseWebSocket<OrderlyExchange> {
       if (position)
         (() => {
           const incoming: StoreData['positions'] = [position];
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: [
-                  ...this.store.positions.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
     }
@@ -138,19 +137,18 @@ export class OrderlyPrivateWebSocket extends BaseWebSocket<OrderlyExchange> {
       if (updatedOrder) {
         (() => {
           const incoming: StoreData['orders'] = [updatedOrder];
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -161,15 +159,14 @@ export class OrderlyPrivateWebSocket extends BaseWebSocket<OrderlyExchange> {
         const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: `${data.orderId}` }];
         const nativeStatus: StoreData['orders'][number]['status'] =
           status === 'CANCELLED' ? OrderStatus.Canceled : OrderStatus.Closed;
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: this.store.orders.map((row) =>
-                targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
-              ),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -284,19 +281,18 @@ export class OrderlyPrivateWebSocket extends BaseWebSocket<OrderlyExchange> {
         for (const order of updatedOrders) {
           (() => {
             const incoming: StoreData['orders'] = [order];
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: [
-                    ...this.store.orders.map((row) => {
-                      const change = incoming.find((item) => item.id === row.id);
-                      return change ? { ...row, ...change } : row;
-                    }),
-                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                  ],
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -317,15 +313,14 @@ export class OrderlyPrivateWebSocket extends BaseWebSocket<OrderlyExchange> {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: `${v(row, 'algoOrderId')}` }];
           const nativeStatus: StoreData['orders'][number]['status'] =
             status === 'CANCELLED' ? OrderStatus.Canceled : OrderStatus.Closed;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         for (const childOrder of row.childOrders || []) {
@@ -333,15 +328,14 @@ export class OrderlyPrivateWebSocket extends BaseWebSocket<OrderlyExchange> {
             const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: `${v(childOrder, 'algoOrderId')}` }];
             const nativeStatus: StoreData['orders'][number]['status'] =
               status === 'CANCELLED' ? OrderStatus.Canceled : OrderStatus.Closed;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: this.store.orders.map((row) =>
-                    targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
-                  ),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }

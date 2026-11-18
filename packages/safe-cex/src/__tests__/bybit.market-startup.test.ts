@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
 import { FrameStore } from '../store/frameStore';
-import { nativeFixture } from './cutover/nativeFixture';
+import { nativeMarket } from './cutover/nativeMarket';
+import { applyReferenceFixture } from './cutover/referenceFixture';
 import { BybitExchange } from './reference/bybit/bybit.exchange';
 
 const createExchange = () => {
@@ -66,12 +67,11 @@ describe('Bybit market startup', () => {
 
   it('falls back to cached markets when the required Trading request fails', async () => {
     const { exchange, store } = createExchange();
-    const cachedMarket = marketPayload('ETHUSDT');
-    store.apply(
-      nativeFixture(
-        { markets: [cachedMarket as any] },
-        store.markets.map((row) => row.symbol),
-      ),
+    const cachedMarket = nativeMarket({ id: 'ETHUSDT', symbol: 'ETHUSDT', base: 'ETH', quote: 'USDT' });
+    applyReferenceFixture(
+      store,
+      { markets: [cachedMarket] },
+      store.markets.map((row) => row.symbol),
     );
 
     (exchange.xhr.get as any) = vi.fn((url: string, config: any) => {
@@ -136,11 +136,10 @@ describe('Bybit market startup', () => {
 
   it('fails startup when the required Trading response is not OK', async () => {
     const { exchange, store } = createExchange();
-    store.apply(
-      nativeFixture(
-        { markets: [marketPayload('ETHUSDT') as any] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [nativeMarket({ id: 'ETHUSDT', symbol: 'ETHUSDT', base: 'ETH', quote: 'USDT' })] },
+      store.markets.map((row) => row.symbol),
     );
 
     (exchange.xhr.get as any) = vi.fn((url: string, config: any) => {
@@ -158,11 +157,10 @@ describe('Bybit market startup', () => {
 
   it('does not use cached markets for Trading market mapper errors', async () => {
     const { exchange, store } = createExchange();
-    store.apply(
-      nativeFixture(
-        { markets: [marketPayload('ETHUSDT') as any] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [nativeMarket({ id: 'ETHUSDT', symbol: 'ETHUSDT', base: 'ETH', quote: 'USDT' })] },
+      store.markets.map((row) => row.symbol),
     );
 
     (exchange.xhr.get as any) = vi.fn((url: string, config: any) => {

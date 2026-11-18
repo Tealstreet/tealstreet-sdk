@@ -10,7 +10,10 @@ import {
   PositionMode,
   PositionSide,
 } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeMarket } from '../cutover/nativeMarket';
+import { nativeOrder } from '../cutover/nativeOrder';
+import { nativePosition } from '../cutover/nativePosition';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { WOOXExchange } from '../reference/woo/woo.exchange';
 import { ENDPOINTS } from '../reference/woo/woo.types';
 
@@ -26,28 +29,27 @@ const makeExchange = () => {
     store,
   );
 
-  store.apply(
-    nativeFixture(
-      {
-        markets: [
-          {
-            id: 'BTC/USDT:USDT',
-            symbol: 'BTCUSDT',
-            precision: { amount: 0.001, price: 0.1 },
-            limits: { amount: { min: 0.001, max: 10 } },
-            info: { price_range: 0.01 },
-          } as any,
-        ],
-        tickers: [
-          {
-            id: 'BTC/USDT:USDT',
-            symbol: 'BTCUSDT',
-            last: 100,
-          } as any,
-        ],
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        nativeMarket({
+          id: 'BTC/USDT:USDT',
+          symbol: 'BTCUSDT',
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 10 }, leverage: { min: 1, max: 100 } },
+          info: { price_range: 0.01 },
+        }) as any,
+      ],
+      tickers: [
+        {
+          id: 'BTC/USDT:USDT',
+          symbol: 'BTCUSDT',
+          last: 100,
+        } as any,
+      ],
+    },
+    store.markets.map((row) => row.symbol),
   );
   vi.spyOn(exchange, 'getPositionMode').mockResolvedValue(PositionMode.OneWay);
 
@@ -111,23 +113,22 @@ describe('WooX remaining July audit regressions', () => {
 
   it('uses mark price for market buys when legacy ticker ask is stale', async () => {
     const { exchange, store } = makeExchange();
-    store.apply(
-      nativeFixture(
-        {
-          tickers: [
-            {
-              id: 'BTC/USDT:USDT',
-              symbol: 'BTCUSDT',
-              bid: 1989.9,
-              ask: 1989.9,
-              last: 1989.9,
-              index: 1886.1,
-              mark: 1886.1,
-            } as any,
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        tickers: [
+          {
+            id: 'BTC/USDT:USDT',
+            symbol: 'BTCUSDT',
+            bid: 1989.9,
+            ask: 1989.9,
+            last: 1989.9,
+            index: 1886.1,
+            mark: 1886.1,
+          } as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     const post = vi.fn().mockResolvedValue({
       data: { success: true, order_id: 303 },
@@ -156,23 +157,22 @@ describe('WooX remaining July audit regressions', () => {
 
   it('uses the current orderbook ask when fair-price slippage would not cross the WOO book', async () => {
     const { exchange, store } = makeExchange();
-    store.apply(
-      nativeFixture(
-        {
-          tickers: [
-            {
-              id: 'BTC/USDT:USDT',
-              symbol: 'BTCUSDT',
-              bid: 1882.3,
-              ask: 1882.3,
-              last: 1882.3,
-              index: 1882.3,
-              mark: 1882.3,
-            } as any,
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        tickers: [
+          {
+            id: 'BTC/USDT:USDT',
+            symbol: 'BTCUSDT',
+            bid: 1882.3,
+            ask: 1882.3,
+            last: 1882.3,
+            index: 1882.3,
+            mark: 1882.3,
+          } as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     const post = vi.fn().mockResolvedValue({
       data: { success: true, order_id: 304 },
@@ -209,23 +209,22 @@ describe('WooX remaining July audit regressions', () => {
 
   it('does not use an orderbook ask outside WOO market price range for market IOC emulation', async () => {
     const { exchange, store } = makeExchange();
-    store.apply(
-      nativeFixture(
-        {
-          tickers: [
-            {
-              id: 'BTC/USDT:USDT',
-              symbol: 'BTCUSDT',
-              bid: 1876.1,
-              ask: 1900.6,
-              last: 1881.2,
-              index: 1881.2,
-              mark: 1881.2,
-            } as any,
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        tickers: [
+          {
+            id: 'BTC/USDT:USDT',
+            symbol: 'BTCUSDT',
+            bid: 1876.1,
+            ask: 1900.6,
+            last: 1881.2,
+            index: 1881.2,
+            mark: 1881.2,
+          } as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     const post = vi.fn().mockResolvedValue({
       data: { success: true, order_id: 305 },
@@ -308,23 +307,22 @@ describe('WooX remaining July audit regressions', () => {
 
   it('rejects crossing post-only limits before WOO can fill them', async () => {
     const { exchange, store } = makeExchange();
-    store.apply(
-      nativeFixture(
-        {
-          tickers: [
-            {
-              id: 'BTC/USDT:USDT',
-              symbol: 'BTCUSDT',
-              bid: 99,
-              ask: 101,
-              last: 102,
-              index: 102,
-              mark: 102,
-            } as any,
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        tickers: [
+          {
+            id: 'BTC/USDT:USDT',
+            symbol: 'BTCUSDT',
+            bid: 99,
+            ask: 101,
+            last: 102,
+            index: 102,
+            mark: 102,
+          } as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     const get = vi.fn().mockResolvedValue({
       data: {
@@ -353,23 +351,22 @@ describe('WooX remaining July audit regressions', () => {
 
   it('rejects post-only limits that can cross hidden WOO liquidity near fair price', async () => {
     const { exchange, store } = makeExchange();
-    store.apply(
-      nativeFixture(
-        {
-          tickers: [
-            {
-              id: 'BTC/USDT:USDT',
-              symbol: 'BTCUSDT',
-              bid: 99,
-              ask: 101,
-              last: 100,
-              index: 100,
-              mark: 100,
-            } as any,
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        tickers: [
+          {
+            id: 'BTC/USDT:USDT',
+            symbol: 'BTCUSDT',
+            bid: 99,
+            ask: 101,
+            last: 100,
+            index: 100,
+            mark: 100,
+          } as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     const get = vi.fn();
     const post = vi.fn();
@@ -495,20 +492,19 @@ describe('WooX remaining July audit regressions', () => {
 
   it('returns camelCase algo order IDs for trailing-stop placement', async () => {
     const { exchange, store } = makeExchange();
-    store.apply(
-      nativeFixture(
-        {
-          positions: [
-            {
-              id: 'BTCUSDT-Long',
-              symbol: 'BTCUSDT',
-              side: PositionSide.Long,
-              contracts: 2,
-            } as any,
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        positions: [
+          nativePosition({
+            id: 'BTCUSDT-Long',
+            symbol: 'BTCUSDT',
+            side: PositionSide.Long,
+            contracts: 2,
+          }) as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     const post = vi.fn().mockResolvedValue({
       data: {
@@ -546,11 +542,10 @@ describe('WooX remaining July audit regressions', () => {
       type: OrderType.StopLoss,
       price: 90,
     } as any;
-    store.apply(
-      nativeFixture(
-        { orders: [takeProfit, oldStopLoss] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { orders: [takeProfit, oldStopLoss] },
+      store.markets.map((row) => row.symbol),
     );
 
     const remove = vi.fn().mockResolvedValue({ data: { success: true } });
@@ -589,11 +584,10 @@ describe('WooX remaining July audit regressions', () => {
       side: OrderSide.Sell,
       price: 120,
     } as any;
-    store.apply(
-      nativeFixture(
-        { orders: [shortTakeProfit, longTakeProfit] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { orders: [shortTakeProfit, longTakeProfit] },
+      store.markets.map((row) => row.symbol),
     );
 
     const remove = vi.fn().mockResolvedValue({ data: { success: true } });
@@ -613,23 +607,22 @@ describe('WooX remaining July audit regressions', () => {
 
   it('rejects when replacement bracket placement fails after cancellation', async () => {
     const { exchange, store } = makeExchange();
-    store.apply(
-      nativeFixture(
-        {
-          orders: [
-            {
-              id: 'tp-child',
-              parentId: 'bracket-parent',
-              symbol: 'BTCUSDT',
-              side: OrderSide.Sell,
-              type: OrderType.TakeProfit,
-              status: OrderStatus.Open,
-              price: 120,
-            } as any,
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        orders: [
+          nativeOrder({
+            id: 'tp-child',
+            parentId: 'bracket-parent',
+            symbol: 'BTCUSDT',
+            side: OrderSide.Sell,
+            type: OrderType.TakeProfit,
+            status: OrderStatus.Open,
+            price: 120,
+          }) as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     const replacementError = {
       response: { data: { message: 'replacement rejected' } },

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { PolymarketExchange } from '../reference/polymarket/polymarket.exchange';
 
 // Raw user-channel contract: https://docs.polymarket.com/trading/realtime-order-updates
@@ -156,11 +156,10 @@ describe('Polymarket private execution attribution', () => {
     send({ ...order('0'), status: 'LIVE' });
     expect(store.orders).toEqual([]);
     // A successful authoritative read can still have started before cancellation.
-    store.apply(
-      nativeFixture(
-        { orders: [{ id: 'own-order', status: 'open' } as any] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { orders: [{ id: 'own-order', status: 'open' } as any] },
+      store.markets.map((row) => row.symbol),
     );
     expect(store.orders).toEqual([]);
   });

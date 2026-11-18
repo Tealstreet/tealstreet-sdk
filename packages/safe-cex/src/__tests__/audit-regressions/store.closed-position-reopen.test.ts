@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { FrameStore } from '../../store/frameStore';
 import { MarginType, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BinancePrivateWebsocket } from '../reference/binance/binance.ws-private';
 import { BlofinExchange } from '../reference/blofin/blofin.exchange';
 
@@ -34,11 +34,10 @@ const rawBlofin = {
   liquidationPrice: '30000',
 };
 const blofin = (store = new FrameStore()) => {
-  store.apply(
-    nativeFixture(
-      { markets: [market] },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { markets: [market] },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new BlofinExchange('blofin', { key: '', secret: '', passphrase: '' }, store);
   return { store, exchange };
@@ -167,27 +166,24 @@ describe('retained adapters reopen without fabricated settings', () => {
     try {
       (() => {
         const incoming: StoreData['positions'] = [position({ leverage: retained })];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const incoming: StoreData['positions'] = [];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
-      store.apply(
-        nativeFixture(
-          { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
-          store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        store,
+        { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
+        store.markets.map((row) => row.symbol),
       );
       expect(exchange.mapPositions([{ ...rawBlofin, leverage: '' }] as any)[0].leverage).toBe(expected);
     } finally {
@@ -200,27 +196,24 @@ describe('retained adapters reopen without fabricated settings', () => {
     try {
       (() => {
         const incoming: StoreData['positions'] = [position({ leverage: 50 })];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const incoming: StoreData['positions'] = [];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
-      store.apply(
-        nativeFixture(
-          { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
-          store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        store,
+        { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
+        store.markets.map((row) => row.symbol),
       );
       for (let event = 1; event <= 3; event++) {
         exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
@@ -248,27 +241,24 @@ describe('retained adapters reopen without fabricated settings', () => {
     try {
       (() => {
         const incoming: StoreData['positions'] = [position({ leverage: 50 })];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const incoming: StoreData['positions'] = [];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
-      store.apply(
-        nativeFixture(
-          { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
-          store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        store,
+        { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
+        store.markets.map((row) => row.symbol),
       );
       exchange.privateWebsocket.handlePositionTopic({ data: [{ ...rawBlofin, leverage: '' }] as any });
       expect(store.positions[0].leverage).toBeNaN();
@@ -308,27 +298,24 @@ describe('retained adapters reopen without fabricated settings', () => {
     try {
       (() => {
         const incoming: StoreData['positions'] = [position({ leverage: 50 })];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const incoming: StoreData['positions'] = [];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
-      store.apply(
-        nativeFixture(
-          { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
-          store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        store,
+        { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
+        store.markets.map((row) => row.symbol),
       );
       vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
       vi.spyOn(exchange, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.OneWay);
@@ -360,27 +347,24 @@ describe('retained adapters reopen without fabricated settings', () => {
     try {
       (() => {
         const incoming: StoreData['positions'] = [position({ leverage: 50 })];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const incoming: StoreData['positions'] = [];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
-      store.apply(
-        nativeFixture(
-          { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
-          store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        store,
+        { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9 } } },
+        store.markets.map((row) => row.symbol),
       );
       vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
       let release!: (value: any) => void;
@@ -511,20 +495,18 @@ describe('retained adapters reopen without fabricated settings', () => {
     try {
       (() => {
         const incoming: StoreData['positions'] = exchange.mapPositions([rawBlofin] as any);
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const incoming: StoreData['positions'] = [];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
@@ -557,27 +539,24 @@ describe('retained adapters reopen without fabricated settings', () => {
     try {
       (() => {
         const incoming: StoreData['positions'] = exchange.mapPositions([rawBlofin] as any);
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const incoming: StoreData['positions'] = [];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
-      store.apply(
-        nativeFixture(
-          { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9, isFetching: true } } },
-          store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        store,
+        { fetchedLeverage: { BTCUSDT: { buyLeverage: 9, sellLeverage: 9, isFetching: true } } },
+        store.markets.map((row) => row.symbol),
       );
       expect(exchange.mapPositions([{ ...rawBlofin, leverage: '' }] as any)[0].leverage).toBe(50);
     } finally {
@@ -590,20 +569,18 @@ describe('retained adapters reopen without fabricated settings', () => {
     try {
       (() => {
         const incoming: StoreData['positions'] = exchange.mapPositions([rawBlofin] as any);
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const incoming: StoreData['positions'] = [];
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
@@ -627,20 +604,18 @@ describe('retained adapters reopen without fabricated settings', () => {
     const id = createPositionId('BTCUSDT', side, mode);
     (() => {
       const incoming: StoreData['positions'] = [position({ id, side, positionMode: mode })];
-      return store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
       );
     })();
     (() => {
       const incoming: StoreData['positions'] = [];
-      return store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
       );
     })();
     expect(store.positions).toEqual([]);
@@ -662,31 +637,28 @@ describe('retained adapters reopen without fabricated settings', () => {
     const { store, reopen } = binance();
     (() => {
       const incoming: StoreData['positions'] = [position({ side: PositionSide.Short })];
-      return store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
       );
     })();
     (() => {
       const incoming: StoreData['positions'] = [];
-      return store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
       );
     })();
-    store.apply(
-      nativeFixture(
-        {
-          fetchedLeverage: {
-            BTCUSDT: { buyLeverage: 9, sellLeverage: 13, marginType: MarginType.Cross },
-          },
+    applyReferenceFixture(
+      store,
+      {
+        fetchedLeverage: {
+          BTCUSDT: { buyLeverage: 9, sellLeverage: 13, marginType: MarginType.Cross },
         },
-        store.markets.map((row) => row.symbol),
-      ),
+      },
+      store.markets.map((row) => row.symbol),
     );
     reopen('BOTH', '-0.2');
     expect(store.positions[0]).toMatchObject({ side: PositionSide.Short, leverage: 13, marginType: MarginType.Cross });
@@ -710,20 +682,18 @@ describe('retained adapters reopen without fabricated settings', () => {
           positionMode: PositionMode.Hedged,
         }),
       ];
-      return store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
       );
     })();
     (() => {
       const incoming: StoreData['positions'] = [];
-      return store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
       );
     })();
     reopen('SHORT', '-0.2');
@@ -737,21 +707,19 @@ describe('retained adapters reopen without fabricated settings', () => {
     try {
       (() => {
         const incoming: StoreData['positions'] = exchange.mapPositions([rawBlofin] as any);
-        return store.apply(
-          nativeFixture(
-            { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const target = { id: 'BTCUSDT' };
         const changes: Partial<StoreData['positions'][number]> = { leverage: Number.NaN };
-        return store.apply(
-          nativeFixture(
-            { positions: store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          store,
+          { positions: store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          store.markets.map((row) => row.symbol),
         );
       })();
       expect(store.positionSettings.BTCUSDT.leverage).toBe(50);
@@ -765,11 +733,10 @@ describe('retained adapters reopen without fabricated settings', () => {
     const { store, reopen } = binance();
     (() => {
       const incoming: StoreData['positions'] = [position()];
-      return store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        { positions: incoming.map((row) => ({ ...store.positions.find((old) => old.id === row.id), ...row })) },
+        store.markets.map((row) => row.symbol),
       );
     })();
     (() => {
@@ -779,11 +746,10 @@ describe('retained adapters reopen without fabricated settings', () => {
         marginType: undefined,
         liquidationPrice: null,
       };
-      return store.apply(
-        nativeFixture(
-          { positions: store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        store,
+        { positions: store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        store.markets.map((row) => row.symbol),
       );
     })();
     expect(store.positionSettings.BTCUSDT.leverage).toBe(17);

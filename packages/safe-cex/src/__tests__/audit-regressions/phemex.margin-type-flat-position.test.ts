@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
 import { MarginType, PositionMode, PositionSide } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeMarket } from '../cutover/nativeMarket';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 
 // A flat ADAUSDT row as accountPositions actually returns it: size 0, but
@@ -35,22 +36,21 @@ const flatHedgedRow = {
 
 const buildExchange = (positionRows = [flatCrossRow]) => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      {
-        markets: [
-          {
-            id: 'ADAUSDT',
-            symbol: 'ADAUSDT',
-            info: { symbol: 'ADAUSDT' },
-            precision: { amount: 1, price: 0.0001 },
-            limits: { amount: { min: 1, max: 100000 }, leverage: { min: 1, max: 100 } },
-          },
-        ] as any,
-        tickers: [{ id: 'ADAUSDT', symbol: 'ADAUSDT', last: 0.2 }] as any,
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        nativeMarket({
+          id: 'ADAUSDT',
+          symbol: 'ADAUSDT',
+          info: { symbol: 'ADAUSDT' },
+          precision: { amount: 1, price: 0.0001 },
+          limits: { amount: { min: 1, max: 100000 }, leverage: { min: 1, max: 100 } },
+        }),
+      ] as any,
+      tickers: [{ id: 'ADAUSDT', symbol: 'ADAUSDT', last: 0.2 }] as any,
+    },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
   const put = vi.fn().mockResolvedValue({ data: { code: 0, msg: '' } });
@@ -163,19 +163,18 @@ describe('audit regression: Phemex margin type on a flat symbol', () => {
           positionMode: PositionMode.OneWay,
         } as any,
       ];
-      return exchange.store.apply(
-        nativeFixture(
-          {
-            positions: [
-              ...exchange.store.positions.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !exchange.store.positions.some((old) => old.id === row.id)),
-            ],
-          },
-          exchange.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          positions: [
+            ...exchange.store.positions.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.positions.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
       );
     })();
 

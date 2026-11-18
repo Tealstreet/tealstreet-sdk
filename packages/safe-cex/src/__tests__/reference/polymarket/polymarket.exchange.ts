@@ -53,7 +53,7 @@ import { createPositionId } from '../../../utils/createPositionId';
 import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { PolymarketAPI } from './polymarket.api';
 import { ORDER_SIDE_MAP, ORDER_STATUS_MAP, ORDER_TYPE_MAP, SignatureType } from './polymarket.constants';
 import { createSignedOrder, createWallet, signApiKeyDerivationMessage } from './polymarket.signing';
@@ -246,14 +246,13 @@ export class PolymarketExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      this.store.apply(
-        nativeFixture(
-          {
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          markets,
+          loaded: { ...this.store.loaded, markets: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       // Fetch tickers
@@ -262,25 +261,23 @@ export class PolymarketExchange extends BaseExchange {
 
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} Polymarket markets`);
 
-      this.store.apply(
-        nativeFixture(
-          {
-            tickers,
-            loaded: { ...this.store.loaded, tickers: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { ...this.store.loaded, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     }
 
     if (this.isPublicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       return;
     }
@@ -300,14 +297,13 @@ export class PolymarketExchange extends BaseExchange {
       const orders = await this.fetchOrders();
       if (this.isDisposed) return;
 
-      this.store.apply(
-        nativeFixture(
-          {
-            orders,
-            loaded: { ...this.store.loaded, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          orders,
+          loaded: { ...this.store.loaded, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     }
   };
@@ -331,28 +327,26 @@ export class PolymarketExchange extends BaseExchange {
         const upnl = positions.length > 0 ? sumBy(positions, 'unrealizedPnl') : 0;
         (balance as Writable<Balance>).upnl = upnl;
 
-        this.store.apply(
-          nativeFixture(
-            {
-              balance,
-              loaded: { ...this.store.loaded, balance: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: { ...this.store.loaded, balance: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         // Fetch orders
         const orders = await this.fetchOrders();
         if (this.isDisposed) return;
 
-        this.store.apply(
-          nativeFixture(
-            {
-              orders,
-              loaded: { ...this.store.loaded, orders: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            orders,
+            loaded: { ...this.store.loaded, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       }
     } catch (err: any) {
@@ -560,7 +554,7 @@ export class PolymarketExchange extends BaseExchange {
           leverage: 1, // No leverage
           unrealizedPnl,
           contracts: holding.size,
-          liquidationPrice: 0, // No liquidation in prediction markets
+          liquidationPrice: null, // No liquidation in prediction markets
           positionMode: PositionMode.OneWay,
           info: {
             tokenId,
@@ -586,14 +580,13 @@ export class PolymarketExchange extends BaseExchange {
   fetchAndSetPositions = async (): Promise<Position[]> => {
     const positions = await this.fetchPositions();
     if (!this.isDisposed) {
-      this.store.apply(
-        nativeFixture(
-          {
-            positions,
-            loaded: { ...this.store.loaded, positions: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          positions,
+          loaded: { ...this.store.loaded, positions: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     }
     return positions;

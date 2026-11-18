@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ENDPOINTS } from '../../exchanges/okx/okx.types';
 import { FrameStore } from '../../store/frameStore';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { OKXEUExchange } from '../reference/okx/okxeu.exchange';
 
 const options: ExchangeOptions = {
@@ -165,11 +165,10 @@ describe('OKX EU X-Perp market support', () => {
       }) as any;
       return exchange.fetchMarkets();
     })();
-    exchange.store.apply(
-      nativeFixture(
-        { markets, loaded: { ...exchange.store.loaded, markets: true } },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      { markets, loaded: { ...exchange.store.loaded, markets: true } },
+      exchange.store.markets.map((row) => row.symbol),
     );
 
     const get = vi.fn(async (endpoint: string, opts?: { params?: Record<string, string> }) => {
@@ -229,15 +228,14 @@ describe('OKX EU X-Perp market support', () => {
         info: xperpInstrument,
       },
     ];
-    exchange.store.apply(
-      nativeFixture(
-        {
-          markets,
-          tickers: markets.map(storedTicker),
-          loaded: { ...exchange.store.loaded, markets: true, tickers: true },
-        },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets,
+        tickers: markets.map(storedTicker),
+        loaded: { ...exchange.store.loaded, markets: true, tickers: true },
+      },
+      exchange.store.markets.map((row) => row.symbol),
     );
 
     exchange.publicWebsocket.handleIndexTickerEvents({ data: [{ instId: 'ETH-USD', idxPx: '2500' }] });

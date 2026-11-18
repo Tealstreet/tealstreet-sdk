@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { FrameStore } from '../../store/frameStore';
 import { Market, Position, PositionMode, PositionSide, Ticker } from '../../types';
 import { calculateOrdersRisk } from '../../utils/risk';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BybitDemoExchange } from '../reference/bybit/bybitdemo.exchange';
 
 const market = {
@@ -56,7 +56,7 @@ const position = {
   unrealizedPnl: -0.03,
   realizedPnl: 0,
   contracts: 200,
-  liquidationPrice: 0,
+  liquidationPrice: null,
   positionMode: PositionMode.OneWay,
 } as Position;
 
@@ -86,15 +86,14 @@ const demoTradingStopOrder = (overrides: Record<string, unknown>) => ({
 describe('Bybit Demo order risk', () => {
   it('estimates realized and unrealized PnL for side-less demo position TP/SL rows', () => {
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        {
-          markets: [market],
-          tickers: [ticker],
-          positions: [position],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        markets: [market],
+        tickers: [ticker],
+        positions: [position],
+      },
+      store.markets.map((row) => row.symbol),
     );
 
     const exchange = new BybitDemoExchange('bybitdemo', { key: 'key', secret: 'secret' }, store);

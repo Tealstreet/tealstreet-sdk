@@ -58,7 +58,8 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust, subtract } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI, createPublicAPI } from './binanceinverse.api';
 import { BinanceInversePrivateWebsocket } from './binanceinverse.ws-private';
 import { BinanceInversePublicWebsocket } from './binanceinverse.ws-public';
@@ -257,21 +258,19 @@ export class BinanceInverseExchange extends BaseExchange {
     if (!useExternalPublicData) {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          { markets, loaded: { ...this.store.loaded, markets: true } },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { markets, loaded: { ...this.store.loaded, markets: true } },
+        this.store.markets.map((row) => row.symbol),
       );
 
       const tickers = await this.fetchTickers();
       if (this.isDisposed) return;
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} Binance COIN-M markets`);
-      this.store.apply(
-        nativeFixture(
-          { tickers, loaded: { ...this.store.loaded, tickers: true } },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { tickers, loaded: { ...this.store.loaded, tickers: true } },
+        this.store.markets.map((row) => row.symbol),
       );
       this.publicWebsocket.connectAndSubscribe();
     }
@@ -282,11 +281,10 @@ export class BinanceInverseExchange extends BaseExchange {
 
   _startPrivate = async () => {
     this.privateWebsocket.connectAndSubscribe();
-    this.store.apply(
-      nativeFixture(
-        { options: { ...this.store.options, ['isHedged']: await this.fetchPositionMode() } },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { options: { ...this.store.options, ['isHedged']: await this.fetchPositionMode() } },
+      this.store.markets.map((row) => row.symbol),
     );
     await this.tick();
     if (this.isDisposed) return;
@@ -295,26 +293,24 @@ export class BinanceInverseExchange extends BaseExchange {
     const orders = await this.fetchOrders();
     if (this.isDisposed || this.ordersSnapshotStale) return;
     this.log(`Loaded Binance COIN-M orders`);
-    this.store.apply(
-      nativeFixture(
-        { orders, loaded: { ...this.store.loaded, orders: true } },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { orders, loaded: { ...this.store.loaded, orders: true } },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
   _startPublicDataOnly = async () => {
     this.log(`Ready to watch public data on Binance COIN-M`);
-    this.store.apply(
-      nativeFixture(
-        {
-          orders: [],
-          balance: { used: 0, free: 0, total: 0, upnl: 0 },
-          positions: [],
-          loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        orders: [],
+        balance: { used: 0, free: 0, total: 0, upnl: 0 },
+        positions: [],
+        loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -323,11 +319,10 @@ export class BinanceInverseExchange extends BaseExchange {
     this.lastOrdersRetryAt = Date.now();
     const orders = await this.fetchOrders();
     if (this.isDisposed || this.ordersSnapshotStale) return;
-    this.store.apply(
-      nativeFixture(
-        { orders, loaded: { ...this.store.loaded, orders: true } },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { orders, loaded: { ...this.store.loaded, orders: true } },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -354,11 +349,10 @@ export class BinanceInverseExchange extends BaseExchange {
         const positionStateVersion = this.getPositionStateVersion();
         const positionsWithRisk = await this.fetchPositions();
         if (positionStateVersion === this.getPositionStateVersion()) {
-          this.store.apply(
-            nativeFixture(
-              { positions: positionsWithRisk },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            { positions: positionsWithRisk },
+            this.store.markets.map((row) => row.symbol),
           );
         }
         this.lastPositionRiskReconciliationAt = Date.now();
@@ -368,15 +362,14 @@ export class BinanceInverseExchange extends BaseExchange {
         const positionStateVersion = this.getPositionStateVersion();
         const { balance, positions } = await this.fetchPositionsAndBalance();
         if (this.isDisposed) return;
-        this.store.apply(
-          nativeFixture(
-            {
-              balance,
-              ...(positionStateVersion === this.getPositionStateVersion() && { positions }),
-              loaded: { ...this.store.loaded, balance: true, positions: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            ...(positionStateVersion === this.getPositionStateVersion() && { positions }),
+            loaded: { ...this.store.loaded, balance: true, positions: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
         this.lastAccountReconciliationAt = Date.now();
       }
@@ -527,7 +520,7 @@ export class BinanceInverseExchange extends BaseExchange {
       leverage,
       unrealizedPnl: parseFloat(p.unRealizedProfit || '0'),
       contracts: this.nativeContractsToBase(p.symbol, nativeContracts, markPrice || entryPrice),
-      liquidationPrice: parseFloat(p.liquidationPrice || '0'),
+      liquidationPrice: nativeLiquidationPrice(parseFloat(p.liquidationPrice || '0')),
       marginSize,
       marginType: String(p.marginType || '').toLowerCase() === 'isolated' ? MarginType.Isolated : MarginType.Cross,
       positionMode: positionMode || mode,
@@ -554,7 +547,7 @@ export class BinanceInverseExchange extends BaseExchange {
             leverage: 0,
             unrealizedPnl: 0,
             contracts: 0,
-            liquidationPrice: 0,
+            liquidationPrice: null,
             marginSize: 0,
             marginType: MarginType.Cross,
             positionMode: mode,
@@ -789,17 +782,15 @@ export class BinanceInverseExchange extends BaseExchange {
         ? { ...position, id: createPositionId(position.symbol, position.side, positionMode), positionMode }
         : position,
     );
-    this.store.apply(
-      nativeFixture(
-        { options: { ...this.store.options, ['isHedged']: hedged } },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { options: { ...this.store.options, ['isHedged']: hedged } },
+      this.store.markets.map((row) => row.symbol),
     );
-    this.store.apply(
-      nativeFixture(
-        { fetchedLeverage, positions },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { fetchedLeverage, positions },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -828,16 +819,15 @@ export class BinanceInverseExchange extends BaseExchange {
               [{ id: createPositionId(symbol, PositionSide.Long) }, { leverage }],
               [{ id: createPositionId(symbol, PositionSide.Short) }, { leverage }],
             ];
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: this.store.positions.map((row) => {
-                  const change = updates.find(([target]) => target.id === row.id);
-                  return change ? { ...row, ...change[1] } : row;
-                }),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: this.store.positions.map((row) => {
+                const change = updates.find(([target]) => target.id === row.id);
+                return change ? { ...row, ...change[1] } : row;
+              }),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       } catch (err: any) {
@@ -861,15 +851,14 @@ export class BinanceInverseExchange extends BaseExchange {
           (() => {
             const targets: Array<Pick<StoreData['orders'][number], 'id'>> = lot.map((o) => ({ id: o.id }));
             const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: this.store.orders.map((row) =>
-                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                  ),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         });
@@ -889,15 +878,14 @@ export class BinanceInverseExchange extends BaseExchange {
           (order) => order.symbol === symbol,
         );
         const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: this.store.orders.map((row) =>
-                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-              ),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } catch (err: any) {

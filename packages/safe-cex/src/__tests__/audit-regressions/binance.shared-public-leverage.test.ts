@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { InProcessPublicDataProvider } from '../../exchanges/in-process-public-data';
 import { FrameStore } from '../../store/frameStore';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 
@@ -23,11 +23,10 @@ const sharedMarket = () => ({
 
 const sharedSourceWith = (markets: unknown[]) => {
   const sourceStore = new FrameStore();
-  sourceStore.apply(
-    nativeFixture(
-      { markets: markets as any, loaded: { ...sourceStore.loaded, markets: true } },
-      sourceStore.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    sourceStore,
+    { markets: markets as any, loaded: { ...sourceStore.loaded, markets: true } },
+    sourceStore.markets.map((row) => row.symbol),
   );
   return sourceStore;
 };
@@ -78,11 +77,10 @@ describe.each(variants)('$name account on a shared public exchange', ({ create, 
     expect(exchange.store.markets[0].limits.leverage.max).toBe(20);
     expect(shared.limits.leverage.max).toBe(1);
 
-    sourceStore.apply(
-      nativeFixture(
-        { markets: [sharedMarket()] as any },
-        sourceStore.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      sourceStore,
+      { markets: [sharedMarket()] as any },
+      sourceStore.markets.map((row) => row.symbol),
     );
 
     expect(exchange.store.markets[0].limits.leverage.max).toBe(20);

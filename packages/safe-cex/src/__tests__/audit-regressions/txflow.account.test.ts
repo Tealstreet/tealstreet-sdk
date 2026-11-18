@@ -3,7 +3,7 @@ import type { Market } from '../../types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { TxflowAccount } from '../reference/txflow/txflow.account';
 
 const NOW = 1_700_000_000_000;
@@ -55,11 +55,10 @@ const ORDER = {
 };
 function create() {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { markets: [MARKET] },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { markets: [MARKET] },
+    store.markets.map((row) => row.symbol),
   );
   const emitFill = vi.fn();
   const reportError = vi.fn();

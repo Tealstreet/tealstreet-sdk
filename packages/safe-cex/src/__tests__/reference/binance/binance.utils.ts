@@ -3,7 +3,7 @@ import type { HistoricalTrade, HistoricalTradeOptions, Order } from '../../../ty
 
 import { FrameStore } from '../../../store/frameStore';
 import { OrderStatus } from '../../../types';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 export const USER_TRADES_MAX_LIMIT = 1000;
 
@@ -73,15 +73,12 @@ export const markBinanceOrdersCanceled = (store: FrameStore, requested: Array<Pi
       (order) => ids.has(order.id) && order.status !== OrderStatus.Closed && order.status !== OrderStatus.Canceled,
     );
     const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-    return store.apply(
-      nativeFixture(
-        {
-          orders: store.orders.map((row) =>
-            targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-          ),
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    return applyReferenceFixture(
+      store,
+      {
+        orders: store.orders.map((row) => (targets.some((target) => target.id === row.id) ? { ...row, status } : row)),
+      },
+      store.markets.map((row) => row.symbol),
     );
   })();
 };

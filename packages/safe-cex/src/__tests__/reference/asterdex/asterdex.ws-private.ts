@@ -9,7 +9,7 @@ import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { FrameStore } from '../../../store/frameStore';
 import { LogSeverity, OrderSide, OrderStatus, PositionSide } from '../../../types';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 type MessageHandlers = {
   [eventType: string]: Array<(data: any) => void>;
@@ -196,11 +196,10 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
           filled: parseFloat(data.z || '0'),
           remaining: parseFloat(data.q || '0') - parseFloat(data.z || '0'),
         };
-        return this.parent.store.apply(
-          nativeFixture(
-            { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
 
@@ -237,19 +236,18 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
             info: orderData,
           },
         ];
-        return this.parent.store.apply(
-          nativeFixture(
-            {
-              orders: [
-                ...this.parent.store.orders.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
-              ],
-            },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          {
+            orders: [
+              ...this.parent.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
 
@@ -291,11 +289,10 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
             remaining: 0,
             lastUpdate: this.getOrderUpdateTime(orderData),
           };
-          return this.parent.store.apply(
-            nativeFixture(
-              { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
         this.parent.emitter.emit('order', order.id, order);
@@ -313,11 +310,10 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
             status: OrderStatus.Canceled,
             lastUpdate: this.getOrderUpdateTime(orderData),
           };
-          return this.parent.store.apply(
-            nativeFixture(
-              { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
         this.parent.emitter.emit('order', order.id, order);
@@ -347,11 +343,10 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
           remaining: parseFloat(orderData.q || '0') - parseFloat(orderData.z || '0'),
           lastUpdate: this.getOrderUpdateTime(orderData),
         };
-        return this.parent.store.apply(
-          nativeFixture(
-            { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
 
@@ -376,11 +371,10 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
         remaining: Math.max(amount - filled, 0),
         lastUpdate: this.getOrderUpdateTime(orderData),
       };
-      return this.parent.store.apply(
-        nativeFixture(
-          { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.parent.store,
+        { orders: this.parent.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.parent.store.markets.map((row) => row.symbol),
       );
     })();
   }
@@ -518,11 +512,10 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
     ) {
       return needsAuthoritativeReconcile;
     }
-    this.parent.store.apply(
-      nativeFixture(
-        { balance: nextBalance },
-        this.parent.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.parent.store,
+      { balance: nextBalance },
+      this.parent.store.markets.map((row) => row.symbol),
     );
     return needsAuthoritativeReconcile;
   }
@@ -597,15 +590,14 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
                 unrealizedPnl: parseFloat(pos.up || '0'),
                 realizedPnl: parseFloat(pos.cr || '0'),
               };
-              return this.parent.store.apply(
-                nativeFixture(
-                  {
-                    positions: this.parent.store.positions.map((row) =>
-                      row.id === target.id ? { ...row, ...changes } : row,
-                    ),
-                  },
-                  this.parent.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.parent.store,
+                {
+                  positions: this.parent.store.positions.map((row) =>
+                    row.id === target.id ? { ...row, ...changes } : row,
+                  ),
+                },
+                this.parent.store.markets.map((row) => row.symbol),
               );
             })();
           } else {
@@ -628,13 +620,12 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
                   LogSeverity.Info,
                 );
                 // Remove the opposite position by updating the store
-                this.parent.store.apply(
-                  nativeFixture(
-                    {
-                      positions: this.parent.store.positions.filter((p) => p.id !== oppositePosition.id),
-                    },
-                    this.parent.store.markets.map((row) => row.symbol),
-                  ),
+                applyReferenceFixture(
+                  this.parent.store,
+                  {
+                    positions: this.parent.store.positions.filter((p) => p.id !== oppositePosition.id),
+                  },
+                  this.parent.store.markets.map((row) => row.symbol),
                 );
               }
             }
@@ -646,13 +637,12 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
 
           if (positionsToRemove.length > 0) {
             this.parent.log(`Removing ${positionsToRemove.length} closed position(s): ${pos.s}`, LogSeverity.Info);
-            this.parent.store.apply(
-              nativeFixture(
-                {
-                  positions: this.parent.store.positions.filter((p) => p.symbol !== pos.s),
-                },
-                this.parent.store.markets.map((row) => row.symbol),
-              ),
+            applyReferenceFixture(
+              this.parent.store,
+              {
+                positions: this.parent.store.positions.filter((p) => p.symbol !== pos.s),
+              },
+              this.parent.store.markets.map((row) => row.symbol),
             );
           }
         }
@@ -849,23 +839,21 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
         this.parent.log('AsterDEX position repair completed successfully', LogSeverity.Debug);
         (() => {
           const incoming: StoreData['positions'] = positions;
-          return this.parent.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.parent.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.parent.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.parent.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
           );
         })();
-        this.parent.store.apply(
-          nativeFixture(
-            { loaded: { ...this.parent.store.loaded, positions: true } },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.parent.store,
+          { loaded: { ...this.parent.store.loaded, positions: true } },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       } else {
         this.parent.log(
@@ -949,17 +937,16 @@ export class AsterDEXPrivateWebsocket extends BaseWebSocket<AsterDEXExchange> {
       const orders = await this.parent.fetchOrders();
       if (this.isDisposed) return;
       this.parent.log('AsterDEX order reconcile completed successfully', LogSeverity.Debug);
-      this.parent.store.apply(
-        nativeFixture(
-          {
-            orders,
-            loaded: {
-              ...this.parent.store.loaded,
-              orders: true,
-            },
+      applyReferenceFixture(
+        this.parent.store,
+        {
+          orders,
+          loaded: {
+            ...this.parent.store.loaded,
+            orders: true,
           },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.parent.store.markets.map((row) => row.symbol),
       );
     } catch (error: any) {
       this.parent.log(

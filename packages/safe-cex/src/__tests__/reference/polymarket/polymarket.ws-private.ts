@@ -25,7 +25,7 @@ import { BaseWebSocket } from '../../../exchanges/base.ws';
 
 import { LogSeverity, Order, OrderSide, OrderStatus, OrderType } from '../../../types';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import {
   ORDER_SIDE_MAP,
   ORDER_STATUS_MAP,
@@ -230,24 +230,22 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: wire.id }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         (() => {
           const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: wire.id }];
-          return this.store.apply(
-            nativeFixture(
-              { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         return;
@@ -282,43 +280,40 @@ export class PolymarketPrivateWebSocket extends BaseWebSocket<PolymarketExchange
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         (() => {
           const removed: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
-          return this.store.apply(
-            nativeFixture(
-              { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       } else {
         // MATCHED notifications contain cumulative size, including partials.
         (() => {
           const incoming: StoreData['orders'] = [order];
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }

@@ -45,7 +45,8 @@ import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI } from './kraken.api';
 import { ENDPOINTS } from './kraken.types';
 import { KrakenPrivateWebsocket } from './kraken.ws-private';
@@ -156,21 +157,19 @@ export class KrakenExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      this.store.apply(
-        nativeFixture(
-          { markets, loaded: { ...this.store.loaded, markets: true } },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { markets, loaded: { ...this.store.loaded, markets: true } },
+        this.store.markets.map((row) => row.symbol),
       );
 
       const tickers = await this.fetchTickers();
       if (this.isDisposed) return;
 
-      this.store.apply(
-        nativeFixture(
-          { tickers, loaded: { ...this.store.loaded, tickers: true } },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { tickers, loaded: { ...this.store.loaded, tickers: true } },
+        this.store.markets.map((row) => row.symbol),
       );
 
       // Start public websocket for live tickers
@@ -185,13 +184,12 @@ export class KrakenExchange extends BaseExchange {
     }
 
     if (this.isPublicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       return;
     }
@@ -772,7 +770,7 @@ export class KrakenExchange extends BaseExchange {
           leverage,
           unrealizedPnl: parseFloat(p.unrealizedPnl ?? 0),
           contracts,
-          liquidationPrice: existingPosition?.liquidationPrice ?? 0,
+          liquidationPrice: nativeLiquidationPrice(existingPosition?.liquidationPrice ?? 0),
           marginType,
           positionMode: PositionMode.OneWay, // Kraken only supports one-way mode
           info: p,
@@ -804,7 +802,7 @@ export class KrakenExchange extends BaseExchange {
             leverage,
             unrealizedPnl: 0,
             contracts: 0,
-            liquidationPrice: 0,
+            liquidationPrice: null,
             marginType, // Use cached margin type preference
             positionMode: PositionMode.OneWay, // Kraken only supports one-way mode
             info: {},
@@ -819,7 +817,7 @@ export class KrakenExchange extends BaseExchange {
             leverage,
             unrealizedPnl: 0,
             contracts: 0,
-            liquidationPrice: 0,
+            liquidationPrice: null,
             marginType, // Use cached margin type preference
             positionMode: PositionMode.OneWay, // Kraken only supports one-way mode
             info: {},
@@ -1594,19 +1592,18 @@ export class KrakenExchange extends BaseExchange {
       const positions = await this.fetchPositions();
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } catch (err: any) {
@@ -1722,55 +1719,50 @@ export class KrakenExchange extends BaseExchange {
               // Always update orders regardless of length
               (() => {
                 const incoming: StoreData['orders'] = orders;
-                return this.store.apply(
-                  nativeFixture(
-                    {
-                      orders: incoming.map((row) => ({
-                        ...this.store.orders.find((old) => old.id === row.id),
-                        ...row,
-                      })),
-                    },
-                    this.store.markets.map((row) => row.symbol),
-                  ),
+                return applyReferenceFixture(
+                  this.store,
+                  {
+                    orders: incoming.map((row) => ({
+                      ...this.store.orders.find((old) => old.id === row.id),
+                      ...row,
+                    })),
+                  },
+                  this.store.markets.map((row) => row.symbol),
                 );
               })();
-              this.store.apply(
-                nativeFixture(
-                  { loaded: { ...this.store.loaded, orders: true } },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              applyReferenceFixture(
+                this.store,
+                { loaded: { ...this.store.loaded, orders: true } },
+                this.store.markets.map((row) => row.symbol),
               );
             }),
             this.fetchPositions().then((positions) => {
               // Always update positions regardless of length
               (() => {
                 const incoming: StoreData['positions'] = positions;
-                return this.store.apply(
-                  nativeFixture(
-                    {
-                      positions: incoming.map((row) => ({
-                        ...this.store.positions.find((old) => old.id === row.id),
-                        ...row,
-                      })),
-                    },
-                    this.store.markets.map((row) => row.symbol),
-                  ),
+                return applyReferenceFixture(
+                  this.store,
+                  {
+                    positions: incoming.map((row) => ({
+                      ...this.store.positions.find((old) => old.id === row.id),
+                      ...row,
+                    })),
+                  },
+                  this.store.markets.map((row) => row.symbol),
                 );
               })();
-              this.store.apply(
-                nativeFixture(
-                  { loaded: { ...this.store.loaded, positions: true } },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              applyReferenceFixture(
+                this.store,
+                { loaded: { ...this.store.loaded, positions: true } },
+                this.store.markets.map((row) => row.symbol),
               );
             }),
             this.fetchBalance().then((balance) => {
               if (balance) {
-                this.store.apply(
-                  nativeFixture(
-                    { balance, loaded: { ...this.store.loaded, balance: true } },
-                    this.store.markets.map((row) => row.symbol),
-                  ),
+                applyReferenceFixture(
+                  this.store,
+                  { balance, loaded: { ...this.store.loaded, balance: true } },
+                  this.store.markets.map((row) => row.symbol),
                 );
               }
             }),

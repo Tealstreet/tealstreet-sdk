@@ -4,7 +4,7 @@ import type { ORDER_EVENT } from '../reference/coinbase/coinbase.types';
 import { describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 
 const makeMarket = (overrides: Partial<Market> = {}): Market => ({
@@ -79,11 +79,10 @@ const makePosition = (product_id: string, number_of_contracts = '1.5') =>
 
 const createExchange = (markets: Market[] = [makeMarket()]) => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { markets },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { markets },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new CoinbaseExchange(
     'coinbase' as any,

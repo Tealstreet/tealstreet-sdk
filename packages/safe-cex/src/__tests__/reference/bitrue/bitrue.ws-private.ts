@@ -5,7 +5,7 @@ import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { LogSeverity, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../../types';
 import { cleanFloat, createIncrementalFills } from '../../../utils/incrementalFills';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_STATUS, ORDER_TYPE, WS_ORDER_TRADE_UPDATE } from './bitrue.types';
 import { reverseWsSymbol } from './bitrue.utils';
 
@@ -264,19 +264,18 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
 
     (() => {
       const incoming: StoreData['orders'] = [order];
-      return this.store.apply(
-        nativeFixture(
-          {
-            orders: [
-              ...this.store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        {
+          orders: [
+            ...this.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };

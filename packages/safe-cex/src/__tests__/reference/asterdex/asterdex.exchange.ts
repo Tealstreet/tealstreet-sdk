@@ -75,7 +75,8 @@ import { precisionToString } from '../../../utils/ccxt_helpers/precision';
 import { createPositionId } from '../../../utils/createPositionId';
 import { loop } from '../../../utils/loop';
 import { adjust } from '../../../utils/safe-math';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { AsterDEXPrivateWebsocket } from './asterdex.ws-private';
 import { AsterDEXPublicWebsocket } from './asterdex.ws-public';
 
@@ -150,16 +151,17 @@ export class AsterDEXExchange extends BaseExchange {
       const balance = await this.fetchBalance();
       if (this.isDisposed || balanceStateVersion !== this.balanceStateVersion) return false;
 
-      this.store.apply(
-        nativeFixture(
-          { balance, loaded: { ...this.store.loaded, balance: true } },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { balance, loaded: { ...this.store.loaded, balance: true } },
+        this.store.markets.map((row) => row.symbol),
       );
       // This retained oracle emits separate bootstrap tables. Publish the full
       // private readiness claim only once all three native tables decoded.
       if (this.store.hasAccountState)
-        this.store.apply(nativeFixture({ loaded: { ...this.store.loaded, balance: true, orders: true, positions: true } }));
+        applyReferenceFixture(this.store, {
+          loaded: { ...this.store.loaded, balance: true, orders: true, positions: true },
+        });
       this.lastBalanceReconciliationAt = Date.now();
       return true;
     } catch (error: any) {
@@ -217,22 +219,20 @@ export class AsterDEXExchange extends BaseExchange {
           );
         }
 
-        this.store.apply(
-          nativeFixture(
-            { markets, loaded: { ...this.store.loaded, markets: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { markets, loaded: { ...this.store.loaded, markets: true } },
+          this.store.markets.map((row) => row.symbol),
         );
 
         // Fetch all tickers
         const tickers = await this.fetchTickers();
         this.log(`Fetched ${tickers.length} tickers`, LogSeverity.Info);
 
-        this.store.apply(
-          nativeFixture(
-            { tickers, loaded: { ...this.store.loaded, tickers: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { tickers, loaded: { ...this.store.loaded, tickers: true } },
+          this.store.markets.map((row) => row.symbol),
         );
 
         // Backfill OI shortly after ticker bootstrap so screener OI is not stuck at 0.
@@ -243,11 +243,10 @@ export class AsterDEXExchange extends BaseExchange {
       if (!this.isPublicDataOnly) {
         try {
           const positions = await this.fetchPositions();
-          this.store.apply(
-            nativeFixture(
-              { positions, loaded: { ...this.store.loaded, positions: true } },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            { positions, loaded: { ...this.store.loaded, positions: true } },
+            this.store.markets.map((row) => row.symbol),
           );
           this.lastPositionSafetyReconciliationAt = Date.now();
           this.log(`Loaded ${positions.length} positions`, LogSeverity.Info);
@@ -258,11 +257,10 @@ export class AsterDEXExchange extends BaseExchange {
 
         try {
           const orders = await this.fetchOrders();
-          this.store.apply(
-            nativeFixture(
-              { orders, loaded: { ...this.store.loaded, orders: true } },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            { orders, loaded: { ...this.store.loaded, orders: true } },
+            this.store.markets.map((row) => row.symbol),
           );
           this.lastOrderSafetyReconciliationAt = Date.now();
           this.log(`Loaded ${orders.length} open orders`, LogSeverity.Info);
@@ -320,23 +318,21 @@ export class AsterDEXExchange extends BaseExchange {
         if (positionStateVersion === this.getPositionStateVersion()) {
           (() => {
             const incoming: StoreData['positions'] = positions;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  positions: incoming.map((row) => ({
-                    ...this.store.positions.find((old) => old.id === row.id),
-                    ...row,
-                  })),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                positions: incoming.map((row) => ({
+                  ...this.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
-          this.store.apply(
-            nativeFixture(
-              { loaded: { ...this.store.loaded, positions: true } },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            { loaded: { ...this.store.loaded, positions: true } },
+            this.store.markets.map((row) => row.symbol),
           );
         }
         this.lastPositionSafetyReconciliationAt = Date.now();
@@ -349,11 +345,10 @@ export class AsterDEXExchange extends BaseExchange {
       try {
         const orders = await this.fetchOrders();
         if (this.isDisposed) return;
-        this.store.apply(
-          nativeFixture(
-            { orders, loaded: { ...this.store.loaded, orders: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { orders, loaded: { ...this.store.loaded, orders: true } },
+          this.store.markets.map((row) => row.symbol),
         );
         this.lastOrderSafetyReconciliationAt = Date.now();
       } catch (error: any) {
@@ -456,11 +451,10 @@ export class AsterDEXExchange extends BaseExchange {
 
   private syncPositionMode = async (): Promise<void> => {
     const isHedged = await this.fetchPositionMode();
-    this.store.apply(
-      nativeFixture(
-        { options: { ...this.store.options, ['isHedged']: isHedged } },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { options: { ...this.store.options, ['isHedged']: isHedged } },
+      this.store.markets.map((row) => row.symbol),
     );
     this.log(`Position mode loaded: ${isHedged ? 'Hedge' : 'One-Way'}`, LogSeverity.Info);
   };
@@ -512,7 +506,7 @@ export class AsterDEXExchange extends BaseExchange {
             leverage: leverageBySymbol.get(market.symbol) ?? 0,
             unrealizedPnl: 0,
             contracts: 0,
-            liquidationPrice: 0,
+            liquidationPrice: null,
             marginType: MarginType.Cross, // AsterDEX default
             positionMode: accountPositionMode,
             info: {},
@@ -527,7 +521,7 @@ export class AsterDEXExchange extends BaseExchange {
             leverage: leverageBySymbol.get(market.symbol) ?? 0,
             unrealizedPnl: 0,
             contracts: 0,
-            liquidationPrice: 0,
+            liquidationPrice: null,
             marginType: MarginType.Cross, // AsterDEX default
             positionMode: accountPositionMode,
             info: {},
@@ -710,21 +704,19 @@ export class AsterDEXExchange extends BaseExchange {
         dualSidePosition: hedged ? 'true' : 'false',
       });
 
-      this.store.apply(
-        nativeFixture(
-          { options: { ...this.store.options, ['isHedged']: hedged } },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { options: { ...this.store.options, ['isHedged']: hedged } },
+        this.store.markets.map((row) => row.symbol),
       );
       this.log(`Position mode changed to ${hedged ? 'Hedge' : 'One-Way'}`, LogSeverity.Info);
 
       try {
         const positions = await this.fetchPositions();
-        this.store.apply(
-          nativeFixture(
-            { positions },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { positions },
+          this.store.markets.map((row) => row.symbol),
         );
       } catch (error: any) {
         this.log(`Failed to refresh positions after position mode change: ${error.message}`, LogSeverity.Warning);
@@ -741,11 +733,10 @@ export class AsterDEXExchange extends BaseExchange {
     ...args: Parameters<this[M]>
   ) => {
     if (method === 'changePositionMode') {
-      this.store.apply(
-        nativeFixture(
-          { options: { ...this.store.options, ['isHedged']: Boolean(args[0]) } },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        { options: { ...this.store.options, ['isHedged']: Boolean(args[0]) } },
+        this.store.markets.map((row) => row.symbol),
       );
     }
   };
@@ -1361,7 +1352,7 @@ export class AsterDEXExchange extends BaseExchange {
       // positionRisk endpoint does not expose realized PnL; preserve the latest WS-derived value.
       realizedPnl: existingPosition?.realizedPnl ?? 0,
       marginType: pos.marginType === 'ISOLATED' ? MarginType.Isolated : MarginType.Cross,
-      liquidationPrice: parseFloat(pos.liquidationPrice || '0'),
+      liquidationPrice: nativeLiquidationPrice(parseFloat(pos.liquidationPrice || '0')),
       positionMode,
       info: pos, // FrameStore raw position data
     };
@@ -1522,11 +1513,10 @@ export class AsterDEXExchange extends BaseExchange {
       (() => {
         const target = ticker;
         const changes: Partial<StoreData['tickers'][number]> = { openInterest };
-        return this.store.apply(
-          nativeFixture(
-            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }

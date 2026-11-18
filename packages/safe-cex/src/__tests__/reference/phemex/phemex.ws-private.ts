@@ -14,7 +14,7 @@ import { BASE_WS_URL, ORDER_STATUS } from '../../../exchanges/phemex/phemex.type
 import { OrderStatus, Position, PositionMode, PositionSide } from '../../../types';
 import { roundUSD } from '../../../utils/roundUSD';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 type PositionSyncSide = PositionSide | 'merged' | 'unknown';
 type PositionSyncTarget = { symbol: string; side: PositionSyncSide };
@@ -48,21 +48,19 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
     this.accountRevision++;
     (() => {
       const incoming: StoreData['positions'] = positions;
-      return this.store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
-    this.store.apply(
-      nativeFixture(
-        {
-          balance,
-          loaded: { ...this.store.loaded, balance: true, positions: true },
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        balance,
+        loaded: { ...this.store.loaded, balance: true, positions: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
     return true;
   }
@@ -579,28 +577,26 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
             return formattedOrders;
           });
           if (json?.type === 'snapshot') {
-            this.store.apply(
-              nativeFixture(
-                { orders: formattedOrders, loaded: { ...this.store.loaded, orders: true } },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            applyReferenceFixture(
+              this.store,
+              { orders: formattedOrders, loaded: { ...this.store.loaded, orders: true } },
+              this.store.markets.map((row) => row.symbol),
             );
           } else {
             (() => {
               const incoming: StoreData['orders'] = formattedOrders;
-              return this.store.apply(
-                nativeFixture(
-                  {
-                    orders: [
-                      ...this.store.orders.map((row) => {
-                        const change = incoming.find((item) => item.id === row.id);
-                        return change ? { ...row, ...change } : row;
-                      }),
-                      ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                    ],
-                  },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.store,
+                {
+                  orders: [
+                    ...this.store.orders.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
               );
             })();
 
@@ -632,19 +628,18 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
           if (upsertablePositions.length > 0) {
             (() => {
               const incoming: StoreData['positions'] = upsertablePositions;
-              return this.store.apply(
-                nativeFixture(
-                  {
-                    positions: [
-                      ...this.store.positions.map((row) => {
-                        const change = incoming.find((item) => item.id === row.id);
-                        return change ? { ...row, ...change } : row;
-                      }),
-                      ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-                    ],
-                  },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.store,
+                {
+                  positions: [
+                    ...this.store.positions.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
               );
             })();
           }
@@ -693,11 +688,10 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
             currencies,
           };
 
-          this.store.apply(
-            nativeFixture(
-              { balance },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            { balance },
+            this.store.markets.map((row) => row.symbol),
           );
         }
       }

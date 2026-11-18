@@ -8,7 +8,7 @@ import { FrameStore } from '../../../store/frameStore';
 import { Candle, LogSeverity, OHLCVOptions, OrderBook, Ticker } from '../../../types';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBook } from '../../../utils/updateOrderBook';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BackpackExchange } from './backpack.exchange';
 import {
   BackpackWsBookTickerUpdate,
@@ -296,11 +296,10 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
           (() => {
             const target = ticker;
             const changes: Partial<StoreData['tickers'][number]> = update;
-            return this.store.apply(
-              nativeFixture(
-                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -333,11 +332,10 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
           (() => {
             const target = ticker;
             const changes: Partial<StoreData['tickers'][number]> = update;
-            return this.store.apply(
-              nativeFixture(
-                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -360,11 +358,10 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
         (() => {
           const target = ticker;
           const changes: Partial<StoreData['tickers'][number]> = { last };
-          return this.store.apply(
-            nativeFixture(
-              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -390,11 +387,10 @@ export class BackpackPublicWebSocket extends BaseWebSocket<BackpackExchange> {
         (() => {
           const target = existingTicker;
           const changes: Partial<StoreData['tickers'][number]> = update;
-          return this.store.apply(
-            nativeFixture(
-              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }

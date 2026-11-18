@@ -36,7 +36,7 @@ import { loop } from '../../../utils/loop';
 import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createKucoinSpotAPI } from './kucoinspot.api';
 import {
   KUCOIN_SPOT_ENDPOINTS,
@@ -133,27 +133,25 @@ export class KucoinSpotExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      this.store.apply(
-        nativeFixture(
-          {
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          markets,
+          loaded: { ...this.store.loaded, markets: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       const tickers = await this.fetchTickers();
       if (this.isDisposed) return;
 
-      this.store.apply(
-        nativeFixture(
-          {
-            tickers,
-            loaded: { ...this.store.loaded, tickers: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { ...this.store.loaded, tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       this.publicWebsocket.connectAndSubscribe();
@@ -165,29 +163,27 @@ export class KucoinSpotExchange extends BaseExchange {
 
     (() => {
       const incoming: StoreData['positions'] = positions;
-      return this.store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
 
     if (this.isPublicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            orders: [],
-            balance: {
-              used: 0,
-              free: 0,
-              total: 0,
-              upnl: 0,
-            },
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+      applyReferenceFixture(
+        this.store,
+        {
+          orders: [],
+          balance: {
+            used: 0,
+            free: 0,
+            total: 0,
+            upnl: 0,
           },
-          this.store.markets.map((row) => row.symbol),
-        ),
+          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       this.log(`Ready to watch public data on KuCoin Spot`);
       return;
@@ -283,7 +279,7 @@ export class KucoinSpotExchange extends BaseExchange {
         leverage: 1,
         unrealizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
         marginType: MarginType.Isolated,
         positionMode: PositionMode.OneWay,
         info: { spot: true },
@@ -295,16 +291,15 @@ export class KucoinSpotExchange extends BaseExchange {
   };
 
   setLeverage = async (symbol: string, _leverage: number, _side?: PositionSide): Promise<void> => {
-    this.store.apply(
-      nativeFixture(
-        {
-          fetchedLeverage: {
-            ...this.store.fetchedLeverage,
-            [symbol]: { buyLeverage: 1, sellLeverage: 1 },
-          },
+    applyReferenceFixture(
+      this.store,
+      {
+        fetchedLeverage: {
+          ...this.store.fetchedLeverage,
+          [symbol]: { buyLeverage: 1, sellLeverage: 1 },
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -325,29 +320,27 @@ export class KucoinSpotExchange extends BaseExchange {
 
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
-        );
-      })();
-      this.store.apply(
-        nativeFixture(
+        return applyReferenceFixture(
+          this.store,
           {
-            orders,
-            balance,
-            loaded: {
-              ...this.store.loaded,
-              balance: true,
-              positions: true,
-              orders: true,
-            },
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
           },
           this.store.markets.map((row) => row.symbol),
-        ),
+        );
+      })();
+      applyReferenceFixture(
+        this.store,
+        {
+          orders,
+          balance,
+          loaded: {
+            ...this.store.loaded,
+            balance: true,
+            positions: true,
+            orders: true,
+          },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);

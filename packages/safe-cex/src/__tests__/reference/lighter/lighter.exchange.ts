@@ -83,7 +83,8 @@ import { loop } from '../../../utils/loop';
 import { mergeUpdatesUsingLastUpdate } from '../../../utils/mergeUpdatesUsingLastUpdate';
 import { adjust, subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createLighterSDKClient } from './lighter.api';
 import { createLighterSignerAdapter } from './lighter.signer';
 import { LighterPrivateWebsocket } from './lighter.ws-private';
@@ -740,14 +741,13 @@ export class LighterExchange extends BaseExchange {
 
     const balance = await this.fetchRawBalance();
     if (!this.isDisposed) {
-      this.store.apply(
-        nativeFixture(
-          {
-            balance,
-            loaded: { ...this.store.loaded, balance: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          loaded: { ...this.store.loaded, balance: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     }
   };
@@ -969,11 +969,10 @@ export class LighterExchange extends BaseExchange {
 
   start = async () => {
     // Lighter is net-position based: opposite-side fills reduce/flip exposure rather than opening a hedge.
-    this.store.apply(
-      nativeFixture(
-        { options: { ...this.store.options, ['isHedged']: false } },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { options: { ...this.store.options, ['isHedged']: false } },
+      this.store.markets.map((row) => row.symbol),
     );
 
     const useExternalPublicData = await this.initExternalPublicData();
@@ -992,29 +991,28 @@ export class LighterExchange extends BaseExchange {
       await this.fetchMarkets().then((markets) => {
         if (this.isDisposed) return [];
         this.log(`Loaded ${markets.length} Lighter markets`);
-        this.store.apply(
-          nativeFixture(
-            {
-              markets,
-              tickers: markets.map((market) => ({
-                id: market.id,
-                symbol: market.symbol,
-                bid: 0,
-                ask: 0,
-                last: 0,
-                volume: 0,
-                quoteVolume: 0,
-                mark: 0,
-                index: 0,
-                percentage: 0,
-                openInterest: 0,
-                fundingRate: 0,
-                fundingTime: 0,
-              })),
-              loaded: { ...this.store.loaded, markets: true, tickers: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            markets,
+            tickers: markets.map((market) => ({
+              id: market.id,
+              symbol: market.symbol,
+              bid: 0,
+              ask: 0,
+              last: 0,
+              volume: 0,
+              quoteVolume: 0,
+              mark: 0,
+              index: 0,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+            })),
+            loaded: { ...this.store.loaded, markets: true, tickers: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
         return markets;
       });
@@ -1033,13 +1031,12 @@ export class LighterExchange extends BaseExchange {
 
     // Start ticking live data
     if (publicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       return;
     }
@@ -1058,25 +1055,23 @@ export class LighterExchange extends BaseExchange {
           if (this.isDisposed) return [];
           (() => {
             const incoming: StoreData['positions'] = positions;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  positions: incoming.map((row) => ({
-                    ...this.store.positions.find((old) => old.id === row.id),
-                    ...row,
-                  })),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
-            );
-          })();
-          this.store.apply(
-            nativeFixture(
+            return applyReferenceFixture(
+              this.store,
               {
-                loaded: { ...this.store.loaded, positions: true, orders: true },
+                positions: incoming.map((row) => ({
+                  ...this.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
               },
               this.store.markets.map((row) => row.symbol),
-            ),
+            );
+          })();
+          applyReferenceFixture(
+            this.store,
+            {
+              loaded: { ...this.store.loaded, positions: true, orders: true },
+            },
+            this.store.markets.map((row) => row.symbol),
           );
           return positions;
         }),
@@ -1084,14 +1079,13 @@ export class LighterExchange extends BaseExchange {
       ]);
 
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          {
-            balance,
-            loaded: { ...this.store.loaded, balance: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          loaded: { ...this.store.loaded, balance: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err: any) {
       this.handlePrivateSnapshotFetchError(err);
@@ -1129,45 +1123,41 @@ export class LighterExchange extends BaseExchange {
       // Update positions
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const incoming: StoreData['orders'] = fetchedOrders;
-        return this.store.apply(
-          nativeFixture(
-            { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
 
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, positions: true, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { ...this.store.loaded, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       const balance = await this.fetchBalance({ allowRecentAccountSnapshot: true });
 
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          {
-            balance,
-            loaded: { ...this.store.loaded, balance: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          loaded: { ...this.store.loaded, balance: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err: any) {
       this.handlePrivateSnapshotFetchError(err);
@@ -1197,14 +1187,13 @@ export class LighterExchange extends BaseExchange {
   ): Promise<void> => {
     const balance = await this.fetchRawBalance(opts);
     if (this.isDisposed) return;
-    this.store.apply(
-      nativeFixture(
-        {
-          balance,
-          loaded: { ...this.store.loaded, balance: true },
-        },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      {
+        balance,
+        loaded: { ...this.store.loaded, balance: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -2297,16 +2286,15 @@ export class LighterExchange extends BaseExchange {
       if (!this.isDisposed) {
         (() => {
           const incoming: StoreData['positions'] = positions;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -2390,16 +2378,15 @@ export class LighterExchange extends BaseExchange {
       if (!this.isDisposed) {
         (() => {
           const incoming: StoreData['positions'] = refreshedPositions;
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: incoming.map((row) => ({
-                  ...this.store.positions.find((old) => old.id === row.id),
-                  ...row,
-                })),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -2994,11 +2981,10 @@ export class LighterExchange extends BaseExchange {
     // Immediately remove all cancelled orders from the store
     (() => {
       const removed: Array<Pick<StoreData['orders'][number], 'id'>> = allOrderIdsToRemove.map((id) => ({ id }));
-      return this.store.apply(
-        nativeFixture(
-          { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
 
@@ -3161,13 +3147,12 @@ export class LighterExchange extends BaseExchange {
       }
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } catch (refreshError: any) {
@@ -3324,7 +3309,7 @@ export class LighterExchange extends BaseExchange {
       unrealizedPnl,
       realizedPnl: parseFloat(v(p, 'realizedPnl') || v(p, 'realized_pnl') || 0),
       contracts,
-      liquidationPrice,
+      liquidationPrice: nativeLiquidationPrice(liquidationPrice),
       positionMode: PositionMode.OneWay,
       marginType: this.marginModeToMarginType(marginMode),
       info: p,

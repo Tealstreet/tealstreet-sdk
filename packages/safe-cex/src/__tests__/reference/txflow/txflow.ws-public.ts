@@ -5,7 +5,7 @@ import type { TxFlowCandle, TxFlowContext, TxFlowTicker } from './txflow.types';
 
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { calcOrderBookTotal, sortOrderBook } from '../../../utils/orderbook';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { mapTxFlowCandle, mapTxFlowContext, mapTxFlowTicker, txflowNumber } from './txflow.public';
 import { TXFLOW_TESTNET_REST_URL } from './txflow.types';
 
@@ -151,11 +151,10 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
             (() => {
               const target = ticker;
               const changes: Partial<StoreData['tickers'][number]> = mapTxFlowContext(ticker, row.ctx);
-              return this.store.apply(
-                nativeFixture(
-                  { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.store,
+                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
               );
             })();
         }
@@ -167,11 +166,10 @@ export class TxFlowWebSocket extends BaseWebSocket<TxFlowExchange> {
           (() => {
             const target = ticker;
             const changes: Partial<StoreData['tickers'][number]> = mapTxFlowTicker(ticker, row);
-            return this.store.apply(
-              nativeFixture(
-                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
       } else if (frame.channel === 'l2Book') {

@@ -3,7 +3,7 @@ import type { KrakenSpotExchange } from './krakenspot.exchange';
 
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { LogSeverity, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../../types';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, ORDER_TYPE } from './krakenspot.types';
 
 // Kraken Spot WS v2 private channels use token-based auth:
@@ -148,11 +148,10 @@ export class KrakenSpotPrivateWebsocket extends BaseWebSocket<KrakenSpotExchange
       }
       (() => {
         const incoming: StoreData['orders'] = orders;
-        return this.store.apply(
-          nativeFixture(
-            { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
       return;
@@ -174,19 +173,18 @@ export class KrakenSpotPrivateWebsocket extends BaseWebSocket<KrakenSpotExchange
                   status: OrderStatus.Canceled,
                 },
               ];
-              return this.store.apply(
-                nativeFixture(
-                  {
-                    orders: [
-                      ...this.store.orders.map((row) => {
-                        const change = incoming.find((item) => item.id === row.id);
-                        return change ? { ...row, ...change } : row;
-                      }),
-                      ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                    ],
-                  },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.store,
+                {
+                  orders: [
+                    ...this.store.orders.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
               );
             })();
           }
@@ -214,19 +212,18 @@ export class KrakenSpotPrivateWebsocket extends BaseWebSocket<KrakenSpotExchange
                   status: remaining === 0 ? OrderStatus.Closed : OrderStatus.Open,
                 },
               ];
-              return this.store.apply(
-                nativeFixture(
-                  {
-                    orders: [
-                      ...this.store.orders.map((row) => {
-                        const change = incoming.find((item) => item.id === row.id);
-                        return change ? { ...row, ...change } : row;
-                      }),
-                      ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                    ],
-                  },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.store,
+                {
+                  orders: [
+                    ...this.store.orders.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
               );
             })();
 
@@ -248,19 +245,18 @@ export class KrakenSpotPrivateWebsocket extends BaseWebSocket<KrakenSpotExchange
       if (order) {
         (() => {
           const incoming: StoreData['orders'] = [order];
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }

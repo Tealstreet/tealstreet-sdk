@@ -6,7 +6,8 @@ import { WORKER_WRITE_METHODS } from '../../exchanges/base';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { FrameStore } from '../../store/frameStore';
 import { MarginType, PositionMode, PositionSide } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativePosition } from '../cutover/nativePosition';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 
@@ -45,11 +46,10 @@ const resolve = (exchange: RustEngineExchange, symbol = 'ADAUSDT') => (exchange 
 describe('Rust Phemex leverage context contract', () => {
   it('exposes the flat-symbol helper and reads fresh native context rather than cached rails', async () => {
     const { exchange, store, command } = build();
-    store.apply(
-      nativeFixture(
-        { fetchedLeverage: { ADAUSDT: { buyLeverage: 99, sellLeverage: 99 } } },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { fetchedLeverage: { ADAUSDT: { buyLeverage: 99, sellLeverage: 99 } } },
+      store.markets.map((row) => row.symbol),
     );
     expect(store.loaded.positions).toBe(false);
     expect(store.positions).toEqual([]);
@@ -64,11 +64,10 @@ describe('Rust Phemex leverage context contract', () => {
 
   it('prefers the current raw read over stale stored positions', async () => {
     const { exchange, store } = build();
-    store.apply(
-      nativeFixture(
-        { positions: [stored()] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { positions: [stored()] },
+      store.markets.map((row) => row.symbol),
     );
     await expect(resolve(exchange)).resolves.toMatchObject({ marginType: MarginType.Cross, longLeverage: 10 });
   });
@@ -78,11 +77,10 @@ describe('Rust Phemex leverage context contract', () => {
     if (kind === 'empty') command.mockResolvedValue(null);
     else command.mockRejectedValue(new Error('fixture read failed'));
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
-    store.apply(
-      nativeFixture(
-        { positions: [stored(PositionSide.Short), stored()] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { positions: [stored(PositionSide.Short), stored()] },
+      store.markets.map((row) => row.symbol),
     );
     await expect(resolve(exchange)).resolves.toEqual({
       longLeverage: 3,
@@ -98,11 +96,10 @@ describe('Rust Phemex leverage context contract', () => {
     const position = stored();
     if (missing === 'margin') Reflect.deleteProperty(position, 'marginType');
     if (missing === 'mode') Reflect.deleteProperty(position, 'positionMode');
-    store.apply(
-      nativeFixture(
-        { positions: missing === 'none' ? [] : [position] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { positions: missing === 'none' ? [] : [position] },
+      store.markets.map((row) => row.symbol),
     );
     await expect(resolve(exchange)).resolves.toBeUndefined();
   });
@@ -110,11 +107,10 @@ describe('Rust Phemex leverage context contract', () => {
   it('uses the first symbol leg for a missing side, as the TS helper does', async () => {
     const { exchange, store, command } = build();
     command.mockResolvedValue(null);
-    store.apply(
-      nativeFixture(
-        { positions: [stored(PositionSide.Short)] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { positions: [stored(PositionSide.Short)] },
+      store.markets.map((row) => row.symbol),
     );
     await expect(resolve(exchange)).resolves.toMatchObject({ longLeverage: 5, shortLeverage: 5 });
   });
@@ -162,11 +158,10 @@ describe('Rust Phemex leverage context contract', () => {
   it('lets the worker fresh-read path bypass Phemex cached settings without mutating them', async () => {
     const { exchange, store, command } = build();
     const cached = { buyLeverage: 99, sellLeverage: 99 };
-    store.apply(
-      nativeFixture(
-        { fetchedLeverage: { ADAUSDT: cached } },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { fetchedLeverage: { ADAUSDT: cached } },
+      store.markets.map((row) => row.symbol),
     );
     await expect((exchange.fetchLeverageForSymbol as any)('ADAUSDT', true)).resolves.toMatchObject({
       buyLeverage: 10,
@@ -186,11 +181,10 @@ describe('Rust Phemex leverage context contract', () => {
     const rejected = expect(pending).rejects.toMatchObject({ code: 'WORKER_STOPPED' });
     const requestId = await dispatched.promise;
     owner = { ownerId: 'owner-b', generation: 2 };
-    store.apply(
-      nativeFixture(
-        { positions: [stored()] },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { positions: [stored()] },
+      store.markets.map((row) => row.symbol),
     );
     exchange.emitter.emit('callMethod:done', {
       requestId,
@@ -214,23 +208,23 @@ describe('Rust Phemex leverage context contract', () => {
           data: {
             data: {
               positions: [
-                { symbol: 'OTHERUSDT', leverageRr: '99' },
-                {
+                nativePosition({ symbol: 'OTHERUSDT', leverageRr: '99' }),
+                nativePosition({
                   symbol: 'ADAUSDT',
                   posSide: 'Short',
                   posMode: mode,
                   leverageRr: String(short),
                   crossMargin: cross,
                   size: '0',
-                },
-                {
+                }),
+                nativePosition({
                   symbol: 'ADAUSDT',
                   posSide: 'Long',
                   posMode: mode,
                   leverageRr: String(long),
                   crossMargin: cross,
                   size: '0',
-                },
+                }),
               ],
             },
           },

@@ -11,7 +11,7 @@ import { ASTERDEX_ENDPOINTS } from '../../../exchanges/asterdex/asterdex.types';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { FrameStore } from '../../../store/frameStore';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 type MessageHandlers = {
   [topic: string]: Array<(data: any) => void>;
@@ -333,11 +333,10 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
     (() => {
       const target = ticker;
       const changes: Partial<StoreData['tickers'][number]> = update;
-      return this.parent.store.apply(
-        nativeFixture(
-          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.parent.store,
+        { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.parent.store.markets.map((row) => row.symbol),
       );
     })();
     this.parent.emitter.emit('ticker', data.s, ticker);
@@ -399,11 +398,10 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
           bid: orderBook.bids[0].price,
           ask: orderBook.asks[0].price,
         };
-        return this.parent.store.apply(
-          nativeFixture(
-            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -431,11 +429,10 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
         const changes: Partial<StoreData['tickers'][number]> = {
           last: parseFloat(data.p),
         };
-        return this.parent.store.apply(
-          nativeFixture(
-            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -467,11 +464,10 @@ export class AsterDEXPublicWebsocket extends BaseWebSocket<AsterDEXExchange> {
     (() => {
       const target = ticker;
       const changes: Partial<StoreData['tickers'][number]> = update;
-      return this.parent.store.apply(
-        nativeFixture(
-          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.parent.store,
+        { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.parent.store.markets.map((row) => row.symbol),
       );
     })();
     this.parent.emitter.emit('markPrice', data.s, ticker);

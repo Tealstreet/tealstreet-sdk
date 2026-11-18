@@ -3,7 +3,7 @@ import type { Balance, Order } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
 import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
 import { LighterExchange } from '../reference/lighter/lighter.exchange';
@@ -113,11 +113,10 @@ describe('reconciliation fetch result ownership', () => {
 
   it('keeps Lighter private snapshots alive when order auth cannot find the account', async () => {
     const exchange = createLighter();
-    exchange.store.apply(
-      nativeFixture(
-        { orders },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      { orders },
+      exchange.store.markets.map((row) => row.symbol),
     );
     (exchange as any).accountIndex = 123n;
     (exchange as any).getPrivateWsAuthToken = vi.fn().mockResolvedValue('token');

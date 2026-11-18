@@ -5,7 +5,7 @@ import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { BaseWebSocket, HeaderCapableWebSocketUnavailableError } from '../../../exchanges/base.ws';
 import { LogSeverity, Order, OrderStatus } from '../../../types';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { signWeexMessage } from './weex.api';
 import { BASE_WS_URL, PRIVATE_WS_REQUEST_PATH } from './weex.types';
 import { normalizeOrder, normalizePosition, normalizeTimestampToSeconds, toNumber } from './weex.utils';
@@ -158,19 +158,18 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
     if (orders.length) {
       (() => {
         const incoming: StoreData['orders'] = orders as any;
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: [
-                ...this.store.orders.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
       const closed = orders.filter(
@@ -180,15 +179,14 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
           const nativeStatus: StoreData['orders'][number]['status'] = order.status;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -204,19 +202,18 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
     if (positions.length) {
       (() => {
         const incoming: StoreData['positions'] = positions as any;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     }
@@ -257,11 +254,10 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
       try {
         const orders = await this.parent.fetchOrders();
         if (!this.isDisposed) {
-          this.store.apply(
-            nativeFixture(
-              { orders },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            { orders },
+            this.store.markets.map((row) => row.symbol),
           );
         }
       } catch (_err) {}
@@ -276,16 +272,15 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
         if (!this.isDisposed) {
           (() => {
             const incoming: StoreData['positions'] = positions;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  positions: incoming.map((row) => ({
-                    ...this.store.positions.find((old) => old.id === row.id),
-                    ...row,
-                  })),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                positions: incoming.map((row) => ({
+                  ...this.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -299,11 +294,10 @@ export class WeexPrivateWebsocket extends BaseWebSocket<WeexExchange> {
       try {
         const balance = await this.parent.fetchBalance();
         if (!this.isDisposed) {
-          this.store.apply(
-            nativeFixture(
-              { balance },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            { balance },
+            this.store.markets.map((row) => row.symbol),
           );
         }
       } catch (_err) {}

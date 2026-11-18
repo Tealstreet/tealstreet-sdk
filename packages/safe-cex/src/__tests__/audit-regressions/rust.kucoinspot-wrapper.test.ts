@@ -8,7 +8,8 @@ import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exch
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { consumerFrame } from '../cutover/consumerFrame';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeOrder } from '../cutover/nativeOrder';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
@@ -82,11 +83,10 @@ describe('KuCoin spot Rust SDK boundary', () => {
     setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
     const store = new FrameStore();
     installNativeStartupFrames(engine, store, () => (rails ? { fetchedLeverage: rails } : {}));
-    store.apply(
-      nativeFixture(
-        { markets: [market], loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { markets: [market], loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new RustEngineExchange(
       'kucoinspot',
@@ -150,7 +150,10 @@ describe('KuCoin spot Rust SDK boundary', () => {
     await exchange.cancelOrders([uncached]);
     await exchange.updateOrder({ order: uncached, update: { price: 101 } });
     expect(commands.map(({ command: _command, ...body }) => body)).toEqual([
-      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'lost-ack-id', symbol: 'BTC-USDT', type: OrderType.Limit }] },
+      {
+        op: 'cancelOrdersWithSymbols',
+        orders: [nativeOrder({ id: 'lost-ack-id', symbol: 'BTC-USDT', type: OrderType.Limit })],
+      },
       { op: 'amendOrderWithSymbol', id: 'lost-ack-id', symbol: 'BTC-USDT', price: 101 },
     ]);
   });

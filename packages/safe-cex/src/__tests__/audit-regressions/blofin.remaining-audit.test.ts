@@ -6,7 +6,7 @@ import { getExchangeMetadata } from '../../exchangeMetadata';
 import { BASE_URL, BASE_WS_URL, ENDPOINTS } from '../../exchanges/blofin/blofin.types';
 import { FrameStore } from '../../store/frameStore';
 import { MarginType, OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionMode } from '../../types';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BlofinExchange } from '../reference/blofin/blofin.exchange';
 import { BLOFIN_MAX_SUBSCRIBE_FRAME_BYTES, buildBlofinSubscribeFrames } from '../reference/blofin/blofin.ws-public';
 
@@ -24,11 +24,10 @@ const MARKET: Market = {
 
 const createExchange = () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      { markets: [MARKET], loaded: { ...store.loaded, markets: true } },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { markets: [MARKET], loaded: { ...store.loaded, markets: true } },
+    store.markets.map((row) => row.symbol),
   );
   return new BlofinExchange('blofin', { key: 'key', secret: 'secret', passphrase: 'pass' }, store);
 };
@@ -205,11 +204,10 @@ describe('BloFin remaining audit regressions', () => {
         triggerPrice: '49000',
       },
     ])[0];
-    exchange.store.apply(
-      nativeFixture(
-        { orders: [existingOrder] },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      { orders: [existingOrder] },
+      exchange.store.markets.map((row) => row.symbol),
     );
     const get = vi.fn().mockImplementation((endpoint: string) => {
       if (endpoint === ENDPOINTS.UNFILLED_TRIGGER_ORDERS) {
@@ -248,11 +246,10 @@ describe('BloFin remaining audit regressions', () => {
         triggerPrice: '49000',
       },
     ])[0];
-    exchange.store.apply(
-      nativeFixture(
-        { orders: [existingOrder] },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      exchange.store,
+      { orders: [existingOrder] },
+      exchange.store.markets.map((row) => row.symbol),
     );
     const partialTrigger = {
       algoId: 'partial-trigger',

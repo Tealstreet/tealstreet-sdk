@@ -8,7 +8,7 @@ import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/ru
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
 import { consumerFrame } from '../cutover/consumerFrame';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { mapBinanceHistoricalOrder } from '../reference/binance/binance.order-history';
@@ -57,11 +57,10 @@ const fixture = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => 
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
   const store = new FrameStore();
   installNativeStartupFrames(engine, store);
-  store.apply(
-    nativeFixture(
-      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new RustEngineExchange(
     name,
@@ -176,24 +175,23 @@ describe('Rust parity query forwarding', () => {
 describe('OKX primary account lookup', () => {
   it('cannot turn a secondary account miss into definitive primary absence', async () => {
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        {
-          markets: [
-            {
-              id: 'BTC-USDT-SWAP',
-              symbol: 'BTCUSDT',
-              base: 'BTC',
-              quote: 'USDT',
-              active: true,
-              precision: { price: 0.1, amount: 1 },
-              limits: { amount: { min: 1, max: 100 }, leverage: { min: 1, max: 100 } },
-              info: {},
-            },
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'BTC-USDT-SWAP',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { price: 0.1, amount: 1 },
+            limits: { amount: { min: 1, max: 100 }, leverage: { min: 1, max: 100 } },
+            info: {},
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     const exchange = new OKXExchange('okx', { key: 'primary', secret: 'secret', passphrase: 'pass' }, store);
     const primary = vi.fn().mockRejectedValue({ response: { data: { code: '51603' } } });
@@ -232,26 +230,25 @@ describe('primary lookup with a colliding secondary-account cache', () => {
       lastUpdate: 1710000000000,
     };
     const store = new FrameStore();
-    store.apply(
-      nativeFixture(
-        {
-          orders: [cached],
-          markets: [
-            {
-              id: name === 'okx' ? 'BTC-USDT-SWAP' : 'BTC/USDT:USDT',
-              symbol: 'BTCUSDT',
-              base: 'BTC',
-              quote: 'USDT',
-              active: true,
-              contractSize: 1,
-              precision: { price: 0.1, amount: 1 },
-              limits: { amount: { min: 1, max: 100 }, leverage: { min: 1, max: 100 } },
-              info: {},
-            },
-          ],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        orders: [cached],
+        markets: [
+          {
+            id: name === 'okx' ? 'BTC-USDT-SWAP' : 'BTC/USDT:USDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            contractSize: 1,
+            precision: { price: 0.1, amount: 1 },
+            limits: { amount: { min: 1, max: 100 }, leverage: { min: 1, max: 100 } },
+            info: {},
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
     );
     const options = {
       key: 'primary',
@@ -357,24 +354,23 @@ it('maps Binance STP expiration to canceled instead of a filled-looking closed o
 
 it('keeps a live untraded OKX X-Perp ticker finite without dropping its market', () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      {
-        markets: [
-          {
-            id: 'TEST002-USD_UM_XPERP-310822',
-            symbol: 'TEST002USD_UM_XPERP310822',
-            base: 'TEST002',
-            quote: 'USD',
-            active: true,
-            precision: { price: 0.1, amount: 1 },
-            limits: { amount: { min: 1, max: 100 }, leverage: { min: 1, max: 20 } },
-            info: {},
-          },
-        ],
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        {
+          id: 'TEST002-USD_UM_XPERP-310822',
+          symbol: 'TEST002USD_UM_XPERP310822',
+          base: 'TEST002',
+          quote: 'USD',
+          active: true,
+          precision: { price: 0.1, amount: 1 },
+          limits: { amount: { min: 1, max: 100 }, leverage: { min: 1, max: 20 } },
+          info: {},
+        },
+      ],
+    },
+    store.markets.map((row) => row.symbol),
   );
   const exchange = new OKXExchange('okxeu', { key: '', secret: '', passphrase: 'pass' }, store);
   try {
@@ -391,11 +387,10 @@ it('keeps a live untraded OKX X-Perp ticker finite without dropping its market',
     ]);
     expect(tickers).toHaveLength(1);
     expect(tickers[0]).toMatchObject({ last: 0, mark: 0, index: 0, percentage: 0, bid: 0, ask: 0 });
-    store.apply(
-      nativeFixture(
-        { tickers },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      { tickers },
+      store.markets.map((row) => row.symbol),
     );
     exchange.publicWebsocket.handleTickerEvents({
       data: [

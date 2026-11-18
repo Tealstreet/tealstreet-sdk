@@ -51,7 +51,8 @@ import { mergeUpdatesUsingLastUpdate } from '../../../utils/mergeUpdatesUsingLas
 import { omitUndefined } from '../../../utils/omitUndefined';
 import { adjust, subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI } from './apexomni.api';
 import {
   BROKER_ID,
@@ -214,29 +215,28 @@ export class ApexOmniExchange extends BaseExchange {
         this.fetchMarkets().then((markets) => {
           if (this.isDisposed) return [];
           this.log(`Loaded ${markets.length} ApeX Pro markets`);
-          this.store.apply(
-            nativeFixture(
-              {
-                markets,
-                tickers: markets.map((market) => ({
-                  id: market.id,
-                  symbol: market.symbol,
-                  bid: 0,
-                  ask: 0,
-                  last: 0,
-                  volume: 0,
-                  quoteVolume: 0,
-                  mark: 0,
-                  index: 0,
-                  percentage: 0,
-                  openInterest: 0,
-                  fundingRate: 0,
-                  fundingTime: 0,
-                })),
-                loaded: { ...this.store.loaded, markets: true, tickers: true },
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          applyReferenceFixture(
+            this.store,
+            {
+              markets,
+              tickers: markets.map((market) => ({
+                id: market.id,
+                symbol: market.symbol,
+                bid: 0,
+                ask: 0,
+                last: 0,
+                volume: 0,
+                quoteVolume: 0,
+                mark: 0,
+                index: 0,
+                percentage: 0,
+                openInterest: 0,
+                fundingRate: 0,
+                fundingTime: 0,
+              })),
+              loaded: { ...this.store.loaded, markets: true, tickers: true },
+            },
+            this.store.markets.map((row) => row.symbol),
           );
           return markets;
         }),
@@ -253,22 +253,20 @@ export class ApexOmniExchange extends BaseExchange {
     // start ticking live data
     // balance, tickers, positions
     if (publicDataOnly) {
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
       return;
     }
 
-    this.store.apply(
-      nativeFixture(
-        { options: { ...this.store.options, isHedged: true } },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { options: { ...this.store.options, isHedged: true } },
+      this.store.markets.map((row) => row.symbol),
     );
     this.privateWebsocket.connectAndSubscribe();
 
@@ -278,25 +276,23 @@ export class ApexOmniExchange extends BaseExchange {
           if (this.isDisposed) return [];
           (() => {
             const incoming: StoreData['positions'] = positions;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  positions: incoming.map((row) => ({
-                    ...this.store.positions.find((old) => old.id === row.id),
-                    ...row,
-                  })),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
-            );
-          })();
-          this.store.apply(
-            nativeFixture(
+            return applyReferenceFixture(
+              this.store,
               {
-                loaded: { ...this.store.loaded, positions: true, orders: true },
+                positions: incoming.map((row) => ({
+                  ...this.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
               },
               this.store.markets.map((row) => row.symbol),
-            ),
+            );
+          })();
+          applyReferenceFixture(
+            this.store,
+            {
+              loaded: { ...this.store.loaded, positions: true, orders: true },
+            },
+            this.store.markets.map((row) => row.symbol),
           );
           return positions;
         }),
@@ -304,14 +300,13 @@ export class ApexOmniExchange extends BaseExchange {
       ]);
 
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          {
-            balance,
-            loaded: { ...this.store.loaded, balance: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          loaded: { ...this.store.loaded, balance: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err: any) {
       this.emitAndLogError(err);
@@ -339,45 +334,41 @@ export class ApexOmniExchange extends BaseExchange {
       // Update positions - note this is now safe because we're also fetching orders
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
       (() => {
         const incoming: StoreData['orders'] = fetchedOrders;
-        return this.store.apply(
-          nativeFixture(
-            { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
 
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, positions: true, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { ...this.store.loaded, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       const balance = await this.fetchBalance();
 
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          {
-            balance,
-            loaded: { ...this.store.loaded, balance: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          loaded: { ...this.store.loaded, balance: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err: any) {
       this.emitAndLogError(err);
@@ -471,22 +462,21 @@ export class ApexOmniExchange extends BaseExchange {
       .filter((p: Position | null): p is Position => p !== null);
 
     if (!this.store.zkLinkConfig?.l2Key) {
-      this.store.apply(
-        nativeFixture(
-          {
-            zkLinkConfig: {
-              ...this.store.zkLinkConfig,
-              l2Key: data.data.l2key,
-              ethereumAddress: data.data.ethereumAddress,
-              id: data.data.id,
-              spotAccount: data.data.spotAccount,
-              spotWallets: data.data.spotWallets,
-              contractAccount: data.data.contractAccount,
-              contractWallets: data.data.contractWallets,
-            },
+      applyReferenceFixture(
+        this.store,
+        {
+          zkLinkConfig: {
+            ...this.store.zkLinkConfig,
+            l2Key: data.data.l2key,
+            ethereumAddress: data.data.ethereumAddress,
+            id: data.data.id,
+            spotAccount: data.data.spotAccount,
+            spotWallets: data.data.spotWallets,
+            contractAccount: data.data.contractAccount,
+            contractWallets: data.data.contractWallets,
           },
-          this.store.markets.map((row) => row.symbol),
-        ),
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     }
 
@@ -509,7 +499,7 @@ export class ApexOmniExchange extends BaseExchange {
           unrealizedPnl: 0,
           contracts: 0,
           leverage: 1 / +m.info?.initialMarginRate || 10,
-          liquidationPrice: 0,
+          liquidationPrice: null,
           positionMode: PositionMode.Hedged,
           marginType: MarginType.Cross,
         },
@@ -522,7 +512,7 @@ export class ApexOmniExchange extends BaseExchange {
           unrealizedPnl: 0,
           contracts: 0,
           leverage: 1 / +m.info?.initialMarginRate || 10,
-          liquidationPrice: 0,
+          liquidationPrice: null,
           positionMode: PositionMode.Hedged,
           marginType: MarginType.Cross,
         },
@@ -1144,16 +1134,15 @@ export class ApexOmniExchange extends BaseExchange {
       },
     } = await this.xhr.get<Record<string, any>>(ENDPOINTS.SYMBOLS);
 
-    this.store.apply(
-      nativeFixture(
-        {
-          zkLinkConfig: {
-            ...this.store.zkLinkConfig,
-            contractConfig,
-          },
+    applyReferenceFixture(
+      this.store,
+      {
+        zkLinkConfig: {
+          ...this.store.zkLinkConfig,
+          contractConfig,
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
     // {
     //   "baselinePositionValue": "50000",
@@ -1874,11 +1863,10 @@ export class ApexOmniExchange extends BaseExchange {
     // Immediately remove all cancelled orders from the store
     (() => {
       const removed: Array<Pick<StoreData['orders'][number], 'id'>> = allOrderIdsToRemove.map((id) => ({ id }));
-      return this.store.apply(
-        nativeFixture(
-          { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
 
@@ -1949,19 +1937,18 @@ export class ApexOmniExchange extends BaseExchange {
       const fetchedPositions = await this.fetchPositions();
       (() => {
         const incoming: StoreData['positions'] = fetchedPositions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
       foundPositions = fetchedPositions.filter((p) => p.symbol === symbol);
@@ -2075,7 +2062,7 @@ export class ApexOmniExchange extends BaseExchange {
       unrealizedPnl,
       realizedPnl: parseFloat(v(p, 'curRealisedPnl') ?? v(p, 'realizedPnl') ?? 0),
       contracts,
-      liquidationPrice: parseFloat(v(p, 'liqPrice') || 0),
+      liquidationPrice: nativeLiquidationPrice(parseFloat(v(p, 'liqPrice') || 0)),
       positionMode: PositionMode.Hedged,
       marginType: MarginType.Cross,
       info: p,

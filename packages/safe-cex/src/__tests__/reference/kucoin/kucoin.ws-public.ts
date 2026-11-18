@@ -7,7 +7,7 @@ import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../../utils/updateOrderBook';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { ENDPOINTS, WS_INTERVAL } from './kucoin.types';
 
 type Data = Record<string, any>;
@@ -268,11 +268,10 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
         bid: parseFloat(data.bestBidPrice || ticker.bid || '0'),
         ask: parseFloat(data.bestAskPrice || ticker.ask || '0'),
       };
-      return this.parent.store.apply(
-        nativeFixture(
-          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-          this.parent.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.parent.store,
+        { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.parent.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -293,11 +292,10 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
       (() => {
         const target = ticker;
         const changes: Partial<StoreData['tickers'][number]> = update;
-        return this.parent.store.apply(
-          nativeFixture(
-            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
   };
@@ -316,11 +314,10 @@ export class KucoinPublicWebsocket extends BaseWebSocket<KucoinExchange> {
       (() => {
         const target = ticker;
         const changes: Partial<StoreData['tickers'][number]> = update;
-        return this.parent.store.apply(
-          nativeFixture(
-            { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.parent.store,
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       })();
   };

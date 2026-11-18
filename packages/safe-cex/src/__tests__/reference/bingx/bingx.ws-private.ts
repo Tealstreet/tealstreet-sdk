@@ -6,7 +6,8 @@ import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { LogSeverity, MarginType, OrderStatus, OrderType, Position, PositionMode, PositionSide } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
 import { readBlob } from '../../../utils/readBlob';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_TRADE_UPDATE, POSITION_SIDE } from './bingx.types';
 
 export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
@@ -169,19 +170,18 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
       if (order?.status === OrderStatus.Open && order.type !== OrderType.Market) {
         (() => {
           const incoming: StoreData['orders'] = [order];
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -190,15 +190,14 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: data.i }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         this.emittedFillQtyByOrderId.delete(String(data.i));
@@ -207,15 +206,14 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: data.i }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
         this.emittedFillQtyByOrderId.delete(String(data.i));
@@ -306,25 +304,24 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
           positionMode: nextPositionMode,
           unrealizedPnl: normalizedUpnl,
           contracts,
-          liquidationPrice: normalizedLiqPrice,
+          liquidationPrice: nativeLiquidationPrice(normalizedLiqPrice),
           info: positionUpdate,
         };
 
         (() => {
           const incoming: StoreData['positions'] = [nextPosition];
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: [
-                  ...this.store.positions.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       });
@@ -392,25 +389,23 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
 
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
-        );
-      })();
-      this.store.apply(
-        nativeFixture(
+        return applyReferenceFixture(
+          this.store,
           {
-            loaded: {
-              ...this.store.loaded,
-              positions: true,
-            },
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
           },
           this.store.markets.map((row) => row.symbol),
-        ),
+        );
+      })();
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: {
+            ...this.store.loaded,
+            positions: true,
+          },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch {
       // Will retry on the next fill/account event.

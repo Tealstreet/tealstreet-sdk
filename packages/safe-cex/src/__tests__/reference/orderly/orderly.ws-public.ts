@@ -10,7 +10,7 @@ import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { v } from '../../../utils/get-key';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBook } from '../../../utils/updateOrderBook';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, ENDPOINTS } from './orderly.types';
 import { normalizeSymbol, reverseSymbol } from './orderly.utils';
 
@@ -147,11 +147,10 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
               quoteVolume: row.amount,
               volume: row.volume,
             };
-            return this.store.apply(
-              nativeFixture(
-                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -172,11 +171,10 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
               bid: row.bid,
               ask: row.ask,
             };
-            return this.store.apply(
-              nativeFixture(
-                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -196,11 +194,10 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
             const changes: Partial<StoreData['tickers'][number]> = {
               mark: row.price,
             };
-            return this.store.apply(
-              nativeFixture(
-                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -221,11 +218,10 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
               fundingRate: parseFloat(v(row, 'fundingRate')),
               fundingTime: parseFloat(v(row, 'fundingTs')),
             };
-            return this.store.apply(
-              nativeFixture(
-                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }

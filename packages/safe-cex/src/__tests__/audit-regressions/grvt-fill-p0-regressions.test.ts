@@ -7,6 +7,7 @@ import { BaseWebSocket } from '../../exchanges/base.ws';
 import { FrameStore } from '../../store/frameStore';
 import { OrderSide } from '../../types';
 import { ChaserOrderInstance } from '../../webworker/chaserOrder/ChaserOrderInstance';
+import { nativeMarket } from '../cutover/nativeMarket';
 import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 import { GrvtPrivateWebSocket } from '../reference/grvt/grvt.ws-private';
 import { GrvtPublicWebSocket } from '../reference/grvt/grvt.ws-public';
@@ -77,7 +78,7 @@ describe('GRVT fill-verification P0 regression', () => {
       options: {},
       store: {
         marketsById: { BTC_USDT_Perp: { id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' } },
-        markets: [{ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' }],
+        markets: [nativeMarket({ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' })],
       },
       emitter: { emit: vi.fn() },
       log: vi.fn(),
@@ -107,8 +108,8 @@ describe('GRVT fill-verification P0 regression', () => {
       options: {},
       store: {
         markets: [
-          { id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' },
-          { id: 'ETH_USDT_Perp', symbol: 'ETH_USDT_PERP' },
+          nativeMarket({ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' }),
+          nativeMarket({ id: 'ETH_USDT_Perp', symbol: 'ETH_USDT_PERP' }),
         ],
       },
       emitter: { on: vi.fn(), off: vi.fn() },
@@ -434,7 +435,7 @@ describe('GRVT fill-verification P0 regression', () => {
           marketsById: {
             BTC_USDT_Perp: { id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' },
           },
-          markets: [{ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' }],
+          markets: [nativeMarket({ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' })],
         },
         emitter: { emit },
         log: vi.fn(),
@@ -465,7 +466,7 @@ describe('GRVT fill-verification P0 regression', () => {
       options: {},
       store: {
         marketsById: { BTC_USDT_Perp: { id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' } },
-        markets: [{ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' }],
+        markets: [nativeMarket({ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' })],
       },
       emitter: { emit },
       log: vi.fn(),

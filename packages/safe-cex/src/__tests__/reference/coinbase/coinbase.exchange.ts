@@ -40,7 +40,8 @@ import { createPositionId } from '../../../utils/createPositionId';
 import { loop } from '../../../utils/loop';
 import { adjust, multiply, round } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI } from './coinbase.api';
 import { mapCoinbaseRestOrder } from './coinbase.orders';
 import {
@@ -188,14 +189,13 @@ export class CoinbaseExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      await this.store.apply(
-        nativeFixture(
-          {
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      await applyReferenceFixture(
+        this.store,
+        {
+          markets,
+          loaded: { ...this.store.loaded, markets: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
 
       this.publicWebsocket.connectAndSubscribe();
@@ -251,22 +251,21 @@ export class CoinbaseExchange extends BaseExchange {
     const tickers = this.replayPublicSpot
       ? this.formatSpotCfmTicker(await this.fetchReplayPublicSpotProducts())
       : await this.fetchTickersIntx();
-    this.store.apply(
-      nativeFixture(
-        {
-          tickers,
-          orders: [],
-          balance: {
-            used: 0,
-            free: 0,
-            total: 0,
-            upnl: 0,
-          },
-          positions: [],
-          loaded: { ...this.store.loaded, tickers: true, orders: true, balance: true, positions: true },
+    applyReferenceFixture(
+      this.store,
+      {
+        tickers,
+        orders: [],
+        balance: {
+          used: 0,
+          free: 0,
+          total: 0,
+          upnl: 0,
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+        positions: [],
+        loaded: { ...this.store.loaded, tickers: true, orders: true, balance: true, positions: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
     if (this.replayPublicSpot) loop(() => this.tickReplayPublicSpot(), this.getTickInterval());
   };
@@ -276,17 +275,16 @@ export class CoinbaseExchange extends BaseExchange {
       try {
         const tickers = await this.fetchTickers();
         if (this.isDisposed) return;
-        this.store.apply(
-          nativeFixture(
-            {
-              tickers,
-              loaded: {
-                ...this.store.loaded,
-                tickers: true,
-              },
+        applyReferenceFixture(
+          this.store,
+          {
+            tickers,
+            loaded: {
+              ...this.store.loaded,
+              tickers: true,
             },
-            this.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         // iterate over tickers and update OB and kline callbacks
@@ -302,40 +300,37 @@ export class CoinbaseExchange extends BaseExchange {
 
         const balance = await this.fetchBalance();
         if (this.isDisposed) return;
-        this.store.apply(
-          nativeFixture(
-            {
-              balance,
-              loaded: { ...this.store.loaded, balance: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: { ...this.store.loaded, balance: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         const positions = await this.fetchPositions();
         if (this.isDisposed) return;
-        this.store.apply(
-          nativeFixture(
-            {
-              positions,
-              loaded: { ...this.store.loaded, positions: true },
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          {
+            positions,
+            loaded: { ...this.store.loaded, positions: true },
+          },
+          this.store.markets.map((row) => row.symbol),
         );
 
         if (this.shouldPollOrders()) {
           try {
             const orders = await this.fetchOpenOrdersSnapshot();
             if (this.isDisposed) return;
-            this.store.apply(
-              nativeFixture(
-                {
-                  orders: this.mergeRestOrdersWithFreshWsState(orders),
-                  loaded: { ...this.store.loaded, orders: true },
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            applyReferenceFixture(
+              this.store,
+              {
+                orders: this.mergeRestOrdersWithFreshWsState(orders),
+                loaded: { ...this.store.loaded, orders: true },
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           } catch (err: any) {
             this.emitOrdersFetchError(err);
@@ -367,38 +362,36 @@ export class CoinbaseExchange extends BaseExchange {
   markPrivateUserStreamMessageReceived = () => {
     this.lastPrivateUserStreamMessageAt = Date.now();
     this.hasWarnedPrivateUserStreamDegraded = false;
-    this.store.apply(
-      nativeFixture(
-        {
-          socketHealth: {
-            publicHealthy: false,
-            privateHealthy: false,
-            publicInitialized: false,
-            privateInitialized: false,
-            ...this.store.socketHealth,
-            ...{ privateDegradedReason: undefined },
-          },
+    applyReferenceFixture(
+      this.store,
+      {
+        socketHealth: {
+          publicHealthy: false,
+          privateHealthy: false,
+          publicInitialized: false,
+          privateInitialized: false,
+          ...this.store.socketHealth,
+          ...{ privateDegradedReason: undefined },
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
   markPrivateUserStreamDegraded = (reason = COINBASE_PRIVATE_USER_STREAM_DEGRADED_MESSAGE, forceToast = false) => {
-    this.store.apply(
-      nativeFixture(
-        {
-          socketHealth: {
-            publicHealthy: false,
-            privateHealthy: false,
-            publicInitialized: false,
-            privateInitialized: false,
-            ...this.store.socketHealth,
-            ...{ privateDegradedReason: reason },
-          },
+    applyReferenceFixture(
+      this.store,
+      {
+        socketHealth: {
+          publicHealthy: false,
+          privateHealthy: false,
+          publicInitialized: false,
+          privateInitialized: false,
+          ...this.store.socketHealth,
+          ...{ privateDegradedReason: reason },
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+      },
+      this.store.markets.map((row) => row.symbol),
     );
     this.log(reason, LogSeverity.Warning);
     if (forceToast && !this.hasWarnedPrivateUserStreamDegraded) {
@@ -431,14 +424,13 @@ export class CoinbaseExchange extends BaseExchange {
     try {
       const orders = await this.fetchOpenOrdersSnapshot();
       if (this.isDisposed) return;
-      this.store.apply(
-        nativeFixture(
-          {
-            orders: this.mergeRestOrdersWithFreshWsState(orders),
-            loaded: { ...this.store.loaded, orders: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      applyReferenceFixture(
+        this.store,
+        {
+          orders: this.mergeRestOrdersWithFreshWsState(orders),
+          loaded: { ...this.store.loaded, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     } catch (err: any) {
       this.log(`Coinbase ${reason} REST order reconciliation failed`, LogSeverity.Warning);
@@ -859,11 +851,10 @@ export class CoinbaseExchange extends BaseExchange {
     try {
       const tickers = this.formatSpotCfmTicker(await this.fetchReplayPublicSpotProducts());
       if (!this.isDisposed)
-        this.store.apply(
-          nativeFixture(
-            { tickers, loaded: { ...this.store.loaded, tickers: true } },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        applyReferenceFixture(
+          this.store,
+          { tickers, loaded: { ...this.store.loaded, tickers: true } },
+          this.store.markets.map((row) => row.symbol),
         );
     } finally {
       if (!this.isDisposed) loop(() => this.tickReplayPublicSpot(), this.getTickInterval());
@@ -1213,7 +1204,7 @@ export class CoinbaseExchange extends BaseExchange {
       marginType: MarginType.Cross,
       unrealizedPnl: 0,
       contracts: 0,
-      liquidationPrice: 0,
+      liquidationPrice: null,
       info: {},
     }));
     return [...openPositions, ...fakePositions];
@@ -1295,7 +1286,7 @@ export class CoinbaseExchange extends BaseExchange {
           leverage: 10,
           unrealizedPnl: unrealisedPnl,
           contracts: sizeInBase,
-          liquidationPrice: 0,
+          liquidationPrice: null,
           extra: {
             contractsNative: size,
           },
@@ -1422,7 +1413,7 @@ export class CoinbaseExchange extends BaseExchange {
             leverage: parseFloat(position.leverage || '10'),
             unrealizedPnl: unrealisedPnl,
             contracts: size,
-            liquidationPrice: parseFloat(position.liquidation_price.value),
+            liquidationPrice: nativeLiquidationPrice(parseFloat(position.liquidation_price.value)),
             info: position,
           };
         },
@@ -1514,15 +1505,14 @@ export class CoinbaseExchange extends BaseExchange {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = lot.map((id) => ({ id }));
           const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       });
@@ -1722,19 +1712,18 @@ export class CoinbaseExchange extends BaseExchange {
       if (optimisticOrder) {
         (() => {
           const incoming: StoreData['orders'] = [optimisticOrder];
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }

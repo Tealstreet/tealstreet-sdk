@@ -5,29 +5,29 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FrameStore } from '../../store/frameStore';
 import { PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeMarket } from '../cutover/nativeMarket';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 
 const create = (mode: PositionMode) => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      {
-        markets: [{ symbol: 'BTCUSDT', limits: { leverage: { min: 1, max: 125 } } } as Market],
-        positions: [PositionSide.Long, PositionSide.Short].slice(0, mode === PositionMode.OneWay ? 1 : 2).map(
-          (side) =>
-            ({
-              id: createPositionId('BTCUSDT', side, mode),
-              symbol: 'BTCUSDT',
-              side,
-              positionMode: mode,
-              leverage: 20,
-              contracts: 0,
-            }) as Position,
-        ),
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: [nativeMarket({ symbol: 'BTCUSDT', limits: { leverage: { min: 1, max: 125 } } }) as Market],
+      positions: [PositionSide.Long, PositionSide.Short].slice(0, mode === PositionMode.OneWay ? 1 : 2).map(
+        (side) =>
+          ({
+            id: createPositionId('BTCUSDT', side, mode),
+            symbol: 'BTCUSDT',
+            side,
+            positionMode: mode,
+            leverage: 20,
+            contracts: 0,
+          }) as Position,
+      ),
+    },
+    store.markets.map((row) => row.symbol),
   );
   return new BinanceExchange('binance', { key: 'fake-key', secret: 'fake-secret' }, store);
 };

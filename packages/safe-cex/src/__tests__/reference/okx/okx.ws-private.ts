@@ -14,7 +14,7 @@ import { OrderStatus } from '../../../types';
 import { roundUSD } from '../../../utils/roundUSD';
 import { virtualClock } from '../../../utils/virtualClock';
 import { WsDirectFallback } from '../../../utils/wsDirectFallback';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
   private recentFillKeys = new Map<string, number>();
@@ -237,15 +237,14 @@ export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
             const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders;
             const status: StoreData['orders'][number]['status'] =
               o.state === 'filled' ? OrderStatus.Closed : OrderStatus.Canceled;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: this.store.orders.map((row) =>
-                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                  ),
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -253,19 +252,18 @@ export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
         if (o.state === 'live' || o.state === 'partially_filled') {
           (() => {
             const incoming: StoreData['orders'] = orders;
-            return this.store.apply(
-              nativeFixture(
-                {
-                  orders: [
-                    ...this.store.orders.map((row) => {
-                      const change = incoming.find((item) => item.id === row.id);
-                      return change ? { ...row, ...change } : row;
-                    }),
-                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                  ],
-                },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
         }
@@ -438,28 +436,26 @@ WS MESSAGE
 
       (() => {
         const incoming: StoreData['positions'] = positions;
-        return this.store.apply(
-          nativeFixture(
-            {
-              positions: [
-                ...this.store.positions.map((row) => {
-                  const change = incoming.find((item) => item.id === row.id);
-                  return change ? { ...row, ...change } : row;
-                }),
-                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-              ],
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
-        );
-      })();
-      this.store.apply(
-        nativeFixture(
+        return applyReferenceFixture(
+          this.store,
           {
-            balance: { ...this.store.balance, used, upnl },
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
           },
           this.store.markets.map((row) => row.symbol),
-        ),
+        );
+      })();
+      applyReferenceFixture(
+        this.store,
+        {
+          balance: { ...this.store.balance, used, upnl },
+        },
+        this.store.markets.map((row) => row.symbol),
       );
     }
   };

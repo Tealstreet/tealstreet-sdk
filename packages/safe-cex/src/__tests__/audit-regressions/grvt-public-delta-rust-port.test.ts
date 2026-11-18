@@ -1,21 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeMarket } from '../cutover/nativeMarket';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 
 describe('GRVT public delta fields', () => {
   it('retains each rolling volume side and open price while last changes', () => {
     const store = new FrameStore();
     const exchange = new GrvtExchange('grvt', { publicDataOnly: true } as any, store);
-    store.apply(
-      nativeFixture(
-        {
-          markets: [{ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' } as any],
-          tickers: [{ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP', last: 0 } as any],
-        },
-        store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      store,
+      {
+        markets: [nativeMarket({ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' }) as any],
+        tickers: [{ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP', last: 0 } as any],
+      },
+      store.markets.map((row) => row.symbol),
     );
     const update = (f: object) =>
       exchange.publicWebsocket.onMessage({

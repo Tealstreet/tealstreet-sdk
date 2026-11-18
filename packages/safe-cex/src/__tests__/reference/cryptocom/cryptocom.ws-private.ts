@@ -21,7 +21,8 @@ import {
 } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
 import { virtualClock } from '../../../utils/virtualClock';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { CryptocomExchange } from './cryptocom.exchange';
 import { generateWsAuthMessage } from './cryptocom.signing';
 import {
@@ -245,19 +246,18 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
 
         (() => {
           const incoming: StoreData['orders'] = [order];
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -282,11 +282,10 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
           const before = this.store.positions.length;
           const updatedPositions = this.store.positions.filter((p) => p.symbol !== market.symbol);
           if (updatedPositions.length !== before)
-            this.store.apply(
-              nativeFixture(
-                { positions: updatedPositions },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            applyReferenceFixture(
+              this.store,
+              { positions: updatedPositions },
+              this.store.markets.map((row) => row.symbol),
             );
           continue;
         }
@@ -309,26 +308,25 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
           positionMode,
           unrealizedPnl: parseFloat(positionData.open_position_pnl) || 0,
           contracts,
-          liquidationPrice,
+          liquidationPrice: nativeLiquidationPrice(liquidationPrice),
           info: { markPrice, isolationId: positionData.isolation_id },
           lastUpdate: positionData.update_timestamp_ms || virtualClock.getCurrentTimeMs(),
         };
 
         (() => {
           const incoming: StoreData['positions'] = [position];
-          return this.store.apply(
-            nativeFixture(
-              {
-                positions: [
-                  ...this.store.positions.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       }
@@ -354,20 +352,19 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
       };
     }
 
-    this.store.apply(
-      nativeFixture(
-        {
-          balance: {
-            total: parseFloat(summary.total_margin_balance) || 0,
-            free: parseFloat(summary.total_available_balance) || 0,
-            used: parseFloat(summary.total_initial_margin) || 0,
-            upnl: parseFloat(summary.total_session_unrealized_pnl) || 0,
-            currencies,
-          },
-          loaded: { ...this.store.loaded, balance: true },
+    applyReferenceFixture(
+      this.store,
+      {
+        balance: {
+          total: parseFloat(summary.total_margin_balance) || 0,
+          free: parseFloat(summary.total_available_balance) || 0,
+          used: parseFloat(summary.total_initial_margin) || 0,
+          upnl: parseFloat(summary.total_session_unrealized_pnl) || 0,
+          currencies,
         },
-        this.store.markets.map((row) => row.symbol),
-      ),
+        loaded: { ...this.store.loaded, balance: true },
+      },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 

@@ -22,7 +22,8 @@ import {
 } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
 import { v } from '../../../utils/get-key';
-import { nativeFixture } from '../../cutover/nativeFixture';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
   authenticated = false;
@@ -231,26 +232,24 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
           (() => {
             const target = { id: orderId };
             const changes: Partial<StoreData['orders'][number]> = { filled: newFilled, remaining };
-            return this.store.apply(
-              nativeFixture(
-                { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
-                this.store.markets.map((row) => row.symbol),
-              ),
+            return applyReferenceFixture(
+              this.store,
+              { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
             );
           })();
           if (remaining === 0) {
             (() => {
               const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
               const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
-              return this.store.apply(
-                nativeFixture(
-                  {
-                    orders: this.store.orders.map((row) =>
-                      targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                    ),
-                  },
-                  this.store.markets.map((row) => row.symbol),
-                ),
+              return applyReferenceFixture(
+                this.store,
+                {
+                  orders: this.store.orders.map((row) =>
+                    targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                  ),
+                },
+                this.store.markets.map((row) => row.symbol),
               );
             })();
           }
@@ -269,15 +268,14 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
       (() => {
         const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: msg.order_id }];
         const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-        return this.store.apply(
-          nativeFixture(
-            {
-              orders: this.store.orders.map((row) =>
-                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-              ),
-            },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
       // Throttled fetch to sync after cancellation
@@ -362,15 +360,14 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
         (() => {
           const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
           const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: this.store.orders.map((row) =>
-                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
-                ),
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       });
@@ -380,11 +377,10 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
       // For snapshots, replace all orders
       (() => {
         const incoming: StoreData['orders'] = orders;
-        return this.store.apply(
-          nativeFixture(
-            { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
-            this.store.markets.map((row) => row.symbol),
-          ),
+        return applyReferenceFixture(
+          this.store,
+          { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
+          this.store.markets.map((row) => row.symbol),
         );
       })();
     } else {
@@ -392,19 +388,18 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
       orders.forEach((order) => {
         (() => {
           const incoming: StoreData['orders'] = [order];
-          return this.store.apply(
-            nativeFixture(
-              {
-                orders: [
-                  ...this.store.orders.map((row) => {
-                    const change = incoming.find((item) => item.id === row.id);
-                    return change ? { ...row, ...change } : row;
-                  }),
-                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-                ],
-              },
-              this.store.markets.map((row) => row.symbol),
-            ),
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
           );
         })();
       });
@@ -478,7 +473,7 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
         leverage,
         unrealizedPnl: parseFloat(p.pnl || p.unrealized_funding || 0),
         contracts,
-        liquidationPrice: parseFloat(p.liquidation_threshold || 0),
+        liquidationPrice: nativeLiquidationPrice(parseFloat(p.liquidation_threshold || 0)),
         marginType,
         positionMode: PositionMode.OneWay, // Kraken only supports one-way mode
         info: p,
@@ -489,11 +484,10 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
     const activePositions = positions.filter((p) => p.contracts > 0);
     (() => {
       const incoming: StoreData['positions'] = activePositions;
-      return this.store.apply(
-        nativeFixture(
-          { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
-          this.store.markets.map((row) => row.symbol),
-        ),
+      return applyReferenceFixture(
+        this.store,
+        { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
+        this.store.markets.map((row) => row.symbol),
       );
     })();
   };
@@ -651,11 +645,10 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
       info: accounts,
     };
 
-    this.store.apply(
-      nativeFixture(
-        { balance },
-        this.store.markets.map((row) => row.symbol),
-      ),
+    applyReferenceFixture(
+      this.store,
+      { balance },
+      this.store.markets.map((row) => row.symbol),
     );
   };
 
@@ -671,17 +664,16 @@ export class KrakenPrivateWebsocket extends BaseWebSocket<KrakenExchange> {
     if (!this.isDisposed) {
       try {
         const orders = await this.parent.fetchOrders();
-        this.parent.store.apply(
-          nativeFixture(
-            {
-              orders,
-              loaded: {
-                ...this.parent.store.loaded,
-                orders: true,
-              },
+        applyReferenceFixture(
+          this.parent.store,
+          {
+            orders,
+            loaded: {
+              ...this.parent.store.loaded,
+              orders: true,
             },
-            this.parent.store.markets.map((row) => row.symbol),
-          ),
+          },
+          this.parent.store.markets.map((row) => row.symbol),
         );
       } catch {
         // Silent failure, will retry on next event

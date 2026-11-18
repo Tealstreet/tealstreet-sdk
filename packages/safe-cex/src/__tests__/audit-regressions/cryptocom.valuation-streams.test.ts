@@ -1,46 +1,45 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { FrameStore } from '../../store/frameStore';
-import { nativeFixture } from '../cutover/nativeFixture';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
 
 const createExchange = () => {
   const store = new FrameStore();
-  store.apply(
-    nativeFixture(
-      {
-        markets: [
-          {
-            id: 'BTCUSD-PERP',
-            symbol: 'BTCUSD-PERP',
-            base: 'BTC',
-            quote: 'USD',
-            active: true,
-            precision: { amount: 0.001, price: 0.5 },
-            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
-            info: { underlyingSymbol: 'BTCUSD-INDEX' },
-          },
-        ],
-        tickers: [
-          {
-            id: 'BTCUSD-PERP',
-            symbol: 'BTCUSD-PERP',
-            bid: 60_000,
-            ask: 60_010,
-            last: 60_005,
-            mark: 60_005,
-            index: 60_004,
-            percentage: 1,
-            fundingRate: 0.0001,
-            fundingTime: 0,
-            volume: 100,
-            quoteVolume: 6_000_000,
-            openInterest: 10,
-          },
-        ],
-      },
-      store.markets.map((row) => row.symbol),
-    ),
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        {
+          id: 'BTCUSD-PERP',
+          symbol: 'BTCUSD-PERP',
+          base: 'BTC',
+          quote: 'USD',
+          active: true,
+          precision: { amount: 0.001, price: 0.5 },
+          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
+          info: { underlyingSymbol: 'BTCUSD-INDEX' },
+        },
+      ],
+      tickers: [
+        {
+          id: 'BTCUSD-PERP',
+          symbol: 'BTCUSD-PERP',
+          bid: 60_000,
+          ask: 60_010,
+          last: 60_005,
+          mark: 60_005,
+          index: 60_004,
+          percentage: 1,
+          fundingRate: 0.0001,
+          fundingTime: 0,
+          volume: 100,
+          quoteVolume: 6_000_000,
+          openInterest: 10,
+        },
+      ],
+    },
+    store.markets.map((row) => row.symbol),
   );
   return new CryptocomExchange('cryptocom', { key: 'key', secret: 'secret' }, store);
 };
