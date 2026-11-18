@@ -1119,9 +1119,12 @@ the one physical socket in both health channels. Hyperliquid and TxFlow use it
 only when their public topics are direct; separate sockets remain independent.
 `RustEngineExchange` exposes one `RustSocketHandle` per channel through the
 `BaseWebSocket` fields, so `getAllSockets`, `reconnect`, `recoverAfterOffline`,
-CLI `ConnectionMonitor` and the base `dispose` work unchanged. It writes
-`store.socketHealth` through the shared `summarizeSocketHealth`, on socket
-changes and every 5 s, never through the TS watchdog. Channel health uses a
+CLI `ConnectionMonitor` and the base `dispose` work unchanged. Native SCXF
+section 26 owns `store.socketHealth`. The host observes socket changes and
+checks recovery every 5 s through `summarizeSocketHealth`. Auth recovery tracks
+the transport's initialization transition independently of the last published
+health frame, so a reconnect followed by private traffic resets the rejection
+streak even before the native health publication arrives. Channel health uses a
 60 s silence threshold. Reconnecting closes only
 open sockets; a connect in flight is left alone, as in TS. `Deactivate` and
 `auth.rejected` events raise `authFailureStreak`; a private stream delivering

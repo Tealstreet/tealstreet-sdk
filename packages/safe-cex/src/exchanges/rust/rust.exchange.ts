@@ -703,6 +703,7 @@ export class RustEngineExchange extends BaseExchange {
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private socketHealthTimer?: ReturnType<typeof setTimeout>;
   private socketHealthClock?: () => number;
+  private privateSocketInitialized = false;
   private readonly bookListeners = new Map<string, Map<number, (book: OrderBook) => void>>();
   private nextBookListenerId = 0;
   private readonly candleListeners = new Map<string, Set<(candle: Candle) => void>>();
@@ -2864,7 +2865,10 @@ export class RustEngineExchange extends BaseExchange {
     };
     const current = this.store.socketHealth;
     // A private stream delivering again proves the key; later rejections still count.
-    if (health.privateInitialized && !current?.privateInitialized) this.recordAuthSuccess();
+    // Native health publication may lag a close, so track the transport transition here.
+    const initialized = health.privateInitialized && !this.privateSocketInitialized;
+    this.privateSocketInitialized = health.privateInitialized;
+    if (initialized) this.recordAuthSuccess();
     if (current && (Object.keys(health) as (keyof typeof health)[]).every((key) => current[key] === health[key]))
       return;
     // Native socket-health sections own the published state.
@@ -4326,6 +4330,7 @@ export class RustEngineExchange extends BaseExchange {
     clearTimeout(this.socketHealthTimer);
     this.socketHealthTimer = undefined;
     this.socketHealthClock = undefined;
+    this.privateSocketInitialized = false;
     this.flushTimers.forEach(clearInterval);
     this.flushTimers = [];
     const host = this.host;
