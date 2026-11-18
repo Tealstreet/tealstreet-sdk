@@ -1095,6 +1095,13 @@ and receiver together. Public `historyCompletenessOf`, `withHistoryCompleteness`
 and `copyHistoryCompleteness` helpers preserve it before row transformations;
 Rust derived position and reported closed-PnL mappings retain it even on empty
 results. Bybit's derived history combines both source axes' assertions.
+A Bybit closed-PnL range whose closing order cannot be joined to an explicit
+`long`, `short` or `both` leg returns no aggregates and carries
+`incompleteReason: unresolvedHedgeLeg`. An absent resolver, empty order response,
+missing order ID or missing order leg is not evidence of one-way mode. Native
+close rows are left untouched and can be re-read through the existing raw history
+path; only a complete join can publish the aggregate's stable key/count. This does
+not add persistent raw-event storage (the separate retention/rebuild decision).
 
 Optional `completeness.failure: { operation, kind, venueCode? }` retains a Bybit
 later-page failure through the same owning-result mapping and serialization.
