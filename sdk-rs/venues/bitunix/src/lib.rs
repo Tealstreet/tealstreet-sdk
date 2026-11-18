@@ -426,18 +426,15 @@ impl BitunixFutures {
                 }
             } else if let Some((symbol, native)) = rest.split_once("_klineop_") {
                 let symbol = symbol.to_ascii_uppercase();
-                let intervals: Vec<_> = self
-                    .candles
-                    .iter()
-                    .filter(|(s, i)| s == &symbol && interval(*i) == native)
-                    .map(|(_, i)| *i)
-                    .collect();
-                if !intervals.is_empty() {
+                // Caller spellings stay independent for unsubscribe, but one
+                // native interval publishes once, including a lowercase alias.
+                let wanted = self.candles.iter().find_map(|(s, i)| {
+                    (s.eq_ignore_ascii_case(&symbol) && interval(*i) == native).then_some(*i)
+                });
+                if let Some(i) = wanted {
                     let d: Kline = serde_json::from_str(text).map_err(|e| e.to_string())?;
                     cx.store.update_ticker(&symbol, |t| t.last = d.close.0);
-                    for i in intervals {
-                        cx.candle(&symbol, i, candle(&d, false));
-                    }
+                    cx.candle(&symbol, i, candle(&d, false));
                 }
             }
         }
@@ -601,6 +598,10 @@ impl Venue for BitunixFutures {
             }
             _ => S::NONE,
         }
+    }
+
+    fn max_account_subscriptions() -> Option<usize> {
+        Some(safe_cex_engine::socket_lifecycle::MAX_FRAMES)
     }
 
     fn capabilities(&self) -> safe_cex_engine::Capabilities {

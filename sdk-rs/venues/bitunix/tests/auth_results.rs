@@ -684,6 +684,122 @@ fn retries_back_off_per_key_to_the_cap_and_only_current_success_resets_them() {
 }
 
 #[test]
+fn private_reconnect_preserves_elevated_positions_read_backoff() {
+    let (mut e, initial) = started(true);
+    answer(
+        &mut e,
+        &http(&initial, "get_pending_positions"),
+        0.0,
+        200,
+        "",
+        r#"{"code":0,"data":{"positionList":[]}}"#,
+    );
+    let socket = initial
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.contains("/private/") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(0.0, Event::WsOpened { socket });
+    e.handle(
+        0.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"op":"login","data":{"result":true}}"#,
+        },
+    );
+    let opened = safe_cex_engine::test_support::prepared_now(&mut e);
+    let failed = answer(
+        &mut e,
+        &http(&opened, "get_pending_positions"),
+        100.0,
+        200,
+        "",
+        r#"{"code":10004}"#,
+    );
+    let (timer, at) = retry(&failed, 100.0);
+    let actions = fired(&mut e, timer, at);
+    let now = at + 1.0;
+    let failed = answer(
+        &mut e,
+        &http(&actions, "get_pending_positions"),
+        now,
+        200,
+        "",
+        r#"{"code":10004}"#,
+    );
+    let (read_timer, eligible) = failed
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (1500.0..=2000.0).contains(&(*at_ms - now)) => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("positions backoff is elevated before close");
+    e.handle(now + 1.0, Event::WsClosed { socket, code: 1006 });
+    let actions = safe_cex_engine::test_support::prepared_now(&mut e);
+    let (timer, at) = retry(&actions, now + 1.0);
+    let actions = fired(&mut e, timer, at);
+    let replacement = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect {
+                socket,
+                url,
+                context: Some(context),
+                ..
+            } if url.contains("/private/") => {
+                assert!(
+                    !context.recover,
+                    "a close retains ordinary reconnect routing"
+                );
+                Some(*socket)
+            }
+            _ => None,
+        })
+        .expect("replacement private socket");
+    e.handle(
+        at,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    e.handle(
+        at,
+        Event::WsMessage {
+            socket: replacement,
+            text: r#"{"op":"login","data":{"result":true}}"#,
+        },
+    );
+    let actions = safe_cex_engine::test_support::prepared_now(&mut e);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("get_pending_positions"))),
+        "opening does not bypass the elevated read delay"
+    );
+    let actions = fired(&mut e, read_timer, eligible);
+    let now = eligible + 1.0;
+    let failed = answer(
+        &mut e,
+        &http(&actions, "get_pending_positions"),
+        now,
+        200,
+        "",
+        r#"{"code":10004}"#,
+    );
+    assert!(
+        failed
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. }
+        if (3000.0..=4000.0).contains(&(*at_ms-now)))),
+        "third refusal retains the elevated 4s step across reconnect: {failed:?}"
+    );
+}
+
+#[test]
 fn malformed_regular_recovery_and_valid_tpsl_cannot_heal_regular_refusal() {
     let (mut e, socket) = startup();
     e.handle(

@@ -440,45 +440,101 @@ fn channel_named_pong_does_not_enable_the_private_idle_watch() {
 
 #[test]
 fn candle_symbol_aliases_cannot_refuse_the_live_futures_feed() {
-    let mut h = H::start();
-    let socket = h.futures();
-    h.open(socket);
-    h.subscribe_book();
-    for symbol in ["BTCUSDT", "btcusdt"] {
-        h.event(Event::Command(Command::SubscribeCandles {
-            symbol: symbol.into(),
+    for (removed, retained) in [("btcusdt", "BTCUSDT"), ("BTCUSDT", "btcusdt")] {
+        let mut h = H::start();
+        let socket = h.futures();
+        h.open(socket);
+        h.subscribe_book();
+        for symbol in ["BTCUSDT", "btcusdt"] {
+            h.event(Event::Command(Command::SubscribeCandles {
+                symbol: symbol.into(),
+                interval: safe_cex_engine::model::Interval::M1,
+            }));
+        }
+        assert!(
+            !h.closed.contains(&socket),
+            "aliases must not stop the feed"
+        );
+        assert_eq!(h.sent_on(socket, "market_btcusdt_klineop_1min"), 1);
+        h.message(socket, DEPTH);
+        assert_eq!(h.best_bid(), Some(96_000.0));
+        for symbol in [None, Some(removed)] {
+            if let Some(symbol) = symbol {
+                h.event(Event::Command(Command::UnsubscribeCandles {
+                    symbol: symbol.into(),
+                    interval: safe_cex_engine::model::Interval::M1,
+                }));
+            }
+            h.engine.take_frame(h.now);
+            h.message(socket, r#"{"channel":"market_btcusdt_klineop_1min","data":{"time":1700000000000,"open":"100","high":"125","low":"99","close":"123","volume":"2"}}"#);
+            let frame = h.engine.take_frame(h.now).expect("live candle frame");
+            let rows = safe_cex_engine::wire::sections(frame)
+                .find(|(tag, _)| *tag == safe_cex_engine::wire::section::CANDLES)
+                .expect("candle delivered for the retained caller")
+                .1;
+            assert_eq!(
+                u32::from_le_bytes(rows[..4].try_into().unwrap()),
+                1,
+                "one candle publication per native topic, including aliases"
+            );
+            assert_eq!(u32::from_le_bytes(rows[4..8].try_into().unwrap()), 0);
+        }
+        assert_eq!(
+            h.sent_on(socket, "market_btcusdt_klineop_1min"),
+            1,
+            "removing {removed} must preserve {retained}"
+        );
+        h.event(Event::Command(Command::UnsubscribeCandles {
+            symbol: retained.into(),
             interval: safe_cex_engine::model::Interval::M1,
         }));
+        assert!(h.sent.iter().any(|(s, text)| *s == socket
+            && text.contains("unsub")
+            && text.contains("market_btcusdt_klineop_1min")));
+        h.engine.take_frame(h.now);
+        h.message(socket, r#"{"channel":"market_btcusdt_klineop_1min","data":{"time":1700000000000,"open":"100","high":"125","low":"99","close":"123","volume":"2"}}"#);
+        if let Some(frame) = h.engine.take_frame(h.now) {
+            assert!(
+                !safe_cex_engine::wire::sections(frame)
+                    .any(|(tag, _)| tag == safe_cex_engine::wire::section::CANDLES)
+            );
+        }
+        h.event(Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }));
+        assert_eq!(h.sent_on(socket, "market_btcusdt_klineop_1min"), 3);
     }
-    assert!(
-        !h.closed.contains(&socket),
-        "duplicate native topics must not stop the feed"
-    );
-    assert_eq!(h.sent_on(socket, "market_btcusdt_klineop_1min"), 1);
-    h.message(socket, DEPTH);
-    assert_eq!(h.best_bid(), Some(96_000.0));
-    h.event(Event::Command(Command::UnsubscribeCandles {
-        symbol: "btcusdt".into(),
-        interval: safe_cex_engine::model::Interval::M1,
-    }));
-    // The native host retains the independently accepted uppercase request.
-    assert_eq!(
-        h.sent_on(socket, "market_btcusdt_klineop_1min"),
-        1,
-        "removing one spelling must preserve another caller's interest"
-    );
-    h.event(Event::Command(Command::UnsubscribeCandles {
-        symbol: "BTCUSDT".into(),
-        interval: safe_cex_engine::model::Interval::M1,
-    }));
-    assert!(h.sent.iter().any(|(s, text)| *s == socket
-        && text.contains("unsub")
-        && text.contains("market_btcusdt_klineop_1min")));
-    h.event(Event::Command(Command::SubscribeCandles {
-        symbol: "BTCUSDT".into(),
-        interval: safe_cex_engine::model::Interval::M1,
-    }));
-    assert_eq!(h.sent_on(socket, "market_btcusdt_klineop_1min"), 3);
+}
+
+#[test]
+fn private_connect_timeout_does_not_claim_a_missing_login_answer() {
+    for opened in [false, true] {
+        let mut h = H::account_unopened();
+        let socket = h.private();
+        if opened {
+            h.open(socket);
+        }
+        // A delayed ingress proves the due deadline even before its timer runs.
+        h.now += 10_000.0;
+        h.message(socket, r#"{"op":"pong"}"#);
+        if !opened {
+            h.open(socket);
+        }
+        assert!(h.closed.contains(&socket));
+        let missing_login = h.notices.iter().filter(|notice| matches!(notice,
+            Notice::Event(event) if event.message.contains("did not answer the private socket login"))).count();
+        assert_eq!(missing_login, usize::from(opened), "opened={opened}");
+        let (timer, at) = h
+            .timers
+            .iter()
+            .copied()
+            .find(|(_, at)| (750.0..=1000.0).contains(&(*at - h.now)))
+            .expect("bounded recovery retry");
+        h.now = at;
+        h.event(Event::TimerFired { timer });
+        assert_ne!(h.private(), socket);
+    }
 }
 
 #[test]
@@ -486,7 +542,24 @@ fn reconnect_restores_the_native_hosts_full_subscription_limit() {
     let mut h = H::start();
     let socket = h.futures();
     h.open(socket);
-    for index in 0..4096 {
+    let mut expected = (0..safe_cex_engine::socket_lifecycle::MAX_FRAMES)
+        .map(|index| format!("market_t{index}usdt_klineop_1min"))
+        .collect::<Vec<_>>();
+    expected.sort();
+    let topics_on = |h: &H, socket| {
+        let mut topics = h
+            .sent
+            .iter()
+            .filter(|(s, _)| *s == socket)
+            .filter_map(|(_, text)| serde_json::from_str::<serde_json::Value>(text).ok())
+            .filter(|v| v["event"] == "sub")
+            .filter_map(|v| v["params"]["channel"].as_str().map(str::to_owned))
+            .filter(|s| s.contains("klineop_"))
+            .collect::<Vec<_>>();
+        topics.sort();
+        topics
+    };
+    for index in 0..safe_cex_engine::socket_lifecycle::MAX_FRAMES {
         h.event(Event::Command(Command::SubscribeCandles {
             symbol: format!("T{index}USDT"),
             interval: safe_cex_engine::model::Interval::M1,
@@ -497,6 +570,7 @@ fn reconnect_restores_the_native_hosts_full_subscription_limit() {
         4096,
         "all accepted subscriptions were live"
     );
+    assert_eq!(topics_on(&h, socket), expected);
     h.event(Event::WsClosed { socket, code: 1006 });
     let (timer, at) = h
         .timers
@@ -511,6 +585,7 @@ fn reconnect_restores_the_native_hosts_full_subscription_limit() {
     h.open(replacement);
     assert!(!h.closed.contains(&replacement));
     assert_eq!(h.sent_on(replacement, "klineop_1min"), 4096);
+    assert_eq!(topics_on(&h, replacement), expected);
     for topic in ["system_notice", "reconnected", "onconnected"] {
         assert_eq!(h.sent_on(replacement, topic), 1);
     }

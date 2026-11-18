@@ -134,9 +134,17 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
                 );
             }
         }
-        safe_cex_engine::test_support::prepared_now(e)
-            .into_iter()
-            .for_each(drop);
+        for action in safe_cex_engine::test_support::prepared_now(e) {
+            assert!(
+                !matches!(&action, Action::WsClose { socket }
+                if sockets.iter().enumerate().any(|(i, (_, sibling))| i != skip && sibling == socket)),
+                "keep_alive retired a sibling: {action:?}"
+            );
+            assert!(
+                !matches!(&action, Action::WsConnect { .. }),
+                "keep_alive unexpectedly replaced a sibling: {action:?}"
+            );
+        }
     };
     for index in 0..6 {
         // Each feed starts with every sibling live. The stable-reset check

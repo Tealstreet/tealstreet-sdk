@@ -34,14 +34,25 @@ All pings retain master's protocol clock. Private pings use its current
 `{op:"ping", ping:<seconds>}` codec; both `op:"pong"` and the real
 `{op:"ping", pong:..., ping:...}` response count as pong evidence. A private
 session without an actual pong keeps its idle gate disabled. A successful login
-still cancels its authentication bound; no-answer timeout warns `stream.unavailable`
-and reconnects, without asserting rejected credentials.
+still cancels its authentication bound; an authentication-answer timeout warns
+`stream.unavailable` and reconnects, without asserting rejected credentials.
+A connection that never opened cannot have an unanswered login: its connect
+timeout retains recovery routing without emitting the login-answer notice.
 
 Public shard registration is skipped when public data is shared or disabled, so
 intentional host suppression emits no admission error. Caller candle spellings
 remain independently desired, while equal canonical native topics coalesce into
 one managed interest until the last spelling is removed. Case aliases cannot
 create duplicate interest keys or unsubscribe another caller's retained topic.
+Candle reduction matches the canonical symbol and publishes once per native
+interval, including when the remaining caller uses a lowercase spelling.
+
+Bitunix declares the existing managed `MAX_FRAMES` (4096) as its conservative
+native-host account subscription capacity. Both generic account registration
+and spawning reject a configured `max_subscriptions_per_account` above that
+capacity before starting the account. The existing 4096 default remains valid;
+book, candle and ticker entries all count toward this conservative host limit.
+Other venues retain their configured limits unless they declare a capacity.
 Only `op` supplies private pong evidence; `ch` remains a login-dispatch fallback.
 
 Timeout retirement carries `recover:true` to the replacement; an ordinary close
@@ -88,6 +99,12 @@ Run the full current Bitunix suite, including login controls, socket lifecycle,
 live balance pacing, routing, account-read progress, ordinary order reconciliation
 and trading/signing uncertainty tests. Retain all existing assertions; fixture
 updates must model live sibling feeds and actual current replacement sockets.
+The lifecycle drain refuses unexpected sibling closes or replacement connects.
+Read-backoff tests separately prove successful-read reset on the same connection
+and retained elevated refusal backoff across a reconnect without an intervening
+success. Full-capacity reconnect assertions compare all topic identities on both
+epochs, not only frame counts. Native registration tests reject cap+1 and twice
+the cap, while accepting the inclusive cap and a smaller account limit.
 Registry Bitunix tests, package format/strict lint, all configured bans and the
 socket checker's own tests remain required.
 

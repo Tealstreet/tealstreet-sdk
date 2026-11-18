@@ -110,3 +110,10 @@ Bitunix alias-retention source `08d18516706c` measures optimized web/Node/replay
 2,025,472-byte cap retains the earlier 2,023,424-byte floor and 10,973-byte
 reserve, with strict cap/cap+1 checks. Caller spelling keys remain independently
 desired; only equal native wire topics coalesce until the last alias is removed.
+
+Bitunix #2301 review fixes retain the managed frame cap and bootstrap split.
+The native host validates its configured account limit against Bitunix's declared
+4096 capacity before startup. Candle aliases retain caller keys and reduce once
+by canonical native symbol. A never-opened private dial is not a login timeout.
+These source changes need fresh exact-head family/combined artifacts and CI;
+prior measurements do not attest the new source. The release-batch hold remains.

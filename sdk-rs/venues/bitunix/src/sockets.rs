@@ -1,7 +1,7 @@
 //! Bitunix native wire over engine-managed sockets: the engine owns epochs,
 //! supervision, interest replay and the private login retry.
 use super::*;
-use safe_cex_engine::socket::Config;
+use safe_cex_engine::socket::{Config, Timeout};
 use safe_cex_engine::socket_lifecycle::{
     AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
     Interest, Invalidation, LifecycleEvent, RetireReason, SocketError, TrafficPolicy,
@@ -265,7 +265,9 @@ impl BitunixFutures {
                 s.recover = matches!(reason, RetireReason::Timeout(_));
                 if matches!(s.feed, Feed::Private) {
                     self.account.private_live = false;
-                    if s.recover && !self.account.login_answered {
+                    if matches!(reason, RetireReason::Timeout(Timeout::Auth))
+                        && !self.account.login_answered
+                    {
                         cx.notice(
                             Level::Warn,
                             code::STREAM_UNAVAILABLE,
