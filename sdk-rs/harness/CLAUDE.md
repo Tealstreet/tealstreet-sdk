@@ -181,3 +181,19 @@ retain every family measurement and module SHA256 and require exact caps,
 10 KiB reserves, alias coverage, and cap/cap+1 boundaries. Combined measures
 17,869,568 B (SHA256 `b7693720dffd5c3878c09ea239e9949532c43d110e4883080aa07b476ad482a3`),
 leaving 218,368 B at the unchanged 18,087,936 B ceiling. No runtime inputs change.
+
+#3640's vetoable M46 reserve refresh uses CI44319661954 after all 31 family
+measurement jobs, including shared aliases, completed successfully. Built source
+`de42fedbb4021e94d1162e4420b8583d0d20906a` has the exact tree of PR head
+`d931514bb9750d82e2f538ed454b0d24edd0db5f`. All 27 sealed family artifacts
+pass source/run/input fingerprints, pinned Rust1.99.0/bindgen0.2.129/Binaryen132
+and optimized web/Node SHA256 checks. The complete 49-name routing and 31-entry
+budget census found shortfalls only for BingX, Hyperliquid, MEXC and OKX.
+Their caps use measured +10 KiB rounded up to KiB, never lowering a prior cap;
+shared aliases follow their parent family. Per-family bytes and hashes are pinned
+in wasm-budget.test.mjs; changed caps retain all provenance comments and floors.
+Combined measures 17,876,808 B, SHA256
+`12320b94f86e8c4561366588bc255edc0d1b438fdcd3c8989d9e22714cc44cee`,
+leaving 211,128 B at its unchanged 18,087,936 B ceiling.
+This budget-only composition changes no runtime inputs; required new-head CI
+and combined consumers still have to run and succeed.

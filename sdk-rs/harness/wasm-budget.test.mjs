@@ -4470,7 +4470,8 @@ for (const [family, measured, parentCap, sha256, aliases, artifact] of postMaste
     assert.ok(Number.isSafeInteger(artifact) && artifact > 0);
     const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
     const cap = WASM_VENUE_OVERRIDES[family];
-    assert.equal(cap, Math.max(parentCap, required), 'raise only to measured reserve; never lower a parent cap');
+    // Historical composition stays a floor; the complete M46 census below pins the exact current cap.
+    assert.ok(cap >= Math.max(parentCap, required), 'retain every earlier measured reserve and parent floor');
     assert.ok(cap - measured >= 10 * 1024, `${family}: ${cap - measured} bytes of reserve`);
     for (const alias of aliases) {
       assert.equal(venueFamily(alias), family);
@@ -4504,6 +4505,87 @@ test('#3640 post-master combined build retains its measured reserve and parent c
   const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
   assert.equal(WASM_BUDGETS.combined, Math.max(parentCap, required));
   assert.equal(WASM_BUDGETS.combined - measured, 218_368);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'combined'), undefined);
+  assert.equal(wasmBudgetError(WASM_BUDGETS.combined, 'combined'), undefined);
+  assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined'), /exceeds/);
+});
+
+// #3640 vetoable M46 rule 17: complete CI run 44319661954, head d931514bb9750d82e2f538ed454b0d24edd0db5f.
+// Built source de42fedbb4021e94d1162e4420b8583d0d20906a has identical tree 96034a1dc92a991b43673ee6023cd915815b42fe.
+// All 31 measurement jobs completed successfully before this census; all 27 sealed family artifacts verified.
+// Rust1.99.0 / bindgen0.2.129 / Binaryen132, required two -Oz passes; optimized web/Node hashes match.
+// Tuples: family, measured bytes, parent cap, paired module SHA256, all routed aliases, artifact ID.
+const m46ReserveMeasurements = [
+  ['apexomni', 2_221_499, 2_232_320, '10b21908c4228d0eeb8da7859b3ca2d837715531c6aa0acce9c0af576f911b88', ['apexomni'], 14434253983],
+  ['asterdex', 2_385_366, 2_396_160, '15131a05b946f46cfa0869bbd99b1d96de28295dc97c546222287079b2228602', ['asterdex'], 14434307727],
+  ['backpack', 2_194_243, 2_204_672, 'e4ac1ad98e2718829dbee4b7429d3b1b21478a5b4e3594250f1a51dbfe43e9eb', ['backpack'], 14434746254],
+  ['binance', 2_399_548, 2_410_496, '8f65a33e378620a67ae85e629a5e0f69d7f780b49ddb2e1ee9ac4eb9fc080c9d', ['binance', 'binanceinverse', 'binancepm', 'binanceoptions', 'binancespot'], 14435345088],
+  ['bingx', 2_280_540, 2_281_472, '43b6deab11cf21d7566a4f257fc13e849d294d41b98e1a3e30e461c5205021e9', ['bingx', 'bingxspot'], 14434571947],
+  ['bitget', 2_918_911, 2_929_664, '239158cbf1ca4b1d776832a02338759f13447e5015149d4d59a940e4f3ebc38a', ['bitget', 'bitgetinverse', 'bitgetusdc'], 14435500072],
+  ['bitrue', 2_030_425, 2_040_832, '7d3a567671e51508d0577947d5eb9999fd941fb2f56dbc333be42026dd2fd6aa', ['bitrue'], 14435400462],
+  ['bitunix', 2_060_267, 2_070_528, 'c1bf013f44d3fb0d1ea98d44592a92ae3448890fdef959c5b765ee3e37d3b051', ['bitunix'], 14434103149],
+  ['blofin', 2_193_054, 2_203_648, '6f053daba3682ad2375ce7a48b08636fd4802e9df7892c2e991e4b8f8d5e755a', ['blofin'], 14433119064],
+  ['bybit', 2_670_652, 2_696_192, '76fbaf355e73bf6b5292f784b5479a9f2a7ab5d9988c88ebc3700d02d30301dc', ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'], 14434357021],
+  ['coinbase', 2_467_231, 2_478_080, '5df8c70d8ba2597306f3264e82e032ad0c541738e160f464201b80aeb52c4598', ['coinbase', 'coinbasespot'], 14435110703],
+  ['cryptocom', 1_935_754, 1_946_624, '5295ac8606d45645e0e34980f60e993e5906ae089c25990c1fdff3efba4e7dce', ['cryptocom'], 14433549166],
+  ['grvt', 2_161_325, 2_171_904, '7ab9c27e4f5416ed0230d6a12167ca4f2c0b3b3d6b438132edbed8c7ce5b4819', ['grvt'], 14435005799],
+  ['hyperliquid', 2_428_978, 2_439_168, 'f242e0ade5f65c8cf9fd93bd0f211b02668d1f69f381221b1452a1d6fabf53ff', ['hyperliquid', 'hyperliquidspot'], 14435086069],
+  ['kraken', 2_412_733, 2_423_808, '6cafd9893661512013b26bb853f170caeda6f93b4149f92a0660a342ebc61adc', ['kraken', 'krakenspot'], 14435035761],
+  ['kucoin', 1_987_325, 1_997_824, 'd5e348710e013476abe057e7b935688e71016c090371aff560991247db93e886', ['kucoin'], 14435081529],
+  ['kucoinspot', 2_669_540, 2_679_808, '93e27408a62c1de0476a6b90b4f5ae20d690996485e7f4702602eda6a80950c6', ['kucoinspot'], 14434612501],
+  ['lighter', 2_343_151, 2_354_176, 'acda5b0d152fdb44552fa4500f3920cfc22b4100d438fdec05a1bdbeafc54069', ['lighter', 'lighter-robinhood'], 14434940914],
+  ['mexc', 2_074_423, 2_082_816, '0c71123e5adb6b43bc1b70488dd43674e758935f6ab404826f5aa22419ba5bcf', ['mexc'], 14433734049],
+  ['okx', 2_180_126, 2_190_336, 'c32226e5e573aebd0beca89567131ce7ce719369a730f7cfa0e5c763525a34fa', ['okx', 'okxdemo', 'okxeu', 'okxeudemo'], 14435011270],
+  ['orderly', 1_904_286, 1_914_880, 'e7f1a44d85c2ec939a33e1705e71999e6850dfdaa963d5918c5e6d682f2f3e1b', ['orderly', 'kodiakfi', 'mode', 'what', 'woofi'], 14433868603],
+  ['paradex', 2_431_400, 2_442_240, '892d6da913e90c29ddf6c9138d9c9486c682bec36a846183199a69b2d366201f', ['paradex'], 14435400501],
+  ['phemex', 2_243_263, 2_253_824, '6a138d96809233b17c89f263ec26c3fcb78e92e191028877b9a5de350f12b7d7', ['phemex'], 14435275349],
+  ['polymarket', 1_786_678, 1_797_120, '5e8e6545f4969be065ff5eefaa2183c38c099c300e9a180652ed1d6ebede2ef8', ['polymarket'], 14434626467],
+  ['txflow', 2_287_868, 2_298_880, 'ef49fce8d93fff542a4b2a0b15105d75e6587d209fc6db9f7bdc663950e77a32', ['txflow'], 14435150538],
+  ['weex', 2_150_848, 2_161_664, '0f9b9cf33f198eb13dc44eb883a2f70cb36e752076b297cb0f29c5d254e94833', ['weex'], 14434032692],
+  ['woo', 2_875_192, 2_885_632, '9595296a78bd8053db61b6ab9899ab2a2a4d5fc64e8da389eee34c7940451e5a', ['woo'], 14435596190],
+];
+
+for (const [family, measured, parentCap, sha256, aliases, artifact] of m46ReserveMeasurements) {
+  test(`#3640 M46 rule 17: ${family} complete reserve and alias audit`, () => {
+    assert.match(sha256, /^[0-9a-f]{64}$/);
+    assert.ok(Number.isSafeInteger(artifact) && artifact > 0);
+    const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.equal(cap, Math.max(parentCap, required), 'raise only to measured reserve; never lower a parent cap');
+    assert.ok(cap - measured >= 10 * 1024, `${family}: ${cap - measured} bytes of reserve`);
+    for (const alias of aliases) {
+      assert.equal(venueFamily(alias), family);
+      // Routed aliases consume their parent family; explicit budget aliases must share its cap.
+      if (Object.hasOwn(WASM_VENUE_OVERRIDES, alias)) {
+        assert.equal(WASM_VENUE_OVERRIDES[alias], cap);
+        assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', alias), undefined);
+        assert.equal(wasmBudgetError(cap, 'venue', alias), undefined);
+        assert.match(wasmBudgetError(cap + 1, 'venue', alias), /exceeds/);
+      }
+    }
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  });
+}
+
+test('#3640 M46 reserve census covers every family and budget alias', () => {
+  assert.deepEqual(m46ReserveMeasurements.map(([family]) => family).sort(), [...venueFamilies].sort());
+  const aliases = m46ReserveMeasurements.flatMap(([, , , , names]) => names);
+  assert.equal(aliases.length, 49, 'all routed names at the pinned CI source');
+  assert.equal(aliases.length, new Set(aliases).size);
+  const budgetAliases = aliases.filter((alias) => Object.hasOwn(WASM_VENUE_OVERRIDES, alias)).sort();
+  assert.deepEqual(budgetAliases, Object.keys(WASM_VENUE_OVERRIDES).sort());
+});
+
+// CI44319661954 combined artifact 14435287450; same source/tree as above.
+// Optimized web/Node 17,876,808 B, SHA256 12320b94f86e8c4561366588bc255edc0d1b438fdcd3c8989d9e22714cc44cee.
+test('#3640 M46 combined build retains its measured reserve and parent ceiling', () => {
+  const measured = 17_876_808;
+  const parentCap = 18_087_936;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(WASM_BUDGETS.combined, Math.max(parentCap, required));
+  assert.equal(WASM_BUDGETS.combined - measured, 211_128);
   assert.equal(wasmBudgetError(measured + 10 * 1024, 'combined'), undefined);
   assert.equal(wasmBudgetError(WASM_BUDGETS.combined, 'combined'), undefined);
   assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined'), /exceeds/);
