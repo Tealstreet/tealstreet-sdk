@@ -112,15 +112,18 @@ BingX Spot replay tracks production decoder receipts alongside pending account r
 Bounded drains precede ticks, checkpoints and final capture; event-loop yields
 alone cannot establish completion of gzip decoding or its queued text messages.
 
-#3640's post-M44 sweep is CI44245108129 at source
-`5a8c12ca5208270288dae40df8d85f111988ea06`, tree-identical to merged head
-`5a6761866990bd1894a20bc89fbedecc14b80978` (master `700dee33e3a9`).
-All 27 exact family builds completed; web/Node hashes and lengths agree.
-The follow-up budget commit replaces provisional `36e3733cf7` provenance with
-these fresh measurements. Each non-Bybit cap is measured +10 KiB rounded to KiB.
-The measured combined module is 17,860,053 B (SHA256
-`eba7cc0304ceb0dbbe2ffd946c02b0975bd3ab23f8d7f09cfdd70bc08dddda5f`);
-combined and Bybit ceilings remain 18,087,936 and 2,696,192 B respectively.
+#3640's final allocation/chaser sweep is CI44266062446 at source
+`283acdd2f583259fa40113dc88f58b54adac610d`. All 27 exact family builds
+completed with matching optimized web/Node bytes and hashes. Their native-input
+fingerprint `399b3f8467a191b58ea8841ec5c9292b6533b2342ba6c1efbecdbfcc49a0a8f5`
+matches branch `c0113a933d`; the complete synthetic merge tree is not asserted
+identical. The follow-up refreshes bb6590f792 provenance after the native fixes.
+Every non-Bybit cap is measured +10 KiB rounded to KiB, retaining historical floors.
+Bybit measures 2,670,297 B at its fixed 2,696,192 B ceiling. The exact local
+combined build at c0113a933d measures 17,866,681 B (paired web/Node SHA256
+`0ed474e4613e860eea7c61babae81aff07fffd8aceb282e84de9282c58e87d8f`)
+at its fixed 18,087,936 B ceiling. Final-head combined consumers must still run
+and succeed in CI; local measurements do not grant that verdict.
 
 #3640 retained BingX Spot and OKX fixture callbacks publish SCXF through the
 explicit reference producer. Aster installs its taped axios transport before
