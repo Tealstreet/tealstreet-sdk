@@ -8,6 +8,37 @@ import { FrameStore } from './frameStore';
 
 const frame = (bytes: number[]) => new Frame(Uint8Array.from(bytes).buffer);
 
+describe('native position notional', () => {
+  const positionFrame = (notional: number | null) =>
+    nativeFixture({
+      positions: [
+        {
+          id: 'BTCUSDT',
+          symbol: 'BTCUSDT',
+          side: PositionSide.Long,
+          entryPrice: 100,
+          notional,
+          leverage: 1,
+          unrealizedPnl: 0,
+          contracts: 1,
+          liquidationPrice: null,
+        },
+      ],
+    });
+
+  it.each([null, 0, 1234.5])('decodes nullable native position notional %s exactly', (notional) => {
+    const store = new FrameStore();
+    store.apply(positionFrame(notional));
+    expect(store.positions[0].notional).toBe(notional);
+  });
+
+  it.each([Infinity, -Infinity])('refuses nonfinite native position notional %s', (notional) => {
+    const store = new FrameStore();
+    expect(() => store.apply(positionFrame(notional))).toThrow(/invalid Position notional/);
+    expect(store.positions).toEqual([]);
+  });
+});
+
 describe('FrameStore native state', () => {
   it('retains unchanged section identities and versions across equal frames', () => {
     const store = new FrameStore();
@@ -176,10 +207,23 @@ it('keeps order and position update counters monotonic through snapshot recovery
 
 it('retains native closed-position settings through same-account snapshot recovery', () => {
   const store = new FrameStore();
-  store.ingest(nativeFixture({ positions: [{
-    id: 'closed-native', symbol: 'BTC', side: PositionSide.Long, contracts: 2,
-    entryPrice: 100, notional: 200, leverage: 10, unrealizedPnl: 7, liquidationPrice: null,
-  }] }));
+  store.ingest(
+    nativeFixture({
+      positions: [
+        {
+          id: 'closed-native',
+          symbol: 'BTC',
+          side: PositionSide.Long,
+          contracts: 2,
+          entryPrice: 100,
+          notional: 200,
+          leverage: 10,
+          unrealizedPnl: 7,
+          liquidationPrice: null,
+        },
+      ],
+    }),
+  );
   store.ingest(nativeFixture({ positions: [] }), { snapshot: true });
   expect(store.positionSettings['closed-native']?.leverage).toBe(10);
   expect(store.positions).toEqual([]);

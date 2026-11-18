@@ -84,6 +84,8 @@ order extras. Exact `remainingNative`, `filledInPlacementUnits`,
 `remainingNotional` and `conditionalOrderPrice` values pass through unchanged.
 The JS reader does not reconstruct missing quantities from rounded base sizes.
 Reported zero remains distinct from the packed absent-value NaN sentinel.
+Position notional decodes that sentinel to the generated nullable `null`;
+finite values, including zero, pass through exactly, and infinities reject.
 Order rejection and bracket trigger metadata remain beside these quantities.
 
 OKX contract-count placement amounts remain separate from base fills and

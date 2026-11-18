@@ -1,6 +1,6 @@
 import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
-import type { Market, Position } from '../types';
 import type { StoreData } from '../generated/StoreData';
+import type { Market, Position } from '../types';
 
 import { positionEnums } from '@tealstreet/safe-cex-wasm/wire';
 import { MarginType, PositionMode, PositionSide } from '../types';
@@ -10,7 +10,11 @@ const modes = { hedged: PositionMode.Hedged, oneway: PositionMode.OneWay };
 const margins = { cross: MarginType.Cross, isolated: MarginType.Isolated };
 
 /** Decode the native Position contract without repairing numbers, sizes or identity. */
-export function readPositionFrame(frame: Frame, store: Pick<StoreData, 'markets'>, markets?: readonly Market[]): Position[] | undefined {
+export function readPositionFrame(
+  frame: Frame,
+  store: Pick<StoreData, 'markets'>,
+  markets?: readonly Market[],
+): Position[] | undefined {
   const positions = frame.positions();
   if (positions) {
     const rows: Position[] = [];
@@ -38,7 +42,7 @@ export function readPositionFrame(frame: Frame, store: Pick<StoreData, 'markets'
     for (let i = 0; i < positions.count; i++) {
       const enums = positionEnums(positions.enums[i]);
       const symbol = positions.symbol(i);
-      const market = markets ? markets[positions.market[i]] : store.markets.find(row => row.symbol === symbol);
+      const market = markets ? markets[positions.market[i]] : store.markets.find((row) => row.symbol === symbol);
       const mode = enums.positionMode === undefined ? undefined : modes[enums.positionMode];
       if (enums.side === undefined) throw new Error('missing Position side');
       const id = positions.id(i);
@@ -46,6 +50,8 @@ export function readPositionFrame(frame: Frame, store: Pick<StoreData, 'markets'
       const unrealizedPnlNative = positions.unrealizedPnlNative[i];
       // Native null means unknown. Preserve it without a numeric fallback.
       const liquidationPrice = positions.liquidationPrice[i];
+      const notional = positions.notional[i];
+      if (!Number.isNaN(notional) && !Number.isFinite(notional)) throw new Error('invalid Position notional');
       const realizedPnl = positions.realizedPnl[i];
       const marginSize = positions.marginSize[i];
       const lastUpdate = positions.lastUpdate[i];
@@ -63,7 +69,7 @@ export function readPositionFrame(frame: Frame, store: Pick<StoreData, 'markets'
           },
         }),
         entryPrice: positions.entryPrice[i],
-        notional: positions.notional[i],
+        notional: Number.isNaN(notional) ? null : notional,
         leverage: positions.leverage[i],
         unrealizedPnl: positions.unrealizedPnl[i],
         contracts: positions.contracts[i],
