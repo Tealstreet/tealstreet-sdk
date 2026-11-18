@@ -59,6 +59,35 @@ export function nativeStoreFrame(data: Partial<StoreData>, symbols?: readonly st
     ]),
   ];
   const base = consumerFrame(data, undefined, false, identities);
+  return withNativeSections(base, data);
+}
+
+/** Fixture engines bypass the Rust producer and must explicitly emit its sections. */
+export function withNativeSections(base: ArrayBuffer, data: Partial<StoreData>): ArrayBuffer {
+  const owners =
+    data.orders === undefined
+      ? undefined
+      : Object.fromEntries(
+          data.orders.flatMap((order) => {
+            const extra: NonNullable<typeof order.extra> & { isFromTwap?: boolean; twapId?: string } =
+              order.extra ?? {};
+            if (!extra?.isFromChaser && !extra?.isFromTwap) return [];
+            return [
+              [
+                order.id,
+                {
+                  ...(extra.isFromChaser && {
+                    isFromChaser: true,
+                    chaserId: extra.chaserId,
+                    chaserAttempts: extra.chaserAttempts,
+                    chaserMaxAttempts: extra.chaserMaxAttempts,
+                  }),
+                  ...(extra.isFromTwap && { isFromTwap: true, twapId: extra.twapId }),
+                },
+              ],
+            ];
+          }),
+        );
   const sections = [
     [26, data.socketHealth],
     [27, data.activeChasers],
@@ -67,6 +96,7 @@ export function nativeStoreFrame(data: Partial<StoreData>, symbols?: readonly st
     [30, data.displayedPositions],
     [31, data.displayedMargin],
     [32, data.balance?.info],
+    [33, owners && Object.keys(owners).length ? owners : undefined],
   ] as const;
   const extra = sections.flatMap(([kind, value]) => (value === undefined ? [] : [{ kind, bytes: nativeValue(value) }]));
   const result = new ArrayBuffer(base.byteLength + extra.reduce((size, section) => size + 8 + section.bytes.length, 0));

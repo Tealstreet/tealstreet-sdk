@@ -33,13 +33,17 @@ import { ChaserOrderInstance } from '../../webworker/chaserOrder/ChaserOrderInst
 import { ChaserOrderManager } from '../../webworker/chaserOrder/ChaserOrderManager';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { setMainAcceptsFrames } from '../../webworker/frameForwarding';
+import { ChaserOrderEnrichmentPostprocessor } from '../../webworker/postProcessors/ChaserOrderEnrichmentPostprocessor';
+import { DisplayedMarginPostprocessor } from '../../webworker/postProcessors/DisplayedMarginPostprocessor';
 import { DisplayedPositionsPostprocessor } from '../../webworker/postProcessors/DisplayedPositionsPostprocessor';
+import { OrdersRiskProfilePostprocessor } from '../../webworker/postProcessors/OrdersRiskProfilePostprocessor';
 import { independentPostprocessors } from '../../webworker/postProcessors/registry';
+import { TwapOrderEnrichmentPostprocessor } from '../../webworker/postProcessors/TwapOrderEnrichmentPostprocessor';
 import { TwapInstance } from '../../webworker/twap/TwapInstance';
 import { TwapStatus } from '../../webworker/twap/TwapStatus';
 import { engineCapabilities, quantityUnitsCode } from '../fixtures/engineCapabilities';
 import { consumerFrame } from './consumerFrame';
-import { nativeFixture } from './nativeFixture';
+import { nativeFixture, withNativeSections } from './nativeFixture';
 
 const hyroEnvironment = vi.hoisted(() => {
   const previous = process.env.NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL;
@@ -129,6 +133,7 @@ function state(name: ExchangeName): Partial<StoreData> {
     ],
     balance: { total: 1000, free: 900, used: 100, upnl: 7 },
     loaded: { balance: true, orders: true, positions: true, markets: true, tickers: true },
+    socketHealth: { publicHealthy: true, privateHealthy: true, publicInitialized: true, privateInitialized: true },
     options: { isHedged: false },
     latency: 12,
     fetchedLeverage: {
@@ -137,16 +142,38 @@ function state(name: ExchangeName): Partial<StoreData> {
   };
 }
 
+// This mock bypasses WasmEngine::store_frames. Its historical TS oracle supplies
+// explicit derived-section fixture values; production projection is covered by
+// realVenue.wasm.test and safe-cex-store-frames' real Rust -> JS regressions.
+function fixtureProjection(name: ExchangeName, data: Partial<StoreData>): StoreData {
+  const decoded = new FrameStore();
+  decoded.apply(nativeFixture(data));
+  const result = structuredClone(decoded.data);
+  for (const Cls of [
+    DisplayedPositionsPostprocessor,
+    DisplayedMarginPostprocessor,
+    ChaserOrderEnrichmentPostprocessor,
+    TwapOrderEnrichmentPostprocessor,
+    OrdersRiskProfilePostprocessor,
+  ])
+    new Cls('conformance', name, { key: '', secret: '' }).process(result);
+  return result;
+}
+
 // A deterministic binary producer for shared consumer edge cases, NOT a venue
 // emulator. realVenue.wasm.test separately starts every actual Rust engine.
 class FrameSource implements WasmEngineLike {
   pending = true;
   current: Partial<StoreData>;
+  private readonly name: ExchangeName;
   constructor(
     readonly venue: string,
     _options: string,
   ) {
-    this.current = state(venue as ExchangeName);
+    const name = [...RUST_VENUES].find((name) => name === venue);
+    if (!name) throw new Error('Unknown fixture venue');
+    this.name = name;
+    this.current = state(name);
     sources.push(this);
   }
   capabilities = () => engineCapabilities(this.venue);
@@ -168,8 +195,13 @@ class FrameSource implements WasmEngineLike {
   };
   snapshotFrame = () => new Uint8Array(this.frame());
   accountSnapshotFrame = () => new Uint8Array(this.frame(true));
-  private frame = (accountRead = false) =>
-    consumerFrame(this.current, undefined, false, undefined, quantityUnitsCode(this.venue), accountRead);
+  private frame = (accountRead = false) => {
+    const projected = fixtureProjection(this.name, this.current);
+    return withNativeSections(
+      consumerFrame(projected, undefined, false, undefined, quantityUnitsCode(this.venue), accountRead),
+      projected,
+    );
+  };
 }
 const sources: FrameSource[] = [];
 const workers: ExchangeWorker[] = [];
@@ -241,7 +273,7 @@ async function consumer(name: ExchangeName) {
     // Exercise the same callback EngineHost invokes, with an independently
     // encoded lifecycle frame; no store mutation is substituted for decoding.
     (exchange as unknown as { receiveFrame(buffer: ArrayBuffer): void }).receiveFrame(
-      consumerFrame(data, delta, events, undefined, quantityUnitsCode(name)),
+      withNativeSections(consumerFrame(data, delta, events, undefined, quantityUnitsCode(name)), data),
     );
   };
   return { main, worker, exchange, messages, ctx, deliver };
@@ -267,7 +299,7 @@ describe.each(venues)('%s consumer conformance', (name) => {
         reference.store.markets.map((row) => row.symbol),
       ),
     );
-    const derived = reference.store.data;
+    const derived = structuredClone(reference.store.data);
     for (const Cls of independentPostprocessors)
       new (Cls as typeof DisplayedPositionsPostprocessor)('conformance', name, exchange.options).process(derived);
     reference.store.apply(
@@ -352,8 +384,10 @@ describe.each(venues)('%s consumer conformance', (name) => {
     main.on('listenOrderBook', books);
     main.on('listenOHLCV', candles);
     deliver({}, [0, 4, 105], true);
-    expect(main.store.tickers[0]).toBe(ticker);
-    expect(ticker.last).toBe(105);
+    // FrameStore shares untouched sections and replaces the changed ticker row.
+    expect(main.store.tickers[0]).not.toBe(ticker);
+    expect(ticker.last).toBe(state(name).tickers![0].last);
+    expect(main.store.tickers[0].last).toBe(105);
     expect(worker.store.updateIds).toEqual(counts);
     expect(fills).toHaveBeenCalledExactlyOnceWith({
       id: 'order-1',
@@ -402,8 +436,8 @@ describe.each(venues)('%s consumer conformance', (name) => {
       );
     })();
     deliver({ orders: state(name).orders });
-    expect(worker.store.orders[0].status).toBe(OrderStatus.Canceled);
-    expect(main.store.orders[0].status).toBe(OrderStatus.Canceled);
+    expect(worker.store.orders[0].status).toBe(OrderStatus.Open);
+    expect(main.store.orders[0].status).toBe(OrderStatus.Open);
     // The engine owns private reconciliation. Explicit store terminal memory
     // is local; bridge snapshots still decode on main with its own counters.
     expect(worker.store.updateIds.orders).toBe(counts.orders + 2);
@@ -532,21 +566,8 @@ describe.each(venues)('%s consumer conformance', (name) => {
     manager.cleanupExchange(exchange);
   });
 
-  it('ships the engine algo rows and order enrichment through the real postprocessor pipeline', async () => {
+  it('ships explicit native algo, display and ownership sections through snapshots', async () => {
     const { worker, main, exchange, deliver } = await consumer(name);
-    exchange.store.apply(
-      nativeFixture(
-        {
-          socketHealth: {
-            publicHealthy: true,
-            privateHealthy: true,
-            publicInitialized: true,
-            privateInitialized: true,
-          },
-        },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
-    );
     // The rows the engine's Rust algos post: this fixture engine runs no algos.
     const chaser = {
       id: 'chaser-1',
@@ -569,12 +590,10 @@ describe.each(venues)('%s consumer conformance', (name) => {
       ordersExecuted: 1,
       status: TwapStatus.Running,
     } as unknown as ActiveTWAP;
-    exchange.store.apply(
-      nativeFixture(
-        { activeChasers: [chaser], activeTWAPs: [twap] },
-        exchange.store.markets.map((row) => row.symbol),
-      ),
-    );
+    const source = sources.find((candidate) => candidate.venue === name);
+    if (!source) throw new Error('Missing fixture engine');
+    source.current = { ...source.current, activeChasers: [chaser], activeTWAPs: [twap] };
+    deliver(fixtureProjection(name, source.current));
     await vi.advanceTimersByTimeAsync(1000);
     worker.sendSnapshot();
     expect(main.store.activeChasers).toEqual([
@@ -594,7 +613,13 @@ describe.each(venues)('%s consumer conformance', (name) => {
     const activeChasers = main.store.activeChasers.map((row) => ({ ...row, attempts: row.attempts + 1 }));
     main.store.apply(
       nativeFixture(
-        { activeChasers },
+        {
+          activeChasers,
+          orders: main.store.orders.map((row) => ({
+            ...row,
+            extra: { ...row.extra, chaserAttempts: activeChasers[0].attempts },
+          })),
+        },
         main.store.markets.map((row) => row.symbol),
       ),
     );
@@ -605,7 +630,13 @@ describe.each(venues)('%s consumer conformance', (name) => {
     expect(exchangeUpdates).toHaveBeenCalledOnce();
     main.store.apply(
       nativeFixture(
-        { activeChasers },
+        {
+          activeChasers,
+          orders: main.store.orders.map((row) => ({
+            ...row,
+            extra: { ...row.extra, chaserAttempts: activeChasers[0].attempts },
+          })),
+        },
         main.store.markets.map((row) => row.symbol),
       ),
     );
