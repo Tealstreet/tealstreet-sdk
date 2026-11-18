@@ -8,6 +8,8 @@ running account. Pending or refused handovers do not renew retention.
 Any admitted client cancels the account's outstanding retention deadline. When
 the final client disconnects again, a new 48-hour interval begins. Another user,
 another account incarnation, and an expired resume ID cannot renew that interval.
+Settings successors sharing that provider renew only at successful publication;
+superseded or refused builds leave the original signing deadline intact.
 
 Expiry stops the account's algos and records `no client for 48 h`, with disposal
 kind `no_client_48h`. The existing retained stop-notice path tells the next

@@ -124,6 +124,12 @@ impl ResidentCopy {
         }
     }
 
+    pub(crate) fn available(&self) -> bool {
+        self.signer
+            .state()
+            .is_some_and(|mut state| state.current().is_some())
+    }
+
     pub(crate) fn admit(&self) -> bool {
         let Some(mut state) = self.signer.state() else {
             return false;

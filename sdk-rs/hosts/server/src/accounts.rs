@@ -439,7 +439,16 @@ impl Account {
     }
 
     fn hold_before_publication(&self, id: u64, live: Live, label: &str) -> bool {
-        self.hold_label(id, live, label)
+        let mut holders = self.holders.lock().unwrap();
+        // A settings successor may share a retained owner. Only publication
+        // admits it; a superseded build must leave the old deadline intact.
+        if self.delegated().as_ref().is_some_and(|resident| {
+            holders.disposed || holders.retention.is_some() || !resident.available()
+        }) {
+            return false;
+        }
+        self.record_hold(&mut holders, id, live, label);
+        true
     }
 
     fn hold_label(&self, id: u64, live: Live, label: &str) -> bool {
@@ -455,6 +464,11 @@ impl Account {
             return false;
         }
         holders.cancel_retention();
+        self.record_hold(&mut holders, id, live, label);
+        true
+    }
+
+    fn record_hold(&self, holders: &mut Holders, id: u64, live: Live, label: &str) {
         holders.confirmed.remove(&(id, label.into()));
         holders
             .labels
@@ -462,8 +476,7 @@ impl Account {
             .or_default()
             .insert(label.to_owned(), Some(live.clone()));
         holders.insert(id, Some(live.clone()));
-        self.sign_through(&mut holders, id, &live);
-        true
+        self.sign_through(holders, id, &live);
     }
 
     fn has_label(&self, name: &str) -> bool {
@@ -699,12 +712,19 @@ impl InitAttempt<'_> {
     ) -> Result<Option<Arc<Account>>, String> {
         // Serialize the final check and insertion with a newer init's admission.
         let mut pending = self.pending.lock().unwrap();
+        let mut accounts = accounts.lock().unwrap();
         self.authority.check_admission()?;
         crate::auth::Verifier::check_expiry(self.expires_at_ms, now_ms())?;
-        let replaced = accounts
-            .lock()
-            .unwrap()
-            .insert(self.key.clone(), account.clone());
+        // Renewal and replacement are atomic with the old owner's retention
+        // cleanup. No failed or unpublished successor can renew that owner.
+        if account
+            .delegated()
+            .as_ref()
+            .is_some_and(|resident| !resident.admit())
+        {
+            return Err("account stopped".into());
+        }
+        let replaced = accounts.insert(self.key.clone(), account.clone());
         self.forget(&mut pending);
         self.published = true;
         Ok(replaced)
