@@ -68,6 +68,12 @@ Hyperliquid, Hyperliquid Spot and Bitunix metadata explicitly declare
 Enforcement still wins over disabled user preferences; inconsistent declarations
 remain observable through the general account-construction warning.
 
+Hyperliquid `/info` weight is coordinated by the resolved egress, never by account:
+direct clients keep the origin row, Tokyo HOW aliases and HTTP private fallback
+share one private-fleet row, and public CORS has a separate row. New fleet rows
+inherit unscoped legacy debt/429 pauses once per stored bucket; account data never enters a key.
+Same-egress peers still share admission, and a prepared request keeps its route.
+
 Hyperliquid `/info` admission falls back after bounded IndexedDB failures to
 half-rate memory admission per JavaScript realm (500 weight/minute; burst 500
 for critical/reconciliation, 400 for normal/bulk). Known debt and 429 pauses remain;

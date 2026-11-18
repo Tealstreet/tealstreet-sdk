@@ -1,12 +1,14 @@
+import type { InternalAxiosRequestConfig } from 'axios';
 import type { HyperliquidInfoBudget } from './hyperliquidInfoBudget';
 
 import { setImmediate } from 'node:timers';
 
+import { AxiosHeaders } from 'axios';
 import { IDBDatabase, IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
-import { hyperliquidInfoWeight } from './hyperliquidInfoBudget';
+import { hyperliquidInfoBudgetKey, hyperliquidInfoWeight } from './hyperliquidInfoBudget';
 
 const ORIGIN = 'https://api.hyperliquid.xyz';
 const ORDERS = JSON.stringify({ type: 'frontendOpenOrders', user: 'local-only' });
@@ -1572,7 +1574,6 @@ it('keeps two actual candle transports available when an established IndexedDB s
   }
 });
 
-
 describe('resolved Hyperliquid egress admission', () => {
   const setup = async () => {
     vi.stubGlobal('indexedDB', factory);
@@ -1581,27 +1582,74 @@ describe('resolved Hyperliquid egress admission', () => {
     const tunnel = await import('@tealstreet/http-over-websocket/src/tunnelEndpoints');
     tunnel.resetTunnelLane(true);
     const directSend = vi.fn(async () => ({ status: 200, headers: '', body: new Uint8Array() }));
-    const fleetSend = vi.fn(async () => ({ status: 200, statusText: 'OK', headers: {}, data: '[]' }));
+    const fleetSend = vi.fn(async (config: InternalAxiosRequestConfig = { headers: new AxiosHeaders() }) => ({
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      data: '[]',
+      config,
+    }));
     const adapter = Object.assign(fleetSend, {
       prepare: async () => ({ bind: () => ({ ready: () => true, dispatch: fleetSend }) }),
     });
     const provider = {
       ...directTransport,
       name: 'egress-budget-fixture',
-      rest: () => ({ baseURL: ORIGIN, proxied: false }),
-      restAdapter: () => adapter,
-      wsRouting: () => ({ restProxyHost: '', howEgress: 'jp' as const,
-        wsPublic: { tunnelled: false }, wsPrivate: { tunnelled: false }, wsBusiness: { tunnelled: false } }),
+      publicCorsProxy: () => 'https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy',
+      rest: ({ options }: { options: { overrideProxyUrl?: string; tealstreetProxy?: boolean } }) => {
+        const prefix =
+          options.overrideProxyUrl ||
+          (options.tealstreetProxy ? 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy' : '');
+        return { baseURL: prefix ? `${prefix}/${ORIGIN}` : ORIGIN, proxied: Boolean(prefix) };
+      },
+      restAdapter: ({ options }: { options: { tealstreetTunnel?: boolean } }) =>
+        options.tealstreetTunnel === false ? undefined : adapter,
+      wsRouting: (_exchange: unknown, options: { proxyRegion?: string }) => ({
+        restProxyHost: '',
+        howEgress: options.proxyRegion === 'SG' ? ('sg' as const) : ('jp' as const),
+        wsPublic: { tunnelled: false },
+        wsPrivate: { tunnelled: false },
+        wsBusiness: { tunnelled: false },
+      }),
     };
-    const raw = { ...nativeTransport(), request: directSend,
-      prepareHttp: () => ({ bind: () => ({ ready: () => true, dispatch: directSend }) }) };
-    const create = (publicDataOnly: boolean) => createEngineTransport('hyperliquid', {
-      key: '', secret: '', publicDataOnly, transport: provider,
-    }, raw);
-    const run = async (transport: ReturnType<typeof create>, publicRead: boolean, timeoutMs = 20_000) => {
-      const packet = { request: 1, method: 'POST' as const, url: ORIGIN + '/info', headers: {},
-        body: JSON.stringify({ type: publicRead ? 'candleSnapshot' : 'frontendOpenOrders' }), timeoutMs,
-        readClass: publicRead ? 'bulk' as const : 'reconciliation' as const };
+    const raw = {
+      ...nativeTransport(),
+      request: directSend,
+      prepareHttp: () => ({ bind: () => ({ ready: () => true, dispatch: directSend }) }),
+    };
+    const create = (
+      publicDataOnly: boolean,
+      options: { proxyRegion?: string; tealstreetTunnel?: boolean; overrideProxyUrl?: string } = {},
+    ) =>
+      createEngineTransport(
+        'hyperliquid',
+        {
+          key: '',
+          secret: '',
+          publicDataOnly,
+          transport: provider,
+          ...options,
+        },
+        raw,
+      );
+    const run = async (
+      transport: ReturnType<typeof create>,
+      publicRead: boolean,
+      timeoutMs = 20_000,
+      signal?: AbortSignal,
+      route?: 'publicCors',
+    ) => {
+      const packet = {
+        request: 1,
+        method: 'POST' as const,
+        url: ORIGIN + '/info',
+        headers: {},
+        body: JSON.stringify({ type: publicRead ? 'candleSnapshot' : 'frontendOpenOrders' }),
+        timeoutMs,
+        readClass: publicRead ? ('bulk' as const) : ('reconciliation' as const),
+        signal,
+        route,
+      };
       const prepared = await transport.prepareHttp!({ ...packet, intent: publicRead ? 'public' : 'primary' });
       return prepared.bind(packet).dispatch();
     };
@@ -1625,18 +1673,26 @@ describe('resolved Hyperliquid egress admission', () => {
       expect(completed).toBe(true);
       expect(directSend).toHaveBeenCalledTimes(2);
       await candles;
-    } finally { account.dispose?.(); chart.dispose?.(); tunnel.resetTunnelLane(); }
+    } finally {
+      account.dispose?.();
+      chart.dispose?.();
+      tunnel.resetTunnelLane();
+    }
   });
 
   it('keeps separate account instances on the same resolved fleet coordinated', async () => {
     const { create, run, fleetSend, tunnel } = await setup();
     const a = create(false);
-    const b = create(false);
+    const b = create(false, { proxyRegion: 'SG' });
     try {
       for (let i = 0; i < 50; i++) await run(a, false);
       await expect(run(b, false, 1000)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
       expect(fleetSend).toHaveBeenCalledTimes(50);
-    } finally { a.dispose?.(); b.dispose?.(); tunnel.resetTunnelLane(); }
+    } finally {
+      a.dispose?.();
+      b.dispose?.();
+      tunnel.resetTunnelLane();
+    }
   });
 
   it('holds legacy unscoped 429 evidence when introducing a fleet bucket', async () => {
@@ -1646,12 +1702,21 @@ describe('resolved Hyperliquid egress admission', () => {
     try {
       await expect(run(account, false, 1000)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
       expect(fleetSend).not.toHaveBeenCalled();
-    } finally { account.dispose?.(); tunnel.resetTunnelLane(); }
+    } finally {
+      account.dispose?.();
+      tunnel.resetTunnelLane();
+    }
   });
 
   it('does not spread a fleet 429 pause to direct public candles', async () => {
     const { create, run, directSend, fleetSend, tunnel } = await setup();
-    fleetSend.mockResolvedValue({ status: 429, statusText: 'limited', headers: { 'retry-after': '45' }, data: '[]' });
+    fleetSend.mockResolvedValue({
+      status: 429,
+      statusText: 'limited',
+      headers: { 'retry-after': '45' },
+      data: '[]',
+      config: { headers: new AxiosHeaders() },
+    });
     const account = create(false);
     const chart = create(true);
     try {
@@ -1660,6 +1725,135 @@ describe('resolved Hyperliquid egress admission', () => {
       await run(chart, true, 1000);
       expect(directSend).toHaveBeenCalledOnce();
       expect(fleetSend).toHaveBeenCalledOnce();
-    } finally { account.dispose?.(); chart.dispose?.(); tunnel.resetTunnelLane(); }
+    } finally {
+      account.dispose?.();
+      chart.dispose?.();
+      tunnel.resetTunnelLane();
+    }
   });
+
+  it('keeps private HTTP fallback in the exhausted tunnel fleet without a resend', async () => {
+    const { create, run, directSend, fleetSend, tunnel } = await setup();
+    const account = create(false);
+    try {
+      for (let i = 0; i < 50; i++) await run(account, false);
+      const endpoint = tunnel.tunnelEgressUrl('jp');
+      for (let i = 0; i < 4; i++) tunnel.noteTunnelDialFailed(tunnel.tunnelDialUrl(endpoint));
+      expect(tunnel.tunnelOutage()).toBeDefined();
+      await expect(run(account, false, 1000)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+      expect(fleetSend).toHaveBeenCalledTimes(50);
+      expect(directSend).not.toHaveBeenCalled();
+    } finally {
+      account.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('keeps distinct resolved tunnel endpoints in independent fleet buckets', async () => {
+    const { create, run, fleetSend, tunnel } = await setup();
+    const endpoints = { jp: tunnel.tunnelEgressUrl('jp'), sg: tunnel.tunnelEgressUrl('sg') };
+    tunnel.setTunnelEgressUrls({ jp: 'wss://tokyo.example.test/tunnel', sg: 'wss://singapore.example.test/tunnel' });
+    const a = create(false);
+    const b = create(false, { proxyRegion: 'SG' });
+    try {
+      for (let i = 0; i < 50; i++) await run(a, false);
+      await run(b, false, 1000);
+      expect(fleetSend).toHaveBeenCalledTimes(51);
+    } finally {
+      a.dispose?.();
+      b.dispose?.();
+      tunnel.setTunnelEgressUrls(endpoints);
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('inherits old unscoped debt without copying it repeatedly or weakening later pauses', async () => {
+    const { create, run, fleetSend, tunnel } = await setup();
+    await spend(client(), 1000);
+    const account = create(false);
+    try {
+      await expect(run(account, false, 1000)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+      expect(fleetSend).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1200);
+      await run(account, false, 1000);
+      expect(fleetSend).toHaveBeenCalledOnce();
+    } finally {
+      account.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('keeps a public CORS candle on its own egress after the private fleet is exhausted', async () => {
+    const { create, run, directSend, tunnel } = await setup();
+    const account = create(false);
+    const chart = create(true);
+    try {
+      for (let i = 0; i < 50; i++) await run(account, false);
+      await run(chart, true, 1000, undefined, 'publicCors');
+      expect(directSend).toHaveBeenCalledOnce();
+    } finally {
+      account.dispose?.();
+      chart.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('cancels an unsent fleet waiter without a later resend or renewed deadline', async () => {
+    const { create, run, fleetSend, tunnel } = await setup();
+    const account = create(false);
+    try {
+      for (let i = 0; i < 50; i++) await run(account, false);
+      const controller = new AbortController();
+      const pending = Promise.allSettled([run(account, false, 20_000, controller.signal)]);
+      await flushDatabase();
+      controller.abort(new Error('cancelled'));
+      await pending;
+      await vi.advanceTimersByTimeAsync(60_000);
+      await flushDatabase();
+      expect(fleetSend).toHaveBeenCalledTimes(50);
+      await expect(run(account, false, 1, controller.signal)).rejects.toThrow('cancelled');
+      expect(fleetSend).toHaveBeenCalledTimes(50);
+    } finally {
+      account.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+
+  it('does not re-import later direct debt when a new account joins an existing fleet bucket', async () => {
+    const { create, run, fleetSend, tunnel } = await setup();
+    const first = create(false);
+    const peer = create(false);
+    try {
+      await run(first, false);
+      await client().response(ORIGIN, 429, 'Retry-After: 45');
+      await run(peer, false, 1000);
+      expect(fleetSend).toHaveBeenCalledTimes(2);
+    } finally {
+      first.dispose?.();
+      peer.dispose?.();
+      tunnel.resetTunnelLane();
+    }
+  });
+});
+
+it('keys resolved routes without account, credential, query or lane-port identity', () => {
+  const direct = hyperliquidInfoBudgetKey(ORIGIN);
+  expect(direct).toBe(ORIGIN);
+  const privateFleet = hyperliquidInfoBudgetKey(ORIGIN, 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel', true);
+  expect(hyperliquidInfoBudgetKey(ORIGIN, 'wss://fsjnpy143pbz-tyo.tealstreet.io:8443/tunnel-staging', true)).toBe(
+    privateFleet,
+  );
+  expect(hyperliquidInfoBudgetKey(ORIGIN, 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/')).toBe(
+    privateFleet,
+  );
+  expect(hyperliquidInfoBudgetKey(ORIGIN, 'https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy')).not.toBe(
+    privateFleet,
+  );
+  const custom = hyperliquidInfoBudgetKey(
+    ORIGIN,
+    'https://PRIVATE_USER:PRIVATE_PASS@proxy.example.test/path?credential=PRIVATE_QUERY',
+  );
+  expect(custom).toBe(hyperliquidInfoBudgetKey(ORIGIN, 'https://proxy.example.test/another-path'));
+  expect(custom).not.toContain('PRIVATE');
+  expect(custom).not.toBe(direct);
 });
