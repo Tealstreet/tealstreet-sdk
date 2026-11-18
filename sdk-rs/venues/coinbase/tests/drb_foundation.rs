@@ -1182,3 +1182,26 @@ fn websocket_auth_accepts_connection_scoped_session_without_token() {
             .is_err()
     );
 }
+
+#[test]
+fn non_object_auth_diagnostics_are_fixed_and_never_accept_a_session() {
+    for value in [
+        json!(null),
+        json!(true),
+        json!(123),
+        json!("PRIVATE_AUTH_VALUE"),
+        json!([{"access_token":"PRIVATE_AUTH_VALUE"}]),
+    ] {
+        for channel in [Channel::Http, Channel::WebSocket(SocketId(9))] {
+            let mut session = Session::new(channel);
+            let error = session.accept(value.clone(), 1000.).unwrap_err();
+            assert_eq!(
+                error,
+                "drb invalid public/auth result: result is not an object (fields: non-object)"
+            );
+            assert!(session.authorization(1001.).is_none());
+            assert!(session.refresh_at().is_none());
+            assert!(!format!("{session:?}").contains("PRIVATE_AUTH_VALUE"));
+        }
+    }
+}

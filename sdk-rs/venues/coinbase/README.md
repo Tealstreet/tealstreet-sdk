@@ -112,7 +112,9 @@ invalidation. A rejected `public/auth` result names the first failing field
 fields such as `portfolio_uuid` and `gateway_id` are ignored. A WebSocket `public/auth`
 reply may be connection-scoped: it carries a `sid` and no `access_token`. That is
 accepted for WS sessions only (they never send Authorization); HTTP still
-requires a bearer token. Gateway JWTs use `iss: cdp`, a fresh nonce, and a 120-second lifetime
+requires a bearer token. Non-object results retain their refusal and use the
+fixed diagnostic label `non-object`, without decoding or naming their contents.
+Gateway JWTs use `iss: cdp`, a fresh nonce, and a 120-second lifetime
 for both existing CDP signer algorithms. Existing spot JWT claims are preserved.
 
 The interface was published first in `af5df7922`; implementation follows on the

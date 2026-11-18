@@ -86,15 +86,7 @@ fn auth_result_defect(result: &Value, connection_session: bool) -> Option<&'stat
 /// reduced to a safe charset and bounded so a hostile reply cannot smuggle data.
 fn field_names(result: &Value) -> String {
     let Some(fields) = result.as_object() else {
-        return match result {
-            Value::Null => "null",
-            Value::Bool(_) => "bool",
-            Value::Number(_) => "number",
-            Value::String(_) => "string",
-            Value::Array(_) => "array",
-            Value::Object(_) => "object",
-        }
-        .into();
+        return "non-object".into();
     };
     if fields.is_empty() {
         return "none".into();
