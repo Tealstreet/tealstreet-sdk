@@ -246,7 +246,7 @@ fn canonical_text(request: &Request, legacy: bool, timestamp: &str) -> String {
 /// Transport bytes and content type. Multipart differs from the signed text.
 fn transport(body: &Body) -> Result<(String, Option<String>), String> {
     Ok(match body {
-        Body::None => ("application/json, charset=utf-8".into(), None),
+        Body::None => ("application/json; charset=utf-8".into(), None),
         Body::Raw(raw) => (
             "application/x-www-form-urlencoded; charset=UTF-8".into(),
             Some(raw.clone()),
