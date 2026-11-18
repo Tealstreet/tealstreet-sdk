@@ -7994,6 +7994,29 @@ impl<V: Venue> Engine<V> {
         &self.io.core.snapshot
     }
 
+    /// Transfer a late-subscriber frame to a host that appends native sections.
+    /// This leaves the stream baseline untouched, like `snapshot_frame`.
+    pub fn snapshot_frame_owned(&mut self, now: f64) -> Vec<u8> {
+        self.snapshot_frame(now);
+        std::mem::take(&mut self.io.core.snapshot)
+    }
+
+    /// Transfer a private read frame without consuming stream changes or events.
+    pub fn account_snapshot_frame_owned(&mut self, now: f64) -> Vec<u8> {
+        self.account_snapshot_frame(now);
+        std::mem::take(&mut self.io.core.snapshot)
+    }
+
+    /// Transfer a flush frame instead of retaining a second host-side copy.
+    pub fn take_frame_owned(&mut self, now: f64, market_only: bool) -> Option<Vec<u8>> {
+        if market_only {
+            self.take_market_frame(now)
+        } else {
+            self.take_frame(now)
+        }?;
+        Some(std::mem::take(&mut self.io.core.frame))
+    }
+
     /// Write everything that changed since the previous call as one flush
     /// frame. Returns `None` when nothing changed.
     pub fn take_frame(&mut self, now: f64) -> Option<&[u8]> {
@@ -8539,6 +8562,43 @@ mod streaming_tests {
         }
     }
 
+    #[test]
+    fn owned_host_frames_transfer_buffers_without_consuming_snapshot_baselines() {
+        let mut borrowed = frame_engine();
+        let mut owned = frame_engine();
+        borrowed.store.set_markets(vec![market("A")]);
+        owned.store.set_markets(vec![market("A")]);
+        assert_eq!(owned.snapshot_frame_owned(1.), borrowed.snapshot_frame(1.));
+        assert_eq!(
+            owned.io.core.snapshot.capacity(),
+            0,
+            "owned snapshot transfers its allocation"
+        );
+        assert_eq!(
+            owned.account_snapshot_frame_owned(2.),
+            borrowed.account_snapshot_frame(2.)
+        );
+        assert_eq!(
+            owned.io.core.snapshot.capacity(),
+            0,
+            "owned account read transfers its allocation"
+        );
+        assert_eq!(
+            owned.take_frame_owned(3., false).as_deref(),
+            borrowed.take_frame(3.)
+        );
+        assert_eq!(
+            owned.io.core.frame.capacity(),
+            0,
+            "owned flush transfers its allocation"
+        );
+        assert!(owned.take_frame_owned(4., false).is_none());
+        assert!(borrowed.take_frame(4.).is_none());
+        assert_eq!(
+            owned.take_frame_owned(5., true).as_deref(),
+            borrowed.take_market_frame(5.)
+        );
+    }
     #[test]
     fn revision_two_fills_emit_public_identity_and_absent_financial_values() {
         for financials in [

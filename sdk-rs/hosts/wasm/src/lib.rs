@@ -190,9 +190,9 @@ trait AnyEngine {
         Ok(())
     }
     fn drain(&mut self) -> Vec<Action>;
-    fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]>;
-    fn snapshot(&mut self, now: f64) -> &[u8];
-    fn account_snapshot(&mut self, now: f64) -> &[u8];
+    fn frame(&mut self, now: f64, market_only: bool) -> Option<Vec<u8>>;
+    fn snapshot(&mut self, now: f64) -> Vec<u8>;
+    fn account_snapshot(&mut self, now: f64) -> Vec<u8>;
     fn health(&self) -> Health {
         Health::default()
     }
@@ -368,18 +368,14 @@ impl<V: Venue> AnyEngine for Engine<V> {
     fn drain(&mut self) -> Vec<Action> {
         self.drain_actions().collect()
     }
-    fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]> {
-        if market_only {
-            self.take_market_frame(now)
-        } else {
-            self.take_frame(now)
-        }
+    fn frame(&mut self, now: f64, market_only: bool) -> Option<Vec<u8>> {
+        self.take_frame_owned(now, market_only)
     }
-    fn snapshot(&mut self, now: f64) -> &[u8] {
-        self.snapshot_frame(now)
+    fn snapshot(&mut self, now: f64) -> Vec<u8> {
+        self.snapshot_frame_owned(now)
     }
-    fn account_snapshot(&mut self, now: f64) -> &[u8] {
-        self.account_snapshot_frame(now)
+    fn account_snapshot(&mut self, now: f64) -> Vec<u8> {
+        self.account_snapshot_frame_owned(now)
     }
     fn health(&self) -> Health {
         Engine::health(self).clone()
@@ -1729,7 +1725,7 @@ impl WasmEngine {
     /// or skipped frames. Frames taken afterwards apply on top of it.
     #[wasm_bindgen(js_name = snapshotFrame)]
     pub fn snapshot_frame(&mut self, now: f64) -> js_sys::Uint8Array {
-        let frame = self.inner.snapshot(now).to_vec();
+        let frame = self.inner.snapshot(now);
         let frame = self
             .store_frames
             .frame(frame, self.inner.store(), true, now);
@@ -1739,7 +1735,7 @@ impl WasmEngine {
     /// Full private sections; leaves pending deltas and public baselines intact.
     #[wasm_bindgen(js_name = accountSnapshotFrame)]
     pub fn account_snapshot_frame(&mut self, now: f64) -> js_sys::Uint8Array {
-        let frame = self.inner.account_snapshot(now).to_vec();
+        let frame = self.inner.account_snapshot(now);
         let frame = self
             .store_frames
             .frame(frame, self.inner.store(), true, now);
@@ -1747,7 +1743,7 @@ impl WasmEngine {
     }
 
     /// Transfer `frame.buffer` to the consumer: it is copied once, straight
-    /// out of the engine's reused frame buffer.
+    /// out of the owned native frame buffer.
     /// With `market_only`, just books, candles and fills (for the venue's
     /// book cadence); store sections wait for the next full frame.
     #[wasm_bindgen(js_name = takeFrame)]
@@ -1759,7 +1755,6 @@ impl WasmEngine {
         let frame = self
             .inner
             .frame(now, market_only)
-            .map(<[u8]>::to_vec)
             .unwrap_or_else(|| safe_cex_store_frames::empty(now));
         let frame = if market_only {
             frame
@@ -1786,7 +1781,6 @@ impl WasmEngine {
         let frame = self
             .inner
             .frame(now, market_only)
-            .map(<[u8]>::to_vec)
             .unwrap_or_else(|| safe_cex_store_frames::empty(now));
         let fills = safe_cex_engine::wire::fills(&frame).unwrap_or_default();
         self.algos.frame(self.inner.store(), fills);
@@ -2959,14 +2953,14 @@ mod tests {
                 self.drains.set(self.drains.get() + 1);
                 Vec::new()
             }
-            fn frame(&mut self, _: f64, _: bool) -> Option<&[u8]> {
+            fn frame(&mut self, _: f64, _: bool) -> Option<Vec<u8>> {
                 None
             }
-            fn snapshot(&mut self, _: f64) -> &[u8] {
-                &[]
+            fn snapshot(&mut self, _: f64) -> Vec<u8> {
+                Vec::new()
             }
-            fn account_snapshot(&mut self, _: f64) -> &[u8] {
-                &[]
+            fn account_snapshot(&mut self, _: f64) -> Vec<u8> {
+                Vec::new()
             }
         }
         let events = Rc::new(RefCell::new(Vec::new()));
@@ -3176,14 +3170,14 @@ mod tests {
         fn drain(&mut self) -> Vec<Action> {
             std::mem::take(&mut self.actions)
         }
-        fn frame(&mut self, _now: f64, _market_only: bool) -> Option<&[u8]> {
+        fn frame(&mut self, _now: f64, _market_only: bool) -> Option<Vec<u8>> {
             None
         }
-        fn snapshot(&mut self, _now: f64) -> &[u8] {
-            &[]
+        fn snapshot(&mut self, _now: f64) -> Vec<u8> {
+            Vec::new()
         }
-        fn account_snapshot(&mut self, _now: f64) -> &[u8] {
-            &[]
+        fn account_snapshot(&mut self, _now: f64) -> Vec<u8> {
+            Vec::new()
         }
     }
 
@@ -3248,14 +3242,14 @@ mod tests {
             fn drain(&mut self) -> Vec<Action> {
                 Vec::new()
             }
-            fn frame(&mut self, _: f64, _: bool) -> Option<&[u8]> {
+            fn frame(&mut self, _: f64, _: bool) -> Option<Vec<u8>> {
                 None
             }
-            fn snapshot(&mut self, _: f64) -> &[u8] {
-                &[]
+            fn snapshot(&mut self, _: f64) -> Vec<u8> {
+                Vec::new()
             }
-            fn account_snapshot(&mut self, _: f64) -> &[u8] {
-                &[]
+            fn account_snapshot(&mut self, _: f64) -> Vec<u8> {
+                Vec::new()
             }
             fn health(&self) -> Health {
                 Health {

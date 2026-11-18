@@ -139,11 +139,26 @@ impl Emitter {
                         .collect()
                 });
             }
-            if has(2) {
-                data.markets = store.markets().to_vec();
-            }
-            if has(3) || has(4) {
-                data.tickers = store.tickers().to_vec();
+            // Public-only accounts have no derived exposure or algo market joins.
+            // Do not retain a second full catalogue/ticker table for empty projections.
+            // Rehydrate from authoritative engine rows when exposure first arrives,
+            // even if this delta carries no new catalogue or ticker section.
+            let needs_public_rows = !store.positions().is_empty()
+                || !store.orders().is_empty()
+                || input
+                    .active_twaps
+                    .as_array()
+                    .is_some_and(|rows| !rows.is_empty());
+            if needs_public_rows {
+                if has(2) || data.markets.is_empty() {
+                    data.markets = store.markets().to_vec();
+                }
+                if has(3) || has(4) || data.tickers.is_empty() {
+                    data.tickers = store.tickers().to_vec();
+                }
+            } else {
+                data.markets = Vec::new();
+                data.tickers = Vec::new();
             }
             if has(8) || has(2) {
                 data.positions = store.positions().to_vec();
@@ -241,6 +256,15 @@ impl Emitter {
         }
         self.current
             .insert(Section::ManagedOrders, encoded(&ownership));
+        // Native extensions are known before append. Reserve their exact total
+        // once so a large base frame is not doubled for a few small sections.
+        let extension_bytes = self
+            .current
+            .iter()
+            .filter(|(kind, payload)| snapshot || self.sent.get(kind) != Some(*payload))
+            .map(|(_, payload)| 8 + payload.len())
+            .sum();
+        frame.reserve_exact(extension_bytes);
         for (&kind, payload) in &self.current {
             if snapshot || self.sent.get(&kind) != Some(payload) {
                 wire::append(&mut frame, kind, payload);
@@ -676,6 +700,58 @@ mod tests {
             .find(|(k, _)| *k == kind as u16)
             .expect("section");
         decode_section(bytes).unwrap()
+    }
+    #[test]
+    fn native_section_append_reserves_exactly_the_final_frame_size() {
+        let store = store();
+        let frame = Emitter::default().frame(empty(1000.), &store, &input(), true);
+        assert_eq!(
+            frame.capacity(),
+            frame.len(),
+            "appending native sections must not double the frame allocation"
+        );
+    }
+    #[test]
+    fn public_projection_does_not_duplicate_catalogues_and_rehydrates_for_exposure() {
+        let mut store = store();
+        let positions = store.positions().to_vec();
+        store.set_positions(Vec::new());
+        store.set_orders(Vec::new());
+        let mut emitter = Emitter::default();
+        let inputs = input();
+        let public = emitter.frame(empty(1000.), &store, &inputs, true);
+        assert_eq!(
+            payload(&public, Section::DisplayedPositions),
+            serde_json::json!([])
+        );
+        let data = emitter.data.as_ref().unwrap();
+        assert!(
+            data.markets.is_empty(),
+            "public projections must not retain a second catalogue"
+        );
+        assert!(
+            data.tickers.is_empty(),
+            "public projections must not retain a second ticker table"
+        );
+        store.take_pending();
+        store.set_positions(positions);
+        let mut writer = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 2000.);
+        let pending = store.take_pending();
+        store.write(&pending, &mut writer);
+        let account = emitter.frame(writer.finish(), &store, &inputs, false);
+        assert_eq!(
+            payload(&account, Section::DisplayedPositions)
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            emitter.data.as_ref().unwrap().displayed_positions[0]
+                .position
+                .unrealized_pnl,
+            20.
+        );
     }
     #[test]
     fn native_host_retains_the_engine_json_map_profile() {
