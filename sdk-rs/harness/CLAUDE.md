@@ -101,6 +101,12 @@ floors and 10 KiB reserve. This source waits for a release batch.
 
 Bitunix #2301 source `b1ac2260570b` measures optimized web/Node 2,012,442 B
 in CI44266617073 family134673305255 and replay134673305783. The 2,023,424-byte
-family cap preserves the earlier 1,967,104-byte floor and 10,982-byte reserve.
+historical floor preserves the earlier 1,967,104-byte floor and 10,982-byte reserve.
 The failed old cap prevented strict replay from starting; fresh correctness and
 combined-consumer receipts are still required after this budget-only change.
+
+Bitunix alias-retention source `08d18516706c` measures optimized web/Node/replay
+2,014,499 B in CI44275298247/job134703677883, artifact14414113480. Its
+2,025,472-byte cap retains the earlier 2,023,424-byte floor and 10,973-byte
+reserve, with strict cap/cap+1 checks. Caller spelling keys remain independently
+desired; only equal native wire topics coalesce until the last alias is removed.

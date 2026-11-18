@@ -101,3 +101,9 @@ The measured-size-plus-10KiB rule yields a 2,023,424 B family cap and 10,982 B
 reserve; the budget regression preserves that reserve, every historical floor
 and strict cap/cap+1 behavior. The correction requires fresh exact-head replay
 and combined evidence. This plan does not authorize release.
+
+The final caller-alias retention source `08d18516706c` measures optimized
+web/Node/replay 2,014,499 B (CI44275298247/job134703677883, artifact14414113480).
+Its 2,025,472 B family cap follows the same rounded 10KiB rule, retains the
+2,023,424 B historical floor and leaves 10,973 B reserve. Budget-only follow-ups
+do not replace fresh exact-head correctness/combined receipts or authorize release.

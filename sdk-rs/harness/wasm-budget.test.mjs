@@ -4,6 +4,20 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #2301 alias-retention source08d18516706c, CI44275298247/job134703677883.
+// Artifact14414113480: optimized web/Node/replay SHA25690538a5261dd88c12a5381a6a1bb40fbfa0a6ebef06a9c1b3305cb6e9faf2434.
+test('#2301 retained caller aliases preserve current measured reserve and prior floors', () => {
+  const measured = 2_014_499;
+  const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.bitunix;
+  assert.equal(requiredCap, 2_025_472);
+  assert.ok(cap >= Math.max(requiredCap, 2_023_424));
+  assert.ok(cap - measured >= 10 * 1024);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bitunix'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bitunix'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bitunix'), /exceeds/);
+});
+
 // #2301 CI44266617073/jobs134673305255+134673305783, source b1ac2260570b.
 // Optimized web/Node 2,012,442 B, SHA256 6dfd360519771817ea5e071168dca2a462a67654ec08592d134783345f9b524c.
 test('#2301 managed Bitunix sockets retain measured reserve and the historical floor', () => {
