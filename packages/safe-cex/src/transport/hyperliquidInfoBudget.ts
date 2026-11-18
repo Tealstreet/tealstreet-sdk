@@ -24,6 +24,7 @@ let indexedDBOpenedInRealm = false;
 const admissionCost = (weight: number, shared: boolean) =>
   weight * MS_PER_WEIGHT * (!shared && indexedDBOpenedInRealm ? 2 : 1);
 type BudgetState = {
+  legacyInherited?: boolean;
   nextAt: number;
   pausedUntil: number;
   generation: number;
@@ -32,6 +33,7 @@ type BudgetState = {
 };
 const emptyState = (): BudgetState => ({ nextAt: 0, pausedUntil: 0, generation: 0, failures: 0 });
 const mergeState = (a: BudgetState, b: BudgetState): BudgetState => ({
+  legacyInherited: a.legacyInherited || b.legacyInherited,
   nextAt: Math.max(a.nextAt, b.nextAt),
   pausedUntil: Math.max(a.pausedUntil, b.pausedUntil),
   generation: Math.max(a.generation, b.generation),
@@ -55,6 +57,7 @@ function boundedState(raw: Partial<BudgetState> = {}): BudgetState {
   const timestamp = (value: number | undefined, maximum: number) =>
     typeof value === 'number' && Number.isFinite(value) ? Math.max(now, Math.min(value, now + maximum)) : now;
   return {
+    legacyInherited: raw.legacyInherited === true || undefined,
     dispatchQueue: Array.isArray(raw.dispatchQueue)
       ? raw.dispatchQueue
           .filter(
@@ -347,9 +350,73 @@ const infoAdmissionFailure = (error: unknown): unknown =>
     ? new HttpPreparationError('timedOut', 'info_admission')
     : error;
 
+/** Resolve one public network budget, never an account or credential identity. */
+export function hyperliquidInfoBudgetKey(origin: string, endpoint?: string, tunnel = false): string {
+  if (!endpoint) return origin;
+  const route = new URL(endpoint);
+  let egress = `${tunnel ? 'tunnel' : 'proxy'}:${route.origin}`;
+  // Tokyo's HOW regions/ports and HTTP private fallback use the same private fleet;
+  // its public CORS path leaves from the tunnel hosts instead (09bc5a90a regression).
+  if (route.hostname === 'fsjnpy143pbz-tyo.tealstreet.io') {
+    if (
+      (tunnel && /^\/tunnel(?:-staging)?\/?$/.test(route.pathname)) ||
+      (!tunnel && /^\/api\/exchange_proxy\/?$/.test(route.pathname))
+    )
+      egress = 'fleet:private:tyo';
+    else if (!tunnel && /^\/api\/public_proxy\/?$/.test(route.pathname)) egress = 'fleet:public:tyo';
+  }
+  return `${origin}|egress=${egress}`;
+}
+
 /** Admission precedes managed HTTP claim; only a physical handoff consumes tokens. */
 export class HyperliquidInfoBudget {
+  private readonly inherited = new Map<string, Promise<boolean>>();
   constructor(private readonly backend: InfoBudgetStorage = storage()) {}
+
+  private update<T>(key: string, change: (state: BudgetState, shared: boolean) => T): Promise<T> {
+    const boundary = key.indexOf('|egress=');
+    if (boundary < 0) return this.backend.update(key, change);
+    return this.updateInherited(key, key.slice(0, boundary), change);
+  }
+
+  private async updateInherited<T>(
+    key: string,
+    legacyKey: string,
+    change: (state: BudgetState, shared: boolean) => T,
+  ): Promise<T> {
+    for (;;) {
+      let inherited = this.inherited.get(key);
+      if (!inherited) {
+        // Memory inheritance is provisional: only a shared legacy read followed
+        // by a committed shared target write may retire migration (e0166af6c).
+        inherited = this.backend
+          .update(legacyKey, (state, shared) => ({ state: { ...state, dispatchQueue: [] }, shared }))
+          .then((legacy) =>
+            this.backend.update(key, (state, shared) => {
+              if (state.legacyInherited) return true;
+              const durable = legacy.shared && shared;
+              Object.assign(state, mergeState(state, legacy.state), { legacyInherited: durable || undefined });
+              return durable;
+            }),
+          );
+        this.inherited.set(key, inherited);
+      }
+      try {
+        if (!(await inherited) && this.inherited.get(key) === inherited) this.inherited.delete(key);
+      } catch (error) {
+        if (this.inherited.get(key) === inherited) this.inherited.delete(key);
+        throw error;
+      }
+      const result = await this.backend.update(key, (state, shared) => {
+        // Recovery can happen after the provisional migration transaction.
+        // Read legacy shared state before admitting on the recovered backend.
+        if (shared && !state.legacyInherited) return { retry: true } as const;
+        return { retry: false, value: change(state, shared) } as const;
+      });
+      if (!result.retry) return result.value;
+      if (this.inherited.get(key) === inherited) this.inherited.delete(key);
+    }
+  }
 
   async wait(
     origin: string,
@@ -369,16 +436,14 @@ export class HyperliquidInfoBudget {
       cancelled = true;
       signal.removeEventListener('abort', cancelWait);
       if (waiterId)
-        void this.backend
-          .update(origin, (state) => {
-            state.dispatchQueue = state.dispatchQueue?.filter((row) => row.id !== waiterId);
-          })
-          .catch(() => warnHyperliquidInfoBudgetUnavailable());
+        void this.update(origin, (state) => {
+          state.dispatchQueue = state.dispatchQueue?.filter((row) => row.id !== waiterId);
+        }).catch(() => warnHyperliquidInfoBudgetUnavailable());
     };
     try {
       for (;;) {
         signal.throwIfAborted();
-        const grant = await this.backend.update(origin, (state, shared) => {
+        const grant = await this.update(origin, (state, shared) => {
           signal.throwIfAborted();
           const now = Date.now();
           const at = Math.max(
@@ -410,7 +475,7 @@ export class HyperliquidInfoBudget {
           continue;
         }
         signal.throwIfAborted();
-        const current = await this.backend.update(origin, (state) => state.generation === grant.generation);
+        const current = await this.update(origin, (state) => state.generation === grant.generation);
         if (Date.now() >= deadline) throw new HttpPreparationError('timedOut');
         if (current)
           return { generation: grant.generation, weight, readClass, ...(waiterId ? { waiterId, cancelWait } : {}) };
@@ -443,7 +508,7 @@ export class HyperliquidInfoBudget {
     };
     try {
       for (;;) {
-        const reservation = await this.backend.update(origin, (state, shared) => {
+        const reservation = await this.update(origin, (state, shared) => {
           active();
           const reservationCost = admissionCost(grant.weight, shared);
           const now = Date.now();
@@ -486,33 +551,32 @@ export class HyperliquidInfoBudget {
       for (;;) {
         let handoffCalled = false;
         const decision = await new Promise<{ at: number } | { value: T }>((resolve, reject) => {
-          void this.backend
-            .update(origin, (state, shared) => {
-              if (handoffCalled) return;
-              active();
-              if (state.pausedUntil > Date.now() || state.generation !== grant.generation)
-                throw new HttpPreparationError('timedOut');
-              // Storage can fail after the reservation: charge its degraded remainder
-              // before the same synchronous handoff, never replaying a physical send.
-              const extraCost = Math.max(0, admissionCost(grant.weight, shared) - cost);
-              if (extraCost) {
-                const now = Date.now();
-                const at = Math.max(now, state.nextAt + extraCost - capacity(readClass) * MS_PER_WEIGHT);
-                if (at >= deadline) throw new HttpPreparationError('timedOut');
-                if (at > now) return { at: Math.min(at, now + DISPATCH_POLL_MS) };
-                state.nextAt = Math.max(now, state.nextAt) + extraCost;
-                cost += extraCost;
-              }
-              handoffCalled = true;
-              try {
-                handoffStarted = true;
-                resolve({ value: send() });
-              } catch (error) {
-                reject(error);
-              } finally {
-                dispatched = wasSent();
-              }
-            })
+          void this.update(origin, (state, shared) => {
+            if (handoffCalled) return;
+            active();
+            if (state.pausedUntil > Date.now() || state.generation !== grant.generation)
+              throw new HttpPreparationError('timedOut');
+            // Storage can fail after the reservation: charge its degraded remainder
+            // before the same synchronous handoff, never replaying a physical send.
+            const extraCost = Math.max(0, admissionCost(grant.weight, shared) - cost);
+            if (extraCost) {
+              const now = Date.now();
+              const at = Math.max(now, state.nextAt + extraCost - capacity(readClass) * MS_PER_WEIGHT);
+              if (at >= deadline) throw new HttpPreparationError('timedOut');
+              if (at > now) return { at: Math.min(at, now + DISPATCH_POLL_MS) };
+              state.nextAt = Math.max(now, state.nextAt) + extraCost;
+              cost += extraCost;
+            }
+            handoffCalled = true;
+            try {
+              handoffStarted = true;
+              resolve({ value: send() });
+            } catch (error) {
+              reject(error);
+            } finally {
+              dispatched = wasSent();
+            }
+          })
             .then((waiting) => {
               if (!handoffCalled && waiting) resolve(waiting);
             })
@@ -529,21 +593,19 @@ export class HyperliquidInfoBudget {
     } finally {
       grant.cancelWait?.();
       if (!dispatched) {
-        await this.backend
-          .update(origin, (state) => {
-            state.dispatchQueue = state.dispatchQueue?.filter((row) => row.id !== waiterId);
-            // A 429 replaced the old token generation; refunds cannot weaken that floor.
-            if (charged && state.generation === grant.generation)
-              state.nextAt = Math.max(Date.now(), state.nextAt - cost);
-          })
-          .catch(() => warnHyperliquidInfoBudgetUnavailable());
+        await this.update(origin, (state) => {
+          state.dispatchQueue = state.dispatchQueue?.filter((row) => row.id !== waiterId);
+          // A 429 replaced the old token generation; refunds cannot weaken that floor.
+          if (charged && state.generation === grant.generation)
+            state.nextAt = Math.max(Date.now(), state.nextAt - cost);
+        }).catch(() => warnHyperliquidInfoBudgetUnavailable());
       }
     }
   }
 
   async response(origin: string, status: number, headers: string): Promise<void> {
     if (status >= 200 && status < 300) {
-      await this.backend.update(origin, (state) => {
+      await this.update(origin, (state) => {
         if (Date.now() >= state.pausedUntil) state.failures = 0;
       });
       return;
@@ -558,7 +620,7 @@ export class HyperliquidInfoBudget {
       .trim();
     const seconds = value === undefined ? NaN : Number(value);
     const delay = seconds > 0 ? Math.min(seconds * 1000, MAX_PAUSE_MS) : value ? Date.parse(value) - Date.now() : NaN;
-    await this.backend.update(origin, (state) => {
+    await this.update(origin, (state) => {
       state.failures = Math.min((state.failures ?? 0) + 1, 5);
       const fallback = Math.min(60_000, 5000 * 2 ** (state.failures - 1));
       const pause = Number.isFinite(delay) && delay > 0 ? Math.min(delay, MAX_PAUSE_MS) : fallback;

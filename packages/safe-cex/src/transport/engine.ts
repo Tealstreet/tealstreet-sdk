@@ -39,7 +39,11 @@ import { observeBybitPublicRateLimit } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
 import { HttpTiming, httpTimingKind, httpTimingStage, tunnelHostLabel, upstreamMsFromHeaders } from './httpTiming';
 import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
-import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
+import {
+  HyperliquidInfoBudget,
+  hyperliquidInfoBudgetKey,
+  warnHyperliquidInfoBudgetUnavailable,
+} from './hyperliquidInfoBudget';
 import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
 import { payloadSignedViaPublicProxy, refuseSignedPublicProxy } from './publicProxyGuard';
 import { getTransport } from './registry';
@@ -772,6 +776,17 @@ const httpTransport = (
       if (infoFacts && request.method === 'POST' && original.pathname === '/info')
         infoRead = infoFacts.begin(tunnelAdapter ? 'how' : route.proxied ? 'proxy' : 'direct', deadlineMs);
       const target = route.baseURL ?? request.url;
+      const budgetKey = infoBudget
+        ? hyperliquidInfoBudgetKey(
+            original.origin,
+            tunnelAdapter
+              ? tunnelEgressUrl(routing.howEgress)
+              : target === request.url
+                ? undefined
+                : target.slice(0, -request.url.length),
+            Boolean(tunnelAdapter),
+          )
+        : original.origin;
       const publicProxy = provider.publicCorsProxy();
       const payloadSigned = payloadSignedViaPublicProxy(exchange, options);
       const testnet = options.testnet;
@@ -941,7 +956,7 @@ const httpTransport = (
         const read = infoRead;
         if (!read) throw new HttpPreparationError('invalid');
         const generation = await untilAborted(
-          read.wait(() => budget.wait(original.origin, request.body, started + deadlineMs, signal, request.readClass)),
+          read.wait(() => budget.wait(budgetKey, request.body, started + deadlineMs, signal, request.readClass)),
           signal,
         );
         pendingAdmission = { budget, read, generation };
@@ -1064,7 +1079,7 @@ const httpTransport = (
               const result = await untilAborted(
                 admission.read.wait(() =>
                   admission.budget.admitDispatch(
-                    original.origin,
+                    budgetKey,
                     admission.generation,
                     started + deadlineMs,
                     signal,
@@ -1150,7 +1165,7 @@ const httpTransport = (
                         if (!signal.aborted) warnHyperliquidInfoBudgetUnavailable();
                       };
                       const recorded = Promise.resolve()
-                        .then(() => infoBudget.response(original.origin, value.status, value.headers ?? ''))
+                        .then(() => infoBudget.response(budgetKey, value.status, value.headers ?? ''))
                         .catch(reportFailure);
                       // Only a 429 must publish its pause before Rust can enqueue its retry.
                       if (value.status === 429) await untilAborted(recorded, signal).catch(reportFailure);
