@@ -665,7 +665,7 @@ async fn action_fix_cancel_all_expires_during_its_symbol_store_read() {
 async fn action_fix_each_deferred_cancel_leg_keeps_deadline_and_owner() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            for mode in ["fresh", "uuid", "age", "retired"] {
+            for mode in ["fresh", "uuid", "age", "retired", "token"] {
                 let registry = crate::accounts::tests::registry();
                 let tape = Tape::default();
                 tape.defer_positions
@@ -722,6 +722,11 @@ async fn action_fix_each_deferred_cancel_leg_keeps_deadline_and_owner() {
                     kind: "cancelAll",
                     deadline,
                 });
+                if mode == "token" {
+                    session.identity.token =
+                        Some(("synthetic-expiring".into(), crate::accounts::now_ms() + 500));
+                }
+                let capture = crate::state::log_capture::capture();
                 let group = Some(Arc::new(Mutex::new(Group {
                     remaining: 2,
                     failures: Vec::new(),
@@ -807,6 +812,21 @@ async fn action_fix_each_deferred_cancel_leg_keeps_deadline_and_owner() {
                         assert!(result["d"]["result"].is_null());
                     }
                 }
+                let audits = grouped_refusal_audits(capture.finish(), "cancelAllOrders");
+                assert_eq!(
+                    audits.len(),
+                    if mode == "fresh" { 0 } else { 2 },
+                    "{mode}: per-leg refusal coverage"
+                );
+                let expected = match mode {
+                    "token" => "auth_expired",
+                    "retired" => "registration_retired",
+                    _ => "action_expired",
+                };
+                assert!(
+                    audits.iter().all(|row| row["reason_class"] == expected),
+                    "{mode}: {audits:?}"
+                );
                 if let Some(session) = session {
                     session.close();
                 }
@@ -896,6 +916,7 @@ async fn action_fix_cancel_all_partial_handoff_settles_failed_legs_without_refus
             assert_eq!(*tape.writes.lock().unwrap(), vec!["cancel"]);
             // The first leg has crossed physical IO. Fence the account before the
             // second leg: its definite local failure proves nothing about the first.
+            let capture = crate::state::log_capture::capture();
             grant(2, 50);
             tokio::time::sleep(Duration::from_millis(60)).await;
             assert!(!account.running.io_allowed());
@@ -935,6 +956,13 @@ async fn action_fix_cancel_all_partial_handoff_settles_failed_legs_without_refus
             assert_eq!(outcome["d"]["error"]["outcome"], "unknown");
             assert_eq!(group.as_ref().unwrap().lock().unwrap().remaining, 0);
             assert_eq!(*tape.writes.lock().unwrap(), vec!["cancel"]);
+            let audits = grouped_refusal_audits(capture.finish(), "cancelAllOrders");
+            assert_eq!(
+                audits.len(),
+                1,
+                "the local second-leg refusal remains observable"
+            );
+            assert_eq!(audits[0]["reason_class"], "lease_fenced");
             session.close();
             registry.dispose(&account, Disposal::PageDisposed);
         })
@@ -1162,8 +1190,20 @@ async fn full_write_leverage_fanout_cannot_refuse_after_another_leg_completed() 
         },
         group: Some(group.clone()),
         incomplete: false,
-        audit: None,
+        audit: Some(Audit {
+            who: crate::audit::Who {
+                user: "synthetic-user".into(),
+                account: "synthetic-main".into(),
+                venue: "bybit".into(),
+            },
+            origin: "synthetic-origin".into(),
+            fields: crate::audit::command(
+                &json!({"op":"setLeverage","symbol":"BTCUSDT","leverage":2}),
+            )
+            .unwrap(),
+        }),
     };
+    let capture = crate::state::log_capture::capture();
     settle(&out, "main", pending(), Ok(Value::Null));
     assert!(sent.try_recv().is_err());
     settle(
@@ -1175,6 +1215,9 @@ async fn full_write_leverage_fanout_cannot_refuse_after_another_leg_completed() 
     let result: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
     assert_eq!(result["d"]["outcome"], "unknown");
     assert_eq!(result["d"]["error"]["outcome"], "unknown");
+    let audits = grouped_refusal_audits(capture.finish(), "setAllLeverage");
+    assert_eq!(audits.len(), 1);
+    assert_eq!(audits[0]["reason_class"], "pre_dispatch_refused");
 }
 
 #[tokio::test]
@@ -2410,16 +2453,30 @@ async fn delegated_price_amend_tolerates_small_clock_skew_without_extending_expi
 }
 
 fn actor_refusal_audits(lines: Vec<String>, op: &str) -> Vec<Value> {
+    bounded_refusal_audits(lines, op, "order.pre_dispatch_refused")
+}
+
+fn grouped_refusal_audits(lines: Vec<String>, op: &str) -> Vec<Value> {
+    assert!(
+        lines
+            .iter()
+            .all(|line| !line.contains("order.pre_dispatch_refused")),
+        "one grouped leg cannot claim whole-action pre-dispatch: {lines:?}"
+    );
+    bounded_refusal_audits(lines, op, "order.leg_pre_dispatch_refused")
+}
+
+fn bounded_refusal_audits(lines: Vec<String>, op: &str, event: &str) -> Vec<Value> {
     lines
         .into_iter()
-        .filter(|line| line.contains("order.pre_dispatch_refused"))
+        .filter(|line| line.contains(event))
         .map(|line| {
             assert!(line.len() < 512);
             let outer: Value = serde_json::from_str(&line).unwrap();
             assert_eq!(outer["level"], "info");
             let fields: Value = serde_json::from_str(outer["msg"].as_str().unwrap()).unwrap();
             assert_eq!(fields.as_object().unwrap().len(), 4);
-            assert_eq!(fields["event"], "order.pre_dispatch_refused");
+            assert_eq!(fields["event"], event);
             assert_eq!(fields["venue"], "bybit");
             assert_eq!(fields["op"], op);
             fields
