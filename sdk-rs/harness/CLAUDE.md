@@ -17,6 +17,10 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
+HyroTrader correlated auth-refusal metadata changes a Bybit-family input.
+Keep its native admission/uncertainty controls and fresh optimized family evidence;
+server negative-join fixtures retain the protected-provider and zero-write guards.
+
 OKX empty-envelope diagnostics retain code-0 cancellation continuation, nonzero
 stop behavior and the original native outcomes. Its scoped ordered-write tests
 pin complete per-order cancellation reporting and the explicit unknown-diagnostic
@@ -33,6 +37,13 @@ flags and the Spot admission/smoke gates remain independent.
 WASM venue caps retain both parents' measured floors. Fresh compositions must
 retain at least 10 KiB above their optimized web/Node measurement, rounded up
 to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
+
+Bitget login clock recovery at d10ba2f3c500 measures web/Node 2,782,976 B in
+CI44135644635 jobs134225245837/134225246062. The coordinator-approved cap
+2,793,472 B retains 10,496 B reserve at that source for family/replay checks.
+M44 source7bd8f25 measures 2,784,464 B in CI44224839389/job134535952644;
+artifact14393041086 has identical web/Node hashes. The coordinator-approved
+2,795,520 B cap retains 11,056 B reserve, all earlier floors and strict boundaries.
 
 BingX history diagnostics inspect failed responses with closed streaming visitors.
 Compact optional detail preserves engine error and socket allocation budgets;
@@ -84,13 +95,19 @@ the generated nullable liquidation price contract: unknown prices, including
 zero-quantity placeholders, are null before fixture encoding. It retains the
 order-ID randomness and signature verification assertions.
 
-#3640 includes native store projection and wire emission in the twelve selected
-family artifacts. Their cap entries record fresh optimized web/Node byte counts
+#3640 includes native store projection and wire emission in every venue-family
+artifact. Its final cap entries require optimized web/Node byte counts
 and SHA-256 hashes from Rust 1.99.0, bindgen 0.2.129 and Binaryen 132 (two -Oz
 passes), with at least 10 KiB reserve rounded up to KiB. Historical floors and
-the combined ceiling remain unchanged.
+the combined ceiling remain unchanged. After M44, remeasure all families on the
+merged tree and record new provenance in a follow-up commit; pre-M44 evidence
+does not establish the merged composition.
 
 The retained Bybit and inverse TS replay oracles publish unknown/nonpositive
 liquidation prices as native null, including flat and option positions. Their
 SCXF fixtures must pass the same generated Position contract as the Rust engine;
 a zero/invalid liquidation sentinel cannot complete TS private replay startup.
+
+BingX Spot replay tracks production decoder receipts alongside pending account reads.
+Bounded drains precede ticks, checkpoints and final capture; event-loop yields
+alone cannot establish completion of gzip decoding or its queued text messages.

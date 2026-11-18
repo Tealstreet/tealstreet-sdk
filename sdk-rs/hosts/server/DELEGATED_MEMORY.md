@@ -52,6 +52,8 @@ erase, never to resume. A signature already returned before erasure cannot be
 recalled. Pending admission probes retain their resident owner through queued
 execution and cleanup. This API does not itself add a retention deadline.
 
+See [DELEGATED retention](DELEGATED_RETENTION.md) for the client-disconnect lifecycle.
+
 ## Container runtime
 
 The existing image runs as UID/GID `65532:65532`, listens on an unprivileged

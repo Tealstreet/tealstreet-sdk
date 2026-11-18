@@ -4,6 +4,24 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #3643 CI44132069302/job134212792364, composition9fd6c31b5299 (PR36a0f89ed4f2 + mastercd4052047a9f).
+// Optimized web/Node 2,292,953 B, SHA256 ef43266ef637108ab003a62b16674079df413c8db0a6fe1c10edaa277281ef53.
+// Coordinator approved measured +10 KiB rounded up on 2026-11-18; all earlier floors remain.
+test('#3643 Kraken row diagnostics retain measured reserve and shared alias floors', () => {
+  const measured = 2_292_953;
+  const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(requiredCap, 2_304_000);
+  for (const venue of ['kraken', 'krakenspot']) {
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= Math.max(2_299_904, requiredCap), `${venue}: retain the measured reserve and parent floor`);
+    assert.ok(cap - measured >= 10 * 1024);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
+});
+
 // #3647 pinned Rust1.99/bindgen0.2.129/Binaryen132 twice-Oz web/Node measurements.
 // 80274d2: 2,066,659 B, SHA11835d00d138a4c751944336d8de85c449e1c85cd14e64fdfee963805b05a3d6.
 // b309848: 2,063,838 B, SHA6dee6055e89e1884781a44f0abddb92b1c463b2b5c6cc2629376bbdca6c31eef.
@@ -181,6 +199,16 @@ for (const [source, measured, minimumCap] of [
 
 // Recorded CI caps are provenance floors; later PRs may raise the live cap.
 // Boundary checks always exercise the live cap and the byte immediately above it.
+
+test('#3424 merged local Bybit artifact retains measured headroom', () => {
+  const measured = 2_332_681;
+  const minimumCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
 
 // #3391 merge aa2dc74ee433 + master aa78ef0a06b7; local optimized web/Node.
 // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132, required two -Oz passes.
@@ -4337,3 +4365,41 @@ test('#3640 family sweep preserves separately approved Bybit and combined ceilin
   assert.equal(WASM_VENUE_OVERRIDES.bybit, 2_696_192);
   assert.equal(WASM_BUDGETS.combined, 18_087_936);
 });
+
+// #3646 d10ba2f3c500, CI44135644635 jobs134225245837/134225246062: web/Node bytes.
+// Rust1.99/bindgen0.2.129/Binaryen132 twice-Oz; shared family and replay budget.
+// SHA256 26a96f1c6e97109a715a8c86a562f22619192492b97c5e75799d2c82c7be0b90.
+for (const venue of ['bitget', 'bitgetusdc']) {
+  test(`#3646 ${venue} login clock recovery retains measured reserve and strict boundaries`, () => {
+    const measured = 2_782_976;
+    const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.equal(required, 2_793_472);
+    assert.ok(cap >= required, 'retain the original clock-recovery measured floor');
+    assert.ok(cap >= 2_781_184, 'retain the historical floor');
+    assert.ok(cap - measured >= 10 * 1024);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    assert.equal(venueFamily(venue), 'bitget');
+    assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
+  });
+}
+
+// #3646 M44 head7bd8f25, CI44224839389/job134535952644/artifact14393041086.
+// All five web/Node/capsule modules: 2,784,464 B, SHA49aade25741062f3c2b963dcff1c3012fa565d52f67d1176971a638dfab1fe9a.
+// A passing old absolute cap leaves only 9,008 B; fresh reserve is independently required.
+for (const venue of ['bitget', 'bitgetusdc']) {
+  test(`#3646 M44 ${venue} retains fresh composed reserve and strict boundaries`, () => {
+    const measured = 2_784_464;
+    const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.equal(required, 2_795_520);
+    assert.ok(cap >= required, 'retain the M44 measured reserve alongside the native-store floor');
+    assert.ok(cap >= 2_793_472, 'retain the approved pre-merge floor');
+    assert.ok(cap - measured >= 10 * 1024);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}

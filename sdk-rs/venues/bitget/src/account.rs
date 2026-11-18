@@ -156,6 +156,11 @@ pub(crate) struct Closable {
     pub locked: f64,
 }
 
+pub(crate) struct AuthClock {
+    context: safe_cex_engine::request_context::Context,
+    waiting: Option<safe_cex_engine::SocketId>,
+}
+
 #[derive(Default)]
 pub struct Account {
     pub(crate) supervisor: Supervisor,
@@ -415,6 +420,17 @@ impl BitgetFutures {
         if std::mem::replace(&mut self.account.position_connection_seen, true) {
             self.reset_position_connection();
         }
+        if let Some(clock) = &mut self.auth_clock {
+            clock.waiting = Some(socket);
+        } else {
+            self.send_private_login(cx, socket);
+        }
+        self.refresh_positions(cx);
+        self.refresh_balance(cx);
+        self.refresh_orders(cx, false);
+    }
+
+    fn send_private_login(&self, cx: &mut Cx<'_, Pending>, socket: safe_cex_engine::SocketId) {
         if let Some(identity) = self.options.credentials.clone() {
             cx.send_signed(
                 socket,
@@ -430,9 +446,69 @@ impl BitgetFutures {
                 )),
             );
         }
-        self.refresh_positions(cx);
-        self.refresh_balance(cx);
-        self.refresh_orders(cx, false);
+    }
+
+    fn read_auth_clock(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.auth_clock.is_some() {
+            return;
+        }
+        let policy = safe_cex_engine::request_context::Policy {
+            timeout_ms: 5_000,
+            ..crate::read_policy(None)
+        };
+        let Ok(context) = cx.http_context(Scope::Background, policy) else {
+            return;
+        };
+        if cx
+            .request_managed_with_headers(
+                context.clone(),
+                None,
+                Method::Get,
+                format!("{}/api/v2/public/time", paths::REST),
+                crate::CHANNEL,
+                None,
+                Pending::AuthClock(context.clone()),
+            )
+            .is_err()
+        {
+            let _ = cx.finish_http_context(&context);
+            return;
+        }
+        self.auth_clock = Some(AuthClock {
+            context,
+            waiting: None,
+        });
+    }
+
+    pub(crate) fn settle_auth_clock(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        context: safe_cex_engine::request_context::Context,
+        response: Option<Response<'_>>,
+    ) {
+        let Some(clock) = self
+            .auth_clock
+            .take_if(|clock| clock.context.owner() == context.owner())
+        else {
+            let _ = cx.finish_http_context(&context);
+            return;
+        };
+        if cx
+            .validate_background_read_http_delivery(&clock.context)
+            .is_ok()
+            && let Some(server) = response.and_then(auth_server_time)
+        {
+            cx.observe_protocol_time(server);
+        }
+        let _ = cx.finish_http_context(&clock.context);
+        if let Some(socket) = clock.waiting.filter(|socket| {
+            self.sockets[3].socket == Some(*socket)
+                && self.sockets[3].open
+                && !self.account.authenticated
+                && !self.account.startup_rejected
+        }) {
+            self.send_private_login(cx, socket);
+        }
     }
 
     fn private_subscribe(&self, cx: &mut Cx<'_, Pending>) {
@@ -2355,6 +2431,9 @@ impl BitgetFutures {
                     code::AUTH_REJECTED,
                     format!("Bitget private WS login failed: {}", header.msg),
                 );
+                if !self.account.authenticated && expired_login_clock(text) {
+                    self.read_auth_clock(cx);
+                }
                 if let Some(socket) = self.sockets[3].socket {
                     cx.close(socket);
                     self.disconnected(cx, 3);
@@ -3821,6 +3900,46 @@ fn socket_key_rejection(text: &str) -> Option<f64> {
         "30012" => Some(30012.0),
         _ => None,
     }
+}
+
+fn expired_login_clock(text: &str) -> bool {
+    #[derive(Deserialize)]
+    struct Header<'a> {
+        #[serde(borrow)]
+        code: &'a serde_json::value::RawValue,
+    }
+    serde_json::from_str::<Header<'_>>(text)
+        .is_ok_and(|header| matches!(header.code.get(), "30014" | r#""30014""#))
+}
+
+fn auth_server_time(response: Response<'_>) -> Option<f64> {
+    #[derive(Deserialize)]
+    struct ClockData {
+        #[serde(rename = "serverTime")]
+        server_time: String,
+    }
+    #[derive(Deserialize)]
+    struct ClockReply<'a> {
+        #[serde(borrow)]
+        code: &'a serde_json::value::RawValue,
+        data: ClockData,
+    }
+    if response.status != 200 {
+        return None;
+    }
+    let reply = serde_json::from_str::<ClockReply<'_>>(response.body).ok()?;
+    if !matches!(reply.code.get(), r#""00000""# | r#""0""# | "0")
+        || !reply.data.server_time.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let server = reply.data.server_time.parse::<u64>().ok()? as f64;
+    let receipt = safe_cex_engine::signing::SignReceipt {
+        nonce: None,
+        stamp_ms: Some(server),
+        expiry_ms: None,
+    };
+    (server > 0. && receipt.validate().is_ok()).then_some(server)
 }
 
 fn rejection(which: &str, code: f64, msg: &str, kind: ErrorKind) -> VenueError {

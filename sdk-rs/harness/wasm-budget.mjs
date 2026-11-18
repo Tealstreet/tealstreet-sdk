@@ -384,6 +384,13 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue bitget.
   // #3317 master merge 20d61cbdf174: run 43517857744, family job 132204972157.
   // Optimized web 2,769,255 B + 10 KiB, rounded up to KiB; both aliases share the module.
+  // #3646 d10ba2f3c500, CI44135644635 jobs134225245837/134225246062: web/Node 2,782,976 B.
+  // SHA256 26a96f1c6e97109a715a8c86a562f22619192492b97c5e75799d2c82c7be0b90.
+  // Coordinator-approved measured + 10 KiB, rounded up to KiB; family and replay share these caps.
+
+  // M44 head7bd8f25, CI44224839389/job134535952644/artifact14393041086: web/Node 2,784,464 B.
+  // SHA256 49aade25741062f3c2b963dcff1c3012fa565d52f67d1176971a638dfab1fe9a.
+  // Coordinator-approved fresh + 10 KiB rounded to KiB; retain prior floors and strict boundaries.
   // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue bitget
   // Linux CI run44232282590 job134560427382, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
@@ -489,6 +496,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // SHA-256 70cd348f758b71303b71e47a7231223bd06078e79b1e56e095dcca7a7f8d2aa2.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; required -Oz build.
   // Current measured bytes + 10 KiB, rounded up; retain all larger parent floors.
+  // #3424 merge 2822bf8cd2cf: local optimized web/Node 2,332,681 B.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue bybit, twice -Oz.
+  // wasm-budget.mjs --venue bybit regenerated the report; measured +10 KiB rounded up.
   // #3317 throughput profile at 0c8e04fe5a: optimized local web/node 2,483,240 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue bybit.
   // #3317 run 43060399359, job 130665084604, artifact 13874660310:
@@ -759,6 +769,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3530 CI43669178292/job132677533254 at 7c31d4ae7f57 (PR f04bd59c3bf2): web/Node 2,289,128 B.
   // Rust1.99/bindgen0.2.129/Binaryen132 required -Oz; current maximum +10 KiB rounded up.
   // Retain every historical floor; both family aliases retain 10,776 B reserve.
+  // #3643 CI44132069302/job134212792364, composition9fd6c31b5299 (PR36a0f89e + mastercd405204).
+  // Optimized web/Node 2,292,953 B; SHA256 ef43266ef637108ab003a62b16674079df413c8db0a6fe1c10edaa277281ef53.
+  // Coordinator approved 2026-11-18: measured +10 KiB rounded up; retain historical and shared-alias floors.
   // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue kraken
   // Linux CI run44232282590 job134560427495, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
@@ -782,6 +795,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
   // #3530 same measured Kraken family: CI43669178292/job132677533254, web/Node 2,289,128 B.
   // Current maximum +10 KiB rounded up; preserve historical floors and the shared-family cap.
+  // #3643 shares Kraken's measured artifact/provenance above; retain the same reserve and parent floors.
   // Rule 5 / #3640: this alias shares kraken's measured native-store module and rule-17 ceiling.
   krakenspot: 2_418_688,
   // #3438 merged-head local build.sh --venue kucoin: web/node 1,866,880 B.

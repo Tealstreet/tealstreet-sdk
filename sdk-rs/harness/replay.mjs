@@ -821,6 +821,9 @@ async function runTs() {
       transportReceipt: tape.transportReceipt(),
     }, tape.audit, { final });
   };
+  const drain = venue.drainTs
+    ? () => within(venue.drainTs(exchange, { isPrivate, clock }), 15_000, 'TS pending venue messages')
+    : undefined;
   const checkpoints = [];
   const frames = await tape.play(
     (t) => {
@@ -852,12 +855,14 @@ async function runTs() {
         for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
       checkpoints.push(captureCheckpoint(point, () => comparisonSnapshot(capture(point.ordinal))));
     },
+    drain,
   );
   await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
   if (venue.tsReplaySettled)
     await until(() => venue.tsReplaySettled(exchange, bookSymbols.length), 'TS pending book snapshots');
   await within(venue.settleTs?.(exchange, { isPrivate, clock }) ?? Promise.resolve(), 15_000, 'TS pending venue reads');
   await settle();
+  if (drain) await drain();
   if (!values.performance) tape.assertWritesConsumed();
   postFrames();
   if (!values['no-egress'])

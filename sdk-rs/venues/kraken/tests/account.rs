@@ -1638,11 +1638,11 @@ fn rejected_order_rows_report_error_only_without_a_retained_copy_and_rearm() {
         [
             (
                 Level::Warn,
-                "Kraken skipped unmappable order order-1".into()
+                "Kraken skipped unmappable order (order_type)".into()
             ),
             (
                 Level::Error,
-                "Kraken skipped unmappable order order-2".into()
+                "Kraken skipped unmappable order (order_type)".into()
             )
         ]
     );
@@ -1654,7 +1654,7 @@ fn rejected_order_rows_report_error_only_without_a_retained_copy_and_rearm() {
         send(&mut e, &bad),
         [(
             Level::Warn,
-            "Kraken skipped unmappable order order-1".into()
+            "Kraken skipped unmappable order (order_type)".into()
         )]
     );
     message(
@@ -1668,7 +1668,7 @@ fn rejected_order_rows_report_error_only_without_a_retained_copy_and_rearm() {
         send(&mut e, &bad),
         [(
             Level::Error,
-            "Kraken skipped unmappable order order-1".into()
+            "Kraken skipped unmappable order (order_type)".into()
         )]
     );
     assert!(send(&mut e, &bad).is_empty());
