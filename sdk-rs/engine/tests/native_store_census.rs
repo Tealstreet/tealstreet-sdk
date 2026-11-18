@@ -91,3 +91,41 @@ fn request_outcomes_are_saturating_monotonic_native_counters() {
         .collect();
     assert_eq!(counts, [1, 2, 2, 1, 1]);
 }
+
+#[test]
+fn selected_margin_rails_do_not_overwrite_a_position_in_the_other_mode() {
+    let mut store = Store::default();
+    store.set_positions(
+        [MarginType::Cross, MarginType::Isolated]
+            .into_iter()
+            .map(|mode| Position {
+                id: format!("BTC:{mode:?}"),
+                symbol: "BTC".into(),
+                side: PositionSide::Long,
+                entry_price: 100.,
+                notional: 100.,
+                leverage: if mode == MarginType::Cross { 10. } else { 5. },
+                margin_type: Some(mode),
+                position_mode: Some(PositionMode::Oneway),
+                unrealized_pnl: 0.,
+                realized_pnl: None,
+                contracts: 1.,
+                liquidation_price: 0.,
+                margin_size: None,
+                last_update: None,
+            })
+            .collect(),
+    );
+    store.update_setting("BTC", |setting| {
+        setting.margin_type = Some(MarginType::Cross);
+        setting.leverage = 12.;
+    });
+    assert_eq!(store.positions()[0].leverage, 12.);
+    assert_eq!(store.positions()[1].leverage, 5.);
+    store.update_setting("BTC", |setting| {
+        setting.margin_type = Some(MarginType::Isolated);
+        setting.leverage = 6.;
+    });
+    assert_eq!(store.positions()[0].leverage, 12.);
+    assert_eq!(store.positions()[1].leverage, 6.);
+}

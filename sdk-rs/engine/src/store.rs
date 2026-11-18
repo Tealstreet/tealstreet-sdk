@@ -1159,6 +1159,10 @@ impl Store {
             let Some(setting) = self.settings.get(position.symbol.as_str()) else {
                 continue;
             };
+            // Rule 5 / #3640: selected-mode rails cannot rewrite another live margin mode.
+            if setting.margin_type.is_some() && setting.margin_type != position.margin_type {
+                continue;
+            }
             let leverage = match position.side {
                 crate::model::PositionSide::Long => setting.buy_leverage,
                 crate::model::PositionSide::Short => setting.sell_leverage,
