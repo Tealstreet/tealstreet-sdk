@@ -19,7 +19,12 @@ type ReadFault = 'none' | 'target' | 'live' | 'history' | 'afterCancel' | 'netwo
 const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
 
-async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) {
+async function account(
+  kind: Kind,
+  scope: Scope = 'Partial',
+  localPage = false,
+  catalogue?: { entered(): void; resume: Promise<void> },
+) {
   const calls: Array<{ role: string; method: string; path: string; query: string; body?: string }> = [];
   let cancelled = false;
   let fault: ReadFault = 'none';
@@ -125,6 +130,10 @@ async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) 
       let retExtInfo: unknown = {};
       switch (path) {
         case '/v5/market/instruments-info':
+          if (role === 'page' && catalogue) {
+            catalogue.entered();
+            await catalogue.resume;
+          }
           result = list(
             parsed.searchParams.has('status')
               ? []
@@ -361,12 +370,47 @@ async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) 
         expect(page.store.orders.find((row) => row.id === original.orderId)?.price).not.toBe(oldPrice);
       });
     },
-    pageCalls: () => calls.filter((call) => call.role === 'page'),
+    // Public catalogue startup is independent of the private proof/write path.
+    pageCalls: () => calls.filter((call) => call.role === 'page' && !call.path.startsWith('/v5/market/')),
     writes: () => calls.filter((call) => call.role === 'page' && call.method === 'POST'),
   };
 }
 
 describe('Bybit frame-fed COSIGNED protective edit preflight (real WASM)', () => {
+  it('waits for the page catalogue even when source markets and orders are loaded', async () => {
+    let entered = () => {};
+    let release = () => {};
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const resume = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fixture = await account('StopLoss', 'Partial', true, { entered, resume });
+    await started;
+    let settled = false;
+    const result = fixture.edit().then(
+      () => {
+        settled = true;
+        return 'applied';
+      },
+      (error: unknown) => {
+        settled = true;
+        return error;
+      },
+    );
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(fixture.page.store.loaded.markets).toBe(true);
+      expect(settled).toBe(false);
+      expect(fixture.writes()).toEqual([]);
+    } finally {
+      release();
+    }
+    await expect(result).resolves.toBe('applied');
+    expect(fixture.writes().map((call) => call.path)).toEqual(['/v5/order/cancel-batch', '/v5/position/trading-stop']);
+  }, 15_000);
+
   for (const localPage of [false, true]) {
     for (const axis of ['target', 'live', 'history'] as const) {
       for (const transition of ['B', 'ABA', 'unavailable', 'unchanged'] as const) {

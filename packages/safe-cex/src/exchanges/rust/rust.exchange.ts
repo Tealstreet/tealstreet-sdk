@@ -1314,7 +1314,6 @@ export class RustEngineExchange extends BaseExchange {
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
     this.flushTimers.push(setInterval(() => this.host?.flush(), STORE_FLUSH_MS * multiplier));
     host.flush();
-    await this.untilPageMarkets();
     return true;
   };
 
