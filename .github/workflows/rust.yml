@@ -739,7 +739,7 @@ jobs:
           corepack yarn workspace @tealstreet/safe-cex-server test-wasm
           corepack yarn workspace @tealstreet/exchange-mcp test-wasm
           corepack yarn workspace @tealstreet/cli test-wasm
-          corepack yarn workspace @tealstreet/safe-cex-react-native test-wasm
+          corepack yarn workspace @tealstreet/safe-cex-react-native test-unit
           corepack yarn -s workspace @tealstreet/exchange-mcp build
           corepack yarn -s workspace @tealstreet/exchange-mcp smoke
       - name: Native product semantics through the real CLI preflight
@@ -1218,7 +1218,7 @@ jobs:
           corepack yarn workspace @tealstreet/safe-cex-server test-wasm
           corepack yarn workspace @tealstreet/exchange-mcp test-wasm
           corepack yarn workspace @tealstreet/cli test-wasm
-          corepack yarn workspace @tealstreet/safe-cex-react-native test-wasm
+          corepack yarn workspace @tealstreet/safe-cex-react-native test-unit
           corepack yarn -s workspace @tealstreet/exchange-mcp build
           corepack yarn -s workspace @tealstreet/exchange-mcp smoke
       - name: Native product semantics through the real CLI preflight
