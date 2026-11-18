@@ -88,3 +88,7 @@ construction feature checks reject raw duplicate keys and missing policy rows.
 Bybit terminal order-history retention is documented in `sdk-rs/venues/bybit/README.md`.
 Its `history.rs` change is a counted beta-WASM input and requires a fresh release/pin;
 this routing correction does not change family caps or construction membership.
+
+BingX Spot replay tracks production decoder receipts alongside pending account reads.
+Bounded drains precede ticks, checkpoints and final capture; event-loop yields
+alone cannot establish completion of gzip decoding or its queued text messages.
