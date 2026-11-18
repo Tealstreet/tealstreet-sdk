@@ -77,7 +77,10 @@ fn fixed_one_way_one_x_settings_are_read_only_and_client_lookup_is_not_definitiv
     assert!(
         matches!(e.drain_actions().next(),Some(Action::Notice(Notice::CommandDone{result,..})) if result==r#"{"buyLeverage":1,"sellLeverage":1}"#)
     );
-    let rails = e.store().setting("x").expect("native fixed rails are cached");
+    let rails = e
+        .store()
+        .setting("x")
+        .expect("native fixed rails are cached");
     assert_eq!(rails.buy_leverage, Some(1.0));
     assert_eq!(rails.sell_leverage, Some(1.0));
     e.handle(
