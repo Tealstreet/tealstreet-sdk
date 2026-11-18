@@ -133,3 +133,10 @@ nonpositive runner IDs still refuse, and replay/signing deadlines stay unchanged
 The native workspace test row installs pinned Node and locked Yarn dependencies:
 store-frames' risk and ownership tests execute maintained TypeScript/FrameStore
 oracles. Missing tsx/TypeScript must fail setup rather than drop those cross-language tests.
+
+Orderly account settings preserve simultaneous Cross/Isolated leverage: a
+selected margin mode updates only that mode's positions. Unknown/global settings
+retain their existing behavior. Replay TIF projection represents absence as
+explicit null across order types while retaining every reported value; it must
+not manufacture a TIF or hide a non-limit order's reported TIF. Known-failure
+and accepted-difference manifests are unchanged by this correction.
