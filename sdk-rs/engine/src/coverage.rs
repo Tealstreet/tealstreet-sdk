@@ -353,6 +353,18 @@ impl<K: Eq + Hash> RowReports<K> {
         level: Level,
         message: impl Into<String>,
     ) -> bool {
+        self.report_with_fields(cx, key, level, message, Vec::new())
+    }
+
+    /// Keep the same admission and health accounting for value-free row diagnostics.
+    pub fn report_with_fields<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        key: K,
+        level: Level,
+        message: impl Into<String>,
+        fields: Vec<(&'static str, crate::log::Value)>,
+    ) -> bool {
         if self.bounded && self.remembered.len() >= MAX_REPORTS {
             self.clear();
         }
@@ -379,7 +391,7 @@ impl<K: Eq + Hash> RowReports<K> {
             RowRepeat::ChangedMessage => ReportState::Message(message.clone()),
         };
         self.remembered.insert(key, state);
-        row_skipped(cx, level, message);
+        cx.event(level, code::ROW_SKIPPED, message, fields);
         true
     }
 

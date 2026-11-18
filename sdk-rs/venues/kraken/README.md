@@ -92,6 +92,39 @@ controls remain strict: one invalid row rejects its whole page. Only earlier
 accepted pages may be returned with `history.incomplete` / `laterPageFailed`;
 rows staged from the failed page are discarded rather than silently skipped.
 
+## Futures order-row diagnostics
+
+Unmappable REST/open-orders snapshot rows retain the existing identity coverage:
+a known nonterminal copy is held (Warn); an order with no copy remains absent
+(Error). Neither diagnostic acceptance nor a changed title repairs a missing row.
+Documented REST `lmt/post/ioc/fok/mkt/stp/take_profit/trailing_stop` and WebSocket
+`limit/stop/take_profit/trailing_stop` shapes are regression controls, including
+snapshot rows with `qty` and no REST `unfilledSize`.
+
+`row.skipped` messages contain only a closed failed predicate: `wire_decode`,
+`missing_order_id`, `missing_symbol`, `market`, `order_type`, `direction`, or
+`quantity`. IDs remain internal suppression/coverage keys and never enter this
+message or its fields. Identical predicates have identical message fingerprints
+across orders. `order_row_reason` repeats the predicate; `order_row_fields` is
+a 29-character field-type vector, keeping the entire engine event within the
+browser's 500-character extra-data bound. Type codes are `-` missing, `z` null,
+`b` boolean, `n` number, `s` string, `a` array, `o` object. Positions are:
+
+```text
+order_id orderId uid symbol instrument orderType type side direction
+limitPrice limit_price price stopPrice stop_price unfilledSize filledSize filled
+qty quantity size reduceOnly reduce_only cliOrdId cli_ord_id trigger_signal
+triggerSignal lastUpdateTime last_update_time lastUpdateTimestamp
+```
+
+No field contents, unknown field names, symbols, identifiers, amounts or raw
+deserializer errors are reported. `wire_decode` reports schema refusal rather
+than guessing which value was invalid; the type vector distinguishes absent,
+null and incompatible JSON types without disclosing them.
+The collector walks JSON types without building a generic value tree. Unknown
+values are still validated, so invalid numeric ranges or depth cannot turn a
+previously unavailable type vector into partially accepted diagnostic data.
+
 ## Kraken Spot hosted signing
 
 Kraken Spot remains local-only, with hosted/remote signing deferred and the existing

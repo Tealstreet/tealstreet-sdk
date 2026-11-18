@@ -686,7 +686,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3530 CI43669178292/job132677533254 at 7c31d4ae7f57 (PR f04bd59c3bf2): web/Node 2,289,128 B.
   // Rust1.99/bindgen0.2.129/Binaryen132 required -Oz; current maximum +10 KiB rounded up.
   // Retain every historical floor; both family aliases retain 10,776 B reserve.
-  kraken: 2_299_904,
+  // #3643 CI44132069302/job134212792364, composition9fd6c31b5299 (PR36a0f89e + mastercd405204).
+  // Optimized web/Node 2,292,953 B; SHA256 ef43266ef637108ab003a62b16674079df413c8db0a6fe1c10edaa277281ef53.
+  // Coordinator approved 2026-11-18: measured +10 KiB rounded up; retain historical and shared-alias floors.
+  kraken: 2_304_000,
   // #3438 merged-head local build.sh --venue kraken: web/node 2,247,702 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3391 run 43328298773, artifact 13992739463; source 46852c576bd1 (ca7e7ea34bf6 tree).
@@ -704,7 +707,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
   // #3530 same measured Kraken family: CI43669178292/job132677533254, web/Node 2,289,128 B.
   // Current maximum +10 KiB rounded up; preserve historical floors and the shared-family cap.
-  krakenspot: 2_299_904,
+  // #3643 shares Kraken's measured artifact/provenance above; retain the same reserve and parent floors.
+  krakenspot: 2_304_000,
   // #3438 merged-head local build.sh --venue kucoin: web/node 1,866,880 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   kucoin: 1_878_016,
