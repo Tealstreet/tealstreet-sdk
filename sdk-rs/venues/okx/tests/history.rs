@@ -112,7 +112,7 @@ fn fills_fallback_deduplicates_trade_identity_and_converts_contracts() {
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].id, "200");
     assert_eq!(rows[1].id, "201");
-    assert_eq!(rows[0].timestamp, 1_710_000_000.0);
+    assert_eq!(rows[0].timestamp, 1_710_000_000.123);
     assert_eq!(rows[0].qty, 0.02);
     assert_eq!(rows[0].commission, 0.4);
     assert_eq!(rows[0].realized_pnl, 3.0);
@@ -498,7 +498,7 @@ fn history_page_cap_keeps_rows_and_owns_its_warning_before_done() {
 }
 
 #[test]
-fn fills_preserve_ts_seconds_bounds_normalization_and_floor_milliseconds() {
+fn fills_preserve_seconds_bounds_normalization_and_millisecond_precision() {
     // RustEngineExchange forwards ExecutionsOptions.from/to unchanged. TS accepts
     // Unix seconds here even though the engine query fields are named *_ms.
     for (from, to) in [
@@ -520,7 +520,7 @@ fn fills_preserve_ts_seconds_bounds_normalization_and_floor_milliseconds() {
         reply(&mut e, &a, &envelope(FILL), 10.0);
         let rows: Vec<Execution> = serde_json::from_str(&result(&mut e)).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].timestamp, 1_710_000_000.0);
+        assert_eq!(rows[0].timestamp, 1_710_000_000.123);
     }
 }
 
@@ -550,7 +550,7 @@ fn block_trade_fills_omit_missing_order_id_and_invalid_commission_like_ts() {
 }
 
 #[test]
-fn fills_apply_bounds_to_native_milliseconds_before_output_seconds_are_truncated() {
+fn fills_apply_bounds_to_native_milliseconds_before_output_seconds_conversion() {
     for (from, to) in [
         (1_710_000_001_500.0, 1_710_000_002_500.0),
         (1_710_000_001.5, 1_710_000_002.5),
@@ -583,7 +583,7 @@ fn fills_apply_bounds_to_native_milliseconds_before_output_seconds_are_truncated
         let rows: Vec<Execution> = serde_json::from_str(&result(&mut e)).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "200");
-        assert_eq!(rows[0].timestamp, 1_710_000_001.0);
+        assert_eq!(rows[0].timestamp, 1_710_000_001.6);
     }
 }
 
@@ -622,4 +622,52 @@ fn window_fills_with_no_limit_flag_a_full_page_and_keep_every_row() {
         Action::Notice(Notice::CommandDone { result, .. })
             if serde_json::from_str::<Vec<Execution>>(result).unwrap().len() == 100
     )));
+}
+
+#[test]
+fn historical_fills_preserve_milliseconds_without_changing_dedupe_keys() {
+    for identified in [true, false] {
+        for time in ["1710000000123", "1710000000.123"] {
+            let mut e = trading_engine();
+            let a = query(&mut e, fills());
+            reply(&mut e, &a, &envelope(""), 10.0);
+            let archive = prepared(&mut e, 1_710_000_000_010.0)
+                .into_iter()
+                .find(|a| matches!(a, Action::Http(_)))
+                .unwrap();
+            let early = FILL.replace("1710000000123", time);
+            let later = early
+                .replace(
+                    time,
+                    if time.contains('.') {
+                        "1710000000.987"
+                    } else {
+                        "1710000000987"
+                    },
+                )
+                .replace("\"tradeId\":\"200\"", "\"tradeId\":\"201\"");
+            let mut body = format!("{early},{later}");
+            if !identified {
+                body = body
+                    .replace("\"tradeId\":\"200\"", "\"tradeId\":\"\"")
+                    .replace("\"tradeId\":\"201\"", "\"tradeId\":\"\"")
+                    .replace("\"billId\":\"900\"", "\"billId\":\"\"");
+            }
+            reply(&mut e, &archive, &envelope(&body), 11.0);
+            let rows: Vec<serde_json::Value> = serde_json::from_str(&result(&mut e)).unwrap();
+            assert_eq!(rows.len(), if identified { 2 } else { 1 });
+            assert_eq!(rows[0]["timestamp"], 1_710_000_000.987);
+            assert_eq!(
+                rows[0]["timestamp"].as_f64().unwrap() * 1000.0,
+                1_710_000_000_987.0
+            );
+            if identified {
+                assert_eq!(rows[0]["id"], "201");
+                assert_eq!(rows[1]["id"], "200");
+                assert_eq!(rows[1]["timestamp"], 1_710_000_000.123);
+            } else {
+                assert!(rows[0].get("id").is_none());
+            }
+        }
+    }
 }

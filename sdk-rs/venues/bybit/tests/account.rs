@@ -1000,7 +1000,7 @@ fn queries_return_history_in_the_shared_shapes() {
     );
     assert_eq!(
         h.result(21),
-        Some(&Ok(r#"[{"id":"e0cbe81d-0f18-5866-9415-cf319b5dab3b","timestamp":1672282722.0,"symbol":"ETHPERP","orderId":"8c065341-7b52-4ca9-ac2c-37e31ac55c94","price":1190.15,"qty":0.1,"side":"buy","commission":0.071409,"maker":false}]"#.to_owned()))
+        Some(&Ok(r#"[{"id":"e0cbe81d-0f18-5866-9415-cf319b5dab3b","timestamp":1672282722.429,"symbol":"ETHPERP","orderId":"8c065341-7b52-4ca9-ac2c-37e31ac55c94","price":1190.15,"qty":0.1,"side":"buy","commission":0.071409,"maker":false}]"#.to_owned()))
     );
 
     h.command(Command::Query {
