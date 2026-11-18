@@ -52,6 +52,13 @@ signature refusals, 402 is expiry, and 406/511/701–704 are permission refusals
 background diagnostics use auth.rejected. A malformed envelope, an HTTP
 status alone, or error-looking text cannot prove a key refusal.
 
+Generic HTTP 425 read failures add a closed `requestClass` from the pending
+request and an optional present, nonnegative safe-integer `venueCode`. The
+diagnostic omits URLs, queries, credentials, response bodies and response messages.
+Typed envelope refusals, ordinary error text, startup completion, backoff,
+signing and write outcomes retain their existing policy. Synthetic full-engine
+controls live in `tests/http_diagnostics.rs`.
+
 MEXC's contract error table identifies 513 as the request-time-window error
 and 602 as signature verification failure:
 https://mexcdevelop.github.io/apidocs/contract_v1_en/#error-code-example
