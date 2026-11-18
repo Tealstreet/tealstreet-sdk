@@ -356,8 +356,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue bitget.
   // #3317 master merge 20d61cbdf174: run 43517857744, family job 132204972157.
   // Optimized web 2,769,255 B + 10 KiB, rounded up to KiB; both aliases share the module.
-  bitget: 2_781_184,
-  bitgetusdc: 2_781_184,
+  // #3646 d10ba2f3c500, CI44135644635 jobs134225245837/134225246062: web/Node 2,782,976 B.
+  // SHA256 26a96f1c6e97109a715a8c86a562f22619192492b97c5e75799d2c82c7be0b90.
+  // Coordinator-approved measured + 10 KiB, rounded up to KiB; family and replay share these caps.
+  bitget: 2_793_472,
+  bitgetusdc: 2_793_472,
   // #3297 run 42556682443 at e5ae4d9a8db measured 1,895,658 B; +10 KiB rounded up.
   // Keep the larger PR-parent cap when merging master; both measurement histories remain pinned.
   // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262

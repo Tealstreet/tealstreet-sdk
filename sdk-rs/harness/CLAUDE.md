@@ -29,6 +29,10 @@ WASM venue caps retain both parents' measured floors. Fresh compositions must
 retain at least 10 KiB above their optimized web/Node measurement, rounded up
 to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
 
+Bitget login clock recovery at d10ba2f3c500 measures web/Node 2,782,976 B in
+CI44135644635 jobs134225245837/134225246062. The coordinator-approved cap
+2,793,472 B retains 10,496 B reserve for family and replay checks and all prior floors.
+
 TxFlow agent refresh #3314 at merge 9bb43250830d measures 2,147,684 bytes;
 refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its
 2,158,592-byte floor retains the required 10 KiB reserve at that source.
