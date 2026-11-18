@@ -26,7 +26,7 @@ credential, financial mapping, order-write or retry classification policy change
 
 | Feed | Authentication | Receive evidence | Other policy |
 | --- | --- | --- | --- |
-| Futures (`ws-futures`) | None | Any text, 45s idle | 10s connect; 15s ping; clear books and notify `book_changed` on retirement. System topics precede book/candle topics. |
+| Futures (`ws-futures`) | None | Any text, 45s idle | 10s connect; 15s ping; clear books and notify `book_changed` on retirement. Three fixed epoch-bootstrap system frames precede book/candle interests; the latter retain all 4096 frame slots for the native host limit. |
 | Public shards, one per 300 markets/channel | None | Any text, 45s idle | 10s connect; 15s ping; 20-symbol native batches spaced 250ms apart. A shard retirement does not clear futures books. |
 | Private (`/private/`) | Observe, with a 10s Supervisor login-answer bound | Text after the first actual pong, then 45s idle | 10s connect; 15s ping; 10s stable threshold after authentication; one 2s same-socket login retry. |
 
@@ -36,6 +36,11 @@ All pings retain master's protocol clock. Private pings use its current
 session without an actual pong keeps its idle gate disabled. A successful login
 still cancels its authentication bound; no-answer timeout warns `stream.unavailable`
 and reconnects, without asserting rejected credentials.
+
+Public shard registration is skipped when public data is shared or disabled, so
+intentional host suppression emits no admission error. Candle insert/remove keys
+are uppercase native identities; case aliases cannot create duplicate interests.
+Only `op` supplies private pong evidence; `ch` remains a login-dispatch fallback.
 
 Timeout retirement carries `recover:true` to the replacement; an ordinary close
 carries `recover:false`. Existing explicit proxy routing remains engine-owned.

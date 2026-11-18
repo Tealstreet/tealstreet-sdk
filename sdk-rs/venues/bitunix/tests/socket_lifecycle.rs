@@ -121,8 +121,6 @@ fn timers(actions: &[Action]) -> Vec<(TimerId, f64)> {
 
 #[test]
 fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
-    let (mut e, mut sockets) = ready();
-    let mut now = 1.0;
     // A live stream: the feeds not under test keep answering inside their idle window.
     let keep_alive = |e: &mut TestEngine, sockets: &[(String, SocketId)], skip: usize, now: f64| {
         for (i, (_, socket)) in sockets.iter().enumerate() {
@@ -140,7 +138,11 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
             .into_iter()
             .for_each(drop);
     };
-    for index in 0..sockets.len() {
+    for index in 0..6 {
+        // Each feed starts with every sibling live. The stable-reset check
+        // retires its subject, so do not carry that retired ID to another case.
+        let (mut e, mut sockets) = ready();
+        let mut now = 1.0;
         let (feed, mut socket) = sockets[index].clone();
         for attempt in 0..8 {
             let nominal = (1000.0 * 2f64.powi(attempt)).min(30_000.0);
@@ -211,7 +213,6 @@ fn each_feed_keeps_capped_retry_state_until_actual_stable_traffic() {
             (750.0..=1000.0).contains(&delay),
             "stable {feed} reset: {delay}"
         );
-        now += 1.0;
     }
 }
 

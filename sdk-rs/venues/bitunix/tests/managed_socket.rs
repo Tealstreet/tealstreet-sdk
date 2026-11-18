@@ -1,7 +1,10 @@
 //! Engine-managed socket lifecycle for Bitunix's futures and private feeds:
 //! frames are admitted only on the open, current, unexpired epoch, and each
 //! open runs its subscriptions and login once.
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Response, SocketId, TimerId};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, Response, SocketId,
+    TimerId,
+};
 mod support;
 use safe_cex_venue_bitunix::BitunixFutures;
 
@@ -23,6 +26,7 @@ struct H {
     sent: Vec<(SocketId, String)>,
     closed: Vec<SocketId>,
     timers: Vec<(TimerId, f64)>,
+    notices: Vec<Notice>,
 }
 
 impl H {
@@ -32,6 +36,9 @@ impl H {
     }
     /// `start` over a caller's catalogue and ticker seed.
     fn start_with(pairs: &str, tickers: &str) -> Self {
+        Self::start_with_policy(pairs, tickers, PublicFeedPolicy::Direct)
+    }
+    fn start_with_policy(pairs: &str, tickers: &str, policy: PublicFeedPolicy) -> Self {
         let mut h = Self {
             engine: support::engine(support::Options {
                 key: Some("replay-key".into()),
@@ -44,7 +51,9 @@ impl H {
             sent: vec![],
             closed: vec![],
             timers: vec![],
+            notices: vec![],
         };
+        h.engine.set_public_feed_policy(policy).unwrap();
         h.engine.start(h.now);
         h.collect();
         h.reply("trading_pairs", pairs);
@@ -105,6 +114,7 @@ impl H {
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(notice) => self.notices.push(notice),
                 _ => {}
             }
         }
@@ -190,6 +200,13 @@ fn futures_duplicate_open_does_not_resubscribe() {
     assert_eq!(subscribes, 1);
     h.open(socket);
     assert_eq!(h.sent_on(socket, "depthop"), subscribes);
+    for topic in ["system_notice", "reconnected", "onconnected"] {
+        assert_eq!(
+            h.sent_on(socket, topic),
+            1,
+            "duplicate open cannot repeat bootstrap"
+        );
+    }
 }
 
 #[test]
@@ -235,6 +252,21 @@ fn futures_open_subscribes_each_interest_once() {
     let socket = h.futures();
     h.open(socket);
     assert_eq!(h.sent_on(socket, "market_btcusdt_depthop_0.1"), 1);
+    let frames: Vec<_> = h
+        .sent
+        .iter()
+        .filter(|(id, _)| *id == socket)
+        .map(|(_, text)| text)
+        .collect();
+    for (frame, topic) in frames
+        .iter()
+        .zip(["system_notice", "reconnected", "onconnected"])
+    {
+        assert!(
+            frame.contains(topic),
+            "system bootstrap precedes caller interests: {frames:?}"
+        );
+    }
 }
 
 #[test]
@@ -367,4 +399,109 @@ fn login_answer_at_its_deadline_cannot_revive_the_private_epoch() {
     h.message(socket, &order("after-late-login"));
     assert!(h.engine.store().order("after-late-login").is_none());
     assert!(h.closed.contains(&socket));
+}
+
+#[test]
+fn host_supplied_public_data_suppresses_shards_without_an_admission_error() {
+    for policy in [PublicFeedPolicy::Shared, PublicFeedPolicy::Disabled] {
+        let h = H::start_with_policy(support::PAIRS, support::TICKERS, policy);
+        assert!(!h.sockets.iter().any(|(_, url)| url.contains("/public/")));
+        assert!(h.sockets.iter().any(|(_, url)| url.contains("ws-futures")));
+        assert!(h.sockets.iter().any(|(_, url)| url.contains("/private/")));
+        assert!(
+            !h.notices
+                .iter()
+                .any(|notice| matches!(notice, Notice::Event(event)
+            if event.code == safe_cex_engine::log::code::SUBSCRIPTION_REJECTED)),
+            "intentional public suppression is not socket refusal: {:?}",
+            h.notices
+        );
+    }
+}
+
+#[test]
+fn channel_named_pong_does_not_enable_the_private_idle_watch() {
+    for text in [r#"{"ch":"pong"}"#, r#"{"ch":"ping","pong":1}"#] {
+        let mut h = H::account();
+        let socket = h.private();
+        h.message(socket, text);
+        h.now += IDLE_MS + 1.0;
+        h.message(socket, &order("still-live-without-a-real-pong"));
+        assert!(
+            h.engine
+                .store()
+                .order("still-live-without-a-real-pong")
+                .is_some(),
+            "{text}"
+        );
+        assert!(!h.closed.contains(&socket));
+    }
+}
+
+#[test]
+fn candle_symbol_aliases_cannot_refuse_the_live_futures_feed() {
+    let mut h = H::start();
+    let socket = h.futures();
+    h.open(socket);
+    h.subscribe_book();
+    for symbol in ["BTCUSDT", "btcusdt"] {
+        h.event(Event::Command(Command::SubscribeCandles {
+            symbol: symbol.into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }));
+    }
+    assert!(
+        !h.closed.contains(&socket),
+        "duplicate native topics must not stop the feed"
+    );
+    assert_eq!(h.sent_on(socket, "market_btcusdt_klineop_1min"), 1);
+    h.message(socket, DEPTH);
+    assert_eq!(h.best_bid(), Some(96_000.0));
+    h.event(Event::Command(Command::UnsubscribeCandles {
+        symbol: "btcusdt".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    }));
+    assert!(h.sent.iter().any(|(s, text)| *s == socket
+        && text.contains("unsub")
+        && text.contains("market_btcusdt_klineop_1min")));
+    h.event(Event::Command(Command::SubscribeCandles {
+        symbol: "BTCUSDT".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    }));
+    assert_eq!(h.sent_on(socket, "market_btcusdt_klineop_1min"), 3);
+}
+
+#[test]
+fn reconnect_restores_the_native_hosts_full_subscription_limit() {
+    let mut h = H::start();
+    let socket = h.futures();
+    h.open(socket);
+    for index in 0..4096 {
+        h.event(Event::Command(Command::SubscribeCandles {
+            symbol: format!("T{index}USDT"),
+            interval: safe_cex_engine::model::Interval::M1,
+        }));
+    }
+    assert_eq!(
+        h.sent_on(socket, "klineop_1min"),
+        4096,
+        "all accepted subscriptions were live"
+    );
+    h.event(Event::WsClosed { socket, code: 1006 });
+    let (timer, at) = h
+        .timers
+        .iter()
+        .copied()
+        .find(|(_, at)| (*at - h.now) >= 750.0 && (*at - h.now) <= 1000.0)
+        .expect("futures retry");
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    let replacement = h.futures();
+    assert_ne!(replacement, socket);
+    h.open(replacement);
+    assert!(!h.closed.contains(&replacement));
+    assert_eq!(h.sent_on(replacement, "klineop_1min"), 4096);
+    for topic in ["system_notice", "reconnected", "onconnected"] {
+        assert_eq!(h.sent_on(replacement, topic), 1);
+    }
 }

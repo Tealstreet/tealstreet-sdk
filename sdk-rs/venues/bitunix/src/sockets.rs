@@ -70,6 +70,13 @@ impl BitunixFutures {
     }
 
     pub(crate) fn connect_feed(&mut self, cx: &mut Cx<'_, Pending>, feed: Feed) {
+        // Shared/disabled public data intentionally suppresses these shards,
+        // just as legacy Cx::connect did; it is not an admission failure.
+        if matches!(feed, Feed::Public { .. })
+            && cx.public_feed_policy() != safe_cex_engine::PublicFeedPolicy::Direct
+        {
+            return;
+        }
         let id = match cx.register_socket_feed(Self::feed_policy(&feed)) {
             Ok(id) => id,
             Err(error) => return self.socket_failed(cx, None, error),
@@ -108,14 +115,9 @@ impl BitunixFutures {
     }
 
     fn futures_interests(&self, cx: &Cx<'_, Pending>) -> Vec<Interest> {
-        ["system_notice", "reconnected", "onconnected"]
+        self.subscriptions(cx)
             .into_iter()
-            .map(|topic| (format!("0:{topic}"), topic.to_owned()))
-            .chain(
-                self.subscriptions(cx)
-                    .into_iter()
-                    .map(|topic| (format!("1:{topic}"), topic)),
-            )
+            .map(|topic| (format!("1:{topic}"), topic))
             .map(|(key, topic)| Interest {
                 key: key.into(),
                 wire_args: topic.into(),
@@ -197,6 +199,15 @@ impl BitunixFutures {
                         return Ok(());
                     }
                     Feed::Futures => {
+                        // The three fixed epoch bootstrap frames are not caller
+                        // interests. Keep all 4096 queue slots available for the
+                        // native host's accepted book/candle subscriptions.
+                        for topic in ["system_notice", "reconnected", "onconnected"] {
+                            cx.send(
+                                epoch.socket(),
+                                ControlFrame::subscription(topic_frame(topic, true)),
+                            );
+                        }
                         for book in self.books.values_mut() {
                             book.levels.clear();
                             book.initialized = false;
@@ -335,14 +346,17 @@ impl BitunixFutures {
         let Ok(m) = serde_json::from_str::<Message<'_>>(text) else {
             return Control::Other;
         };
+        // Only the native op field is pong evidence. The channel fallback
+        // below exists for login dispatch, not for the first-pong idle gate.
+        if m.op == "pong" || (m.op == "ping" && m.pong) {
+            return Control::Pong;
+        }
         let operation = if m.op.is_empty() {
             m.ch.as_ref()
         } else {
             m.op.as_ref()
         };
         match operation {
-            "pong" => Control::Pong,
-            "ping" if m.pong => Control::Pong,
             "login" => {
                 #[derive(serde::Deserialize)]
                 struct Login {

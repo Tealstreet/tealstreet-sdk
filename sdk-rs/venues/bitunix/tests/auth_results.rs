@@ -630,6 +630,32 @@ fn retries_back_off_per_key_to_the_cap_and_only_current_success_resets_them() {
         r#"{"code":0,"data":{"positionList":[]}}"#,
     );
     assert_eq!(auth(&recovered).last().unwrap().2, AuthOutcome::Accepted);
+    // Acceptance itself resets the read backoff, before any socket close can
+    // contribute. Drive another read on this same authenticated connection.
+    e.handle(
+        now + 1.0,
+        Event::Command(safe_cex_engine::Command::Venue {
+            command: 9901,
+            action: safe_cex_engine::VenueAction::ReadPositions,
+        }),
+    );
+    let actions = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect::<Vec<_>>();
+    let next = http(&actions, "get_pending_positions");
+    let failure = answer(&mut e, &next, now + 2.0, 200, "", r#"{"code":10004}"#);
+    let (timer, timer_at) = retry(&failure, now + 2.0);
+    let actions = fired(&mut e, timer, timer_at);
+    let next = http(&actions, "get_pending_positions");
+    let now = timer_at + 1.0;
+    answer(
+        &mut e,
+        &next,
+        now,
+        200,
+        "",
+        r#"{"code":0,"data":{"positionList":[]}}"#,
+    );
     // Opening the private socket starts a fresh read, without resetting failures itself.
     // The live session closes and the engine reconnects; the test follows the new socket.
     e.handle(now + 1.0, Event::WsClosed { socket, code: 1006 });
