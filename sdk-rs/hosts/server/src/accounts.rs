@@ -2046,7 +2046,7 @@ impl Registry {
         ]
         .into_iter()
         .flatten()
-        .any(|route| route.authorize || route.mode == safe_cex_native::routing::HttpRouteMode::How);
+        .any(|route| route.authorize || route.tunnel_url.is_some());
         let authority = authority.clone();
         #[cfg(test)]
         let e2e_venue = self.e2e_venue.clone();
