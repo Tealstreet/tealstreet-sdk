@@ -64,7 +64,7 @@ import { ScriptBatchOrderError } from './ScriptBatchOrderError';
 const EMPTY: readonly never[] = Object.freeze([]);
 
 const lower = (name: string | undefined, fallback: ExchangeName): ExchangeName =>
-  ((name ?? fallback) as string).toLowerCase() as ExchangeName;
+  (name ?? fallback).toLowerCase() as ExchangeName;
 
 // The store keeps terminal rows a while; to a script they are not resting orders.
 const isNotTerminal = (order: Pick<Order, 'status'>): boolean =>
@@ -84,7 +84,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
   ): NonNullable<HostExchange[K]> => {
     const fn = exchange[method];
     if (!fn) throw new Error(`account '${account}' does not support ${String(method)}`);
-    return fn as NonNullable<HostExchange[K]>;
+    return fn;
   };
 
   const findMarket = (symbol: string, account: string): Market | undefined =>
@@ -132,7 +132,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
       // `getStore` first: the CLI's exchange handle and a mobile bridge do not
       // both carry a `store`, and an empty position list clamps to nothing at
       // all rather than failing loudly.
-      positions: (host.getStore(account)?.positions ?? exchange?.store?.positions ?? EMPTY) as Position[],
+      positions: host.getStore(account)?.positions ?? exchange?.store?.positions ?? EMPTY,
       // A binding because web holds OPTIMISTIC in-progress rows that exist
       // nowhere else. A host without it clamps against the store, which is
       // correct — just less current.
@@ -224,8 +224,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
     },
 
     // ── Store reads ──────────────────────────────────────────────────────
-    getMarkets: (account): readonly Market[] =>
-      host.readMarkets?.(account) ?? (host.getStore(account)?.markets as readonly Market[]) ?? EMPTY,
+    getMarkets: (account): readonly Market[] => host.readMarkets?.(account) ?? host.getStore(account)?.markets ?? EMPTY,
     getMarket: (symbol, account): Market | undefined => findMarket(symbol, account),
     getTicker: (symbol, account): Ticker | undefined => findTicker(symbol, account),
     getTickers: (symbols, account): readonly Ticker[] => {
@@ -239,9 +238,9 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
       return tickers.filter((ticker) => want.has(ticker.symbol));
     },
     getPositions: ({ account, symbol }): readonly Position[] =>
-      bySymbol((host.getStore(account)?.positions as readonly Position[]) ?? EMPTY, symbol),
+      bySymbol(host.getStore(account)?.positions ?? EMPTY, symbol),
     getOrders: ({ account, symbol }): readonly Order[] =>
-      bySymbol(((host.getStore(account)?.orders) ?? EMPTY).filter(isNotTerminal), symbol),
+      bySymbol((host.getStore(account)?.orders ?? EMPTY).filter(isNotTerminal), symbol),
     getBalance: (account): Balance | undefined =>
       host.readBalance ? host.readBalance(account) : host.getStore(account)?.balance,
     getCombinedBalance: ({ accounts }): CombinedBalance => summarizeBalance(accounts),
@@ -426,10 +425,10 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
         if (opts.amount !== undefined && opts.percent !== undefined) {
           throw new ScriptValidationError('Set only one of close amount and percent');
         }
-        const candidates = ((host.getStore(account)?.positions ?? []) as Position[]).filter(
+        const candidates = (host.getStore(account)?.positions ?? []).filter(
           (position) => position.symbol === opts.symbol && (!opts.side || position.side === opts.side),
         );
-        if (candidates.length === 0) return { orderIds: Object.freeze([] as readonly string[]) };
+        if (candidates.length === 0) return { orderIds: Object.freeze([]) };
         const market = requireMarket(opts.symbol, account);
         for (const position of candidates) {
           // `position.contracts` is BASE and `placeOrder.amount` is NATIVE —
