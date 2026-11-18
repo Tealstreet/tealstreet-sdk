@@ -167,8 +167,14 @@ pub(crate) fn pre_dispatch_refused(venue: Option<&str>, op: &str, message: &str)
         "account is busy; command not sent" => "input_busy",
         crate::auth::TOKEN_EXPIRED => "auth_expired",
         "Action expired; no further action command was sent" => "action_expired",
-        "Action registration retired; no further action command was sent" => "registration_retired",
-        "runtime_disabled"
+        "Action registration retired; no further action command was sent"
+        | "Action registration retired before dispatch" => "registration_retired",
+        "Algo operation cancelled-for-owner-change: authenticated connection binding changed" => {
+            "owner_changed"
+        }
+        crate::methods::NUKE_NOT_LOADED => "account_not_loaded",
+        "restore_refused"
+        | "runtime_disabled"
         | "pending_verification"
         | "account_missing"
         | "wrong_signing_mode"

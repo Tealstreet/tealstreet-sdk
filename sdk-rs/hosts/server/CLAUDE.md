@@ -400,7 +400,10 @@ Pre-dispatch order refusals emit journal-only INFO `order.pre_dispatch_refused`.
 Its closed reason class, catalog-validated venue (or null) and closed operation
 never include IDs, labels, credentials, payloads or raw error text. Admission
 reasons distinguish runtime, pending proof, mode, holder, registration and drain
-without changing those predicates. Normal amend targets remain id/symbol only;
+without changing those predicates. Receipt-bearing actor Nuke/Algo work also
+logs its owner, expiry, IO, admission and load refusals before its first dispatch.
+Receipt completion and later native-leg failures never mint this whole-action
+pre-dispatch event. Normal amend targets remain id/symbol only;
 reduce-only LIMIT price amendments use the ordinary native amend path.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
