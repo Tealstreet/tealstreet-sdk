@@ -874,7 +874,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3266 merge 2d0fdf629b84: local optimized web/Node 1,960,367 B, build.sh --venue mexc.
   // Rust1.99, bindgen0.2.129, Binaryen132 twice -Oz; measured + 10 KiB rounded up.
   // Module SHA256 e8939820ec914ac233aafc4ef82692d2fda4478800a10f85a7597073810af27f; retain parent floors.
-  mexc: 1_971_200,
+  // Rule 5 / #3638: coordinator approved measured + 10 KiB rounded up; historical floors retained.
+  // Exact 06c5b32372b7; Rust SDK run 44220118208, artifact 14390662738; web/Node/replay 1,962,854 B.
+  // SHA256 8631ad5e6b56b169ab428fb5a897cbc35a57b0d3a3efa91027b0354cabd9ce52; 10,394 B reserve.
+  mexc: 1_973_248,
   // Nullable history output: local optimized web/node 2,052,533 B.
   // SAFE_CEX_WASM_OPT=required build.sh --venue okx; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
   // Current measured size + 10 KiB, rounded up to KiB (rule 17).

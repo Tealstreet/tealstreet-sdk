@@ -4027,3 +4027,17 @@ test('BingX shared command codecs retain the measured optimized reserve', () => 
   assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
 });
+
+// #3638 Rule 5: Rust SDK run 44220118208, artifact 14390662738.
+// Exact source 06c5b32372b7eb047af0039b861e3b58dc8bc0cd; equal optimized web/Node/replay modules.
+// Coordinator: measured + 10 KiB rounded up, preserving historical floors.
+test('#3638 diagnostic composition retains the fresh MEXC reserve and boundary', () => {
+  const measured = 1_962_854;
+  const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.mexc;
+  assert.equal(requiredCap, 1_973_248);
+  assert.ok(cap >= Math.max(requiredCap, 1_971_200), `${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'mexc'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'mexc'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'mexc'), /exceeds/);
+});
