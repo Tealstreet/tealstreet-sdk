@@ -504,10 +504,9 @@ mod tests {
         }
     }
     fn resident(calls: Arc<Mutex<Vec<SignRequest>>>) -> Arc<ResidentCopy> {
-        let protected = safe_cex_engine::signing::ProtectedProvider::new(Arc::new(
-            ProtectedRecording(calls),
-        ))
-        .unwrap();
+        let protected =
+            safe_cex_engine::signing::ProtectedProvider::new(Arc::new(ProtectedRecording(calls)))
+                .unwrap();
         ResidentCopy::test_protected_provider(protected, identities("new"))
     }
     fn signer() -> (Arc<AccountSigner>, Calls, Arc<SignerLink>) {

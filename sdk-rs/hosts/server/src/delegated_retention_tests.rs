@@ -863,7 +863,8 @@ async fn successor_publication_control(published: bool) {
     let owner = account.delegated().unwrap();
     let provider = owner.provider();
     let request = safe_cex_engine::signing::SignRequest {
-        receipt: Default::default(), context: Default::default(),
+        receipt: Default::default(),
+        context: Default::default(),
         operations: vec![safe_cex_engine::signing::Operation::Sign {
             algorithm: Algorithm::HmacSha256,
             key: KeyRef("primary.signing".into()),
@@ -874,44 +875,107 @@ async fn successor_publication_control(published: bool) {
     let deferred = provider.sign(request.clone());
     let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
     let (mut successor, _successor_inbox) = testing::account_on(
-        testing::HeldLoad { placed: Arc::default(), load_after_ms: Some(0.), ticker: true },
-        (&account.user, &account.name, &account.venue), None, "pending-settings".into(), running,
+        testing::HeldLoad {
+            placed: Arc::default(),
+            load_after_ms: Some(0.),
+            ticker: true,
+        },
+        (&account.user, &account.name, &account.venue),
+        None,
+        "pending-settings".into(),
+        running,
     );
     let inner = Arc::get_mut(&mut successor).unwrap();
     inner.identity = account.identity.clone();
     inner.public_only = false;
     inner.signing.set_test_resident(owner.clone());
-    let mut attempt = registry.begin_init(&account.user, account.registry_name(), false, "pending-settings", None).unwrap();
+    let mut attempt = registry
+        .begin_init(
+            &account.user,
+            account.registry_name(),
+            false,
+            "pending-settings",
+            None,
+        )
+        .unwrap();
     registry.release(&account, 7, Disposal::SocketClosed);
     // Delay only registry cleanup: escaped handles must enforce their deadline.
-    account.holders.lock().unwrap().retention.as_ref().unwrap().abort_cleanup_for_test();
-    assert!(successor.hold_before_publication(8, Live { outbox: Arc::new(|_| true), token: None }, &successor.name));
+    account
+        .holders
+        .lock()
+        .unwrap()
+        .retention
+        .as_ref()
+        .unwrap()
+        .abort_cleanup_for_test();
+    assert!(successor.hold_before_publication(
+        8,
+        Live {
+            outbox: Arc::new(|_| true),
+            token: None
+        },
+        &successor.name
+    ));
     if published {
-        assert!(attempt.publish(&registry.accounts, &successor).unwrap().is_some());
+        assert!(
+            attempt
+                .publish(&registry.accounts, &successor)
+                .unwrap()
+                .is_some()
+        );
     } else {
-        let _newer = registry.begin_init(&account.user, account.registry_name(), false, "superseding-settings", None).unwrap();
+        let _newer = registry
+            .begin_init(
+                &account.user,
+                account.registry_name(),
+                false,
+                "superseding-settings",
+                None,
+            )
+            .unwrap();
         assert!(attempt.publish(&registry.accounts, &successor).is_err());
     }
-    let current = registry.accounts.lock().unwrap()[&(account.user.clone(), account.registry_name().into())].clone();
-    assert!(Arc::ptr_eq(&current, if published { &successor } else { &account }));
+    let current = registry.accounts.lock().unwrap()
+        [&(account.user.clone(), account.registry_name().into())]
+        .clone();
+    assert!(Arc::ptr_eq(
+        &current,
+        if published { &successor } else { &account }
+    ));
     advance(RETAIN).await;
     if published {
-        assert_eq!(provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256), Capability::Supported);
+        assert_eq!(
+            provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+            Capability::Supported
+        );
         assert!(provider.sign_ready(&request).unwrap().is_ok());
         assert!(deferred.await.is_ok());
     } else {
-        assert_eq!(provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256), Capability::Unsupported);
-        assert_eq!(provider.sign_ready(&request), Some(Err(safe_cex_engine::signing::SignError::Unavailable)));
-        assert_eq!(deferred.await, Err(safe_cex_engine::signing::SignError::Unavailable));
+        assert_eq!(
+            provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+            Capability::Unsupported
+        );
+        assert_eq!(
+            provider.sign_ready(&request),
+            Some(Err(safe_cex_engine::signing::SignError::Unavailable))
+        );
+        assert_eq!(
+            deferred.await,
+            Err(safe_cex_engine::signing::SignError::Unavailable)
+        );
     }
 }
 
 #[tokio::test(start_paused = true)]
 async fn unpublished_settings_successor_cannot_clear_the_residents_retention_deadline() {
-    tokio::task::LocalSet::new().run_until(successor_publication_control(false)).await;
+    tokio::task::LocalSet::new()
+        .run_until(successor_publication_control(false))
+        .await;
 }
 
 #[tokio::test(start_paused = true)]
 async fn published_settings_successor_cancels_the_residents_old_retention_deadline() {
-    tokio::task::LocalSet::new().run_until(successor_publication_control(true)).await;
+    tokio::task::LocalSet::new()
+        .run_until(successor_publication_control(true))
+        .await;
 }
