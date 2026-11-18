@@ -90,7 +90,7 @@ async fn order_frames_use_the_existing_native_call_and_registration() {
                 let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
                 session.joined.get_mut("synthetic-main").unwrap().out =
                     session.out.with_instance_id(id);
-                assert!(session.resnapshot("synthetic-main").await);
+                assert!(session.resnapshot("synthetic-main", None).await);
                 let key = submit(&mut session, 0, id).await;
                 {
                     let pending = session.joined["synthetic-main"]
@@ -204,7 +204,7 @@ async fn order_frames_delayed_unknown_remains_on_its_original_users_socket() {
             let (mut alice, mut a_sent) = joined(registry.clone(), "A", a.clone()).await;
             alice.joined.get_mut("synthetic-main").unwrap().out =
                 alice.out.with_instance_id(Some("alice"));
-            assert!(alice.resnapshot("synthetic-main").await);
+            assert!(alice.resnapshot("synthetic-main", None).await);
             submit(&mut alice, 0, Some("alice")).await;
             let _ = order_frame(&mut a_sent, "order.ack").await;
             tokio::time::timeout(Duration::from_secs(2), async {
@@ -219,7 +219,7 @@ async fn order_frames_delayed_unknown_remains_on_its_original_users_socket() {
             let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
             bob.joined.get_mut("synthetic-main").unwrap().out =
                 bob.out.with_instance_id(Some("bob"));
-            assert!(bob.resnapshot("synthetic-main").await);
+            assert!(bob.resnapshot("synthetic-main", None).await);
             a_tape.finish_unknown();
             let unknown = order_frame(&mut a_sent, "order.outcome").await;
             assert_eq!(unknown["d"]["outcome"], "unknown");
@@ -255,7 +255,7 @@ async fn order_frames_retired_registration_drops_its_deferred_completion() {
             let (mut alice, mut a_sent) = joined(registry.clone(), "A", a.clone()).await;
             alice.joined.get_mut("synthetic-main").unwrap().out =
                 alice.out.with_instance_id(Some("alice-old"));
-            assert!(alice.resnapshot("synthetic-main").await);
+            assert!(alice.resnapshot("synthetic-main", None).await);
             submit(&mut alice, 0, Some("alice-old")).await;
             order_frame(&mut a_sent, "order.ack").await;
             let pending = alice.joined["synthetic-main"].client.pending.clone();
@@ -272,13 +272,13 @@ async fn order_frames_retired_registration_drops_its_deferred_completion() {
                 replacement,
             );
             previous.retire_registration();
-            assert!(alice.resnapshot("synthetic-main").await);
+            assert!(alice.resnapshot("synthetic-main", None).await);
             let b_tape = Tape::default();
             let b = delegated_account(&registry, "B", "bybit", b_tape.clone());
             let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
             bob.joined.get_mut("synthetic-main").unwrap().out =
                 bob.out.with_instance_id(Some("bob"));
-            assert!(bob.resnapshot("synthetic-main").await);
+            assert!(bob.resnapshot("synthetic-main", None).await);
             a_tape.finish_unknown();
             tokio::time::timeout(Duration::from_secs(2), async {
                 while !pending.lock().unwrap().is_empty() {
@@ -344,7 +344,7 @@ async fn order_frames_successful_reverification_drops_previous_deferred_completi
             alice.identity.token = Some(("synthetic-valid-token".into(), u64::MAX));
             alice.joined.get_mut("synthetic-main").unwrap().out =
                 alice.out.with_instance_id(Some("alice-old"));
-            assert!(alice.resnapshot("synthetic-main").await);
+            assert!(alice.resnapshot("synthetic-main", None).await);
             submit(&mut alice, 0, Some("alice-old")).await;
             order_frame(&mut a_sent, "order.ack").await;
             let pending = alice.joined["synthetic-main"].client.pending.clone();
@@ -399,7 +399,7 @@ async fn order_frames_successful_reverification_drops_previous_deferred_completi
             let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
             bob.joined.get_mut("synthetic-main").unwrap().out =
                 bob.out.with_instance_id(Some("bob"));
-            assert!(bob.resnapshot("synthetic-main").await);
+            assert!(bob.resnapshot("synthetic-main", None).await);
             a_tape.finish_unknown();
             tokio::time::timeout(Duration::from_secs(2), async {
                 while !pending.lock().unwrap().is_empty() {
@@ -451,7 +451,7 @@ async fn unsupported_init_preserves_live_delegated_receipts_and_pending_completi
             session
                 .registration_outputs
                 .insert("synthetic-main".into(), live);
-            assert!(session.resnapshot("synthetic-main").await);
+            assert!(session.resnapshot("synthetic-main", None).await);
             let first_id = submit(&mut session, 0, Some("live")).await;
             assert_eq!(
                 order_frame(&mut sent, "order.ack").await["d"]["instanceId"],
@@ -504,7 +504,7 @@ async fn unsupported_init_preserves_live_delegated_receipts_and_pending_completi
             let b = delegated_account(&registry, "B", "bybit", b_tape.clone());
             let (mut bob, mut b_sent) = joined(registry.clone(), "B", b.clone()).await;
             bob.joined.get_mut("synthetic-main").unwrap().out = bob.out.with_instance_id(Some("B"));
-            assert!(bob.resnapshot("synthetic-main").await);
+            assert!(bob.resnapshot("synthetic-main", None).await);
             for (id, events) in tape.waiting.lock().unwrap().drain(..) {
                 answer(
                     &events,

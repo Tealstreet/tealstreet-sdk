@@ -142,3 +142,8 @@ project fields from the omission marker or fall back to uninspected raw input.
 Redaction fixtures construct public canary bytes from short pieces or explicit
 JSON/base64 encoding. Keep the original runtime bytes and assertions; historical
 scan exceptions are exact commit/file/rule/line records, never a test-path exemption.
+
+`redactDiagnosticDataWithOutcome` exposes the same single pass as the legacy copy
+API, adding only closed omission reason/stage and bounded inspected-string byte
+metrics. It must not retry reads, stringify raw input, inspect thrown values or
+relax a parser limit. See the policy for the byte metric's partial-work semantics.
