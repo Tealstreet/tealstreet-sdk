@@ -24,6 +24,11 @@ measures equal optimized web/Node/replay modules at 2,683,302 bytes. The
 coordinator's Rule 5 floor is 2,694,144 bytes, retaining 10,842 bytes and every
 historical floor.
 
+OKX empty-envelope diagnostics retain code-0 cancellation continuation, nonzero
+stop behavior and the original native outcomes. Its scoped ordered-write tests
+pin complete per-order cancellation reporting and the explicit unknown-diagnostic
+fallback; optimized family evidence remains separate from these native controls.
+
 BingX Spot qualification adds independent Spot public/private cases to the `bingx` suite.
 The nondefault `bingx-spot-replay` WASM feature exports a fixed-credential fixture constructor;
 normal factories still refuse Spot. Shipped family size checks run before the fixture build.
@@ -35,6 +40,10 @@ flags and the Spot admission/smoke gates remain independent.
 WASM venue caps retain both parents' measured floors. Fresh compositions must
 retain at least 10 KiB above their optimized web/Node measurement, rounded up
 to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
+
+BingX history diagnostics inspect failed responses with closed streaming visitors.
+Compact optional detail preserves engine error and socket allocation budgets;
+fresh web/Node artifacts must retain the existing family cap and 10 KiB reserve.
 
 TxFlow agent refresh #3314 at merge 9bb43250830d measures 2,147,684 bytes;
 refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its

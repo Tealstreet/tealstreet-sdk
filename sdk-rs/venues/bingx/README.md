@@ -94,6 +94,22 @@ History read refusals retain a typed kind, the numeric venue code, and a closed
 decode). These diagnostics do not change one-resend or strict history recovery
 rules. Code meanings follow [BingX's error reference](https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/error-codes.md).
 
+Income-ledger and order-history decode failures additionally carry closed
+`historyDecode` evidence: schema/reason and a `shape` of fixed field path,
+expected/actual JSON types and envelope-code presence. `row.*` paths are relative
+to one streamed row; indices, identities, amounts and raw parser text are never
+included. Inspection runs only after an existing decode failure and cannot accept
+or skip a rejected row. HTTP/key/rate-limit and transport errors keep their typed
+refusals instead. Production diagnosis still needs this evidence from a failing
+response; no claim is made that one schema change explains all historical alerts.
+Inspection streams a closed set of fields and types instead of constructing a JSON
+tree. Optional diagnostic storage keeps the engine's original two-byte footprint;
+ordinary errors and socket-auth queues retain their existing allocation budgets.
+
+REST order history accepts documented `PARTIALLYFILLED` as open and `FAILED` as
+canceled alongside the existing status spellings. Other unknown states still
+refuse the whole history read; this read-only mapping conveys no write authority.
+
 Protective edits retain native closing authority and use a final managed-Claim
 veto with a genuine <=5 s Mark/Last receipt. Proven standalone stop-market edits
 use native cancelReplace; explicit partial refusal permits one exact put-back.

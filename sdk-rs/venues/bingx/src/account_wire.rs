@@ -60,11 +60,17 @@ pub fn boolean<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     match Bool::deserialize(d)? {
         Bool::Bare(b) => Ok(b),
         Bool::Null(()) => Ok(false),
-        Bool::Text(s) => match s.as_ref() {
-            "true" => Ok(true),
-            "false" | "" => Ok(false),
-            _ => Err(serde::de::Error::custom("invalid boolean")),
-        },
+        Bool::Text(s) => {
+            boolean_text(s.as_ref()).ok_or_else(|| serde::de::Error::custom("invalid boolean"))
+        }
+    }
+}
+
+pub(super) fn boolean_text(text: &str) -> Option<bool> {
+    match text {
+        "true" => Some(true),
+        "false" | "" => Some(false),
+        _ => None,
     }
 }
 
@@ -380,6 +386,34 @@ pub struct PositionIntent<'a> {
 #[cfg(test)]
 mod native_order_tests {
     use super::*;
+
+    #[test]
+    fn boolean_wire_keeps_its_exact_existing_scalar_contract() {
+        #[derive(Deserialize)]
+        struct Flag(#[serde(deserialize_with = "boolean")] bool);
+        for (raw, expected) in [
+            ("true", true),
+            ("false", false),
+            ("null", false),
+            (r#""true""#, true),
+            (r#""false""#, false),
+            (r#""""#, false),
+        ] {
+            assert_eq!(serde_json::from_str::<Flag>(raw).unwrap().0, expected);
+        }
+        for raw in [
+            "0",
+            "1",
+            "-1",
+            "1.5",
+            "[]",
+            "{}",
+            r#""TRUE""#,
+            r#"" false ""#,
+        ] {
+            assert!(serde_json::from_str::<Flag>(raw).is_err());
+        }
+    }
 
     #[test]
     fn a_row_without_time_in_force_is_complete() {
