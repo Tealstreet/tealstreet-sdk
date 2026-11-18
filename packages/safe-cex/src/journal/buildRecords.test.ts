@@ -285,3 +285,21 @@ describe('buildFoldedPositionRecords — incomplete history cannot claim complet
     expect(result.records[0].fundingAttributed).toBe(true);
   });
 });
+
+describe('buildFoldedPositionRecords — foreign fee currencies', () => {
+  it('rejects the derived result instead of silently dropping its unconvertible position', async () => {
+    const fills = roundTrip('BTCUSDT').map((fill, index) => ({
+      ...fill,
+      commissionAsset: index === 0 ? 'BNB' : 'USDT',
+    }));
+    await expect(
+      buildFoldedPositionRecords(
+        {
+          fetchHistoricalFills: async () => fills,
+          fetchIncomeHistoryRange: async () => [{ symbol: 'BTCUSDT' }],
+        },
+        options({ symbolScoped: true }),
+      ),
+    ).rejects.toThrow(/fee currency conversion/);
+  });
+});

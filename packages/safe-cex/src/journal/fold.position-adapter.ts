@@ -71,6 +71,13 @@ export const mapFoldedInterval = (
   // nowhere, and the residual reads as a mapping defect rather than as missing data.
   if (interval.realizedPnl === undefined) return null;
 
+  const settleCurrency = deps.resolveSettleCurrency(interval.symbol);
+  // A BNB charge is not a USDT cost. Without historical FX, refuse the fold
+  // rather than publish mixed units or silently omit this closed position.
+  if (interval.feeCurrencies.some((currency) => currency !== settleCurrency)) {
+    throw new Error('journal fold: fee currency conversion is unavailable');
+  }
+
   const funding = deps.resolveFunding?.(interval);
 
   return {
@@ -79,7 +86,7 @@ export const mapFoldedInterval = (
     key: `${deps.account}|${interval.symbol}|${interval.positionSide}|${interval.openedAt}|${interval.closedAt}`,
     account: deps.account,
     symbol: interval.symbol,
-    settleCurrency: deps.resolveSettleCurrency(interval.symbol),
+    settleCurrency,
     side: interval.side,
     positionSide: interval.positionSide,
     state: 'closed',

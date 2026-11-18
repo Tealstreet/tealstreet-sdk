@@ -119,3 +119,51 @@ describe('folded-interval position adapter (binance / hyperliquid)', () => {
     expect(record.fees).toBeCloseTo(0.042, 10);
   });
 });
+
+describe('folded fees retain their currency boundary', () => {
+  const roundTrip = (openingAsset: string, closingAsset: string) =>
+    reconstructPositionIntervals([
+      {
+        symbol: 'BTCUSDT',
+        timestamp: 1_000,
+        price: 100,
+        qty: 1,
+        side: OrderSide.Buy,
+        commission: 0.01,
+        commissionAsset: openingAsset,
+        realizedPnl: 0,
+      },
+      {
+        symbol: 'BTCUSDT',
+        timestamp: 2_000,
+        price: 110,
+        qty: 1,
+        side: OrderSide.Sell,
+        commission: 0.01,
+        commissionAsset: closingAsset,
+        realizedPnl: 10,
+      },
+    ])[0];
+
+  it.each([
+    ['BNB', 'BNB'],
+    ['BNB', 'USDT'],
+    ['USDT', 'BNB'],
+  ])('refuses %s/%s fees instead of labeling the sum as USDT', (openingAsset, closingAsset) => {
+    const folded = roundTrip(openingAsset, closingAsset);
+    expect(folded.realizedPnl).toBe(10);
+    expect(folded.feeCurrencies).toEqual([...new Set([openingAsset, closingAsset])]);
+    expect(() => mapFoldedInterval(folded, deps)).toThrow(/fee currency conversion/);
+  });
+
+  it('keeps settlement-denominated costs and rebates without changing gross PnL', () => {
+    const folded = roundTrip('USDT', 'USDT');
+    const record = mapFoldedInterval(folded, deps);
+    expect(record?.settleCurrency).toBe('USDT');
+    expect(record?.fees).toBeCloseTo(0.02);
+    expect(record?.realizedPnl).toBe(10);
+    const rebate = mapFoldedInterval({ ...folded, fees: -0.02 }, deps);
+    expect(rebate?.fees).toBeCloseTo(-0.02);
+    expect(rebate?.realizedPnl).toBe(10);
+  });
+});

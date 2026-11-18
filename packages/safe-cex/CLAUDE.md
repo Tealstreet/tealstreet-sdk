@@ -1094,6 +1094,12 @@ and `copyHistoryCompleteness` helpers preserve it before row transformations;
 Rust derived position and reported closed-PnL mappings retain it even on empty
 results. Bybit's derived history combines both source axes' assertions.
 
+The journal fold refuses a derived position when any reported fee currency differs
+from its settlement currency: there is no historical FX conversion in this path.
+The error propagates through `buildFoldedPositionRecords`; never silently drop the
+position or label BNB/mixed-currency fees as USDT. Raw fills retain their native
+fee amounts and currencies. Settlement-denominated fees and rebates are unchanged.
+
 The journal fold rejects flagged fills and symbol-scoped income; with complete
 account-wide fills it discards flagged income enrichment and leaves funding
 unattributed. NX ingestion must still inspect completeness before transforms
