@@ -1,5 +1,5 @@
 /** Runs a WasmEngine against a transport. See host.mjs. */
-import type { EngineCapabilities } from './wire.mjs';
+import type { EngineCapabilities } from './capabilities.mjs';
 
 export type { EngineCapabilities };
 export type HistoryDecodeDetail = {

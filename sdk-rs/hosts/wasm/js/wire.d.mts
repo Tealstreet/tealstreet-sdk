@@ -1,3 +1,5 @@
+import type { EngineCapabilities, QuantityUnits } from './capabilities.mjs';
+export type { EngineCapabilities, QuantityUnits } from './capabilities.mjs';
 import type { StoreData } from '../../../../packages/safe-cex/src/generated/StoreData.js';
 import type { Balance } from '../../../../packages/safe-cex/src/generated/Balance.js';
 export type { Balance } from '../../../../packages/safe-cex/src/generated/Balance.js';
@@ -51,54 +53,10 @@ export const MARKET_COLUMNS: readonly [
 export type MarketColumn = (typeof MARKET_COLUMNS)[number];
 export const ORDER_TRIGGER_WORD: { TP_SHIFT: 0; SL_SHIFT: 8; TRIGGER_MASK: 255; NATIVE_ALGO: 65536 };
 export const MARKET_FLAG: { ACTIVE: 1; INVERSE: 2; SPOT: 4; PERPETUAL: 8; EXPIRING: 16; READ_ONLY: 32 };
-export type QuantityUnits = 'base' | 'nativePlacement' | 'inverseNative' | 'contractCount' | 'inverseContractSized';
 export const QUANTITY_UNITS: readonly QuantityUnits[];
 /** A market's quantity convention, from its MARKETS flags. */
 export function marketQuantityUnits(flags: number): QuantityUnits;
-/** What a venue answers beyond the common commands (`safe_cex_engine::Capabilities`). */
-export interface EngineCapabilities {
-  account: 'unsupported' | 'query' | 'afterLoad';
-  clientOrderLookup: boolean;
-  fillHistory: boolean;
-  orderHistory: boolean;
-  incomeHistory: boolean;
-  fillsByOrderId: boolean;
-  cancelAll: 'eachOpenSymbol' | 'eachPlacedSymbol' | 'native';
-  leverageQuery: 'settings' | 'onRead' | 'onMetadata' | 'onReadAndMetadata';
-  maxLeverage: 'market' | 'query' | 'rails' | 'unsupported';
-  accountLeverage: boolean;
-  accountMarginType: boolean;
-  cancelWithSymbols: boolean;
-  amendWithSymbol: boolean;
-  orderBookQuery: boolean;
-  options: boolean;
-  quantityUnits: QuantityUnits;
-  accountTier: boolean;
-  closedPositions: boolean;
-  balanceInfo: boolean;
-  marketRefresh: boolean;
-  positionHistory: 'unsupported' | 'fillsAccount' | 'fillsSymbol' | 'bybit' | 'okx' | 'blofin' | 'wooOrders' | 'bitunix';
-  closedPositionFormat: 'unsupported' | 'bybit' | 'okx' | 'blofin' | 'bitunix';
-  fillHistoryTime: 'asProvided' | 'secondsOrMilliseconds' | 'nonnegativeSecondsOrMilliseconds';
-  stpControls: boolean;
-  bybitExecutionControls: boolean;
-  rejectClientSlippage: boolean;
-  finiteCommandNumbers: boolean;
-  finiteHistoryBounds: boolean;
-  rejectOrderHistoryFilters: boolean;
-  publicCatalogueValidation: boolean;
-  isolatedBookSubscriptions: boolean;
-  inverseClosedPositions: boolean;
-  scheduleCancel: boolean;
-  orderHistoryNeedsSymbol: boolean;
-  freshPositions: boolean;
-  /** The `cancelAccountOrders` op, which only a nuke sends. */
-  nukeAccountCancel: boolean;
-  /** A symbol cancel can miss an order the store has not seen yet. */
-  symbolCancelMissesUnseen: boolean;
-  /** The source writes read covers; a frame-fed page lifts fences on them (Rust ingest only). */
-  orderReadCovers: boolean;
-}
+
 export const LOADED_FLAG: { BALANCE: 1; ORDERS: 2; MARKETS: 4; TICKERS: 8; POSITIONS: 16 };
 export const STATUS_FLAG: { HEDGED: 1; LATENCY_MEASURED: 2 };
 export const ORDER_COLUMNS: readonly ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
