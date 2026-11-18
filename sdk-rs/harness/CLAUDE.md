@@ -158,3 +158,16 @@ tables are allocated. Full books reserve their known level columns, and the stri
 tail includes final alignment. LOCAL copies each owned flush once to JavaScript; snapshots keep independent
 baselines.
 The public 16-pair memory gate and all compared fields remain unchanged.
+
+#3640 post-master rule-17 reserve audit uses CI44302321301, built source
+`1fdd2db8279b2d4ab697720f2169cd0b6941a078` (the exact tree of PR head
+`7e9d5723fad5e8820242a18b205c068dd8eb851f`). All 27 sealed family artifacts
+have matching optimized web/Node bytes and hashes, verified source/run/input
+fingerprints, and pinned tools. The complete 49-name routing and 31-name explicit
+budget census found shortfalls only for ApeX, Binance, Kraken, Lighter, TxFlow and
+WOO; their vetoable cap refreshes use measured +10 KiB rounded up to KiB, never
+lowering a prior cap, with shared budget aliases kept equal. The budget tests
+retain every family measurement and module SHA256 and require exact caps,
+10 KiB reserves, alias coverage, and cap/cap+1 boundaries. Combined measures
+17,869,568 B (SHA256 `b7693720dffd5c3878c09ea239e9949532c43d110e4883080aa07b476ad482a3`),
+leaving 218,368 B at the unchanged 18,087,936 B ceiling. No runtime inputs change.
