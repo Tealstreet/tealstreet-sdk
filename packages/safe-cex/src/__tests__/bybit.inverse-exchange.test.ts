@@ -77,6 +77,23 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     expect(store.positions[0].liquidationPrice).toBeNull();
   });
 
+  it.each([false, true])(
+    'publishes complete private readiness from decoded empty tables (initial=%s)',
+    async (initial) => {
+      const { exchange, store } = create(true);
+      store.apply(
+        nativeFixture({ markets: [], tickers: [], loaded: { ...store.loaded, markets: true, tickers: true } }),
+      );
+      vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([]);
+      vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([]);
+      vi.spyOn(exchange, 'fetchBalance').mockResolvedValue({ used: 0, free: 0, total: 0, upnl: 0 });
+      vi.spyOn(exchange, 'fetchRawBalance').mockResolvedValue([]);
+      if (initial) await exchange.fetchOrdersPositionsAndBalance();
+      else await exchange.fetchAndSetPrivateSnapshot();
+      expect(store.loaded).toEqual({ markets: true, tickers: true, balance: true, orders: true, positions: true });
+    },
+  );
+
   it.each(['40', '2000000', '0', '-1', '', 'invalid', undefined])(
     'dedicated inverse reference publishes a conservative maximum with native market cap %s',
     async (marketCap) => {

@@ -1187,7 +1187,8 @@ export class BybitExchange extends BaseExchange {
         nativeFixture(
           {
             balance,
-            loaded: { ...this.store.loaded, balance: true },
+            // All three source reads completed; partial consumer flags are clamped.
+            loaded: { ...this.store.loaded, balance: true, orders: true, positions: true },
           },
           this.store.markets.map((row) => row.symbol),
         ),
@@ -1237,7 +1238,6 @@ export class BybitExchange extends BaseExchange {
           nativeFixture(
             {
               orders,
-              loaded: { ...this.store.loaded, orders: true },
             },
             this.store.markets.map((row) => row.symbol),
           ),
@@ -1264,14 +1264,6 @@ export class BybitExchange extends BaseExchange {
           ),
         );
       })();
-      this.store.apply(
-        nativeFixture(
-          {
-            loaded: { ...this.store.loaded, positions: true },
-          },
-          this.store.markets.map((row) => row.symbol),
-        ),
-      );
 
       const balance = await balancePromise;
 
@@ -1280,7 +1272,15 @@ export class BybitExchange extends BaseExchange {
         nativeFixture(
           {
             balance,
-            loaded: { ...this.store.loaded, balance: true },
+            // FrameStore clamps account flags until every dataset has decoded.
+            // Publish source completion together; copying partial clamped flags
+            // would erase the orders/positions reads that already completed.
+            loaded: {
+              ...this.store.loaded,
+              balance: true,
+              positions: true,
+              orders: fetchOrders || this.store.loaded.orders,
+            },
           },
           this.store.markets.map((row) => row.symbol),
         ),
