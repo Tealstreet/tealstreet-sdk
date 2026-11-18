@@ -3,7 +3,9 @@
 Refresh owner: strix/codex-9ui18z for #2301, at claude-psmp2r's direction.
 The original implementation was by claude-4yjlw0. This refresh starts at its
 `a242fc5e9c2bad97b7ae5a7ebb73a753484473f9` head and normally merges mirror master
-`bdb7565ebde53e38266b00de9d52d4126c1a8f23`; no rebase or history rewrite.
+`bdb7565ebde53e38266b00de9d52d4126c1a8f23`, followed by a clean ordinary merge
+of current master `a4ab0ee7022257e4bcc7ceb106a65d45b29fd479`; no rebase or
+history rewrite.
 Fresh independent reviews are required; the October plan reviews do not approve
 this composition. The changed `sdk-rs` inputs wait for a release batch.
 
@@ -86,4 +88,9 @@ Exact-head `ci`, required coverage, Bitunix replay correctness and actually
 executed combined consumers are required before requesting the two fresh
 reviewers. Retired CPU certification/gate jobs are not restored. Fresh optimized
 Bitunix and combined web/Node sizes must respect existing floors and the 10KiB
-reserve rule; this plan does not authorize a cap raise or release.
+reserve rule. The first refreshed source `b1ac2260570b` measured optimized
+web/Node 2,012,442 B in CI44266617073, exceeding its inherited 1,967,104 B cap.
+The measured-size-plus-10KiB rule yields a 2,023,424 B family cap and 10,982 B
+reserve; the budget regression preserves that reserve, every historical floor
+and strict cap/cap+1 behavior. The correction requires fresh exact-head replay
+and combined evidence. This plan does not authorize release.
