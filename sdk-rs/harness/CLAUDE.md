@@ -27,6 +27,13 @@ MEXC's object-envelope guard at c2455ca0e799 measures 1,963,086 bytes in run
 44255752536, artifact 14406113023. Rule 17's measured + 10 KiB rounded-up floor
 is 1,974,272 bytes, retaining 11,186 bytes and all earlier measured floors.
 
+WOO's exact signature-error auth classification changes diagnostics only; socket
+recovery, signing, retry and write behavior retain their lifecycle controls.
+Exact source 85a85576995b, Rust SDK run 44220127210, artifact 14390881543
+measures equal optimized web/Node/replay modules at 2,683,302 bytes. The
+coordinator's Rule 5 floor is 2,694,144 bytes, retaining 10,842 bytes and every
+historical floor.
+
 HyroTrader correlated auth-refusal metadata changes a Bybit-family input.
 Keep its native admission/uncertainty controls and fresh optimized family evidence;
 server negative-join fixtures retain the protected-provider and zero-write guards.

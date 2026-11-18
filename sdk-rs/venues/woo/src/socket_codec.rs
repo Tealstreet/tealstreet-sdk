@@ -41,7 +41,13 @@ struct AuthReply {
     status: Option<AuthValue>,
 }
 
-fn auth_refusal(reply: AuthReply) -> VenueError {
+#[derive(serde::Deserialize)]
+struct AuthMessage {
+    #[serde(rename = "errorMsg")]
+    message: Option<AuthValue>,
+}
+
+fn auth_refusal(reply: AuthReply, frame: &str) -> VenueError {
     let code = reply.code.as_ref().and_then(AuthValue::integer);
     // https://docs.woox.io/#error-codes: -1002 covers several causes, not specifically IP.
     let reason = match code {
@@ -51,6 +57,11 @@ fn auth_refusal(reply: AuthReply) -> VenueError {
         Some(-1000) => "unknown venue error",
         Some(-1011) => "venue RPC connection unavailable",
         Some(-1012) => "venue RPC request rejected",
+        _ if serde_json::from_str::<AuthMessage>(frame).is_ok_and(|reply| {
+            matches!(reply.message, Some(AuthValue::Text(message)) if message == "signature error")
+        }) => {
+            "invalid signature"
+        }
         _ => "unclassified auth refusal",
     };
     let mut message = "WOO X private websocket authentication failed".to_owned();
@@ -301,7 +312,7 @@ impl Woo {
                         ..
                     }) => AuthEvidence::Accepted,
                     Ok(reply) if reply.success == Some(false) => {
-                        AuthEvidence::Rejected(auth_refusal(reply))
+                        AuthEvidence::Rejected(auth_refusal(reply, text))
                     }
                     _ => AuthEvidence::Malformed,
                 };

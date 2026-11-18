@@ -447,6 +447,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // SHA-256 70cd348f758b71303b71e47a7231223bd06078e79b1e56e095dcca7a7f8d2aa2.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; required -Oz build.
   // Current measured bytes + 10 KiB, rounded up; retain all larger parent floors.
+  // #3424 merge 2822bf8cd2cf: local optimized web/Node 2,332,681 B.
+  // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; build.sh --venue bybit, twice -Oz.
+  // wasm-budget.mjs --venue bybit regenerated the report; measured +10 KiB rounded up.
   // #3317 throughput profile at 0c8e04fe5a: optimized local web/node 2,483,240 B.
   // SAFE_CEX_WASM_OPT=required bash sdk-rs/harness/build.sh --venue bybit.
   // #3317 run 43060399359, job 130665084604, artifact 13874660310:
@@ -1128,7 +1131,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3290 CI 43563699705, source 8043e2bb11e5, artifact 14101841020: web/Node/replay 2,680,145 B.
   // Verified optimized module maximum + 10 KiB rounded up; all historical floors retained.
   // #3513 CI43629571410: 2_681_664 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
-  woo: 2_692_096,
+  // Rule 5 / #3639: coordinator approved measured + 10 KiB rounded up; historical floors retained.
+  // Exact 85a85576995b; Rust SDK run 44220127210, artifact 14390881543; web/Node/replay 2,683,302 B.
+  // SHA256 38768e867378a4f467c599939c1f0e15177056929c57a057cabbf825d45817f8; 10,842 B reserve.
+  woo: 2_694_144,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];

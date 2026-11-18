@@ -50,7 +50,16 @@ pub fn enabled_for(venue: &str) -> bool {
 
 pub fn action_capabilities(venue: Option<&str>) -> DelegatedActions {
     if activation_allowed(venue.is_some_and(enabled_for), &PLACE_AND_CLOSE) {
-        PLACE_AND_CLOSE
+        // e2dab6ad16 made scope venue-generic; 17865385b5 enabled full writes.
+        // c4370459d pins metadata matching that runtime, with the same activation floor.
+        let actions_enabled = runtime_enabled();
+        DelegatedActions {
+            amend: actions_enabled,
+            cancel: actions_enabled,
+            cancel_all: actions_enabled,
+            nuke: actions_enabled,
+            ..PLACE_AND_CLOSE
+        }
     } else {
         DelegatedActions {
             place: false,
@@ -118,16 +127,33 @@ pub fn key_time(id: &str) -> Option<u64> {
     u64::from_str_radix(&id[..13].replace('-', ""), 16).ok()
 }
 
-pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
-    let created = key_time(id).ok_or("not sent: invalid intent key")?;
-    let age = now
-        .checked_sub(created)
-        .ok_or("not sent: invalid key time")?;
+pub(crate) fn key_age(created: u64, now: u64) -> Result<u64, &'static str> {
+    if created.saturating_sub(now) > 5_000 {
+        return Err("not sent: invalid key time");
+    }
+    let age = now.saturating_sub(created);
     if age >= 10_000 {
         Err("not sent: expired")
     } else {
-        Ok(())
+        Ok(age)
     }
+}
+
+pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
+    let created = key_time(id).ok_or("not sent: invalid intent key")?;
+    key_age(created, now)?;
+    let skew = created.saturating_sub(now);
+    if skew > 0 {
+        let bucket = match skew {
+            1..=1_000 => "le_1s",
+            1_001..=3_000 => "gt_1s_le_3s",
+            _ => "gt_3s_le_5s",
+        };
+        crate::state::Log::info(
+            &json!({"event":"order.intent_clock_skew","skew_bucket":bucket}).to_string(),
+        );
+    }
+    Ok(())
 }
 
 /// #3630 audits native formats: keep all validated UUID bits in supported text
@@ -404,3 +430,7 @@ mod activation_tests {
 #[cfg(test)]
 #[path = "client_order_ids_tests.rs"]
 mod client_order_ids_tests;
+
+#[cfg(test)]
+#[path = "order_key_time_tests.rs"]
+mod key_time_tests;

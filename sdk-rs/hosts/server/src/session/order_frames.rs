@@ -17,19 +17,62 @@ impl Session {
         self.handover_out(name)
     }
 
+    pub(super) fn audit_legacy_order_refusal(&self, msg: &AccountMsg, reason: &str) {
+        if msg.op == "callMethod"
+            && let Some(method) = msg.data["method"]
+                .as_str()
+                .filter(|method| crate::audit::ORDER_METHODS.contains(method))
+        {
+            self.audit_order_refusal(msg.account_name.as_deref().unwrap_or(""), method, reason);
+        }
+    }
+
+    pub(super) fn audit_order_refusal(&self, name: &str, op: &str, message: &str) {
+        crate::audit::pre_dispatch_refused(
+            self.joined.get(name).map(|j| j.account.venue.as_str()),
+            op,
+            message,
+        );
+    }
+
+    pub(super) fn order_admission_refusal(
+        &self,
+        name: &str,
+        instance: Option<&str>,
+    ) -> Option<&'static str> {
+        if !self.order_frames_enabled {
+            return Some("runtime_disabled");
+        }
+        if self.pending_verifications.contains_key(name) {
+            return Some("pending_verification");
+        }
+        let Some(joined) = self.joined.get(name) else {
+            return Some("account_missing");
+        };
+        if joined.account.delegated().is_none() {
+            return Some("wrong_signing_mode");
+        }
+        if joined.account.is_public() {
+            return Some("public_account");
+        }
+        if !order_contract::enabled_for(&joined.account.venue) {
+            return Some("venue_disabled");
+        }
+        if !joined.account.running.io_allowed() {
+            return Some("io_fenced");
+        }
+        if !self.registry.holds(&joined.account, self.socket) {
+            return Some("holder_changed");
+        }
+        if !joined.out.order_binding(instance) {
+            return Some("registration_mismatch");
+        }
+        self.moved_by_drain().then_some("draining")
+    }
+
     pub(super) fn order_admitted(&mut self, name: &str, instance: Option<&str>) -> bool {
         self.forget_disposed();
-        self.order_frames_enabled
-            && !self.pending_verifications.contains_key(name)
-            && self.joined.get(name).is_some_and(|joined| {
-                joined.account.delegated().is_some()
-                    && !joined.account.is_public()
-                    && order_contract::enabled_for(&joined.account.venue)
-                    && joined.account.running.io_allowed()
-                    && self.registry.holds(&joined.account, self.socket)
-                    && joined.out.order_binding(instance)
-            })
-            && !self.moved_by_drain()
+        self.order_admission_refusal(name, instance).is_none()
     }
 
     // Expiry refuses this new command; queue cancellation cannot prove the
@@ -48,6 +91,15 @@ impl Session {
             || id.len() > order_contract::KEY_MAX
             || instance.is_some_and(|value| value.len() > 128)
         {
+            self.audit_order_refusal(
+                name,
+                if action {
+                    "order.action"
+                } else {
+                    "order.submit"
+                },
+                crate::auth::TOKEN_EXPIRED,
+            );
             out.send(envelope::error(Some(name), crate::auth::TOKEN_EXPIRED));
             return;
         }
@@ -61,6 +113,16 @@ impl Session {
                     "order.submit"
                 },
                 &[],
+                crate::auth::TOKEN_EXPIRED,
+            );
+        } else {
+            self.audit_order_refusal(
+                name,
+                if action {
+                    "order.action"
+                } else {
+                    "order.submit"
+                },
                 crate::auth::TOKEN_EXPIRED,
             );
         }
@@ -81,6 +143,7 @@ impl Session {
             || submit.intent_id.len() > order_contract::KEY_MAX
             || submit.instance_id.as_ref().is_some_and(|id| id.len() > 128)
         {
+            self.audit_order_refusal(&name, "order.submit", "not sent: invalid order binding");
             out.send(envelope::error(
                 Some(&name),
                 "not sent: invalid order binding",
@@ -107,10 +170,18 @@ impl Session {
             }
         };
         if let Some(message) = refused {
+            let reason = if message == "not sent: account not admitted for order frames" {
+                self.order_admission_refusal(&name, submit.instance_id.as_deref())
+                    .unwrap_or(message)
+            } else {
+                message
+            };
+            self.audit_order_refusal(&name, "order.submit", reason);
             refuse(&out, &name, &id, submit.seq, message);
             return;
         }
         let Some(params) = submit.params.as_object_mut() else {
+            self.audit_order_refusal(&name, "order.submit", "not sent: invalid parameters");
             refuse(&out, &name, &id, submit.seq, "not sent: invalid parameters");
             return;
         };
@@ -118,6 +189,7 @@ impl Session {
             .get("clientOrderId")
             .is_some_and(|value| value.as_str() != Some(&submit.intent_id))
         {
+            self.audit_order_refusal(&name, "order.submit", "not sent: client order id differs");
             refuse(
                 &out,
                 &name,
@@ -163,6 +235,11 @@ impl Session {
             || cancel.intent_id.len() > order_contract::KEY_MAX
             || cancel.instance_id.as_ref().is_some_and(|id| id.len() > 128)
         {
+            self.audit_order_refusal(
+                &cancel.account_name,
+                "order.cancelQueued",
+                "not sent: invalid order binding",
+            );
             out.send(envelope::error(
                 Some(&cancel.account_name),
                 "not sent: invalid order binding",
@@ -170,6 +247,10 @@ impl Session {
             return;
         }
         if !self.order_admitted(&cancel.account_name, cancel.instance_id.as_deref()) {
+            let reason = self
+                .order_admission_refusal(&cancel.account_name, cancel.instance_id.as_deref())
+                .unwrap_or("not sent: account not admitted for order frames");
+            self.audit_order_refusal(&cancel.account_name, "order.cancelQueued", reason);
             refuse(
                 &out,
                 &cancel.account_name,
@@ -188,6 +269,11 @@ impl Session {
                 .bytes()
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         {
+            self.audit_order_refusal(
+                &cancel.account_name,
+                "order.cancelQueued",
+                "not sent: invalid queued cancellation",
+            );
             refuse(
                 &out,
                 &cancel.account_name,
@@ -215,6 +301,13 @@ impl Session {
         outcome: Option<&str>,
         order_frame: Option<OrderReceipt>,
     ) {
+        if let Some(receipt) = order_frame {
+            let op = match receipt {
+                OrderReceipt::Action { kind, .. } => kind,
+                OrderReceipt::Placement(_) => "order.submit",
+            };
+            self.audit_order_refusal(name, op, message);
+        }
         if let Some(OrderReceipt::Action { seq, .. }) = order_frame {
             crate::order_actions::refuse(&self.account_out(name), name, request_id, seq, message);
         } else if let Some(OrderReceipt::Placement(seq)) = order_frame {

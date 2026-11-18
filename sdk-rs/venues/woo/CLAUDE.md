@@ -84,3 +84,6 @@ status, and closed reasons from `https://docs.woox.io/#error-codes`. Free vendor
 `message`/`error`, authentication parameters and unknown fields are discarded.
 The broad `-1002` does not identify an IP refusal, so it adds no whitelist advice.
 An auth-frame status is a vendor status, not a measured HTTP upgrade response.
+An exact `errorMsg: "signature error"` supplies the closed `invalid signature`
+reason only when no recognized numeric code supplies one. Other message values
+remain discarded; this diagnostic grants no retry or recovery authority.
