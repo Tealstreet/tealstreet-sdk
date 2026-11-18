@@ -990,9 +990,9 @@ Both sources retain the original caller deadline, credential selection and
 [OKX's recent-order documentation](https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-order-history-last-7-days)
 limits unfilled cancellations to two hours.
 [Its three-month archive](https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-order-history-last-3-months)
-excludes canceled orders without fills. A range starting before the two-hour
-boundary, or without a lower bound, therefore returns its available ordinary
-orders with an owned `retentionLimit` incomplete marker, including empty results.
+excludes canceled orders without fills. A range starting at or before the two-hour
+boundary when the read completes, or without a lower bound, returns its available
+ordinary orders with an owned `retentionLimit` marker, including empty results.
 Later page failures retain their existing, more specific incomplete reason.
 No archive fallback can reconstruct an expired cancellation or extend the
 three-month source retention.

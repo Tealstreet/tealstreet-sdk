@@ -125,8 +125,9 @@ continuation pacing. Merge identity is native `ordId`; recent rows win duplicate
 archive deliveries. Recent-only requests retain their existing request count.
 
 OKX retains unfilled canceled orders for only two hours, and the archive omits
-that population. Queries with an older or absent lower bound emit the existing
-owned `retentionLimit` marker before completion, including empty results. A later
+that population. Queries whose lower bound reaches the two-hour boundary by completion, or has
+no lower bound, emit the existing owned `retentionLimit` marker, including empty
+results. The check includes time spent fetching pages. A later
 page failure retains its more specific incomplete reason and accepted prefix.
 See the [recent](https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-order-history-last-7-days)
 and [archive](https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-order-history-last-3-months)

@@ -158,8 +158,8 @@ fn expired_unfilled_cancellations_cannot_make_an_empty_range_complete() {
 }
 
 #[test]
-fn recent_and_exact_retention_boundary_keep_the_original_single_read() {
-    for from in [NOW - HOUR, NOW - 2. * HOUR] {
+fn recent_ranges_inside_retention_keep_the_original_single_read() {
+    for from in [NOW - HOUR, NOW - 2. * HOUR + 100.] {
         let (mut engine, recent) = start(Some(from));
         let output = reply(&mut engine, &recent, NOW + 10., &support::envelope(""));
         assert_eq!(rows(&output), serde_json::json!([]));
@@ -311,4 +311,14 @@ fn composite_account_walks_both_instrument_types_in_each_source() {
     let output = reply(&mut engine, &fourth, NOW + 140., &support::envelope(""));
     assert_eq!(rows(&output), serde_json::json!([]));
     assert_eq!(reasons(&output), ["retentionLimit"]);
+}
+
+#[test]
+fn retention_boundary_crossed_in_flight_cannot_report_complete() {
+    for from in [NOW - 2. * HOUR, NOW - 2. * HOUR + 5.] {
+        let (mut engine, recent) = start(Some(from));
+        let output = reply(&mut engine, &recent, NOW + 10., &support::envelope(""));
+        assert_eq!(rows(&output), serde_json::json!([]));
+        assert_eq!(reasons(&output), ["retentionLimit"]);
+    }
 }

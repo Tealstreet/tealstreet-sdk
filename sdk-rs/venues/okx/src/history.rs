@@ -41,7 +41,6 @@ pub struct Request {
     inst_type: &'static str,
     next_type: bool,
     archive_orders: bool,
-    order_retention_gap: bool,
     order_id: Option<String>,
     income_kind: Option<String>,
     from: Option<f64>,
@@ -378,7 +377,14 @@ impl Request {
         }
     }
     fn finish(mut self, cx: &mut Cx<'_, Pending>) {
-        if self.order_retention_gap {
+        // Retention can expire while pages are in flight. Use the completion
+        // clock so an admission-time boundary cannot become a false success.
+        if self.lookup.is_none()
+            && matches!(self.rows, Rows::Orders(_))
+            && self
+                .from
+                .is_none_or(|from| from <= cx.protocol_now() - CANCELED_ORDER_RETENTION_MS)
+        {
             self.completion.incomplete(
                 safe_cex_engine::history::IncompleteReason::RetentionLimit,
                 "OKX order history is incomplete: unfilled canceled orders are retained for only two hours and are absent from the archive",
@@ -587,12 +593,10 @@ impl Okx {
                 return;
             }
         };
-        // Freeze retention against the admitted query time, not later page clocks.
+        // Select the archive once; all its pages retain the admitted read root.
         let now = cx.protocol_now();
         let archive_orders = matches!(rows, Rows::Orders(_))
             && from.is_some_and(|from| from < now - ORDER_RECENT_MS);
-        let order_retention_gap = matches!(rows, Rows::Orders(_))
-            && from.is_none_or(|from| from < now - CANCELED_ORDER_RETENTION_MS);
         self.history_request(
             cx,
             Request {
@@ -606,7 +610,6 @@ impl Okx {
                 inst_type,
                 next_type,
                 archive_orders,
-                order_retention_gap,
                 order_id,
                 income_kind,
                 from,
@@ -732,7 +735,6 @@ impl Okx {
             inst_type: "SWAP",
             next_type: false,
             archive_orders: false,
-            order_retention_gap: false,
             order_id: None,
             income_kind: None,
             from: None,
