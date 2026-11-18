@@ -1547,6 +1547,26 @@ impl Venue for Bingx {
             }
         }
     }
+    fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        status: u16,
+        headers: &str,
+        error: &str,
+    ) {
+        match pending {
+            Pending::History(request) => self
+                .history
+                .on_stream_malformed(cx, request, status, headers, error),
+            pending => self.on_http_failed(
+                cx,
+                pending,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Internal),
+            ),
+        }
+    }
+
     fn on_http_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
