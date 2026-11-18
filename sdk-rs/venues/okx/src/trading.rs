@@ -2532,7 +2532,7 @@ fn rejection(message: String, code: Option<&str>, status: u16) -> VenueError {
 
 fn unknown_outcome(mut error: VenueError) -> VenueError {
     if error.venue_message.is_none() {
-        error.venue_message = Some(error.message.clone().into_boxed_str());
+        error.venue_message = Some(error.message.clone().into());
     }
     error.message = UNKNOWN_OUTCOME_TEXT.into();
     error.outcome = Some(Outcome::Unknown);

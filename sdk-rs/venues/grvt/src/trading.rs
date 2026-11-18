@@ -1545,7 +1545,7 @@ impl Grvt {
                                 error: Some(Box::new(error.clone())),
                             }
                         } else {
-                            error.venue_message = Some(error.message.clone().into_boxed_str());
+                            error.venue_message = Some(error.message.clone().into());
                             error.message = UNKNOWN_TEXT.into();
                             error.outcome = Some(Outcome::Unknown);
                             cx.event(

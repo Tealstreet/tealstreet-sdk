@@ -1,3 +1,4 @@
+import { bingxWriteShapeFromError } from '@tealstreet/safe-cex-wasm/host';
 import type { CommandProgress } from '@tealstreet/safe-cex-wasm/host';
 import type { SerializedCommandError } from '../commandOutcome';
 import type { Exchange } from '../exchanges/base';
@@ -232,6 +233,9 @@ export class ExchangeWorker {
       }
     }
 
+    const bingxWriteShape = bingxWriteShapeFromError(error);
+    const writeDiagnostics = bingxWriteShape ? { bingxWriteShape } : {};
+
     // Create a serializable error object
     const serializableError =
       error instanceof Error
@@ -240,12 +244,14 @@ export class ExchangeWorker {
             name: error.name,
             stack: error.stack,
             ...historyErrorDiagnostics(error),
+            ...writeDiagnostics,
           }
         : {
             message: String(error),
             name: 'UnknownError',
             stack: new Error().stack,
             ...historyErrorDiagnostics(error),
+            ...writeDiagnostics,
           };
 
     try {

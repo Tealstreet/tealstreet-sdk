@@ -79,6 +79,15 @@ pub fn unsigned_headers(method: Method) -> &'static [(&'static str, &'static str
 }
 
 impl Params {
+    pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+    pub(crate) fn text_value(&self, key: &str) -> Option<&str> {
+        match self.0.get(key) {
+            Some(Param::Text(value)) => Some(value),
+            _ => None,
+        }
+    }
     pub fn new() -> Self {
         Self::default()
     }

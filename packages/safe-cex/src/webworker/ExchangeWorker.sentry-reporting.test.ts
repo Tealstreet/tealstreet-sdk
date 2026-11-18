@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
+import { ExchangeError, type BingxWriteShapeDetail } from '@tealstreet/safe-cex-wasm/host';
 
 import { ExchangeWorker } from './ExchangeWorker';
 
-const createWorker = () => {
+const createWorker = (exchangeName: 'bybit' | 'bingx' = 'bybit') => {
   const messages: any[] = [];
   const ctx = {
     postMessage: vi.fn((message: any) => {
@@ -14,7 +14,7 @@ const createWorker = () => {
   const worker = new ExchangeWorker(
     ctx as any,
     'bybit-main',
-    'bybit',
+    exchangeName,
     {} as any,
     {} as any,
     {} as any,
@@ -156,5 +156,30 @@ describe('ExchangeWorker closed history diagnostics', () => {
     expect(sentryData.error).not.toHaveProperty('historyDecode');
     expect(JSON.stringify(sentryData)).not.toContain('PRIVATE_ACCOUNT_123');
     expect(JSON.stringify(sentryData)).not.toContain('private-amount');
+  });
+});
+
+
+describe('ExchangeWorker closed BingX write shape', () => {
+  it('retains only closed shape in the existing redacted packet without another report', () => {
+    const { messages, worker } = createWorker('bingx');
+    const shape: BingxWriteShapeDetail = {
+      endpointFamily: 'order', method: 'DELETE', parameterNames: ['orderId', 'signature', 'symbol', 'timestamp'],
+      hasOtherParameters: false, idClass: 'numeric', idDigits: 19, targetKind: 'takeProfit',
+      symbolFormat: 'hyphenated', replacement: 'observed',
+    };
+    const error = new ExchangeError('BingX cancellation rejected: apiKey=private-key-canary', {
+      message: 'fixture refusal', kind: 'invalidInput', venueCode: '109400', bingxWriteShape: shape,
+    });
+    Object.assign(error, { request: { orderId: 'private-order', signature: 'private-signature' } });
+    Reflect.get(worker, 'logError').call(worker, 'BingX cancellation rejected', error);
+    expect(messages).toHaveLength(1);
+    const packet = structuredClone(messages[0]);
+    expect(packet.data[1].sentryData.error.bingxWriteShape).toEqual(shape);
+    expect(packet.data[1].sentryData.tags).toMatchObject({
+      bingx_endpoint: 'order', bingx_id_class: 'numeric', bingx_id_digits: '19',
+      bingx_target_kind: 'takeProfit', bingx_replacement: 'observed',
+    });
+    expect(JSON.stringify(packet)).not.toMatch(/private-key-canary|private-order|private-signature/);
   });
 });

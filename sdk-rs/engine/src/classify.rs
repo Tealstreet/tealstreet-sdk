@@ -378,6 +378,16 @@ impl Fact {
         &self.error
     }
 
+    /// Passive closed detail; classification and attempt authority stay unchanged.
+    #[cfg(feature = "bingx-write-diagnostics")]
+    pub fn with_bingx_write_shape(
+        mut self,
+        shape: Option<crate::error::bingx_write_shape::BingxWriteShape>,
+    ) -> Self {
+        self.error.bingx_write_shape = shape;
+        self
+    }
+
     /// Native order IDs this reply carried: reconciliation evidence only.
     pub fn with_order_ids(mut self, order_ids: &[String]) -> Self {
         self.error = self.error.partial_ids(order_ids);

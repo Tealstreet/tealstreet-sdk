@@ -78,6 +78,23 @@ pub enum Pending {
 }
 
 impl Pending {
+    fn http_class(&self) -> &'static str {
+        match self {
+            Self::Private { pending, .. } => pending.http_class(),
+            Self::Clock(_) => "clock",
+            Self::History(_) => "history",
+            Self::Identity(_) => "identity",
+            Self::Trade(_) => "trade",
+            Self::Protective(_) => "protective",
+            Self::Account(request) => request.http_class(),
+            Self::Markets { .. } => "markets",
+            Self::Tickers { .. } => "tickers",
+            Self::Depth { .. } => "depth",
+            Self::BookQuery { .. } => "orderBook",
+            Self::Candles { .. } => "candles",
+        }
+    }
+
     fn public_context(&self) -> Option<&Context> {
         match self {
             Self::Markets { context, .. }
@@ -1075,6 +1092,11 @@ impl Venue for MexcFutures {
         if matches!(&pending, Pending::Markets { .. } | Pending::Tickers { .. })
             && let Err(error) = Envelope::checked(response.body)
         {
+            let error = if response.status == 425 {
+                http_failure(pending.http_class(), response)
+            } else {
+                error
+            };
             self.failure(cx, pending, &error);
             return;
         }
@@ -1109,7 +1131,8 @@ impl Venue for MexcFutures {
         }
         // Account reads classify their own HTTP failures (a refused key ends startup).
         if response.status != 200 && !matches!(pending, Pending::Account(_)) {
-            self.failure(cx, pending, &format!("MEXC HTTP {}", response.status));
+            let error = http_failure(pending.http_class(), response);
+            self.failure(cx, pending, &error);
             return;
         }
         let background = pending.public_context().cloned();
