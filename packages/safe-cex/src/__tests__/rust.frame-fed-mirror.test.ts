@@ -383,6 +383,12 @@ describe('frame-fed main-thread mirror', () => {
         exchange.store.apply(
           nativeFixture(
             {
+              // Rule 5: 7b723d8837 requires decoded evidence for loaded flags.
+              markets: [],
+              tickers: [],
+              orders: [],
+              positions: [],
+              balance: { used: 0, free: 0, total: 0, upnl: 0 },
               loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
             },
             exchange.store.markets.map((row) => row.symbol),
@@ -908,7 +914,7 @@ describe('frame-fed main-thread mirror', () => {
     const mirror = mirrorWith(fake);
     exchange = mirror.exchange;
     exchange.options = { ...exchange.options, signingMode: 'delegated' };
-    await expect(exchange.frameFedReady).resolves.toBe(true);
+    await expect(exchange.frameFedReady).resolves.toBe(false);
     expect(fake.started).toBe(0);
     expect(fake.constructed).toBe(0);
     await expect(exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
@@ -922,7 +928,7 @@ describe('frame-fed main-thread mirror', () => {
     setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
     const mirror = mirrorWith(fake);
     exchange = mirror.exchange;
-    await expect(exchange.frameFedReady).resolves.toBe(true);
+    await expect(exchange.frameFedReady).resolves.toBe(false);
     expect(construct).not.toHaveBeenCalled();
     await expect(exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
     expect(mirror.calls).toEqual([]);
@@ -931,7 +937,7 @@ describe('frame-fed main-thread mirror', () => {
   it('never starts an engine that does not report itself frame-fed', async () => {
     const fake = fakeEngine({ frameFed: false });
     exchange = mirrorWith(fake).exchange;
-    await expect(exchange.frameFedReady).resolves.toBe(true);
+    await expect(exchange.frameFedReady).resolves.toBe(false);
     expect(fake.started).toBe(0);
   });
 

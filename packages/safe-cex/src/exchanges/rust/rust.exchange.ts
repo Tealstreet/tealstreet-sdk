@@ -1103,10 +1103,7 @@ export class RustEngineExchange extends BaseExchange {
     this.frameFedReady = this.isWorkerMirror
       ? this.isPublicDataOnly
         ? Promise.resolve(true)
-        : this.startFrameFed().then(
-            () => true,
-            () => true,
-          )
+        : this.startFrameFed().catch(() => false)
       : Promise.resolve(false);
     const frameFedSettled = () => {
       this.frameFedSettled = true;
@@ -1316,6 +1313,7 @@ export class RustEngineExchange extends BaseExchange {
     host.start();
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
     this.flushTimers.push(setInterval(() => this.host?.flush(), STORE_FLUSH_MS * multiplier));
+    host.flush();
     await this.untilPageMarkets();
     return true;
   };

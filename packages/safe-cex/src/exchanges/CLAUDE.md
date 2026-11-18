@@ -18,7 +18,9 @@ It retains `unsupported` / `notSent` without adding a retry or fallback.
 Page writes also wait for the page engine's own native MARKETS readiness;
 source STATUS/market evidence cannot stand in for its independent instrument
 read. Page frames wake that bounded wait without publishing into the source
-FrameStore. Owner admission is rechecked after the wait.
+FrameStore. Owner admission is rechecked after the wait. `frameFedReady`
+resolves false for refused/unsupported/failed private page construction and
+true only after that engine loads its catalogue (public mirrors need no engine).
 Account reads retain their source bridge. See `packages/safe-cex/CLAUDE.md` →
 "Rust main-thread trading".
 
