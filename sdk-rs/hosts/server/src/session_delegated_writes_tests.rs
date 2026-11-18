@@ -457,7 +457,12 @@ async fn joined_without_runtime_opt_in(
     // The new argument records that provenance without changing its construction.
     let admitted_mode = account.actual_signing_mode();
     session
-        .join(account.clone(), out.with_instance_id(None), admitted_mode)
+        .join(
+            account.clone(),
+            out.with_instance_id(None),
+            admitted_mode,
+            0,
+        )
         .await;
     if account.delegated().is_some() {
         tokio::time::timeout(Duration::from_secs(5), async {
