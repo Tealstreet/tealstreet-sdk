@@ -121,3 +121,11 @@ these fresh measurements. Each non-Bybit cap is measured +10 KiB rounded to KiB.
 The measured combined module is 17,860,053 B (SHA256
 `eba7cc0304ceb0dbbe2ffd946c02b0975bd3ab23f8d7f09cfdd70bc08dddda5f`);
 combined and Bybit ceilings remain 18,087,936 and 2,696,192 B respectively.
+
+#3640 retained BingX Spot and OKX fixture callbacks publish SCXF through the
+explicit reference producer. Aster installs its taped axios transport before
+construction so its closed secondary read client inherits it as well.
+GitHub runner assignment metadata may lag started measurement steps: CI44248450357
+returned runner_id=0 beyond the former 60-second window. Physical-job discovery
+now re-lists for at most five minutes; missing/duplicate identities, retries and
+nonpositive runner IDs still refuse, and replay/signing deadlines stay unchanged.
