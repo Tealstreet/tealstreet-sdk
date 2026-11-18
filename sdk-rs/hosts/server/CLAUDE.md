@@ -117,7 +117,7 @@ with server-owned claims and a signature-only reply. DELEGATED CDP handover
 remains explicitly proof-unavailable; no fallback selects another signing mode.
 Legacy and typed full-write method admission both use this shared eligibility.
 
-DELEGATED uses `prepare_local_signer_for`, including wallet key-only/agent
+DELEGATED uses `prepare_protected_local_signer_for`, including wallet key-only/agent
 layouts. Guarded handover strings move into the zeroizing native options for
 that setup; only its provider, identities and required public metadata remain.
 Hyperliquid wallet addresses survive construction and resident reconfiguration.
@@ -298,11 +298,26 @@ any typed action receipt, and both guards survive deferred dispatch. Typed v1
 TWAP-state rows carry optional safe-integer `ownerGeneration` through validation
 and fingerprinting without backfill; the native restore gate remains mandatory.
 
+Settings rebuilds share the protected resident owner with the published successor.
+Retiring the replaced actor preserves that successor; explicit disposal or the last
+account-owner drop still revokes the provider while engine handles remain.
+
+Retention captures disconnected labels until its deadline, so identity-keyed
+lookup, explicit disposal and public-fallback refusals survive resume-grace expiry.
+An unjoined label matching multiple identities refuses instead of choosing one.
+
+Stopped DELEGATED accounts keep live holders for final stop notices. A resumable
+disconnect releases that stopped holder through the normal release path instead
+of parking it or restarting retention; the final live holder leaving evicts the
+stopped account. Owner and account-incarnation checks still isolate late cleanup.
+
 ## DELEGATED order frames
 
 Sam's 2026-11-11 policy allows activation with place and reduce-only close before
-amend, venue cancel, cancel-all or nuke. The additive `delegatedActivationScopeV1`
-advertisement exposes exactly that partial set. The existing compiled feature,
+amend, venue cancel, cancel-all or nuke. `delegatedActivationScopeV1` preserves
+that activation minimum; its four later-action fields reflect runtime typed-write
+availability for the selected hosted venue. This metadata grants no admission.
+The existing compiled feature,
 hosted venue support, runtime frame switch, router ledger and per-connection
 ownership/registration checks remain required. `DELEGATED` is the host's
 per-user feature flag, not a new box environment variable. SDK `activate` checks
@@ -320,9 +335,16 @@ same named refusal. Paused TWAP restoration and existing stop/cleanup controls
 remain available; this does not resume or replay an interrupted intent.
 
 DELEGATED `order.submit` messages use the existing method translation,
-native command completion and order audit, with the intent UUIDv7 as both request
-ID and, where supported, client order ID. Bybit protection omits its unsupported
-caller ID and reports null in the receipt. Other modes keep `callMethod` unchanged. Pending joins
+native command completion and order audit. The request ID stays the intent UUIDv7;
+Hyperliquid/Spot client order IDs are `0x` plus its 32 lowercase hex digits;
+Bitget, OKX, BloFin and Binance PM use the bare 32 hex digits. Bybit and other
+compatible text adapters retain the UUID. Lighter/Robinhood, Binance inverse,
+AsterDEX, Kraken and MEXC receive no caller venue ID, per the spec's supported-ID
+condition; receipts keep `clientOrderId: null`. The router UUID/fingerprint ledger
+remains primary dedupe in every case. Numeric adapters retain their current
+refusal pending their separate bounded-hash mapping. Bybit protection also omits
+its unsupported caller ID and reports null. HyroTrader retains its native
+caller-ID refusal. Other modes keep `callMethod` unchanged. Pending joins
 and elapsed ages of ten seconds or more refuse without a write. New replies
 use the existing instanceId registration helper. The NX router must durably
 record submits before forwarding and expose acknowledgements only after commit;
@@ -414,3 +436,24 @@ ApeX protected setup, which installs `primary.extra.zklinkSeed` with hex encodin
 The field is never public init/engine JSON, a fingerprint or wallet signingKey.
 Other venues, mixed wallet layouts and non-65-byte hex seeds refuse. Monitoring
 without a seed remains unchanged and supplies no placement-signing capability.
+
+Retained DELEGATED accounts share the canonical protected owner through the sole
+`AccountSigner`; escaped engine handles have no independent erasure authority.
+The 48-hour clock starts only after the last admitted holder disconnects and is
+cancelled only by admitted reconnect. Removal/off/key removal erase immediately.
+For a selected proxy transport, token expiry has an explicitly interim terminal
+stop/erase with recorded reason `proxy-token-expired`; no issuer renewal, direct
+fallback or authority extension is implied. Sam still owns the long-term policy.
+See `DELEGATED_RETENTION.md` for the retention and restart contracts.
+
+
+## DELEGATED intent clock skew
+
+UUIDv7 intent time permits at most 5 seconds ahead of the box clock. Past age
+still refuses at 10 seconds. Accepted positive skew emits journal-only INFO
+`order.intent_clock_skew` with only closed `skew_bucket`: `le_1s`,
+`gt_1s_le_3s` or `gt_3s_le_5s`; never add identifiers or raw clock values.
+Action deadlines use the same bounded age, clamp future-key wall expiry to
+arrival-time plus 10 seconds and retain the client-age monotonic bound. Deferred
+work cannot renew that budget. The paired router policy must preserve its
+coverage-quarantine and cross-clock safety bounds when adopting this tolerance.

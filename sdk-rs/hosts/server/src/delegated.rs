@@ -437,6 +437,34 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn encrypted_apex_seed_round_trip_preserves_private_fields_and_consumes_offer() {
+        // Keep the wire/schema regression runnable on hosts without Linux's
+        // protected resident-memory implementation.
+        let seed = format!("0x{}", "11".repeat(65));
+        let mut owner = Handovers::default();
+        let offer = owner.issue("fixture", "apexomni", 100).unwrap();
+        let plaintext = Zeroizing::new(
+            serde_json::to_vec(&serde_json::json!({
+                "key": "synthetic-key", "secret": "synthetic-secret",
+                "passphrase": "synthetic-phrase", "omniKeySeed": seed
+            }))
+            .unwrap(),
+        );
+        let sealed = seal(&offer, "apexomni", "synthetic-key", &plaintext);
+        let opened = owner
+            .take("fixture", &sealed, 101)
+            .unwrap()
+            .open("apexomni", "synthetic-key", &sealed, 102)
+            .unwrap();
+        assert!(opened.omni_key_seed.as_deref().map(String::as_str) == Some(seed.as_str()));
+        assert!(opened.secret.as_str() == "synthetic-secret");
+        assert!(opened.passphrase.as_deref().map(String::as_str) == Some("synthetic-phrase"));
+        assert!(opened.signing_key.is_none());
+        assert!(owner.take("fixture", &sealed, 103).is_err());
+        assert!(!format!("{sealed:?}").contains(seed.as_str()));
+    }
+
+    #[test]
     fn fixed_cross_implementation_handover_matches_independent_fixture() {
         let v: serde_json::Value =
             serde_json::from_str(include_str!("../tests/data/delegated-handover-v1.json")).unwrap();

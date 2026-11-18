@@ -48,6 +48,7 @@ pub struct Options {
 }
 
 pub enum Pending {
+    AuthClock(Context),
     Identity(Context),
     Leverage(leverage::Read),
     History(Box<history::Request>),
@@ -138,6 +139,7 @@ pub struct BitgetFutures {
     options: Options,
     discovery: PublicRetries,
     account: account::Account,
+    auth_clock: Option<account::AuthClock>,
     trading: trading::Trading,
     telemetry: telemetry::Telemetry,
     history: history::History,
@@ -148,8 +150,8 @@ pub struct BitgetFutures {
     candles: HashMap<(String, Interval), usize>,
     /// Topics Bitget answered with event:error, by (channel, instId): retries made, pending timer.
     refused_topics: HashMap<(String, String), (u32, Option<TimerId>)>,
-    /// Known missing ticker topics warned once for this engine's lifetime.
-    warned_ticker_refusals: HashSet<String>,
+    /// Exact native missing ticker topics retired for this engine's lifetime.
+    refused_ticker_topics: HashSet<String>,
     /// When an unreadable public message was last logged; at most one per minute.
     public_parse_logged_at: Option<f64>,
     order_caps: HashMap<String, OrderCaps>,
@@ -266,6 +268,7 @@ impl BitgetFutures {
             options,
             discovery: Default::default(),
             account: account::Account::new(),
+            auth_clock: None,
             trading: trading::Trading::default(),
             telemetry: telemetry::Telemetry::default(),
             history: history::History::default(),
@@ -275,7 +278,7 @@ impl BitgetFutures {
             books: HashMap::new(),
             candles: HashMap::new(),
             refused_topics: HashMap::new(),
-            warned_ticker_refusals: HashSet::new(),
+            refused_ticker_topics: HashSet::new(),
             public_parse_logged_at: None,
             order_caps: HashMap::new(),
         }
@@ -500,6 +503,12 @@ impl BitgetFutures {
         let mut payload = prefix.clone();
         let overhead = (prefix.len() + 2).max(r#"{"op":"unsubscribe","args":[]}"#.len());
         for (channel, symbol) in topics {
+            if op == "subscribe"
+                && channel == "ticker"
+                && self.refused_ticker_topics.contains(symbol)
+            {
+                continue;
+            }
             let topic = serde_json::to_string(&Topic {
                 inst_type: &product,
                 channel,
@@ -580,9 +589,8 @@ impl BitgetFutures {
         let Some(native) = message.msg.strip_suffix(" doesn't exist") else {
             return false;
         };
-        if native != symbol
-            && native != format!("instType:{product},channel:ticker,instId:{symbol}")
-        {
+        let topic = format!("instType:{product},channel:ticker,instId:{symbol}");
+        if native != symbol && native != topic && native != format!("{topic},precision:null") {
             return false;
         }
         serde_json::from_str::<Refusal<'_>>(text).is_ok_and(|refusal| {
@@ -628,6 +636,19 @@ impl BitgetFutures {
                 message.arg.channel.to_string(),
                 message.arg.inst_id.to_string(),
             );
+            if self.known_ticker_refusal(cx, &message, text) {
+                if let Some((_, Some(timer))) = self.refused_topics.remove(&topic) {
+                    cx.clear_timer(timer);
+                }
+                if self.refused_ticker_topics.insert(topic.1) {
+                    cx.notice(
+                        Level::Warn,
+                        code::SUBSCRIPTION_REJECTED,
+                        "Bitget ticker subscription refused for a known market",
+                    );
+                }
+                return;
+            }
             let retry = (!topic.0.is_empty() && !topic.1.is_empty())
                 .then(|| {
                     self.refused_topics
@@ -647,25 +668,15 @@ impl BitgetFutures {
                 None if !topic.0.is_empty() => format!("{} {}: not retried", topic.0, topic.1),
                 None => String::new(),
             };
-            if self.known_ticker_refusal(cx, &message, text) {
-                if self.warned_ticker_refusals.insert(topic.1) {
-                    cx.notice(
-                        Level::Warn,
-                        code::SUBSCRIPTION_REJECTED,
-                        "Bitget ticker subscription refused for a known market",
-                    );
-                }
-            } else {
-                cx.notice(
-                    Level::Error,
-                    code::SUBSCRIPTION_REJECTED,
-                    if detail.is_empty() {
-                        format!("Bitget WS: {}", message.msg)
-                    } else {
-                        format!("Bitget WS: {} ({detail})", message.msg)
-                    },
-                );
-            }
+            cx.notice(
+                Level::Error,
+                code::SUBSCRIPTION_REJECTED,
+                if detail.is_empty() {
+                    format!("Bitget WS: {}", message.msg)
+                } else {
+                    format!("Bitget WS: {} ({detail})", message.msg)
+                },
+            );
             return;
         }
         if !self.refused_topics.is_empty()
@@ -1145,7 +1156,7 @@ impl Venue for BitgetFutures {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Identity(_) | Pending::Leverage(_) => {}
+            Pending::AuthClock(_) | Pending::Identity(_) | Pending::Leverage(_) => {}
             Pending::History(request) => self.query_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::Account {
@@ -1241,6 +1252,9 @@ impl Venue for BitgetFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::AuthClock(context) = pending {
+            return self.settle_auth_clock(cx, context, Some(response));
+        }
         if let Pending::Identity(root) = pending {
             self.identity_response(cx, &root, response);
             return;
@@ -1436,6 +1450,7 @@ impl Venue for BitgetFutures {
         error: safe_cex_engine::VenueError,
     ) {
         cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
+            Pending::AuthClock(context) => self.settle_auth_clock(cx, context, None),
             Pending::Identity(root) | Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(&root, error);
             }
@@ -1489,6 +1504,7 @@ impl Venue for BitgetFutures {
             return;
         }
         match pending {
+            Pending::AuthClock(context) => self.settle_auth_clock(cx, context, None),
             Pending::History(mut request) => {
                 if request.delivered(cx) {
                     self.query_failed(cx, *request, error);

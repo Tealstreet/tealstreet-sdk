@@ -334,7 +334,7 @@ impl VenueIo {
         }
         Some(self.valid_private_signature(r))
     }
-    fn valid_private_signature(&self, r: &HttpRequest) -> bool {
+    pub(crate) fn valid_private_signature(&self, r: &HttpRequest) -> bool {
         if self.venue == "okxeudemo" {
             let simulated: Vec<_> = r
                 .headers
@@ -720,7 +720,7 @@ fn with_hosted_endpoints(venue: &str, mut options: Value) -> Value {
 // socket rejection itself is checked separately, and retries are not proof.
 struct HyroPrivateReadMismatch {
     // The owner must outlive the probe or protected read keys are erased.
-    reads: ResidentCopy,
+    reads: Arc<ResidentCopy>,
     socket: safe_cex_engine::signing::Provider,
 }
 impl safe_cex_engine::signing::Signer for HyroPrivateReadMismatch {

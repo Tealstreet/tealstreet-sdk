@@ -16,6 +16,9 @@ Native hosted diagnostic owner attribution is documented in
 Bybit's sparse ticker freshness contract lives in
 [`sdk-rs/README.md`](sdk-rs/README.md#bybit-ticker-reference-freshness).
 
+Bitget login-only timestamp-expiry recovery samples a bounded public clock and
+re-signs on the current socket at dispatch. See `sdk-rs/venues/bitget/README.md`.
+
 Synthetic-fixture scan provenance is documented beside exact historical records
 in [`.gitleaksignore`](.gitleaksignore); current fixture construction stays in its package tests.
 
@@ -37,6 +40,8 @@ older mode/transport discussions are explicitly superseded where they disagree.
 
 OKX EEA config-before-catalogue startup and bounded signature refusals are
 documented in [`sdk-rs/venues/okx/README.md`](sdk-rs/venues/okx/README.md#eea-private-startup).
+OKX's native write-diagnostic section also documents empty-envelope cancellation
+reasons and passive per-order reporting; neither grants retry or continuation authority.
 
 Closed join-proof v1 payloads and canonical public identity facts are documented
 in `docs/plans/callers/public-key-admission.md`. The pure crypto helpers do not
