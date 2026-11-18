@@ -141,7 +141,11 @@ export type PositionRecord = {
   /** Positive = cost to the trader. */
   readonly fees: number;
 
-  /** Signed, positive = received. Never folded into `realizedPnl`. */
+  /**
+   * Signed, positive = received. Never folded into `realizedPnl`.
+   * When unattributed, a fills-derived amount includes only its unambiguous portion
+   * (possibly zero); the unresolved symbol ledger amount is not copied onto each leg.
+   */
   readonly funding: number;
 
   /**
@@ -149,7 +153,8 @@ export type PositionRecord = {
    *
    * Funding arrives per symbol, not per leg. With both hedge legs open there is no
    * venue-reported split, and any allocation we invent is a fabrication — so it is
-   * recorded at symbol level and flagged here rather than silently divided.
+   * retained separately in the fold result's `unattributedFunding` and flagged here
+   * rather than silently divided or duplicated.
    */
   readonly fundingAttributed: boolean;
 
