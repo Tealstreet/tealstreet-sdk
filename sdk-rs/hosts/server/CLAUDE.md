@@ -314,8 +314,10 @@ stopped account. Owner and account-incarnation checks still isolate late cleanup
 ## DELEGATED order frames
 
 Sam's 2026-11-11 policy allows activation with place and reduce-only close before
-amend, venue cancel, cancel-all or nuke. The additive `delegatedActivationScopeV1`
-advertisement exposes exactly that partial set. The existing compiled feature,
+amend, venue cancel, cancel-all or nuke. `delegatedActivationScopeV1` preserves
+that activation minimum; its four later-action fields reflect runtime typed-write
+availability for the selected hosted venue. This metadata grants no admission.
+The existing compiled feature,
 hosted venue support, runtime frame switch, router ledger and per-connection
 ownership/registration checks remain required. `DELEGATED` is the host's
 per-user feature flag, not a new box environment variable. SDK `activate` checks

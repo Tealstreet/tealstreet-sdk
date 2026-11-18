@@ -50,7 +50,16 @@ pub fn enabled_for(venue: &str) -> bool {
 
 pub fn action_capabilities(venue: Option<&str>) -> DelegatedActions {
     if activation_allowed(venue.is_some_and(enabled_for), &PLACE_AND_CLOSE) {
-        PLACE_AND_CLOSE
+        // e2dab6ad16 made scope venue-generic; 17865385b5 enabled full writes.
+        // c4370459d pins metadata matching that runtime, with the same activation floor.
+        let actions_enabled = runtime_enabled();
+        DelegatedActions {
+            amend: actions_enabled,
+            cancel: actions_enabled,
+            cancel_all: actions_enabled,
+            nuke: actions_enabled,
+            ..PLACE_AND_CLOSE
+        }
     } else {
         DelegatedActions {
             place: false,
