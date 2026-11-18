@@ -14,6 +14,9 @@ pub(super) fn http_failure(class: &'static str, response: safe_cex_engine::Respo
     }
     message.push_str(" requestClass=");
     message.push_str(class);
+    if !response.body.trim_ascii_start().starts_with('{') {
+        return message;
+    }
     #[derive(Deserialize)]
     struct Code {
         #[serde(default, deserialize_with = "optional_number")]

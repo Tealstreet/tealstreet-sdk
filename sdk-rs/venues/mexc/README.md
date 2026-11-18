@@ -54,6 +54,8 @@ status alone, or error-looking text cannot prove a key refusal.
 
 Generic HTTP 425 read failures add a closed `requestClass` from the pending
 request and an optional present, nonnegative safe-integer `venueCode`. The
+code must come from a JSON object envelope; arrays and scalar responses supply
+no code, and duplicate or malformed code fields remain absent. The
 diagnostic omits URLs, queries, credentials, response bodies and response messages.
 Typed envelope refusals, ordinary error text, startup completion, backoff,
 signing and write outcomes retain their existing policy. Synthetic full-engine
