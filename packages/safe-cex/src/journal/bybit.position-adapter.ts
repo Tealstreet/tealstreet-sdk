@@ -220,8 +220,15 @@ export const aggregateBybitClosedLifecycles = (
           deps.resolveLeg?.(String(row.orderId)) !== leg,
       ) ||
       Math.abs(size - interval.closedSize) > 1e-9 * Math.max(1, size)
-    )
+    ) {
+      if (
+        interval.closedAt !== undefined &&
+        interval.closedAt >= (deps.from ?? -Infinity) &&
+        interval.closedAt <= (deps.to ?? Infinity)
+      )
+        unresolved = true;
       continue;
+    }
     for (const id of lifecycle.closingOrderIds) assigned.add(id);
     // Partial closes belong to a still-open lifecycle, not a closed round trip.
     if (interval.closedAt === undefined || !lifecycle.closingId) continue;

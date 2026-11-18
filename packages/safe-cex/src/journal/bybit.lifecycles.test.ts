@@ -79,6 +79,12 @@ describe('Bybit fills-proven lifecycle membership', () => {
     expect(historyCompletenessOf(records)?.incomplete).toBe(true);
   });
 
+  it('keeps a fills-proven close incomplete when the native close census has not arrived', () => {
+    const records = fold(fills, []);
+    expect(records).toEqual([]);
+    expect(historyCompletenessOf(records)?.incomplete).toBe(true);
+  });
+
   it('keeps a visible partial close in an open lifecycle out of the closed-position count', () => {
     const records = fold(fills.slice(0, 3), rows.slice(0, 1));
     expect(records).toEqual([]);
