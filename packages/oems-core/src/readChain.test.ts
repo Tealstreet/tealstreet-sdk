@@ -1,3 +1,5 @@
+import { requireArray } from './typeChecks.testHelpers';
+
 import type { CoreAdapter } from '@tealstreet/script-api-core';
 import type { OemsContext } from './context.types';
 import type { OemsReadResult } from './prompt';
@@ -85,7 +87,7 @@ describe('model output → reads → venue → prompt', () => {
 
     // 4. Bounded on the way back.
     const results = boundReadResults([{ tool: 'getCandles', args: calls[0].args, ok: true, data: raw }]);
-    const bounded = results[0].data as unknown[];
+    const bounded = requireArray(results[0].data);
     expect(bounded.length).toBeLessThan(900);
     expect(JSON.stringify(bounded)).not.toContain('xxxx');
     expect(results[0]).toMatchObject({ truncated: true, kept: 200, total: 900 });
