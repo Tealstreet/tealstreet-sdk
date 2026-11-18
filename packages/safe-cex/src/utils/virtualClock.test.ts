@@ -22,7 +22,7 @@ describe('virtualClock', () => {
 
     // Reset virtualClock state
     virtualClock.stop();
-    (virtualClock as any).started = false;
+    virtualClock.started = false;
     (virtualClock as any).server = null;
     (virtualClock as any).client = null;
     (virtualClock as any).offsetMs = 0;
@@ -77,7 +77,7 @@ describe('virtualClock', () => {
 
   describe('stop', () => {
     it('should set started to false', () => {
-      (virtualClock as any).started = true;
+      virtualClock.started = true;
       virtualClock.stop();
       expect(virtualClock.started).toBe(false);
     });
@@ -109,7 +109,7 @@ describe('virtualClock', () => {
         (global as any).window = {};
         let elapsed = 0;
         vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
-        let finish!: (time: number | undefined) => void;
+        let finish: ((time: number | undefined) => void) | undefined;
         const source = vi
           .fn()
           .mockImplementationOnce(
@@ -128,6 +128,7 @@ describe('virtualClock', () => {
           }
           expect(source).toHaveBeenCalledOnce();
           if (stop) virtualClock.stop();
+          if (!finish) throw new Error('Expected the pending time-source callback');
           finish(fail ? undefined : Date.now());
           await pending;
           await vi.advanceTimersByTimeAsync(0);
