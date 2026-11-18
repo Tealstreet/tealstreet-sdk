@@ -22,6 +22,18 @@ fn resident_with_identity(
     Arc<Account>,
     mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
 ) {
+    resident_with_authority(registry, user, key, false)
+}
+
+fn resident_with_authority(
+    registry: &Registry,
+    user: &str,
+    key: Option<&str>,
+    proxy: bool,
+) -> (
+    Arc<Account>,
+    mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+) {
     let init = InitPayload {
         account_name: "synthetic-main".into(),
         exchange_name: "bybit".into(),
@@ -42,6 +54,7 @@ fn resident_with_identity(
     );
     let inner = Arc::get_mut(&mut account).unwrap();
     inner.public_only = false;
+    inner.proxy_authority_required = proxy;
     if key.is_some() {
         inner.identity = identity::digest(user, &init).unwrap();
     }
@@ -727,4 +740,119 @@ async fn disconnected_alias_on_a_still_live_socket_keeps_revocation_lookup() {
             );
         })
         .await;
+}
+
+// Interim authority fence; the maintainer keeps renewal versus long-term early
+// stop undecided. A selected proxy cannot extend its socket-issued authority.
+#[tokio::test(start_paused = true)]
+async fn retained_proxy_expiry_stops_and_erases_with_a_recorded_reason() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, mut inbox) =
+                resident_with_authority(&registry, "proxy-expiry", Some("synthetic-key"), true);
+            let provider = account.delegated().unwrap().provider();
+            account
+                .token
+                .set(Some(("synthetic-token".into(), now_ms() + 10_000)));
+            assert!(account.proxy_authority_required());
+            registry.release(&account, 7, Disposal::SocketClosed);
+            advance(Duration::from_secs(11)).await;
+            match inbox.try_recv() {
+                Ok(crate::algos::AlgoInput::Dispose { reason, stopped }) => {
+                    assert_eq!(reason, "proxy-token-expired");
+                    assert!(stopped.is_some());
+                }
+                _ => panic!("expired proxy authority must stop retained algos visibly"),
+            }
+            assert_eq!(registry.account_count(), 0);
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn direct_retention_does_not_inherit_the_socket_proxy_expiry() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, mut inbox) = resident(&registry, "direct-control");
+            let provider = account.delegated().unwrap().provider();
+            account
+                .token
+                .set(Some(("synthetic-token".into(), now_ms() + 10_000)));
+            assert!(!account.proxy_authority_required());
+            registry.release(&account, 7, Disposal::SocketClosed);
+            advance(Duration::from_secs(11)).await;
+            assert!(inbox.try_recv().is_err());
+            assert_eq!(registry.account_count(), 1);
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Supported
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn admitted_proxy_reconnect_replaces_the_old_expiry_without_affecting_another_user() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, mut inbox) =
+                resident_with_authority(&registry, "reconnect-proxy", Some("synthetic-key"), true);
+            let (peer, mut peer_inbox) = resident(&registry, "other-user");
+            let provider = account.delegated().unwrap().provider();
+            account
+                .token
+                .set(Some(("old-token".into(), now_ms() + 10_000)));
+            registry.release(&account, 7, Disposal::SocketClosed);
+            registry.release(&peer, 7, Disposal::SocketClosed);
+            advance(Duration::from_secs(5)).await;
+            assert!(account.hold(
+                9,
+                Live {
+                    outbox: Arc::new(|_| true),
+                    token: Some(("new-token".into(), now_ms() + 60_000)),
+                }
+            ));
+            advance(Duration::from_secs(11)).await;
+            assert!(
+                inbox.try_recv().is_err(),
+                "old token timer cannot stop a fresh admitted holder"
+            );
+            registry.release(&account, 9, Disposal::SocketClosed);
+            advance(Duration::from_secs(61)).await;
+            match inbox.try_recv() {
+                Ok(crate::algos::AlgoInput::Dispose { reason, stopped }) => {
+                    assert_eq!(reason, "proxy-token-expired");
+                    assert!(stopped.is_some());
+                }
+                _ => panic!("new proxy authority must still expire"),
+            }
+            assert!(peer_inbox.try_recv().is_err());
+            assert_eq!(registry.account_count(), 1);
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn retained_proxy_without_transport_authority_stops_and_erases_immediately() {
+    tokio::task::LocalSet::new().run_until(async {
+        let registry = tests::registry();
+        let (account, mut inbox) = resident_with_authority(&registry, "missing-proxy-authority", Some("synthetic-key"), true);
+        let provider = account.delegated().unwrap().provider();
+        registry.release(&account, 7, Disposal::SocketClosed);
+        advance(Duration::ZERO).await;
+        assert!(matches!(inbox.try_recv(), Ok(crate::algos::AlgoInput::Dispose { reason, .. }) if reason == "proxy-token-expired"));
+        assert_eq!(registry.account_count(), 0);
+        assert_eq!(provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256), Capability::Unsupported);
+    }).await;
 }

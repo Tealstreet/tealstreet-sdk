@@ -92,6 +92,8 @@ pub struct Account {
     /// Original browser link; permanently retired for signing after handover.
     pub link: Option<Arc<SignerLink>>,
     pub token: ProxyToken,
+    /// Resolved account transport depends on the socket-issued proxy authority.
+    proxy_authority_required: bool,
     pub fingerprint: String,
     /// Live sockets carry their outbox and token; park holders carry none.
     holders: Mutex<Holders>,
@@ -379,6 +381,10 @@ impl Account {
 
     pub(crate) fn moving(&self) -> bool {
         self.handle.disposal_cause() == Some(DisposalCause::Moving)
+    }
+
+    pub fn proxy_authority_required(&self) -> bool {
+        self.proxy_authority_required
     }
 
     pub fn is_public(&self) -> bool {
@@ -2030,6 +2036,17 @@ impl Registry {
             .get(user)
             .cloned()
             .unwrap_or(plan);
+        let proxy_authority_required = [
+            Some(&plan.http),
+            plan.public_http.as_ref(),
+            plan.read_http.as_ref(),
+            plan.read_public_http.as_ref(),
+            plan.public_read_http.as_ref(),
+            plan.public_cors_http.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|route| route.authorize || route.mode == safe_cex_native::routing::HttpRouteMode::How);
         let authority = authority.clone();
         #[cfg(test)]
         let e2e_venue = self.e2e_venue.clone();
@@ -2088,6 +2105,7 @@ impl Registry {
             public_only,
             signing,
             token: proxy_token,
+            proxy_authority_required,
             fingerprint,
             holders: Mutex::default(),
             algos,
@@ -3111,6 +3129,7 @@ pub mod testing {
             signing: AccountSigner::new(None, Default::default(), link.clone(), None),
             link,
             token: ProxyToken::new(),
+            proxy_authority_required: false,
             fingerprint,
             holders: Mutex::default(),
             algos: Some(algos),
