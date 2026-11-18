@@ -73,6 +73,31 @@ Edits and protective cancels require their existing cancellation proof; a missin
 order reply never authorizes a replacement or put-back. Generic `109400`
 parameter and timestamp refusals keep their existing classifications.
 
+Invalid-input diagnostics for a sent cancel/amend retain a closed
+`bingxWriteShape`: endpoint family, method, allowlisted parameter names (including
+only the *names* `timestamp`/`signature`), numeric/other/missing target-ID class
+and digit count, closed target kind, symbol-format class and replacement origin.
+No parameter values, native identities, symbols, keys, prices or signatures enter
+this record. Unknown parameter names are omitted and set `hasOtherParameters`.
+Digit count64 means64 or more; nonnumeric/missing IDs use zero. Request shape is
+captured before dispatch and survives authoritative row removal and journal
+sealing. Success, ordinary auth/network errors and unsent local validation gain
+no shape. A final109400 refusal is included even when its kind is not invalidInput.
+
+Replacement `observed` means this engine accepted that replacement ID;
+`unobserved` makes no claim about earlier sessions or evicted evidence. The passive
+cache retains at most64 IDs of at most64 bytes; it never participates in routing,
+admission, retry or cancellation proof. The feature is linked only by BingX.
+Hosts validate/detach the record, workers preserve it through command cloning,
+and existing error tags index only its closed fields. Parameter names are split
+into ten-name chunks so host tag-length bounds do not silently discard them.
+The existing redactor and capture policy are unchanged.
+
+The feature packs the record into an optional eight-byte word. Its thin
+venue-message backing offsets that word in native error queues while preserving
+the existing string/JSON view and trimmed text allocation. Builds without this
+feature retain their original `Box<str>` backing.
+
 The gate declares TS fixes for zero decimal precision, descending asks,
 non-finite ticker placeholders, per-execution fills and terminal dedupe,
 `cp` close flags, required full-position stop quantity, fail-closed bracket

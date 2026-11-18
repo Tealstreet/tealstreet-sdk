@@ -7,6 +7,31 @@ pub type Str<'a> = Cow<'a, str>;
 
 pub use safe_cex_engine::de::{number, optional_number};
 
+pub(super) fn http_failure(class: &'static str, response: safe_cex_engine::Response<'_>) -> String {
+    let mut message = format!("MEXC HTTP {}", response.status);
+    if response.status != 425 {
+        return message;
+    }
+    message.push_str(" requestClass=");
+    message.push_str(class);
+    if !response.body.trim_ascii_start().starts_with('{') {
+        return message;
+    }
+    #[derive(Deserialize)]
+    struct Code {
+        #[serde(default, deserialize_with = "optional_number")]
+        code: Option<f64>,
+    }
+    if let Some(code) = serde_json::from_str::<Code>(response.body)
+        .ok()
+        .and_then(|envelope| envelope.code)
+        .filter(|code| code.fract() == 0.0 && (0.0..=9_007_199_254_740_991.0).contains(code))
+    {
+        message.push_str(&format!(" venueCode={code}"));
+    }
+    message
+}
+
 // TS public mappers use toNumber(value, fallback); private financial rows remain strict.
 fn public_optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     #[derive(Deserialize)]

@@ -17,6 +17,16 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
+MEXC's HTTP 425 read labels are diagnostics only; typed refusals, backoff,
+signing and write outcomes retain their existing controls. Exact source
+06c5b32372b7, Rust SDK run 44220118208, artifact 14390662738 measures equal
+optimized web/Node/replay modules at 1,962,854 bytes. The coordinator's Rule 5
+floor is 1,973,248 bytes, retaining 10,394 bytes and every historical floor.
+
+MEXC's object-envelope guard at c2455ca0e799 measures 1,963,086 bytes in run
+44255752536, artifact 14406113023. Rule 17's measured + 10 KiB rounded-up floor
+is 1,974,272 bytes, retaining 11,186 bytes and all earlier measured floors.
+
 WOO's exact signature-error auth classification changes diagnostics only; socket
 recovery, signing, retry and write behavior retain their lifecycle controls.
 Exact source 85a85576995b, Rust SDK run 44220127210, artifact 14390881543
