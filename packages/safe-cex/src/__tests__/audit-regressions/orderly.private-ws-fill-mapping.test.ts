@@ -89,3 +89,25 @@ describe('audit regression: Orderly private websocket fill mapping', () => {
     ).toEqual(expect.objectContaining({ amount: 10, filled: 2, remaining: 8, status: OrderStatus.Open }));
   });
 });
+
+it('publishes the native limit identity for a POST_ONLY execution report', () => {
+  const { exchange, store } = createExchange();
+  exchange.privateWebsocket.handleExecutionReport({
+    symbol: 'PERP_BTC_USDC',
+    orderId: 30,
+    type: 'POST_ONLY',
+    side: 'BUY',
+    quantity: 0.25,
+    price: 49900,
+    totalExecutedQuantity: 0,
+    reduceOnly: false,
+    status: 'NEW',
+  });
+  expect(store.orders[0]).toMatchObject({
+    id: '30',
+    symbol: 'BTCUSDC',
+    type: OrderType.Limit,
+    amount: 0.25,
+    price: 49900,
+  });
+});
