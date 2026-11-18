@@ -91,12 +91,12 @@ export type RelayConnection = 'off' | 'connecting' | 'connected' | 'unauthorized
 type Pending<T> = { resolve: (value: T) => void; timer: ReturnType<typeof setTimeout> };
 
 const unrefTimer = (timer: ReturnType<typeof setTimeout>) => {
-  (timer as { unref?: () => void }).unref?.();
+  timer.unref?.();
   return timer;
 };
 
 export class WebhookRelayClient {
-  private socket: RelaySocket | null = null;
+  private socket: RelaySocket | WebSocket | null = null;
   private stopped = false;
   private generation = 0;
   private reconnectMs = RECONNECT_BASE_MS;
@@ -188,7 +188,7 @@ export class WebhookRelayClient {
       return;
     }
     this.currentToken = token;
-    const create = this.opts.createSocket ?? ((url: string) => new WebSocket(url) as unknown as RelaySocket);
+    const create = this.opts.createSocket ?? ((url: string) => new WebSocket(url));
     const socket = create(this.opts.url ?? DEFAULT_NEWS_WS_URL);
     this.socket = socket;
     this.connection = 'connecting';
@@ -196,7 +196,7 @@ export class WebhookRelayClient {
     socket.onopen = () => {
       if (isCurrent()) this.sendFrame({ type: 'rpc.auth', token, source: this.opts.kind });
     };
-    socket.onmessage = (event) => {
+    socket.onmessage = (event: { data: unknown }) => {
       if (isCurrent()) this.onMessage(event.data);
     };
     socket.onerror = () => {};
