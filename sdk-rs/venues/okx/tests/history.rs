@@ -187,6 +187,72 @@ fn history_preserves_canceled_orders_and_native_contract_conversion() {
     assert!(rows[0].reduce_only);
 }
 
+#[test]
+fn unknown_historical_order_market_prevents_complete_coverage() {
+    const NOW: f64 = 1_710_000_000_000.0;
+    for (symbol, from_ms, include_known, incomplete) in [
+        (None, None, true, true),
+        (None, None, false, true),
+        (None, Some(NOW), true, false),
+        (Some("BTCUSDT"), None, true, false),
+    ] {
+        let mut e = trading_engine();
+        e.set_log_level(safe_cex_engine::Level::Error);
+        let request = query(
+            &mut e,
+            Query::OrderHistory {
+                symbol: symbol.map(str::to_owned),
+                from_ms,
+                to_ms: None,
+                limit: None,
+            },
+        );
+        // A valid historical order can outlive its instrument's current catalogue row.
+        let delisted = order("998")
+            .replace("BTC-USDT-SWAP", "DELISTED-USDT-SWAP")
+            .replace("1710000000123", "1709999999000");
+        let body = if include_known {
+            format!("{},{delisted}", order("999"))
+        } else {
+            delisted
+        };
+        reply(&mut e, &request, &envelope(&body), 10.0);
+        let out = actions(&mut e);
+        let result = out
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandDone {
+                    command: 991,
+                    result,
+                }) => Some(result),
+                _ => None,
+            })
+            .expect("available mapped rows still complete their command");
+        let rows: Vec<HistoricalOrder> = serde_json::from_str(result).unwrap();
+        assert_eq!(rows.len(), usize::from(include_known));
+        if include_known {
+            assert_eq!(rows[0].id, "999");
+            assert_eq!(rows[0].amount, 0.03);
+        }
+        if incomplete {
+            owned_incomplete(&out);
+            assert!(out.iter().any(|a| matches!(a,
+                Action::Notice(Notice::Event(event))
+                    if event.message.contains("unresolved historical market")
+                    && event.fields.contains(&("reason", safe_cex_engine::Value::Str("coverageGap".into())))
+            )));
+        } else {
+            assert!(
+                !out.iter().any(|a| matches!(a,
+                    Action::Notice(Notice::Event(event))
+                        if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+                )),
+                "an unrelated row cannot make this window incomplete"
+            );
+        }
+    }
+}
+
 fn next_page(e: &mut Engine<Okx>) -> Action {
     let out = actions(e);
     let (timer, time) = out
@@ -405,7 +471,7 @@ fn full_recent_fills_page_does_not_trigger_archive_and_limit_is_clamped() {
 }
 
 #[test]
-fn unknown_market_does_not_issue_a_history_request() {
+fn unknown_order_history_market_refuses_without_issuing_a_request() {
     let mut e = trading_engine();
     e.handle(
         10.0,
@@ -423,8 +489,12 @@ fn unknown_market_does_not_issue_a_history_request() {
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
         out.iter().any(
-            |a| matches!(a, Action::Notice(Notice::CommandDone { result: s, .. }) if s == "[]")
+            |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 991, error }) if error.legacy_text().contains("unresolved historical market"))
         )
+    );
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 991, .. })))
     );
 }
 

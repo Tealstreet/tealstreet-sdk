@@ -71,7 +71,7 @@ import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport 
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { engineEventClassified, isErrorReported, markErrorReported } from '../../commandOutcome';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
-import { copyHistoryCompleteness } from '../../historyCompleteness';
+import { copyHistoryCompleteness, withHistoryCompleteness } from '../../historyCompleteness';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
 import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
 import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
@@ -4020,10 +4020,15 @@ export class RustEngineExchange extends BaseExchange {
     if (this.isPublicDataOnly) return [];
     const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to }, false);
     const records = [];
+    let unresolvedMarket = false;
     for (const row of rows) {
       const market = this.store.marketsById[String(row.instId ?? '')];
+      if (!market) {
+        unresolvedMarket = true;
+        continue;
+      }
       // As TS: inverse rows need a reference price the adapter lacks, so they are skipped.
-      if (!market || market.isInverse) continue;
+      if (market.isInverse) continue;
       const record = mapOkxPositionHistory(row, {
         account: opts.account,
         toBase: (contracts: number, instId: string) =>
@@ -4033,6 +4038,7 @@ export class RustEngineExchange extends BaseExchange {
       });
       if (record) records.push(record);
     }
+    if (unresolvedMarket) withHistoryCompleteness(records, { incomplete: true, reason: 'coverageGap' });
     return copyHistoryCompleteness(rows, records);
   };
 
