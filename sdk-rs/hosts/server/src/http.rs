@@ -1058,6 +1058,10 @@ async fn serve(
 }
 
 #[cfg(test)]
+#[path = "activation_scope_tests.rs"]
+mod activation_scope_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

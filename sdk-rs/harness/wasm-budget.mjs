@@ -1285,6 +1285,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3290 CI 43563699705, source 8043e2bb11e5, artifact 14101841020: web/Node/replay 2,680,145 B.
   // Verified optimized module maximum + 10 KiB rounded up; all historical floors retained.
   // #3513 CI43629571410: 2_681_664 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
+  // Rule 5 / #3639: coordinator approved measured + 10 KiB rounded up; historical floors retained.
+  // Exact 85a85576995b; Rust SDK run 44220127210, artifact 14390881543; web/Node/replay 2,683,302 B.
+  // SHA256 38768e867378a4f467c599939c1f0e15177056929c57a057cabbf825d45817f8; 10,842 B reserve.
   // Rule 5 / #3640: fresh native-store allocation/chaser fixes after M44 master 700dee33e3a9.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue woo
   // CI 44266062446 source 283acdd2f583259fa40113dc88f58b54adac610d; native inputs match c0113a933d.

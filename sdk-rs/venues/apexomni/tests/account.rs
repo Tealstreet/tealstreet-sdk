@@ -146,6 +146,127 @@ fn order(id: &str, status: &str, cumulative: &str) -> String {
     )
 }
 
+fn rejected_status_warning(status: &str) -> String {
+    let mut row: serde_json::Value = serde_json::from_str(&order("parent", "OPEN", "0.5")).unwrap();
+    row["status"] = status.into();
+    row["clientId"] = "private-client-id".into();
+    let (mut e, socket) = ready();
+    ws(&mut e, socket, 50.0, r#"{"op":"login","success":true}"#);
+    e.prepared(50.0).for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        100.0,
+        &frame("delta", &serde_json::json!({"orders":[row]}).to_string()),
+    );
+    // An unknown token cannot cancel or change an existing order.
+    assert_eq!(e.store().order("parent").unwrap().status, OrderStatus::Open);
+    assert_eq!(e.store().order("parent").unwrap().filled, 0.25);
+    let warnings = e
+        .prepared(100.0)
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::ROW_SKIPPED =>
+            {
+                Some(event.message)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(warnings.len(), 1);
+    let warning = warnings.into_iter().next().unwrap();
+    for field in ["parent", "private-client-id", "BTC-USDT", "BUY"] {
+        assert!(!warning.contains(field), "unrelated row field in warning");
+    }
+    assert!(warning.len() <= 128);
+    assert!(warning.bytes().all(|byte| (b' '..=b'~').contains(&byte)));
+    warning
+}
+
+#[test]
+fn unknown_status_warning_names_only_the_bounded_printable_token() {
+    for (status, expected) in [
+        ("FUTURE_STATUS", r#"unknown order status: "FUTURE_STATUS""#),
+        ("", r#"unknown order status: """#),
+        (
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            r#"unknown order status: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA""#,
+        ),
+        ("BAD\"\\STATUS", r#"unknown order status: "BAD\"\\STATUS""#),
+    ] {
+        assert_eq!(rejected_status_warning(status), expected);
+    }
+}
+
+#[test]
+fn unknown_status_warning_hashes_oversized_and_non_printable_input() {
+    for (status, bytes, hash) in [
+        (
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            33,
+            "5d873590851b7b00b60490c8e6966b3409c385adcc9590d801f0e03e268b5ba5",
+        ),
+        (
+            "BAD\nSTATUS",
+            10,
+            "597afc8f0b53f492a194e060a101a9191921dc34a69d3385d0a5e7caa0ecc5a4",
+        ),
+        (
+            "BAD\rSTATUS",
+            10,
+            "6b510d65773d8df5b103e8fca8dff5bb3ff9af7f1d3ec20a8fbbaa570d6c0f63",
+        ),
+        (
+            "BAD\tSTATUS",
+            10,
+            "41e735e4eb66c8c74398e02925f1e574dabcb202ab1320f7a058e55f0e21bda9",
+        ),
+        (
+            "BAD\0STATUS",
+            10,
+            "7285d685e1532ce24fcf19fe07a18d38b504b0cdaa09d4a741762f57573aab82",
+        ),
+        (
+            "BAD\x7fSTATUS",
+            10,
+            "9413ad9869ffcde7df3b563d956485b63b5edd9d66cc1d0c0cdcd63f117a2e34",
+        ),
+        (
+            "é",
+            2,
+            "4a99557e4033c3539de2eb65472017cad5f9557f7a0625a09f1c3f6e2ba69c4c",
+        ),
+    ] {
+        assert_eq!(
+            rejected_status_warning(status),
+            format!("unknown order status: <bytes={bytes} sha256={hash}>")
+        );
+    }
+}
+
+// #3649: status data must not be mistaken for an authentication refusal.
+#[test]
+fn unknown_status_warning_hashes_tokens_that_would_add_auth_advice() {
+    for (status, hash) in [
+        (
+            "IP not whitelisted",
+            "16c39b90dc569381efb400bfeb90de767c5cab8d8c7b9ef91ce9e1f8245b5b03",
+        ),
+        (
+            "Bad key or IP whitelist",
+            "e0115ea472863bfe63762f7de7f38aa0006e00d5c176c1ebb6c879b893e95064",
+        ),
+    ] {
+        assert_eq!(
+            rejected_status_warning(status),
+            format!(
+                "unknown order status: <bytes={} sha256={hash}>",
+                status.len()
+            )
+        );
+    }
+}
+
 #[test]
 fn documented_order_statuses_map_on_rest_snapshots_and_private_deltas() {
     // https://api-docs.omni.apex.exchange/#get-open-orders
@@ -226,7 +347,7 @@ fn unknown_order_status_is_visible_and_preserves_the_live_order() {
         assert_eq!(e.store().order("parent").unwrap().filled, 0.25);
         assert!(e.prepared(100.0).any(|action| matches!(action,
             Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::ROW_SKIPPED
-                && event.message == "unknown order status"
+                && event.message == format!("unknown order status: {status:?}")
         )));
     }
 }
@@ -1366,6 +1487,14 @@ fn an_answered_key_refusal_ends_the_start() {
         }
         assert_eq!(failures.len(), 1, "{status} {body}");
         assert_eq!(failures[0].kind, Some(kind), "{status} {body}");
+        // #3649: real authentication refusals keep the existing whitelist advice.
+        if kind == ErrorKind::AuthPermission {
+            assert!(
+                failures[0]
+                    .message
+                    .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT)
+            );
+        }
         assert!(
             failures[0].message.contains(text),
             "{}",

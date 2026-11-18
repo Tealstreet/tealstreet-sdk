@@ -25,6 +25,8 @@ export type HistoryDecodeDetail = {
 export function historyDecodeOf(value: unknown): HistoryDecodeDetail | undefined;
 
 export const DEFAULT_COMMAND_TIMEOUT_MS: 120000;
+/** Closed caller write names only; never a payload, URL or native endpoint inference. */
+export function writeCommandOf(value: unknown): string | undefined;
 
 export interface Socket {
   send(text: string): void;
@@ -225,6 +227,7 @@ export interface CommandIdentity {
 
 /** A classified venue failure built from the engine's `detail`; `message` is unchanged venue text. */
 export class ExchangeError extends Error {
+  readonly command?: string;
   readonly code?: 'GRVT_BUILDER_UNAUTHORIZED';
   readonly reason?: BuilderAuthorizationDetail['reason'];
   readonly requiredRaw?: number;

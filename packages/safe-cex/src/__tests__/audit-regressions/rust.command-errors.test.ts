@@ -338,7 +338,12 @@ it.each([false, true])(
     expect(serializeCommandError(error)).toMatchObject(expected);
     expect(r.errors).toHaveBeenCalledTimes(1);
     expect(r.errors.mock.calls[0][0]).toBe(detail.message);
-    expect(r.errors.mock.calls[0][1].classified).toEqual({ kind: 'network', outcome: 'unknown', venueCode: '10001' });
+    expect(r.errors.mock.calls[0][1].classified).toEqual({
+      command: 'cancelOrders',
+      kind: 'network',
+      outcome: 'unknown',
+      venueCode: '10001',
+    });
   },
 );
 

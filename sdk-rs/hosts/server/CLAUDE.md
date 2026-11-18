@@ -314,8 +314,10 @@ stopped account. Owner and account-incarnation checks still isolate late cleanup
 ## DELEGATED order frames
 
 Sam's 2026-11-11 policy allows activation with place and reduce-only close before
-amend, venue cancel, cancel-all or nuke. The additive `delegatedActivationScopeV1`
-advertisement exposes exactly that partial set. The existing compiled feature,
+amend, venue cancel, cancel-all or nuke. `delegatedActivationScopeV1` preserves
+that activation minimum; its four later-action fields reflect runtime typed-write
+availability for the selected hosted venue. This metadata grants no admission.
+The existing compiled feature,
 hosted venue support, runtime frame switch, router ledger and per-connection
 ownership/registration checks remain required. `DELEGATED` is the host's
 per-user feature flag, not a new box environment variable. SDK `activate` checks
@@ -396,6 +398,19 @@ Retirement fences new legs and drops stale outcomes; already handed-off work
 remains uncertain. An aborted/abandoned nuke settles unknown on
 its captured output, never another owner's registration.
 
+Pre-dispatch order refusals emit journal-only INFO `order.pre_dispatch_refused`.
+Its closed reason class, catalog-validated venue (or null) and closed operation
+never include IDs, labels, credentials, payloads or raw error text. Admission
+reasons distinguish runtime, pending proof, mode, holder, registration and drain
+without changing those predicates. Receipt-bearing actor Nuke/Algo work also
+logs its owner, expiry, IO, admission and load refusals before its first dispatch.
+Receipt completion and later native-leg failures never mint this whole-action
+pre-dispatch event. Grouped Session command refusals use the separate bounded
+INFO `order.leg_pre_dispatch_refused` with the same closed fields: no earlier-leg
+handoff proof is inferred, and group uncertainty/settlement remain unchanged.
+Normal amend targets remain id/symbol only;
+reduce-only LIMIT price amendments use the ordinary native amend path.
+
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
 Every raw typed-action payload checks recursive key uniqueness before `Value`
@@ -443,3 +458,15 @@ For a selected proxy transport, token expiry has an explicitly interim terminal
 stop/erase with recorded reason `proxy-token-expired`; no issuer renewal, direct
 fallback or authority extension is implied. Sam still owns the long-term policy.
 See `DELEGATED_RETENTION.md` for the retention and restart contracts.
+
+
+## DELEGATED intent clock skew
+
+UUIDv7 intent time permits at most 5 seconds ahead of the box clock. Past age
+still refuses at 10 seconds. Accepted positive skew emits journal-only INFO
+`order.intent_clock_skew` with only closed `skew_bucket`: `le_1s`,
+`gt_1s_le_3s` or `gt_3s_le_5s`; never add identifiers or raw clock values.
+Action deadlines use the same bounded age, clamp future-key wall expiry to
+arrival-time plus 10 seconds and retain the client-age monotonic bound. Deferred
+work cannot renew that budget. The paired router policy must preserve its
+coverage-quarantine and cross-clock safety bounds when adopting this tolerance.

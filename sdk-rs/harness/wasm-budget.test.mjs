@@ -4341,6 +4341,20 @@ test('#3640 family sweep preserves separately approved Bybit and combined ceilin
   assert.equal(WASM_BUDGETS.combined, 18_087_936);
 });
 
+// #3639 Rule 5: Rust SDK run 44220127210, artifact 14390881543.
+// Exact source 85a85576995b511750553a16337a8ea4d53dfcc5; equal optimized web/Node/replay modules.
+// Coordinator: measured + 10 KiB rounded up, preserving historical floors.
+test('#3639 diagnostic composition retains the fresh WOO reserve and boundary', () => {
+  const measured = 2_683_302;
+  const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.woo;
+  assert.equal(requiredCap, 2_694_144);
+  assert.ok(cap >= Math.max(requiredCap, 2_692_096), `${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'woo'), /exceeds/);
+});
+
 // #3646 d10ba2f3c500, CI44135644635 jobs134225245837/134225246062: web/Node bytes.
 // Rust1.99/bindgen0.2.129/Binaryen132 twice-Oz; shared family and replay budget.
 // SHA256 26a96f1c6e97109a715a8c86a562f22619192492b97c5e75799d2c82c7be0b90.

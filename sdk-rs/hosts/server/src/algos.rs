@@ -125,6 +125,9 @@ impl From<&str> for Kept {
 /// Keeps a stop notice for a client that is not there to see it.
 pub type StopNotice = Box<dyn Fn(Kept) + Send>;
 
+#[cfg(all(test, feature = "delegated-order-frames"))]
+type NukeReadPause = (oneshot::Sender<()>, oneshot::Receiver<()>);
+
 /// The chases and TWAPs running on one account, readable off its engine thread.
 pub struct Running {
     chases: AtomicUsize,
@@ -136,6 +139,8 @@ pub struct Running {
     lease: OnceLock<crate::router_lease::Permit>,
     lease_parked: AtomicBool,
     restores: OnceLock<crate::interruption::RestoreGuard>,
+    #[cfg(all(test, feature = "delegated-order-frames"))]
+    nuke_read_pause: Mutex<Option<NukeReadPause>>,
 }
 
 impl Running {
@@ -149,7 +154,25 @@ impl Running {
             lease: OnceLock::new(),
             lease_parked: AtomicBool::new(false),
             restores: OnceLock::new(),
+            #[cfg(all(test, feature = "delegated-order-frames"))]
+            nuke_read_pause: Mutex::default(),
         }
+    }
+
+    #[cfg(all(test, feature = "delegated-order-frames"))]
+    pub(crate) fn pause_next_nuke_after_read(
+        &self,
+    ) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (reached, observed) = oneshot::channel();
+        let (resume, paused) = oneshot::channel();
+        assert!(
+            self.nuke_read_pause
+                .lock()
+                .unwrap()
+                .replace((reached, paused))
+                .is_none()
+        );
+        (observed, resume)
     }
 
     pub(crate) fn attach_restores(&self, guard: crate::interruption::RestoreGuard) {
@@ -1073,17 +1096,21 @@ pub(crate) async fn run_with_identity(
                     return;
                 }
                 Some(AlgoInput::Op { op, mut data, origin, twap_owner: captured_owner, action }) => {
+                    let audit_refusal = |reason: &str| crate::audit::pre_dispatch_refused(Some(&who.venue), "algo", reason);
                     if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() {
                         let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                        if action.is_some() { audit_refusal(message); }
                         port.emit("error", serde_json::json!(message).to_string());
                         if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
                         continue;
                     }
                     if let Some(receipt) = action.as_ref() && let Err(message) = receipt.guard().check() {
+                        audit_refusal(message);
                         if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
                         continue;
                     }
                     if !running.io_allowed() {
+                        if action.is_some() { audit_refusal("io_fenced"); }
                         port.emit("error", crate::user_drain::refusal().to_string());
                         continue;
                     }
@@ -1094,16 +1121,19 @@ pub(crate) async fn run_with_identity(
                         port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
                     }
                     if !running.io_allowed() {
+                        if action.is_some() { audit_refusal("io_fenced"); }
                         port.emit("error", crate::user_drain::refusal().to_string());
                         continue;
                     }
                     if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() {
                         let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                        if action.is_some() { audit_refusal(message); }
                         port.emit("error", serde_json::json!(message).to_string());
                         if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
                         continue;
                     }
                     if let Some(receipt) = action.as_ref() && let Err(message) = receipt.guard().check() {
+                        audit_refusal(message);
                         if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
                         continue;
                     }
@@ -1123,6 +1153,7 @@ pub(crate) async fn run_with_identity(
                         .filter(|id| twap.active_twaps(&name).iter().any(|row| row["id"] == id.as_str() && row["status"] == "paused"));
                     if let Some(id) = &resume && let Some(guard) = running.restores.get()
                         && let Err(error) = guard.reserve_resume(id, epoch) {
+                        if action.is_some() { audit_refusal("restore_refused"); }
                         port.emit("error", serde_json::to_string(error).unwrap());
                         continue;
                     }
@@ -1145,12 +1176,14 @@ pub(crate) async fn run_with_identity(
                                 // Admission can wait: re-check the owner after it, right before dispatch.
                                 Ok(_admission) if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() => {
                                     let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                                    if action.is_some() { audit_refusal(message); }
                                     port.emit("error", serde_json::json!(message).to_string());
                                     if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
                                     continue;
                                 }
                                 Ok(_admission) => dispatch(),
                                 Err(error) => {
+                                    if action.is_some() { audit_refusal("draining"); }
                                     port.emit("error", error.to_string());
                                     continue;
                                 }
@@ -1181,11 +1214,15 @@ pub(crate) async fn run_with_identity(
                     }
                 }
                 Some(AlgoInput::Nuke { mode, request_id, action }) => {
+                    let audit_refusal = |reason: &str| crate::audit::pre_dispatch_refused(Some(&who.venue), "nuke", reason);
                     if let Some(receipt) = action.as_ref() && let Err(message) = receipt.guard().check() {
+                        audit_refusal(message);
                         if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"unknown"}))); }
                         continue;
                     }
-                    if !running.io_allowed() || action.as_ref().is_some_and(|receipt| !receipt.active()) {
+                    let io_allowed = running.io_allowed();
+                    if !io_allowed || action.as_ref().is_some_and(|receipt| !receipt.active()) {
+                        audit_refusal(if io_allowed {"Action registration retired before dispatch"} else {"io_fenced"});
                         if let Some(receipt) = action { receipt.finish(Err(crate::user_drain::refusal())); }
                         else { (port.emit)(crate::envelope::msg(&name, "callMethod:done", serde_json::json!({
                             "requestId":request_id,"success":false,"result":crate::user_drain::refusal(),
@@ -1200,6 +1237,14 @@ pub(crate) async fn run_with_identity(
                         port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
                         loaded
                     });
+                    #[cfg(all(test, feature = "delegated-order-frames"))]
+                    {
+                        let pause = running.nuke_read_pause.lock().unwrap().take();
+                        if let Some((reached, resume)) = pause {
+                            let _ = reached.send(());
+                            let _ = resume.await;
+                        }
+                    }
                     let admission = running.user.get().map(|user| user.admit_cleanup());
                     let nuke_cx = match action.as_ref().map(|receipt| receipt.guard()) {
                         Some(guard) => AlgoCx::new(
@@ -1210,19 +1255,41 @@ pub(crate) async fn run_with_identity(
                     };
                     let action_refusal = action.as_ref().and_then(|receipt| receipt.guard().check().err());
                     let started = match (action_refusal, admission.as_ref()) {
-                        (Some(message), _) => Err(serde_json::json!({"message":message,"outcome":"unknown"})),
-                        _ if action.as_ref().is_some_and(|receipt| !receipt.active() || !running.io_allowed()) => Err(serde_json::json!({"message":"Action registration retired before dispatch","outcome":"notSent"})),
-                        (_, Some(Err(error))) => Err(error.clone()),
+                        (Some(message), _) => {
+                            audit_refusal(message);
+                            Err(serde_json::json!({"message":message,"outcome":"unknown"}))
+                        }
+                        _ if action.as_ref().is_some_and(|receipt| {
+                            if !receipt.active() {
+                                audit_refusal("Action registration retired before dispatch");
+                                true
+                            } else if !running.io_allowed() {
+                                audit_refusal("io_fenced");
+                                true
+                            } else {
+                                false
+                            }
+                        }) => {
+                            // Keep the existing wire error; only the journal distinguishes IO.
+                            Err(serde_json::json!({"message":"Action registration retired before dispatch","outcome":"notSent"}))
+                        }
+                        (_, Some(Err(error))) => {
+                            audit_refusal("draining");
+                            Err(error.clone())
+                        }
                         _ => match seen {
                         Some((markets, positions, orders))
                             if crate::methods::nuke_can_see(mode, markets, positions, orders) =>
                         {
                             exec.nuke(mode, &nuke_cx)
                         }
-                        _ => Err(serde_json::json!({
-                            "message": crate::methods::NUKE_NOT_LOADED,
-                            "outcome": "notSent",
-                        })),
+                        _ => {
+                            audit_refusal(crate::methods::NUKE_NOT_LOADED);
+                            Err(serde_json::json!({
+                                "message": crate::methods::NUKE_NOT_LOADED,
+                                "outcome": "notSent",
+                            }))
+                        }
                         },
                     };
                     running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());

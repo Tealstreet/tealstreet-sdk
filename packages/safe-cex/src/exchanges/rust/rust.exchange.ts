@@ -1769,7 +1769,9 @@ export class RustEngineExchange extends BaseExchange {
             pendingProtocolTime = { now, utc };
           }),
       this.signerSetup,
-      (message) => this.emitAndLogError(message),
+      (message, source) => {
+        this.emitAndLogError(message, undefined, source ? { sentryTags: { http_preparation_source: source } } : undefined);
+      },
       (notice) => {
         // Sentry and the log only: the account keeps working, degraded, so no toast.
         const { message, sentryData } = tunnelProxyFallbackReport(this.name, notice);

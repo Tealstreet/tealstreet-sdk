@@ -29,6 +29,7 @@ struct Tape {
     reduce_only: Arc<Mutex<Vec<bool>>>,
     hold: bool,
     two_orders: bool,
+    closing_limit: bool,
     close_unknown: bool,
     closed_positions: Arc<std::sync::atomic::AtomicBool>,
     defer_positions: Arc<std::sync::atomic::AtomicBool>,
@@ -220,6 +221,10 @@ impl Transport for Tape {
                 "price":"50000","qty":"0.001","cumExecQty":"0","leavesQty":"0.001",
                 "reduceOnly":false,"timeInForce":"GTC","positionIdx":0,
                 "createdTime":"1000","updatedTime":"1000"}],"nextPageCursor":""}});
+            if self.closing_limit {
+                result["result"]["list"][0]["side"] = "Sell".into();
+                result["result"]["list"][0]["reduceOnly"] = true.into();
+            }
             if self.two_orders {
                 let mut second = result["result"]["list"][0].clone();
                 second["orderId"] = "second-resting-order".into();

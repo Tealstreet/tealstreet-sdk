@@ -90,6 +90,12 @@ Hyperliquid, Hyperliquid Spot and Bitunix metadata explicitly declare
 Enforcement still wins over disabled user preferences; inconsistent declarations
 remain observable through the general account-construction warning.
 
+Settled native write errors retain their captured, closed host `command` name.
+Worker serialization and `classifiedError` preserve it; `exchangeErrorTags`
+emits only allowlisted `error_command` values. This is caller-operation evidence,
+not an inferred native endpoint or algo subtype. Error details cannot override
+it with arbitrary text; payloads, IDs and URLs never become this tag.
+
 Hyperliquid `/info` weight is coordinated by the resolved egress, never by account:
 direct clients keep the origin row, Tokyo HOW aliases and HTTP private fallback
 share one private-fleet row, and public CORS has a separate row. New fleet rows
@@ -2500,7 +2506,12 @@ cooldown. Failed physical reads publish owner-fenced 1/2/4/8/16/30 s cooldowns,
 honoring Retry-After up to five minutes before followers can elect again.
 Unavailable storage from startup preserves independent native discovery/backoff.
 After a successful coordination transaction, storage loss refuses preparation
-instead of bypassing an unknown lease. Waiter cancellation never deletes a peer's
+instead of bypassing an unknown lease. Storage/owner failures and deadlines while
+waiting for peer coordination retain their original network/timedOut and notSent
+settlement. They report local catalogue coordination with closed
+`http_preparation_source=catalogue_coordination`, bound to the failed catalogue await.
+HOW still waits for connection, clock and authentication within its original budget.
+Waiter cancellation never deletes a peer's
 lease/cooldown; each engine still parses and publishes its own catalogue.
 The 30 s storage recovery pause starts only on an actual failed storage attempt.
 Retries refused during that pause cannot extend it; after expiry the coordinator
