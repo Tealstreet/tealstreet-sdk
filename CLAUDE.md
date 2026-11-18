@@ -37,6 +37,8 @@ older mode/transport discussions are explicitly superseded where they disagree.
 
 OKX EEA config-before-catalogue startup and bounded signature refusals are
 documented in [`sdk-rs/venues/okx/README.md`](sdk-rs/venues/okx/README.md#eea-private-startup).
+OKX's native write-diagnostic section also documents empty-envelope cancellation
+reasons and passive per-order reporting; neither grants retry or continuation authority.
 
 Closed join-proof v1 payloads and canonical public identity facts are documented
 in `docs/plans/callers/public-key-admission.md`. The pure crypto helpers do not
