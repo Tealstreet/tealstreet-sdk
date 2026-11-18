@@ -4077,6 +4077,20 @@ test('#3638 diagnostic composition retains the fresh MEXC reserve and boundary',
   assert.match(wasmBudgetError(cap + 1, 'venue', 'mexc'), /exceeds/);
 });
 
+// #3638 object envelopes: source c2455ca0e799, run 44255752536, artifact 14406113023.
+// Five optimized web/Node/replay copies: 1,963,086 B; SHA256 b13413acd4d81fae3b088fb69ad69776d0ae0c513d657f49565f4399e2e67b0f.
+// Rule 17: fresh measured + 10 KiB rounded up, retaining the earlier approved floor.
+test('#3638 object-envelope guard retains the fresh MEXC reserve and boundaries', () => {
+  const measured = 1_963_086;
+  const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.mexc;
+  assert.equal(requiredCap, 1_974_272);
+  assert.ok(cap >= Math.max(requiredCap, 1_973_248), `${cap} leaves less than 10 KiB above ${measured}`);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'mexc'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'mexc'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'mexc'), /exceeds/);
+});
+
 // #3646 d10ba2f3c500, CI44135644635 jobs134225245837/134225246062: web/Node bytes.
 // Rust1.99/bindgen0.2.129/Binaryen132 twice-Oz; shared family and replay budget.
 // SHA256 26a96f1c6e97109a715a8c86a562f22619192492b97c5e75799d2c82c7be0b90.

@@ -23,6 +23,10 @@ signing and write outcomes retain their existing controls. Exact source
 optimized web/Node/replay modules at 1,962,854 bytes. The coordinator's Rule 5
 floor is 1,973,248 bytes, retaining 10,394 bytes and every historical floor.
 
+MEXC's object-envelope guard at c2455ca0e799 measures 1,963,086 bytes in run
+44255752536, artifact 14406113023. Rule 17's measured + 10 KiB rounded-up floor
+is 1,974,272 bytes, retaining 11,186 bytes and all earlier measured floors.
+
 HyroTrader correlated auth-refusal metadata changes a Bybit-family input.
 Keep its native admission/uncertainty controls and fresh optimized family evidence;
 server negative-join fixtures retain the protected-provider and zero-write guards.
