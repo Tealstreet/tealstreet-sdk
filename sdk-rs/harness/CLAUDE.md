@@ -141,3 +141,10 @@ null across order types while retaining every reported value. Other families
 keep their established limit-only comparison scope. The projection never
 manufactures a compared TIF. Known-failure and accepted-difference manifests
 are unchanged by this correction.
+
+Native-store frame memory reservations include product metadata, ticker observation
+columns, message-stat numeric rows and their string tail before temporary interning
+tables are allocated. Full books reserve their known level columns, and the string
+tail includes final alignment. LOCAL copies each owned flush once to JavaScript; snapshots keep independent
+baselines.
+The public 16-pair memory gate and all compared fields remain unchanged.

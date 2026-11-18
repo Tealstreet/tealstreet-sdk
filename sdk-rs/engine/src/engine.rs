@@ -8086,20 +8086,41 @@ impl<V: Venue> Engine<V> {
             // A market-only flush must not publish row indexes ahead of MARKETS.
             !self.book_deltas || store || markets_match
         };
-        let buffer = std::mem::take(&mut self.io.core.frame);
-        let mut w = FrameWriter::new(buffer, now);
+        let pending = store.then(|| self.store.take_pending());
+        let (bytes, strings) = pending.as_ref().map_or((0, 0), |pending| {
+            self.store.frame_table_reservation(pending)
+        });
         #[cfg(feature = "managed-sockets")]
         let publish_stats = store && self.io.core.socket_driver.state.stats_due(now);
         #[cfg(feature = "managed-sockets")]
         if publish_stats {
             self.io.core.socket_driver.state.prepare_stats();
+        }
+        #[cfg(feature = "managed-sockets")]
+        let (bytes, strings) = if publish_stats {
+            let (stats_bytes, stats_strings) = self
+                .io
+                .core
+                .socket_driver
+                .state
+                .stats_frame_reservation(false);
+            (bytes + stats_bytes, strings + stats_strings)
+        } else {
+            (bytes, strings)
+        };
+        // Allocate the startup output before its temporary interning tables.
+        // Growing it around those tables leaves holes in WASM's linear heap.
+        let buffer = std::mem::take(&mut self.io.core.frame);
+        let mut w = FrameWriter::new(buffer, now);
+        w.reserve_tables(bytes, strings);
+        #[cfg(feature = "managed-sockets")]
+        if publish_stats {
             self.io
                 .core
                 .socket_driver
                 .state
                 .write_stats(&mut w, now, false);
         }
-        let pending = store.then(|| self.store.take_pending());
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
             if let Some(state) = self.venue.export_venue_state_for(&self.store)

@@ -1428,8 +1428,8 @@ impl Store {
         self.ticker_deltas_spare = pending.ticker_deltas;
     }
 
-    /// Write the drained changes as frame sections.
-    pub fn write<'a>(&'a self, pending: &Pending, w: &mut FrameWriter<'a>) {
+    /// Capacity hint for a flush's public tables, before any section is written.
+    pub(crate) fn frame_table_reservation(&self, pending: &Pending) -> (usize, usize) {
         let changes = &pending.changes;
         if changes.markets || changes.tickers_replaced {
             let market_bytes = if changes.markets {
@@ -1440,20 +1440,48 @@ impl Store {
             } else {
                 0
             };
+            // Classification/product tables share the catalogue flush. Their
+            // fixed columns must be reserved before any table can grow the buffer.
+            #[cfg(any(test, feature = "product-semantics"))]
+            let market_bytes = market_bytes
+                + if changes.markets {
+                    self.instrument_classifications
+                        .as_ref()
+                        .map_or(0, |rows| 16 + 16 * rows.len())
+                        + self
+                            .derivative_products
+                            .as_ref()
+                            .map_or(0, |rows| 16 + 44 * rows.len())
+                } else {
+                    0
+                };
             let ticker_bytes = if changes.tickers_replaced {
-                108 * self.tickers.len()
+                (108 + if self.export_ticker_observations {
+                    32
+                } else {
+                    0
+                }) * self.tickers.len()
             } else {
                 0
             };
-            w.reserve_tables(
+            (
                 market_bytes + ticker_bytes + 128,
                 if changes.markets {
                     4 * self.markets.len()
                 } else {
                     0
                 },
-            );
+            )
+        } else {
+            (0, 0)
         }
+    }
+
+    /// Write the drained changes as frame sections.
+    pub fn write<'a>(&'a self, pending: &Pending, w: &mut FrameWriter<'a>) {
+        let changes = &pending.changes;
+        let (bytes, strings) = self.frame_table_reservation(pending);
+        w.reserve_tables(bytes, strings);
         if changes.markets {
             self.write_markets(w);
             #[cfg(any(test, feature = "product-semantics"))]

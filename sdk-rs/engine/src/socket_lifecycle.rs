@@ -595,12 +595,20 @@ fn compare_topic_parts(key: &str, parts: &[&str]) -> std::cmp::Ordering {
 }
 
 struct TopicStats {
-    id: String,
-    received: Option<f64>,
+    id: Box<str>,
+    // Like implicit_received, NaN denotes no finite receipt yet.
+    received_at: f64,
     public_topic: bool,
     dirty: bool,
     subscribed: bool,
     observed: bool,
+}
+
+#[cfg(test)]
+impl TopicStats {
+    fn received(&self) -> Option<f64> {
+        (!self.received_at.is_nan()).then_some(self.received_at)
+    }
 }
 
 struct Feed {
@@ -822,7 +830,7 @@ impl Lifecycle {
         if !stats.subscribed {
             return false;
         }
-        stats.received = Some(stats.received.map_or(now, |previous| previous.max(now)));
+        stats.received_at = stats.received_at.max(now);
         stats.dirty = true;
         stats.observed = true;
         self.stats_dirty = true;
@@ -857,8 +865,8 @@ impl Lifecycle {
                     f.message_stats.insert(
                         Arc::from("private"),
                         TopicStats {
-                            id: String::new(),
-                            received: None,
+                            id: Box::default(),
+                            received_at: f64::NAN,
                             public_topic: false,
                             dirty: true,
                             subscribed: false,
@@ -870,17 +878,31 @@ impl Lifecycle {
                     .message_stats
                     .get_mut("private")
                     .expect("implicit private row");
-                let received = (!f.implicit_received.is_nan()).then_some(f.implicit_received);
-                stats.dirty |= stats.received != received || stats.observed != f.implicit_observed;
-                stats.received = received;
+                let received = f.implicit_received;
+                stats.dirty |= (stats.received_at != received
+                    && !(stats.received_at.is_nan() && received.is_nan()))
+                    || stats.observed != f.implicit_observed;
+                stats.received_at = received;
                 stats.observed = f.implicit_observed;
             }
             for (key, stats) in &mut f.message_stats.0 {
                 if stats.id.is_empty() {
-                    stats.id = format!("{index}.{key}");
+                    stats.id = format!("{index}.{key}").into_boxed_str();
                 }
             }
         }
+    }
+
+    /// Include numeric rows and their string tail in the initial flush allocation.
+    pub(crate) fn stats_frame_reservation(&self, snapshot: bool) -> (usize, usize) {
+        let full = snapshot || self.stats_replace;
+        self.feeds
+            .iter()
+            .flat_map(|feed| feed.message_stats.values())
+            .filter(|stats| full || stats.dirty)
+            .fold((32, 0), |(bytes, strings), stats| {
+                (bytes + 24 + 4 + stats.id.len(), strings + 1)
+            })
     }
 
     pub(crate) fn write_stats<'a>(
@@ -927,7 +949,11 @@ impl Lifecycle {
                 writer.u32(topic);
                 writer.u32(u32::from(subscribed) | (u32::from(subscribed && stats.observed) << 1));
                 writer.u32(0);
-                writer.f64(stats.received.map_or(f64::NAN, |at| (now - at).max(0.)));
+                writer.f64(if stats.received_at.is_nan() {
+                    f64::NAN
+                } else {
+                    (now - stats.received_at).max(0.)
+                });
             }
         }
         writer.end();
@@ -1668,8 +1694,8 @@ impl Lifecycle {
                 f.message_stats.insert(
                     key.clone(),
                     TopicStats {
-                        id: String::new(),
-                        received: None,
+                        id: Box::default(),
+                        received_at: f64::NAN,
                         public_topic,
                         dirty: true,
                         subscribed: false,
@@ -3422,6 +3448,14 @@ mod tests {
         assert_eq!(l.release_batch(current, false), None);
     }
     #[test]
+    fn topic_stats_keep_per_subscription_storage_compact() {
+        assert!(
+            std::mem::size_of::<TopicStats>() <= 32,
+            "thousands of subscriptions must not each retain expandable IDs or an optional-f64 tag"
+        );
+    }
+
+    #[test]
     fn topic_stats_follow_release_data_reconnect_and_unsubscribe() {
         let (mut l, feed, epoch) = started(AuthMode::None);
         l.replace_interests(
@@ -3433,16 +3467,16 @@ mod tests {
         l.record_topic(epoch, &["ticker.BTC"], 1.);
         assert!(
             l.feeds[feed.0].message_stats["ticker.BTC"]
-                .received
+                .received()
                 .is_none()
         );
         while l.release_batch(epoch, false).is_some() {}
         l.record_topic(epoch, &["ticker.", "BTC"], 2.);
         assert_eq!(
-            l.feeds[feed.0].message_stats["ticker.BTC"].received,
+            l.feeds[feed.0].message_stats["ticker.BTC"].received(),
             Some(2.)
         );
-        assert_eq!(l.feeds[feed.0].message_stats["book.BTC"].received, None);
+        assert_eq!(l.feeds[feed.0].message_stats["book.BTC"].received(), None);
         assert!(l.stats_due(2.));
         l.record_topic(epoch, &["ticker.BTC"], 3.);
         assert!(!l.stats_due(1_001.));
@@ -3452,7 +3486,7 @@ mod tests {
         let retired = l.retire(feed).unwrap();
         l.record_topic(epoch, &["ticker.BTC"], 4.);
         assert_eq!(
-            l.feeds[feed.0].message_stats["ticker.BTC"].received,
+            l.feeds[feed.0].message_stats["ticker.BTC"].received(),
             Some(3.)
         );
         l.retired(retired.epoch, true).unwrap();
@@ -3465,7 +3499,7 @@ mod tests {
         l.prepare_stats();
         assert_eq!(l.feeds[feed.0].message_stats["ticker.BTC"].id, id);
         assert_eq!(
-            l.feeds[feed.0].message_stats["ticker.BTC"].received,
+            l.feeds[feed.0].message_stats["ticker.BTC"].received(),
             Some(1_004.)
         );
         l.replace_interests(feed, vec![interest("book.BTC")], encode)
@@ -3487,7 +3521,7 @@ mod tests {
             for split in (0..=topic.len()).filter(|&i| topic.is_char_boundary(i)) {
                 let before: Vec<_> = keys
                     .iter()
-                    .map(|key| l.feeds[feed.0].message_stats[*key].received)
+                    .map(|key| l.feeds[feed.0].message_stats[*key].received())
                     .collect();
                 now += 1.;
                 assert_eq!(
@@ -3497,7 +3531,7 @@ mod tests {
                 );
                 for (index, key) in keys.iter().enumerate() {
                     assert_eq!(
-                        l.feeds[feed.0].message_stats[*key].received,
+                        l.feeds[feed.0].message_stats[*key].received(),
                         if *key == topic {
                             Some(now)
                         } else {
@@ -3519,8 +3553,8 @@ mod tests {
         l.record_topic(epoch, &["one"], 100.);
         l.record_topic(epoch, &["one"], 50.);
         l.record_topic(epoch, &["two"], f64::NAN);
-        assert_eq!(l.feeds[feed.0].message_stats["one"].received, Some(100.));
-        assert_eq!(l.feeds[feed.0].message_stats["two"].received, None);
+        assert_eq!(l.feeds[feed.0].message_stats["one"].received(), Some(100.));
+        assert_eq!(l.feeds[feed.0].message_stats["two"].received(), None);
         let mut writer = crate::wire::FrameWriter::new(Vec::new(), 150.);
         l.prepare_stats();
         l.write_stats(&mut writer, 150., true);
@@ -3543,9 +3577,9 @@ mod tests {
             .unwrap();
         while l.release_batch(epoch, false).is_some() {}
         l.record_topic(epoch, &["@l2Book|ETH||||||"], 10.);
-        assert_eq!(l.feeds[feed.0].message_stats[key].received, None);
+        assert_eq!(l.feeds[feed.0].message_stats[key].received(), None);
         l.record_topic(epoch, &["@l2Book|BTC||||||"], 11.);
-        assert_eq!(l.feeds[feed.0].message_stats[key].received, Some(11.));
+        assert_eq!(l.feeds[feed.0].message_stats[key].received(), Some(11.));
         assert!(l.feeds[feed.0].message_stats[key].public_topic);
     }
     #[cfg(feature = "socket-topic-aliases")]
@@ -3563,18 +3597,18 @@ mod tests {
         l.replace_interests(feed, vec![interest(a)], encode)
             .unwrap();
         assert!(l.record_topic(epoch, &["@l2Book|BTC||||||"], 11.));
-        assert_eq!(l.feeds[feed.0].message_stats[a].received, Some(11.));
+        assert_eq!(l.feeds[feed.0].message_stats[a].received(), Some(11.));
         assert!(!l.feeds[feed.0].message_stats.contains_key(b));
         assert!(!l.record_topic(epoch, &["@l2Book|ETH||||||"], 12.));
-        assert_eq!(l.feeds[feed.0].message_stats[a].received, Some(11.));
+        assert_eq!(l.feeds[feed.0].message_stats[a].received(), Some(11.));
         l.replace_interests(feed, vec![interest(b)], encode)
             .unwrap();
         assert!(l.record_topic(epoch, &["@l2Book|BTC||||||"], 13.));
-        assert_eq!(l.feeds[feed.0].message_stats[a].received, Some(13.));
-        assert_eq!(l.feeds[feed.0].message_stats[b].received, None);
+        assert_eq!(l.feeds[feed.0].message_stats[a].received(), Some(13.));
+        assert_eq!(l.feeds[feed.0].message_stats[b].received(), None);
         while l.release_batch(epoch, false).is_some() {}
         assert!(l.record_topic(epoch, &["@l2Book|BTC||||||"], 14.));
-        assert_eq!(l.feeds[feed.0].message_stats[b].received, Some(14.));
+        assert_eq!(l.feeds[feed.0].message_stats[b].received(), Some(14.));
         assert!(!l.feeds[feed.0].message_stats.contains_key(a));
     }
     #[test]
@@ -3588,7 +3622,10 @@ mod tests {
         l.prepare_stats();
         l.write_stats(&mut writer, 6., true);
         let _ = writer.finish();
-        assert_eq!(l.feeds[feed.0].message_stats["private"].received, Some(5.));
+        assert_eq!(
+            l.feeds[feed.0].message_stats["private"].received(),
+            Some(5.)
+        );
     }
     #[cfg(feature = "socket-topic-aliases")]
     #[test]
@@ -3614,13 +3651,16 @@ mod tests {
         assert!(l.record_topic(epoch, &["@l2Book|BTC||||true|5|"], 10.));
         assert!(l.record_topic(epoch, &["@ticker|||||||18446744073709551615"], 11.));
         assert!(l.record_topic(epoch, &["@ticker|PF_BTCUSD"], 12.));
-        assert_eq!(l.feeds[feed.0].message_stats[precision].received, Some(10.));
         assert_eq!(
-            l.feeds[feed.0].message_stats[instrument].received,
+            l.feeds[feed.0].message_stats[precision].received(),
+            Some(10.)
+        );
+        assert_eq!(
+            l.feeds[feed.0].message_stats[instrument].received(),
             Some(11.)
         );
-        assert_eq!(l.feeds[feed.0].message_stats[batch].received, Some(12.));
-        assert_eq!(l.feeds[feed.0].message_stats[other].received, None);
+        assert_eq!(l.feeds[feed.0].message_stats[batch].received(), Some(12.));
+        assert_eq!(l.feeds[feed.0].message_stats[other].received(), None);
     }
 
     #[test]
@@ -3648,11 +3688,11 @@ mod tests {
             "n:0",
             "n:18446744073709551615",
         ] {
-            assert!(l.feeds[feed.0].message_stats[key].received.is_some());
+            assert!(l.feeds[feed.0].message_stats[key].received().is_some());
         }
         l.record_symbol_topic(epoch, &"X".repeat(1025), &["@bookTicker"], 14.);
         assert_eq!(
-            l.feeds[feed.0].message_stats["btcusdt@bookTicker"].received,
+            l.feeds[feed.0].message_stats["btcusdt@bookTicker"].received(),
             Some(10.)
         );
     }
@@ -3668,11 +3708,17 @@ mod tests {
         let next = l.begin(feed, SocketId(2)).unwrap();
         l.opened(next).unwrap();
         l.prepare_stats();
-        assert_eq!(l.feeds[feed.0].message_stats["private"].received, Some(5.));
+        assert_eq!(
+            l.feeds[feed.0].message_stats["private"].received(),
+            Some(5.)
+        );
         assert!(!l.feeds[feed.0].message_stats["private"].observed);
         l.record_topic(next, &["private"], 10.);
         l.prepare_stats();
-        assert_eq!(l.feeds[feed.0].message_stats["private"].received, Some(10.));
+        assert_eq!(
+            l.feeds[feed.0].message_stats["private"].received(),
+            Some(10.)
+        );
         assert!(l.feeds[feed.0].message_stats["private"].observed);
     }
     #[cfg(feature = "socket-topic-aliases")]
@@ -3689,7 +3735,7 @@ mod tests {
             while l.release_batch(current, false).is_some() {}
         }
         assert!(l.record_topic(other_epoch, &["@l2Book|BTC||||||"], 10.));
-        assert_eq!(l.feeds[first.0].message_stats[key].received, None);
-        assert_eq!(l.feeds[second.0].message_stats[key].received, Some(10.));
+        assert_eq!(l.feeds[first.0].message_stats[key].received(), None);
+        assert_eq!(l.feeds[second.0].message_stats[key].received(), Some(10.));
     }
 }
