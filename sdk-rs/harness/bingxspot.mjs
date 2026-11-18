@@ -22,6 +22,7 @@ export const bingxspot = {
   tsBooksReady: exchange => Boolean(exchange.public),
   tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).length >= count,
   settleTs: exchange => exchange.settle(),
+  drainTs: exchange => exchange.settle(),
   createSocketAudit(_impl, { isPrivate, books }) {
     const sockets = new Map(), failures = [];
     const state = (url, generation = 1) => {
