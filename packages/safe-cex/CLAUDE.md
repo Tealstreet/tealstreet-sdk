@@ -68,6 +68,12 @@ Hyperliquid, Hyperliquid Spot and Bitunix metadata explicitly declare
 Enforcement still wins over disabled user preferences; inconsistent declarations
 remain observable through the general account-construction warning.
 
+Settled native write errors retain their captured, closed host `command` name.
+Worker serialization and `classifiedError` preserve it; `exchangeErrorTags`
+emits only allowlisted `error_command` values. This is caller-operation evidence,
+not an inferred native endpoint or algo subtype. Error details cannot override
+it with arbitrary text; payloads, IDs and URLs never become this tag.
+
 Hyperliquid `/info` weight is coordinated by the resolved egress, never by account:
 direct clients keep the origin row, Tokyo HOW aliases and HTTP private fallback
 share one private-fleet row, and public CORS has a separate row. New fleet rows
