@@ -403,7 +403,10 @@ reasons distinguish runtime, pending proof, mode, holder, registration and drain
 without changing those predicates. Receipt-bearing actor Nuke/Algo work also
 logs its owner, expiry, IO, admission and load refusals before its first dispatch.
 Receipt completion and later native-leg failures never mint this whole-action
-pre-dispatch event. Normal amend targets remain id/symbol only;
+pre-dispatch event. Grouped Session command refusals use the separate bounded
+INFO `order.leg_pre_dispatch_refused` with the same closed fields: no earlier-leg
+handoff proof is inferred, and group uncertainty/settlement remain unchanged.
+Normal amend targets remain id/symbol only;
 reduce-only LIMIT price amendments use the ordinary native amend path.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or

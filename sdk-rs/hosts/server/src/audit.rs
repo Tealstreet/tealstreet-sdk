@@ -107,6 +107,16 @@ fn pick(source: &Value, fields: &[&str]) -> Map<String, Value> {
 
 /// Refusals before handoff are journal-only and contain no client values.
 pub(crate) fn pre_dispatch_refused(venue: Option<&str>, op: &str, message: &str) {
+    command_refused(venue, op, message, false);
+}
+
+/// A grouped command proves only its own refusal, never the whole action.
+pub(crate) fn command_refused(venue: Option<&str>, op: &str, message: &str, grouped: bool) {
+    let event = if grouped {
+        "order.leg_pre_dispatch_refused"
+    } else {
+        "order.pre_dispatch_refused"
+    };
     let op = if ORDER_METHODS.contains(&op)
         || matches!(
             op,
@@ -188,7 +198,7 @@ pub(crate) fn pre_dispatch_refused(venue: Option<&str>, op: &str, message: &str)
     };
     let venue = venue.filter(|venue| safe_cex_venues::supported(venue));
     crate::state::Log::info(
-        &json!({"event":"order.pre_dispatch_refused", "reason_class":reason,
+        &json!({"event":event, "reason_class":reason,
         "venue":venue,"op":op})
         .to_string(),
     );
@@ -407,6 +417,24 @@ mod tests {
         assert_eq!(
             fields,
             json!({"event":"order.pre_dispatch_refused","venue":"bybit","op":"amend","reason_class":"fingerprint_mismatch"})
+        );
+    }
+
+    #[test]
+    fn grouped_refusal_audit_is_closed_and_excludes_all_caller_values() {
+        let canary = "private-id-body-canary".repeat(1000);
+        let capture = crate::state::log_capture::capture();
+        super::command_refused(Some(&canary), &canary, &canary, true);
+        let lines = capture.finish();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].len() < 512 && !lines[0].contains("canary"));
+        let outer: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+        assert_eq!(outer["level"], "info");
+        let fields: serde_json::Value =
+            serde_json::from_str(outer["msg"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            fields,
+            json!({"event":"order.leg_pre_dispatch_refused","venue":null,"op":"unknown","reason_class":"pre_dispatch_refused"})
         );
     }
 

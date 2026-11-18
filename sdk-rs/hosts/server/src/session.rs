@@ -2795,11 +2795,17 @@ impl Session {
         let refusal_venue = joined.account.venue.clone();
         let refusal_op = method.to_owned();
         let audit_refusal = crate::audit::ORDER_METHODS.contains(&method);
+        let grouped = group.is_some();
         let load_refusal = (refusal_venue.clone(), refusal_op.clone());
         let send = move || {
             if let Err(message) = crate::auth::Verifier::check_expiry(expires_at_ms, now_ms()) {
                 if audit_refusal {
-                    crate::audit::pre_dispatch_refused(Some(&refusal_venue), &refusal_op, message);
+                    crate::audit::command_refused(
+                        Some(&refusal_venue),
+                        &refusal_op,
+                        message,
+                        grouped,
+                    );
                 }
                 if let Some(entry) = pending.lock().unwrap().remove(&id) {
                     settle(
@@ -2817,7 +2823,12 @@ impl Session {
                 && let Err(message) = guard.check()
             {
                 if audit_refusal {
-                    crate::audit::pre_dispatch_refused(Some(&refusal_venue), &refusal_op, message);
+                    crate::audit::command_refused(
+                        Some(&refusal_venue),
+                        &refusal_op,
+                        message,
+                        grouped,
+                    );
                 }
                 if let Some(entry) = pending.lock().unwrap().remove(&id) {
                     settle(
@@ -2844,7 +2855,12 @@ impl Session {
                         methods::Reply::Intent { .. } | methods::Reply::Action { .. }
                     )
                 {
-                    crate::audit::pre_dispatch_refused(Some(&refusal_venue), &refusal_op, &message);
+                    crate::audit::command_refused(
+                        Some(&refusal_venue),
+                        &refusal_op,
+                        &message,
+                        grouped,
+                    );
                 }
                 let mut detail = failure_detail("Error", &message, false);
                 if matches!(
@@ -2865,10 +2881,11 @@ impl Session {
                 Ok(()) => send(),
                 Err(refused) => {
                     if audit_refusal {
-                        crate::audit::pre_dispatch_refused(
+                        crate::audit::command_refused(
                             Some(&load_refusal.0),
                             &load_refusal.1,
                             &refused.message,
+                            grouped,
                         );
                     }
                     if let Some(entry) = pending.lock().unwrap().remove(&id) {
@@ -2894,10 +2911,24 @@ impl Session {
         order_frame: Option<OrderReceipt>,
     ) {
         if order_frame.is_none() && crate::audit::ORDER_METHODS.contains(&pending.method.as_str()) {
-            self.audit_order_refusal(name, &pending.method, message);
+            crate::audit::command_refused(
+                self.joined
+                    .get(name)
+                    .map(|joined| joined.account.venue.as_str()),
+                &pending.method,
+                message,
+                pending.group.is_some(),
+            );
         }
         if pending.group.is_some() && matches!(pending.reply, methods::Reply::Action { .. }) {
-            self.audit_order_refusal(name, &pending.method, message);
+            crate::audit::command_refused(
+                self.joined
+                    .get(name)
+                    .map(|joined| joined.account.venue.as_str()),
+                &pending.method,
+                message,
+                pending.group.is_some(),
+            );
             // This proves only one leg was not dispatched. Another leg may be
             // in flight: count every leg and let the group settle as unknown.
             settle(
@@ -3052,10 +3083,11 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
         if let Err(error) = &outcome
             && error["outcome"] == "notSent"
         {
-            crate::audit::pre_dispatch_refused(
+            crate::audit::command_refused(
                 Some(&audit.who.venue),
                 &pending.method,
                 error["message"].as_str().unwrap_or(""),
+                pending.group.is_some(),
             );
         }
         let mut fields = audit.fields.clone();
