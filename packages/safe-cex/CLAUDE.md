@@ -1105,6 +1105,15 @@ The fatal symbol-scoped income wrapper retains shared engine classification
 (`kind`, `outcome`, `venueCode`) alongside its existing name and cause. Failed
 income still stops the fold before any fill reads; no empty account is invented.
 
+Fills-derived journal keys use `fold-v2` plus escaped account, symbol, leg and the
+native execution ID that finally flattened the leg. A flip's closing half retains
+that execution ID; its opening half belongs to the next lifecycle. Neither time
+precision nor a response ordinal is identity. The closing ID also stays stable
+when a wider lookback reveals earlier opening fills. A reportable close without
+that ID fails the fold instead of emitting a colliding key or silently dropping
+the record. Consumers must rebuild legacy timestamp-keyed derived projections
+before mixing them with `fold-v2`; this does not rekey venue-reported positions.
+
 ## Rust socket health
 
 Engine venues own their sockets and reconnect policy; the wasm host only

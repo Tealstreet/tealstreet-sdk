@@ -21,8 +21,9 @@ const TO = FROM + 24 * 60 * 60 * 1000;
 
 /** A buy then a sell, which folds into exactly one closed round trip. */
 const roundTrip = (symbol: string): Execution[] => [
-  { timestamp: FROM / 1000 + 60, symbol, price: 100, qty: 1, side: OrderSide.Buy, commission: 0.1 },
+  { id: '1', timestamp: FROM / 1000 + 60, symbol, price: 100, qty: 1, side: OrderSide.Buy, commission: 0.1 },
   {
+    id: '2',
     timestamp: FROM / 1000 + 120,
     symbol,
     price: 110,

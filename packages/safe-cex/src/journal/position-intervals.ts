@@ -59,6 +59,8 @@ export type PositionInterval = {
   readonly openedAt: number;
   /** Absent while the position is still open at the end of the fills window. */
   readonly closedAt?: number;
+  /** Native execution that flattened this leg (also the closing half of a flip). */
+  readonly closingExecutionId?: string;
   /** Peak absolute size the position reached. */
   readonly maxSize: number;
   /** Total volume closed over the interval. */
@@ -191,12 +193,14 @@ const finish = (
   symbol: string,
   leg: PositionSide | 'both',
   closedAt?: number,
+  closingExecutionId?: string,
 ): PositionInterval => ({
   symbol,
   positionSide: leg,
   side: position.signed > 0 ? PositionSide.Long : PositionSide.Short,
   openedAt: position.openedAt,
   closedAt,
+  closingExecutionId,
   maxSize: position.maxSize,
   closedSize: position.closedSize,
   complete: position.complete,
@@ -329,7 +333,7 @@ export const reconstructPositionIntervals = (
 
     if (!crossed) {
       accrueFill(current, execution, true);
-      intervals.push({ ...finish(current, execution.symbol, leg, at), closedByFlip: false });
+      intervals.push({ ...finish(current, execution.symbol, leg, at, execution.id), closedByFlip: false });
       running.delete(key);
       continue;
     }
@@ -346,7 +350,7 @@ export const reconstructPositionIntervals = (
       },
       true,
     );
-    intervals.push({ ...finish(current, execution.symbol, leg, at), closedByFlip: true });
+    intervals.push({ ...finish(current, execution.symbol, leg, at, execution.id), closedByFlip: true });
 
     const openedSize = Math.abs(next);
     const opened = freshPosition({
