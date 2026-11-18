@@ -111,3 +111,13 @@ a zero/invalid liquidation sentinel cannot complete TS private replay startup.
 BingX Spot replay tracks production decoder receipts alongside pending account reads.
 Bounded drains precede ticks, checkpoints and final capture; event-loop yields
 alone cannot establish completion of gzip decoding or its queued text messages.
+
+#3640's post-M44 sweep is CI44245108129 at source
+`5a8c12ca5208270288dae40df8d85f111988ea06`, tree-identical to merged head
+`5a6761866990bd1894a20bc89fbedecc14b80978` (master `700dee33e3a9`).
+All 27 exact family builds completed; web/Node hashes and lengths agree.
+The follow-up budget commit replaces provisional `36e3733cf7` provenance with
+these fresh measurements. Each non-Bybit cap is measured +10 KiB rounded to KiB.
+The measured combined module is 17,860,053 B (SHA256
+`eba7cc0304ceb0dbbe2ffd946c02b0975bd3ab23f8d7f09cfdd70bc08dddda5f`);
+combined and Bybit ceilings remain 18,087,936 and 2,696,192 B respectively.

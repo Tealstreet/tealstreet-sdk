@@ -255,11 +255,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Optimized web/Node 2,100,887 B; SHA256 77668ba3c8e46c6365627540656151f3d8a78531c2fef79cbf897c68ef040088.
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
   // #3513 CI43629571410: 2_101_409 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue apexomni
-  // Linux CI run44232282590 job134560427364, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2219656 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2219656 B.
   // SHA256 1c313a5fd381774503f730bff944e071359db69fa08b65f646f9efbbccaf15a8; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   apexomni: 2_230_272,
   // #3448 merged head 9b737161757f: CI run 43061512265, artifact 13873588589.
   // Optimized web/node 2,197,821 B + 10 KiB, rounded up to KiB.
@@ -303,12 +304,13 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Optimized web/Node 2,264,745 B; SHA256 0dda31c9b2d4b80e09af5654ce3bb096647fd5c6a153037acda1564c7e90efb4.
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
   // #3513 CI43629571410: 2_265_275 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue asterdex
-  // Linux CI run44232282590 job134560427458, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2383840 B.
-  // SHA256 a78ad1a783ec28ced95d3e4430656224596a7158e11e0296be8499930a6735c8; rule 17: measured +10 KiB, rounded up to KiB.
-  asterdex: 2_394_112,
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2383961 B.
+  // SHA256 e7e6031bbebcf852370c2984f9a7fdaa8d149e6424bccc6379dd9a6db42b1fc6; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
+  asterdex: 2_395_136,
   // #3438 merged-head local build.sh --venue backpack: web/node 2,036,671 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3290 CI 43563699705, source 8043e2bb11e5, artifact 14101806150: web/Node/replay 2,047,591 B.
@@ -320,11 +322,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rule 5 / #3566: only Backpack links the new admission decoder/capture by default; other families stay opt-in.
   // Pinned build.sh --venue backpack: optimized local web/Node 2,082,554 B; CI43755040219/job132937508086 web2,076,180 B.
   // max(measured) +10 KiB rounded up; retain the 2,060,288 B floor/provenance; two independent CLEARs required.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue backpack
-  // Linux CI run44232282590 job134560427316, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2192861 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2192861 B.
   // SHA256 ee094e8532358b22ff3ea708fe2141b0c968951279d842bee41284452cac269e; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   backpack: 2_203_648,
   // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
@@ -339,12 +342,13 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3290 CI43591113196/job132437636240, artifact14112821349; source97507acf9371 (head738ee1289).
   // Optimized web/Node 2,279,707 B; SHA256 2336f164dfa6ad6f617a50ae7e14937aeaf4bed3efab735764fb771009c0e6cd.
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue binance
-  // macOS merged tree bf83495ed0, exact standalone command; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2420187 B.
-  // SHA256 3d849d113a19df594c819042c4bf47f639ccc52f72d55e1020eb7b258671668d; rule 17: measured +10 KiB, rounded up to KiB.
-  binance: 2_430_976,
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2398105 B.
+  // SHA256 d1d3389429a0bad0a43776cca13e38f2c133cb79d745cb9321e0f69a878c1c2c; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
+  binance: 2_408_448,
   // #3438 merged-head local build.sh --venue bingx: web/node 2,130,988 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3290 CI 43563699705, source 8043e2bb11e5, artifact 14101497823: web/Node/replay 2,137,074 B.
@@ -368,11 +372,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Shared command codecs: optimized web/Node 2,168,354 B, SHA aeab98147da32f70.
   // Rust1.99/bindgen0.2.129/Binaryen132, canonical family build with two -Oz passes.
   // Maximum + 10 KiB rounded to KiB; retain every historical floor.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue bingx
-  // Linux CI run44232282590 job134560427377, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2269727 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2269727 B.
   // SHA256 de2572eab8236adaab88c97b51ec6d5fb5045302a80f254d6730e4a82dd6f34b; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   bingx: 2_280_448,
   // #3157 at ea21e32e001, CI run 42399005414, job 128482879551: 2,447,105 B.
   // Standing CI + 10 KiB rounded up to KiB; Bitget siblings share the same module cap.
@@ -391,14 +396,15 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // M44 head7bd8f25, CI44224839389/job134535952644/artifact14393041086: web/Node 2,784,464 B.
   // SHA256 49aade25741062f3c2b963dcff1c3012fa565d52f67d1176971a638dfab1fe9a.
   // Coordinator-approved fresh + 10 KiB rounded to KiB; retain prior floors and strict boundaries.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue bitget
-  // Linux CI run44232282590 job134560427382, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2910037 B.
-  // SHA256 39b03b27a4dce90c0b6b9e96f091dd4345074bf10fe6e288011eac5dec52ea60; rule 17: measured +10 KiB, rounded up to KiB.
-  bitget: 2_920_448,
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2917374 B.
+  // SHA256 b994470c435b14c3737132c8745215181c147894bd08f44dfddcc1bfb258d079; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
+  bitget: 2_927_616,
   // Rule 5 / #3640: this alias shares bitget's measured native-store module and rule-17 ceiling.
-  bitgetusdc: 2_920_448,
+  bitgetusdc: 2_927_616,
   // #3297 run 42556682443 at e5ae4d9a8db measured 1,895,658 B; +10 KiB rounded up.
   // Keep the larger PR-parent cap when merging master; both measurement histories remain pinned.
   // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262
@@ -408,11 +414,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded up.
   // #3438 merged-head local build.sh --venue bitrue: web/node 1,908,695 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue bitrue
-  // Linux CI run44232282590 job134560427404, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2029349 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2029349 B.
   // SHA256 f6234c328019216bbb7bcbefb9b8eb1772d494cd7d971fd3624b6e87c8020c5f; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   bitrue: 2_039_808,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web 1,916,290 B + 10 KiB, rounded up.
   // Nullable history output: local optimized web/node 1,927,088 B.
@@ -439,20 +446,22 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Retain historical floors; 10,904 B reserve; shares bitunix family.
   // #3317 merge e25dc312bd2c, run 43545517625, artifact 14093428727: web/Node/replay 1,954,918 B.
   // Measured + 10 KiB, rounded up to KiB; retain parent floors and shared-family aliases.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue bitunix
-  // Linux CI run44232282590 job134560427556, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2059210 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2059210 B.
   // SHA256 2e85c05fe73c3c26c23f3b01bc9b618e34f96334408f70a9b10052e88e83e0de; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   bitunix: 2_069_504,
   // Nullable history output: local optimized web/node 2,070,435 B.
   // SAFE_CEX_WASM_OPT=required build.sh --venue blofin; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
   // Current measured size + 10 KiB, rounded up to KiB (rule 17).
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue blofin
-  // Linux CI run44232282590 job134560427604, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2191576 B.
-  // SHA256 0735462080a844f5bdc59f0c566d03c9bb55f0bc271d83f75a23e48f1192c79e; rule 17: measured +10 KiB, rounded up to KiB.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2191688 B.
+  // SHA256 a6c729244198ab95a6e5699ae884bacb9f13e1bdc3a8844a4cdee0bea8bff20d; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   blofin: 2_202_624,
   // #3395 run 42561995598, merge c4b68c461e1f: CI web/node 2,316,042 B + 10 KiB, rounded up.
   // #3372 merge keeps max(PR 2,295,808, master 2,326,528); prior run 42484598496 measured 2,285,327 B.
@@ -606,11 +615,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust1.99.0, bindgen0.2.129, Binaryen132, required two -Oz passes.
   // Read-scoped close/version guards retain causal floors across bounded cache eviction.
   // Current CI bytes +10 KiB rounded up; 10,609 B reserve, every prior floor retained.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue coinbase
-  // Linux CI run44232282590 job134560427427, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2466000 B.
-  // SHA256 c44e76460e1513bc667bb9e0356621fe9f30f1e23067743cff1e0cfe2aa0df73; rule 17: measured +10 KiB, rounded up to KiB.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2466142 B.
+  // SHA256 051f6b275cef4df69a1de78ec4a30343f5b1cb9b8b87c8f3a7946d26583da3e4; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   coinbase: 2_477_056,
   // #3438 merged-head local build.sh --venue cryptocom: web/node 1,803,468 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
@@ -628,11 +638,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Current measured bytes + 10 KiB, rounded up; retain all larger parent floors.
   // #3317 merge e25dc312bd2c, run 43545517625, artifact 14093603492: web/Node/replay 1,815,949 B.
   // Measured + 10 KiB, rounded up to KiB; retain parent floors and shared-family aliases.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue cryptocom
-  // Linux CI run44232282590 job134560427513, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 1934549 B.
-  // SHA256 3ddf945d7ed953f3a24e0ec18e2ec83b22a6e509ba819380cd83431ed0b4e430; rule 17: measured +10 KiB, rounded up to KiB.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 1934696 B.
+  // SHA256 78b698d190cccdb81d9b4974a61e32fe909e05218236742986246fa3f3baca0c; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   cryptocom: 1_945_600,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.
@@ -665,11 +676,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // build.sh --venue grvt, Rust1.99.0/bindgen0.2.129/Binaryen132 twice -Oz.
   // Optimized web/Node 2,043,354 B; SHA256 19b58267327bb19c7b508b01625e5b50423edd96e37efb96f8c30e3802f2c02b.
   // Current measured size +10 KiB rounded up, preserving every historical floor.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue grvt
-  // Linux CI run44232282590 job134560427473, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2160164 B.
-  // SHA256 bb6de73a9381b3bc19b144b499e2dc3af713bcc78bcafc0ad668dc8f79006797; rule 17: measured +10 KiB, rounded up to KiB.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2160244 B.
+  // SHA256 2a7dc17a1955269b998fcf9ee5c0b27a27a2d1fd2bbf83f91302c3efb404f73e; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   grvt: 2_170_880,
   // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
@@ -713,11 +725,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3579 CI43782227341/jobs133022239190+133022239183, head b323ddf25c4a (checkout b5dc3b07feaf): web/Node 2,305,365 B.
   // CI SHA256 fe93956d5b10bf917f6281f5dbee10b8f366c72a539dd4f29a984e0b251ab921; local 2,306,669 B, SHA256 6df619c9c1fb891e336cd42715164081e63a4d689f7f723e6d467a8d9e552075.
   // Rust1.99/bindgen0.2.129/Binaryen132 twice -Oz; max(current CI, local) + 10 KiB rounded up, retaining historical floors.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue hyperliquid
-  // Linux CI run44232282590 job134560427586, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2427522 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2427522 B.
   // SHA256 31736b2d19724ee095d4ab617380d32befacfd34f25b625f43abedafb1bd7e94; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   hyperliquid: 2_438_144,
   // #3438 merged-head local build.sh --venue hyperliquid: web/node 2,238,027 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
@@ -772,12 +785,13 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3643 CI44132069302/job134212792364, composition9fd6c31b5299 (PR36a0f89e + mastercd405204).
   // Optimized web/Node 2,292,953 B; SHA256 ef43266ef637108ab003a62b16674079df413c8db0a6fe1c10edaa277281ef53.
   // Coordinator approved 2026-11-18: measured +10 KiB rounded up; retain historical and shared-alias floors.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue kraken
-  // Linux CI run44232282590 job134560427495, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2407727 B.
-  // SHA256 f3324ad6dc773f2c082955ec53dfedbfe1c09ad776408995cafd8799d4fece1d; rule 17: measured +10 KiB, rounded up to KiB.
-  kraken: 2_418_688,
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2411161 B.
+  // SHA256 7ab109f8aa06de4ef283d11e21e782989480afc28a2ea5a4e3c5ec830ca4ad4d; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
+  kraken: 2_421_760,
   // #3438 merged-head local build.sh --venue kraken: web/node 2,247,702 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3391 run 43328298773, artifact 13992739463; source 46852c576bd1 (ca7e7ea34bf6 tree).
@@ -797,14 +811,15 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Current maximum +10 KiB rounded up; preserve historical floors and the shared-family cap.
   // #3643 shares Kraken's measured artifact/provenance above; retain the same reserve and parent floors.
   // Rule 5 / #3640: this alias shares kraken's measured native-store module and rule-17 ceiling.
-  krakenspot: 2_418_688,
+  krakenspot: 2_421_760,
   // #3438 merged-head local build.sh --venue kucoin: web/node 1,866,880 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue kucoin
-  // Linux CI run44232282590 job134560427417, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 1986254 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 1986254 B.
   // SHA256 b65a7a918726814825bd053754cf78c282673b578d8c82b672ecb285957a0343; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   kucoin: 1_996_800,
   // #3397 run 43319466529/job 131536920530, source b9f5256efe4c (tree = merge 1663c1a885):
   // web size refusal: 2,464,041 B; separate Node capsule has the same size.
@@ -844,11 +859,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust1.99, bindgen0.2.129, Binaryen132, required twice -Oz; current bytes + 10 KiB rounded up (11,237 B reserve).
   // Preserve both parent floors and all provenance above.
   // #3513 CI43629571410: 2_478_273 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue kucoinspot
-  // Linux CI run44232282590 job134560427346, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2667561 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2667561 B.
   // SHA256 61613126ab2716333b8a065420cd5f6707058ac1d6eae76341a50d352c5c954e; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   kucoinspot: 2_678_784,
   // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
@@ -902,11 +918,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3579 merged source873c3c199: build.sh --venue lighter; Rust1.99/bindgen0.2.129/Binaryen132 twice-Oz.
   // Fresh web/Node 2,228,730 B; SHA256 abd2e36ac525defc7673fc51d3ca7170d7d3f784589016c821c95de511b6f8f9.
   // Same module at master711dc03e942; measured +10 KiB rounded up, retaining both parent floors.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue lighter
-  // Linux CI run44232282590 job134560427476, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2341801 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2341801 B.
   // SHA256 1a4abadc938d9183d63f2bbae05da36ad5747a04c3a5cf892f188b34d03db194; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   lighter: 2_352_128,
   // #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
@@ -983,11 +1000,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3266 merge 2d0fdf629b84: local optimized web/Node 1,960,367 B, build.sh --venue mexc.
   // Rust1.99, bindgen0.2.129, Binaryen132 twice -Oz; measured + 10 KiB rounded up.
   // Module SHA256 e8939820ec914ac233aafc4ef82692d2fda4478800a10f85a7597073810af27f; retain parent floors.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue mexc
-  // Linux CI run44232282590 job134560427378, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2070748 B.
-  // SHA256 78ff64664d69fc6dc66d7d5572e6cc7436dbc7444ef97ae120ce53289bf5b096; rule 17: measured +10 KiB, rounded up to KiB.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2070898 B.
+  // SHA256 a90c978aaea33a23c029c2ddb950badb8f06e052a6c69b3d668284ec4f46380b; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   mexc: 2_081_792,
   // Nullable history output: local optimized web/node 2,052,533 B.
   // SAFE_CEX_WASM_OPT=required build.sh --venue okx; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
@@ -996,11 +1014,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3647 coordinator-approved 2026-11-18: 80274d2 web/Node 2,066,659 B; b309848 trims to 2,063,838 B.
   // Pinned Rust1.99/bindgen0.2.129/Binaryen132 twice-Oz; max(measured + 10 KiB, historical floor), rounded to KiB.
   // Retain both measurement certificates in wasm-budget.test.mjs; remeasure future inputs before changing this cap.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue okx
-  // Linux CI run44232282590 job134560427384, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2178719 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2178719 B.
   // SHA256 5cf9f7fc9a9de35cdf3cd807c0719e5f3638d2b7ab6eb2d5fbf36602b053793b; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   okx: 2_189_312,
   // #3438 merged-head local build.sh --venue orderly: web/node 1,769,717 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
@@ -1021,11 +1040,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3317 merge e25dc312bd2c, run 43545517625, artifact 14094391124: web/Node/replay 1,782,494 B.
   // Measured + 10 KiB, rounded up to KiB; retain parent floors and shared-family aliases.
   // #3513 CI43629571410: 1_784_084 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue orderly
-  // Linux CI run44232282590 job134560427425, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 1903246 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 1903246 B.
   // SHA256 5e43c7e9cdb1d339282741085dd1e738b0a7190220c732c423ef8ad1ceb2b668; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   orderly: 1_913_856,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
   // #3397 run 43319466529/job 131536920493, source b9f5256efe4c (tree = merge 1663c1a885):
@@ -1045,11 +1065,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3290 CI43591113196/job132437636274, artifact14112204213; source97507acf9371 (head738ee1289).
   // Optimized web/Node 2,311,211 B; SHA256 5b06471f86a183e59e0f01177a20baad87ae96849c177b00ad7e07253f9ccfef.
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue paradex
-  // Linux CI run44232282590 job134560427415, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2430326 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2430326 B.
   // SHA256 ce459dadc0d9846d3a4bc6466757d67e01dd953fe347278d234f59d39b95b9d1; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   paradex: 2_441_216,
   // #3245 at 46378cfab09, CI run 42367120442: 2,079,779 B + 10 KiB, rounded up to KiB.
   // #3249 CI: web Phemex measured 2,079,916 B; CI size plus 10 KiB, rounded up to KiB.
@@ -1073,11 +1094,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Optimized web/Node 2,144,862 B; SHA256 f8edfa4fc31b825f067684c1580a6ce69d152cb6d8461f18ca8fc11d78158155.
   // Current maximum + 10 KiB rounded up; retain every larger historical floor.
   // #3513 CI43629571410: 2_145_381 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue phemex
-  // Linux CI run44232282590 job134560427600, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2241775 B.
-  // SHA256 02c56b00a8f1eacf5b5b23355654d09a1ce084f3e810791275e65d052091e83c; rule 17: measured +10 KiB, rounded up to KiB.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2241927 B.
+  // SHA256 8ceebbefcb7d817de7ae82ce8a209dad4c86b01277b0963f375d286a9d2bc54a; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   phemex: 2_252_800,
   // #3397 run 43319466529/job 131536920519, source b9f5256efe4c (tree = merge 1663c1a885):
   // web/Node 1,652,282 B; current measured bytes + 10 KiB, rounded up; retain parent floors.
@@ -1105,11 +1127,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3266 merge 2d0fdf629b84: local optimized web/Node 1,665,253 B, build.sh --venue polymarket.
   // Rust1.99, bindgen0.2.129, Binaryen132 twice -Oz; measured + 10 KiB rounded up.
   // Module SHA256 3ce71a13dd298e47164f6f1389a2d17c19e93e29e5dfe04e2ec67c0b11545f9c; retain parent floors.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue polymarket
-  // Linux CI run44232282590 job134560427352, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 1785361 B.
-  // SHA256 9fdfae03dbf12533fc836656c9dfa6be9e8093aecca29566c6955116e2fe0f22; rule 17: measured +10 KiB, rounded up to KiB.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 1785579 B.
+  // SHA256 377f15208713331a88fba5d6a2b2729d2c440b3e6abb0ee6d7a44ee92c36de6e; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   polymarket: 1_796_096,
   // #3277 TxFlow public-decode crate, CI run 42407352871: 1,896,742 B + 10 KiB, rounded up to KiB.
   // #3314 CI run 42560319271, merge 449511022a8d, job 128975487404: web/node 2,121,120 B.
@@ -1149,11 +1172,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3520 run43648572739/job132612114429, artifact14135771071: five copies 2,167,082 B.
   // Source5de35a110cf1 equals head eecfabbc5d6e's tree; same required twice-Oz pinned profile.
   // SHA256 4a3fd2ef9c8134095b97d1db4897701e5d0ee1aeb161cc86681a3e339a5b5f01; +10 KiB rounded up.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue txflow
-  // Linux CI run44232282590 job134560427515, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2286265 B.
-  // SHA256 976da3b0fcf68f35784ff0bd4fc4bcaa60b242065d7e7511514e7b670bee56e1; rule 17: measured +10 KiB, rounded up to KiB.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2286415 B.
+  // SHA256 207a381182c57410431705a268ebb1b72ab0283ba695fd72600aab4d73b0ff14; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   txflow: 2_296_832,
   // #3362 fresh merge f10ca13c112 + master 05241cd0f41: web/node 1,980,557 B.
   // corepack yarn rust:build-wasm --venue weex; CI profiles, Binaryen132 twice-Oz; +10 KiB rounded up.
@@ -1216,11 +1240,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3273 third merge 47a277eb4a6b + b86a48664ac8: optimized web/Node 2,033,603 B.
   // Rust1.99, bindgen0.2.129, Binaryen132, two required -Oz passes; build.sh --venue weex.
   // Measured + 10 KiB rounded up; retain both parent floors and all CI provenance.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue weex
-  // Linux CI run44232282590 job134560427621, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2149486 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2149486 B.
   // SHA256 cecf3e2d9c589b2999721622a373180143e94344bfa00672053ce1fc9f12109a; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   weex: 2_160_640,
   // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
   // #3221 hosted signing: CI run 42352558360 measured web/node at 2,568,219 B; + 10 KiB, rounded up to KiB.
@@ -1260,11 +1285,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3290 CI 43563699705, source 8043e2bb11e5, artifact 14101841020: web/Node/replay 2,680,145 B.
   // Verified optimized module maximum + 10 KiB rounded up; all historical floors retained.
   // #3513 CI43629571410: 2_681_664 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
-  // Rule 5 / #3640 (7b723d8837): native store sections and managed-order ownership.
+  // Rule 5 / #3640: fresh native-store measurement AFTER M44 master 700dee33e3a9 merge.
   // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue woo
-  // Linux CI run44232282590 job134560427294, merged tree e564db0; Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes.
-  // Optimized web/Node 2870836 B.
+  // CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06; tree equals merged head 5a6761866990.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, two -Oz passes; optimized web/Node 2870836 B.
   // SHA256 b1bcbd0a3c07d9b7bcd7711f51c1ade8f3cf6b6361c92260de853f15ee07a30e; rule 17: measured +10 KiB, rounded up to KiB.
+  // Follow-up replaces provisional 36e3733cf7 provenance; no e564db0 sizes used.
   woo: 2_881_536,
 });
 export const wasmBudgetBytes = (profile, venue) =>

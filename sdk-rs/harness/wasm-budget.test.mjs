@@ -4076,19 +4076,28 @@ test('BingX shared command codecs retain the measured optimized reserve', () => 
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
 });
 
-// Rule 5 / #3640: 7b723d8837 moved UI projection/ownership into native store frames.
-// Full 27-family sweep after merging mirror master 0eaeb151b5. Each exact command:
+// Rule 5 / #3640: fresh 27-family sweep after M44 master 700dee33e3a9.
+// CI 44245108129 source 5a8c12ca5208270288dae40df8d85f111988ea06, identical tree to 5a6761866990.
 // SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue FAMILY
-// Rust1.99.0, bindgen0.2.129, Binaryen132; two required -Oz passes, web=Node hashes.
-for (const [family, measured, minimumCap, sha256, previousFloor, aliases] of [
+// Rust1.99.0 / bindgen0.2.129 / Binaryen132; web/Node identical; two -Oz passes.
+// Supersedes provisional 36e3733cf7 / e564db0 provenance in a follow-up commit.
+for (const [family, measured, required, sha256, aliases] of [
   [
-    "woo",
-    2870836,
-    2881536,
-    "b1bcbd0a3c07d9b7bcd7711f51c1ade8f3cf6b6361c92260de853f15ee07a30e",
-    2692096,
+    "apexomni",
+    2219656,
+    2230272,
+    "1c313a5fd381774503f730bff944e071359db69fa08b65f646f9efbbccaf15a8",
     [
-      "woo"
+      "apexomni"
+    ]
+  ],
+  [
+    "asterdex",
+    2383961,
+    2395136,
+    "e7e6031bbebcf852370c2984f9a7fdaa8d149e6424bccc6379dd9a6db42b1fc6",
+    [
+      "asterdex"
     ]
   ],
   [
@@ -4096,50 +4105,17 @@ for (const [family, measured, minimumCap, sha256, previousFloor, aliases] of [
     2192861,
     2203648,
     "ee094e8532358b22ff3ea708fe2141b0c968951279d842bee41284452cac269e",
-    2093056,
     [
       "backpack"
     ]
   ],
   [
-    "bitget",
-    2910037,
-    2920448,
-    "39b03b27a4dce90c0b6b9e96f091dd4345074bf10fe6e288011eac5dec52ea60",
-    2781184,
+    "binance",
+    2398105,
+    2408448,
+    "d1d3389429a0bad0a43776cca13e38f2c133cb79d745cb9321e0f69a878c1c2c",
     [
-      "bitget",
-      "bitgetusdc"
-    ]
-  ],
-  [
-    "kucoinspot",
-    2667561,
-    2678784,
-    "61613126ab2716333b8a065420cd5f6707058ac1d6eae76341a50d352c5c954e",
-    2489344,
-    [
-      "kucoinspot"
-    ]
-  ],
-  [
-    "polymarket",
-    1785361,
-    1796096,
-    "9fdfae03dbf12533fc836656c9dfa6be9e8093aecca29566c6955116e2fe0f22",
-    1676288,
-    [
-      "polymarket"
-    ]
-  ],
-  [
-    "apexomni",
-    2219656,
-    2230272,
-    "1c313a5fd381774503f730bff944e071359db69fa08b65f646f9efbbccaf15a8",
-    2112512,
-    [
-      "apexomni"
+      "binance"
     ]
   ],
   [
@@ -4147,17 +4123,127 @@ for (const [family, measured, minimumCap, sha256, previousFloor, aliases] of [
     2269727,
     2280448,
     "de2572eab8236adaab88c97b51ec6d5fb5045302a80f254d6730e4a82dd6f34b",
-    2179072,
     [
       "bingx"
     ]
   ],
   [
+    "bitget",
+    2917374,
+    2927616,
+    "b994470c435b14c3737132c8745215181c147894bd08f44dfddcc1bfb258d079",
+    [
+      "bitget",
+      "bitgetusdc"
+    ]
+  ],
+  [
+    "bitrue",
+    2029349,
+    2039808,
+    "f6234c328019216bbb7bcbefb9b8eb1772d494cd7d971fd3624b6e87c8020c5f",
+    [
+      "bitrue"
+    ]
+  ],
+  [
+    "bitunix",
+    2059210,
+    2069504,
+    "2e85c05fe73c3c26c23f3b01bc9b618e34f96334408f70a9b10052e88e83e0de",
+    [
+      "bitunix"
+    ]
+  ],
+  [
+    "blofin",
+    2191688,
+    2202624,
+    "a6c729244198ab95a6e5699ae884bacb9f13e1bdc3a8844a4cdee0bea8bff20d",
+    [
+      "blofin"
+    ]
+  ],
+  [
+    "coinbase",
+    2466142,
+    2477056,
+    "051f6b275cef4df69a1de78ec4a30343f5b1cb9b8b87c8f3a7946d26583da3e4",
+    [
+      "coinbase"
+    ]
+  ],
+  [
+    "cryptocom",
+    1934696,
+    1945600,
+    "78b698d190cccdb81d9b4974a61e32fe909e05218236742986246fa3f3baca0c",
+    [
+      "cryptocom"
+    ]
+  ],
+  [
+    "grvt",
+    2160244,
+    2170880,
+    "2a7dc17a1955269b998fcf9ee5c0b27a27a2d1fd2bbf83f91302c3efb404f73e",
+    [
+      "grvt"
+    ]
+  ],
+  [
+    "hyperliquid",
+    2427522,
+    2438144,
+    "31736b2d19724ee095d4ab617380d32befacfd34f25b625f43abedafb1bd7e94",
+    [
+      "hyperliquid",
+      "hyperliquidspot"
+    ]
+  ],
+  [
+    "kraken",
+    2411161,
+    2421760,
+    "7ab109f8aa06de4ef283d11e21e782989480afc28a2ea5a4e3c5ec830ca4ad4d",
+    [
+      "kraken",
+      "krakenspot"
+    ]
+  ],
+  [
+    "kucoin",
+    1986254,
+    1996800,
+    "b65a7a918726814825bd053754cf78c282673b578d8c82b672ecb285957a0343",
+    [
+      "kucoin"
+    ]
+  ],
+  [
+    "kucoinspot",
+    2667561,
+    2678784,
+    "61613126ab2716333b8a065420cd5f6707058ac1d6eae76341a50d352c5c954e",
+    [
+      "kucoinspot"
+    ]
+  ],
+  [
+    "lighter",
+    2341801,
+    2352128,
+    "1a4abadc938d9183d63f2bbae05da36ad5747a04c3a5cf892f188b34d03db194",
+    [
+      "lighter",
+      "lighter-robinhood"
+    ]
+  ],
+  [
     "mexc",
-    2070748,
+    2070898,
     2081792,
-    "78ff64664d69fc6dc66d7d5572e6cc7436dbc7444ef97ae120ce53289bf5b096",
-    1971200,
+    "a90c978aaea33a23c029c2ddb950badb8f06e052a6c69b3d668284ec4f46380b",
     [
       "mexc"
     ]
@@ -4167,39 +4253,8 @@ for (const [family, measured, minimumCap, sha256, previousFloor, aliases] of [
     2178719,
     2189312,
     "5cf9f7fc9a9de35cdf3cd807c0719e5f3638d2b7ab6eb2d5fbf36602b053793b",
-    2077696,
     [
       "okx"
-    ]
-  ],
-  [
-    "bitrue",
-    2029349,
-    2039808,
-    "f6234c328019216bbb7bcbefb9b8eb1772d494cd7d971fd3624b6e87c8020c5f",
-    1925120,
-    [
-      "bitrue"
-    ]
-  ],
-  [
-    "paradex",
-    2430326,
-    2441216,
-    "ce459dadc0d9846d3a4bc6466757d67e01dd953fe347278d234f59d39b95b9d1",
-    2322432,
-    [
-      "paradex"
-    ]
-  ],
-  [
-    "kucoin",
-    1986254,
-    1996800,
-    "b65a7a918726814825bd053754cf78c282673b578d8c82b672ecb285957a0343",
-    1878016,
-    [
-      "kucoin"
     ]
   ],
   [
@@ -4207,122 +4262,44 @@ for (const [family, measured, minimumCap, sha256, previousFloor, aliases] of [
     1903246,
     1913856,
     "5e43c7e9cdb1d339282741085dd1e738b0a7190220c732c423ef8ad1ceb2b668",
-    1795072,
     [
       "orderly"
     ]
   ],
   [
-    "coinbase",
-    2466000,
-    2477056,
-    "c44e76460e1513bc667bb9e0356621fe9f30f1e23067743cff1e0cfe2aa0df73",
-    2359296,
+    "paradex",
+    2430326,
+    2441216,
+    "ce459dadc0d9846d3a4bc6466757d67e01dd953fe347278d234f59d39b95b9d1",
     [
-      "coinbase"
-    ]
-  ],
-  [
-    "hyperliquid",
-    2427522,
-    2438144,
-    "31736b2d19724ee095d4ab617380d32befacfd34f25b625f43abedafb1bd7e94",
-    2317312,
-    [
-      "hyperliquid",
-      "hyperliquidspot"
-    ]
-  ],
-  [
-    "asterdex",
-    2383840,
-    2394112,
-    "a78ad1a783ec28ced95d3e4430656224596a7158e11e0296be8499930a6735c8",
-    2276352,
-    [
-      "asterdex"
-    ]
-  ],
-  [
-    "lighter",
-    2341801,
-    2352128,
-    "1a4abadc938d9183d63f2bbae05da36ad5747a04c3a5cf892f188b34d03db194",
-    2239488,
-    [
-      "lighter",
-      "lighter-robinhood"
-    ]
-  ],
-  [
-    "grvt",
-    2160164,
-    2170880,
-    "bb6de73a9381b3bc19b144b499e2dc3af713bcc78bcafc0ad668dc8f79006797",
-    2054144,
-    [
-      "grvt"
-    ]
-  ],
-  [
-    "kraken",
-    2407727,
-    2418688,
-    "f3324ad6dc773f2c082955ec53dfedbfe1c09ad776408995cafd8799d4fece1d",
-    2299904,
-    [
-      "kraken",
-      "krakenspot"
-    ]
-  ],
-  [
-    "cryptocom",
-    1934549,
-    1945600,
-    "3ddf945d7ed953f3a24e0ec18e2ec83b22a6e509ba819380cd83431ed0b4e430",
-    1827840,
-    [
-      "cryptocom"
-    ]
-  ],
-  [
-    "txflow",
-    2286265,
-    2296832,
-    "976da3b0fcf68f35784ff0bd4fc4bcaa60b242065d7e7511514e7b670bee56e1",
-    2178048,
-    [
-      "txflow"
-    ]
-  ],
-  [
-    "bitunix",
-    2059210,
-    2069504,
-    "2e85c05fe73c3c26c23f3b01bc9b618e34f96334408f70a9b10052e88e83e0de",
-    1967104,
-    [
-      "bitunix"
+      "paradex"
     ]
   ],
   [
     "phemex",
-    2241775,
+    2241927,
     2252800,
-    "02c56b00a8f1eacf5b5b23355654d09a1ce084f3e810791275e65d052091e83c",
-    2156544,
+    "8ceebbefcb7d817de7ae82ce8a209dad4c86b01277b0963f375d286a9d2bc54a",
     [
       "phemex"
     ]
   ],
   [
-    "blofin",
-    2191576,
-    2202624,
-    "0735462080a844f5bdc59f0c566d03c9bb55f0bc271d83f75a23e48f1192c79e",
-    2085888,
+    "polymarket",
+    1785579,
+    1796096,
+    "377f15208713331a88fba5d6a2b2729d2c440b3e6abb0ee6d7a44ee92c36de6e",
     [
-      "blofin"
+      "polymarket"
+    ]
+  ],
+  [
+    "txflow",
+    2286415,
+    2296832,
+    "207a381182c57410431705a268ebb1b72ab0283ba695fd72600aab4d73b0ff14",
+    [
+      "txflow"
     ]
   ],
   [
@@ -4330,29 +4307,27 @@ for (const [family, measured, minimumCap, sha256, previousFloor, aliases] of [
     2149486,
     2160640,
     "cecf3e2d9c589b2999721622a373180143e94344bfa00672053ce1fc9f12109a",
-    2043904,
     [
       "weex"
     ]
   ],
   [
-    "binance",
-    2420187,
-    2430976,
-    "3d849d113a19df594c819042c4bf47f639ccc52f72d55e1020eb7b258671668d",
-    2290688,
+    "woo",
+    2870836,
+    2881536,
+    "b1bcbd0a3c07d9b7bcd7711f51c1ade8f3cf6b6361c92260de853f15ee07a30e",
     [
-      "binance"
+      "woo"
     ]
   ]
 ]) {
-  test(`#3640 native store rule 17: ${family} retains measured reserve and aliases`, () => {
+  test(`#3640 fresh M44 native-store rule 17: ${family} reserve and aliases`, () => {
     assert.match(sha256, /^[0-9a-f]{64}$/);
-    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(required, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     for (const alias of aliases) {
       assert.equal(venueFamily(alias), family);
       const cap = WASM_VENUE_OVERRIDES[alias];
-      assert.ok(cap >= Math.max(previousFloor, minimumCap));
+      assert.equal(cap, required);
       assert.equal(cap, WASM_VENUE_OVERRIDES[family]);
       assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', alias), undefined);
       assert.equal(wasmBudgetError(cap, 'venue', alias), undefined);
@@ -4403,3 +4378,9 @@ for (const venue of ['bitget', 'bitgetusdc']) {
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   });
 }
+
+// Rule 5 / #3640: measured after M44; separately approved ceilings remain fixed.
+test('#3640 fresh M44 Bybit and combined fit approved ceilings', () => {
+  assert.equal(wasmBudgetError(2669159, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(17_860_053, 'combined'), undefined);
+});
