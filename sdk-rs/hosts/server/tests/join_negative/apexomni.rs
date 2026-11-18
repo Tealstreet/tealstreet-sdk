@@ -29,6 +29,19 @@ fn valid(key: &str, pass: &str, stamp: &str, signature: &str, suffix: &str) -> b
     let _ = (material(key), pass, stamp, signature, suffix);
     true
 }
+fn signed_bytes(frame: &Value) -> Vec<u8> {
+    assert_eq!(frame["d"]["wsAuth"]["outputFormat"], "apexomni-batch");
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Part { bytes: Vec<u8> }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Batch { contracts: Vec<Vec<u8>>, payload: Vec<Part> }
+    let batch: Batch = serde_json::from_str(frame["d"]["wsAuth"]["toSign"].as_str().unwrap()).unwrap();
+    assert!(batch.contracts.is_empty(), "admission never signs order contracts");
+    assert!(!batch.payload.is_empty());
+    batch.payload.into_iter().flat_map(|p| p.bytes).collect()
+}
 impl<const TESTNET: bool> Venue for Apex<TESTNET> {
     const NAME: &'static str = "apexomni";
     fn init() -> InitPayload {
@@ -39,18 +52,16 @@ impl<const TESTNET: bool> Venue for Apex<TESTNET> {
         if other { json!({"key":OTHER_KEY,"secret":OTHER_SECRET,"passphrase":PASS}) }
         else { json!({"key":KEY,"secret":SECRET,"passphrase":PASS}) }
     }
+    fn replayable(frame: &Value) -> bool {
+        // Replay private reads; answer setup/login freshly so an unrelated
+        // prerequisite failure cannot masquerade as the intended REST rejection.
+        let bytes = signed_bytes(frame);
+        let text = std::str::from_utf8(&bytes).unwrap();
+        matches!(text.trim_start_matches(|c: char| c.is_ascii_digit()),
+            "GET/api/v3/account" | "GET/api/v3/account-balance" | "GET/api/v3/open-orders")
+    }
     fn signature(frame: &Value, other: bool) -> (String, Vec<u8>, Value) {
-        assert_eq!(frame["d"]["wsAuth"]["outputFormat"], "apexomni-batch");
-        #[derive(serde::Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Part { bytes: Vec<u8> }
-        #[derive(serde::Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Batch { contracts: Vec<Vec<u8>>, payload: Vec<Part> }
-        let batch: Batch = serde_json::from_str(frame["d"]["wsAuth"]["toSign"].as_str().unwrap()).unwrap();
-        assert!(batch.contracts.is_empty(), "admission never signs order contracts");
-        assert!(!batch.payload.is_empty());
-        let bytes: Vec<u8> = batch.payload.into_iter().flat_map(|p| p.bytes).collect();
+        let bytes = signed_bytes(frame);
         let text = std::str::from_utf8(&bytes).unwrap();
         let slot = text.trim_start_matches(|c: char| c.is_ascii_digit()).to_owned();
         let answer = json!({"credential":KEY,"contracts":[],"signature":mac(if other { OTHER_SECRET } else { SECRET }, &bytes)}).to_string();
