@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [features]
-# Only Bitget and Kraken serialize closed history row-validation detail.
+# Only Bitget, Kraken and BingX serialize closed history row-validation detail.
 history-row-diagnostics = []
 # Only counter-nonce families link send-time reservation and release repair.
 dispatch-nonce = []

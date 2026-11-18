@@ -29,6 +29,10 @@ WASM venue caps retain both parents' measured floors. Fresh compositions must
 retain at least 10 KiB above their optimized web/Node measurement, rounded up
 to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
 
+BingX history diagnostics inspect failed responses with closed streaming visitors.
+Compact optional detail preserves engine error and socket allocation budgets;
+fresh web/Node artifacts must retain the existing family cap and 10 KiB reserve.
+
 TxFlow agent refresh #3314 at merge 9bb43250830d measures 2,147,684 bytes;
 refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its
 2,158,592-byte floor retains the required 10 KiB reserve at that source.
