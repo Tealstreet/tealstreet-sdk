@@ -202,6 +202,14 @@ leaving 211,128 B at its unchanged 18,087,936 B ceiling.
 This budget-only composition changes no runtime inputs; required new-head CI
 and combined consumers still have to run and succeed.
 
+#3640's vetoable M48 reserve refresh, after merging master 04a2f14e5b at
+`d123c9b38c4559ab38b5df8142981c7fdcc008b5`, uses CI44389135230. Its built
+source `42e792c614d768737151090feb06c4da4558855a` (GitHub's merge ref) has the
+identical tree. The 27-family census found shortfalls only for Bitunix
+(10,219 B), KuCoin Spot (10,212 B) and OKX (9,982 B); each moves to measured
++10 KiB rounded up. The M46 census becomes a floor and the M48 census pins the
+exact caps. Combined measures 18,087,936 − 206,989 B and stays at its ceiling.
+
 Managed HTTP preparation observations change shipped host JS, so they move the
 beta input fingerprint and require a new release/pin. They do not change Rust
 sources or waive fresh combined-consumer/size evidence or any retained floor.
