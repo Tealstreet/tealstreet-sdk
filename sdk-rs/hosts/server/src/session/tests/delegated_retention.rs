@@ -11,7 +11,7 @@ async fn stopped_delegated_account_is_released_by_resumable_session_close() {
     finish(&mut alice, &mut ready).await;
     let account = f.registry.held("alice", "acct", alice.socket).unwrap();
     let holder = alice.socket;
-    let provider = account.delegated.as_ref().unwrap().provider();
+    let provider = account.delegated().as_ref().unwrap().provider();
     assert!(alice.identity.resumable);
     assert!(!alice.moved);
 
@@ -49,7 +49,7 @@ async fn stopped_delegated_account_is_released_by_resumable_session_close() {
     assert!(!Arc::ptr_eq(&account, &current));
     assert_eq!(
         current
-            .delegated
+            .delegated()
             .as_ref()
             .unwrap()
             .provider()
@@ -139,7 +139,7 @@ async fn a_new_authenticated_socket_can_remove_its_retained_account_but_another_
     alice.init(init).await.unwrap();
     finish(&mut alice, &mut ready).await;
     let account = f.registry.held("alice", "acct", alice.socket).unwrap();
-    let provider = account.delegated.as_ref().unwrap().provider();
+    let provider = account.delegated().as_ref().unwrap().provider();
     alice.close();
     assert_eq!(f.registry.account_count(), 1);
     assert_eq!(
@@ -174,7 +174,7 @@ async fn switching_login_during_retention_keeps_the_expiry_on_the_disconnected_u
     alice.init(init).await.unwrap();
     finish(&mut alice, &mut a_ready).await;
     let a = f.registry.held("alice", "acct", alice.socket).unwrap();
-    let a_provider = a.delegated.as_ref().unwrap().provider();
+    let a_provider = a.delegated().as_ref().unwrap().provider();
     alice.close();
 
     // A's captured expiry is pending throughout the login switch and B's proof await.
@@ -184,7 +184,7 @@ async fn switching_login_during_retention_keeps_the_expiry_on_the_disconnected_u
     bob.init(init).await.unwrap();
     finish(&mut bob, &mut b_ready).await;
     let b = f.registry.held("bob", "acct", bob.socket).unwrap();
-    let b_provider = b.delegated.as_ref().unwrap().provider();
+    let b_provider = b.delegated().as_ref().unwrap().provider();
     assert_eq!(f.registry.account_count(), 2);
     tokio::time::pause();
     tokio::task::yield_now().await;

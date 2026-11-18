@@ -12,6 +12,7 @@ pub struct ResidentCopy {
     signer: Arc<ResidentSigner>,
     pub(super) state: Option<safe_cex_venues::TrustedSignerState>,
     pub(super) identities: safe_cex_engine::signing::Identities,
+    pub(super) trusted_identities: Option<safe_cex_native::TrustedSignerIdentities>,
     #[cfg(test)]
     test_provider: Option<Provider>,
 }
@@ -66,6 +67,7 @@ impl ResidentCopy {
             })))),
             identities,
             state,
+            trusted_identities: None,
             #[cfg(test)]
             test_provider: None,
         }
@@ -81,8 +83,31 @@ impl ResidentCopy {
             })))),
             identities: Default::default(),
             state: None,
+            trusted_identities: None,
             test_provider: Some(provider),
         })
+    }
+
+    pub(crate) fn identities(&self) -> &safe_cex_engine::signing::Identities {
+        &self.identities
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_provider_with_identities(
+        provider: Provider,
+        identities: safe_cex_engine::signing::Identities,
+    ) -> Arc<Self> {
+        let mut resident = Self::test_provider(provider);
+        Arc::get_mut(&mut resident).unwrap().identities = identities;
+        resident
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_protected_provider(
+        protection: ProtectedProvider,
+        identities: safe_cex_engine::signing::Identities,
+    ) -> Arc<Self> {
+        Arc::new(Self::new(protection, identities, None))
     }
 
     pub fn provider(&self) -> Provider {

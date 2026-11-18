@@ -1690,7 +1690,9 @@ impl Registry {
                         account.broadcast_signing_mode();
                     }
                 }
-                account.hold_label(holder, Live { outbox, token }, &init.account_name);
+                if !account.hold_label(holder, Live { outbox, token }, &init.account_name) {
+                    return Err("account stopped".into());
+                }
                 return Ok(account);
             }
             if !account.is_public() && account.delegated().is_some() != delegated {
@@ -2339,7 +2341,8 @@ impl Registry {
             let key = (account.user.clone(), account.registry_name().to_owned());
             let transferred = accounts.get(&key).is_some_and(|current| {
                 !Arc::ptr_eq(current, account)
-                    && current.delegated()
+                    && current
+                        .delegated()
                         .as_ref()
                         .is_some_and(|next| Arc::ptr_eq(next, resident))
             });

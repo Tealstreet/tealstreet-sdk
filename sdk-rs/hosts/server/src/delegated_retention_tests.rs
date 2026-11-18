@@ -45,7 +45,7 @@ fn resident_with_identity(
     if key.is_some() {
         inner.identity = identity::digest(user, &init).unwrap();
     }
-    inner.delegated = Some(
+    inner.signing.set_test_resident(
         prepare_delegated(
             &init,
             DelegatedPair::new(init.key.clone(), "synthetic-secret".into(), None),
@@ -83,7 +83,7 @@ async fn delegated_retention_outlives_resume_grace_then_stops_and_revokes_existi
         .run_until(async {
             let registry = tests::registry();
             let (account, mut inbox) = resident(&registry, "A");
-            let provider = account.delegated.as_ref().unwrap().provider();
+            let provider = account.delegated().as_ref().unwrap().provider();
             let key = KeyRef("primary.signing".into());
             assert_eq!(
                 provider.can_sign(&key, Algorithm::HmacSha256),
@@ -142,7 +142,7 @@ async fn delegated_removal_is_immediate_even_with_another_live_holder() {
             let registry = tests::registry();
             let (account, mut inbox) = resident(&registry, "A");
             hold(&account, 8);
-            let provider = account.delegated.as_ref().unwrap().provider();
+            let provider = account.delegated().as_ref().unwrap().provider();
             registry.release(&account, 7, Disposal::PageDisposed);
             assert_eq!(registry.account_count(), 0);
             assert!(matches!(
@@ -397,7 +397,7 @@ async fn delegated_cleanup_does_not_leave_a_copy_behind_an_old_resume_holder() {
             for disposal in [Disposal::Moving, Disposal::JoinFailed] {
                 let registry = tests::registry();
                 let (account, mut inbox) = resident(&registry, "A");
-                let provider = account.delegated.as_ref().unwrap().provider();
+                let provider = account.delegated().as_ref().unwrap().provider();
                 registry.park("old-resume".into(), "A", vec![(account.clone(), 7)]);
                 hold(&account, 8);
                 hold(&account, 9);
@@ -511,7 +511,7 @@ async fn retention_and_explicit_disposal_use_the_identity_key_after_alias_grace(
             let registry = tests::registry();
             let (account, _inbox) = resident_with_identity(&registry, "A", Some("synthetic-key"));
             assert_ne!(account.registry_name(), account.name);
-            let provider = account.delegated.as_ref().unwrap().provider();
+            let provider = account.delegated().as_ref().unwrap().provider();
             assert!(account.hold_label(
                 8,
                 Live {
@@ -572,7 +572,7 @@ async fn retiring_old_settings_preserves_only_the_published_successors_resident(
         .run_until(async {
             let registry = tests::registry();
             let (account, _inbox) = resident_with_identity(&registry, "A", Some("synthetic-key"));
-            let resident = account.delegated.as_ref().unwrap().clone();
+            let resident = account.delegated().as_ref().unwrap().clone();
             let provider = resident.provider();
             let running = Arc::new(crate::algos::Running::new(registry.algos_ended.clone()));
             let (mut successor, _successor_inbox) = testing::account_on(
@@ -589,7 +589,7 @@ async fn retiring_old_settings_preserves_only_the_published_successors_resident(
             let inner = Arc::get_mut(&mut successor).unwrap();
             inner.identity = account.identity.clone();
             inner.public_only = false;
-            inner.delegated = Some(resident);
+            inner.signing.set_test_resident(resident);
             testing::register(&registry, &successor);
             hold(&successor, 8);
             registry.stop_for_new_settings(&account, Arc::new(|_| true), Disposal::SettingsChanged);
@@ -621,8 +621,8 @@ async fn an_ambiguous_unjoined_label_never_disposes_a_guessed_identity() {
             registry.release(&second, 7, Disposal::SocketClosed);
             registry.release(&first, 7, Disposal::SocketClosed);
             registry.release(&second, 8, Disposal::SocketClosed);
-            let first_provider = first.delegated.as_ref().unwrap().provider();
-            let second_provider = second.delegated.as_ref().unwrap().provider();
+            let first_provider = first.delegated().as_ref().unwrap().provider();
+            let second_provider = second.delegated().as_ref().unwrap().provider();
             registry.dispose_delegated("A", &first.name);
             assert_eq!(registry.account_count(), 2);
             let key = KeyRef("primary.signing".into());
@@ -658,7 +658,7 @@ async fn earlier_disconnected_alias_still_revokes_resident_and_does_not_touch_an
                 let registry = tests::registry();
                 let (account, mut inbox) = resident(&registry, "A");
                 let (other, mut other_inbox) = resident(&registry, "B");
-                let provider = account.delegated.as_ref().unwrap().provider();
+                let provider = account.delegated().as_ref().unwrap().provider();
                 for (id, label) in [(8, "phone"), (9, "tablet")] {
                     assert!(account.hold_label(
                         id,
@@ -714,7 +714,7 @@ async fn disconnected_alias_on_a_still_live_socket_keeps_revocation_lookup() {
                 },
                 "phone"
             ));
-            let provider = account.delegated.as_ref().unwrap().provider();
+            let provider = account.delegated().as_ref().unwrap().provider();
             registry.release_label(&account, 7, "phone", Disposal::SocketClosed);
             assert!(registry.holds(&account, 7));
             registry.release(&account, 7, Disposal::SocketClosed);

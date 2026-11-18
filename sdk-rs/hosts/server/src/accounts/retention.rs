@@ -22,7 +22,7 @@ impl Holders {
 impl Registry {
     /// Called after a real holder leaves. Only the current account can arm work.
     pub(super) fn retain_delegated(self: &Arc<Self>, account: &Arc<Account>, labels: Vec<String>) {
-        let Some(resident) = &account.delegated else {
+        let Some(resident) = &account.delegated() else {
             return;
         };
         let accounts = self.accounts.lock().unwrap();
@@ -106,7 +106,7 @@ impl Registry {
         }
         holders.disposed = true;
         holders.retention = None;
-        if let Some(resident) = &account.delegated {
+        if let Some(resident) = &account.delegated() {
             resident.revoke();
         }
         accounts.remove(&key);
@@ -125,7 +125,7 @@ impl Registry {
     pub(crate) fn dispose_delegated(&self, user: &str, name: &str) {
         let accounts = self.accounts.lock().unwrap();
         let mut matches = accounts.values().filter(|account| {
-            if account.user != user || account.delegated.is_none() {
+            if account.user != user || account.delegated().is_none() {
                 return false;
             }
             account.has_label(name)
