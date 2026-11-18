@@ -1614,7 +1614,7 @@ impl Store {
                 }
                 w.end();
             }
-            w.begin(35);
+            w.begin(section::REQUEST_STATS);
             w.u32s(self.request_stats);
             w.pad();
             w.end();
@@ -2283,7 +2283,7 @@ mod tests {
                     section::BALANCE,
                     section::SETTINGS,
                     section::STATUS,
-                    35
+                    section::REQUEST_STATS
                 ]
             );
         }

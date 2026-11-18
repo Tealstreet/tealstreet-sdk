@@ -62,6 +62,8 @@ pub mod section {
     pub const MESSAGE_HANDLER_STATS: u16 = 25;
     /// Shared public-provider diagnostics, independently replaced from private groups.
     pub const PUBLIC_MESSAGE_HANDLER_STATS: u16 = 34;
+    /// HTTP outcomes [ok, rateLimit, auth, network, other], emitted with STATUS.
+    pub const REQUEST_STATS: u16 = 35;
 }
 
 pub mod status_flag {
@@ -649,7 +651,7 @@ mod tests {
                 section::MARKETS,
                 section::TICKERS,
                 section::STATUS,
-                35,
+                section::REQUEST_STATS,
                 section::CANDLES,
                 section::STRINGS
             ]

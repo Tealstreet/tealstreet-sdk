@@ -9847,7 +9847,7 @@ mod streaming_tests {
                 section::BALANCE,
                 section::SETTINGS,
                 section::STATUS,
-                35,
+                section::REQUEST_STATS,
                 section::ACCOUNT_READ
             ]
         );
