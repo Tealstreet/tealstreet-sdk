@@ -185,7 +185,8 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
             }]),
         })
         .await;
-    let restored = twap_row(&mut sent, "paused").await;
+    let mut loaded = session.take_loaded();
+    let restored = twap_row(&mut session, &mut loaded, &mut sent, "paused").await;
     assert_eq!(
         restored["status"], "paused",
         "key admission never auto-replays a job"
@@ -224,7 +225,7 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
             data: Value::Null,
         })
         .await;
-    let still_paused = twap_row(&mut sent, "paused").await;
+    let still_paused = twap_row(&mut session, &mut loaded, &mut sent, "paused").await;
     assert_eq!(
         still_paused, restored,
         "refused resume must retain the paused schedule and its progress"
@@ -303,9 +304,24 @@ fn assert_partial_action_refusal(sent: &mut crate::out::Receiver, op: &str) {
     );
 }
 
-async fn twap_row(sent: &mut crate::out::Receiver, status: &str) -> Value {
+async fn twap_row(
+    session: &mut Session,
+    loaded: &mut tokio::sync::mpsc::UnboundedReceiver<(String, u64)>,
+    sent: &mut crate::out::Receiver,
+    status: &str,
+) -> Value {
     tokio::time::timeout(Duration::from_secs(5), async {
-        while let Some(frame) = sent.recv().await {
+        loop {
+            // Native sections obey the startup snapshot hold. Drive the same
+            // loaded callback as the real socket loop before expecting frames.
+            let frame = tokio::select! {
+                callback = loaded.recv() => {
+                    let (name, client) = callback.expect("session loaded channel");
+                    session.account_loaded(&name, client).await;
+                    continue;
+                }
+                frame = sent.recv() => frame.expect("account output ended before the TWAP row"),
+            };
             let frame: Value = serde_json::from_str(&frame).unwrap();
             assert_ne!(
                 frame["d"]["op"], "error",
@@ -320,7 +336,6 @@ async fn twap_row(sent: &mut crate::out::Receiver, status: &str) -> Value {
                 return row.clone();
             }
         }
-        panic!("account output ended before the TWAP row");
     })
     .await
     .expect("native algo reply")
