@@ -266,3 +266,41 @@ it('keeps empty stream censuses out of UI update IDs and subscriptions', () => {
   expect(receipts).toBe(1);
   expect(store.updateIds).toEqual({ orders: 0, positions: 0 });
 });
+
+// Rule 5 / #3640 review: account observer failures cannot suppress financial subscriptions.
+it.each([false, true])('delivers accepted balances to UI peers when an account observer throws=%s', (throws) => {
+  const store = new FrameStore();
+  const ui: number[] = [];
+  let peers = 0;
+  store.subscribeAccountObservations(() => {
+    if (throws) throw new Error('account observer failed');
+  });
+  store.subscribeAccountObservations(() => peers++);
+  store.subscribe('balance', (balance) => ui.push(balance.total));
+  const ingest = () => store.ingest(nativeFixture({ orders: [], balance: { used: 0, free: 1, total: 1, upnl: 0 } }));
+  if (throws) expect(ingest).toThrow('observation subscriber failed');
+  else ingest();
+  expect(store.balance.total).toBe(1);
+  expect(peers).toBe(1);
+  expect(ui).toEqual([1]);
+  expect(store.version('balance')).toBe(1);
+  expect(store.updateIds.orders).toBe(0);
+  expect(store.observationIds.orders).toBe(1);
+  expect(store.snapshotRequired).toBe(false);
+  expect(store.recovery.size).toBe(0);
+});
+
+it('preserves accepted UI snapshot order when a throwing account observer reenters', () => {
+  const store = new FrameStore();
+  const ui: number[] = [];
+  store.subscribeAccountObservations(() => {
+    if (store.balance.total === 1) store.ingest(nativeFixture({ balance: { used: 0, free: 2, total: 2, upnl: 0 } }));
+    throw new Error('reentrant observer failed');
+  });
+  store.subscribe('balance', (balance) => ui.push(balance.total));
+  expect(() => store.ingest(nativeFixture({ orders: [], balance: { used: 0, free: 1, total: 1, upnl: 0 } }))).toThrow(
+    'observation subscriber failed',
+  );
+  expect(ui).toEqual([1, 2]);
+  expect(store.balance.total).toBe(2);
+});

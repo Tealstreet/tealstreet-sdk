@@ -782,6 +782,18 @@ export class BitrueExchange extends BaseExchange {
     return balance;
   };
 
+  // Rule 5 / #3640: retained REST evidence enters the same native frame path.
+  // Each complete symbol census replaces its scope, including terminal rows.
+  fetchAndSetOrders = async (symbols?: string[]): Promise<Order[]> => {
+    const orders = await this.fetchOrders(symbols);
+    if (!this.isDisposed && symbols?.length) {
+      applyReferenceFixture(this.store, {
+        orders: [...this.store.orders.filter((row) => !symbols.includes(row.symbol)), ...orders],
+      });
+    }
+    return orders;
+  };
+
   fetchOrders = async (symbols?: string[]) => {
     if (symbols?.length) {
       const orders = await mapSeries(symbols, (symbol) => this.fetchOrdersForSymbol(symbol));
@@ -811,24 +823,8 @@ export class BitrueExchange extends BaseExchange {
       if (!nextToFetch) break;
       toFetch.delete(nextToFetch);
       fetchedSymbols.add(nextToFetch);
-      const orders = await this.fetchOrdersForSymbol(nextToFetch);
+      await this.fetchAndSetOrders([nextToFetch]);
       if (this.isDisposed) return;
-      (() => {
-        const incoming: StoreData['orders'] = orders;
-        return applyReferenceFixture(
-          this.store,
-          {
-            orders: [
-              ...this.store.orders.map((row) => {
-                const change = incoming.find((item) => item.id === row.id);
-                return change ? { ...row, ...change } : row;
-              }),
-              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
-            ],
-          },
-          this.store.markets.map((row) => row.symbol),
-        );
-      })();
       await sleep(100);
       if (this.isDisposed) return;
     }
@@ -1320,7 +1316,7 @@ export class BitrueExchange extends BaseExchange {
     const payloads = this.formatCreateOrder(opts);
     const res = await this.placeOrderBatch(payloads);
     if (opts.type === OrderType.StopLoss || opts.type === OrderType.TakeProfit || opts.stopLoss || opts.takeProfit) {
-      await (this as any as BaseExchange).callMethodInWorker('fetchAndSetOrders', [opts.symbol]);
+      await this.fetchAndSetOrders([opts.symbol]);
       // stop orders have bad ID, just remove the placeholder by returning []
       return [];
     }
@@ -1338,9 +1334,9 @@ export class BitrueExchange extends BaseExchange {
         .map((o) => o.symbol),
     );
 
-    // if set is not empty, need to fetch updated orders in worker as WS does not provide TP/SL updates
+    // Refresh the native order frames because WS does not provide TP/SL updates.
     if (tpSlSymbols.size) {
-      await (this as any as BaseExchange).callMethodInWorker('fetchAndSetOrders', Array.from(tpSlSymbols));
+      await this.fetchAndSetOrders(Array.from(tpSlSymbols));
       // stop orders have bad ID, just remove the placeholder by returning []
       return [];
     }
@@ -1469,8 +1465,9 @@ export class BitrueExchange extends BaseExchange {
       });
 
       // bitrue doesnt update orders on cancel, so we need to remove them manually
-      const orderIds: Pick<Order, 'id'>[] = orders.map((o) => ({ id: o.id }));
-      await (this as any as BaseExchange).callMethodInWorker('removeOrders', orderIds);
+      if (this.isDisposed) return;
+      const removed = new Set(orders.map((order) => order.id));
+      applyReferenceFixture(this.store, { orders: this.store.orders.filter((row) => !removed.has(row.id)) });
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw new Error(err?.response?.data?.msg || err?.message);

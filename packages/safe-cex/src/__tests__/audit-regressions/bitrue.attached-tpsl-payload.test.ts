@@ -66,7 +66,8 @@ describe('audit regression: Bitrue attached TP/SL payloads', () => {
   ] as const)('sends %s TP/SL only as parent-attached trigger params', async (_name, side, type, expectedSide) => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ data: { code: '0', data: { orderId: 'server-order-id' } } });
-    const refetchOrders = vi.spyOn(exchange, 'callMethodInWorker').mockResolvedValue([]);
+    // Rule 5 / #3640: the retained producer refreshes through its native frame helper.
+    const refetchOrders = vi.spyOn(exchange, 'fetchAndSetOrders').mockResolvedValue([]);
     exchange.unlimitedXHR = { post } as any;
 
     await expect(
@@ -129,13 +130,13 @@ describe('audit regression: Bitrue attached TP/SL payloads', () => {
       expect(child).not.toHaveProperty('conditionOrder');
     }
     expect(children[0].clientOrderId).not.toBe(children[1].clientOrderId);
-    expect(refetchOrders).toHaveBeenCalledWith('fetchAndSetOrders', [MARKET.symbol]);
+    expect(refetchOrders).toHaveBeenCalledWith([MARKET.symbol]);
   });
 
   it('does not send a sibling conditional when Bitrue rejects the parent', async () => {
     const exchange = createExchange();
     const post = vi.fn().mockResolvedValue({ data: { code: '-2019', msg: 'Parent rejected' } });
-    const refetchOrders = vi.spyOn(exchange, 'callMethodInWorker');
+    const refetchOrders = vi.spyOn(exchange, 'fetchAndSetOrders');
     exchange.unlimitedXHR = { post } as any;
 
     await expect(
