@@ -20,6 +20,9 @@ mod order_actions;
 mod order_frames;
 mod settings;
 
+#[cfg(test)]
+mod history_completeness_tests;
+
 #[derive(Clone, Copy)]
 pub(super) enum OrderReceipt {
     Placement(u64),
