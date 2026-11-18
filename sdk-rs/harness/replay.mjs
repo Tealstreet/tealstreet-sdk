@@ -739,6 +739,9 @@ async function runTs() {
     for (const buffer of pendingFrames.splice(0))
       mainStore.ingest(new Frame(structuredClone(buffer, { transfer: [buffer] })));
   };
+  // Install the tape before construction: Aster's read-key proxy retains a
+  // private axios client that instance enumeration cannot reach afterwards.
+  await venue.prepareTsTransport?.(adapter);
   const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
   // Model worker dispatch through the exchange's real local methods.
   exchange.emitter.on('callMethod', ({ method, args, requestId }) => {
@@ -754,11 +757,11 @@ async function runTs() {
     });
   });
   venue.configureTs?.(exchange);
-  await venue.prepareTs?.(exchange, TapeWebSocket);
+  const { applyReferenceFixture } = await import('../../packages/safe-cex/src/__tests__/cutover/referenceFixture.ts');
+  await venue.prepareTs?.(exchange, TapeWebSocket, (data) => applyReferenceFixture(store, data));
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
-  await venue.prepareTsTransport?.(exchange, adapter);
   const finalBooks = {};
   const started = exchange.start();
   const subscribed = (async () => {

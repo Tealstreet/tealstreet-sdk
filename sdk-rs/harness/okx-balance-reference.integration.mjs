@@ -1,3 +1,4 @@
+import { applyReferenceFixture } from '../../packages/safe-cex/src/__tests__/cutover/referenceFixture.ts';
 import { nativeFixture } from '../../packages/safe-cex/src/__tests__/cutover/nativeFixture.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,7 +13,7 @@ const amounts = (balance) => ({ used: balance.used, upnl: balance.upnl, total: b
 test('real OKX untraded native empty last/open seed clears unavailable scalars without hiding malformed nonempty data', () => {
   const store = new FrameStore(); store.apply(nativeFixture({ markets: [linear] }, store.markets.map(row => row.symbol)));
   const exchange = new OKXExchange('okx', { publicDataOnly: true }, store);
-  venueOf('okx').prepareTs(exchange);
+  venueOf('okx').prepareTs(exchange, undefined, data => applyReferenceFixture(store, data));
   try {
     const raw = { instId: linear.id, last: '', open24h: '', bidPx: '9', askPx: '11', volCcy24h: '2', vol24h: '20' };
     const [ticker] = exchange.parseTickers([raw]);
@@ -48,7 +49,7 @@ test('real OKX reference formatter refuses malformed native risk before it can b
   })) }));
   const exchange = new OKXExchange('okx', { key: 'fixture-key', secret: 'fixture-secret', passphrase: 'fixture-passphrase' }, store);
   exchange._accountPositionMode = 'oneway'; exchange._accountLevel = 2;
-  venueOf('okx').prepareTs(exchange);
+  venueOf('okx').prepareTs(exchange, undefined, data => applyReferenceFixture(store, data));
   const equity = [{ ccy: 'USD', eq: '10000' }];
   try {
     for (const field of ['imr', 'upl']) {

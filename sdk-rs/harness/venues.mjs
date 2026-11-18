@@ -572,7 +572,7 @@ const okx = (name) => ({
     const expected = createHmac('sha256', 'replay-secret').update(`${timestamp}${method.toUpperCase()}${parsed.pathname}${parsed.search}${raw}`).digest('base64');
     if (h['ok-access-sign'] !== expected) throw new Error('Invalid OKX signed HTTP signature');
   },
-  prepareTs(exchange) {
+  prepareTs(exchange, _TapeWebSocket, publishNativeFixture) {
     const fetchMarkets = exchange.fetchMarkets.bind(exchange);
     exchange.fetchMarkets = async () => (await fetchMarkets()).map((market) => {
       if (Number.isFinite(market.limits.amount.max)) return market;
@@ -648,7 +648,7 @@ const okx = (name) => ({
         validatePositions(exchange.store.positions);
         const equity = authoritativeEquity ?? exchange.store.balance.total + exchange.store.balance.upnl;
         positionTopic(message);
-        exchange.store.update({ balance: { ...exchange.store.balance, ...balanceFromRows(equity) } });
+        publishNativeFixture({ balance: { ...exchange.store.balance, ...balanceFromRows(equity) } });
       };
       const accountTopic = exchange.privateWebsocket.handleAccountTopic.bind(exchange.privateWebsocket);
       exchange.privateWebsocket.handleAccountTopic = (message) => {
@@ -661,7 +661,7 @@ const okx = (name) => ({
         if (!values.length) return;
         authoritativeEquity = round(values.reduce((sum, value) => sum + value, 0));
         cachedInfo = exchange.store.balance.info;
-        exchange.store.update({ balance: { ...exchange.store.balance, ...balanceFromRows(authoritativeEquity) } });
+        publishNativeFixture({ balance: { ...exchange.store.balance, ...balanceFromRows(authoritativeEquity) } });
       };
       const formatter = exchange.formatBalanceUsedAvail.bind(exchange);
       exchange.formatBalanceUsedAvail = async (...args) => {
@@ -1400,7 +1400,7 @@ export const VENUES = {
         params: ['!ticker@arr', '!markPrice@arr@1s', ...books.map((symbol) => `${symbol.toLowerCase()}@depth20@100ms`)],
       });
     },
-    prepareTsTransport: async (_exchange, adapter) => {
+    prepareTsTransport: async (adapter) => {
       const { default: axios } = await import('axios');
       axios.defaults.adapter = adapter;
       createRequire(import.meta.url)('axios').defaults.adapter = adapter;
