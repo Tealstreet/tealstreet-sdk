@@ -1774,9 +1774,9 @@ describe('resolved Hyperliquid egress admission', () => {
     const recovering = new budgetModule.HyperliquidInfoBudget(backend);
     const send = vi.fn(() => 0);
     const deadline = Date.now() + 60_000;
-    const dispatched = recovering.wait(fleet, ORDERS, deadline, signal(), 'critical').then((grant) =>
-      recovering.admitDispatch(fleet, grant, deadline, signal(), send),
-    );
+    const dispatched = recovering
+      .wait(fleet, ORDERS, deadline, signal(), 'critical')
+      .then((grant) => recovering.admitDispatch(fleet, grant, deadline, signal(), send));
     await expect(dispatched).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
     expect(send).not.toHaveBeenCalled();
   });

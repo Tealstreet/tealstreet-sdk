@@ -370,33 +370,52 @@ export function hyperliquidInfoBudgetKey(origin: string, endpoint?: string, tunn
 
 /** Admission precedes managed HTTP claim; only a physical handoff consumes tokens. */
 export class HyperliquidInfoBudget {
-  private readonly inherited = new Map<string, Promise<void>>();
+  private readonly inherited = new Map<string, Promise<boolean>>();
   constructor(private readonly backend: InfoBudgetStorage = storage()) {}
 
   private update<T>(key: string, change: (state: BudgetState, shared: boolean) => T): Promise<T> {
     const boundary = key.indexOf('|egress=');
     if (boundary < 0) return this.backend.update(key, change);
-    let inherited = this.inherited.get(key);
-    if (!inherited) {
-      // The legacy row cannot identify its egress: retain its debt/pause once,
-      // without copying waiters from another route into this route's FIFO.
-      inherited = this.backend
-        .update(key.slice(0, boundary), (state) => ({ ...state, dispatchQueue: [] }))
-        .then((legacy) =>
-          this.backend.update(key, (state) => {
-            if (state.legacyInherited) return;
-            Object.assign(state, mergeState(state, legacy), { legacyInherited: true });
-          }),
-        );
-      this.inherited.set(key, inherited);
-    }
-    return inherited.then(
-      () => this.backend.update(key, change),
-      (error: unknown) => {
-        this.inherited.delete(key);
+    return this.updateInherited(key, key.slice(0, boundary), change);
+  }
+
+  private async updateInherited<T>(
+    key: string,
+    legacyKey: string,
+    change: (state: BudgetState, shared: boolean) => T,
+  ): Promise<T> {
+    for (;;) {
+      let inherited = this.inherited.get(key);
+      if (!inherited) {
+        // Memory inheritance is provisional: only a shared legacy read followed
+        // by a committed shared target write may retire migration (e0166af6c).
+        inherited = this.backend
+          .update(legacyKey, (state, shared) => ({ state: { ...state, dispatchQueue: [] }, shared }))
+          .then((legacy) =>
+            this.backend.update(key, (state, shared) => {
+              if (state.legacyInherited) return true;
+              const durable = legacy.shared && shared;
+              Object.assign(state, mergeState(state, legacy.state), { legacyInherited: durable || undefined });
+              return durable;
+            }),
+          );
+        this.inherited.set(key, inherited);
+      }
+      try {
+        if (!(await inherited) && this.inherited.get(key) === inherited) this.inherited.delete(key);
+      } catch (error) {
+        if (this.inherited.get(key) === inherited) this.inherited.delete(key);
         throw error;
-      },
-    );
+      }
+      const result = await this.backend.update(key, (state, shared) => {
+        // Recovery can happen after the provisional migration transaction.
+        // Read legacy shared state before admitting on the recovered backend.
+        if (shared && !state.legacyInherited) return { retry: true } as const;
+        return { retry: false, value: change(state, shared) } as const;
+      });
+      if (!result.retry) return result.value;
+      if (this.inherited.get(key) === inherited) this.inherited.delete(key);
+    }
   }
 
   async wait(
