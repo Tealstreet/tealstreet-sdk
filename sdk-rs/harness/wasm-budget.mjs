@@ -885,7 +885,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // SAFE_CEX_WASM_OPT=required build.sh --venue okx; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
   // Current measured size + 10 KiB, rounded up to KiB (rule 17).
   // #3513 CI43629571410: 2_058_368 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
-  okx: 2_069_504,
+  // #3647 coordinator-approved 2026-11-18: 80274d2 web/Node 2,066,659 B; b309848 trims to 2,063,838 B.
+  // Pinned Rust1.99/bindgen0.2.129/Binaryen132 twice-Oz; max(measured + 10 KiB, historical floor), rounded to KiB.
+  // Retain both measurement certificates in wasm-budget.test.mjs; remeasure future inputs before changing this cap.
+  okx: 2_077_696,
   // #3438 merged-head local build.sh --venue orderly: web/node 1,769,717 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3391 run 43204096369/job 131135454025, source d62f6d989c3a (3de5a492d792 tree).

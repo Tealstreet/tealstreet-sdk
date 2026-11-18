@@ -1735,3 +1735,152 @@ fn engine_ambiguity_503_signature_working_control_never_resends() {
             .all(|e| e.outcome == Some(safe_cex_engine::Outcome::Unknown))
     );
 }
+
+// OKX v5 cancel-batch/cancel-algos return code/msg plus per-order sCode/sMsg.
+// https://www.okx.com/docs-v5/en/#order-book-trading-trade-post-cancel-multiple-orders
+#[test]
+fn empty_code_one_absent_cancel_keeps_native_diagnostics_and_stops() {
+    for algo in [false, true] {
+        let mut engine = trading_engine();
+        let id = if algo { "202_sl" } else { "101" };
+        engine.store_mut().upsert_order(Order {
+            kind: if algo {
+                OrderType::StopLoss
+            } else {
+                OrderType::Limit
+            },
+            ..stored(id)
+        });
+        engine.handle(
+            5.,
+            Event::Command(Command::CancelOrders {
+                command: OWNER,
+                ids: vec![id.into()],
+            }),
+        );
+        let sent = prepared(&mut engine, 5.);
+        assert!(
+            matches!(post(&sent), Action::Http(request) if request.url.ends_with(
+                if algo { "/cancel-algos" } else { "/cancel-batch-orders" }
+            ))
+        );
+        let field = if algo { "algoId" } else { "ordId" };
+        let wire_id = if algo { "202" } else { "101" };
+        reply(
+            &mut engine,
+            post(&sent),
+            &serde_json::json!({
+                "code":"1", "msg":"", "data":[{
+                    field:wire_id, "sCode":"51400", "sMsg":"Order does not exist"
+                }]
+            })
+            .to_string(),
+            6.,
+        );
+        let output = prepared(&mut engine, 6.);
+        let errors = failures(&output);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].venue_code.as_deref(), Some("51400"), "{errors:?}");
+        assert_eq!(
+            errors[0].outcome, None,
+            "already absent is not an uncertain cancel"
+        );
+        assert!(
+            errors[0].message.contains("Order does not exist"),
+            "{errors:?}"
+        );
+        assert!(!errors[0].message.contains("OKX 1: "));
+        assert!(
+            !output.iter().any(|a| matches!(a, Action::Http(r)
+            if r.method != safe_cex_engine::Method::Get)),
+            "never retry a settled cancel"
+        );
+    }
+}
+
+#[test]
+fn empty_partial_cancel_retains_applied_and_refused_order_diagnostics() {
+    use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
+    let mut engine = trading_engine();
+    for id in ["101", "102", "103"] {
+        engine.store_mut().upsert_order(stored(id));
+    }
+    engine.handle(
+        5.,
+        Event::Command(Command::CancelOrders {
+            command: OWNER,
+            ids: vec!["101".into(), "102".into(), "103".into()],
+        }),
+    );
+    let sent = prepared(&mut engine, 5.);
+    reply(
+        &mut engine,
+        post(&sent),
+        r#"{"code":"2","msg":"","data":[
+        {"ordId":"101","sCode":"0","sMsg":""},
+        {"ordId":"102","sCode":"51000","sMsg":"Parameter error"},
+        {"ordId":"103","sCode":"51400","sMsg":"Order does not exist"}
+    ]}"#,
+        6.,
+    );
+    let output = prepared(&mut engine, 6.);
+    let errors = failures(&output);
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].message.contains("Parameter error"));
+    assert!(
+        !errors[0].message.contains("Order does not exist"),
+        "a satisfied sibling must not hide the real refusal: {errors:?}"
+    );
+    let elements = errors[0]
+        .elements
+        .as_ref()
+        .expect("one passive outcome per requested order");
+    assert_eq!(elements.len(), 3);
+    assert_eq!(errors[0].outcome, None);
+    assert_eq!(errors[0].partial.as_ref().unwrap().total, Some(3));
+    assert_eq!(errors[0].partial.as_ref().unwrap().failed_index, Some(1));
+    for index in [0, 2] {
+        assert!(matches!(&elements[index].result, ElementResult::Applied {
+            effect: AppliedEffect::Cancel, target_order_id: Some(id), ..
+        } if id == if index == 0 { "101" } else { "103" }));
+    }
+    assert!(
+        matches!(&elements[1].result, ElementResult::NotSent { error: Some(error) }
+        if error.venue_code.as_deref() == Some("51000")
+        && error.venue_message.as_deref() == Some("Parameter error"))
+    );
+    assert!(!output.iter().any(|a| matches!(a, Action::Http(r)
+        if r.method != safe_cex_engine::Method::Get)));
+}
+
+#[test]
+fn empty_operation_failure_without_usable_rows_has_a_nonblank_reason() {
+    for body in [
+        r#"{"code":"1","msg":"","data":[]}"#,
+        r#"{"code":"1","msg":""}"#,
+        r#"{"code":"1","msg":"","data":[{"sCode":null}]}"#,
+        r#"{"code":"1","msg":"","data":[{"ordId":"accepted","sCode":"0","sMsg":""}]}"#,
+        r#"{"code":"1","msg":"","data":[{"sCode":"0","ordId":"101","sMsg":""}]}"#,
+    ] {
+        let mut engine = trading_engine();
+        place(&mut engine, vec![order(1)]);
+        let sent = prepared(&mut engine, 5.);
+        reply(&mut engine, post(&sent), body, 6.);
+        let output = prepared(&mut engine, 6.);
+        let errors = failures(&output);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].venue_code.as_deref(), Some("1"));
+        assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(
+            errors[0].partial.is_none(),
+            "a contradictory envelope proves no accepted sibling"
+        );
+        let reason = errors[0]
+            .venue_message
+            .as_deref()
+            .unwrap_or(&errors[0].message);
+        assert!(reason.contains("per-order"), "{body}: {errors:?}");
+        assert!(!output.iter().any(|a| matches!(a, Action::Http(r)
+            if r.method != safe_cex_engine::Method::Get)));
+    }
+}

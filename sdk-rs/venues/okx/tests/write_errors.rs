@@ -184,3 +184,32 @@ fn nonempty_envelope_message_keeps_the_existing_placement_diagnostic() {
     );
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
 }
+
+#[test]
+fn successful_ack_without_message_keeps_the_existing_default() {
+    let mut engine = trading_engine();
+    engine.handle(5., Event::Command(placement()));
+    let out = prepared(&mut engine, 5.);
+    let request = out
+        .iter()
+        .find(|action| {
+            matches!(action,
+                Action::Http(request) if request.method != safe_cex_engine::Method::Get
+            )
+        })
+        .expect("one released write");
+    reply(
+        &mut engine,
+        request,
+        r#"{"code":"0","msg":"","data":[{"ordId":"accepted","sCode":"0"}]}"#,
+        6.,
+    );
+    let out = prepared(&mut engine, 6.);
+    assert!(out.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandDone { command: 1, result }) if result == r#"["accepted"]"#
+    )), "an omitted sMsg retains its empty borrowed default: {out:?}");
+    assert!(
+        !out.iter()
+            .any(|action| matches!(action, Action::Notice(Notice::CommandFailed { .. })))
+    );
+}

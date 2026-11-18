@@ -100,7 +100,10 @@ pub use error::{
     VenueError,
 };
 #[cfg(feature = "history-row-diagnostics")]
-pub use error::{HistoryDecode, HistoryDecodeReason, HistorySchema};
+pub use error::{
+    HistoryDecode, HistoryDecodeField, HistoryDecodeReason, HistoryDecodeShape,
+    HistoryEnvelopeCode, HistoryExpectedType, HistoryJsonType, HistorySchema,
+};
 pub use log::{Health, Level, LogEvent, Redacted, Value};
 pub use model::{OrderIdentityKind, OrderIdentityReceipt};
 pub use store::{OrderSnapshotToken, Store};

@@ -19,6 +19,7 @@ use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+mod diagnostics;
 
 // BingX-API/api-ai-skills references/error-codes.md: preserve native codes,
 // but never make diagnostics depend on a free-form venue message.
@@ -69,6 +70,7 @@ pub struct Request {
     leg: Leg,
     rows: Vec<Row>,
     error: Option<String>,
+    row_diagnostic: Option<diagnostics::Detail>,
 }
 
 struct Page {
@@ -257,22 +259,157 @@ struct Envelope<T> {
     data: Option<T>,
 }
 
+// on_item validates every financial row. Retained metadata lists must be empty;
+// stream their shape without buffering or deserializing financial rows again.
+struct FillData;
+
 #[derive(Deserialize)]
-#[serde(untagged)]
-enum FillData {
-    Direct(Vec<FillRow>),
-    History { fill_history_orders: Vec<FillRow> },
-    Orders { fill_orders: Vec<FillRow> },
+#[serde(field_identifier)]
+enum FillDataField {
+    #[serde(rename = "fill_history_orders")]
+    History,
+    #[serde(rename = "fill_orders")]
+    Orders,
+    #[serde(other)]
+    Other,
 }
 
-impl FillData {
-    fn is_empty(&self) -> bool {
-        match self {
-            Self::Direct(rows)
-            | Self::History {
-                fill_history_orders: rows,
+struct FillRows;
+impl<'de> Visitor<'de> for FillRows {
+    type Value = FillData;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("list")
+    }
+    fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<FillData, A::Error> {
+        if seq.next_element::<de::IgnoredAny>()?.is_some() {
+            return Err(de::Error::custom("invalid fill metadata"));
+        }
+        Ok(FillData)
+    }
+    fn visit_map<M: de::MapAccess<'de>>(self, mut map: M) -> Result<FillData, M::Error> {
+        let mut seen = 0_u8;
+        while let Some(field) = map.next_key::<FillDataField>()? {
+            let bit = match field {
+                FillDataField::History => 1,
+                FillDataField::Orders => 2,
+                FillDataField::Other => {
+                    map.next_value::<de::IgnoredAny>()?;
+                    continue;
+                }
+            };
+            if seen & bit != 0 {
+                return Err(de::Error::custom("invalid fill metadata"));
             }
-            | Self::Orders { fill_orders: rows } => rows.is_empty(),
+            seen |= bit;
+            map.next_value_seed(FillRows)?;
+        }
+        if seen == 0 {
+            return Err(de::Error::custom("invalid fill metadata"));
+        }
+        Ok(FillData)
+    }
+}
+impl<'de> de::DeserializeSeed<'de> for FillRows {
+    type Value = FillData;
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<FillData, D::Error> {
+        d.deserialize_seq(self)
+    }
+}
+impl<'de> Deserialize<'de> for FillData {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<FillData, D::Error> {
+        d.deserialize_any(FillRows)
+            .map_err(|_| de::Error::custom("invalid fill metadata"))
+    }
+}
+
+#[cfg(test)]
+mod fill_metadata_tests {
+    use super::*;
+
+    fn permits_completion(data: &str) -> bool {
+        serde_json::from_str::<FillData>(data).is_ok()
+    }
+
+    #[test]
+    fn history_side_mapping_keeps_every_ascii_case_and_exact_refusals() {
+        for (base, expected) in [("buy", "buy"), ("sell", "sell")] {
+            for mask in 0..(1 << base.len()) {
+                let text: String = base
+                    .bytes()
+                    .enumerate()
+                    .map(|(i, byte)| {
+                        if mask & (1 << i) != 0 {
+                            byte.to_ascii_uppercase() as char
+                        } else {
+                            byte as char
+                        }
+                    })
+                    .collect();
+                assert_eq!(side(&text), Ok(expected));
+            }
+        }
+        for invalid in ["", " buy", "BUY ", "buying", "büy", "ＳＥＬＬ", "bu\0y"] {
+            assert_eq!(side(invalid), Err(format!("invalid side {invalid}")));
+        }
+    }
+
+    #[test]
+    fn empty_fill_metadata_keeps_every_supported_envelope() {
+        for data in [
+            "[]",
+            r#"{"fill_history_orders":[]}"#,
+            r#"{"fill_orders":[]}"#,
+            r#"{"fill_orders":[],"fill_history_orders":[]}"#,
+            r#"{"fill_history_orders":[],"unrelated":{"private":"canary"}}"#,
+            r#"{"fill_histo\u0072y_orders":[]}"#,
+        ] {
+            assert!(permits_completion(data), "{data}");
+        }
+    }
+
+    #[test]
+    fn malformed_fill_metadata_does_not_echo_private_values() {
+        for raw in [
+            r#""private-value-canary""#,
+            r#"{"fill_orders":"private-value-canary"}"#,
+        ] {
+            let error = match serde_json::from_str::<FillData>(raw) {
+                Ok(_) => panic!("malformed metadata accepted"),
+                Err(error) => error.to_string(),
+            };
+            assert!(!error.contains("private-value-canary"), "{error}");
+        }
+    }
+
+    #[test]
+    fn malformed_fill_metadata_stays_refused() {
+        for data in [
+            "null",
+            "{}",
+            "true",
+            "7",
+            r#""text""#,
+            r#"{"fill_history_orders":null}"#,
+            r#"{"fill_history_orders":[],"fill_history_orders":[]}"#,
+            r#"{"fill_orders":[],"fill_orders":[]}"#,
+            r#"{"fill_history_orders":[],"fill_orders":[{}]}"#,
+        ] {
+            assert!(!permits_completion(data), "{data}");
+        }
+    }
+
+    #[test]
+    fn retained_fill_metadata_cannot_fall_through_to_an_empty_sibling() {
+        for data in [
+            r#"{"fill_history_orders":[{"private-id":"canary"}],"fill_orders":[]}"#,
+            r#"{"fill_history_orders":[{"private-id":"canary"}]}"#,
+            r#"{"fill_orders":[{"private-id":"canary"}]}"#,
+            r#"[{"private-id":"canary"}]"#,
+        ] {
+            assert!(
+                !permits_completion(data),
+                "retained rows cannot complete: {data}"
+            );
         }
     }
 }
@@ -704,6 +841,7 @@ impl History {
                             leg: Leg::Signed(leg),
                             rows: Vec::new(),
                             error: None,
+                            row_diagnostic: None,
                         })
                     },
                 )
@@ -731,6 +869,7 @@ impl History {
                     leg: Leg::Public(context.clone()),
                     rows: Vec::new(),
                     error: None,
+                    row_diagnostic: None,
                 });
                 let queued = cx.request_managed_with_headers(
                     context,
@@ -858,6 +997,7 @@ impl History {
                     )
                 }),
             );
+            let error = self.decode_diagnostic(&request, Some(response.body), error);
             self.on_http_failed(cx, request, error);
         }
     }
@@ -906,7 +1046,10 @@ impl History {
         };
         match row {
             Ok(row) => request.rows.push(row),
-            Err(error) => request.error = Some(error),
+            Err(error) => {
+                request.row_diagnostic = diagnostics::row(read.native.kind, item, &error);
+                request.error = Some(error);
+            }
         }
     }
 
@@ -965,13 +1108,6 @@ impl History {
                         return Err(format!("{}: {}", response.code, response.msg));
                     }
                     response.data.ok_or_else(|| "missing fill data".to_owned())
-                })
-                .and_then(|data| {
-                    if data.is_empty() {
-                        Ok(())
-                    } else {
-                        Err("streamed fill metadata retained unexpected rows".into())
-                    }
                 });
             if let Err(error) = result {
                 request.error = Some(error);
@@ -989,10 +1125,15 @@ impl History {
                 });
             if let Err(error) = result {
                 request.error = Some(error);
+                request.row_diagnostic = None;
             }
         }
         if let Some(error) = request.error.take() {
-            self.on_failed(cx, request, &error);
+            let error = VenueError::new(error)
+                .kind(ErrorKind::Internal)
+                .cause_code(ErrorCause::HistoryDecode);
+            let error = self.decode_diagnostic(&request, Some(response.body), error);
+            self.on_http_failed(cx, request, error);
             return;
         }
         let command = request.page.command;
@@ -1128,14 +1269,68 @@ impl History {
         self.on_http_failed(cx, request, error);
     }
 
+    pub fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        status: u16,
+        headers: &str,
+        error: &str,
+    ) {
+        let diagnostic = self
+            .reads
+            .get(&request.page.command)
+            .is_some_and(|read| matches!(read.native.kind, Kind::Income | Kind::Orders));
+        if !diagnostic {
+            self.on_http_failed(
+                cx,
+                request,
+                VenueError::new(error).kind(ErrorKind::Internal),
+            );
+        } else if (200..300).contains(&status) {
+            self.on_failed(cx, request, error);
+        } else {
+            self.on_stream_error(
+                cx,
+                request,
+                Response {
+                    status,
+                    headers,
+                    body: "",
+                },
+            );
+        }
+    }
+
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        self.on_http_failed(
-            cx,
-            request,
-            VenueError::new(error)
-                .kind(ErrorKind::Internal)
-                .cause_code(ErrorCause::HistoryDecode),
-        );
+        let error = VenueError::new(error)
+            .kind(ErrorKind::Internal)
+            .cause_code(ErrorCause::HistoryDecode);
+        let error = self.decode_diagnostic(&request, None, error);
+        self.on_http_failed(cx, request, error);
+    }
+
+    fn decode_diagnostic(
+        &self,
+        request: &Request,
+        body: Option<&str>,
+        error: VenueError,
+    ) -> VenueError {
+        if error.cause_code != Some(ErrorCause::HistoryDecode) {
+            return error;
+        }
+        let Some(read) = self.reads.get(&request.page.command) else {
+            return error;
+        };
+        let Some(detail) = diagnostics::failure(read.native.kind, request.row_diagnostic, body)
+        else {
+            return error;
+        };
+        let mut safe = VenueError::new("BingX history response could not be decoded")
+            .kind(ErrorKind::Internal)
+            .cause_code(ErrorCause::HistoryDecode);
+        safe.history_decode = Some(detail);
+        safe
     }
 
     pub fn on_http_failed(
@@ -1182,8 +1377,8 @@ fn map_fill(row: FillRow, fallback_symbol: &str) -> Result<Row, String> {
     }))
 }
 
-fn map_order(row: OrderRow) -> Result<Row, String> {
-    let kind = match row.kind.as_str() {
+fn order_type(value: &str) -> Option<OrderType> {
+    Some(match value {
         "MARKET" => OrderType::Market,
         "LIMIT" => OrderType::Limit,
         "STOP" | "TRIGGER_LIMIT" | "STOP_LIMIT" | "TAKE_PROFIT" | "TAKE_PROFIT_LIMIT" => {
@@ -1192,14 +1387,25 @@ fn map_order(row: OrderRow) -> Result<Row, String> {
         "STOP_MARKET" | "TRIGGER_MARKET" => OrderType::StopLoss,
         "TAKE_PROFIT_MARKET" => OrderType::TakeProfit,
         "TRAILING_STOP_MARKET" | "TRAILING_TP_SL" => OrderType::TrailingStopLoss,
-        _ => return Err(format!("unknown order type {}", row.kind)),
-    };
-    let status = match row.status.as_str() {
-        "NEW" | "OPEN" | "WORKING" | "PENDING" | "PARTIALLY_FILLED" => OrderStatus::Open,
+        _ => return None,
+    })
+}
+
+fn order_status(value: &str) -> Option<OrderStatus> {
+    Some(match value {
+        "NEW" | "OPEN" | "WORKING" | "PENDING" | "PARTIALLY_FILLED" | "PARTIALLYFILLED" => {
+            OrderStatus::Open
+        }
         "FILLED" => OrderStatus::Closed,
-        "CANCELED" | "CANCELLED" | "EXPIRED" | "REJECTED" => OrderStatus::Canceled,
-        _ => return Err(format!("unknown order status {}", row.status)),
-    };
+        "CANCELED" | "CANCELLED" | "EXPIRED" | "REJECTED" | "FAILED" => OrderStatus::Canceled,
+        _ => return None,
+    })
+}
+
+fn map_order(row: OrderRow) -> Result<Row, String> {
+    let kind = order_type(&row.kind).ok_or_else(|| format!("unknown order type {}", row.kind))?;
+    let status =
+        order_status(&row.status).ok_or_else(|| format!("unknown order status {}", row.status))?;
     Ok(Row::Order(HistoricalOrder {
         id: row.order_id,
         symbol: symbol(&row.symbol),
@@ -1218,10 +1424,16 @@ fn map_order(row: OrderRow) -> Result<Row, String> {
 }
 
 fn side(value: &str) -> Result<&'static str, String> {
-    match value.to_ascii_uppercase().as_str() {
-        "BUY" => Ok("buy"),
-        "SELL" => Ok("sell"),
-        _ => Err(format!("invalid side {value}")),
+    side_value(value).ok_or_else(|| format!("invalid side {value}"))
+}
+
+fn side_value(value: &str) -> Option<&'static str> {
+    if value.eq_ignore_ascii_case("BUY") {
+        Some("buy")
+    } else if value.eq_ignore_ascii_case("SELL") {
+        Some("sell")
+    } else {
+        None
     }
 }
 

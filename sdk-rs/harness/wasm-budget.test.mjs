@@ -4,6 +4,23 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #3647 pinned Rust1.99/bindgen0.2.129/Binaryen132 twice-Oz web/Node measurements.
+// 80274d2: 2,066,659 B, SHA11835d00d138a4c751944336d8de85c449e1c85cd14e64fdfee963805b05a3d6.
+// b309848: 2,063,838 B, SHA6dee6055e89e1884781a44f0abddb92b1c463b2b5c6cc2629376bbdca6c31eef.
+test('#3647 OKX diagnostics retain both measured reserves and the historical floor', () => {
+  const measurements = [2_066_659, 2_063_838];
+  const minimumCap = Math.ceil((Math.max(...measurements) + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.okx;
+  assert.equal(minimumCap, 2_077_696);
+  assert.ok(cap >= Math.max(minimumCap, 2_069_504));
+  for (const measured of measurements) {
+    assert.ok(cap - measured >= 10 * 1024);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'okx'), undefined);
+  }
+  assert.equal(wasmBudgetError(cap, 'venue', 'okx'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'okx'), /exceeds/);
+});
+
 // #3579 CI43782227341/jobs133022239190+133022239183: web/Node 2,305,365 B.
 // Local pinned build at b323ddf25c4a: web/Node 2,306,669 B; retain the larger reserve.
 // Both aliases share one family; historical 2,279,424 B floor remains authoritative.
