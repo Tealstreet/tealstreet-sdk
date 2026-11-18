@@ -130,6 +130,20 @@ pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
     }
 }
 
+/// #3630 audits native formats: keep all validated UUID bits in supported text
+/// IDs. Adapters without caller-ID support omit it; the router ledger still
+/// owns dedupe. Numeric-ID adapters retain their refusal pending a follow-up.
+pub(crate) fn client_order_id(venue: &str, intent: &str) -> Option<String> {
+    let hex = || intent.replace('-', "");
+    match venue {
+        "hyperliquid" | "hyperliquidspot" => Some(format!("0x{}", hex())),
+        "bitget" | "bitgetusdc" | "bitgetinverse" | "okx" | "okxdemo" | "okxeu" | "okxeudemo"
+        | "blofin" | "binancepm" => Some(hex()),
+        "lighter" | "lighter-robinhood" | "binanceinverse" | "asterdex" | "kraken" | "mexc" => None,
+        _ => Some(intent.to_owned()),
+    }
+}
+
 // 116aeae12: protected Session controls pin Bybit's no-caller-ID protection path.
 pub(crate) fn bybit_protection(venue: &str, order: &serde_json::Map<String, Value>) -> bool {
     matches!(venue, "bybit" | "bybitdemo" | "bybitinverse" | "bybitspot")
@@ -327,6 +341,39 @@ mod activation_tests {
     }
 
     #[test]
+    fn client_ids_preserve_the_same_intent_bits_and_other_venues() {
+        for (intent, expected) in [
+            (
+                "018bcfe5-6800-7101-8101-010101010101",
+                "0x018bcfe5680071018101010101010101",
+            ),
+            (
+                "018bcfe5-6801-7abc-bdef-fedcba987654",
+                "0x018bcfe568017abcbdeffedcba987654",
+            ),
+        ] {
+            assert!(key_time(intent).is_some());
+            for venue in ["hyperliquid", "hyperliquidspot"] {
+                let first = client_order_id(venue, intent);
+                assert_eq!(first.as_deref(), Some(expected));
+                assert_eq!(client_order_id(venue, intent), first);
+                assert_eq!(&first.unwrap()[2..], intent.replace('-', ""));
+            }
+            for venue in ["bybit", "bybitinverse", "binance", "kucoin"] {
+                assert_eq!(client_order_id(venue, intent).as_deref(), Some(intent));
+            }
+            // 85b32c274 moved OKX to compact hex alongside Bitget/BloFin/PM;
+            // keep its lossless-bit assertion here rather than dropping it.
+            for venue in ["okx", "bitget", "blofin", "binancepm"] {
+                assert_eq!(
+                    client_order_id(venue, intent),
+                    Some(intent.replace('-', ""))
+                );
+            }
+        }
+    }
+
+    #[test]
     fn place_and_reduce_only_close_activate_without_later_actions() {
         assert!(activation_allowed(true, &PLACE_AND_CLOSE));
         assert_eq!(
@@ -353,3 +400,7 @@ mod activation_tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "client_order_ids_tests.rs"]
+mod client_order_ids_tests;
