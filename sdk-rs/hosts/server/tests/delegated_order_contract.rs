@@ -47,7 +47,15 @@ fn frozen_order_frames_key_epoch_and_canonical_fingerprint() {
         contract::check_key(id, now + 10_000),
         Err("not sent: expired")
     );
-    assert!(contract::check_key(id, now - 1).is_err());
+    // Maintainer-approved forward tolerance replaces the old zero-skew refusal.
+    // UUID identity, fingerprints and the ten-second past-age cap stay frozen.
+    for ahead in [1, 500, 4_999, 5_000] {
+        assert_eq!(contract::check_key(id, now - ahead), Ok(()));
+    }
+    assert_eq!(
+        contract::check_key(id, now - 5_001),
+        Err("not sent: invalid key time")
+    );
     assert!(contract::key_time(&id.to_uppercase()).is_none());
     assert!(contract::key_time("01ARZ3NDEKTSV4RRFFQ69G5FAV").is_none());
     assert_eq!(
