@@ -17,6 +17,10 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
+HyroTrader correlated auth-refusal metadata changes a Bybit-family input.
+Keep its native admission/uncertainty controls and fresh optimized family evidence;
+server negative-join fixtures retain the protected-provider and zero-write guards.
+
 BingX Spot qualification adds independent Spot public/private cases to the `bingx` suite.
 The nondefault `bingx-spot-replay` WASM feature exports a fixed-credential fixture constructor;
 normal factories still refuse Spot. Shipped family size checks run before the fixture build.

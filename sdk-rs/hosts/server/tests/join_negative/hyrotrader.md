@@ -24,3 +24,10 @@ The unchecked checkpoint is compiled before verifier wiring: positive passes,
 three invalid verifier controls fail, and the actual wrong-key Session must
 fail with an unproved socket attached. No helper, production, catalog, origin or
 signing-codec changes or live venue certification are implied.
+
+The native auth-refusal companion types only a correlated explicit auth denial
+with native 10003 as generic rejected. This settles the sealed wrong-secret
+admission without diagnosing its cause or changing the shared permanent-refusal,
+resident/provider, registration or zero-write assertions. The full Session
+fixture requires Linux protected storage; macOS refuses its valid-resident setup
+before the scenario. Those setup failures are not semantic red/green evidence.
