@@ -522,7 +522,7 @@ async fn cold_delegated_registration(registered_scalar: u8, refuse: bool) {
                         1,
                         Arc::new(|_| panic!("cold DELEGATED construction cannot contact a device")),
                         &authority,
-                        Some(DelegatedSetup::Resident(Box::new(resident))),
+                        Some(DelegatedSetup::Resident(resident)),
                     )
                     .await;
                 if refuse {
