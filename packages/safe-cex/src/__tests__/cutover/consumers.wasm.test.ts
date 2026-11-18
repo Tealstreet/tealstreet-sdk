@@ -374,6 +374,9 @@ describe.each(venues)('%s consumer conformance', (name) => {
   it('keeps update IDs, terminal opt-in, split deltas and stream events correct', async () => {
     const { worker, main, exchange, deliver } = await consumer(name);
     const ticker = main.store.tickers[0];
+    const markets = main.store.markets;
+    const orders = main.store.orders;
+    const balance = main.store.balance;
     const counts = { ...worker.store.updateIds };
     const fills = vi.fn();
     const workerFills = vi.fn();
@@ -385,6 +388,9 @@ describe.each(venues)('%s consumer conformance', (name) => {
     main.on('listenOHLCV', candles);
     deliver({}, [0, 4, 105], true);
     // FrameStore shares untouched sections and replaces the changed ticker row.
+    expect(main.store.markets).toBe(markets);
+    expect(main.store.orders).toBe(orders);
+    expect(main.store.balance).toBe(balance);
     expect(main.store.tickers[0]).not.toBe(ticker);
     expect(ticker.last).toBe(state(name).tickers![0].last);
     expect(main.store.tickers[0].last).toBe(105);
