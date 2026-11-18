@@ -1571,3 +1571,95 @@ it('keeps two actual candle transports available when an established IndexedDB s
     transport.dispose?.();
   }
 });
+
+
+describe('resolved Hyperliquid egress admission', () => {
+  const setup = async () => {
+    vi.stubGlobal('indexedDB', factory);
+    const { createEngineTransport } = await import('./engine');
+    const { directTransport } = await import('./direct');
+    const tunnel = await import('@tealstreet/http-over-websocket/src/tunnelEndpoints');
+    tunnel.resetTunnelLane(true);
+    const directSend = vi.fn(async () => ({ status: 200, headers: '', body: new Uint8Array() }));
+    const fleetSend = vi.fn(async () => ({ status: 200, statusText: 'OK', headers: {}, data: '[]' }));
+    const adapter = Object.assign(fleetSend, {
+      prepare: async () => ({ bind: () => ({ ready: () => true, dispatch: fleetSend }) }),
+    });
+    const provider = {
+      ...directTransport,
+      name: 'egress-budget-fixture',
+      rest: () => ({ baseURL: ORIGIN, proxied: false }),
+      restAdapter: () => adapter,
+      wsRouting: () => ({ restProxyHost: '', howEgress: 'jp' as const,
+        wsPublic: { tunnelled: false }, wsPrivate: { tunnelled: false }, wsBusiness: { tunnelled: false } }),
+    };
+    const raw = { ...nativeTransport(), request: directSend,
+      prepareHttp: () => ({ bind: () => ({ ready: () => true, dispatch: directSend }) }) };
+    const create = (publicDataOnly: boolean) => createEngineTransport('hyperliquid', {
+      key: '', secret: '', publicDataOnly, transport: provider,
+    }, raw);
+    const run = async (transport: ReturnType<typeof create>, publicRead: boolean, timeoutMs = 20_000) => {
+      const packet = { request: 1, method: 'POST' as const, url: ORIGIN + '/info', headers: {},
+        body: JSON.stringify({ type: publicRead ? 'candleSnapshot' : 'frontendOpenOrders' }), timeoutMs };
+      const prepared = await transport.prepareHttp!({ ...packet, intent: publicRead ? 'public' : 'primary',
+        readClass: publicRead ? 'bulk' : 'reconciliation' });
+      return prepared.bind(packet).dispatch();
+    };
+    return { create, run, directSend, fleetSend, tunnel };
+  };
+
+  it('admits direct public candles immediately after the account fleet exhausts its bucket', async () => {
+    const { create, run, directSend, fleetSend, tunnel } = await setup();
+    const account = create(false);
+    const chart = create(true);
+    try {
+      for (let i = 0; i < 50; i++) await run(account, false);
+      expect(fleetSend).toHaveBeenCalledTimes(50);
+      let completed = false;
+      const candles = Promise.allSettled([run(chart, true, 1000), run(chart, true, 1000)]).then((rows) => {
+        completed = rows.every((row) => row.status === 'fulfilled');
+      });
+      await flushDatabase();
+      await vi.advanceTimersByTimeAsync(0);
+      await flushDatabase();
+      expect(completed).toBe(true);
+      expect(directSend).toHaveBeenCalledTimes(2);
+      await candles;
+    } finally { account.dispose?.(); chart.dispose?.(); tunnel.resetTunnelLane(); }
+  });
+
+  it('keeps separate account instances on the same resolved fleet coordinated', async () => {
+    const { create, run, fleetSend, tunnel } = await setup();
+    const a = create(false);
+    const b = create(false);
+    try {
+      for (let i = 0; i < 50; i++) await run(a, false);
+      await expect(run(b, false, 1000)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+      expect(fleetSend).toHaveBeenCalledTimes(50);
+    } finally { a.dispose?.(); b.dispose?.(); tunnel.resetTunnelLane(); }
+  });
+
+  it('holds legacy unscoped 429 evidence when introducing a fleet bucket', async () => {
+    const { create, run, fleetSend, tunnel } = await setup();
+    await client().response(ORIGIN, 429, 'Retry-After: 45');
+    const account = create(false);
+    try {
+      await expect(run(account, false, 1000)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+      expect(fleetSend).not.toHaveBeenCalled();
+    } finally { account.dispose?.(); tunnel.resetTunnelLane(); }
+  });
+
+  it('does not spread a fleet 429 pause to direct public candles', async () => {
+    const { create, run, directSend, fleetSend, tunnel } = await setup();
+    fleetSend.mockResolvedValue({ status: 429, statusText: 'limited', headers: { 'retry-after': '45' }, data: '[]' });
+    const account = create(false);
+    const chart = create(true);
+    try {
+      await run(account, false);
+      await expect(run(account, false, 1000)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+      await run(chart, true, 1000);
+      expect(directSend).toHaveBeenCalledOnce();
+      expect(fleetSend).toHaveBeenCalledOnce();
+    } finally { account.dispose?.(); chart.dispose?.(); tunnel.resetTunnelLane(); }
+  });
+});
