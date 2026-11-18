@@ -461,6 +461,16 @@ fn candle_symbol_aliases_cannot_refuse_the_live_futures_feed() {
         symbol: "btcusdt".into(),
         interval: safe_cex_engine::model::Interval::M1,
     }));
+    // The native host retains the independently accepted uppercase request.
+    assert_eq!(
+        h.sent_on(socket, "market_btcusdt_klineop_1min"),
+        1,
+        "removing one spelling must preserve another caller's interest"
+    );
+    h.event(Event::Command(Command::UnsubscribeCandles {
+        symbol: "BTCUSDT".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    }));
     assert!(h.sent.iter().any(|(s, text)| *s == socket
         && text.contains("unsub")
         && text.contains("market_btcusdt_klineop_1min")));

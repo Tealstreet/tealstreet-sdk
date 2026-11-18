@@ -115,7 +115,12 @@ impl BitunixFutures {
     }
 
     fn futures_interests(&self, cx: &Cx<'_, Pending>) -> Vec<Interest> {
-        self.subscriptions(cx)
+        // The host retains caller spellings independently. Coalesce equal
+        // native topics here, so removing one alias cannot unsubscribe another.
+        let mut topics = self.subscriptions(cx);
+        topics.sort_unstable();
+        topics.dedup();
+        topics
             .into_iter()
             .map(|topic| (format!("1:{topic}"), topic))
             .map(|(key, topic)| Interest {

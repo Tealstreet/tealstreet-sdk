@@ -38,8 +38,10 @@ still cancels its authentication bound; no-answer timeout warns `stream.unavaila
 and reconnects, without asserting rejected credentials.
 
 Public shard registration is skipped when public data is shared or disabled, so
-intentional host suppression emits no admission error. Candle insert/remove keys
-are uppercase native identities; case aliases cannot create duplicate interests.
+intentional host suppression emits no admission error. Caller candle spellings
+remain independently desired, while equal canonical native topics coalesce into
+one managed interest until the last spelling is removed. Case aliases cannot
+create duplicate interest keys or unsubscribe another caller's retained topic.
 Only `op` supplies private pong evidence; `ch` remains a login-dispatch fallback.
 
 Timeout retirement carries `recover:true` to the replacement; an ordinary close

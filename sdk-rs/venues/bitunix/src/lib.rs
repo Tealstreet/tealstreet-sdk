@@ -1102,9 +1102,6 @@ impl Venue for BitunixFutures {
                     );
                     return;
                 }
-                // Native topics are case-insensitive. One canonical identity
-                // prevents aliases from proposing duplicate managed interests.
-                let symbol = symbol.to_ascii_uppercase();
                 self.read_symbol_settings(cx, &symbol);
                 if self.candles.insert((symbol, i)) {
                     self.sync_futures(cx);
@@ -1117,7 +1114,7 @@ impl Venue for BitunixFutures {
                 if interval_ms(i).is_none() {
                     return;
                 }
-                self.candles.remove(&(symbol.to_ascii_uppercase(), i));
+                self.candles.remove(&(symbol, i));
                 self.sync_futures(cx);
             }
             Command::FetchCandles {
