@@ -235,8 +235,10 @@ it('queues a newer rejection received while a now-stale snapshot RPC is in fligh
   expect(requests).toBe(2);
 });
 
-function identityFrame(name: string, market = 0, interval = '1m') {
-  const bytes = new Uint8Array(nativeFrame(name));
+function identityFrame(name: string, market = 0, interval = '1m', snapshot = false) {
+  // Rule 5 / #3640: RPC snapshots must restore the full catalogue after its reset.
+  // Stream updates intentionally omit it; retain all backoff and call-count assertions.
+  const bytes = new Uint8Array(nativeFrame(snapshot ? `identity-${name}` : name));
   const frame = new Frame(bytes.buffer);
   let marketOffset: number;
   if (name.toLowerCase().includes('candle')) {
@@ -281,7 +283,7 @@ const unrelatedStreams = [
 it.each(unrelatedStreams)(
   'keeps stream backoff when recovery returns a $name',
   async ({ bad, good, market, interval }) => {
-    const { exchange, calls } = identityMirror(() => identityFrame(good));
+    const { exchange, calls } = identityMirror(() => identityFrame(good, 0, '1m', true));
     for (let i = 0; i < 20; i++) {
       exchange.applyWorkerFrame(identityFrame(bad, market, interval));
       await settle();
@@ -297,7 +299,7 @@ it.each(unrelatedStreams)(
 it.each(unrelatedStreams)(
   'keeps stream backoff across healthy traffic for a $name',
   async ({ bad, good, market, interval }) => {
-    const { exchange, calls } = identityMirror(() => identityFrame(bad, market, interval));
+    const { exchange, calls } = identityMirror(() => identityFrame(bad, market, interval, true));
     for (let i = 0; i < 20; i++) {
       exchange.applyWorkerFrame(identityFrame(bad, market, interval));
       await settle();
@@ -313,7 +315,7 @@ it.each(unrelatedStreams)(
 );
 
 it.each(unrelatedStreams)('reports only the rejected identity for a $name', ({ bad, market, interval }) => {
-  const { exchange } = identityMirror(() => identityFrame(bad, market, interval));
+  const { exchange } = identityMirror(() => identityFrame(bad, market, interval, true));
   const signals: Array<OrderBookFrameRejection | OHLCVFrameRejection> = [];
   for (const symbol of ['A/USD', 'B/USD']) {
     exchange.listenOrderBookWebworker(
@@ -341,7 +343,7 @@ it.each(unrelatedStreams)('reports only the rejected identity for a $name', ({ b
 });
 
 it('keeps backoff until both unresolved book identities recover', async () => {
-  const { exchange, calls } = identityMirror(() => identityFrame('unordered', 1));
+  const { exchange, calls } = identityMirror(() => identityFrame('unordered', 1, '1m', true));
   exchange.applyWorkerFrame(identityFrame('unordered', 0));
   await settle();
   exchange.applyWorkerFrame(identityFrame('unordered', 1));

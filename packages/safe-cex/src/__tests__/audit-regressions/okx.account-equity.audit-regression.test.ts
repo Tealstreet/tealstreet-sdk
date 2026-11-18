@@ -127,7 +127,9 @@ describe('OKX account equity anchor', () => {
       store.subscribe((value) => observed(value));
       return observed;
     })();
+    const frames = vi.spyOn(store, 'apply');
     let beforeWs = -1;
+    let framesBeforeWs = -1;
     vi.spyOn(exchange, 'fetchMarkets').mockResolvedValue(store.markets);
     vi.spyOn(exchange, 'fetchTickersRaw').mockResolvedValue([
       {
@@ -149,6 +151,7 @@ describe('OKX account equity anchor', () => {
       // The read has completed; a buffered account frame precedes its .then commit.
       queueMicrotask(() => {
         beforeWs = writes.mock.calls.length;
+        framesBeforeWs = frames.mock.calls.length;
         exchange.applyAccountEquity([{ totalEq: '40400', details: [{ ccy: 'USD', eq: '400' }] }]);
       });
       return completed;
@@ -158,8 +161,15 @@ describe('OKX account equity anchor', () => {
     const totals = writes.mock.calls
       .slice(beforeWs)
       .flatMap(([update]) => (update.balance ? [update.balance.total] : []));
-    expect(totals.length).toBeGreaterThanOrEqual(2);
-    expect(totals.every((total) => total === 40387.18)).toBe(true);
+    // Rule 5 / #3640: both WS and the final startup frame must commit fresh
+    // equity. FrameStore deduplicates the equal final state for UI subscribers.
+    // Inspect the actual frames so a missing/stale startup commit still fails.
+    const committedTotals = frames.mock.calls.slice(framesBeforeWs).flatMap(([frame]) => {
+      const balance = frame.balance();
+      return balance ? [balance.total] : [];
+    });
+    expect(committedTotals).toEqual([40387.18, 40387.18]);
+    expect(totals).toEqual([40387.18]);
     expect(store.balance).toMatchObject({ total: 40387.18, free: 40317 });
     expect(exchange.xhr.get).not.toHaveBeenCalled();
   });
