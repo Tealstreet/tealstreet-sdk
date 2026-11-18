@@ -1695,6 +1695,92 @@ describe('resolved Hyperliquid egress admission', () => {
     }
   });
 
+  it('recovers shared legacy pauses after provisional inheritance during an outage', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const shared = client();
+    await shared.response(ORIGIN, 429, 'Retry-After: 300');
+    let available = false;
+    const unstable = {
+      open: (name: string, version?: number) => {
+        if (!available) throw new DOMException('storage unavailable', 'SecurityError');
+        return factory.open(name, version);
+      },
+    } as IDBFactory;
+    const recovering = new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(unstable));
+    const fleet = hyperliquidInfoBudgetKey(ORIGIN, 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel', true);
+    const send = vi.fn(() => 0);
+    const dispatch = async (budget: HyperliquidInfoBudget, key: string) => {
+      const deadline = Date.now() + 1000;
+      const abort = signal();
+      const grant = await budget.wait(key, ORDERS, deadline, abort, 'critical');
+      return budget.admitDispatch(key, grant, deadline, abort, send);
+    };
+    await dispatch(recovering, fleet);
+    expect(send).toHaveBeenCalledOnce();
+    available = true;
+    await vi.advanceTimersByTimeAsync(30_001);
+    const freshFleet = hyperliquidInfoBudgetKey(ORIGIN, 'wss://other.example.test/tunnel', true);
+    await expect(dispatch(shared, freshFleet)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+    await expect(dispatch(recovering, fleet)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it('retries legacy inheritance when the target migration could not commit', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const shared = client();
+    await shared.response(ORIGIN, 200, '');
+    const fleet = hyperliquidInfoBudgetKey(ORIGIN, 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel', true);
+    const put = IDBObjectStore.prototype.put;
+    let failTarget = true;
+    vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+      if (key === fleet && failTarget) {
+        failTarget = false;
+        throw new DOMException('target migration failed', 'UnknownError');
+      }
+      return put.call(this, value, key);
+    });
+    const recovering = client();
+    await admit(recovering, fleet, ORDERS, Date.now() + 1000, signal());
+    await shared.response(ORIGIN, 429, 'Retry-After: 300');
+    await vi.advanceTimersByTimeAsync(30_001);
+    await expect(admit(recovering, fleet, ORDERS, Date.now() + 1000, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+    });
+  });
+
+  it('finishes durable inheritance when storage recovers between migration and admission', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await client().response(ORIGIN, 429, 'Retry-After: 300');
+    const fleet = hyperliquidInfoBudgetKey(ORIGIN, 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel', true);
+    let available = false;
+    const unstable = {
+      open: (name: string, version?: number) => {
+        if (!available) throw new DOMException('storage unavailable', 'SecurityError');
+        return factory.open(name, version);
+      },
+    } as IDBFactory;
+    const backend = new budgetModule.IndexedInfoBudgetStorage(unstable);
+    const update = backend.update.bind(backend);
+    let recoverAfterMigration = true;
+    vi.spyOn(backend, 'update').mockImplementation(async (key, change) => {
+      const result = await update(key, change);
+      if (key === fleet && recoverAfterMigration) {
+        recoverAfterMigration = false;
+        available = true;
+        vi.setSystemTime(Date.now() + 30_001);
+      }
+      return result;
+    });
+    const recovering = new budgetModule.HyperliquidInfoBudget(backend);
+    const send = vi.fn(() => 0);
+    const deadline = Date.now() + 60_000;
+    const dispatched = recovering.wait(fleet, ORDERS, deadline, signal(), 'critical').then((grant) =>
+      recovering.admitDispatch(fleet, grant, deadline, signal(), send),
+    );
+    await expect(dispatched).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('holds legacy unscoped 429 evidence when introducing a fleet bucket', async () => {
     const { create, run, fleetSend, tunnel } = await setup();
     await client().response(ORIGIN, 429, 'Retry-After: 45');
