@@ -593,7 +593,15 @@ fn a_cancel_batch_continues_after_a_failure_through_one_plan() {
 
 #[test]
 fn a_v3_stp_mode_read_is_a_managed_command_read() {
-    let mut e = support::engine(Options::v3_wallet());
+    // Nonces are shared process-wide per signer. Keep this independent read
+    // from racing the clock-recovery test's releases on its fixture wallet.
+    let secret = "03".repeat(32);
+    let signer = safe_cex_crypto::ethereum::private_key_address(&secret).unwrap();
+    let mut e = support::engine(Options {
+        key: Some(signer),
+        secret: Some(secret),
+        ..Options::v3_wallet()
+    });
     e.store_mut().set_markets(vec![market()]);
     let sent = command(&mut e, Command::FetchStpMode { command: COMMAND });
     managed(&sent, 1);

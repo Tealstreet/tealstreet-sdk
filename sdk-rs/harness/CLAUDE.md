@@ -17,6 +17,10 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
+Bybit order-history retention is decided at completion and preserves earlier
+page-failure causes. Fresh family and combined artifacts must retain the
+10 KiB reserve.
+
 MEXC's HTTP 425 read labels are diagnostics only; typed refusals, backoff,
 signing and write outcomes retain their existing controls. Exact source
 06c5b32372b7, Rust SDK run 44220118208, artifact 14390662738 measures equal
@@ -197,3 +201,7 @@ Combined measures 17,876,808 B, SHA256
 leaving 211,128 B at its unchanged 18,087,936 B ceiling.
 This budget-only composition changes no runtime inputs; required new-head CI
 and combined consumers still have to run and succeed.
+
+Managed HTTP preparation observations change shipped host JS, so they move the
+beta input fingerprint and require a new release/pin. They do not change Rust
+sources or waive fresh combined-consumer/size evidence or any retained floor.

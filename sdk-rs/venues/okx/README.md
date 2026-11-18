@@ -116,3 +116,23 @@ assessment as list-bearing replies: non-authentication errors reset the streak;
 genuine signature answers still receive only one retry before permanent refusal.
 Public/frame-fed, non-EEA and already-configured refresh paths retain their
 existing behavior. No startup step places or replays a trading write.
+
+## Order-history financial projection
+
+Ordinary derivative order history retains the native `pnl`, `fee` and `feeCcy`
+from [OKX orders-history](https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-order-history-last-7-days).
+`realizedPnl` is the venue's gross order close PnL, excluding its fee. It is not
+the position-history net `realizedPnl`; no fee or funding is added to it.
+
+For SWAP and supported EEA FUTURES, native `fee` is an accumulated signed
+fee/rebate total: a negative charge becomes positive-cost `fees`, and a positive
+credit becomes separate positive `rebate`. `feeAsset` preserves `feeCcy`; a
+credit also carries that currency in `rebateAsset`. The reported aggregate
+cannot reconstruct separate gross fees and rebates across the order's fills,
+so the projection does not invent the unreported counterpart. No monetary
+amount is converted with contract size or price, including BTC-settled orders.
+
+Missing, null, blank, malformed and non-finite monetary strings remain absent;
+a reported zero remains zero. Non-financial order fields, query scope, paging
+and write behavior are unchanged. Adding these fields does not promote the
+orders axis from unmeasured: an independent financial check is still required.

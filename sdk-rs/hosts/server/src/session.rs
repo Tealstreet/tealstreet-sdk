@@ -16,9 +16,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
 
+mod history_completeness;
 mod order_actions;
 mod order_frames;
 mod settings;
+use history_completeness::HistoryCompleteness;
+
+#[cfg(test)]
+mod history_completeness_tests;
 
 #[derive(Clone, Copy)]
 pub(super) enum OrderReceipt {
@@ -48,8 +53,8 @@ struct Pending {
     reply: methods::Reply,
     /// A cancel-all fanned out over symbols: one shared outcome for the group.
     group: Option<Arc<Mutex<Group>>>,
-    /// The engine said this history read returned only part of the window.
-    incomplete: bool,
+    /// Cold detail is allocated only after an explicit incomplete-read notice.
+    incomplete: Option<Box<HistoryCompleteness>>,
     /// Order-affecting commands are logged with their result when they settle.
     audit: Option<Audit>,
 }
@@ -2727,7 +2732,7 @@ impl Session {
             method: method.to_owned(),
             reply,
             group: group.clone(),
-            incomplete: false,
+            incomplete: None,
             audit: None,
         };
         if !self.joined[name].account.running.io_allowed() {
@@ -3195,8 +3200,8 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
             };
             let mut data =
                 json!({"requestId": pending.request_id, "success": true, "result": result});
-            if pending.incomplete {
-                data["completeness"] = json!({"incomplete": true});
+            if let Some(completeness) = pending.incomplete {
+                data["completeness"] = json!(completeness);
             }
             data
         }
@@ -3456,13 +3461,13 @@ fn notice_to_msg(
     // As the SDK bridge: a partial history read is answered with its rows and a
     // positive `completeness` marker, never as complete.
     if kind == "event" && notice["code"] == "history.incomplete" {
-        let owner = notice["fields"]["command"]
-            .as_u64()
-            .and_then(|id| u32::try_from(id).ok());
+        let owner = history_completeness::command_owner(&notice["fields"]["command"]);
         if let Some(id) = owner
             && let Some(waiting) = pending.lock().unwrap().get_mut(&id)
         {
-            waiting.incomplete = true;
+            waiting.incomplete = Some(Box::new(HistoryCompleteness::from_fields(
+                &notice["fields"],
+            )));
         }
     }
     let command = notice["command"]
@@ -6494,7 +6499,7 @@ mod tests {
                 method: "placeOrder".into(),
                 reply: methods::Reply::Result,
                 group: None,
-                incomplete: false,
+                incomplete: None,
                 audit: None,
             },
         );
@@ -6531,7 +6536,7 @@ mod tests {
                 method: "fetchHistoricalFills".into(),
                 reply: methods::Reply::Result,
                 group: None,
-                incomplete: false,
+                incomplete: None,
                 audit: None,
             },
         );
@@ -6604,7 +6609,7 @@ mod tests {
                 method: "placeOrder".into(),
                 reply: methods::Reply::Result,
                 group: None,
-                incomplete: false,
+                incomplete: None,
                 audit: None,
             },
         );
@@ -6630,7 +6635,7 @@ mod tests {
                     client_order_id: "cid-1".into(),
                 },
                 group: None,
-                incomplete: false,
+                incomplete: None,
                 audit: None,
             },
         );

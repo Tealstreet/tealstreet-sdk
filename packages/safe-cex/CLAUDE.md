@@ -639,7 +639,9 @@ See `docs/plans/callers/startup-incomplete-causes.md` for the field contract.
 
 Managed HTTP failures also emit the JS host's Debug `http.request_failed` event,
 with the actual SDK venue plus method, redacted path template, phase and closed
-failure kind. Queries, origins and request material are never diagnostic fields;
+failure kind. Closed preparation stage, route kind, encoded error class and capped
+prepare/budget-wait milliseconds remain passive observations of actual awaits.
+Queries, origins and request material are never diagnostic fields;
 this event does not emit another error or change retries/native deadlines.
 
 ## Rust public-feed ownership
@@ -1116,6 +1118,20 @@ and receiver together. Public `historyCompletenessOf`, `withHistoryCompleteness`
 and `copyHistoryCompleteness` helpers preserve it before row transformations;
 Rust derived position and reported closed-PnL mappings retain it even on empty
 results. Bybit's derived history combines both source axes' assertions.
+A Bybit closed-PnL range whose closing order cannot be joined to an explicit
+`long`, `short` or `both` leg returns no aggregates and carries
+`incompleteReason: unresolvedHedgeLeg`. An absent resolver, empty order response,
+missing order ID or missing order leg is not evidence of one-way mode. Native
+close rows are left untouched and can be re-read through the existing raw history
+path; only a complete join can publish the aggregate's stable key/count. This does
+not add persistent raw-event storage (the separate retention/rebuild decision).
+
+Optional `completeness.failure: { operation, kind, venueCode? }` retains a Bybit
+later-page failure through the same owning-result mapping and serialization.
+`historyFailureOf` allowlists every field; native messages and row values never
+enter it. The array's `historyFailure` property is non-enumerable. Replacing an
+assertion replaces its diagnostic too, so a different partial input cannot
+borrow the earlier input's error facts. Grouping is a caller concern.
 
 The journal fold rejects flagged fills and symbol-scoped income; with complete
 account-wide fills it discards flagged income enrichment and leaves funding
@@ -1127,6 +1143,15 @@ wire protocol. See B11 in `docs/plans/RUST_CUTOVER_CALLERS.md`.
 The fatal symbol-scoped income wrapper retains shared engine classification
 (`kind`, `outcome`, `venueCode`) alongside its existing name and cause. Failed
 income still stops the fold before any fill reads; no empty account is invented.
+
+Fills-derived journal keys use `fold-v2` plus escaped account, symbol, leg and the
+native execution ID that finally flattened the leg. A flip's closing half retains
+that execution ID; its opening half belongs to the next lifecycle. Neither time
+precision nor a response ordinal is identity. The closing ID also stays stable
+when a wider lookback reveals earlier opening fills. A reportable close without
+that ID fails the fold instead of emitting a colliding key or silently dropping
+the record. Consumers must rebuild legacy timestamp-keyed derived projections
+before mixing them with `fold-v2`; this does not rekey venue-reported positions.
 
 ## Rust socket health
 
@@ -2583,3 +2608,15 @@ BingX cancel/amend `invalidInput` diagnostics preserve a validated, value-free
 `bingxWriteShape` through host errors, command cloning and typed telemetry tags.
 The closed schema and evidence bounds live in `sdk-rs/venues/bingx/README.md`;
 raw request/row fields are never copied into this diagnostic record.
+
+## Fills-derived journal funding ownership
+
+The journal fold assigns a symbol funding event only when exactly one visible,
+complete, closed interval can own it. Open legs also participate in that census;
+filtering them out before allocation would invent an owner. A shared hedge event
+is retained once in `BuildRecordsResult.unattributedFunding`, outside per-leg
+amounts. A leg affected by unresolved events has `fundingAttributed: false` and
+contains only the events that could be uniquely assigned (possibly zero).
+Source rows outside all reconstructed intervals remain in that separate list.
+This is an in-memory result, not a new durable income-ingestion axis or a repair
+of previously persisted rows. Reported-position PnL/fee conventions are unchanged.

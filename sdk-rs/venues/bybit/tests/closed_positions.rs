@@ -372,3 +372,123 @@ fn repeated_cursor_stops_with_owned_incomplete_and_raw_duplicate_rows() {
     )));
     }
 }
+
+#[test]
+fn later_page_failure_retains_closed_diagnostics_without_response_values() {
+    use safe_cex_engine::{Event, Notice, Value};
+    for (body, kind, code) in [
+        (
+            Some(r#"{"retCode":10006,"retMsg":"PRIVATE_CANARY","result":{}}"#),
+            "rateLimited",
+            Some("10006"),
+        ),
+        (
+            Some(r#"{"retCode":10001,"retMsg":"PRIVATE_CANARY","result":{}}"#),
+            "invalidInput",
+            Some("10001"),
+        ),
+        (
+            Some(r#"{"retCode":10000,"retMsg":"PRIVATE_CANARY","result":{}}"#),
+            "timeout",
+            Some("10000"),
+        ),
+        (
+            Some(r#"{"retCode":10002,"retMsg":"PRIVATE_CANARY","result":{}}"#),
+            "authInvalid",
+            Some("10002"),
+        ),
+        (
+            Some(r#"{"retCode":10004,"retMsg":"PRIVATE_CANARY","result":{}}"#),
+            "authInvalid",
+            Some("10004"),
+        ),
+        (
+            Some(r#"{"retCode":10005,"retMsg":"PRIVATE_CANARY","result":{}}"#),
+            "authPermission",
+            Some("10005"),
+        ),
+        (
+            Some(r#"{"retCode":10016,"retMsg":"PRIVATE_CANARY","result":{}}"#),
+            "venueUnavailable",
+            Some("10016"),
+        ),
+        (
+            Some(r#"{"retCode":33004,"retMsg":"PRIVATE_CANARY","result":{}}"#),
+            "authExpired",
+            Some("33004"),
+        ),
+        (
+            Some(r#"{"retCode":987654,"retMsg":"PRIVATE_CANARY","result":{}}"#),
+            "rejected",
+            Some("other"),
+        ),
+        (None, "network", None),
+    ] {
+        let mut h = startup(Variant::Linear, true);
+        h.notices.clear();
+        h.engine.set_log_level(safe_cex_engine::Level::Error);
+        fetch(&mut h, 800, None, Some(1.0), Some(2.0));
+        h.respond(
+            "/v5/position/closed-pnl",
+            200,
+            &page(&[ROW_A], "synthetic-cursor"),
+        );
+        let request = h.take("/v5/position/closed-pnl");
+        if let Some(body) = body {
+            h.reply(request.id, 200, body);
+            if matches!(code, Some("10002" | "10004")) {
+                let retry = h.take("/v5/position/closed-pnl");
+                h.reply(retry.id, 200, body);
+            }
+        } else {
+            h.event(Event::HttpFailed {
+                request: request.id,
+                error: "PRIVATE_CANARY",
+            });
+        }
+        assert_eq!(h.result(800), Some(&Ok(format!("[{ROW_A}]"))));
+        let event = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                Notice::Event(event)
+                    if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            event
+                .fields
+                .iter()
+                .find(|(key, _)| *key == "historyOperation")
+                .map(|(_, value)| value),
+            Some(&Value::Str("bybitClosedPnl".into()))
+        );
+        assert_eq!(
+            event
+                .fields
+                .iter()
+                .find(|(key, _)| *key == "historyFailureKind")
+                .map(|(_, value)| value),
+            Some(&Value::Str(kind.into()))
+        );
+        assert_eq!(
+            event
+                .fields
+                .iter()
+                .find(|(key, _)| *key == "historyVenueCode")
+                .map(|(_, value)| value),
+            code.map(|code| Value::Str(code.into())).as_ref()
+        );
+        let fields = format!("{:?}", event.fields);
+        assert!(
+            !fields.contains("PRIVATE_CANARY")
+                && !fields.contains("987654")
+                && !fields.contains("synthetic-cursor")
+        );
+        assert!(!h.has_request("/v5/position/closed-pnl"));
+    }
+}

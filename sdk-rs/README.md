@@ -119,6 +119,11 @@ fixed API vocabulary survives, all other segments become `:segment`, at most eig
 segments plus `:more`. Origins, queries, fragments, bodies and headers are excluded.
 The SDK adds the actual venue; consumers may retain a bounded recent breadcrumb.
 These diagnostics neither retry requests nor add a second user-facing error.
+The same event carries closed preparation-stage and route-kind labels, an encoded
+standard/tunnel error class (`syntax_error` denotes SyntaxError), and prepare versus
+budget-wait durations capped at one hour. The routing adapter reports actual await
+stages; missing provider observations stay unknown. Wire time is excluded. No raw
+error name, input, account identity, credential or URL enters these fields.
 
 Post-release JS HTTP failures retain a closed cause label in the existing engine
 error string (timeout, disconnect, direct-fetch, response-decode, aborted, disposed,

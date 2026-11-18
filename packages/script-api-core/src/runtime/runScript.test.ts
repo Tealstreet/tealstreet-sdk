@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { OrderSide, OrderType } from '@tealstreet/safe-cex/src/types';
+
 import { createMockAdapter } from '../__tests__/mockAdapter';
 import { SEED } from '../__tests__/fixtures';
 import type { Capabilities } from '../api/capabilities.types';
@@ -25,7 +27,11 @@ const baseCaps: Capabilities = {
   storage: { enabled: true, quotaBytes: 102400 },
 };
 
-const buildCtx = (overrides: Partial<RunContext> = {}): RunContext => ({
+type MockRunContext = Omit<RunContext, 'adapter'> & {
+  readonly adapter: ReturnType<typeof createMockAdapter>;
+};
+
+const buildCtx = (overrides: Partial<MockRunContext> = {}): MockRunContext => ({
   adapter: createMockAdapter(SEED),
   transpile: identityTranspile,
   runtime: baseRuntime,
@@ -260,7 +266,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
     expect(result.ok).toBe(true);
     expect(typeof result.returnValue).toBe('string');
     // Adapter recorded the dispatch with the resolved account injected.
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.writes).toHaveLength(1);
     expect(adapter.logs.writes[0]).toMatchObject({
       kind: 'placeOrder',
@@ -287,7 +293,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
 
     const result = await runScript(script, '', ctx);
     expect(result.ok).toBe(true);
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.writes).toEqual([
       {
         kind: 'placeOrder',
@@ -326,7 +332,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/capability denied: write 'placeOrder'/);
     // Hard rule: denial path must never reach the adapter.
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.writes).toEqual([]);
   });
 
@@ -345,7 +351,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
     const result = await runScript(script, '', ctx);
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/exchange 'bybit' not in script capabilities\.exchanges/);
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.writes).toEqual([]);
   });
 
@@ -361,7 +367,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
     });
     const result = await runScript(script, '', ctx);
     expect(result.ok).toBe(true);
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.commands).toEqual([
       { command: 'buy 1 BTCUSDT', account: 'mybybit', symbol: undefined, depth: 1 },
     ]);
@@ -391,7 +397,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
     const result = await runScript(script, '', ctx);
     expect(result.ok).toBe(true);
     expect(result.returnValue).toEqual(['fulfilled', 'fulfilled', 'fulfilled', 'fulfilled', 'fulfilled']);
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.commands.map((c) => c.depth)).toEqual([1, 1, 1, 1, 1]);
   });
 
@@ -407,7 +413,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
     });
     const result = await runScript(script, '', ctx);
     expect(result.ok).toBe(true);
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.commands.map((c) => c.depth)).toEqual([4]);
   });
 
@@ -424,7 +430,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
     const result = await runScript(script, '', ctx);
     expect(result.ok).toBe(false);
     expect(result.error).toBe('capability denied: runCommand recursion depth 5 exceeds cap 4');
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.commands).toEqual([]);
   });
 
@@ -446,7 +452,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
     });
     const result = await runScript(script, '', ctx);
     expect(result.ok).toBe(true);
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.commands.map((c) => c.depth)).toEqual([1, 1, 1]);
   });
 
@@ -463,7 +469,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
     const result = await runScript(script, '', ctx);
     expect(result.ok).toBe(false);
     expect(result.error).toBe("capability denied: runCommand verb 'account' not in allowlist");
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.commands).toEqual([]);
   });
 
@@ -483,7 +489,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
       { text: 'plain', kind: 'print' },
     ]);
     // …and the host adapter's print sink ran with the same lines.
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.io).toEqual([
       { text: 'hello', kind: 'success' },
       { text: 'plain', kind: 'print' },
@@ -517,7 +523,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
     });
     const result = await runScript(script, '', ctx);
     expect(result.ok).toBe(true);
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.commands.map((c) => c.depth)).toEqual([1]);
   });
 
@@ -611,7 +617,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
     const result = await runScript(script, '', ctx);
     expect(result.ok).toBe(true);
     expect(result.returnValue).toEqual([]);
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.writes).toEqual([]);
   });
 
@@ -717,7 +723,7 @@ describe('runScript — phase-2-step-3 action surface', () => {
     });
     const r2 = await runScript(scriptBoth, '', ctxOk);
     expect(r2.ok).toBe(true);
-    const adapter = ctxOk.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctxOk.adapter;
     expect(adapter.logs.writes.at(-1)).toMatchObject({ kind: 'closePosition' });
   });
 
@@ -745,7 +751,11 @@ describe('runScript — phase-2-step-3 action surface', () => {
     });
     const result = await runScript(script, '', ctx);
     expect(result.ok).toBe(true);
-    expect((result.returnValue as { denied: boolean }).denied).toBe(true);
+    const returned = result.returnValue;
+    if (typeof returned !== 'object' || returned === null || !('denied' in returned)) {
+      throw new Error('Expected the script to return its denied flag');
+    }
+    expect(returned.denied).toBe(true);
   });
 });
 
@@ -776,14 +786,14 @@ describe('runScript — fn-ref path (SPEC §5.1 file-loader)', () => {
       // throw before reaching the adapter, regardless of how the script
       // was loaded.
       fn: async (_args, api) => {
-        await api.exchange.placeOrder({ symbol: 'BTCUSDT', side: 'buy', type: 'market', amount: 1 });
+        await api.exchange.placeOrder({ symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Market, amount: 1 });
       },
     });
     const ctx = buildCtx();
     const result = await runScript(script, '', ctx);
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/capability denied: write 'placeOrder'/);
-    const adapter = ctx.adapter as ReturnType<typeof import('../__tests__/mockAdapter').createMockAdapter>;
+    const adapter = ctx.adapter;
     expect(adapter.logs.writes).toEqual([]);
   });
 

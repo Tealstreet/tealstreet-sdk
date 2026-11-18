@@ -920,13 +920,13 @@ const resolveAmend = (
 
   // Round to NEAREST for an amend even where placement rounds down: truncating
   // a resting order's size is a change the user did not ask for.
-  const amountProblem = hasAmount ? nativeAmountProblem(context, market, step.amount as number, order) : undefined;
+  const amountProblem = hasAmount ? nativeAmountProblem(context, market, step.amount, order) : undefined;
   if (amountProblem) {
     out.reasons.push(amountProblem);
     return out;
   }
   const value = hasPrice
-    ? roundToStep(step.price as number, market.priceStep)
+    ? roundToStep(step.price, market.priceStep)
     : roundToStep(step.amount as number, market.amountStep);
   if (!(value > 0)) {
     out.reasons.push(`the amended ${hasPrice ? 'price' : 'amount'} rounds to zero`);

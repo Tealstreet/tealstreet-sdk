@@ -747,6 +747,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Built source de42fedbb4021e94d1162e4420b8583d0d20906a; exact tree of PR head d931514bb9750d82e2f538ed454b0d24edd0db5f.
   // Optimized web/Node 2,428,978 B; SHA256 f242e0ade5f65c8cf9fd93bd0f211b02668d1f69f381221b1452a1d6fabf53ff.
   // Parent cap 2,439,168 B left 10,190 B; measured +10 KiB rounded up, retaining every historical floor.
+  // #3669 run 44325589048, artifact 14437511989: optimized family 2,309,206 B.
+  // Coordinator-approved +10 KiB rounded up; preserve this and any larger parent floor.
   hyperliquid: 2_440_192,
   // #3438 merged-head local build.sh --venue hyperliquid: web/node 2,238,027 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
@@ -765,6 +767,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Built source de42fedbb4021e94d1162e4420b8583d0d20906a; exact tree of PR head d931514bb9750d82e2f538ed454b0d24edd0db5f.
   // Optimized web/Node 2,428,978 B; SHA256 f242e0ade5f65c8cf9fd93bd0f211b02668d1f69f381221b1452a1d6fabf53ff.
   // Parent cap 2,439,168 B left 10,190 B; measured +10 KiB rounded up, retaining every historical floor.
+  // #3669 shares the measured family and approved reserve immediately above.
   hyperliquidspot: 2_440_192,
   // #2351 run 42402512142, jobs 128493440380/128493440356: node/web 2,136,136 B.
   // CI size plus 10 KiB rounded up to KiB; Kraken and Kraken Spot share the cap.

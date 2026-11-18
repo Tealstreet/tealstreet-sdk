@@ -4,6 +4,22 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #3669 run 44325589048, artifact 14437511989: optimized Hyperliquid 2,309,206 B.
+// Coordinator approved measured +10 KiB rounded up, retaining all parent floors.
+for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+  test(`#3669 ${venue} diagnostics retain measured reserve and strict boundaries`, () => {
+    const measured = 2_309_206;
+    const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.equal(requiredCap, 2_320_384);
+    assert.ok(cap >= Math.max(2_317_312, requiredCap));
+    assert.ok(cap - measured >= 10 * 1024);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}
+
 // #3643 CI44132069302/job134212792364, composition9fd6c31b5299 (PR36a0f89ed4f2 + mastercd4052047a9f).
 // Optimized web/Node 2,292,953 B, SHA256 ef43266ef637108ab003a62b16674079df413c8db0a6fe1c10edaa277281ef53.
 // Coordinator approved measured +10 KiB rounded up on 2026-11-18; all earlier floors remain.

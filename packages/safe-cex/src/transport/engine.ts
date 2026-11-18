@@ -5,7 +5,7 @@ import type {
   TimerLatenessBucket,
 } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import type { TunnelOutage } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
-import type { EngineEvent, HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { EngineEvent, HttpPreparationStage, HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { ExchangeName, ExchangeOptions } from '../types';
 import type { BybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
@@ -632,6 +632,11 @@ const httpTransport = (
   type Reroute = { abandon?: AbortSignal; rerouted?: { startedAt: number } };
   const prepare = async (request: Request, intent?: CredentialIntent, reroute: Reroute = {}): Promise<PreparedHttp> => {
     if (disposed) throw new Error('Engine transport disposed');
+    const note = (stage: HttpPreparationStage, route?: 'direct' | 'proxy' | 'tunnel') => {
+      try { request.onPreparationStage?.(stage, route); }
+      catch { /* Diagnostics cannot change preparation or admission. */ }
+    };
+    note('route_resolve');
     let proxyRoute: RestTransport | undefined;
     try {
       proxyRoute = tunnelProxyRoute(request, intent, reroute.rerouted !== undefined);
@@ -776,6 +781,8 @@ const httpTransport = (
           : { baseURL: publicPrefix ? `${publicPrefix}/${request.url}` : request.url, proxied: false };
       if (infoFacts && request.method === 'POST' && original.pathname === '/info')
         infoRead = infoFacts.begin(tunnelAdapter ? 'how' : route.proxied ? 'proxy' : 'direct', deadlineMs);
+      const routeKind = tunnelAdapter ? 'tunnel' : route.proxied ? 'proxy' : 'direct';
+      note('route_resolve', routeKind);
       const target = route.baseURL ?? request.url;
       const budgetKey = infoBudget
         ? hyperliquidInfoBudgetKey(
@@ -819,11 +826,14 @@ const httpTransport = (
       };
       aliasHeaders(config.headers, aliases);
       const before = AxiosHeaders.from(config.headers.toJSON());
-      if (route.proxied && route.authorize)
+      if (route.proxied && route.authorize) {
+        note('proxy_token');
         await untilAborted(
           withProxyTokenProvider(proxyTokenProvider, () => route.authorize!(config)),
           signal,
         );
+        note('route_resolve');
+      }
       signal.throwIfAborted();
       if (remaining() <= 0) throw timeoutError();
       if (
@@ -865,6 +875,7 @@ const httpTransport = (
         return untilAborted(promise, signal);
       };
       if (infoBudget) {
+        note('catalogue_wait');
         catalogueRead = await untilAborted(
           sharedHyperliquidCatalogue.prepare({ ...request, intent }, signal, started + deadlineMs),
           signal,
@@ -882,6 +893,7 @@ const httpTransport = (
           !(routeEndpoint.username || routeEndpoint.password || routeEndpoint.search || routeEndpoint.hash)
         ) {
           try {
+            note('catalogue_wait');
             catalogueRead = await untilAborted(
               sharedBinanceCatalogue.prepare(
                 { ...request, intent },
@@ -916,6 +928,7 @@ const httpTransport = (
       if (cached) {
         prepared = { kind: 'cached', response: cached };
       } else if (tunnelAdapter) {
+        note('tunnel');
         const candidate: unknown = Reflect.get(tunnelAdapter, intent === undefined ? 'prepareLegacy' : 'prepare');
         const prepareTunnel = isTunnelPreparation(candidate) ? candidate : undefined;
         prepared = {
@@ -929,6 +942,7 @@ const httpTransport = (
         };
         if (!prepareTunnel && intent !== undefined) throw new HttpPreparationError('unsupported');
       } else {
+        note('transport_prepare');
         const prepareDirect = transport.prepareHttp;
         if (intent !== undefined && !prepareDirect) throw new HttpPreparationError('unsupported');
         prepared = {
@@ -962,10 +976,12 @@ const httpTransport = (
         const budget = infoBudget;
         const read = infoRead;
         if (!read) throw new HttpPreparationError('invalid');
+        note('budget_wait');
         const generation = await untilAborted(
           read.wait(() => budget.wait(budgetKey, request.body, started + deadlineMs, signal, request.readClass)),
           signal,
         );
+        note('transport_prepare');
         pendingAdmission = { budget, read, generation };
       }
       const admission = pendingAdmission;
@@ -1082,6 +1098,7 @@ const httpTransport = (
               if (sent || admitting) throw new HttpPreparationError('invalid');
             });
             admitting = true;
+            note('budget_wait');
             try {
               const result = await untilAborted(
                 admission.read.wait(() =>
@@ -1092,6 +1109,7 @@ const httpTransport = (
                     signal,
                     () => {
                       active();
+                      note('transport_prepare');
                       admitted = true;
                       try {
                         return { value: handoff() };

@@ -1189,7 +1189,7 @@ async fn full_write_leverage_fanout_cannot_refuse_after_another_leg_completed() 
             idless_protection: false,
         },
         group: Some(group.clone()),
-        incomplete: false,
+        incomplete: None,
         audit: Some(Audit {
             who: crate::audit::Who {
                 user: "synthetic-user".into(),
@@ -1325,7 +1325,7 @@ async fn full_write_keeps_local_unit_reply_semantics_after_native_completion() {
             idless_protection: false,
         },
         group: None,
-        incomplete: false,
+        incomplete: None,
         audit: None,
     };
     // Bybit's complete trading plan returns an empty ID array for a setting.
