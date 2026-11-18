@@ -2250,3 +2250,74 @@ async fn delegated_predispatch_refusals_have_closed_bounded_audit_lines() {
         }
     }).await;
 }
+
+#[tokio::test]
+async fn expired_queue_cancellations_and_oversized_orders_keep_errors_and_emit_audit() {
+    tokio::task::LocalSet::new().run_until(async {
+        for kind in ["order.cancelQueued", "order.actionCancelQueued", "order.action", "order.submit"] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            while sent.try_recv().is_ok() {}
+            session.identity.token = Some(("synthetic-expired".into(), crate::accounts::now_ms()));
+            let mut data = json!({"version":1,"accountName":"synthetic-main","intentId":action_key(),"seq":1,"fingerprint":"0".repeat(64)});
+            if kind == "order.cancelQueued" { data.as_object_mut().unwrap().remove("version"); }
+            if kind == "order.action" {
+                data["ageMs"] = json!(0);
+                data["action"] = json!({"kind":"cancelAll","padding":"x".repeat(crate::order_contract::SUBMIT_MAX)});
+            }
+            if kind == "order.submit" {
+                data.as_object_mut().unwrap().remove("version");
+                data["ageMs"] = json!(0);
+                data["params"] = json!({"padding":"x".repeat(crate::order_contract::SUBMIT_MAX)});
+            }
+            let capture = crate::state::log_capture::capture();
+            session.handle(&json!({"t":kind,"d":data}).to_string()).await.unwrap();
+            let lines: Vec<_> = capture.finish().into_iter().filter(|line|line.contains("order.pre_dispatch_refused")).collect();
+            let frames: Vec<Value> = std::iter::from_fn(||sent.try_recv().ok()).map(|line|serde_json::from_str(&line).unwrap()).collect();
+            assert!(frames.iter().any(|frame|frame["t"]=="msg" && frame["d"]["op"]=="error" && frame["d"]["data"][0]==crate::auth::TOKEN_EXPIRED), "{kind}: {frames:?}");
+            assert!(frames.iter().all(|frame|!frame["t"].as_str().unwrap_or("").starts_with("order.")), "expiry fallback must not fabricate a business receipt");
+            assert!(tape.writes.lock().unwrap().is_empty());
+            assert!(account.running.io_allowed());
+            assert!(registry.holds(&account, session.socket));
+            assert_eq!(lines.len(), 1, "{kind}: expiry fallback needs one audit line");
+            let outer: Value = serde_json::from_str(&lines[0]).unwrap();
+            let fields: Value = serde_json::from_str(outer["msg"].as_str().unwrap()).unwrap();
+            assert_eq!(fields["reason_class"], "auth_expired");
+            assert_eq!(fields["op"], kind);
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn legacy_order_command_guards_without_typed_receipts_have_audit() {
+    tokio::task::LocalSet::new().run_until(async {
+        for (case, reason) in [("lease", "lease_fenced"), ("capacity", "capacity"), ("command_id", "command_ids_exhausted")] {
+            let registry = Arc::new(Registry::new(crate::threads::EngineThreads::start(1).unwrap(), Duration::from_millis(1), Duration::from_secs(60)).with_router_lease(crate::router_lease::Config { box_id: Some("test-box".into()), ..Default::default() }));
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let _held = if case == "capacity" {
+                Some(account.reads.clone().acquire_many_owned(account.reads.available_permits() as u32).await.unwrap())
+            } else { None };
+            if case == "lease" { registry.router_leases.enforce(true); assert!(!account.running.io_allowed()); }
+            if case == "command_id" { session.joined.get_mut("synthetic-main").unwrap().next_command = u32::MAX; }
+            let capture = crate::state::log_capture::capture();
+            session.send_command("synthetic-main", &json!("legacy-amend"), "updateOrder", &None,
+                json!({"op":"amendOrder","id":"resting-order","price":51000}), methods::Reply::OrderIds, case == "capacity", None);
+            let lines: Vec<_> = capture.finish().into_iter().filter(|line|line.contains("order.pre_dispatch_refused")).collect();
+            let outcome = reply(&mut sent, "legacy-amend").await;
+            assert_eq!(outcome["success"], false);
+            if case == "lease" { assert_eq!(outcome["result"]["outcome"], "notSent"); }
+            else { assert!(outcome["result"].get("outcome").is_none(), "do not invent a proof for the existing generic reply"); }
+            assert!(tape.writes.lock().unwrap().is_empty());
+            assert_eq!(lines.len(), 1, "{case}: legacy pre-dispatch refusal needs an audit line");
+            let outer: Value = serde_json::from_str(&lines[0]).unwrap();
+            let fields: Value = serde_json::from_str(outer["msg"].as_str().unwrap()).unwrap();
+            assert_eq!(fields, json!({"event":"order.pre_dispatch_refused","reason_class":reason,"venue":"bybit","op":"updateOrder"}));
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
