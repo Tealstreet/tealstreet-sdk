@@ -142,3 +142,10 @@ credential, changing resident ownership, or authorizing any write. The numeric
 code is retained without interpreting its cause; raw reply text is not copied.
 Missing/null success, other codes, subscription responses, stale request IDs and
 transport/handshake timeouts retain their existing uncertainty and retry behavior.
+
+## Execution-history fees
+
+Historical fills preserve the signed `execFee`: positive is a cost and negative
+is a maker rebate. The transaction-log income row uses the opposite cash-flow
+sign. Missing, empty or invalid execution fees stay absent; an explicitly
+reported zero remains zero. Timestamps, pagination and order identity are unchanged.
