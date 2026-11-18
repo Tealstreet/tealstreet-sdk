@@ -125,6 +125,9 @@ impl From<&str> for Kept {
 /// Keeps a stop notice for a client that is not there to see it.
 pub type StopNotice = Box<dyn Fn(Kept) + Send>;
 
+#[cfg(all(test, feature = "delegated-order-frames"))]
+type NukeReadPause = (oneshot::Sender<()>, oneshot::Receiver<()>);
+
 /// The chases and TWAPs running on one account, readable off its engine thread.
 pub struct Running {
     chases: AtomicUsize,
@@ -136,6 +139,8 @@ pub struct Running {
     lease: OnceLock<crate::router_lease::Permit>,
     lease_parked: AtomicBool,
     restores: OnceLock<crate::interruption::RestoreGuard>,
+    #[cfg(all(test, feature = "delegated-order-frames"))]
+    nuke_read_pause: Mutex<Option<NukeReadPause>>,
 }
 
 impl Running {
@@ -149,7 +154,25 @@ impl Running {
             lease: OnceLock::new(),
             lease_parked: AtomicBool::new(false),
             restores: OnceLock::new(),
+            #[cfg(all(test, feature = "delegated-order-frames"))]
+            nuke_read_pause: Mutex::default(),
         }
+    }
+
+    #[cfg(all(test, feature = "delegated-order-frames"))]
+    pub(crate) fn pause_next_nuke_after_read(
+        &self,
+    ) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (reached, observed) = oneshot::channel();
+        let (resume, paused) = oneshot::channel();
+        assert!(
+            self.nuke_read_pause
+                .lock()
+                .unwrap()
+                .replace((reached, paused))
+                .is_none()
+        );
+        (observed, resume)
     }
 
     pub(crate) fn attach_restores(&self, guard: crate::interruption::RestoreGuard) {
@@ -1224,6 +1247,14 @@ pub(crate) async fn run_with_identity(
                         port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
                         loaded
                     });
+                    #[cfg(all(test, feature = "delegated-order-frames"))]
+                    {
+                        let pause = running.nuke_read_pause.lock().unwrap().take();
+                        if let Some((reached, resume)) = pause {
+                            let _ = reached.send(());
+                            let _ = resume.await;
+                        }
+                    }
                     let admission = running.user.get().map(|user| user.admit_cleanup());
                     let nuke_cx = match action.as_ref().map(|receipt| receipt.guard()) {
                         Some(guard) => AlgoCx::new(

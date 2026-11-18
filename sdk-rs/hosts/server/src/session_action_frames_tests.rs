@@ -2459,3 +2459,83 @@ async fn queued_actor_io_refusals_keep_existing_receipts_and_emit_bounded_audit(
         }
     }).await;
 }
+
+#[tokio::test]
+async fn nuke_post_store_lease_fence_audits_io_without_changing_receipt() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = Arc::new(
+                Registry::new(
+                    crate::threads::EngineThreads::start(1).unwrap(),
+                    Duration::from_millis(1),
+                    Duration::from_secs(60),
+                )
+                .with_router_lease(crate::router_lease::Config {
+                    enforce: true,
+                    box_id: Some("test-box".into()),
+                    ..Default::default()
+                }),
+            );
+            let grant = |owner_epoch| {
+                let now = crate::accounts::now_ms();
+                registry
+                    .router_leases
+                    .accept(&crate::router_lease::Heartbeat {
+                        r#box: "test-box".into(),
+                        issued_at: now,
+                        users: vec![crate::router_lease::Assertion {
+                            user_id: "A".into(),
+                            owner_epoch,
+                            sequence: 1,
+                            not_after: now + 45_000,
+                        }],
+                    })
+                    .unwrap();
+            };
+            grant(1);
+            let tape = Tape::default();
+            let (account, inbox) =
+                delegated_account_with_algo_inbox(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let (after_read, resume) = account.running.pause_next_nuke_after_read();
+            let account =
+                testing::run_algos(account, SignerLink::new(0, Arc::new(|_| false)), inbox);
+            let capture = crate::state::log_capture::capture();
+            action(&mut session, json!({"kind":"nuke"}), 1, false).await;
+            assert_eq!(
+                action_frame(&mut sent, "order.actionAck").await["d"]["received"],
+                true
+            );
+            tokio::time::timeout(Duration::from_secs(3), after_read)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(account.running.io_allowed());
+            assert!(session.account_out("synthetic-main").action_active());
+            assert!(!session.token_expired());
+            grant(2);
+            assert!(!account.running.io_allowed());
+            assert!(
+                session.account_out("synthetic-main").action_active(),
+                "lease fencing does not retire registration"
+            );
+            resume.send(()).unwrap();
+            let outcome = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(outcome["d"]["outcome"], "refused");
+            assert_eq!(outcome["d"]["error"]["outcome"], "notSent");
+            assert_eq!(
+                outcome["d"]["error"]["message"],
+                "Action registration retired before dispatch"
+            );
+            assert!(tape.writes.lock().unwrap().is_empty());
+            let audits = actor_refusal_audits(capture.finish(), "nuke");
+            assert_eq!(audits.len(), 1);
+            assert_eq!(
+                audits[0]["reason_class"], "io_fenced",
+                "post-store lease refusal must not claim registration retirement"
+            );
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
+}
