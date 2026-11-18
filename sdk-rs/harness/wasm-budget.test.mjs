@@ -4,6 +4,20 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #2301 CI44266617073/jobs134673305255+134673305783, source b1ac2260570b.
+// Optimized web/Node 2,012,442 B, SHA256 6dfd360519771817ea5e071168dca2a462a67654ec08592d134783345f9b524c.
+test('#2301 managed Bitunix sockets retain measured reserve and the historical floor', () => {
+  const measured = 2_012_442;
+  const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  const cap = WASM_VENUE_OVERRIDES.bitunix;
+  assert.equal(requiredCap, 2_023_424);
+  assert.ok(cap >= Math.max(requiredCap, 1_967_104));
+  assert.ok(cap - measured >= 10 * 1024);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', 'bitunix'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bitunix'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bitunix'), /exceeds/);
+});
+
 // #3643 CI44132069302/job134212792364, composition9fd6c31b5299 (PR36a0f89ed4f2 + mastercd4052047a9f).
 // Optimized web/Node 2,292,953 B, SHA256 ef43266ef637108ab003a62b16674079df413c8db0a6fe1c10edaa277281ef53.
 // Coordinator approved measured +10 KiB rounded up on 2026-11-18; all earlier floors remain.

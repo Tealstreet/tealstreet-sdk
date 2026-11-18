@@ -98,3 +98,9 @@ Keep the current private ping codec, ten-second login-answer bound with Observe,
 first-pong idle gate, live balance pacing and all read/reconciliation controls.
 Require fresh optimized family/combined web/Node evidence with the existing
 floors and 10 KiB reserve. This source waits for a release batch.
+
+Bitunix #2301 source `b1ac2260570b` measures optimized web/Node 2,012,442 B
+in CI44266617073 family134673305255 and replay134673305783. The 2,023,424-byte
+family cap preserves the earlier 1,967,104-byte floor and 10,982-byte reserve.
+The failed old cap prevented strict replay from starting; fresh correctness and
+combined-consumer receipts are still required after this budget-only change.

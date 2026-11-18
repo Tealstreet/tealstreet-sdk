@@ -400,7 +400,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Retain historical floors; 10,904 B reserve; shares bitunix family.
   // #3317 merge e25dc312bd2c, run 43545517625, artifact 14093428727: web/Node/replay 1,954,918 B.
   // Measured + 10 KiB, rounded up to KiB; retain parent floors and shared-family aliases.
-  bitunix: 1_967_104,
+  // #2301 managed-socket refresh, source b1ac2260570b: CI44266617073
+  // family134673305255/replay134673305783 optimized web/Node 2,012,442 B.
+  // SHA256 6dfd360519771817ea5e071168dca2a462a67654ec08592d134783345f9b524c.
+  // Measured +10 KiB rounded up; retain all prior floors and strict cap boundaries.
+  bitunix: 2_023_424,
   // Nullable history output: local optimized web/node 2,070,435 B.
   // SAFE_CEX_WASM_OPT=required build.sh --venue blofin; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
   // Current measured size + 10 KiB, rounded up to KiB (rule 17).
