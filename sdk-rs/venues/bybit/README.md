@@ -117,6 +117,22 @@ Account UX, consuming that event in the web Requests Log, and the beta user
 document belong to the NX web workstream. Production promotion requires separate
 approval after reachability and that smoke pass are accepted.
 
+## Closed-history lifecycle evidence
+
+Transaction-log rows with an execution reference retain optional native decimal
+strings `positionAfter` and `executionQuantity` beside `tradeId`. They preserve
+signed post-event position size and exact execution quantity. Missing, empty or
+invalid evidence is omitted, never converted to flat. A source event whose
+explicit cash flow and fee are zero retains a balance-neutral `other` record so
+its flat-position evidence is not lost. Existing financial components, signs
+and identities are unchanged.
+
+The SDK joins these facts to executions, validates their quantities using decimal
+arithmetic, and independently establishes the initial position size. This keeps
+an add and partial close of a pre-window position from becoming a round trip.
+Income history retains its existing read-only cursor, owner and pacing path.
+The source contract is [Bybit's transaction log](https://bybit-exchange.github.io/docs/v5/account/transaction-log).
+
 ## Order-history terminal retention
 
 The default `/v5/order/history` walk keeps the caller's full range and existing

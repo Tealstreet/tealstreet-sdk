@@ -71,10 +71,11 @@ import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport 
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { engineEventClassified, isErrorReported, markErrorReported } from '../../commandOutcome';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
-import { copyHistoryCompleteness } from '../../historyCompleteness';
+import { copyHistoryCompleteness, historyCompletenessOf } from '../../historyCompleteness';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
 import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
-import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
+import { bybitExecutionEvidence, reconstructBybitLifecycles } from '../../journal/bybit.lifecycles';
+import { aggregateBybitClosedLifecycles, aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { SECONDARY_READ_KEYS_ENABLED } from '../../secondaryReadKeys';
@@ -3996,24 +3997,49 @@ export class RustEngineExchange extends BaseExchange {
     const to = opts.to ?? this.utcNow();
     const from = opts.from ?? to - 7 * 24 * 60 * 60 * 1000;
     if (this.isPublicDataOnly) return [];
-    const rows = await this.fetchClosedPositionRows({ from, to }, false);
+    const joinedLifecycles = this.name === 'bybit';
+    const lookbackFrom = joinedLifecycles ? from - 14 * 24 * 60 * 60 * 1000 : from;
+    const rows = await this.fetchClosedPositionRows({ from: lookbackFrom, to }, false);
     // Closed-PnL rows carry no hedge leg; the order axis does (see bybit.exchange.ts).
     const legs = new Map<string, PositionSide | 'both'>();
     let orders: HistoricalOrder[];
     try {
-      orders = await this.fetchHistoricalOrders({ from, to });
+      orders = await this.fetchHistoricalOrders({ from: lookbackFrom, to });
       for (const order of orders) {
         if (order?.id && order.positionSide) legs.set(String(order.id), order.positionSide);
       }
     } catch {
       throw new Error('bybit: could not read the order axis to resolve hedge legs');
     }
-    const records = aggregateBybitClosedPnl(rows, {
+    if (!joinedLifecycles) {
+      const records = aggregateBybitClosedPnl(rows, {
+        account: opts.account,
+        resolveSettleCurrency: (symbol: string) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
+        resolveLeg: legs.size ? (orderId: string) => legs.get(orderId) : undefined,
+      });
+      return copyHistoryCompleteness(orders, copyHistoryCompleteness(rows, records));
+    }
+    const fills = await this.fetchHistoricalFills({ from: lookbackFrom, to, limit: 1000 });
+    const income = await this.fetchIncomeHistoryRange(lookbackFrom, to);
+    const positionAfter = bybitExecutionEvidence(income);
+    const records = aggregateBybitClosedLifecycles(rows, {
       account: opts.account,
+      from,
+      to,
       resolveSettleCurrency: (symbol: string) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
-      resolveLeg: legs.size ? (orderId: string) => legs.get(orderId) : undefined,
+      resolveLeg: (orderId: string) => legs.get(orderId),
+      lifecycles:
+        historyCompletenessOf(fills) ||
+        historyCompletenessOf(orders) ||
+        historyCompletenessOf(rows) ||
+        historyCompletenessOf(income)
+          ? []
+          : reconstructBybitLifecycles(fills, (orderId) => legs.get(orderId), positionAfter),
     });
-    return copyHistoryCompleteness(orders, copyHistoryCompleteness(rows, records));
+    return copyHistoryCompleteness(
+      income,
+      copyHistoryCompleteness(fills, copyHistoryCompleteness(orders, copyHistoryCompleteness(rows, records))),
+    );
   };
 
   private okxJournal = async (opts: { account: string; from?: number; to?: number }) => {

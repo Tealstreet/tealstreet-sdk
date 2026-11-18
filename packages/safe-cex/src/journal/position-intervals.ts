@@ -121,6 +121,10 @@ export type PositionIntervalOptions = {
   readonly openingSize?: Record<string, number>;
   /** Leg for a fill that does not report one, e.g. from an order-axis join on `orderId`. */
   readonly resolveLeg?: (execution: Execution) => PositionSide | 'both' | undefined;
+  /** Retain exact source membership for a caller joining native closing orders. */
+  readonly onInterval?: (interval: PositionInterval, executions: readonly Execution[]) => void;
+  /** The caller has independently established order, including native timestamp ties. */
+  readonly sourceOrdered?: boolean;
 };
 
 type RunningPosition = {
@@ -257,15 +261,23 @@ export const reconstructPositionIntervals = (
   executions: Execution[],
   options: PositionIntervalOptions = {},
 ): PositionInterval[] => {
-  const ordered = [...executions].sort(compareExecutionOrder);
+  const ordered = options.sourceOrdered ? executions : [...executions].sort(compareExecutionOrder);
   const running = new Map<string, RunningPosition>();
   const intervals: PositionInterval[] = [];
+  const sources = options.onInterval ? new WeakMap<RunningPosition, Execution[]>() : undefined;
+  const emit = (position: RunningPosition, symbol: string, leg: PositionSide | 'both', at?: number, flip = false) => {
+    const interval = { ...finish(position, symbol, leg, at), closedByFlip: flip };
+    intervals.push(interval);
+    options.onInterval?.(interval, sources?.get(position) ?? []);
+  };
 
   // Seed positions the window opened with. Their true open time is unknowable from these
   // fills, so they are marked incomplete and their `openedAt` is the first fill we see.
   for (const [key, signed] of Object.entries(options.openingSize ?? {})) {
     if (Math.abs(signed) <= FLAT_EPSILON) continue;
-    running.set(key, freshPosition({ signed, maxSize: Math.abs(signed), complete: false }));
+    const seeded = freshPosition({ signed, maxSize: Math.abs(signed), complete: false });
+    sources?.set(seeded, []);
+    running.set(key, seeded);
   }
 
   for (const execution of ordered) {
@@ -289,11 +301,13 @@ export const reconstructPositionIntervals = (
         entryNotional: execution.qty * price,
       });
       accrueFill(opened, execution);
+      sources?.set(opened, [execution]);
       running.set(key, opened);
       continue;
     }
 
     if (current.openedAt === 0) current.openedAt = at;
+    sources?.get(current)?.push(execution);
 
     const next = current.signed + delta;
     const sameDirection = Math.sign(delta) === Math.sign(current.signed);
@@ -329,7 +343,7 @@ export const reconstructPositionIntervals = (
 
     if (!crossed) {
       accrueFill(current, execution, true);
-      intervals.push({ ...finish(current, execution.symbol, leg, at), closedByFlip: false });
+      emit(current, execution.symbol, leg, at);
       running.delete(key);
       continue;
     }
@@ -346,7 +360,7 @@ export const reconstructPositionIntervals = (
       },
       true,
     );
-    intervals.push({ ...finish(current, execution.symbol, leg, at), closedByFlip: true });
+    emit(current, execution.symbol, leg, at, true);
 
     const openedSize = Math.abs(next);
     const opened = freshPosition({
@@ -358,6 +372,7 @@ export const reconstructPositionIntervals = (
       fees: execution.commission === undefined ? 0 : execution.commission * (1 - closedShare),
       feeCurrencies: new Set(execution.commissionAsset ? [execution.commissionAsset] : []),
     });
+    sources?.set(opened, [execution]);
     running.set(key, opened);
   }
 
@@ -367,7 +382,7 @@ export const reconstructPositionIntervals = (
   for (const [key, current] of running.entries()) {
     if (Math.abs(current.signed) <= FLAT_EPSILON) continue;
     const [symbol, leg] = [key.slice(0, key.lastIndexOf('|')), key.slice(key.lastIndexOf('|') + 1)];
-    intervals.push(finish(current, symbol, leg as PositionSide | 'both', undefined));
+    emit(current, symbol, leg as PositionSide | 'both');
   }
 
   return intervals.sort((a, b) => (a.closedAt ?? Number.MAX_SAFE_INTEGER) - (b.closedAt ?? Number.MAX_SAFE_INTEGER));

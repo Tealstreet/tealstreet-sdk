@@ -89,6 +89,11 @@ struct Income {
     tran_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     trade_id: Option<String>,
+    /// TRADE's signed position size after this execution; an independent fold anchor.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    position_after: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    execution_quantity: Option<String>,
     category: &'static str,
     /// Native row identity: equal for page repeats, distinct for hedge legs.
     #[serde(skip)]
@@ -384,6 +389,14 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
     let symbol = present(&row.symbol).unwrap_or_default();
     let asset = present(&row.currency).unwrap_or("USDT");
     let trade_id = present(&row.trade_id);
+    let execution_evidence = match (trade_id, present(&row.size), present(&row.qty)) {
+        (Some(_), Some(size), Some(qty))
+            if float(size).is_finite() && float(qty).is_finite() && float(qty) > 0.0 =>
+        {
+            Some((size.to_owned(), qty.to_owned()))
+        }
+        _ => None,
+    };
     // Exactly TS's id, so pre/post-cutover rows key identically; same-instant
     // hedge legs share it there too; `source` tells them from page repeats.
     let base: Vec<&str> = [
@@ -411,6 +424,8 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
             timestamp,
             tran_id: format!("{base}:{suffix}"),
             trade_id: trade_id.map(str::to_owned),
+            position_after: execution_evidence.as_ref().map(|(size, _)| size.clone()),
+            execution_quantity: execution_evidence.as_ref().map(|(_, qty)| qty.clone()),
             category,
             source: source.clone(),
         });
@@ -428,6 +443,15 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
     }
     if fee != 0.0 {
         push(-fee, if fee > 0.0 { "commission" } else { "rebate" }, "fee");
+    }
+    // A real zero-money trade can still prove that a position became flat.
+    // Retain that source fact without inventing an absent financial amount.
+    if execution_evidence.is_some()
+        && float_of(&row.cash_flow) == 0.0
+        && float_of(&row.fee) == 0.0
+        && (present(&row.funding).is_none() || float_of(&row.funding) == 0.0)
+    {
+        push(0.0, "other", "position");
     }
 }
 
@@ -976,6 +1000,57 @@ fn page(walk: &Walk, body: &str) -> serde_json::Result<(Rows, Option<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transaction_position_evidence_survives_zero_cash_flow() {
+        let row: TransactionRow = serde_json::from_str(r#"{"id":"native-trade","symbol":"BTCUSDT","type":"TRADE","transactionTime":"2000","tradeId":"execution","qty":"1","size":"0","cashFlow":"0","funding":"0","fee":"0"}"#).unwrap();
+        let mut rows = Vec::new();
+        incomes(&row, &mut rows);
+        assert_eq!(
+            rows.len(),
+            1,
+            "a zero-money trade still proves the position became flat"
+        );
+        let value = serde_json::to_value(&rows[0]).unwrap();
+        assert_eq!(value["positionAfter"], "0");
+        assert_eq!(value["executionQuantity"], "1");
+        assert_eq!(value["tradeId"], "execution");
+        assert_eq!(value["income"], 0.0);
+        assert_eq!(value["category"], "other");
+    }
+
+    #[test]
+    fn position_evidence_preserves_sign_and_does_not_turn_missing_size_into_flat() {
+        for size in [
+            "",
+            ",\"size\":null",
+            ",\"size\":\"\"",
+            ",\"size\":\"invalid\"",
+        ] {
+            let body = format!(
+                r#"{{"symbol":"BTCUSDT","type":"TRADE","transactionTime":"2000","tradeId":"execution","qty":"1","cashFlow":"4","fee":"0.1"{size}}}"#
+            );
+            let row: TransactionRow = serde_json::from_str(&body).unwrap();
+            let mut rows = Vec::new();
+            incomes(&row, &mut rows);
+            assert_eq!(rows.len(), 2);
+            assert!(rows.iter().all(|row| {
+                serde_json::to_value(row)
+                    .unwrap()
+                    .get("positionAfter")
+                    .is_none()
+            }));
+        }
+        let row: TransactionRow = serde_json::from_str(r#"{"symbol":"BTCUSDT","type":"TRADE","transactionTime":"2000","tradeId":"execution","qty":"1","size":"-2","cashFlow":"4","fee":"0.1"}"#).unwrap();
+        let mut rows = Vec::new();
+        incomes(&row, &mut rows);
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows.iter()
+                .all(|row| row.position_after.as_deref() == Some("-2"))
+        );
+        assert!((rows.iter().map(|row| row.income).sum::<f64>() - 3.9).abs() < 1e-12);
+    }
 
     #[test]
     fn finalization_rejects_a_mismatched_row_instead_of_dropping_it() {
