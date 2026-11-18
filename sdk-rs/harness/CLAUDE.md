@@ -17,6 +17,13 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
+WOO's exact signature-error auth classification changes diagnostics only; socket
+recovery, signing, retry and write behavior retain their lifecycle controls.
+Exact source 85a85576995b, Rust SDK run 44220127210, artifact 14390881543
+measures equal optimized web/Node/replay modules at 2,683,302 bytes. The
+coordinator's Rule 5 floor is 2,694,144 bytes, retaining 10,842 bytes and every
+historical floor.
+
 HyroTrader correlated auth-refusal metadata changes a Bybit-family input.
 Keep its native admission/uncertainty controls and fresh optimized family evidence;
 server negative-join fixtures retain the protected-provider and zero-write guards.

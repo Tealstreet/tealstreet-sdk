@@ -1125,7 +1125,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3290 CI 43563699705, source 8043e2bb11e5, artifact 14101841020: web/Node/replay 2,680,145 B.
   // Verified optimized module maximum + 10 KiB rounded up; all historical floors retained.
   // #3513 CI43629571410: 2_681_664 B +10 KiB rounded up; artifact/hash certificate in wasm-budget.test.mjs.
-  woo: 2_692_096,
+  // Rule 5 / #3639: coordinator approved measured + 10 KiB rounded up; historical floors retained.
+  // Exact 85a85576995b; Rust SDK run 44220127210, artifact 14390881543; web/Node/replay 2,683,302 B.
+  // SHA256 38768e867378a4f467c599939c1f0e15177056929c57a057cabbf825d45817f8; 10,842 B reserve.
+  woo: 2_694_144,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
