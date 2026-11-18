@@ -145,7 +145,8 @@ it.each([false, true])(
       await startup;
       for (const current of [store, main.store]) {
         expect(current.loaded.balance).toBe(true);
-        expect(current.balance).toEqual({ used: 0, free: 0, total: 0, upnl: 0 });
+        // Rule 5: 7b723d8837 emits an explicit native balance.info clear.
+        expect(current.balance).toEqual({ used: 0, free: 0, total: 0, upnl: 0, info: null });
         expect(current.orders.find((order) => order.id === 'native-order')).toMatchObject({
           amount: 0.004,
           filled: 0.003,
