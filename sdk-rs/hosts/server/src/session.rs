@@ -1154,6 +1154,28 @@ impl Session {
                     );
                     return Ok(());
                 }
+                Ok(
+                    message @ (Inbound::OrderSubmit(_)
+                    | Inbound::OrderAction(_)
+                    | Inbound::OrderCancelQueued(_)
+                    | Inbound::OrderActionCancelQueued(_)),
+                ) => {
+                    let op = match message {
+                        Inbound::OrderSubmit(_) => "order.submit",
+                        Inbound::OrderAction(_) => "order.action",
+                        Inbound::OrderCancelQueued(_) => "order.cancelQueued",
+                        Inbound::OrderActionCancelQueued(_) => "order.actionCancelQueued",
+                        _ => "order.action",
+                    };
+                    self.audit_order_refusal(
+                        name.as_deref().unwrap_or(""),
+                        op,
+                        crate::auth::TOKEN_EXPIRED,
+                    );
+                    name.as_deref()
+                        .map(|name| self.account_out(name))
+                        .unwrap_or_else(|| self.out.clone())
+                }
                 _ => name
                     .as_deref()
                     .map(|name| self.account_out(name))
@@ -1287,6 +1309,7 @@ impl Session {
                     && !(msg.account_name.as_deref() == Some(PUBLIC_ACCOUNT)
                         && PUBLIC_OPS.contains(&msg.op.as_str()))
                 {
+                    self.audit_legacy_order_refusal(&msg, "Unauthenticated order rejected");
                     return Err(Close::Policy(
                         "Unauthenticated exchange-server message rejected",
                     ));
@@ -1828,6 +1851,7 @@ impl Session {
             return;
         }
         let Some(name) = msg.account_name.clone() else {
+            self.audit_legacy_order_refusal(&msg, "account_missing");
             return;
         };
         if msg.op == "delegated-key-req" {
@@ -1869,6 +1893,7 @@ impl Session {
         if let Some(pending) = self.pending_verifications.get(&name) {
             let out = pending.out.clone();
             if msg.op == "callMethod" {
+                self.audit_legacy_order_refusal(&msg, "pending_verification");
                 out.send(envelope::msg(
                     &name,
                     "callMethod:done",
@@ -1903,6 +1928,7 @@ impl Session {
         if !self.joined.contains_key(&name) {
             Log::warn(&format!("no joined account for op {}", msg.op));
             if msg.op == "callMethod" {
+                self.audit_legacy_order_refusal(&msg, "account_missing");
                 self.reply_failure(
                     &name,
                     &msg.data.get("requestId").cloned().unwrap_or(Value::Null),
@@ -2279,6 +2305,9 @@ impl Session {
             Some(Value::Array(args)) => args.clone(),
             None | Some(Value::Null) => Vec::new(),
             Some(_) => {
+                if order_frame.is_none() && crate::audit::ORDER_METHODS.contains(&method.as_str()) {
+                    self.audit_order_refusal(name, &method, "not sent: invalid parameters");
+                }
                 self.call_failure(
                     name,
                     &request_id,
@@ -2857,6 +2886,9 @@ impl Session {
         outcome: Option<&str>,
         order_frame: Option<OrderReceipt>,
     ) {
+        if order_frame.is_none() && crate::audit::ORDER_METHODS.contains(&pending.method.as_str()) {
+            self.audit_order_refusal(name, &pending.method, message);
+        }
         if pending.group.is_some() && matches!(pending.reply, methods::Reply::Action { .. }) {
             self.audit_order_refusal(name, &pending.method, message);
             // This proves only one leg was not dispatched. Another leg may be

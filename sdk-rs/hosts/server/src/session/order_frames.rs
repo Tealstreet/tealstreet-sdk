@@ -17,6 +17,16 @@ impl Session {
         self.handover_out(name)
     }
 
+    pub(super) fn audit_legacy_order_refusal(&self, msg: &AccountMsg, reason: &str) {
+        if msg.op == "callMethod"
+            && let Some(method) = msg.data["method"]
+                .as_str()
+                .filter(|method| crate::audit::ORDER_METHODS.contains(method))
+        {
+            self.audit_order_refusal(msg.account_name.as_deref().unwrap_or(""), method, reason);
+        }
+    }
+
     pub(super) fn audit_order_refusal(&self, name: &str, op: &str, message: &str) {
         crate::audit::pre_dispatch_refused(
             self.joined.get(name).map(|j| j.account.venue.as_str()),
