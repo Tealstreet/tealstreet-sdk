@@ -5,6 +5,13 @@ changing server behavior. Validate scoped Rust changes with
 `cargo test -p safe-cex-exchange-server` and
 `cargo clippy -p safe-cex-exchange-server --all-targets` from `sdk-rs/`.
 
+## Connection-local public pacing
+
+The optional `publishIntervalMs` init field and `set-publish-interval` account op
+are documented in `DESIGN.md` under Connection-local publication interval.
+Keep cadence in the socket/account pump, never in shared engine identity or
+configuration. Private financial sections and outcomes bypass the public coalescer.
+
 ## Sentry owner identity
 
 The native Sentry allowlist and captured authentication-subject contract live in
@@ -79,8 +86,10 @@ handover pair. DELEGATED and COSIGNED share hosted eligibility: a supported
 `remoteSigning` policy and a configured server origin, with the existing
 unhosted refusal preserved. There is no separate DELEGATED venue allowlist or
 `delegated.enabled` declaration. The account retains the existing LocalSigner provider,
-passes opaque refs to the engine and creates no remote signer link. Public mode
-is recorded explicitly. Unproved/trusted construction still refuses cross-mode
+passes opaque refs to the engine and creates no remote signer link. Trusted
+construction also retains original typed identity facts bound to the same provider,
+venue and serialized refs; JSON must never restore ScalarOnly credential absence.
+Public mode is recorded explicitly. Unproved/trusted construction still refuses cross-mode
 attachment. Socket joins first prove their own credentials: COSIGNED can attach
 to a DELEGATED resident without downgrading it; a proved DELEGATED join upgrades
 a supported COSIGNED resident without replacing its actor, orders or algo jobs.
@@ -312,13 +321,21 @@ remain available; this does not resume or replay an interrupted intent.
 
 DELEGATED `order.submit` messages use the existing method translation,
 native command completion and order audit, with the intent UUIDv7 as both request
-ID and client order ID. Other modes keep `callMethod` unchanged. Pending joins
+ID and, where supported, client order ID. Bybit protection omits its unsupported
+caller ID and reports null in the receipt. Other modes keep `callMethod` unchanged. Pending joins
 and elapsed ages of ten seconds or more refuse without a write. New replies
 use the existing instanceId registration helper. The NX router must durably
 record submits before forwarding and expose acknowledgements only after commit;
 the server supplies no dedupe ledger or queued-order storage. `order.cancelQueued`
 is a router operation and never becomes a venue cancellation. The interception
 contract is documented in `docs/plans/callers/delegated-order-frames.md`.
+
+Whole-action guards before any native command return their real `notSent`
+reason; guards after possible effects remain unknown. Typed completion audits add
+only closed `result_shape`; initial refusals log `stage: preflight` and the real reason.
+Expired-token submits/actions receive correlated `notSent` receipts during the
+unchanged socket grace. Queue cancellations cannot prove an earlier intent was
+unsent and keep their existing expiry handling.
 
 Receipt sequencing belongs to each registration output and is shared by its
 clones. Replacing or retiring that registration also retires its order receipts;
