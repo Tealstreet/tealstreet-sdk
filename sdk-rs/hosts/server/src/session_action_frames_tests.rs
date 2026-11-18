@@ -212,6 +212,7 @@ async fn nuke_checks_the_captured_owner_after_the_private_load_deferral() {
                 },
                 out.clone(),
             );
+            alice.order_frames_enabled = crate::order_contract::enabled();
             crate::accounts::tests::hold_live(&a, alice.socket, out.outbox());
             // Preserve this fixture's existing DELEGATED account admission.
             alice
@@ -222,8 +223,13 @@ async fn nuke_checks_the_captured_owner_after_the_private_load_deferral() {
                     0,
                 )
                 .await;
+            let capture = crate::state::log_capture::capture();
             action(&mut alice, json!({"kind":"nuke"}), 1, false).await;
-            action_frame(&mut a_sent, "order.actionAck").await;
+            assert_eq!(
+                action_frame(&mut a_sent, "order.actionAck").await["d"]["received"],
+                true,
+                "owner-fence control must first enter the admitted deferred nuke path"
+            );
             tokio::time::timeout(Duration::from_secs(2), async {
                 while tape.held_positions.lock().unwrap().is_empty() {
                     tokio::task::yield_now().await;
@@ -263,6 +269,13 @@ async fn nuke_checks_the_captured_owner_after_the_private_load_deferral() {
                 "applied"
             );
             assert_eq!(*b_tape.writes.lock().unwrap(), vec!["cancel"]);
+            let audits = actor_refusal_audits(capture.finish(), "nuke");
+            assert_eq!(
+                audits.len(),
+                1,
+                "retired nuke must journal before native handoff"
+            );
+            assert_eq!(audits[0]["reason_class"], "registration_retired");
             bob.close();
             registry.dispose(&a, Disposal::PageDisposed);
             registry.dispose(&b, Disposal::PageDisposed);
@@ -281,6 +294,7 @@ async fn a_partial_native_nuke_is_unknown_after_its_cancel_leg_completed() {
             };
             let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
             let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let capture = crate::state::log_capture::capture();
             action(&mut session, json!({"kind":"nuke"}), 1, false).await;
             let reply = action_frame(&mut sent, "order.actionOutcome").await;
             assert_eq!(reply["d"]["outcome"], "unknown");
@@ -289,6 +303,10 @@ async fn a_partial_native_nuke_is_unknown_after_its_cancel_leg_completed() {
             let writes = tape.writes.lock().unwrap().clone();
             assert!(writes.iter().any(|op| op == "cancel"));
             assert!(writes.iter().any(|op| op == "create"));
+            assert!(
+                actor_refusal_audits(capture.finish(), "nuke").is_empty(),
+                "later-leg failure is not whole-action pre-dispatch"
+            );
             session.close();
             registry.dispose(&account, Disposal::PageDisposed);
         })
@@ -514,6 +532,7 @@ async fn action_fix_deferred_nuke_expires_without_any_physical_write() {
             let id = format!("{}-{}-7101-8101-010101010101",&hex[..8],&hex[8..]);
             let payload = json!({"kind":"nuke"});
             let fp = crate::order_contract::action_fingerprint("synthetic-main",&id,&payload,1).unwrap();
+            let capture = crate::state::log_capture::capture();
             session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","intentId":id,"seq":1,"ageMs":if clock=="age" {9500}else{0},"fingerprint":fp,"action":payload}}).to_string()).await.unwrap();
             assert_eq!(action_frame(&mut sent,"order.actionAck").await["d"]["received"],true);
             assert!(tape.writes.lock().unwrap().is_empty());
@@ -521,6 +540,9 @@ async fn action_fix_deferred_nuke_expires_without_any_physical_write() {
             tape.release_positions();
             let result = action_frame(&mut sent,"order.actionOutcome").await;
             let writes = tape.writes.lock().unwrap().clone();
+            let audits = actor_refusal_audits(capture.finish(), "nuke");
+            assert_eq!(audits.len(), usize::from(clock != "fresh"), "{clock}: actor refusal audit missing");
+            if clock != "fresh" { assert_eq!(audits[0]["reason_class"], "action_expired"); }
             observed.push((clock,result,writes));
             session.close(); registry.dispose(&account,Disposal::PageDisposed);
         }
@@ -552,6 +574,7 @@ async fn action_fix_nuke_expiry_is_checked_between_each_native_leg() {
             let id = format!("{}-{}-7101-8101-010101010101",&hex[..8],&hex[8..]);
             let payload = json!({"kind":"nuke"});
             let fp = crate::order_contract::action_fingerprint("synthetic-main",&id,&payload,1).unwrap();
+            let capture = crate::state::log_capture::capture();
             session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main","intentId":id,"seq":1,"ageMs":if clock=="age" {9500}else{0},"fingerprint":fp,"action":payload}}).to_string()).await.unwrap();
             assert_eq!(action_frame(&mut sent,"order.actionAck").await["d"]["received"],true);
             tokio::time::timeout(Duration::from_secs(3),async {
@@ -573,6 +596,7 @@ async fn action_fix_nuke_expiry_is_checked_between_each_native_leg() {
                 assert!(result["d"]["error"]["message"].as_str().unwrap().contains("expired"));
                 assert!(result["d"]["result"].is_null());
             }
+            assert!(actor_refusal_audits(capture.finish(), "nuke").is_empty(), "{clock}: a prior native leg already ran");
             observed.push((clock,close,writes));
             session.close(); registry.dispose(&account,Disposal::PageDisposed);
         }
@@ -641,7 +665,7 @@ async fn action_fix_cancel_all_expires_during_its_symbol_store_read() {
 async fn action_fix_each_deferred_cancel_leg_keeps_deadline_and_owner() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            for mode in ["fresh", "uuid", "age", "retired"] {
+            for mode in ["fresh", "uuid", "age", "retired", "token"] {
                 let registry = crate::accounts::tests::registry();
                 let tape = Tape::default();
                 tape.defer_positions
@@ -698,6 +722,11 @@ async fn action_fix_each_deferred_cancel_leg_keeps_deadline_and_owner() {
                     kind: "cancelAll",
                     deadline,
                 });
+                if mode == "token" {
+                    session.identity.token =
+                        Some(("synthetic-expiring".into(), crate::accounts::now_ms() + 500));
+                }
+                let capture = crate::state::log_capture::capture();
                 let group = Some(Arc::new(Mutex::new(Group {
                     remaining: 2,
                     failures: Vec::new(),
@@ -783,6 +812,21 @@ async fn action_fix_each_deferred_cancel_leg_keeps_deadline_and_owner() {
                         assert!(result["d"]["result"].is_null());
                     }
                 }
+                let audits = grouped_refusal_audits(capture.finish(), "cancelAllOrders");
+                assert_eq!(
+                    audits.len(),
+                    if mode == "fresh" { 0 } else { 2 },
+                    "{mode}: per-leg refusal coverage"
+                );
+                let expected = match mode {
+                    "token" => "auth_expired",
+                    "retired" => "registration_retired",
+                    _ => "action_expired",
+                };
+                assert!(
+                    audits.iter().all(|row| row["reason_class"] == expected),
+                    "{mode}: {audits:?}"
+                );
                 if let Some(session) = session {
                     session.close();
                 }
@@ -872,6 +916,7 @@ async fn action_fix_cancel_all_partial_handoff_settles_failed_legs_without_refus
             assert_eq!(*tape.writes.lock().unwrap(), vec!["cancel"]);
             // The first leg has crossed physical IO. Fence the account before the
             // second leg: its definite local failure proves nothing about the first.
+            let capture = crate::state::log_capture::capture();
             grant(2, 50);
             tokio::time::sleep(Duration::from_millis(60)).await;
             assert!(!account.running.io_allowed());
@@ -911,6 +956,13 @@ async fn action_fix_cancel_all_partial_handoff_settles_failed_legs_without_refus
             assert_eq!(outcome["d"]["error"]["outcome"], "unknown");
             assert_eq!(group.as_ref().unwrap().lock().unwrap().remaining, 0);
             assert_eq!(*tape.writes.lock().unwrap(), vec!["cancel"]);
+            let audits = grouped_refusal_audits(capture.finish(), "cancelAllOrders");
+            assert_eq!(
+                audits.len(),
+                1,
+                "the local second-leg refusal remains observable"
+            );
+            assert_eq!(audits[0]["reason_class"], "lease_fenced");
             session.close();
             registry.dispose(&account, Disposal::PageDisposed);
         })
@@ -1138,8 +1190,20 @@ async fn full_write_leverage_fanout_cannot_refuse_after_another_leg_completed() 
         },
         group: Some(group.clone()),
         incomplete: None,
-        audit: None,
+        audit: Some(Audit {
+            who: crate::audit::Who {
+                user: "synthetic-user".into(),
+                account: "synthetic-main".into(),
+                venue: "bybit".into(),
+            },
+            origin: "synthetic-origin".into(),
+            fields: crate::audit::command(
+                &json!({"op":"setLeverage","symbol":"BTCUSDT","leverage":2}),
+            )
+            .unwrap(),
+        }),
     };
+    let capture = crate::state::log_capture::capture();
     settle(&out, "main", pending(), Ok(Value::Null));
     assert!(sent.try_recv().is_err());
     settle(
@@ -1151,6 +1215,9 @@ async fn full_write_leverage_fanout_cannot_refuse_after_another_leg_completed() 
     let result: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
     assert_eq!(result["d"]["outcome"], "unknown");
     assert_eq!(result["d"]["error"]["outcome"], "unknown");
+    let audits = grouped_refusal_audits(capture.finish(), "setAllLeverage");
+    assert_eq!(audits.len(), 1);
+    assert_eq!(audits[0]["reason_class"], "pre_dispatch_refused");
 }
 
 #[tokio::test]
@@ -1169,6 +1236,7 @@ async fn full_write_algo_queued_for_alice_is_dropped_when_bob_replaces_the_login
             // This fixture's actors share the current LocalSet. The typed algo
             // admission path contains no pending await: it enqueues the Op and
             // returns before that actor can execute. Retire A before yielding.
+            let capture = crate::state::log_capture::capture();
             action(
                 &mut alice,
                 json!({"kind":"algo","op":"exec","data":{"command":"buy $100","symbol":"BTCUSDT"}}),
@@ -1205,6 +1273,12 @@ async fn full_write_algo_queued_for_alice_is_dropped_when_bob_replaces_the_login
                 let frame: Value = serde_json::from_str(&text).unwrap();
                 assert_ne!(frame["t"], "order.actionOutcome");
             }
+            let audits = actor_refusal_audits(capture.finish(), "algo");
+            assert_eq!(audits.len(), 1, "retired actor must journal its refusal");
+            assert!(matches!(
+                audits[0]["reason_class"].as_str(),
+                Some("owner_changed" | "registration_retired")
+            ));
             bob.close();
             registry.dispose(&a, Disposal::PageDisposed);
             registry.dispose(&b, Disposal::PageDisposed);
@@ -2006,6 +2080,7 @@ async fn typed_algo_admission_keeps_the_initiating_socket_token_expiry() {
                         .find(|case| case["action"]["op"] == op)
                         .unwrap()["action"]
                         .clone();
+                    let capture = crate::state::log_capture::capture();
                     action(&mut session, payload, 1, false).await;
                     assert_eq!(
                         action_frame(&mut sent, "order.actionAck").await["d"]["received"],
@@ -2030,6 +2105,15 @@ async fn typed_algo_admission_keeps_the_initiating_socket_token_expiry() {
                     }
                     let writes = tape.writes.lock().unwrap().clone();
                     let jobs = account.running.jobs().0;
+                    let audits = actor_refusal_audits(capture.finish(), "algo");
+                    assert_eq!(
+                        audits.len(),
+                        usize::from(expired),
+                        "{op}: queued expiry audit missing"
+                    );
+                    if expired {
+                        assert_eq!(audits[0]["reason_class"], "auth_expired");
+                    }
                     session.close();
                     registry.dispose(&account, Disposal::PageDisposed);
                     if expired {
@@ -2185,4 +2269,351 @@ async fn typed_place_rejects_shadowed_bbo_without_ack_job_or_write() {
 #[tokio::test]
 async fn typed_place_rejects_duplicate_bbo_level_without_ack_job_or_write() {
     duplicate_order_payload_is_unsupported("level").await;
+}
+
+#[tokio::test]
+async fn delegated_bybit_reduce_only_sell_limit_price_amend_reaches_native_once() {
+    tokio::task::LocalSet::new().run_until(async {
+        let registry = crate::accounts::tests::registry();
+        let tape = Tape { closing_limit: true, ..Default::default() };
+        let account = delegated_account(&registry, "A", "bybit", tape.clone());
+        let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+        let payload = json!({"kind":"amend","order":{"id":"resting-order","symbol":"BTCUSDT"},"update":{"price":51000}});
+        action(&mut session, payload, 1, false).await;
+        let result = action_frame(&mut sent, "order.actionOutcome").await;
+        assert_eq!(result["d"]["outcome"], "applied", "{result}");
+        assert_eq!(*tape.writes.lock().unwrap(), vec!["amend"]);
+        let requests = native_request_rows(&tape, "amend");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["orderId"], "resting-order");
+        assert_eq!(requests[0]["price"], "51000");
+        assert!(requests[0].get("qty").is_none());
+        assert!(requests[0].get("orderLinkId").is_none());
+        session.close(); registry.dispose(&account, Disposal::PageDisposed);
+    }).await;
+}
+
+#[tokio::test]
+async fn delegated_predispatch_refusals_have_closed_bounded_audit_lines() {
+    tokio::task::LocalSet::new().run_until(async {
+        for case in ["version", "fingerprint", "schema", "binding", "admission", "expiry"] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape { closing_limit: true, ..Default::default() };
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let mut payload = json!({"kind":"amend","order":{"id":"resting-order","symbol":"BTCUSDT"},"update":{"price":51000}});
+            if case == "schema" { payload["order"]["type"] = "limit".into(); }
+            if case == "admission" { session.order_frames_enabled = false; }
+            let id = if case == "expiry" { { let hex = format!("{:012x}", crate::accounts::now_ms() - 10_001); format!("{}-{}-7101-8101-010101010101", &hex[..8], &hex[8..]) } } else { action_key() };
+            let fp = crate::order_contract::action_wire_fingerprint("synthetic-main", &id, &payload, 1).unwrap();
+            let capture = crate::state::log_capture::capture();
+            session.handle(&json!({"t":"order.action","d":{"version":if case=="version"{2}else{1},
+                "accountName":"synthetic-main","instanceId":if case=="binding"{Some("foreign")}else{None},
+                "intentId":id,"seq":1,"ageMs":0,"fingerprint":if case=="fingerprint"{"0".repeat(64)}else{fp},"action":payload}}).to_string()).await.unwrap();
+            let lines: Vec<_> = capture.finish().into_iter().filter(|line|line.contains("order.pre_dispatch_refused")).collect();
+            let result = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(result["d"]["outcome"], if case == "schema" { "unsupported" } else { "refused" });
+            assert!(tape.writes.lock().unwrap().is_empty());
+            assert_eq!(lines.len(), 1, "{case}: missing bounded pre-dispatch audit");
+            assert!(lines[0].len() < 512);
+            let outer: Value = serde_json::from_str(&lines[0]).unwrap();
+            assert_eq!(outer["level"], "info");
+            let fields: Value = serde_json::from_str(outer["msg"].as_str().unwrap()).unwrap();
+            let reason = match case {
+                "version" => "unsupported_version",
+                "fingerprint" => "fingerprint_mismatch",
+                "schema" => "invalid_amendment",
+                "binding" => "registration_mismatch",
+                "admission" => "runtime_disabled",
+                "expiry" => "expired_intent",
+                _ => unreachable!(),
+            };
+            assert_eq!(fields, json!({"event":"order.pre_dispatch_refused","venue":"bybit","op":"amend","reason_class":reason}));
+            assert!(!lines[0].contains("resting-order") && !lines[0].contains("synthetic-main") && !lines[0].contains(&id));
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn expired_queue_cancellations_and_oversized_orders_keep_errors_and_emit_audit() {
+    tokio::task::LocalSet::new().run_until(async {
+        for kind in ["order.cancelQueued", "order.actionCancelQueued", "order.action", "order.submit"] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            while sent.try_recv().is_ok() {}
+            session.identity.token = Some(("synthetic-expired".into(), crate::accounts::now_ms()));
+            let mut data = json!({"version":1,"accountName":"synthetic-main","intentId":action_key(),"seq":1,"fingerprint":"0".repeat(64)});
+            if kind == "order.cancelQueued" { data.as_object_mut().unwrap().remove("version"); }
+            if kind == "order.action" {
+                data["ageMs"] = json!(0);
+                data["action"] = json!({"kind":"cancelAll","padding":"x".repeat(crate::order_contract::SUBMIT_MAX)});
+            }
+            if kind == "order.submit" {
+                data.as_object_mut().unwrap().remove("version");
+                data["ageMs"] = json!(0);
+                data["params"] = json!({"padding":"x".repeat(crate::order_contract::SUBMIT_MAX)});
+            }
+            let capture = crate::state::log_capture::capture();
+            session.handle(&json!({"t":kind,"d":data}).to_string()).await.unwrap();
+            let lines: Vec<_> = capture.finish().into_iter().filter(|line|line.contains("order.pre_dispatch_refused")).collect();
+            let frames: Vec<Value> = std::iter::from_fn(||sent.try_recv().ok()).map(|line|serde_json::from_str(&line).unwrap()).collect();
+            assert!(frames.iter().any(|frame|frame["t"]=="msg" && frame["d"]["op"]=="error" && frame["d"]["data"][0]==crate::auth::TOKEN_EXPIRED), "{kind}: {frames:?}");
+            assert!(frames.iter().all(|frame|!frame["t"].as_str().unwrap_or("").starts_with("order.")), "expiry fallback must not fabricate a business receipt");
+            assert!(tape.writes.lock().unwrap().is_empty());
+            assert!(account.running.io_allowed());
+            assert!(registry.holds(&account, session.socket));
+            assert_eq!(lines.len(), 1, "{kind}: expiry fallback needs one audit line");
+            let outer: Value = serde_json::from_str(&lines[0]).unwrap();
+            let fields: Value = serde_json::from_str(outer["msg"].as_str().unwrap()).unwrap();
+            assert_eq!(fields["reason_class"], "auth_expired");
+            assert_eq!(fields["op"], kind);
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn legacy_order_command_guards_without_typed_receipts_have_audit() {
+    tokio::task::LocalSet::new().run_until(async {
+        for (case, reason) in [("lease", "lease_fenced"), ("capacity", "capacity"), ("command_id", "command_ids_exhausted")] {
+            let registry = Arc::new(Registry::new(crate::threads::EngineThreads::start(1).unwrap(), Duration::from_millis(1), Duration::from_secs(60)).with_router_lease(crate::router_lease::Config { enforce: true, box_id: Some("test-box".into()), ..Default::default() }));
+            let grant = |owner_epoch| {
+                let now = crate::accounts::now_ms();
+                registry.router_leases.accept(&crate::router_lease::Heartbeat {
+                    r#box: "test-box".into(), issued_at: now,
+                    users: vec![crate::router_lease::Assertion { user_id: "A".into(), owner_epoch, sequence: 1, not_after: now + 45_000 }],
+                }).unwrap();
+            };
+            grant(1);
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let _held = if case == "capacity" {
+                Some(account.reads.clone().acquire_many_owned(account.reads.available_permits() as u32).await.unwrap())
+            } else { None };
+            if case == "lease" { grant(2); assert!(!account.running.io_allowed()); }
+            if case == "command_id" { session.joined.get_mut("synthetic-main").unwrap().next_command = u32::MAX; }
+            let capture = crate::state::log_capture::capture();
+            session.send_command("synthetic-main", &json!("legacy-amend"), "updateOrder", &None,
+                json!({"op":"amendOrder","id":"resting-order","price":51000}), methods::Reply::OrderIds, case == "capacity", None);
+            let lines: Vec<_> = capture.finish().into_iter().filter(|line|line.contains("order.pre_dispatch_refused")).collect();
+            let outcome = reply(&mut sent, "legacy-amend").await;
+            assert_eq!(outcome["success"], false);
+            if case == "lease" { assert_eq!(outcome["result"]["outcome"], "notSent"); }
+            else { assert!(outcome["result"].get("outcome").is_none(), "do not invent a proof for the existing generic reply"); }
+            assert!(tape.writes.lock().unwrap().is_empty());
+            assert_eq!(lines.len(), 1, "{case}: legacy pre-dispatch refusal needs an audit line");
+            let outer: Value = serde_json::from_str(&lines[0]).unwrap();
+            let fields: Value = serde_json::from_str(outer["msg"].as_str().unwrap()).unwrap();
+            assert_eq!(fields, json!({"event":"order.pre_dispatch_refused","reason_class":reason,"venue":"bybit","op":"updateOrder"}));
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn delegated_price_amend_tolerates_small_clock_skew_without_extending_expiry() {
+    tokio::task::LocalSet::new().run_until(async {
+        for (offset, expected) in [(0_i64, "applied"), (500, "applied"), (60_000, "refused"), (-10_001, "refused")] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let now = crate::accounts::now_ms();
+            let created = now.checked_add_signed(offset).unwrap();
+            let hex = format!("{created:012x}");
+            let id = format!("{}-{}-7101-8101-010101010101", &hex[..8], &hex[8..]);
+            let payload = json!({"kind":"amend","order":{"id":"resting-order","symbol":"BTCUSDT"},"update":{"price":51000}});
+            let fingerprint = crate::order_contract::action_wire_fingerprint("synthetic-main", &id, &payload, 1).unwrap();
+            session.handle(&json!({"t":"order.action","d":{"version":1,"accountName":"synthetic-main",
+                "intentId":id,"seq":1,"ageMs":0,"fingerprint":fingerprint,"action":payload}}).to_string()).await.unwrap();
+            let outcome = action_frame(&mut sent, "order.actionOutcome").await;
+            let writes = tape.writes.lock().unwrap().clone();
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+            assert_eq!(outcome["d"]["intentId"], id);
+            assert_eq!(outcome["d"]["outcome"], expected, "offset={offset}: {outcome}");
+            if expected == "applied" {
+                assert_eq!(writes, vec!["amend"]);
+                let rows = native_request_rows(&tape, "amend");
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0]["orderId"], "resting-order");
+                assert_eq!(rows[0]["price"], "51000");
+                assert!(rows[0].get("qty").is_none());
+                assert!(rows[0].get("orderLinkId").is_none());
+            } else {
+                assert!(writes.is_empty());
+                assert_eq!(outcome["d"]["error"]["outcome"], "notSent");
+                assert_eq!(outcome["d"]["error"]["message"], if offset > 0 {"not sent: invalid key time"} else {"not sent: expired"});
+            }
+        }
+    }).await;
+}
+
+fn actor_refusal_audits(lines: Vec<String>, op: &str) -> Vec<Value> {
+    bounded_refusal_audits(lines, op, "order.pre_dispatch_refused")
+}
+
+fn grouped_refusal_audits(lines: Vec<String>, op: &str) -> Vec<Value> {
+    assert!(
+        lines
+            .iter()
+            .all(|line| !line.contains("order.pre_dispatch_refused")),
+        "one grouped leg cannot claim whole-action pre-dispatch: {lines:?}"
+    );
+    bounded_refusal_audits(lines, op, "order.leg_pre_dispatch_refused")
+}
+
+fn bounded_refusal_audits(lines: Vec<String>, op: &str, event: &str) -> Vec<Value> {
+    lines
+        .into_iter()
+        .filter(|line| line.contains(event))
+        .map(|line| {
+            assert!(line.len() < 512);
+            let outer: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(outer["level"], "info");
+            let fields: Value = serde_json::from_str(outer["msg"].as_str().unwrap()).unwrap();
+            assert_eq!(fields.as_object().unwrap().len(), 4);
+            assert_eq!(fields["event"], event);
+            assert_eq!(fields["venue"], "bybit");
+            assert_eq!(fields["op"], op);
+            fields
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn queued_actor_io_refusals_keep_existing_receipts_and_emit_bounded_audit() {
+    tokio::task::LocalSet::new().run_until(async {
+        for (kind, stage) in [("nuke", "pre_actor"), ("nuke", "actor"), ("algo", "actor")] {
+            let registry = Arc::new(Registry::new(crate::threads::EngineThreads::start(1).unwrap(), Duration::from_millis(1), Duration::from_secs(60))
+                .with_router_lease(crate::router_lease::Config { enforce: true, box_id: Some("test-box".into()), ..Default::default() }));
+            let grant = |owner_epoch| {
+                let now = crate::accounts::now_ms();
+                registry.router_leases.accept(&crate::router_lease::Heartbeat {
+                    r#box: "test-box".into(), issued_at: now,
+                    users: vec![crate::router_lease::Assertion { user_id: "A".into(), owner_epoch, sequence: 1, not_after: now + 45_000 }],
+                }).unwrap();
+            };
+            grant(1);
+            let tape = Tape::default();
+            let (account, mut inbox) = delegated_account_with_algo_inbox(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let payload = if kind == "nuke" { json!({"kind":"nuke"}) } else {
+                json!({"kind":"algo","op":"exec","data":{"command":"buy $100","symbol":"BTCUSDT"}})
+            };
+            action(&mut session, payload, 1, false).await;
+            assert_eq!(action_frame(&mut sent, "order.actionAck").await["d"]["received"], true);
+            if stage == "actor" {
+                // Observe the genuine Session handoff before fencing the lease.
+                // Requeue it unchanged; the actor still has not started.
+                let input = tokio::time::timeout(Duration::from_secs(3), async {
+                    loop {
+                        let input = inbox.recv().await.expect("live actor inbox");
+                        if matches!(&input, crate::algos::AlgoInput::Nuke { action: Some(_), .. }
+                            | crate::algos::AlgoInput::Op { action: Some(_), .. }) { break input; }
+                    }
+                }).await.expect("Session must hand off before the actor IO fence");
+                assert!(account.algos.as_ref().unwrap().send(input).is_ok());
+            }
+            grant(2);
+            assert!(!account.running.io_allowed());
+            assert!(session.account_out("synthetic-main").action_active());
+            let capture = crate::state::log_capture::capture();
+            let account = testing::run_algos(account, SignerLink::new(0, Arc::new(|_| false)), inbox);
+            let outcome = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(outcome["d"]["outcome"], if kind == "nuke" {"refused"} else {"unknown"});
+            if stage == "pre_actor" {
+                assert_eq!(outcome["d"]["error"]["message"], "Action registration retired before dispatch");
+            }
+            assert_eq!(outcome["d"]["error"]["outcome"], if kind == "nuke" {"notSent"} else {"unknown"});
+            assert!(tape.writes.lock().unwrap().is_empty());
+            let audits = actor_refusal_audits(capture.finish(), kind);
+            assert_eq!(audits.len(), 1, "{kind}/{stage}: IO refusal needs one line");
+            assert_eq!(audits[0]["reason_class"], "io_fenced");
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn nuke_post_store_lease_fence_audits_io_without_changing_receipt() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = Arc::new(
+                Registry::new(
+                    crate::threads::EngineThreads::start(1).unwrap(),
+                    Duration::from_millis(1),
+                    Duration::from_secs(60),
+                )
+                .with_router_lease(crate::router_lease::Config {
+                    enforce: true,
+                    box_id: Some("test-box".into()),
+                    ..Default::default()
+                }),
+            );
+            let grant = |owner_epoch| {
+                let now = crate::accounts::now_ms();
+                registry
+                    .router_leases
+                    .accept(&crate::router_lease::Heartbeat {
+                        r#box: "test-box".into(),
+                        issued_at: now,
+                        users: vec![crate::router_lease::Assertion {
+                            user_id: "A".into(),
+                            owner_epoch,
+                            sequence: 1,
+                            not_after: now + 45_000,
+                        }],
+                    })
+                    .unwrap();
+            };
+            grant(1);
+            let tape = Tape::default();
+            let (account, inbox) =
+                delegated_account_with_algo_inbox(&registry, "A", "bybit", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let (after_read, resume) = account.running.pause_next_nuke_after_read();
+            let account =
+                testing::run_algos(account, SignerLink::new(0, Arc::new(|_| false)), inbox);
+            let capture = crate::state::log_capture::capture();
+            action(&mut session, json!({"kind":"nuke"}), 1, false).await;
+            assert_eq!(
+                action_frame(&mut sent, "order.actionAck").await["d"]["received"],
+                true
+            );
+            tokio::time::timeout(Duration::from_secs(3), after_read)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(account.running.io_allowed());
+            assert!(session.account_out("synthetic-main").action_active());
+            assert!(!session.token_expired());
+            grant(2);
+            assert!(!account.running.io_allowed());
+            assert!(
+                session.account_out("synthetic-main").action_active(),
+                "lease fencing does not retire registration"
+            );
+            resume.send(()).unwrap();
+            let outcome = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(outcome["d"]["outcome"], "refused");
+            assert_eq!(outcome["d"]["error"]["outcome"], "notSent");
+            assert_eq!(
+                outcome["d"]["error"]["message"],
+                "Action registration retired before dispatch"
+            );
+            assert!(tape.writes.lock().unwrap().is_empty());
+            let audits = actor_refusal_audits(capture.finish(), "nuke");
+            assert_eq!(audits.len(), 1);
+            assert_eq!(
+                audits[0]["reason_class"], "io_fenced",
+                "post-store lease refusal must not claim registration retirement"
+            );
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        })
+        .await;
 }

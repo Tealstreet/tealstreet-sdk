@@ -95,9 +95,12 @@ that capability. Hosts must discover both per connection before passing a ticket
 to the outbox. See [order-frame activation](../../../docs/plans/callers/delegated-order-frames.md#rolling-activation)
 for deployment ordering and rollback.
 
-`delegatedActivationScopeV1` advertises the partial action set allowed by Sam on
-2026-11-11: place and reduce-only close; amend, venue cancel, cancel-all and nuke
-are false and not activation prerequisites. Hosts query `?exchangeName=<joined venue>` on either capabilities route.
+`delegatedActivationScopeV1` retains Sam's 2026-11-11 activation minimum: place
+and reduce-only close. Amend, venue cancel, cancel-all and nuke report the same
+runtime availability as `delegatedOrderActionsV1`/`delegatedFullWriteActionsV1`,
+gated by the selected venue's generic hosted eligibility. They remain optional
+for activation; this metadata changes neither admission nor legacy method rules.
+Hosts query `?exchangeName=<joined venue>` on either capabilities route.
 The action scope is computed for that venue, not a representative venue.
 `delegatedVenueV1` echoes the selection; missing, unsupported or unhosted
 selections advertise no actions. SDK activation checks that the echoed venue

@@ -898,3 +898,34 @@ test('malformed later-page metadata cannot smuggle values or mark ordinary resul
     assert.equal((await promise).historyFailure, undefined);
   }
 });
+for (const op of ['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
+  'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode',
+  'setStpMode', 'setAccountTier', 'scheduleCancel']) {
+  test(`settled write errors retain only the captured command name: ${op}`, async () => {
+    const r = rig();
+    const command = { op, orders: [], ids: [] };
+    const pending = r.host.command(command).catch((error) => error);
+    command.op = 'private-apiKey-canary';
+    r.host.run(JSON.stringify([{ op: 'done', command: r.calls[0].command, error: 'OKX 1: ',
+      detail: { message: 'OKX 1: ', kind: 'rejected', venueCode: '1', command: 'private-apiKey-canary' } }]));
+    const error = await pending;
+    assert.equal(error.command, op);
+    assert.equal(error.message, 'OKX 1: ');
+    assert.equal(error.kind, 'rejected');
+    assert.equal(error.venueCode, '1');
+    assert.equal(error.outcome, undefined);
+    assert.ok(!JSON.stringify(error).includes('private-apiKey-canary'));
+    r.host.dispose();
+  });
+}
+
+for (const op of ['fetchOHLCV', 'private-apiKey-canary']) {
+  test(`settled error does not tag an unlisted caller command: ${op}`, async () => {
+    const r = rig();
+    const pending = r.host.command({ op }).catch((error) => error);
+    r.host.run(JSON.stringify([{ op: 'done', command: r.calls[0].command, error: 'refused',
+      detail: { message: 'refused', command: 'private-apiKey-canary' } }]));
+    assert.equal((await pending).command, undefined);
+    r.host.dispose();
+  });
+}

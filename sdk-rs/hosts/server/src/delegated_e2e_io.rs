@@ -28,6 +28,7 @@ pub(crate) struct MockVenue {
     registration: Option<Registration>,
     coinbase: Option<crate::delegated::probe::coinbase_tests::CoinbaseIo>,
     hyperliquid: bool,
+    placement_fixture: bool,
 }
 #[derive(Clone)]
 struct Registration {
@@ -45,6 +46,7 @@ impl MockVenue {
             registration: None,
             coinbase: None,
             hyperliquid: false,
+            placement_fixture: false,
         }
     }
 
@@ -72,6 +74,15 @@ impl MockVenue {
             venue,
             seen: Arc::clone(&seen),
         });
+        (mock, seen)
+    }
+
+    #[cfg(all(target_os = "linux", feature = "delegated-order-frames"))]
+    pub(crate) fn for_placement(
+        venue: &'static str,
+    ) -> (Self, Arc<Mutex<crate::delegated::probe::venue_tests::Seen>>) {
+        let (mut mock, seen) = Self::for_admission(venue);
+        mock.placement_fixture = true;
         (mock, seen)
     }
 
@@ -138,7 +149,9 @@ impl Transport for MockVenue {
         if let Some(io) = &self.coinbase {
             return io.prepare_http(request, intent);
         }
-        if let Some(io) = &self.admission {
+        if !self.placement_fixture
+            && let Some(io) = &self.admission
+        {
             return io.prepare_http(request, intent);
         }
         self.observed.lock().unwrap().preparations += 1;
@@ -197,6 +210,89 @@ impl Transport for MockVenue {
         if let Some(io) = &self.coinbase {
             io.request(request, events);
             return;
+        }
+        if self.placement_fixture
+            && request.method == Method::Get
+            && self
+                .admission
+                .as_ref()
+                .is_some_and(|io| io.venue == "bitget")
+            && request
+                .url
+                .split('?')
+                .next()
+                .unwrap()
+                .ends_with("/api/v2/mix/account/account")
+        {
+            assert!(
+                self.admission
+                    .as_ref()
+                    .unwrap()
+                    .valid_private_signature(&request)
+            );
+            answer(
+                &events,
+                request.id,
+                json!({"code":"00000","data":{
+                "symbol":"BTCUSDT","posMode":"one_way_mode","marginMode":"crossed","leverage":"20"}}),
+            );
+            return;
+        }
+        if self.placement_fixture && request.method == Method::Post {
+            let io = self.admission.as_ref().unwrap();
+            let path = request.url.split('?').next().unwrap();
+            if path.contains("/order/") || path.contains("/trade/") || path.ends_with("/um/order") {
+                assert!(io.valid_private_signature(&request), "protected write HMAC");
+                let body: Value = if let Some(body) = &request.body {
+                    serde_json::from_str(body).unwrap()
+                } else {
+                    request
+                        .url
+                        .split_once('?')
+                        .unwrap()
+                        .1
+                        .split('&')
+                        .map(|field| {
+                            let (key, value) = field.split_once('=').unwrap();
+                            (key.to_owned(), Value::String(value.to_owned()))
+                        })
+                        .collect::<serde_json::Map<String, Value>>()
+                        .into()
+                };
+                let rows = body
+                    .get("orderList")
+                    .and_then(Value::as_array)
+                    .or_else(|| body.as_array())
+                    .cloned()
+                    .unwrap_or_else(|| vec![body.clone()]);
+                assert_eq!(rows.len(), 1, "one native order, no split fallback");
+                let client = match io.venue {
+                    "bitget" => &rows[0]["clientOid"],
+                    "okx" => &rows[0]["clOrdId"],
+                    "blofin" => &rows[0]["clientOrderId"],
+                    "binancepm" => &rows[0]["newClientOrderId"],
+                    other => panic!("no placement fixture for {other}"),
+                };
+                assert!(client.as_str().is_some_and(|id| !id.is_empty()));
+                self.observed.lock().unwrap().writes.push(body);
+                let response = match io.venue {
+                    "bitget" => {
+                        json!({"code":"00000","msg":"success","data":{"successList":[{"orderId":"77","clientOid":client}],"failureList":[]}})
+                    }
+                    "okx" => {
+                        json!({"code":"0","msg":"","data":[{"ordId":"77","clOrdId":client,"sCode":"0","sMsg":""}]})
+                    }
+                    "blofin" => {
+                        json!({"code":"0","msg":"","data":[{"orderId":"77","clientOrderId":client,"code":"0","msg":"success"}]})
+                    }
+                    "binancepm" => {
+                        json!({"orderId":77,"clientOrderId":client,"symbol":"BTCUSDT","status":"NEW"})
+                    }
+                    _ => unreachable!(),
+                };
+                answer(&events, request.id, response);
+                return;
+            }
         }
         if let Some(io) = &self.admission {
             return io.request(request, events);

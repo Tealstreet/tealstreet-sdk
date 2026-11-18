@@ -486,13 +486,15 @@ impl ActionDeadline {
             return None;
         }
         let created = crate::order_contract::key_time(id)?;
-        let key_age = crate::accounts::now_ms().checked_sub(created)?;
+        let now = crate::accounts::now_ms();
+        let key_age = crate::order_contract::key_age(created, now).ok()?;
         let key_remaining = 10_000_u64.checked_sub(key_age).filter(|ms| *ms > 0)?;
         let remaining = std::time::Duration::from_secs_f64((10_000.0 - age_ms) / 1000.0)
             .min(std::time::Duration::from_millis(key_remaining));
         Some(Self {
             monotonic: arrived + remaining,
-            key_expires_at_ms: created + 10_000,
+            // Forward clock tolerance never adds time to an admitted action.
+            key_expires_at_ms: created.min(now) + 10_000,
         })
     }
     pub(crate) fn expired(self) -> bool {
@@ -658,6 +660,24 @@ mod tests {
         assert_eq!(frame["d"]["error"]["outcome"], "unknown");
         assert!(frame["d"]["result"].is_null());
     }
+    #[test]
+    fn bounded_future_key_action_keeps_ten_second_arrival_budget() {
+        let now = crate::accounts::now_ms();
+        let key = |created| {
+            let hex = format!("{created:012x}");
+            format!("{}-{}-7101-8101-010101010101", &hex[..8], &hex[8..])
+        };
+        let arrived = std::time::Instant::now();
+        let deadline = ActionDeadline::new(&key(now + 500), 0.0, arrived)
+            .expect("small forward clock skew must not block a fresh action");
+        assert!(deadline.monotonic <= arrived + std::time::Duration::from_secs(10));
+        assert!(deadline.key_expires_at_ms <= crate::accounts::now_ms() + 10_000);
+        assert!(!deadline.expired());
+        assert!(ActionDeadline::new(&key(now + 60_000), 0.0, arrived).is_none());
+        assert!(ActionDeadline::new(&key(now - 10_000), 0.0, arrived).is_none());
+        assert!(ActionDeadline::new(&key(now), 10_000.0, arrived).is_none());
+    }
+
     #[test]
     fn nuke_deadline_guards_both_monotonic_and_uuid_expiry() {
         use std::time::{Duration, Instant};

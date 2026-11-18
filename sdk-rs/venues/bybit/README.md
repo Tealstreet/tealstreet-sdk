@@ -152,3 +152,12 @@ from an auxiliary order-history failure without treating a retained prefix as
 complete coverage. An earlier missing-coverage reason remains authoritative;
 first-page failures and serialization failures still reject. These diagnostics
 do not change requests, deadlines, retry policy, pacing or writes.
+## HyroTrader auth refusal during admission
+
+A current, correlated `auth` acknowledgement with explicit `success:false` and
+native `10003` reports a generic typed `rejected` event. Hosted admission can
+refuse that attempt promptly without guessing a key/IP cause, disabling the
+credential, changing resident ownership, or authorizing any write. The numeric
+code is retained without interpreting its cause; raw reply text is not copied.
+Missing/null success, other codes, subscription responses, stale request IDs and
+transport/handshake timeouts retain their existing uncertainty and retry behavior.

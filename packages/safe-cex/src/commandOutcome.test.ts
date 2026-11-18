@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  classifiedError,
   deserializeCommandError,
   exchangeErrorCategory,
   exchangeErrorTags,
@@ -344,4 +345,27 @@ describe('closed history diagnostic tags', () => {
       }),
     ).toEqual({});
   });
+});
+
+it('preserves a closed settled-write command through worker classification and Sentry tags', () => {
+  for (const command of ['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
+    'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode',
+    'setStpMode', 'setAccountTier', 'scheduleCancel']) {
+    const error = Object.assign(new Error('Order does not exist'), {
+      command, kind: 'rejected', venueCode: '51400',
+    });
+    const restored = deserializeCommandError(structuredClone(serializeCommandError(error)));
+    expect(exchangeErrorTags(classifiedError(restored))).toEqual({
+      error_kind: 'rejected', error_category: 'order_rejected', venue_code: '51400', error_command: command,
+    });
+  }
+});
+
+it('never copies arbitrary command text into classified error tags', () => {
+  for (const command of ['apiKey=PRIVATE_COMMAND_CANARY', 'https://signed?secret=PRIVATE_COMMAND_CANARY',
+    'fetchOHLCV', '__proto__', {}, 123]) {
+    const error = { kind: 'rejected', command };
+    expect(classifiedError(error)).not.toHaveProperty('command');
+    expect(exchangeErrorTags(error)).not.toHaveProperty('error_command');
+  }
 });

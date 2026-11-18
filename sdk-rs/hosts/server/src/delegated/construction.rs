@@ -1,7 +1,6 @@
 //! Trusted DELEGATED account construction; socket handover is a separate step.
 use crate::accounts::{engine_options, routing_plan};
 use crate::envelope::InitPayload;
-use safe_cex_engine::signing::Provider;
 use serde_json::json;
 use zeroize::Zeroizing;
 
@@ -63,83 +62,20 @@ impl DelegatedPair {
     }
 }
 
-/// The account's shared protected provider erasure authority.
-/// Cloning this handle neither serializes nor copies the private material.
-#[derive(Clone)]
-pub struct ResidentCopy {
-    protection: Option<std::sync::Arc<safe_cex_engine::signing::ProtectedProvider>>,
-    #[cfg(test)]
-    test_provider: Option<Provider>,
-    identities: safe_cex_engine::signing::Identities,
-    state: Option<safe_cex_venues::TrustedSignerState>,
-    trusted_identities: Option<safe_cex_native::TrustedSignerIdentities>,
-}
+use std::sync::Arc;
+mod resident;
+pub use resident::ResidentCopy;
+
 impl ResidentCopy {
-    #[cfg(test)]
-    pub(crate) fn test_provider(provider: Provider) -> Self {
-        Self {
-            protection: None,
-            test_provider: Some(provider),
-            identities: Default::default(),
-            state: None,
-            trusted_identities: None,
-        }
-    }
-
-    pub(crate) fn identities(&self) -> &safe_cex_engine::signing::Identities {
-        &self.identities
-    }
-
-    #[cfg(test)]
-    pub(crate) fn test_provider_with_identities(
-        provider: Provider,
-        identities: safe_cex_engine::signing::Identities,
-    ) -> Self {
-        Self {
-            identities,
-            ..Self::test_provider(provider)
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn test_protected_provider(
-        protection: safe_cex_engine::signing::ProtectedProvider,
-        identities: safe_cex_engine::signing::Identities,
-    ) -> Self {
-        Self {
-            protection: Some(std::sync::Arc::new(protection)),
-            test_provider: None,
-            identities,
-            state: None,
-            trusted_identities: None,
-        }
-    }
-
-    /// Trusted host ingress, as with a remote account's provider.
-    pub fn provider(&self) -> Provider {
-        #[cfg(test)]
-        if let Some(provider) = &self.test_provider {
-            return provider.clone();
-        }
-        self.protection
-            .as_ref()
-            .expect("canonical protected setup")
-            .provider()
-    }
-
-    /// Retention/disposal authority; all previously issued engine handles refuse.
-    pub fn erase(&self) {
-        if let Some(protection) = &self.protection {
-            protection.erase();
-        }
-    }
-
     pub(crate) fn configure(&self, config: &mut safe_cex_native::ServerConfig) {
         config.trusted_signer_state = self.state.clone();
         config.trusted_signer_identities = self.trusted_identities.clone();
     }
 
-    pub(crate) fn reconfigure(&self, init: &InitPayload) -> Result<PreparedDelegated, String> {
+    pub(crate) fn reconfigure(
+        self: &Arc<Self>,
+        init: &InitPayload,
+    ) -> Result<PreparedDelegated, String> {
         if !super::enabled(&init.exchange_name) || init.public_only == Some(true) {
             return Err("DELEGATED settings are not enabled for this account".into());
         }
@@ -163,7 +99,7 @@ impl ResidentCopy {
 pub struct PreparedDelegated {
     pub plan: safe_cex_native::RoutingPlan,
     pub options: String,
-    pub resident: ResidentCopy,
+    pub resident: Arc<ResidentCopy>,
 }
 
 /// Called only after the host has admitted and verified the handover.
@@ -215,23 +151,16 @@ pub fn prepare_delegated(
     fields.insert("publicDataOnly".into(), false.into());
     fields.insert("remoteSigning".into(), false.into());
     fields.insert("payloadSigner".into(), false.into());
-    let protection = std::sync::Arc::new(protection);
-    let trusted_identities = safe_cex_native::TrustedSignerIdentities::capture(
+    let mut resident = ResidentCopy::new(protection, identities.clone(), Some(state));
+    resident.trusted_identities = Some(safe_cex_native::TrustedSignerIdentities::capture(
         &init.exchange_name,
-        protection.provider(),
-        identities.clone(),
-    );
+        resident.provider(),
+        identities,
+    ));
     Ok(PreparedDelegated {
         plan,
         options: options.to_string(),
-        resident: ResidentCopy {
-            protection: Some(protection),
-            #[cfg(test)]
-            test_provider: None,
-            identities,
-            state: Some(state),
-            trusted_identities: Some(trusted_identities),
-        },
+        resident: Arc::new(resident),
     })
 }
 

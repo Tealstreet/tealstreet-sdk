@@ -16,6 +16,9 @@ Native hosted diagnostic owner attribution is documented in
 Bybit's sparse ticker freshness contract lives in
 [`sdk-rs/README.md`](sdk-rs/README.md#bybit-ticker-reference-freshness).
 
+Bitget login-only timestamp-expiry recovery samples a bounded public clock and
+re-signs on the current socket at dispatch. See `sdk-rs/venues/bitget/README.md`.
+
 Synthetic-fixture scan provenance is documented beside exact historical records
 in [`.gitleaksignore`](.gitleaksignore); current fixture construction stays in its package tests.
 
