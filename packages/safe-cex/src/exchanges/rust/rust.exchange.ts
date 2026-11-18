@@ -2883,7 +2883,7 @@ export class RustEngineExchange extends BaseExchange {
           },
           (error) =>
             error instanceof ExchangeError && error.kind
-              ? finish({ error: error.message, kind: error.kind as ExchangeErrorKind })
+              ? finish({ error: error.message, kind: error.kind })
               : onError(String(error?.message ?? error)),
         );
     });
@@ -3979,8 +3979,8 @@ export class RustEngineExchange extends BaseExchange {
   /** The venue's raw closed-position rows, for the same TS mappers the TS venue uses. */
   private fetchClosedPositionRows = (opts: { symbol?: string; from?: number; to?: number }, report = true) =>
     this.routesToWorker
-      ? (this.callWorker('fetchClosedPositions', opts) as Promise<Array<Record<string, any>>>)
-      : this.command<Array<Record<string, any>>>(
+      ? (this.callWorker('fetchClosedPositions', opts) as Promise<Array<Record<string, unknown>>>)
+      : this.command<Array<Record<string, unknown>>>(
           { op: 'fetchClosedPositions', symbol: opts.symbol, from: opts.from, to: opts.to },
           { report },
         );
