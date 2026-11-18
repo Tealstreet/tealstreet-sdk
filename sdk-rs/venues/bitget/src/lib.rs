@@ -27,7 +27,7 @@ use safe_cex_engine::{
     num,
 };
 use serde::{Serialize, de::IgnoredAny};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wire::*;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -148,6 +148,8 @@ pub struct BitgetFutures {
     candles: HashMap<(String, Interval), usize>,
     /// Topics Bitget answered with event:error, by (channel, instId): retries made, pending timer.
     refused_topics: HashMap<(String, String), (u32, Option<TimerId>)>,
+    /// Known missing ticker topics warned once for this engine's lifetime.
+    warned_ticker_refusals: HashSet<String>,
     /// When an unreadable public message was last logged; at most one per minute.
     public_parse_logged_at: Option<f64>,
     order_caps: HashMap<String, OrderCaps>,
@@ -273,6 +275,7 @@ impl BitgetFutures {
             books: HashMap::new(),
             candles: HashMap::new(),
             refused_topics: HashMap::new(),
+            warned_ticker_refusals: HashSet::new(),
             public_parse_logged_at: None,
             order_caps: HashMap::new(),
         }
@@ -551,6 +554,45 @@ impl BitgetFutures {
         }
     }
 
+    fn known_ticker_refusal(
+        &self,
+        cx: &Cx<'_, Pending>,
+        message: &PublicMessage<'_>,
+        text: &str,
+    ) -> bool {
+        #[derive(serde::Deserialize)]
+        struct Refusal<'a> {
+            #[serde(borrow)]
+            code: Option<&'a serde_json::value::RawValue>,
+            #[serde(borrow)]
+            arg: ProductArgument<'a>,
+        }
+        #[derive(serde::Deserialize)]
+        struct ProductArgument<'a> {
+            #[serde(rename = "instType")]
+            product: &'a str,
+        }
+        let symbol = message.arg.inst_id.as_ref();
+        if message.arg.channel != "ticker" || cx.store.market(symbol).is_none() {
+            return false;
+        }
+        let product = self.product().to_uppercase();
+        let Some(native) = message.msg.strip_suffix(" doesn't exist") else {
+            return false;
+        };
+        if native != symbol
+            && native != format!("instType:{product},channel:ticker,instId:{symbol}")
+        {
+            return false;
+        }
+        serde_json::from_str::<Refusal<'_>>(text).is_ok_and(|refusal| {
+            refusal.arg.product == product
+                && refusal
+                    .code
+                    .is_some_and(|code| matches!(code.get(), "30001" | r#""30001""#))
+        })
+    }
+
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         let message = match serde_json::from_str::<PublicMessage<'_>>(text) {
             Ok(message) => message,
@@ -605,15 +647,25 @@ impl BitgetFutures {
                 None if !topic.0.is_empty() => format!("{} {}: not retried", topic.0, topic.1),
                 None => String::new(),
             };
-            cx.notice(
-                Level::Error,
-                code::SUBSCRIPTION_REJECTED,
-                if detail.is_empty() {
-                    format!("Bitget WS: {}", message.msg)
-                } else {
-                    format!("Bitget WS: {} ({detail})", message.msg)
-                },
-            );
+            if self.known_ticker_refusal(cx, &message, text) {
+                if self.warned_ticker_refusals.insert(topic.1) {
+                    cx.notice(
+                        Level::Warn,
+                        code::SUBSCRIPTION_REJECTED,
+                        "Bitget ticker subscription refused for a known market",
+                    );
+                }
+            } else {
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
+                    if detail.is_empty() {
+                        format!("Bitget WS: {}", message.msg)
+                    } else {
+                        format!("Bitget WS: {} ({detail})", message.msg)
+                    },
+                );
+            }
             return;
         }
         if !self.refused_topics.is_empty()

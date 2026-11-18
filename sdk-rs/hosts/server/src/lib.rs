@@ -20,6 +20,7 @@ pub mod order_contract;
 pub mod out;
 pub mod pacing;
 pub mod public_topics;
+mod publication;
 pub mod router_lease;
 pub mod session;
 pub mod state;

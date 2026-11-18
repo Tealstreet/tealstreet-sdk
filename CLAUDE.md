@@ -24,6 +24,10 @@ are documented in [`sdk-rs/venues/bybit/README.md`](sdk-rs/venues/bybit/README.m
 The engine owns the clocks and fences; only a validated native `10006` rejection
 is known, never resendable. Contradictory and unproven responses remain Unknown.
 
+Hyperliquid candle reads retain their original deadline while a requested public
+catalogue row is pending. Known markets stay immediate; settled missing or
+explicitly excluded rows refuse. See `sdk-rs/venues/hyperliquid/README.md`.
+
 DELEGATED is venue-generic under the same hosted eligibility as COSIGNED. Use
 one runtime `DELEGATED` kill switch/per-user pin; `DELEGATED_BYBIT` is only its
 compatibility alias. Mobile is DELEGATED-only; DELEGATED clients have no WASM
