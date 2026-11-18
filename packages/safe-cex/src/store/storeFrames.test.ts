@@ -50,7 +50,7 @@ describe('generated FrameStore frame module on the isolated Position base', () =
     if (!settings?.buyLeverage) throw new Error('settings fixture required');
     settings.buyLeverage[0] = NaN;
     expect(() => readStoreSettings(settings, true, (_market, symbol) => symbol ?? '')).toThrow(
-      'Invalid native FrameStore leverage rails',
+      'Invalid native Store leverage rails',
     );
   });
 });
