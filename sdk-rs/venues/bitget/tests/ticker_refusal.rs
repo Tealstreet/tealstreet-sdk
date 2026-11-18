@@ -38,32 +38,29 @@ fn subscribes(h: &Harness) -> usize {
         .count()
 }
 
+// Proven nonexistent tickers now retire (regression 21cc20fce). Unproven
+// refusals retain the backoff/recovery coverage below, not futile ticker sends.
 #[test]
-fn known_ticker_refusal_warns_once_with_a_fixed_title_without_changing_retries() {
+fn known_ticker_refusal_warns_once_and_retires_its_topic() {
     let mut h = Harness::public();
     let initial = subscribes(&h);
-    for (attempt, delay) in [(1, 1000.), (2, 2000.), (3, 4000.)] {
-        h.message(&missing("BTCUSDT", "30001"));
-        let notices = events(&h);
-        assert_eq!(notices.len(), 1);
-        assert_eq!(notices[0].level, Level::Warn);
-        assert_eq!(notices[0].message, TITLE);
-        h.timer_after(delay);
-        assert_eq!(subscribes(&h), initial + attempt);
-    }
-    let before = h.timers.len();
-    for _ in 0..5 {
+    for _ in 0..8 {
         h.message(&missing("BTCUSDT", "30001"));
     }
     assert_eq!(events(&h).len(), 1);
-    assert_eq!(h.timers.len(), before, "retry exhaustion stays bounded");
-    assert_eq!(subscribes(&h), initial + 3);
+    assert_eq!(events(&h)[0].level, Level::Warn);
+    assert_eq!(events(&h)[0].message, TITLE);
+    assert!(!h.timers.iter().any(|(_, at)| *at == h.now + 1000.0));
+    for (socket, _) in h.sockets.clone() {
+        h.event(Event::WsOpened { socket });
+    }
+    assert_eq!(subscribes(&h), initial);
 }
 
 #[test]
 fn recovery_still_clears_pending_retry_and_restarts_the_original_backoff() {
     let mut h = Harness::public();
-    h.message(&missing("BTCUSDT", "30001"));
+    h.message(&missing("BTCUSDT", "30002"));
     let timer = h
         .timers
         .iter()
@@ -74,14 +71,15 @@ fn recovery_still_clears_pending_retry_and_restarts_the_original_backoff() {
     assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 111.);
     assert!(h.timers.iter().all(|(id, _)| *id != timer));
     let initial = subscribes(&h);
-    h.message(&missing("BTCUSDT", "30001"));
+    h.message(&missing("BTCUSDT", "30002"));
     h.timer_after(1000.);
     assert_eq!(subscribes(&h), initial + 1);
     assert_eq!(
         events(&h).len(),
-        1,
-        "recovery does not reset diagnostic deduplication"
+        2,
+        "unproven refusals remain visible before and after recovery"
     );
+    assert!(events(&h).iter().all(|event| event.level == Level::Error));
 }
 
 #[test]
