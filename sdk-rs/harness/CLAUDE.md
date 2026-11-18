@@ -36,7 +36,10 @@ to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
 
 Bitget login clock recovery at d10ba2f3c500 measures web/Node 2,782,976 B in
 CI44135644635 jobs134225245837/134225246062. The coordinator-approved cap
-2,793,472 B retains 10,496 B reserve for family and replay checks and all prior floors.
+2,793,472 B retains 10,496 B reserve at that source for family/replay checks.
+M44 source7bd8f25 measures 2,784,464 B in CI44224839389/job134535952644;
+artifact14393041086 has identical web/Node hashes. The coordinator-approved
+2,795,520 B cap retains 11,056 B reserve, all earlier floors and strict boundaries.
 
 BingX history diagnostics inspect failed responses with closed streaming visitors.
 Compact optional detail preserves engine error and socket allocation budgets;

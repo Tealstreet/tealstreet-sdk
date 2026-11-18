@@ -4054,7 +4054,7 @@ for (const venue of ['bitget', 'bitgetusdc']) {
     const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
     const cap = WASM_VENUE_OVERRIDES[venue];
     assert.equal(required, 2_793_472);
-    assert.equal(cap, required);
+    assert.ok(cap >= required, 'retain the original clock-recovery measured floor');
     assert.ok(cap >= 2_781_184, 'retain the historical floor');
     assert.ok(cap - measured >= 10 * 1024);
     assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
@@ -4062,5 +4062,23 @@ for (const venue of ['bitget', 'bitgetusdc']) {
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
     assert.equal(venueFamily(venue), 'bitget');
     assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
+  });
+}
+
+// #3646 M44 head7bd8f25, CI44224839389/job134535952644/artifact14393041086.
+// All five web/Node/capsule modules: 2,784,464 B, SHA49aade25741062f3c2b963dcff1c3012fa565d52f67d1176971a638dfab1fe9a.
+// A passing old absolute cap leaves only 9,008 B; fresh reserve is independently required.
+for (const venue of ['bitget', 'bitgetusdc']) {
+  test(`#3646 M44 ${venue} retains fresh composed reserve and strict boundaries`, () => {
+    const measured = 2_784_464;
+    const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.equal(required, 2_795_520);
+    assert.equal(cap, required);
+    assert.ok(cap >= 2_793_472, 'retain the approved pre-merge floor');
+    assert.ok(cap - measured >= 10 * 1024);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   });
 }

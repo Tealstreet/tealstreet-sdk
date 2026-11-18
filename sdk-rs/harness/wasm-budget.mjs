@@ -359,8 +359,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // #3646 d10ba2f3c500, CI44135644635 jobs134225245837/134225246062: web/Node 2,782,976 B.
   // SHA256 26a96f1c6e97109a715a8c86a562f22619192492b97c5e75799d2c82c7be0b90.
   // Coordinator-approved measured + 10 KiB, rounded up to KiB; family and replay share these caps.
-  bitget: 2_793_472,
-  bitgetusdc: 2_793_472,
+
+  // M44 head7bd8f25, CI44224839389/job134535952644/artifact14393041086: web/Node 2,784,464 B.
+  // SHA256 49aade25741062f3c2b963dcff1c3012fa565d52f67d1176971a638dfab1fe9a.
+  // Coordinator-approved fresh + 10 KiB rounded to KiB; retain prior floors and strict boundaries.
+  bitget: 2_795_520,
+  bitgetusdc: 2_795_520,
   // #3297 run 42556682443 at e5ae4d9a8db measured 1,895,658 B; +10 KiB rounded up.
   // Keep the larger PR-parent cap when merging master; both measurement histories remain pinned.
   // #3301 at 8628807c88b: CI run 42609133754, artifacts 13671350218 / 13670477262
