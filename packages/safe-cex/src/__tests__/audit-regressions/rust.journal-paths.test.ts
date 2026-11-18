@@ -86,6 +86,46 @@ describe('Rust journal paths follow the TS venue declarations', () => {
     expect(records).toHaveLength(2);
   });
 
+
+  it.each([{ orders: [] }, { orders: [{ id: 'known', positionSide: PositionSide.Long }] }])(
+    'keeps a closed-PnL range unresolved when the order axis omits a closing order: %j',
+    async ({ orders }) => {
+      const rows = [
+        { symbol: 'BTCUSDT', orderId: 'known', side: 'Sell', closedSize: '1', avgEntryPrice: '100', avgExitPrice: '110', closedPnl: '10', updatedTime: '1001' },
+        { symbol: 'BTCUSDT', orderId: 'missing', side: 'Sell', closedSize: '1', avgEntryPrice: '100', avgExitPrice: '120', closedPnl: '20', updatedTime: '1002' },
+      ];
+      const original = structuredClone(rows);
+      const responses = { fetchClosedPositions: rows, fetchOrderHistory: orders };
+      const { exchange } = make('bybit', responses);
+      const unresolved = await exchange.fetchHistoricalPositions({ account: 'acct', from: 1, to: 2000 });
+      // A partial aggregate could later acquire a different first-order key.
+      // Retain the source rows and publish no confident aggregate until every join resolves.
+      expect(unresolved).toEqual([]);
+      expect(unresolved).toHaveProperty('incomplete', true);
+      expect(unresolved).toHaveProperty('incompleteReason', 'unresolvedHedgeLeg');
+      expect(rows).toEqual(original);
+      responses.fetchOrderHistory = [
+        { id: 'known', positionSide: PositionSide.Long },
+        { id: 'missing', positionSide: PositionSide.Long },
+      ];
+      const repaired = await exchange.fetchHistoricalPositions({ account: 'acct', from: 1, to: 2000 });
+      expect(repaired).toHaveLength(1);
+      expect(repaired[0]).toMatchObject({ positionSide: PositionSide.Long, closeCount: 2, closedSize: 2 });
+      expect(repaired).not.toHaveProperty('incomplete');
+    },
+  );
+
+  it('retains a positively joined one-way leg', async () => {
+    const row = { symbol: 'BTCUSDT', orderId: 'one-way', side: 'Sell', closedSize: '1', avgEntryPrice: '100', avgExitPrice: '110', closedPnl: '10', updatedTime: '1001' };
+    const { exchange } = make('bybit', {
+      fetchClosedPositions: [row], fetchOrderHistory: [{ id: 'one-way', positionSide: 'both' }],
+    });
+    const records = await exchange.fetchHistoricalPositions({ account: 'acct', from: 1, to: 2000 });
+    expect(records).toHaveLength(1);
+    expect(records[0].positionSide).toBe('both');
+    expect(records).not.toHaveProperty('incomplete');
+  });
+
   it('bybit refuses to present an unjoined history and propagates a failed row read', async () => {
     const failedOrders = make('hyrotrader', { fetchClosedPositions: [], fetchOrderHistory: new Error('down') }).exchange;
     await expect(failedOrders.fetchHistoricalPositions({ account: 'a' })).rejects.toThrow(

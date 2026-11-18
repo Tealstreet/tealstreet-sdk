@@ -4011,7 +4011,7 @@ export class RustEngineExchange extends BaseExchange {
     const records = aggregateBybitClosedPnl(rows, {
       account: opts.account,
       resolveSettleCurrency: (symbol: string) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
-      resolveLeg: legs.size ? (orderId: string) => legs.get(orderId) : undefined,
+      resolveLeg: (orderId: string) => legs.get(orderId),
     });
     return copyHistoryCompleteness(orders, copyHistoryCompleteness(rows, records));
   };
