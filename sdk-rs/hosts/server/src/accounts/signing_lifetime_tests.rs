@@ -27,7 +27,7 @@ impl Signer for ValueFreeSigner {
         Box::pin(std::future::ready(Err(SignError::Refused)))
     }
 }
-fn resident(released: Arc<AtomicUsize>) -> ResidentCopy {
+fn resident(released: Arc<AtomicUsize>) -> Arc<ResidentCopy> {
     let protection = ProtectedProvider::new(Arc::new(ValueFreeSigner(released))).unwrap();
     let identities = Identities {
         primary: Some(Identity::new(
@@ -83,7 +83,9 @@ fn cosigned() -> (Arc<Account>, safe_cex_engine::signing::Provider, KeyRef) {
     let engine = account.signing.provider();
     (account, engine, key)
 }
-fn delegated(resident: ResidentCopy) -> (Arc<Account>, safe_cex_engine::signing::Provider, KeyRef) {
+fn delegated(
+    resident: Arc<ResidentCopy>,
+) -> (Arc<Account>, safe_cex_engine::signing::Provider, KeyRef) {
     let mut account = account();
     let key = resident
         .identities()

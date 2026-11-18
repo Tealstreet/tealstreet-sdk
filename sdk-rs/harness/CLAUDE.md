@@ -17,6 +17,17 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
+WOO's exact signature-error auth classification changes diagnostics only; socket
+recovery, signing, retry and write behavior retain their lifecycle controls.
+Exact source 85a85576995b, Rust SDK run 44220127210, artifact 14390881543
+measures equal optimized web/Node/replay modules at 2,683,302 bytes. The
+coordinator's Rule 5 floor is 2,694,144 bytes, retaining 10,842 bytes and every
+historical floor.
+
+HyroTrader correlated auth-refusal metadata changes a Bybit-family input.
+Keep its native admission/uncertainty controls and fresh optimized family evidence;
+server negative-join fixtures retain the protected-provider and zero-write guards.
+
 OKX empty-envelope diagnostics retain code-0 cancellation continuation, nonzero
 stop behavior and the original native outcomes. Its scoped ordered-write tests
 pin complete per-order cancellation reporting and the explicit unknown-diagnostic
@@ -33,6 +44,13 @@ flags and the Spot admission/smoke gates remain independent.
 WASM venue caps retain both parents' measured floors. Fresh compositions must
 retain at least 10 KiB above their optimized web/Node measurement, rounded up
 to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
+
+Bitget login clock recovery at d10ba2f3c500 measures web/Node 2,782,976 B in
+CI44135644635 jobs134225245837/134225246062. The coordinator-approved cap
+2,793,472 B retains 10,496 B reserve at that source for family/replay checks.
+M44 source7bd8f25 measures 2,784,464 B in CI44224839389/job134535952644;
+artifact14393041086 has identical web/Node hashes. The coordinator-approved
+2,795,520 B cap retains 11,056 B reserve, all earlier floors and strict boundaries.
 
 BingX history diagnostics inspect failed responses with closed streaming visitors.
 Compact optional detail preserves engine error and socket allocation budgets;
@@ -77,3 +95,7 @@ construction feature checks reject raw duplicate keys and missing policy rows.
 Bybit terminal order-history retention is documented in `sdk-rs/venues/bybit/README.md`.
 Its `history.rs` change is a counted beta-WASM input and requires a fresh release/pin;
 this routing correction does not change family caps or construction membership.
+
+BingX Spot replay tracks production decoder receipts alongside pending account reads.
+Bounded drains precede ticks, checkpoints and final capture; event-loop yields
+alone cannot establish completion of gzip decoding or its queued text messages.

@@ -3,7 +3,7 @@ use safe_cex_crypto::signer::LocalSigner;
 use safe_cex_engine::signing::Identities;
 use std::{future::Future, task::Poll};
 
-fn candidate(scalar: u8) -> ResidentCopy {
+fn candidate(scalar: u8) -> Arc<ResidentCopy> {
     let mut bytes = vec![0; 40];
     bytes[0] = scalar;
     let (provider, identities) = LocalSigner::from_json_with_policy(
@@ -17,7 +17,7 @@ struct Fixture {
     registry: Registry,
     account: Arc<Account>,
     init: InitPayload,
-    candidate: ResidentCopy,
+    candidate: Arc<ResidentCopy>,
     gate: Arc<tokio::sync::Semaphore>,
     observed: Arc<Mutex<crate::delegated_e2e_io::Observed>>,
 }
@@ -522,7 +522,7 @@ async fn cold_delegated_registration(registered_scalar: u8, refuse: bool) {
                         1,
                         Arc::new(|_| panic!("cold DELEGATED construction cannot contact a device")),
                         &authority,
-                        Some(DelegatedSetup::Resident(Box::new(resident))),
+                        Some(DelegatedSetup::Resident(resident)),
                     )
                     .await;
                 if refuse {

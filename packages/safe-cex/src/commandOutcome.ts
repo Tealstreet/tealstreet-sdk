@@ -1,7 +1,7 @@
 import type { BingxWriteShapeDetail, BuilderAuthorizationDetail, HistoryDecodeDetail, OrderIdentityReceipt, VenueErrorDetail } from '@tealstreet/safe-cex-wasm/host';
 import type { ErrorCategory } from './health/errorPatterns';
 
-import { bingxWriteShapeFromError, builderAuthorizationOf, historyDecodeOf, writePlanElementsOf } from '@tealstreet/safe-cex-wasm/host';
+import { bingxWriteShapeFromError, builderAuthorizationOf, historyDecodeOf, writeCommandOf, writePlanElementsOf } from '@tealstreet/safe-cex-wasm/host';
 
 // Frozen errors must retain their identity and command outcome. Weak membership
 // carries only reporting state and cannot keep completed operations alive.
@@ -201,13 +201,15 @@ export const exchangeErrorCategory = (value: unknown): ErrorCategory | undefined
 };
 
 /** The classified fields of an engine error, for the `'error'` event payload. */
-export type ClassifiedError = { kind?: ExchangeErrorKind; outcome?: CommandOutcome; venueCode?: string; bingxWriteShape?: BingxWriteShapeDetail };
+export type ClassifiedError = { kind?: ExchangeErrorKind; outcome?: CommandOutcome; venueCode?: string; command?: string; bingxWriteShape?: BingxWriteShapeDetail };
 
 /** Only the closed-set classification of `value`; undefined when it carries none. */
 export const classifiedError = (value: unknown): ClassifiedError | undefined => {
   if (value === null || typeof value !== 'object') return undefined;
-  const { kind, outcome, venueCode } = value as { kind?: unknown; outcome?: unknown; venueCode?: unknown };
+  const { kind, outcome, venueCode, command } = value as { kind?: unknown; outcome?: unknown; venueCode?: unknown; command?: unknown };
   const result: ClassifiedError = {};
+  const operation = writeCommandOf(command);
+  if (operation) result.command = operation;
   if (typeof kind === 'string' && KINDS.includes(kind)) result.kind = kind as ExchangeErrorKind;
   if (typeof outcome === 'string' && OUTCOMES.includes(outcome)) result.outcome = outcome as CommandOutcome;
   if (typeof venueCode === 'string' && venueCode) result.venueCode = venueCode;
@@ -280,6 +282,8 @@ export const exchangeErrorTags = (value: unknown): Record<string, string> => {
   if (value === null || typeof value !== 'object') return {};
   const { kind, outcome, venueCode } = value as { kind?: unknown; outcome?: unknown; venueCode?: unknown };
   const tags: Record<string, string> = {};
+  const operation = writeCommandOf((value as { command?: unknown }).command);
+  if (operation) tags.error_command = operation;
   if (typeof kind === 'string' && KINDS.includes(kind)) {
     tags.error_kind = kind;
     tags.error_category = CATEGORIES[kind as ExchangeErrorKind];

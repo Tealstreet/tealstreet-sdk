@@ -142,6 +142,7 @@ const commandTimeout = (value) => {
 const WRITE_COMMANDS = new Set(['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
   'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode', 'setStpMode',
   'setAccountTier', 'scheduleCancel']);
+export const writeCommandOf = (value) => typeof value === 'string' && WRITE_COMMANDS.has(value) ? value : undefined;
 class UnknownEngineActionError extends Error {}
 class CommandDiagnosticCallbackError extends Error {
   constructor(cause) { super('Command diagnostic callback failed', { cause }); }
@@ -200,6 +201,8 @@ function receiptSession(fill) {
 }
 
 function commandReceiptSnapshot(error, command) {
+  const operation = writeCommandOf(command?.op);
+  if (operation) error.command = operation;
   if (!command?.receiptKey) return;
   error.receiptKey = command.receiptKey;
   error.commandId = command.commandId;

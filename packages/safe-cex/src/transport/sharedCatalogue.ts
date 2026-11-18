@@ -2,6 +2,15 @@ import type { HttpPacket, HttpResponse } from '@tealstreet/safe-cex-wasm/host';
 
 import { HttpPreparationError } from '@tealstreet/safe-cex-wasm/host';
 
+/** A local coordination refusal, before any HTTP transport preparation. */
+export class CatalogueCoordinationError extends HttpPreparationError {
+  readonly preparationSource = 'catalogue_coordination' as const;
+
+  constructor() {
+    super('network');
+  }
+}
+
 const POLL_MS = 100;
 const STORAGE_MS = 250;
 type Entry = {
@@ -247,7 +256,7 @@ export class SharedCatalogue {
     try {
       owner = crypto.randomUUID();
     } catch {
-      if (this.policy.strict && this.coordinated) throw new HttpPreparationError('network');
+      if (this.policy.strict && this.coordinated) throw new CatalogueCoordinationError();
       return;
     }
     const stopAt = Math.min(deadline, Date.now() + this.policy.leaseMs);
@@ -294,7 +303,7 @@ export class SharedCatalogue {
       } catch (error) {
         signal.throwIfAborted();
         if (error instanceof HttpPreparationError) throw error;
-        if (this.policy.strict && this.coordinated) throw new HttpPreparationError('network');
+        if (this.policy.strict && this.coordinated) throw new CatalogueCoordinationError();
         return;
       }
     }

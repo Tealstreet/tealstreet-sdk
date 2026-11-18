@@ -15,7 +15,7 @@ pub(crate) struct AccountSigner {
     original: Option<safe_cex_engine::signing::Provider>,
     identities: Identities,
     link: Option<Arc<SignerLink>>,
-    resident: Mutex<Option<ResidentCopy>>,
+    resident: Mutex<Option<Arc<ResidentCopy>>>,
     binding: Option<safe_cex_remote_signer::PublicBindingSource>,
 }
 // Engine handles retain dispatch access, never the account's erasure authority.
@@ -51,7 +51,7 @@ impl AccountSigner {
         provider: Option<safe_cex_engine::signing::Provider>,
         identities: Identities,
         link: Option<Arc<SignerLink>>,
-        resident: Option<ResidentCopy>,
+        resident: Option<Arc<ResidentCopy>>,
     ) -> Arc<Self> {
         Self::new_bound(provider, identities, link, resident, None)
     }
@@ -60,7 +60,7 @@ impl AccountSigner {
         provider: Option<safe_cex_engine::signing::Provider>,
         identities: Identities,
         link: Option<Arc<SignerLink>>,
-        resident: Option<ResidentCopy>,
+        resident: Option<Arc<ResidentCopy>>,
         binding: Option<safe_cex_remote_signer::PublicBindingSource>,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -76,11 +76,11 @@ impl AccountSigner {
             binding,
         })
     }
-    pub(super) fn resident(&self) -> Option<ResidentCopy> {
+    pub(super) fn resident(&self) -> Option<Arc<ResidentCopy>> {
         self.resident.lock().unwrap().clone()
     }
     #[cfg(test)]
-    pub(crate) fn set_test_resident(&self, resident: ResidentCopy) {
+    pub(crate) fn set_test_resident(&self, resident: Arc<ResidentCopy>) {
         *self.resident.lock().unwrap() = Some(resident);
     }
 
@@ -140,13 +140,16 @@ impl AccountSigner {
             .map_err(|_| Unavailable)
     }
 
-    pub(super) fn upgrade(&self, resident: ResidentCopy) -> Result<bool, ModeTransitionRefusal> {
+    pub(super) fn upgrade(
+        &self,
+        resident: Arc<ResidentCopy>,
+    ) -> Result<bool, ModeTransitionRefusal> {
         self.upgrade_proven(resident, None)
     }
 
     pub(super) fn upgrade_proven(
         &self,
-        resident: ResidentCopy,
+        resident: Arc<ResidentCopy>,
         public: Option<&PublicKey>,
     ) -> Result<bool, ModeTransitionRefusal> {
         use ModeTransitionRefusal::{Busy, Unavailable};
@@ -477,11 +480,34 @@ mod tests {
             ],
         }
     }
-    fn resident(calls: Arc<Mutex<Vec<SignRequest>>>) -> ResidentCopy {
-        ResidentCopy::test_provider_with_identities(
-            Arc::new(Recording { calls, wait: false }),
-            identities("new"),
-        )
+    // This synchronous resident records synthetic requests and owns no keys.
+    // Original asynchronous Recording controls retain their existing behavior.
+    struct ProtectedRecording(Calls);
+    impl safe_cex_engine::signing::ProtectedSigner for ProtectedRecording {}
+    impl Signer for ProtectedRecording {
+        fn immediate(&self) -> bool {
+            true
+        }
+        fn can_sign(&self, _: &KeyRef, algorithm: Algorithm) -> Capability {
+            if algorithm == Algorithm::HmacSha256 {
+                Capability::Supported
+            } else {
+                Capability::Unsupported
+            }
+        }
+        fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+            self.0.lock().unwrap().push(request.clone());
+            Some(Err(SignError::Refused))
+        }
+        fn sign(&self, request: SignRequest) -> SignFuture {
+            Box::pin(std::future::ready(self.sign_ready(&request).unwrap()))
+        }
+    }
+    fn resident(calls: Arc<Mutex<Vec<SignRequest>>>) -> Arc<ResidentCopy> {
+        let protected =
+            safe_cex_engine::signing::ProtectedProvider::new(Arc::new(ProtectedRecording(calls)))
+                .unwrap();
+        ResidentCopy::test_protected_provider(protected, identities("new"))
     }
     fn signer() -> (Arc<AccountSigner>, Calls, Arc<SignerLink>) {
         let calls: Calls = Arc::default();
