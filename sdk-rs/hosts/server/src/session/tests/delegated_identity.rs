@@ -64,7 +64,7 @@ async fn snapshot(session: &mut Session, sent: &mut crate::out::Receiver, label:
     })
     .await
     .expect("account loads before the socket releases its held snapshot");
-    assert!(session.resnapshot(label).await);
+    assert!(session.resnapshot(label, None).await);
     frame(sent, "frame").await
 }
 

@@ -211,3 +211,14 @@ All Futures Unknown trading failures include reconciliation guidance, including
 HTTP 200 native server errors and unproven cancellation statuses. Batch errors
 retain an unknown leg's message and native diagnostics together when a later
 leg is definitively refused.
+
+## Public read refusal diagnostics
+
+Futures public response refusals name only the endpoint class (`instruments`,
+`tickers` or `candles`), HTTP status and a closed reason. The first refused
+predicate is `http_status`, `invalid_envelope`, `result_not_success`,
+`error_present` or `status_not_success`; missing streamed arrays and malformed
+JSON use `missing_list` and `malformed_json`. `unknown` is the defensive fallback.
+No response values, bodies, symbols, headers or parser previews enter these messages.
+The existing acceptance tests, chart-envelope exemption, startup failure kinds,
+context delivery checks and discovery backoff remain unchanged.

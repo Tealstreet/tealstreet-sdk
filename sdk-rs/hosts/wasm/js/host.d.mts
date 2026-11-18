@@ -13,11 +13,23 @@ import type { EngineCapabilities } from './wire.mjs';
 export type { EngineCapabilities };
 export type HistoryDecodeDetail = {
   schema: 'bitgetClassicFills' | 'bitgetUtaFills' | 'bitgetClassicOrders' | 'bitgetUtaOrders'
-    | 'bitgetClassicIncome' | 'bitgetUtaIncome' | 'bitgetPublicTrades' | 'krakenFills' | 'krakenOrders' | 'krakenIncome';
+    | 'bitgetClassicIncome' | 'bitgetUtaIncome' | 'bitgetPublicTrades' | 'krakenFills' | 'krakenOrders' | 'krakenIncome'
+    | 'bingxIncome' | 'bingxOrders';
   reason: 'rowShape' | 'identity' | 'symbol' | 'quantity' | 'filledQuantity' | 'timestamp'
     | 'timestampOrder' | 'side' | 'orderStatus' | 'orderType' | 'fee' | 'market' | 'economics'
     | 'quantityNegative' | 'quantityZero' | 'filledQuantityNegative' | 'filledQuantityExceedsQuantity'
-    | 'quantityDecimal' | 'filledQuantityDecimal' | 'timestampDecimal' | 'lastUpdateTimestampDecimal' | 'limitPriceDecimal';
+    | 'quantityDecimal' | 'filledQuantityDecimal' | 'timestampDecimal' | 'lastUpdateTimestampDecimal' | 'limitPriceDecimal'
+    | 'fieldType' | 'fieldValue' | 'envelopeShape' | 'envelopeCode' | 'dataShape';
+  shape?: {
+    field: 'root' | 'code' | 'msg' | 'data' | 'data.orders' | 'row' | 'row.symbol' | 'row.incomeType'
+      | 'row.income' | 'row.asset' | 'row.time' | 'row.tranId' | 'row.tradeId' | 'row.orderId'
+      | 'row.side' | 'row.type' | 'row.status' | 'row.price' | 'row.avgPrice' | 'row.origQty'
+      | 'row.executedQty' | 'row.reduceOnly' | 'row.positionSide' | 'row.updateTime';
+    expected: 'object' | 'array' | 'integer' | 'string' | 'numberOrNumericString' | 'stringOrInteger'
+      | 'booleanOrStringOrNull' | 'stringOrNull' | 'stringOrIntegerOrNull' | 'arrayOrObject';
+    actual: 'missing' | 'invalidJson' | 'null' | 'boolean' | 'number' | 'string' | 'array' | 'object';
+    envelopeCode: 'present' | 'absent' | 'unavailable';
+  };
 };
 export function historyDecodeOf(value: unknown): HistoryDecodeDetail | undefined;
 
