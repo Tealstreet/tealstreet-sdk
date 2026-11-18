@@ -676,10 +676,18 @@ export class RustEngineExchange extends BaseExchange {
   private readonly commandTimeoutMs: number;
   private readonly bridgeConstruction: EngineBridgeConstruction;
   private publicDemandReady = false;
-  private readonly publicFeedObservers = new Set<{ updated(catalogChanged: boolean): void; diagnostics?(frame: Frame): void; closed(): void }>();
+  private readonly publicFeedObservers = new Set<{
+    updated(catalogChanged: boolean): void;
+    diagnostics?(frame: Frame): void;
+    closed(): void;
+  }>();
 
   /** Public providers observe applied native ticker frames, without replacing onFrame. */
-  observePublicFeed(observer: { updated(catalogChanged: boolean): void; diagnostics?(frame: Frame): void; closed(): void }): () => void {
+  observePublicFeed(observer: {
+    updated(catalogChanged: boolean): void;
+    diagnostics?(frame: Frame): void;
+    closed(): void;
+  }): () => void {
     this.publicFeedObservers.add(observer);
     return () => {
       this.publicFeedObservers.delete(observer);
@@ -727,6 +735,7 @@ export class RustEngineExchange extends BaseExchange {
    */
   readonly frameFedReady: Promise<boolean>;
   private frameFed = false;
+  private pageMarketsLoaded = false;
   private frameFedSettled = false;
   private pageWriteSupported?: boolean;
   private frameFedEngine = false;
@@ -1307,6 +1316,7 @@ export class RustEngineExchange extends BaseExchange {
     host.start();
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
     this.flushTimers.push(setInterval(() => this.host?.flush(), STORE_FLUSH_MS * multiplier));
+    await this.untilPageMarkets();
     return true;
   };
 
@@ -2151,6 +2161,10 @@ export class RustEngineExchange extends BaseExchange {
         }
         throw this.pageWriterUnavailable(method);
       }
+      await this.untilPageMarkets();
+      admitted?.(method, args);
+      if (this.isDisposed) throw this.workerOwnerChanged(method, args);
+      if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
       return await send();
     } catch (error) {
       const callerReports =
@@ -2160,6 +2174,36 @@ export class RustEngineExchange extends BaseExchange {
       throw error;
     }
   };
+
+  /** Source readiness cannot authorize the page engine's independent instrument read. */
+  private untilPageMarkets = (): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const finish = (error?: Error) => {
+        clearTimeout(timeout);
+        this.startupWaiters.delete(wake);
+        if (error) reject(error);
+        else resolve();
+      };
+      const wake = () => {
+        const failure = this.engineFailure ?? this.startupFailure;
+        if (failure || this.isDisposed) finish(failure ?? new Error('Exchange disposed during page market load'));
+        else if (this.pageMarketsLoaded) finish();
+      };
+      const message = 'Timed out waiting for page engine markets';
+      const timeout = setTimeout(
+        () =>
+          finish(
+            new ExchangeError(message, {
+              message,
+              kind: 'timeout',
+              outcome: 'notSent',
+            }),
+          ),
+        this.startupWriteWaitMs,
+      );
+      this.startupWaiters.add(wake);
+      wake();
+    });
 
   /** A mirror can be used before its host wires `callMethod`; calls wait for that bridge. */
   private untilWorkerBridge = async (assertCurrent?: () => void): Promise<() => boolean> => {
@@ -2498,7 +2542,12 @@ export class RustEngineExchange extends BaseExchange {
 
   private receiveFrame = (buffer: ArrayBuffer) => {
     // A page write engine never republishes account state over its source's frames.
-    if (this.isWorkerMirror) return;
+    if (this.isWorkerMirror) {
+      const loaded = new Frame(buffer).status()?.loaded;
+      if (loaded !== undefined) this.pageMarketsLoaded = (loaded & LOADED_FLAG.MARKETS) !== 0;
+      for (const wake of this.startupWaiters) wake();
+      return;
+    }
     this.applyEngineFrame(buffer, true);
   };
 
