@@ -89,3 +89,22 @@ Text key boundaries must not consume the separator needed by a following key
 This is for diagnostic copies and persisted snapshots, never signing inputs or
 the live trading transport. Keep timestamps and ordinary IDs intact. Callers
 that need a stronger schema should project only their known fields first.
+
+## Closed omission outcomes
+
+`redactDiagnosticDataWithOutcome` runs that same policy once. Success returns
+`status: redacted` and the detached copy; refusal returns `status: omitted`, the
+existing marker and only closed metadata: reason (`serialized_depth`,
+`serialized_size`, `parser_budget`, `inspection_failure`) and stage
+(`parser_inspection`, `copy`). Arbitrary thrown values are never read or coerced.
+The legacy `redactDiagnosticData` still returns exactly the outcome's value.
+No sink behavior, parser limits, credential matching or grouping changes here.
+
+`inspectedStringBytes` counts UTF-8 bytes of unique string values reached by
+parser discovery, including decoded nested JSON strings, capped at 1,048,576.
+`byteCountCapped` means additional bytes were encountered. This is partial work,
+not total input/serialized size: inaccessible properties, property names and
+unvisited siblings are not counted. Accounting reads no objects again and does
+not encode or serialize a raw payload. Metadata never carries input excerpts,
+property paths, exception text or inferred producer labels; consumers supply
+closed producer labels at their own boundary.

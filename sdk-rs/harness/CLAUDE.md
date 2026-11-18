@@ -17,6 +17,11 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
+OKX empty-envelope diagnostics retain code-0 cancellation continuation, nonzero
+stop behavior and the original native outcomes. Its scoped ordered-write tests
+pin complete per-order cancellation reporting and the explicit unknown-diagnostic
+fallback; optimized family evidence remains separate from these native controls.
+
 BingX Spot qualification adds independent Spot public/private cases to the `bingx` suite.
 The nondefault `bingx-spot-replay` WASM feature exports a fixed-credential fixture constructor;
 normal factories still refuse Spot. Shipped family size checks run before the fixture build.
@@ -32,6 +37,10 @@ to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
 Bitget login clock recovery at d10ba2f3c500 measures web/Node 2,782,976 B in
 CI44135644635 jobs134225245837/134225246062. The coordinator-approved cap
 2,793,472 B retains 10,496 B reserve for family and replay checks and all prior floors.
+
+BingX history diagnostics inspect failed responses with closed streaming visitors.
+Compact optional detail preserves engine error and socket allocation budgets;
+fresh web/Node artifacts must retain the existing family cap and 10 KiB reserve.
 
 TxFlow agent refresh #3314 at merge 9bb43250830d measures 2,147,684 bytes;
 refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its

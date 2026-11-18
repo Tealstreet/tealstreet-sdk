@@ -32,10 +32,14 @@ A single topic that cannot fit both subscription and later unsubscription is
 refused locally with a bounded `subscription.rejected` event, while other topics
 continue. Reconnects and book/candle repair use the same bounded formatter.
 
-A native `30001` ticker refusal naming a known REST market as nonexistent emits
-one fixed-title Warn per topic for the engine lifetime. Other refusals remain
-Errors. The existing 1/2/4-second subscription retries, recovery and reconnect
-subscriptions are unchanged; REST markets are not removed by a WS refusal.
+A native `30001` ticker refusal naming the exact known REST market and product
+as nonexistent retires only that ticker topic for the engine lifetime, including
+the venue's `,precision:null` spelling. It cancels an existing topic retry and
+skips future retry/reconnect subscription sends, with one fixed-title Warn.
+A fresh engine starts from its own catalogue again. REST rows and book/candle
+subscriptions remain available; unrelated refusals retain Errors and the existing
+1/2/4-second retries. Initial catalogue selection retains the legacy partition
+without inferring WS availability from a symbol's spelling or trading status.
 
 Protocol sources for the scripted tests:
 
