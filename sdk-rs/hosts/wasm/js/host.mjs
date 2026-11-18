@@ -1,3 +1,5 @@
+import { bingxWriteShapeFromError } from './bingx-write-shape.mjs';
+export { bingxWriteShapeOf, bingxWriteShapeFromError } from './bingx-write-shape.mjs';
 import { historyDecodeOf } from './history-decode.mjs';
 export { historyDecodeOf } from './history-decode.mjs';
 import { ManagedHttp, prepareFetch } from './managed-http.mjs';
@@ -257,6 +259,8 @@ function writePlanErrorOf(value, active, depth) {
     if (typeof value.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value.causeCode)) error.causeCode = value.causeCode;
     const historyDecode = historyDecodeOf(value.historyDecode);
     if (historyDecode) error.historyDecode = historyDecode;
+    const bingxWriteShape = bingxWriteShapeFromError(value);
+    if (bingxWriteShape) error.bingxWriteShape = bingxWriteShape;
     const builder = builderAuthorizationOf(value.builderAuthorization);
     if (builder) error.builderAuthorization = builder;
     if (Number.isFinite(value.retryAfterMs) && value.retryAfterMs >= 0) error.retryAfterMs = value.retryAfterMs;
@@ -326,6 +330,8 @@ export class ExchangeError extends Error {
     if (typeof detail.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(detail.causeCode)) this.causeCode = detail.causeCode;
     const historyDecode = historyDecodeOf(detail.historyDecode);
     if (historyDecode) this.historyDecode = historyDecode;
+    const bingxWriteShape = bingxWriteShapeFromError(detail);
+    if (bingxWriteShape) this.bingxWriteShape = bingxWriteShape;
     const venueCode = text(detail.venueCode);
     if (venueCode) this.venueCode = venueCode;
     const venueMessage = text(detail.venueMessage);

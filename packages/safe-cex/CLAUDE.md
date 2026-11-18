@@ -2540,3 +2540,8 @@ Join-proof v1 wire declarations live in `src/joinProof.types.ts`, re-exported
 from `src/types.ts`. They do not widen the legacy remote-signer dispatch or
 enable a venue. Rust owns closed payload decoding/public identity projection;
 see `docs/plans/callers/public-key-admission.md` and the admission contract tests.
+
+BingX cancel/amend `invalidInput` diagnostics preserve a validated, value-free
+`bingxWriteShape` through host errors, command cloning and typed telemetry tags.
+The closed schema and evidence bounds live in `sdk-rs/venues/bingx/README.md`;
+raw request/row fields are never copied into this diagnostic record.

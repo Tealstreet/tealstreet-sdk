@@ -18,3 +18,9 @@ test('invalid enum, parameter value, numeric bounds and hostile accessors fail c
  for(const value of cases)assert.equal(host.bingxWriteShapeOf?.(value),undefined);
  const throwing=record();Object.defineProperty(throwing,'idClass',{get(){throw Error('unreadable')}});assert.equal(host.bingxWriteShapeOf?.(throwing),undefined);
 });
+
+test('nested indexed outcomes preserve the same validated record',()=>{
+ const rows=host.writePlanElementsOf([{index:0,status:'notSent',error:{message:'fixture refusal',kind:'invalidInput',venueCode:'109400',bingxWriteShape:{...record(),orderId:'private-order',signature:'private-signature'}}}]);
+ assert.deepEqual(rows[0].error.bingxWriteShape,record());
+ assert.ok(!JSON.stringify(rows).includes('private-'));
+});

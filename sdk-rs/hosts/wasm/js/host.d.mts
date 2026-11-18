@@ -24,6 +24,24 @@ export type HistoryDecodeDetail = {
 };
 export function historyDecodeOf(value: unknown): HistoryDecodeDetail | undefined;
 
+export interface BingxWriteShapeDetail {
+  endpointFamily: 'order' | 'amend' | 'cancelReplace' | 'cancelAll';
+  method: 'DELETE' | 'POST';
+  parameterNames: Array<'cancelClientOrderId' | 'cancelOrderId' | 'cancelReplaceMode' | 'cancelRestrictions'
+    | 'clientOrderId' | 'closePosition' | 'orderId' | 'positionId' | 'positionSide' | 'price'
+    | 'priceProtect' | 'quantity' | 'reduceOnly' | 'side' | 'signature' | 'stopGuaranteed'
+    | 'stopPrice' | 'symbol' | 'timeInForce' | 'timestamp' | 'type' | 'workingType'>;
+  hasOtherParameters: boolean;
+  idClass: 'numeric' | 'other' | 'missing';
+  /** 64 means 64 or more digits; other/missing identities use zero. */
+  idDigits: number;
+  targetKind: 'limit' | 'takeProfit' | 'stopLoss' | 'trigger' | 'attached' | 'trailing' | 'other' | 'unavailable' | 'multiple';
+  symbolFormat: 'hyphenated' | 'compact' | 'other' | 'missing';
+  replacement: 'observed' | 'unobserved' | 'notApplicable';
+}
+export function bingxWriteShapeOf(value: unknown): BingxWriteShapeDetail | undefined;
+export function bingxWriteShapeFromError(value: unknown): BingxWriteShapeDetail | undefined;
+
 export const DEFAULT_COMMAND_TIMEOUT_MS: 120000;
 
 export interface Socket {
@@ -117,6 +135,7 @@ export interface VenueErrorDetail {
   outcome?: 'notSent' | 'rejected' | 'unknown';
   causeCode?: string;
   historyDecode?: HistoryDecodeDetail;
+  bingxWriteShape?: BingxWriteShapeDetail;
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
@@ -235,6 +254,7 @@ export class ExchangeError extends Error {
   readonly outcome?: NonNullable<VenueErrorDetail['outcome']>;
   readonly causeCode?: string;
   readonly historyDecode?: HistoryDecodeDetail;
+  readonly bingxWriteShape?: BingxWriteShapeDetail;
   readonly venueCode?: string;
   readonly venueMessage?: string;
   readonly retryAfterMs?: number;

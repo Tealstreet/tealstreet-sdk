@@ -1460,7 +1460,7 @@ impl Coinbase {
                 let uncertain =
                     !matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent));
                 let result = if uncertain {
-                    error.venue_message = Some(error.message.clone().into_boxed_str());
+                    error.venue_message = Some(error.message.clone().into());
                     error.message = UNKNOWN_TEXT.into();
                     error.outcome = Some(Outcome::Unknown);
                     cx.event(
