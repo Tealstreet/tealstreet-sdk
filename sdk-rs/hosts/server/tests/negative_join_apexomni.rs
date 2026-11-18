@@ -1,10 +1,10 @@
 //! ApeX Omni negative joins use the shared production admission harness.
-#[path = "join_negative/mod.rs"]
-mod join_negative;
 #[path = "join_negative/apexomni.rs"]
 mod apexomni_fixture;
-use join_negative::*;
+#[path = "join_negative/mod.rs"]
+mod join_negative;
 use apexomni_fixture::Apex;
+use join_negative::*;
 macro_rules! suite {
     ($module:ident, $venue:ty) => {
         mod $module {
