@@ -980,7 +980,7 @@ impl Okx {
                     side: row.side.into(),
                     commission: {
                         let value = first(&[row.fee, row.fill_fee]);
-                        parse_decimal(if value.is_empty() { "0" } else { value }).map(f64::abs)
+                        parse_decimal(if value.is_empty() { "0" } else { value }).map(|fee| -fee)
                     },
                     commission_asset: text(first(&[row.fee_ccy, row.ccy])),
                     position_side: (!row.pos_side.is_empty()).then(|| hedge(row.pos_side)),
