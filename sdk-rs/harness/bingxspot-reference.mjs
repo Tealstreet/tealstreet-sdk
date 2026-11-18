@@ -2,7 +2,7 @@
 import axios from 'axios';
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { TinyEmitter } from 'tiny-emitter';
-import { socketMessages } from '../hosts/wasm/js/host.mjs';
+import { replaySocketMessages } from './replay-messages.mjs';
 import { BingxSpotReference, SPOT_WS, spotSigningGolden } from '../../packages/safe-cex/src/__tests__/reference/bingxspot/bingxspot.exchange.ts';
 
 export class BingxSpotReplayExchange {
@@ -60,8 +60,8 @@ export class BingxSpotReplayExchange {
   socket(url, channels) {
     const socket = new WebSocket(url);
     for (const channel of channels) this.subscribe(socket, channel);
-    const receive = socketMessages(value => this.message(socket, value), error => { this.failure = error; });
-    socket.addEventListener('message', event => receive(event.data));
+    const receive = replaySocketMessages(value => this.message(socket, value));
+    socket.addEventListener('message', event => this.track(receive(event.data)));
     return socket;
   }
   message(socket, value) {

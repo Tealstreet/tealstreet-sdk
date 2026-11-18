@@ -320,9 +320,16 @@ same named refusal. Paused TWAP restoration and existing stop/cleanup controls
 remain available; this does not resume or replay an interrupted intent.
 
 DELEGATED `order.submit` messages use the existing method translation,
-native command completion and order audit, with the intent UUIDv7 as both request
-ID and, where supported, client order ID. Bybit protection omits its unsupported
-caller ID and reports null in the receipt. Other modes keep `callMethod` unchanged. Pending joins
+native command completion and order audit. The request ID stays the intent UUIDv7;
+Hyperliquid/Spot client order IDs are `0x` plus its 32 lowercase hex digits;
+Bitget, OKX, BloFin and Binance PM use the bare 32 hex digits. Bybit and other
+compatible text adapters retain the UUID. Lighter/Robinhood, Binance inverse,
+AsterDEX, Kraken and MEXC receive no caller venue ID, per the spec's supported-ID
+condition; receipts keep `clientOrderId: null`. The router UUID/fingerprint ledger
+remains primary dedupe in every case. Numeric adapters retain their current
+refusal pending their separate bounded-hash mapping. Bybit protection also omits
+its unsupported caller ID and reports null. HyroTrader retains its native
+caller-ID refusal. Other modes keep `callMethod` unchanged. Pending joins
 and elapsed ages of ten seconds or more refuse without a write. New replies
 use the existing instanceId registration helper. The NX router must durably
 record submits before forwarding and expose acknowledgements only after commit;
