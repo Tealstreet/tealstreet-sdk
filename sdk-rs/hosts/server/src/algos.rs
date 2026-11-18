@@ -1269,8 +1269,18 @@ pub(crate) async fn run_with_identity(
                             audit_refusal(message);
                             Err(serde_json::json!({"message":message,"outcome":"unknown"}))
                         }
-                        _ if action.as_ref().is_some_and(|receipt| !receipt.active() || !running.io_allowed()) => {
-                            audit_refusal("Action registration retired before dispatch");
+                        _ if action.as_ref().is_some_and(|receipt| {
+                            if !receipt.active() {
+                                audit_refusal("Action registration retired before dispatch");
+                                true
+                            } else if !running.io_allowed() {
+                                audit_refusal("io_fenced");
+                                true
+                            } else {
+                                false
+                            }
+                        }) => {
+                            // Keep the existing wire error; only the journal distinguishes IO.
                             Err(serde_json::json!({"message":"Action registration retired before dispatch","outcome":"notSent"}))
                         }
                         (_, Some(Err(error))) => {
