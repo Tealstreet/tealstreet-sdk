@@ -1,10 +1,10 @@
 //! AsterDEX V1 negative joins use the shared production admission harness.
-#[path = "join_negative/mod.rs"]
-mod join_negative;
 #[path = "join_negative/asterdex.rs"]
 mod asterdex_fixture;
-use join_negative::*;
+#[path = "join_negative/mod.rs"]
+mod join_negative;
 use asterdex_fixture::Aster;
+use join_negative::*;
 macro_rules! suite {
     ($module:ident, $venue:ty) => {
         mod $module {
@@ -53,13 +53,28 @@ async fn wallet_v3_shapes_remain_cosigned_proof_unavailable() {
         let f = Fixture::new::<Aster<false>>().await;
         let mut client = Client::new(&f);
         let mut init = Aster::<false>::init();
-        if wallet_key { init.key = format!("0x{}", "11".repeat(20)); }
-        else { init.application_id = Some("synthetic-main-wallet".into()); }
+        if wallet_key {
+            init.key = format!("0x{}", "11".repeat(20));
+        } else {
+            init.application_id = Some("synthetic-main-wallet".into());
+        }
         client.init(init).await;
-        client.finish::<Aster<false>>(&mut Device::default(), Answer::Correct).await;
+        client
+            .finish::<Aster<false>>(&mut Device::default(), Answer::Correct)
+            .await;
         assert!(f.registry.held(USER, ACCOUNT, client.socket()).is_none());
-        assert!(client.frames.iter().any(|v| v["d"]["data"][1]["kind"] == "proof-unavailable"));
-        assert!(!client.frames.iter().any(|v| v["d"]["op"] == "account-signing-mode" || v["t"] == "sign-req"));
+        assert!(
+            client
+                .frames
+                .iter()
+                .any(|v| v["d"]["data"][1]["kind"] == "proof-unavailable")
+        );
+        assert!(
+            !client
+                .frames
+                .iter()
+                .any(|v| v["d"]["op"] == "account-signing-mode" || v["t"] == "sign-req")
+        );
         let seen = f.seen.lock().unwrap();
         assert_eq!((seen.signed_reads, seen.rejections, seen.writes), (0, 0, 0));
     }
