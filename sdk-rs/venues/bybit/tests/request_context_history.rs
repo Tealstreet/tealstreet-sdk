@@ -344,17 +344,22 @@ fn historical_fills_preserve_milliseconds_sorting_and_execution_identity() {
             "1672282722987"
         });
         later["execId"] = serde_json::json!("e2");
-        body["result"]["list"] = serde_json::json!([early.clone(), later, early]);
+        let mut tied = later.clone();
+        tied["execId"] = serde_json::json!("e0");
+        body["result"]["list"] = serde_json::json!([early.clone(), later, tied, early]);
         h.respond("/v5/execution/list", 200, &body.to_string());
         let rows: Vec<serde_json::Value> =
             serde_json::from_str(h.result(101).unwrap().as_ref().unwrap()).unwrap();
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 3);
         assert_eq!(rows[0]["id"], "e2");
-        assert_eq!(rows[1]["id"], "e1");
+        // Equal native times keep venue order; execution IDs are not a clock.
+        assert_eq!(rows[1]["id"], "e0");
+        assert_eq!(rows[2]["id"], "e1");
         assert_eq!(rows[0]["timestamp"], 1_672_282_722.987);
-        assert_eq!(rows[1]["timestamp"], 1_672_282_722.429);
+        assert_eq!(rows[1]["timestamp"], 1_672_282_722.987);
+        assert_eq!(rows[2]["timestamp"], 1_672_282_722.429);
         assert_eq!(
-            rows[1]["timestamp"].as_f64().unwrap() * 1000.0,
+            rows[2]["timestamp"].as_f64().unwrap() * 1000.0,
             1_672_282_722_429.0
         );
     }

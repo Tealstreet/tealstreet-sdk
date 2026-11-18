@@ -1144,7 +1144,7 @@ impl BinanceFutures {
                     let (rows, native) = rows::<UserTrade, _>(body, |t| {
                         Some(Execution {
                             id: t.id.to_string(),
-                            timestamp: (t.time / 1000.0).floor(),
+                            timestamp: t.time / 1000.0,
                             symbol: t.symbol.into_owned(),
                             order_id: t.order_id.to_string(),
                             price: num::parse(&t.price),
