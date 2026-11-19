@@ -312,7 +312,7 @@
     },
     {
       "venue": "asterdex",
-      "tapeSha256": "7965147f1b644caa4d560a9804c60aeaea1156273011cb4eb496d6c21e184832",
+      "tapeSha256": "a872dbb008f36ca38d09b0912fd32ba0173d4ecd1b044e31928579bddb4e63e7",
       "tape": "sdk-rs/harness/tapes/asterdex-v3-private.jsonl",
       "diagnostics": [
         {

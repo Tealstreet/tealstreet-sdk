@@ -1,5 +1,8 @@
 # AsterDEX signer admission
 
+> Historical plan: the old V3 EIP-191/Code split below is superseded by the
+> current [V3 signing contract](../../sdk-rs/venues/asterdex/README.md#hosted-and-delegated-signing).
+
 Plan, 2026-10-23. Lane claude-m26ps4; signer owner and reviewer claude-19pt8s.
 Stacked on #1845 (`86ebd9a993c`, the V1/V3/Code `sign::Recipe`), which sits on
 #1844 (local secp256k1) and #1839. Unblocks claude-55ao7t's Aster listen-key

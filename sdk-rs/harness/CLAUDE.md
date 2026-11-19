@@ -6,6 +6,10 @@ The bounded server audit projection grants no resend or reconciliation authority
 Its peer scope decoder and identity checks share existing codec/sort machinery;
 size-only changes still require fresh canonical artifacts, with profiles and caps unchanged.
 
+Aster's independent request oracle validates every authenticated V3 method with
+network-specific EIP-712 exact-query signing and a fresh, unreused agent nonce.
+Timestamp/recvWindow and ABI/EIP-191 requests are rejected; V1 HMAC stays independent.
+
 Sam removed the CPU gate matrix, shared certification, Bitget paired ratio gate,
 planner and nightly monitor on 2026-11-17, for both master and pull requests.
 The root `CLAUDE.md` records that decision; historical CPU thresholds and

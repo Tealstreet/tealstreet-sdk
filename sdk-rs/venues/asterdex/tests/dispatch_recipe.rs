@@ -25,7 +25,6 @@ struct Case {
     params: BTreeMap<String, String>,
     now_ms: f64,
     nonce: String,
-    signature: String,
     code_query: String,
     code_signature: String,
     testnet: bool,
@@ -234,6 +233,57 @@ fn send(signer: Arc<LocalSigner>, now: f64, step: (Method, &str, Recipe)) -> Htt
 }
 
 #[test]
+fn v3_private_reads_and_session_requests_use_the_eip712_wire() {
+    let corpus: Corpus = serde_json::from_str(include_str!("fixtures/signing.json")).unwrap();
+    for case in corpus
+        .cases
+        .into_iter()
+        .filter(|case| case.name.starts_with("empty-"))
+    {
+        for (method, endpoint) in [
+            (Method::Get, "account"),
+            (Method::Get, "positionSide/dual"),
+            (Method::Get, "positionRisk"),
+            (Method::Get, "openOrders"),
+            (Method::Get, "order"),
+            (Method::Delete, "order"),
+            (Method::Post, "listenKey"),
+            (Method::Put, "listenKey"),
+            (Method::Post, "leverage"),
+            (Method::Post, "marginType"),
+            (Method::Post, "positionSide/dual"),
+            (Method::Get, "stpMode"),
+        ] {
+            let path = format!("/fapi/v3/{endpoint}");
+            let wire = safe_cex_venue_asterdex::sign::v3_wire_for_nonce(
+                method,
+                ORIGIN,
+                &path,
+                Query::new(),
+                &case.user,
+                &case.signer,
+                case.nonce.parse().unwrap(),
+                case.now_ms,
+                case.testnet,
+                &case.private_key,
+            )
+            .unwrap();
+            assert_eq!(
+                wire,
+                format!(
+                    "{ORIGIN}{path}?{}&signature={}",
+                    case.code_query, case.code_signature
+                ),
+                "current V3 private signing: {method:?} {endpoint} {}",
+                case.name
+            );
+            assert!(!wire.contains("timestamp="));
+            assert!(!wire.contains("recvWindow="));
+        }
+    }
+}
+
+#[test]
 fn v1_v3_and_code_recipes_match_independent_vectors() {
     let corpus: Corpus = serde_json::from_str(include_str!("fixtures/signing.json")).unwrap();
     for case in corpus.cases {
@@ -261,7 +311,7 @@ fn v1_v3_and_code_recipes_match_independent_vectors() {
         );
         assert_eq!(http.headers, vec![("X-MBX-APIKEY", case.signer.clone())]);
 
-        // Code EIP-712 and standard EIP-191 through address setup and the
+        // V3 EIP-712 through address setup and the
         // engine nonce: each wire equals the recipe's own preimage and wire
         // code at the reserved nonce, which the unit vectors pin at the fixture
         // nonce. The engine nonce sits on the protocol-ms floor.
@@ -291,15 +341,10 @@ fn v1_v3_and_code_recipes_match_independent_vectors() {
             "Code {}",
             case.name
         );
-        let transport = case.v1_query.split("&signature=").next().unwrap();
         assert_eq!(
             oracle(Method::Delete),
-            format!(
-                "{ORIGIN}/fapi/v3/order?{transport}&user={}&signer={}&nonce={fixture}&signature={}",
-                case.user, case.signer, case.signature
-            ),
-            "V3 {}",
-            case.name
+            oracle(Method::Post),
+            "all V3 methods use the same signed payload"
         );
         for method in [Method::Post, Method::Delete] {
             let path = "/fapi/v3/order";

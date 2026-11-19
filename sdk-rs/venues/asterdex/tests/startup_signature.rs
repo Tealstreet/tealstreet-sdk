@@ -159,16 +159,46 @@ fn one_v1_signature_rejection_can_still_recover_on_its_existing_resend() {
 fn v3_signature_refusal_keeps_its_existing_no_resend_startup_behavior() {
     let (mut engine, first) = starting(Options::v3_wallet());
     let done = reply(&mut engine, &first, 400, REJECTED);
-    assert!(
-        !done
-            .iter()
-            .any(|a| matches!(a, Action::Notice(Notice::StartupFailed { .. })))
-    );
+    assert!(done.iter().any(
+        |a| matches!(a, Action::Notice(Notice::StartupFailed { error, .. })
+        if error.kind == Some(ErrorKind::AuthInvalid))
+    ));
     assert!(
         !done
             .iter()
             .any(|a| matches!(a,Action::Http(r) if account(r)))
     );
+}
+
+#[test]
+fn v3_wallet_signature_refusal_ends_startup_without_waiting_for_timeout() {
+    for status in [200, 400] {
+        let (mut engine, first) = starting(Options::v3_wallet());
+        let done = reply(
+            &mut engine,
+            &first,
+            status,
+            r#"{"code":-1000,"msg":"Signature check failed"}"#,
+        );
+        let failures: Vec<_> = done
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::StartupFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1, "one immediate credential refusal");
+        assert_eq!(failures[0].kind, Some(ErrorKind::AuthInvalid));
+        assert_eq!(
+            failures[0].message,
+            "Aster API key signature rejected: re-create the key (V3)"
+        );
+        assert!(
+            !done
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if account(r)))
+        );
+    }
 }
 
 fn listen_key_refusal_during_account_read(status: u16) {
