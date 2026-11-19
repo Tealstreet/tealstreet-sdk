@@ -31,6 +31,8 @@ pub struct InitPayload {
     #[serde(default, deserialize_with = "text")]
     pub passphrase: Option<String>,
     pub testnet: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tuning: Option<safe_cex_venues::DisplayTuning>,
     #[serde(default, deserialize_with = "text")]
     pub application_id: Option<String>,
     #[serde(default, deserialize_with = "text")]
@@ -214,32 +216,16 @@ pub(crate) fn with_account_label(text: String, label: &str) -> String {
     if data.get("accountName").and_then(Value::as_str) == Some(label) {
         return text;
     }
-    match data.get("op").and_then(Value::as_str) {
-        Some("store") => {
-            if let Some(rows) = data
-                .get_mut("data")
-                .and_then(|data| data.get_mut("activeTWAPs"))
-                .and_then(Value::as_array_mut)
-            {
-                for row in rows {
-                    if let Some(row) = row.as_object_mut() {
-                        row.insert("accountName".into(), label.into());
-                    }
+    if data.get("op").and_then(Value::as_str) == Some("twap:stateUpdate")
+        && let Some(rows) = data.get_mut("data").and_then(Value::as_object_mut)
+    {
+        for row in rows.values_mut() {
+            for field in ["options", "state"] {
+                if let Some(fields) = row.get_mut(field).and_then(Value::as_object_mut) {
+                    fields.insert("accountName".into(), label.into());
                 }
             }
         }
-        Some("twap:stateUpdate") => {
-            if let Some(rows) = data.get_mut("data").and_then(Value::as_object_mut) {
-                for row in rows.values_mut() {
-                    for field in ["options", "state"] {
-                        if let Some(fields) = row.get_mut(field).and_then(Value::as_object_mut) {
-                            fields.insert("accountName".into(), label.into());
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
     }
     data.insert("accountName".into(), label.into());
     envelope(kind, frame["d"].take())

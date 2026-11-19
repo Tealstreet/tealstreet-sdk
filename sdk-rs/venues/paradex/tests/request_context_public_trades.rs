@@ -1,4 +1,7 @@
 //! Native single-page trades through real managed preparation and Read authority.
+#[path = "../../../engine/tests/support/request_stats_frame.rs"]
+mod request_stats_frame;
+use request_stats_frame::assert_request_stats_frame;
 mod support;
 
 use safe_cex_engine::request_context::{
@@ -179,6 +182,7 @@ fn native_unsigned_query_clamp_and_schema_survive_managed_single_page_release() 
                 (Some(900), 500),
             ] {
                 let mut e = engine(testnet, private);
+                let before_stats = e.snapshot_frame(NOW).to_vec();
                 let actions = ask(&mut e, NOW, 901, SYMBOL, limit);
                 let (token, unsigned) = preparation(&actions);
                 let host = if testnet { "testnet" } else { "prod" };
@@ -211,7 +215,12 @@ fn native_unsigned_query_clamp_and_schema_survive_managed_single_page_release() 
                 no_marker(&actions);
                 assert!(e.store().orders().is_empty());
                 assert!(e.store().positions().is_empty());
-                assert!(e.take_frame(NOW + 3.).is_none());
+                assert_request_stats_frame(
+                    &before_stats,
+                    e.take_frame(NOW + 3.),
+                    NOW + 3.,
+                    [1, 0, 0, 0, 0],
+                );
                 let duplicate = reply(&mut e, NOW + 4., &request, 200, &body);
                 assert!(results(&duplicate, 901).is_empty());
                 no_marker(&duplicate);
@@ -263,6 +272,7 @@ fn invalid_native_page_never_returns_a_valid_prefix_or_marker() {
         (200, format!(r#"{{"results":[{ROW},"#)),
     ] {
         let mut e = engine(false, false);
+        let before_stats = e.snapshot_frame(NOW).to_vec();
         let (token, _) = preparation(&ask(&mut e, NOW, 903, SYMBOL, None));
         let request = release(&mut e, token, NOW + 1.);
         let actions = reply(&mut e, NOW + 2., &request, status, &body);
@@ -275,7 +285,16 @@ fn invalid_native_page_never_returns_a_valid_prefix_or_marker() {
         assert_eq!(done[0].as_ref().unwrap_err().outcome, None);
         no_marker(&actions);
         assert!(e.store().orders().is_empty());
-        assert!(e.take_frame(NOW + 2.).is_none());
+        assert_request_stats_frame(
+            &before_stats,
+            e.take_frame(NOW + 2.),
+            NOW + 2.,
+            if status == 200 {
+                [1, 0, 0, 0, 0]
+            } else {
+                [0, 0, 0, 0, 1]
+            },
+        );
     }
 }
 
@@ -430,6 +449,7 @@ fn initial_capacity_denial_also_precedes_missing_market_empty_completion() {
 fn incremental_valid_prefix_is_discarded_on_transport_loss_or_broken_end() {
     for transport in [false, true] {
         let mut e = engine(false, false);
+        let before_stats = e.snapshot_frame(NOW).to_vec();
         let (token, _) = preparation(&ask(&mut e, NOW, 908, SYMBOL, None));
         let request = release(&mut e, token, NOW + 1.);
         e.handle(
@@ -484,6 +504,15 @@ fn incremental_valid_prefix_is_discarded_on_transport_loss_or_broken_end() {
         only_retirement(&actions, token);
         assert!(e.store().orders().is_empty());
         assert!(e.store().positions().is_empty());
-        assert!(e.take_frame(NOW + 4.).is_none());
+        assert_request_stats_frame(
+            &before_stats,
+            e.take_frame(NOW + 4.),
+            NOW + 4.,
+            if transport {
+                [0, 0, 0, 1, 0]
+            } else {
+                [1, 0, 0, 0, 0]
+            },
+        );
     }
 }

@@ -18,6 +18,7 @@ sign-meta = ["safe-cex-engine/sign-meta"]
 venues = ["dep:safe-cex-venues", "safe-cex-venues/default"]
 
 [dependencies]
+safe-cex-store-frames.workspace = true
 safe-cex-crypto.workspace = true
 safe-cex-venues = { workspace = true, optional = true }
 safe-cex-engine = { workspace = true, features = ["managed-sockets", "polling-control", "command-asterdex", "command-apexomni", "command-polymarket", "command-kucoinspot", "command-options"] }

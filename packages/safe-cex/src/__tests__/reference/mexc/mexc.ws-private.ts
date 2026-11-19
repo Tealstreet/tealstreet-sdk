@@ -1,11 +1,13 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { MexcExchange } from './mexc.exchange';
 
 import { nanoid } from 'nanoid';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { LogSeverity, Order, OrderStatus } from '../../../types';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { signMexcWsLogin } from './mexc.api';
 import { BASE_WS_URL, isMexcControlChannel, MEXC_WS_HEARTBEAT_INTERVAL_MS } from './mexc.types';
 import {
@@ -266,10 +268,37 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
       });
 
     if (orders.length) {
-      this.store.addOrUpdateOrders(orders as any);
+      (() => {
+        const incoming: StoreData['orders'] = orders as any;
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
       for (const order of orders) {
         if (order.status === OrderStatus.Closed || order.status === OrderStatus.Canceled) {
-          this.store.markOrdersTerminal([{ id: order.id }], order.status);
+          (() => {
+            const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: order.id }];
+            const nativeStatus: StoreData['orders'][number]['status'] = order.status;
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
       }
     }
@@ -341,7 +370,22 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
       .map((row) => normalizePosition(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]))
       .filter(Boolean);
     if (positions.length) {
-      this.store.addOrUpdatePositions(positions as any);
+      (() => {
+        const incoming: StoreData['positions'] = positions as any;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
     // Intentionally no REST reconciliation here. `push.personal.position`
     // is a full snapshot (holdVol/frozenVol/holdAvgPrice/leverage/liqPrice/
@@ -398,15 +442,17 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     // Canceled and Closed frames are always honored (they're authoritative
     // regardless of what our local shield thinks).
     const latest = new Map<string, Order>();
-    const orders = parsed.filter((order) => {
-      if (order.status !== OrderStatus.Open) return true;
-      if (this.parent.isRecentlyCanceledStopLikeOrderId(order.id)) return false;
-      return true;
-    }).map((order) => {
-      const next = this.parent.mergeOrderSnapshot(order, latest.get(order.id));
-      latest.set(order.id, next);
-      return next;
-    });
+    const orders = parsed
+      .filter((order) => {
+        if (order.status !== OrderStatus.Open) return true;
+        if (this.parent.isRecentlyCanceledStopLikeOrderId(order.id)) return false;
+        return true;
+      })
+      .map((order) => {
+        const next = this.parent.mergeOrderSnapshot(order, latest.get(order.id));
+        latest.set(order.id, next);
+        return next;
+      });
 
     if (!orders.length) return;
 
@@ -414,7 +460,22 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     // Canceled / Closed status carried by the frame), so a separate
     // `updateOrderStatus` call would just re-emit the store notification
     // for the same terminal transition — skip it.
-    this.store.addOrUpdateOrders(orders as any);
+    (() => {
+      const incoming: StoreData['orders'] = orders as any;
+      return applyReferenceFixture(
+        this.store,
+        {
+          orders: [
+            ...this.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
+    })();
     // Intentionally no REST fan-out. The plan/stop frame is a full-row
     // snapshot; the 1.5s coalesced `scheduleStopOrderSnapshotRefresh` fires
     // after user actions and covers cases where a frame is missed or dropped.
@@ -425,7 +486,12 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     this.refreshBalanceTimeout = setTimeout(async () => {
       try {
         const balance = await this.parent.fetchBalance();
-        if (!this.isDisposed) this.store.update({ balance });
+        if (!this.isDisposed)
+          applyReferenceFixture(
+            this.store,
+            { balance },
+            this.store.markets.map((row) => row.symbol),
+          );
       } catch (_err) {}
     }, 1000);
   };

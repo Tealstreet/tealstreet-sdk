@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 import { ENDPOINTS } from '../../exchanges/phemex/phemex.types';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
-import { DefaultStore } from '../../store/store.base';
+import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 
 describe('Phemex order-write routing audit regression', () => {
   it('keeps placement and cancellation off the rate-limited account-polling client', async () => {
-    const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, new DefaultStore());
+    const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, new FrameStore());
     const unlimitedPut = vi.fn().mockResolvedValue({ data: { code: 0, data: { orderID: 'new-order' } } });
     const unlimitedDelete = vi.fn().mockResolvedValue({ data: { code: 0 } });
     exchange.unlimitedXHR = { put: unlimitedPut, delete: unlimitedDelete } as any;

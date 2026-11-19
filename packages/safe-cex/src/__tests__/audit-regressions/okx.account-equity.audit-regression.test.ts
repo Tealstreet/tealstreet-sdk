@@ -2,14 +2,15 @@ import type { Market, Order, Position } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { parseAccountEquity } from '../reference/okx/okx.account-equity';
 import { OKXExchange } from '../reference/okx/okx.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
 
 const exchanges: OKXExchange[] = [];
 const fixture = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const market: Market = {
     id: 'BTC-USD-SWAP',
     symbol: 'BTCUSD',
@@ -50,23 +51,27 @@ const fixture = () => {
     lastUpdate: 1,
     info: { ccy: 'BTC', lever: '10' },
   };
-  store.update({
-    markets: [market],
-    tickers: [{ id: market.id, symbol: market.symbol, last: 40000, mark: 40000 } as never],
-    positions: [position],
-    orders: [order],
-    balance: {
-      used: 50,
-      free: 40017,
-      total: 40087.18,
-      upnl: 12.82,
-      info: [
-        { ccy: 'BTC', eq: '1' },
-        { ccy: 'USD', eq: '100' },
-      ],
+  applyReferenceFixture(
+    store,
+    {
+      markets: [market],
+      tickers: [{ id: market.id, symbol: market.symbol, last: 40000, mark: 40000 } as never],
+      positions: [position],
+      orders: [order],
+      balance: {
+        used: 50,
+        free: 40017,
+        total: 40087.18,
+        upnl: 12.82,
+        info: [
+          { ccy: 'BTC', eq: '1' },
+          { ccy: 'USD', eq: '100' },
+        ],
+      },
+      loaded: { markets: true, tickers: true, positions: true, balance: true, orders: true },
     },
-    loaded: { markets: true, tickers: true, positions: true, balance: true, orders: true },
-  });
+    store.markets.map((row) => row.symbol),
+  );
   const exchange = new OKXExchange('okx', { key: 'key', secret: 'secret', passphrase: 'pass' }, store);
   exchange._accountLevel = 2;
   exchange._accountPositionMode = PositionMode.OneWay;
@@ -117,8 +122,14 @@ describe('OKX account equity anchor', () => {
     vi.useFakeTimers();
     const { exchange, store } = fixture();
     const stale = store.balance;
-    const writes = vi.spyOn(store, 'update');
+    const writes = (() => {
+      const observed = vi.fn<(value: typeof store.data) => void>();
+      store.subscribe((value) => observed(value));
+      return observed;
+    })();
+    const frames = vi.spyOn(store, 'apply');
     let beforeWs = -1;
+    let framesBeforeWs = -1;
     vi.spyOn(exchange, 'fetchMarkets').mockResolvedValue(store.markets);
     vi.spyOn(exchange, 'fetchTickersRaw').mockResolvedValue([
       {
@@ -140,6 +151,7 @@ describe('OKX account equity anchor', () => {
       // The read has completed; a buffered account frame precedes its .then commit.
       queueMicrotask(() => {
         beforeWs = writes.mock.calls.length;
+        framesBeforeWs = frames.mock.calls.length;
         exchange.applyAccountEquity([{ totalEq: '40400', details: [{ ccy: 'USD', eq: '400' }] }]);
       });
       return completed;
@@ -149,8 +161,15 @@ describe('OKX account equity anchor', () => {
     const totals = writes.mock.calls
       .slice(beforeWs)
       .flatMap(([update]) => (update.balance ? [update.balance.total] : []));
-    expect(totals.length).toBeGreaterThanOrEqual(2);
-    expect(totals.every((total) => total === 40387.18)).toBe(true);
+    // Rule 5 / #3640: both WS and the final startup frame must commit fresh
+    // equity. FrameStore deduplicates the equal final state for UI subscribers.
+    // Inspect the actual frames so a missing/stale startup commit still fails.
+    const committedTotals = frames.mock.calls.slice(framesBeforeWs).flatMap(([frame]) => {
+      const balance = frame.balance();
+      return balance ? [balance.total] : [];
+    });
+    expect(committedTotals).toEqual([40387.18, 40387.18]);
+    expect(totals).toEqual([40387.18]);
     expect(store.balance).toMatchObject({ total: 40387.18, free: 40317 });
     expect(exchange.xhr.get).not.toHaveBeenCalled();
   });

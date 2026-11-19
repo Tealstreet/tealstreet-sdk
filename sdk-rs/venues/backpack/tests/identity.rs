@@ -159,6 +159,43 @@ fn respond(e: &mut Engine<Backpack>, r: &HttpRequest, status: u16, body: &str) -
     );
     e.drain_actions().collect()
 }
+// Rule 5 / #3640: identity reads preserve every financial/account byte while
+// section 35 independently records the final physical HTTP outcome.
+fn assert_unchanged_account(before: &[u8], after: &[u8], delta: [u32; 5]) {
+    assert_eq!(&after[..16], &before[..16]);
+    let sections = |frame: &[u8]| {
+        let mut at = 16;
+        safe_cex_engine::wire::sections(frame)
+            .map(|(kind, payload)| {
+                let end = at + 8 + payload.len();
+                let bytes = frame[at..end].to_vec();
+                at = end;
+                (kind, bytes)
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = sections(before);
+    let after = sections(after);
+    assert_eq!(after.len(), before.len());
+    let mut stats_seen = false;
+    for ((before_kind, mut expected), (after_kind, actual)) in before.into_iter().zip(after) {
+        assert_eq!(after_kind, before_kind);
+        if before_kind == 35 {
+            stats_seen = true;
+            for (index, increment) in delta.into_iter().enumerate() {
+                let at = 8 + index * 4;
+                let previous = u32::from_le_bytes(expected[at..at + 4].try_into().unwrap());
+                expected[at..at + 4].copy_from_slice(&(previous + increment).to_le_bytes());
+            }
+        }
+        assert_eq!(actual, expected, "account section {before_kind}");
+    }
+    assert!(
+        stats_seen,
+        "identity response snapshot must carry request statistics"
+    );
+}
+
 #[test]
 fn identity_returns_exact_response_ids_without_mutating_live_account() {
     let mut e = engine(false, false);
@@ -179,7 +216,7 @@ fn identity_returns_exact_response_ids_without_mutating_live_account() {
         result(out, false).unwrap(),
         r#"{"userId":"9007199254740993","affiliateId":null}"#
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     assert!(
         respond(
             &mut e,
@@ -211,7 +248,7 @@ fn identity_uses_secondary_read_signer_and_contract_fallback() {
         result(out, false).unwrap(),
         r#"{"userId":"read-account","affiliateId":null}"#
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
 }
 #[test]
 fn identity_missing_false_empty_or_failed_read_rejects_once_and_preserves_state() {
@@ -225,7 +262,7 @@ fn identity_missing_false_empty_or_failed_read_rejects_once_and_preserves_state(
         let before = e.account_snapshot_frame(NOW).to_vec();
         let r = request(&mut e);
         result(respond(&mut e, &r, 200, body), true).unwrap_err();
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     }
     for network in [false, true] {
         let mut e = engine(false, false);
@@ -244,7 +281,15 @@ fn identity_missing_false_empty_or_failed_read_rejects_once_and_preserves_state(
             respond(&mut e, &r, 503, "unavailable")
         };
         result(out, true).unwrap_err();
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(
+            &before,
+            e.account_snapshot_frame(NOW),
+            if network {
+                [0, 0, 0, 1, 0]
+            } else {
+                [0, 0, 0, 0, 1]
+            },
+        );
     }
 }
 #[test]

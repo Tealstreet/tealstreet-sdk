@@ -1,8 +1,7 @@
-import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../../store/store.interface';
 import type { ClientOrderLookup } from '../../../exchanges/clientOrderId';
+import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
@@ -13,6 +12,22 @@ import uniqBy from 'lodash/uniqBy';
 import { forEachSeries } from 'p-iteration';
 
 import { createApiWithSecondaryKey } from '../../../createApiWithSecondaryKey';
+import { BaseExchange, CallableMethodsInWorker } from '../../../exchanges/base';
+import {
+  BinanceIncomeRecord,
+  ENDPOINTS,
+  GET_POSITION_RISK_RESPONSE,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  ORDER_SIDE,
+  ORDER_TRIGGER_TYPE,
+  ORDER_TYPE,
+  POSITION_SIDE,
+  TIME_IN_FORCE,
+} from '../../../exchanges/binance/binance.types';
+import { orderCarriesClientOrderId, patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { paginateIncomeRange } from '../../../exchanges/income-paging';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -57,24 +72,12 @@ import { adjust, subtract } from '../../../utils/safe-math';
 import { splitTimeRange } from '../../../utils/splitTimeRange';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange, CallableMethodsInWorker } from '../../../exchanges/base';
-import { orderCarriesClientOrderId, patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
-import { paginateIncomeRange } from '../../../exchanges/income-paging';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import { createAPI, createPublicAPI } from './binance.api';
 import { deriveBinanceClosedPositions } from './binance.closed-pnl';
 import { mapBinanceHistoricalOrder } from './binance.order-history';
-import {
-  BinanceIncomeRecord,
-  ENDPOINTS,
-  GET_POSITION_RISK_RESPONSE,
-  GRAFANA_ENDPOINTS_EVERY,
-  GRAFANA_ENDPOINTS_PERIODIC,
-  ORDER_SIDE,
-  ORDER_TRIGGER_TYPE,
-  ORDER_TYPE,
-  POSITION_SIDE,
-  TIME_IN_FORCE,
-} from '../../../exchanges/binance/binance.types';
 import { markBinanceOrdersCanceled, USER_TRADES_MAX_WINDOW_MS } from './binance.utils';
 import { BinancePrivateWebsocket } from './binance.ws-private';
 import { BinancePublicWebsocket } from './binance.ws-public';
@@ -235,7 +238,7 @@ export class BinanceExchange extends BaseExchange {
   grafanaEndpointsEvery = GRAFANA_ENDPOINTS_EVERY;
   grafanaEndpointsPeriodic = GRAFANA_ENDPOINTS_PERIODIC;
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     const [xhr, primaryXhr, secondaryXhr] = createApiWithSecondaryKey(opts, this, createAPI, {
@@ -381,10 +384,14 @@ export class BinanceExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      this.store.update({
-        markets,
-        loaded: { ...this.store.loaded, markets: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          markets,
+          loaded: { markets: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       // load initial tickers data
       // then we use websocket for live data
@@ -393,10 +400,14 @@ export class BinanceExchange extends BaseExchange {
 
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} Binance markets`);
 
-      this.store.update({
-        tickers,
-        loaded: { ...this.store.loaded, tickers: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       // start websocket streams
       this.publicWebsocket.connectAndSubscribe();
@@ -420,14 +431,22 @@ export class BinanceExchange extends BaseExchange {
     this.lastOrdersRetryAt = Date.now();
     const orders = await this.fetchOrders();
     if (this.isDisposed || this.ordersSnapshotStale) return;
-    this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+    applyReferenceFixture(
+      this.store,
+      { orders, loaded: { orders: true } },
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   _startPrivate = async () => {
     this.privateWebsocket.connectAndSubscribe();
 
     // fetch current position mode (Hedge/One-way)
-    this.store.setSetting('isHedged', await this.fetchPositionMode());
+    applyReferenceFixture(
+      this.store,
+      { options: { ...this.store.options, ['isHedged']: await this.fetchPositionMode() } },
+      this.store.markets.map((row) => row.symbol),
+    );
 
     // start ticking live data
     // balance, tickers, positions
@@ -446,10 +465,14 @@ export class BinanceExchange extends BaseExchange {
 
     this.log(`Loaded Binance orders`);
 
-    this.store.update({
-      orders,
-      loaded: { ...this.store.loaded, orders: true },
-    });
+    applyReferenceFixture(
+      this.store,
+      {
+        orders,
+        loaded: { orders: true },
+      },
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   _startPublicDataOnly = async () => {
@@ -458,17 +481,21 @@ export class BinanceExchange extends BaseExchange {
     if (this.isDisposed) return;
 
     this.log(`Ready to watch public data on Binance`);
-    this.store.update({
-      orders: [],
-      balance: {
-        used: 0,
-        free: 0,
-        total: 0,
-        upnl: 0,
+    applyReferenceFixture(
+      this.store,
+      {
+        orders: [],
+        balance: {
+          used: 0,
+          free: 0,
+          total: 0,
+          upnl: 0,
+        },
+        positions: [],
+        loaded: { orders: true, balance: true, positions: true },
       },
-      positions: [],
-      loaded: { ...this.store.loaded, orders: true, balance: true, positions: true },
-    });
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   tick = async (_count = 0) => {
@@ -493,7 +520,11 @@ export class BinanceExchange extends BaseExchange {
           const positionStateVersion = this.getPositionStateVersion();
           const positionsWithRisk = await this.fetchPositions();
           if (positionStateVersion === this.getPositionStateVersion()) {
-            this.store.update({ positions: positionsWithRisk });
+            applyReferenceFixture(
+              this.store,
+              { positions: positionsWithRisk },
+              this.store.markets.map((row) => row.symbol),
+            );
           }
           this.lastPositionRiskReconciliationAt = Date.now();
           if (this.isDisposed) return;
@@ -503,15 +534,15 @@ export class BinanceExchange extends BaseExchange {
           const { balance, positions } = await this.fetchPositionsAndBalance();
           if (this.isDisposed) return;
 
-          this.store.update({
-            balance,
-            ...(positionStateVersion === this.getPositionStateVersion() && { positions }),
-            loaded: {
-              ...this.store.loaded,
-              balance: true,
-              positions: true,
+          applyReferenceFixture(
+            this.store,
+            {
+              balance,
+              ...(positionStateVersion === this.getPositionStateVersion() && { positions }),
+              loaded: { balance: true, positions: true },
             },
-          });
+            this.store.markets.map((row) => row.symbol),
+          );
           this.lastAccountReconciliationAt = Date.now();
         }
       } catch (err: any) {
@@ -664,7 +695,7 @@ export class BinanceExchange extends BaseExchange {
           leverage,
           unrealizedPnl: parseFloat(p.unRealizedProfit),
           contracts: Math.abs(contracts),
-          liquidationPrice: parseFloat(p.liquidationPrice),
+          liquidationPrice: nativeLiquidationPrice(parseFloat(p.liquidationPrice)),
           marginSize,
           marginType,
           positionMode,
@@ -687,7 +718,7 @@ export class BinanceExchange extends BaseExchange {
             leverage,
             unrealizedPnl: 0,
             contracts: 0,
-            liquidationPrice: 0,
+            liquidationPrice: null,
             marginSize: 0,
             marginType: config?.marginType === 'ISOLATED' ? MarginType.Isolated : MarginType.Cross,
             positionMode: mode,
@@ -892,6 +923,29 @@ export class BinanceExchange extends BaseExchange {
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       return { balance: this.store.balance, positions: this.store.positions };
+    }
+  };
+
+  // Test-only protocol producer: BaseExchange now expects native reads to
+  // publish frames. This retained REST oracle explicitly emits its snapshot.
+  fetchAndSetOrders = async (symbols?: string[]): Promise<Order[]> => {
+    const orders = await this.fetchOrders();
+    if (!this.isDisposed)
+      applyReferenceFixture(this.store, {
+        orders,
+        positions: this.store.positions,
+        balance: this.store.balance,
+        loaded: { orders: true },
+      });
+    return orders;
+  };
+
+  fetchAndSetPrivateSnapshot = async () => {
+    if (this.isDisposed || this.isPublicDataOnly) return;
+    try {
+      await this.fetchAndSetOrders();
+    } catch (error) {
+      this.emitAndLogError(error instanceof Error ? error : String(error));
     }
   };
 
@@ -1440,8 +1494,16 @@ export class BinanceExchange extends BaseExchange {
       };
     });
 
-    this.store.setSetting('isHedged', hedged);
-    this.store.update({ fetchedLeverage, positions });
+    applyReferenceFixture(
+      this.store,
+      { options: { ...this.store.options, ['isHedged']: hedged } },
+      this.store.markets.map((row) => row.symbol),
+    );
+    applyReferenceFixture(
+      this.store,
+      { fetchedLeverage, positions },
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   changeMarginType = async (isolated: boolean, symbol?: string) => {
@@ -1478,9 +1540,20 @@ export class BinanceExchange extends BaseExchange {
           leverage,
         });
 
-        this.store.updatePositions(
-          this.store.positions.filter((p) => p.symbol === symbol).map((p) => [{ id: p.id }, { leverage }]),
-        );
+        (() => {
+          const updates: Array<[Pick<StoreData['positions'][number], 'id'>, Partial<StoreData['positions'][number]>]> =
+            this.store.positions.filter((p) => p.symbol === symbol).map((p) => [{ id: p.id }, { leverage }]);
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: this.store.positions.map((row) => {
+                const change = updates.find(([target]) => target.id === row.id);
+                return change ? { ...row, ...change[1] } : row;
+              }),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.msg || err?.message);
         throw err;

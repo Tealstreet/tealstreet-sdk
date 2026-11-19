@@ -27,6 +27,16 @@ export const SECTION = {
   ACCOUNT_READ: 21,
   TICKER_OBSERVATIONS: 24,
   MESSAGE_HANDLER_STATS: 25,
+  SOCKET_HEALTH: 26,
+  ACTIVE_CHASERS: 27,
+  ACTIVE_TWAPS: 28,
+  ORDERS_RISK: 29,
+  DISPLAYED_POSITIONS: 30,
+  DISPLAYED_MARGIN: 31,
+  BALANCE_INFO: 32,
+  MANAGED_ORDERS: 33,
+  PUBLIC_MESSAGE_HANDLER_STATS: 34,
+  REQUEST_STATS: 35,
 };
 
 export const NONE = 0xffffffff;
@@ -37,7 +47,7 @@ export const TICKER_FIELDS = [
 ];
 
 const LEGACY_TICKER_FIELDS = TICKER_FIELDS.slice(0, 11);
-const REVISED_SECTIONS = new Set([SECTION.MARKETS, SECTION.TICKERS, SECTION.TICKER_DELTAS, SECTION.ORDERS, SECTION.POSITIONS, SECTION.FILLS, SECTION.SETTINGS]);
+const REVISED_SECTIONS = new Set([SECTION.MARKETS, SECTION.TICKERS, SECTION.TICKER_DELTAS, SECTION.ORDERS, SECTION.POSITIONS, SECTION.FILLS, SECTION.SETTINGS, SECTION.SOCKET_HEALTH, SECTION.ACTIVE_CHASERS, SECTION.ACTIVE_TWAPS, SECTION.ORDERS_RISK, SECTION.DISPLAYED_POSITIONS, SECTION.DISPLAYED_MARGIN, SECTION.BALANCE_INFO, SECTION.MANAGED_ORDERS]);
 const KNOWN_SECTIONS = new Set(Object.values(SECTION));
 
 export const MARKET_COLUMNS = [
@@ -121,6 +131,7 @@ export const positionEnums = (word) => ({
 
 // Native registries may import before their host supplies text codecs.
 let utf8 = typeof TextDecoder === 'function' ? new TextDecoder() : undefined;
+let nativeText;
 const align8 = (n) => Math.ceil(n / 8) * 8;
 const requireEnd = (section, end) => {
   if (!Number.isSafeInteger(end) || end > section.offset + section.length) throw new Error(`truncated section ${section.kind}`);
@@ -241,6 +252,118 @@ export class Frame {
     if (!this.strings) throw new Error('missing STRINGS section for string reference');
     return this.strings.get(index);
   }
+
+  /** Decode one native replacement section without a JSON/wasm round trip. */
+  nativeStoreSection(kind) {
+    const section = this.first(kind);
+    if (!section) return undefined;
+    if ([...this.of(kind)].length !== 1) throw new Error('duplicate native store section');
+    const { view } = this;
+    let at = section.offset;
+    requireEnd(section, at + 4);
+    const end = at + 4 + view.getUint32(at, true);
+    at += 4;
+    requireEnd(section, end);
+    if (align8(end) !== section.offset + section.length) throw new Error('invalid native store section length');
+    const take = (n) => {
+      if (n < 0 || at + n > end) throw new Error('truncated native store value');
+      const offset = at;
+      at += n;
+      return offset;
+    };
+    const count = () => view.getUint32(take(4), true);
+    const text = () => {
+      const n = count();
+      if (section.revision === 1) {
+        const start = take(n);
+        return (nativeText ??= new TextDecoder('utf-8', { fatal: true })).decode(new Uint8Array(this.buffer, start, n));
+      }
+      const start = take(n * 2);
+      let out = '';
+      // Bounded calls also support large retained venue info on Hermes.
+      for (let i = 0; i < n; i += 4096) {
+        const units = [];
+        for (let j = i; j < Math.min(i + 4096, n); j++) units.push(view.getUint16(start + j * 2, true));
+        out += String.fromCharCode(...units);
+      }
+      return out;
+    };
+    const read = (depth) => {
+      if (depth > 128) throw new Error('native store nesting limit');
+      const tag = view.getUint8(take(1));
+      switch (tag) {
+        case 0: return undefined;
+        case 1: return null;
+        case 2: return false;
+        case 3: return true;
+        case 4: return view.getFloat64(take(8), true);
+        case 5: return text();
+        case 6: {
+          const n = count();
+          if (n > end - at) throw new Error('invalid native store array length');
+          const out = [];
+          for (let i = 0; i < n; i++) out.push(read(depth + 1));
+          return out;
+        }
+        case 7: {
+          const n = count();
+          if (n > (end - at) / 5) throw new Error('invalid native store object length');
+          const out = {};
+          for (let i = 0; i < n; i++) {
+            const key = text();
+            if (Object.prototype.hasOwnProperty.call(out, key)) throw new Error('duplicate native store key');
+            Object.defineProperty(out, key, { value: read(depth + 1), writable: true, enumerable: true, configurable: true });
+          }
+          return out;
+        }
+        default: throw new Error('invalid native store tag');
+      }
+    };
+    const value = read(0);
+    if (at !== end) throw new Error('trailing native store value bytes');
+    for (; at < section.offset + section.length; at++) {
+      if (view.getUint8(at) !== 0) throw new Error('invalid native store padding');
+    }
+    return value;
+  }
+
+  socketHealth() { return this.nativeStoreSection(SECTION.SOCKET_HEALTH); }
+  activeChasers() { return this.nativeStoreSection(SECTION.ACTIVE_CHASERS); }
+  activeTWAPs() { return this.nativeStoreSection(SECTION.ACTIVE_TWAPS); }
+  ordersRisk() { return this.nativeStoreSection(SECTION.ORDERS_RISK); }
+  displayedPositions() { return this.nativeStoreSection(SECTION.DISPLAYED_POSITIONS); }
+  displayedMargin() { return this.nativeStoreSection(SECTION.DISPLAYED_MARGIN); }
+  balanceInfo() { return this.nativeStoreSection(SECTION.BALANCE_INFO); }
+  requestStats() {
+    const section = this.first(SECTION.REQUEST_STATS);
+    if (!section) return undefined;
+    if (section.length !== 24) throw new Error('invalid native request stats');
+    const values = new Uint32Array(this.buffer, section.offset, 5);
+    return { ok: values[0], rateLimit: values[1], auth: values[2], network: values[3], other: values[4] };
+  }
+  managedOrders() {
+    const rows = this.nativeStoreSection(SECTION.MANAGED_ORDERS);
+    if (rows === undefined) return undefined;
+    if (!rows || typeof rows !== 'object' || Array.isArray(rows)) throw new Error('invalid managed orders');
+    for (const owner of Object.values(rows)) {
+      if (!owner || typeof owner !== 'object' || Array.isArray(owner)) throw new Error('invalid managed order owner');
+      if (owner.isFromChaser !== true && owner.isFromTwap !== true) throw new Error('empty managed order owner');
+      if (owner.isFromChaser === true && (typeof owner.chaserId !== 'string' || !Number.isFinite(owner.chaserAttempts) || !Number.isFinite(owner.chaserMaxAttempts)))
+        throw new Error('incomplete chaser ownership');
+      if (owner.isFromTwap === true && typeof owner.twapId !== 'string') throw new Error('incomplete TWAP ownership');
+      for (const [key, value] of Object.entries(owner)) {
+        if (key === 'isFromChaser' || key === 'isFromTwap') {
+          if (value !== true) throw new Error('invalid managed order flag');
+        } else if (key === 'chaserId' || key === 'twapId') {
+          if (typeof value !== 'string') throw new Error('invalid managed order id');
+        } else if (key === 'chaserAttempts' || key === 'chaserMaxAttempts') {
+          if (!Number.isFinite(value)) throw new Error('invalid managed order attempts');
+        } else throw new Error('unknown managed order field');
+      }
+    }
+    return rows;
+  }
+
 
   /** A synchronous read does not represent a fresh streaming observation. */
   accountRead() {
@@ -410,8 +533,12 @@ export class Frame {
   }
 
   /** Subscription snapshot or changed rows; ages use the engine clock. */
-  messageHandlerStats() {
-    const section = this.first(SECTION.MESSAGE_HANDLER_STATS);
+  publicMessageHandlerStats() {
+    return this.messageHandlerStats(SECTION.PUBLIC_MESSAGE_HANDLER_STATS);
+  }
+
+  messageHandlerStats(kind = SECTION.MESSAGE_HANDLER_STATS) {
+    const section = this.first(kind);
     if (!section) return undefined;
     if (section.length < 8) throw new Error('truncated message handler stats');
     const count = this.view.getUint32(section.offset, true);
@@ -425,7 +552,7 @@ export class Frame {
     for (let i = 0; i < count; i++) {
       requiredString(this, this.view.getUint32(at(i) + 4, true));
       const age = ageMs(i);
-      if (group(i) > 3 || flags(i) > 3 || (!Number.isNaN(age) && (!Number.isFinite(age) || age < 0)) ||
+      if (group(i) > (kind === SECTION.PUBLIC_MESSAGE_HANDLER_STATS ? 2 : 3) || flags(i) > 3 || (!Number.isNaN(age) && (!Number.isFinite(age) || age < 0)) ||
           ((flags(i) & 2) && (!(flags(i) & 1) || Number.isNaN(age)))) throw new Error('invalid message handler stats row');
     }
     return { count, replace: Boolean(mode), group, topic: (i) => requiredString(this, this.view.getUint32(at(i) + 4, true)),

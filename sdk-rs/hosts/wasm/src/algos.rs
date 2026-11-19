@@ -74,6 +74,7 @@ struct Port {
     queued: RefCell<Vec<Command>>,
     emits: Emits,
     capabilities: safe_cex_engine::Capabilities,
+    store_inputs: Rc<RefCell<safe_cex_store_frames::Inputs>>,
     placed: RefCell<BTreeSet<String>>,
 }
 
@@ -191,7 +192,6 @@ struct Algos {
     book: Rc<ChaserBook>,
     twap: Rc<TwapFactory>,
     name: String,
-    published: String,
     /// Set once `algoDispose` started the shutdown.
     disposing: bool,
     /// Set by the shutdown task once the scope is disposed.
@@ -219,6 +219,7 @@ impl Algos {
     }
 
     /// Builds the registry exactly as the server's `run`.
+    #[allow(clippy::too_many_arguments)]
     fn start(
         name: String,
         venue: String,
@@ -227,6 +228,7 @@ impl Algos {
         now_ms: f64,
         wall_ms: f64,
         restore: TwapRestore,
+        store_inputs: Rc<RefCell<safe_cex_store_frames::Inputs>>,
     ) -> Self {
         let executor = HostExecutor::new(now_ms, wall_ms);
         let _installed = Installed(executor::set_current(Some(Rc::new(executor.clone()))));
@@ -241,11 +243,62 @@ impl Algos {
             queued: RefCell::default(),
             emits,
             capabilities: engine.capabilities(),
+            store_inputs,
             placed: RefCell::default(),
         });
         port.refresh(engine.store(), Vec::new());
         let scope = Scope::new();
         let cx = AlgoCx::new(port.clone(), scope.clone());
+        if port.capabilities.balance_info || port.capabilities.account_tier {
+            let sync = port.clone();
+            cx.spawn(async move {
+                let mut payload = None;
+                let mut tier = None;
+                let mut ticks = 0u32;
+                loop {
+                    if sync.store().loaded.is_some_and(|loaded| loaded.balance) {
+                        for (enabled, action, target) in [
+                            (
+                                sync.capabilities.balance_info,
+                                safe_cex_engine::engine::VenueAction::FetchBalanceInfo,
+                                &mut payload,
+                            ),
+                            (
+                                sync.capabilities.account_tier && ticks.is_multiple_of(7),
+                                safe_cex_engine::engine::VenueAction::FetchAccountTier,
+                                &mut tier,
+                            ),
+                        ] {
+                            if enabled {
+                                let command = Command::Venue {
+                                    command: sync.next_command_id(),
+                                    action,
+                                };
+                                if let Ok(text) = sync.command(command).await
+                                    && let Ok(value) = serde_json::from_str::<Value>(&text)
+                                    && !value.is_null()
+                                {
+                                    *target = Some(value);
+                                }
+                            }
+                        }
+                        if payload.is_some() || tier.is_some() {
+                            let mut info = payload.clone().unwrap_or_else(|| serde_json::json!({}));
+                            if let Some(tier) = &tier {
+                                if !info.is_object() {
+                                    info = serde_json::json!({});
+                                }
+                                info["lighterAccountLimits"] =
+                                    serde_json::json!({"user_tier_name":tier});
+                            }
+                            sync.store_inputs.borrow_mut().balance_info(&info);
+                        }
+                    }
+                    ticks = ticks.wrapping_add(1);
+                    executor::sleep_ms(2_000).await;
+                }
+            });
+        }
         let chasers = safe_cex_chaser::ChaserFactory::new(cx.clone());
         let book = chasers.book();
         let twap = Rc::new(match restore {
@@ -293,7 +346,6 @@ impl Algos {
             book,
             twap,
             name,
-            published: String::new(),
             disposing: false,
             finished: Rc::default(),
         };
@@ -301,17 +353,12 @@ impl Algos {
         algos
     }
 
-    /// `store` rows the frames do not carry (`activeChasers`, `activeTWAPs`).
+    /// The next native account frame carries the complete algo rows.
     fn publish(&mut self) {
-        let rows = serde_json::json!({
-            "activeChasers": self.book.active_chasers(),
-            "activeTWAPs": self.twap.active_twaps(&self.name),
-        });
-        let text = rows.to_string();
-        if self.published != text {
-            self.port.emit("store", text.clone());
-            self.published = text;
-        }
+        self.port.store_inputs.borrow_mut().algos(
+            &self.book.active_chasers(),
+            &self.twap.active_twaps(&self.name),
+        );
     }
 
     fn dispatch(&mut self, op: &str, data: &str) -> Option<()> {
@@ -539,6 +586,10 @@ impl WasmEngine {
         if self.algos.running.is_some() {
             return Err(JsError::new("algos are already running"));
         }
+        self.store_frames
+            .inputs
+            .borrow_mut()
+            .configure(account_name, &self.algos.venue);
         let algos = Algos::start(
             account_name.to_owned(),
             self.algos.venue.clone(),
@@ -547,6 +598,7 @@ impl WasmEngine {
             now_ms,
             wall_ms,
             restore,
+            self.store_frames.inputs.clone(),
         );
         self.algos.running = Some(algos);
         Ok(())

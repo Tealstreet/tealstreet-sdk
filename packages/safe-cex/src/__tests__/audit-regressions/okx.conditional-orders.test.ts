@@ -1,44 +1,50 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
-import { OKXExchange } from '../reference/okx/okx.exchange';
 import { BROKER_ID, ENDPOINTS } from '../../exchanges/okx/okx.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStopTriggerType, OrderType, PositionMode } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 
 const createExchange = (options: Record<string, any> = {}) => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTC-USDT-SWAP',
-        symbol: 'BTCUSDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
-        contractSize: 1,
+        markets: [
+          {
+            id: 'BTC-USDT-SWAP',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+            contractSize: 1,
+          },
+        ] as any,
+        tickers: [
+          {
+            id: 'BTC-USDT-SWAP',
+            symbol: 'BTCUSDT',
+            bid: 59_999,
+            ask: 60_001,
+            last: 60_000,
+            mark: 60_000,
+            index: 60_000,
+            percentage: 0,
+            openInterest: 0,
+            fundingRate: 0,
+            fundingTime: 0,
+            volume: 0,
+            quoteVolume: 0,
+          },
+        ],
       },
-    ] as any,
-    tickers: [
-      {
-        id: 'BTC-USDT-SWAP',
-        symbol: 'BTCUSDT',
-        bid: 59_999,
-        ask: 60_001,
-        last: 60_000,
-        mark: 60_000,
-        index: 60_000,
-        percentage: 0,
-        openInterest: 0,
-        fundingRate: 0,
-        fundingTime: 0,
-        volume: 0,
-        quoteVolume: 0,
-      },
-    ],
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
 
   const exchange = new OKXExchange(
     'okx',
@@ -165,23 +171,26 @@ describe('audit regression: OKX opening conditional orders', () => {
     );
   });
 
-  it.each([undefined, 0, -1, Number.NaN])('emits and rejects invalid opening trigger price %s', async (triggerPrice) => {
-    const { exchange, post } = createExchange();
-    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+  it.each([undefined, 0, -1, Number.NaN])(
+    'emits and rejects invalid opening trigger price %s',
+    async (triggerPrice) => {
+      const { exchange, post } = createExchange();
+      const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
 
-    await expect(
-      exchange.placeOrder({
-        symbol: 'BTCUSDT',
-        type: OrderType.Conditional,
-        side: OrderSide.Buy,
-        amount: 1,
-        triggerPrice,
-      }),
-    ).rejects.toThrow('Trigger price is required for OKX opening conditional orders');
+      await expect(
+        exchange.placeOrder({
+          symbol: 'BTCUSDT',
+          type: OrderType.Conditional,
+          side: OrderSide.Buy,
+          amount: 1,
+          triggerPrice,
+        }),
+      ).rejects.toThrow('Trigger price is required for OKX opening conditional orders');
 
-    expect(emitAndLogError).toHaveBeenCalledWith('Trigger price is required for OKX opening conditional orders');
-    expect(post).not.toHaveBeenCalled();
-  });
+      expect(emitAndLogError).toHaveBeenCalledWith('Trigger price is required for OKX opening conditional orders');
+      expect(post).not.toHaveBeenCalled();
+    },
+  );
 
   it('maps OKX trigger algo orders to opening conditionals', () => {
     const { exchange } = createExchange();
@@ -221,25 +230,30 @@ describe('audit regression: OKX opening conditional orders', () => {
   it('classifies reduce-only trigger rows against their selected trigger source', () => {
     const { exchange, store } = createExchange();
     exchange.markPriceLoaded('BTC-USDT-SWAP');
-    store.update({
-      tickers: [
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTC-USDT-SWAP',
-          symbol: 'BTCUSDT',
-          bid: 59_999,
-          ask: 60_001,
-          last: 60_000,
-          mark: 62_000,
-          index: 60_000,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
+          tickers: [
+            {
+              id: 'BTC-USDT-SWAP',
+              symbol: 'BTCUSDT',
+              bid: 59_999,
+              ask: 60_001,
+              last: 60_000,
+              mark: 62_000,
+              index: 60_000,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const [stopLoss] = exchange.mapOrders([
       rawTriggerOrder({
@@ -318,7 +332,12 @@ describe('audit regression: OKX opening conditional orders', () => {
   it('amends trigger edits while preserving the original execution price', async () => {
     const { exchange, post, store } = createExchange();
     const [order] = exchange.mapOrders([rawTriggerOrder({ algoId: 'trigger-edit', ordPx: '60900' })]);
-    store.update({ orders: [order] });
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await expect(exchange.updateOrder({ order, update: { price: 60_500, amount: 0.25 } })).resolves.toEqual([
       'trigger-edit',
@@ -338,7 +357,12 @@ describe('audit regression: OKX opening conditional orders', () => {
   it('sends required trigger fields for amount-only trigger edits', async () => {
     const { exchange, post, store } = createExchange();
     const [order] = exchange.mapOrders([rawTriggerOrder({ algoId: 'trigger-edit', ordPx: '60900' })]);
-    store.update({ orders: [order] });
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await expect(exchange.updateOrder({ order, update: { amount: 0.25 } })).resolves.toEqual(['trigger-edit']);
 
@@ -359,7 +383,12 @@ describe('audit regression: OKX opening conditional orders', () => {
       data: { data: [{ algoId: 'trigger-edit', sCode: '51000', sMsg: 'trigger price error' }] },
     });
     const [order] = exchange.mapOrders([rawTriggerOrder({ algoId: 'trigger-edit' })]);
-    store.update({ orders: [order] });
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await expect(exchange.updateOrder({ order, update: { price: 60_500 } })).rejects.toThrow('trigger price error');
 
@@ -373,11 +402,14 @@ describe('audit regression: OKX opening conditional orders', () => {
       data: { code: '51000', msg: 'top-level trigger error', data: [] },
     });
     const [order] = exchange.mapOrders([rawTriggerOrder({ algoId: 'trigger-edit' })]);
-    store.update({ orders: [order] });
-
-    await expect(exchange.updateOrder({ order, update: { price: 60_500 } })).rejects.toThrow(
-      'top-level trigger error',
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
     );
+
+    await expect(exchange.updateOrder({ order, update: { price: 60_500 } })).rejects.toThrow('top-level trigger error');
 
     expect(emitAndLogError).toHaveBeenCalledWith('top-level trigger error');
   });

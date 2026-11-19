@@ -1700,6 +1700,9 @@ impl Session {
     ) -> Result<Client, &'static str> {
         crate::auth::Verifier::check_expiry(self.token_expires_at_ms(), now_ms())?;
         let id = self.registry.next_id();
+        account
+            .handle
+            .configure_store_frames(&account.name, &account.venue);
         let link = account.handle.join(id, true).await?;
         if self.token_expired() {
             account.handle.leave(id);
@@ -1717,6 +1720,7 @@ impl Session {
             id,
             self.dropped.clone(),
             account.handle.clone(),
+            account.name.clone(),
             out.account_label(&account.name).to_owned(),
             out,
             pending.clone(),
@@ -3206,8 +3210,6 @@ fn settle(out: &Out, name: &str, pending: Pending, outcome: Result<Value, Value>
     let _ = out.send(envelope::msg(name, "callMethod:done", data));
 }
 
-/// How often a client's `store.socketHealth` is re-derived, as the browser engine's sync.
-const SOCKET_HEALTH_EVERY: std::time::Duration = std::time::Duration::from_secs(1);
 /// Last-message times alone change on every frame; they go out at most this often.
 const SOCKET_HEALTH_TIMES_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -3251,7 +3253,7 @@ pub fn socket_health(summary: SocketSummary) -> Value {
 
 /// Forwards one client's account output: frames as base64 SCXF with a per-client
 /// seq (the first frame is the snapshot), notices as the existing msg ops, and
-/// `store.socketHealth`, which frames do not carry, once the snapshot is out.
+/// native store sections carried by that same SCXF stream.
 /// Where a private account's pump reports that its held snapshot may go.
 struct Hold {
     client: u64,
@@ -3300,6 +3302,7 @@ async fn pump(
     client: u64,
     dropped: tokio::sync::mpsc::UnboundedSender<(String, u64)>,
     handle: AccountHandle,
+    source_name: String,
     name: String,
     out: Out,
     pending: Arc<Mutex<HashMap<u32, Pending>>>,
@@ -3315,35 +3318,7 @@ async fn pump(
         safe_cex_native::ServerConfig::default().max_frame_bytes,
     );
     let mut configuration_open = true;
-    let mut health_tick = tokio::time::interval(SOCKET_HEALTH_EVERY);
     let mut hold_tick = tokio::time::interval(SNAPSHOT_HOLD_CHECK);
-    let mut sent_health = (Value::Null, std::time::Instant::now());
-    let report_health = |sent: &mut (Value, std::time::Instant)| {
-        let sockets = handle.socket_health();
-        let health = socket_health(sockets.summary(now_ms()));
-        if !socket_health_due(&sent.0, &health, sent.1.elapsed()) {
-            return true;
-        }
-        // The host tracker's own view, on every state change: whether a private
-        // socket was ever seen opening and taking a frame.
-        if socket_health_due(&sent.0, &health, std::time::Duration::ZERO) {
-            Log::info(&format!(
-                "{name} socketHealth privateInitialized={} privateHealthy={} publicInitialized={} tracker public={:?} business={:?} private={:?}",
-                health["privateInitialized"],
-                health["privateHealthy"],
-                health["publicInitialized"],
-                sockets.public,
-                sockets.business,
-                sockets.private,
-            ));
-        }
-        *sent = (health.clone(), std::time::Instant::now());
-        out.send(envelope::msg(
-            &name,
-            "store",
-            json!({"socketHealth": health}),
-        ))
-    };
     loop {
         // Service cadence after each received item, even with a permanently ready inbox.
         // The preceding item's private sections/notices have already been sent.
@@ -3394,12 +3369,7 @@ async fn pump(
                 release_hold(&handle, &name, &mut hold, held.expect("holding")).await;
                 continue;
             }
-            _ = health_tick.tick() => {
-                if seq > 0 && !draining.load(Ordering::Relaxed) && !report_health(&mut sent_health) {
-                    break;
-                }
-                continue;
-            }
+
         };
         match item {
             Outgoing::Frame(bytes) => {
@@ -3420,6 +3390,12 @@ async fn pump(
                 if held.is_some() {
                     continue;
                 }
+                // Relabel native UI sections before cadence splits/coalesces public data.
+                let bytes = if source_name == name {
+                    bytes
+                } else {
+                    safe_cex_store_frames::with_account_label(&bytes, &name).into()
+                };
                 let initial = seq == 0;
                 match publisher.receive(bytes, initial) {
                     Ok(frames) => {
@@ -3432,9 +3408,6 @@ async fn pump(
                         let _ = dropped.send((name.clone(), client));
                         break;
                     }
-                }
-                if initial && seq > 0 && !report_health(&mut sent_health) {
-                    break;
                 }
             }
             Outgoing::Text(text) => {
@@ -4054,11 +4027,7 @@ mod tests {
                 session.init(first.clone()).await.unwrap();
                 assert!(Arc::ptr_eq(&session.joined["acct"].account, &account_a));
                 while sent.try_recv().is_ok() {}
-                let old_update = envelope::msg(
-                    "acct",
-                    "store",
-                    json!({"balance":{"info":{"syntheticOwner":"A"}}}),
-                );
+                let old_update = envelope::msg("acct", "log", json!({"syntheticOwner":"A"}));
                 account_a.notify(old_update.clone());
                 assert_eq!(
                     sent.try_recv().unwrap(),
@@ -4087,11 +4056,7 @@ mod tests {
                     !old_callback(old_update.clone()),
                     "late A callback cannot adopt B's generation"
                 );
-                let new_update = envelope::msg(
-                    "acct",
-                    "store",
-                    json!({"balance":{"info":{"syntheticOwner":"B"}}}),
-                );
+                let new_update = envelope::msg("acct", "log", json!({"syntheticOwner":"B"}));
                 account_b.notify(new_update.clone());
                 let mut queued = Vec::new();
                 while let Ok(text) = sent.try_recv() {
@@ -4582,8 +4547,8 @@ mod tests {
                 let mut chase = Value::Null;
                 while let Ok(frame) = sent.try_recv() {
                     let frame: Value = serde_json::from_str(&frame).unwrap();
-                    if frame["d"]["op"] == "store"
-                        && let Some(row) = frame["d"]["data"]["activeChasers"].get(0)
+                    if let Some(rows) = crate::accounts::testing::native_frame_data(&frame)
+                        && let Some(row) = rows["activeChasers"].get(0)
                     {
                         chase = row["id"].clone();
                     }
@@ -5692,8 +5657,7 @@ mod tests {
                 let (mut chase, mut twap) = (Value::Null, Value::Null);
                 while let Ok(frame) = sent.try_recv() {
                     let frame: Value = serde_json::from_str(&frame).unwrap();
-                    let rows = &frame["d"]["data"];
-                    if frame["d"]["op"] == "store" {
+                    if let Some(rows) = crate::accounts::testing::native_frame_data(&frame) {
                         if let Some(row) = rows["activeChasers"].get(0) {
                             chase = row["id"].clone();
                         }
@@ -5890,6 +5854,7 @@ mod tests {
                     1,
                     dropped,
                     handle,
+                    "acct".into(),
                     "acct".into(),
                     out,
                     Arc::default(),
@@ -6143,6 +6108,7 @@ mod tests {
                 dropped,
                 handle.clone(),
                 "acct".into(),
+                "acct".into(),
                 out,
                 Arc::default(),
                 Arc::default(),
@@ -6393,6 +6359,7 @@ mod tests {
                         1,
                         dropped,
                         handle.clone(),
+                        "acct".into(),
                         "acct".into(),
                         out,
                         Arc::default(),

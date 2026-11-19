@@ -1,9 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
-import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeOptions, Market, PlaceOrderOpts, StoreData } from '../../types';
@@ -11,15 +5,28 @@ import type { ExchangeOptions, Market, PlaceOrderOpts, StoreData } from '../../t
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
-import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { nativeOrder } from '../cutover/nativeOrder';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 const market: Market = {
-  id: 'BTC-USDT', symbol: 'BTC-USDT', base: 'BTC', quote: 'USDT', active: true,
+  id: 'BTC-USDT',
+  symbol: 'BTC-USDT',
+  base: 'BTC',
+  quote: 'USDT',
+  active: true,
   precision: { amount: 0.001, price: 0.1 },
-  limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 1 } }, info: {},
+  limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 1 } },
+  info: {},
 };
 const order: PlaceOrderOpts = { symbol: 'BTC-USDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, price: 100 };
 
@@ -41,25 +48,51 @@ describe('KuCoin spot Rust SDK boundary', () => {
         commands.push(command);
         // KuCoin spot leverage is fixed: the engine confirms 1x rails for the symbol.
         if (command.op === 'setLeverage') rails = { [command.symbol]: { buyLeverage: 1, sellLeverage: 1 } };
-        const result = command.op === 'fetchAccount' ? { userId: 'user', subId: null, affiliateId: null }
-          : command.op === 'findOrderByClientOrderId' ? { found: false, definitive: false }
-          : command.op === 'placeOrders' || command.op === 'amendOrderWithSymbol' ? ['native-id'] : null;
+        const result =
+          command.op === 'fetchAccount'
+            ? { userId: 'user', subId: null, affiliateId: null }
+            : command.op === 'findOrderByClientOrderId'
+              ? { found: false, definitive: false }
+              : command.op === 'placeOrders' || command.op === 'amendOrderWithSymbol'
+                ? ['native-id']
+                : null;
         return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result) }]);
       },
-      takeFrame: () => new Uint8Array(consumerFrame({
-        markets: [market],
-        loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
-        ...(rails ? { fetchedLeverage: rails } : {}),
-      })), snapshotFrame: () => new Uint8Array(),
-      wsOpen: noActions, wsMessage: noActions, wsClose: noActions, wsRouteExhausted: noActions,
-      httpStart: noActions, httpChunk: noActions, httpEnd: noActions, httpFailed: noActions, timer: noActions,
+      takeFrame: () =>
+        new Uint8Array(
+          consumerFrame({
+            markets: [market],
+            loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+            ...(rails ? { fetchedLeverage: rails } : {}),
+          }),
+        ),
+      snapshotFrame: () => new Uint8Array(),
+      wsOpen: noActions,
+      wsMessage: noActions,
+      wsClose: noActions,
+      wsRouteExhausted: noActions,
+      httpStart: noActions,
+      httpChunk: noActions,
+      httpEnd: noActions,
+      httpFailed: noActions,
+      timer: noActions,
     };
-    const construct = vi.fn(function (_venue: string, _options: string, _signerSetup?: string) { return engine; });
+    const construct = vi.fn(function (_venue: string, _options: string, _signerSetup?: string) {
+      return engine;
+    });
     setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
-    const store = new DefaultStore();
+    const store = new FrameStore();
     installNativeStartupFrames(engine, store, () => (rails ? { fetchedLeverage: rails } : {}));
-    store.update({ markets: [market], loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
-    const exchange = new RustEngineExchange('kucoinspot', { key: 'key', secret: 'secret', passphrase: 'passphrase', ...options }, store);
+    applyReferenceFixture(
+      store,
+      { markets: [market], loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+      store.markets.map((row) => row.symbol),
+    );
+    const exchange = new RustEngineExchange(
+      'kucoinspot',
+      { key: 'key', secret: 'secret', passphrase: 'passphrase', ...options },
+      store,
+    );
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
     exchanges.push(exchange);
     return { exchange, commands, construct, store };
@@ -75,7 +108,9 @@ describe('KuCoin spot Rust SDK boundary', () => {
     expect(construct.mock.calls[0][0]).toBe('kucoinspot');
     const options = JSON.parse(construct.mock.calls[0][1]);
     for (const field of ['key', 'secret', 'passphrase']) expect(options).not.toHaveProperty(field);
-    expect(JSON.parse(construct.mock.calls[0][2]!)).toEqual({ primary: { key: 'key', secret: 'secret', passphrase: 'passphrase' } });
+    expect(JSON.parse(construct.mock.calls[0][2]!)).toEqual({
+      primary: { key: 'key', secret: 'secret', passphrase: 'passphrase' },
+    });
   });
 
   it('preserves caller IDs, rejects invalid IDs and marks open-only misses', async () => {
@@ -84,7 +119,10 @@ describe('KuCoin spot Rust SDK boundary', () => {
     await expect(exchange.placeOrder({ ...order, clientOrderId: 'Caller_01-id' })).resolves.toEqual(['native-id']);
     expect(commands[0]).toMatchObject({ op: 'placeOrders', orders: [{ ...order, clientOrderId: 'Caller_01-id' }] });
     await expect(exchange.placeOrder({ ...order, clientOrderId: 'has space' })).rejects.toThrow('clientOrderId');
-    await expect(exchange.findOrderByClientOrderId('BTC-USDT', 'Caller_01-id')).resolves.toEqual({ found: false, definitive: false });
+    await expect(exchange.findOrderByClientOrderId('BTC-USDT', 'Caller_01-id')).resolves.toEqual({
+      found: false,
+      definitive: false,
+    });
   });
 
   it('cancels account-wide and preserves TS fixed leverage/no-op mode setters', async () => {
@@ -95,8 +133,10 @@ describe('KuCoin spot Rust SDK boundary', () => {
     await exchange.changeMarginType(true);
     await exchange.changePositionMode(true);
     expect(commands.map(({ command: _command, ...body }) => body)).toEqual([
-      { op: 'cancelSymbolOrders', symbol: '' }, { op: 'setLeverage', symbol: 'BTC-USDT', leverage: 20 },
-      { op: 'setMarginType', symbol: '', isolated: true }, { op: 'setPositionMode', hedged: true },
+      { op: 'cancelSymbolOrders', symbol: '' },
+      { op: 'setLeverage', symbol: 'BTC-USDT', leverage: 20 },
+      { op: 'setMarginType', symbol: '', isolated: true },
+      { op: 'setPositionMode', hedged: true },
     ]);
     expect(store.fetchedLeverage['BTC-USDT']).toMatchObject({ buyLeverage: 1, sellLeverage: 1 });
   });
@@ -104,11 +144,16 @@ describe('KuCoin spot Rust SDK boundary', () => {
   it('keeps the supplied symbol when canceling or amending an uncached order', async () => {
     const { exchange, commands } = setup();
     await exchange.start();
-    const uncached = { id: 'lost-ack-id', symbol: 'BTC-USDT', type: OrderType.Limit } as Parameters<typeof exchange.cancelOrders>[0][number];
+    const uncached = { id: 'lost-ack-id', symbol: 'BTC-USDT', type: OrderType.Limit } as Parameters<
+      typeof exchange.cancelOrders
+    >[0][number];
     await exchange.cancelOrders([uncached]);
     await exchange.updateOrder({ order: uncached, update: { price: 101 } });
     expect(commands.map(({ command: _command, ...body }) => body)).toEqual([
-      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'lost-ack-id', symbol: 'BTC-USDT', type: OrderType.Limit }] },
+      {
+        op: 'cancelOrdersWithSymbols',
+        orders: [{ id: 'lost-ack-id', symbol: 'BTC-USDT', type: OrderType.Limit }],
+      },
       { op: 'amendOrderWithSymbol', id: 'lost-ack-id', symbol: 'BTC-USDT', price: 101 },
     ]);
   });
@@ -118,7 +163,10 @@ describe('KuCoin spot Rust SDK boundary', () => {
     await exchange.start();
     const issued = commands.length;
     expect(exchange.capabilities).toMatchObject({
-      orderHistory: false, closedPnl: false, incomeHistory: false, incomeRange: false,
+      orderHistory: false,
+      closedPnl: false,
+      incomeHistory: false,
+      incomeRange: false,
     });
     await expect(exchange.fetchHistoricalOrders()).resolves.toEqual([]);
     await expect(exchange.fetchIncomeHistory()).resolves.toEqual([]);

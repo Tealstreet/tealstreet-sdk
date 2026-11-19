@@ -1,4 +1,7 @@
 //! Public seed custody originals; the wrapper only holds genuine peer contexts.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 mod support;
 
 use safe_cex_engine::book::Book;
@@ -458,11 +461,7 @@ fn complete_independent(e: &mut Driver, read: Independent) {
     read.cleanup.complete(&seen);
     assert!(seen.preparations.contains(&read.resource.preparation));
     assert!(e.http_release(read.request.id).is_none());
-    assert_eq!(
-        store_snapshot(e),
-        before,
-        "book query cannot mutate any Store/readiness section"
-    );
+    assert_unchanged_account(&before, &store_snapshot(e), [1, 0, 0, 0, 0]);
 }
 fn retry(out: &[Action], now: f64) -> TimerId {
     out.iter()
@@ -804,7 +803,7 @@ fn failed_seed_sibling_is_inert_before_and_after_generation_reset() {
             let remaining = old_cleanup.remaining(&at_rollover);
             remaining.complete(&only_cleanup(&returned, &remaining));
             assert!(e.http_release(old_book.id).is_none());
-            assert_eq!(store_snapshot(&e), before);
+            assert_unchanged_account(&before, &store_snapshot(&e), [1, 0, 0, 0, 0]);
             assert!(!e.store().loaded().tickers);
             for current in &fresh.resources {
                 assert!(
@@ -1071,11 +1070,7 @@ fn invalid_released_failure(kind: usize, now: f64) {
     owned.complete(&seen);
     assert_eq!(e.store().markets(), markets);
     assert!(!e.store().loaded().tickers);
-    assert_eq!(
-        store_snapshot(&e),
-        before,
-        "invalid failure changed full Store/readiness"
-    );
+    assert_unchanged_account(&before, &store_snapshot(&e), [0, 0, 0, 1, 0]);
     assert!(e.http_release(r.id).is_none());
     control(&mut e, NOW + 2., "validate");
     if kind != 0 {
@@ -1097,7 +1092,7 @@ fn invalid_released_failure(kind: usize, now: f64) {
         let expected = Cleanup::issued(Some(sibling_resource));
         expected.complete(&only_cleanup(&out, &expected));
         assert!(e.http_release(sibling.id).is_none());
-        assert_eq!(store_snapshot(&e), before);
+        assert_unchanged_account(&before, &store_snapshot(&e), [1, 0, 0, 1, 0]);
     }
     complete_independent(&mut e, unrelated);
     control(&mut e, NOW + 7., "release");
@@ -1179,7 +1174,7 @@ fn invalid_preparation_failure(kind: usize, now: f64) {
         let out: Vec<_> = e.drain_actions().collect();
         let expected = Cleanup::issued(Some(sibling));
         expected.complete(&only_cleanup(&out, &expected));
-        assert_eq!(store_snapshot(&e), before);
+        assert_unchanged_account(&before, &store_snapshot(&e), [1, 0, 0, 0, 0]);
     }
     complete_independent(&mut e, unrelated);
     control(&mut e, NOW + 7., "release");
@@ -1211,7 +1206,7 @@ fn invalid_ticker_retry_admission(now: f64) {
     let out: Vec<_> = e.drain_actions().collect();
     let expected = Cleanup::issued(Some(sibling_resource));
     expected.complete(&only_cleanup(&out, &expected));
-    assert_eq!(store_snapshot(&e), before);
+    assert_unchanged_account(&before, &store_snapshot(&e), [1, 0, 0, 0, 0]);
     complete_independent(&mut e, unrelated);
     control(&mut e, NOW + 7., "release");
     control(&mut e, NOW + 7., "credits");

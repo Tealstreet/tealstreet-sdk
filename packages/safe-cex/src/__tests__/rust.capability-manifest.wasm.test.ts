@@ -11,7 +11,7 @@ import { exchangeRegistry } from '../exchanges/registry';
 import { BETA_VENUES } from '../exchanges/rust/betaVenues';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 
 // HyroTrader has no default endpoints: hosts configure them at build time, read when bybit.types loads.
 vi.hoisted(() => {
@@ -79,7 +79,7 @@ const transport: Transport = {
 /** Construction through the runtime registry, as the app does; capabilities need no venue I/O. */
 const loadCapabilities = async (name: ExchangeName, options: ExchangeOptions): Promise<ExchangeCapabilities> => {
   const Exchange = await exchangeRegistry[name]();
-  const exchange = new Exchange(name, options, new DefaultStore());
+  const exchange = new Exchange(name, options, new FrameStore());
   running.push(exchange);
   return exchange.loadCapabilities();
 };

@@ -1,8 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, ExchangeOptions, PlaceOrderOpts } from '../../types';
 
@@ -13,9 +8,14 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { adoptEngineCapabilities, engineCapabilities } from '../fixtures/engineCapabilities';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 const exchanges: RustEngineExchange[] = [];
 afterEach(() => {
@@ -28,7 +28,7 @@ const setup = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => {
   const exchange = new RustEngineExchange(
     name,
     { key: '', secret: '', publicDataOnly: true, ...options },
-    new DefaultStore(),
+    new FrameStore(),
   );
   exchanges.push(exchange);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
@@ -48,7 +48,9 @@ it.each([
       constructor(venue: string, options: string) {
         constructor(venue, JSON.parse(options));
       }
-      syncHostTime() { return true; }
+      syncHostTime() {
+        return true;
+      }
       capabilities() {
         return engineCapabilities('bybit', { options: enableOptionMarkets });
       }
@@ -94,7 +96,9 @@ it('rejects legacy TS public providers before native product construction', asyn
     constructor(venue: string, options: string) {
       constructor(venue, JSON.parse(options));
     }
-    syncHostTime() { return true; }
+    syncHostTime() {
+      return true;
+    }
     capabilities() {
       return engineCapabilities('bybit', { options: true });
     }
@@ -118,7 +122,9 @@ it('keeps combined native products enabled with an explicit shared-feed policy',
     constructor(venue: string, options: string) {
       constructor(venue, JSON.parse(options));
     }
-    syncHostTime() { return true; }
+    syncHostTime() {
+      return true;
+    }
     capabilities() {
       return engineCapabilities('bybit', { options: true });
     }

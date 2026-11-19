@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseExchange } from '../../exchanges/base';
 import { BaseWebSocket } from '../../exchanges/base.ws';
 import { ExchangeEmitter } from '../../exchanges/exchangeEmitter';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { reportEvent, reportException, setTelemetrySink } from '../../telemetry';
 import { LogSeverity } from '../../types';
 import { diagnosticConsole, diagnosticText, redactDiagnosticData } from '../../utils/diagnosticRedaction';
@@ -24,7 +24,7 @@ const exchange = () => {
   const value = new BaseExchange(
     'bybit',
     { key: '', secret: '', publicDataOnly: true, tuning: { consoleLogging: false } },
-    new DefaultStore(),
+    new FrameStore(),
   );
   exchanges.push(value);
   return value;

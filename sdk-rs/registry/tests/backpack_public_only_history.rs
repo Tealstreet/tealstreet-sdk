@@ -1,5 +1,8 @@
 //! Native public-only mode still permits explicitly configured private history reads.
 #![cfg(feature = "backpack")]
+#[path = "../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 
 use safe_cex_engine::{Action, Command, Engine, Event, Method, Notice, Query, Response, Venue};
 use safe_cex_venues::{EngineOptions, Visit, build};
@@ -134,7 +137,7 @@ impl Visit for HistoryProbe {
                 })
                 .collect();
             assert_eq!(terminal, ["[]"]);
-            assert_eq!(engine.account_snapshot_frame(now), before);
+            assert_unchanged_account(&before, engine.account_snapshot_frame(now), [1, 0, 0, 0, 0]);
         }
     }
 }

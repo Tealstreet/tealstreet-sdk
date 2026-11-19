@@ -1,9 +1,11 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { KucoinSpotExchange } from './kucoinspot.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
-import { OrderStatus } from '../../../types';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { OrderStatus } from '../../../types';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { KUCOIN_SPOT_ENDPOINTS } from './kucoinspot.types';
 
 type Data = Record<string, any>;
@@ -136,11 +138,50 @@ export class KucoinSpotPrivateWebsocket extends BaseWebSocket<KucoinSpotExchange
     }
 
     if (eventType === 'canceled' || eventType === 'cancelled') {
-      this.store.updateOrderStatus(order, OrderStatus.Canceled);
+      (() => {
+        const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [order];
+        const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     } else if (eventType === 'filled') {
-      this.store.updateOrderStatus(order, OrderStatus.Closed);
+      (() => {
+        const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [order];
+        const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     } else {
-      this.store.addOrUpdateOrder(order);
+      (() => {
+        const incoming: StoreData['orders'] = [order];
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: [
+              ...this.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
 
     this.refreshOrdersSoon();
@@ -180,10 +221,14 @@ export class KucoinSpotPrivateWebsocket extends BaseWebSocket<KucoinSpotExchange
       const balance = await this.parent.fetchBalance();
       if (this.isDisposed) return;
 
-      this.store.update({
-        balance,
-        loaded: { ...this.store.loaded, balance: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          loaded: { balance: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     }, 250);
   };
 

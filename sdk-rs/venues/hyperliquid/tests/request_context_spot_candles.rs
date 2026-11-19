@@ -1,4 +1,7 @@
 //! Spot and merged-spot candle requests require original Read custody.
+#[path = "../../../engine/tests/support/request_stats_frame.rs"]
+mod request_stats_frame;
+use request_stats_frame::assert_request_stats_frame;
 use safe_cex_engine::Outcome;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::model::Interval;
@@ -308,6 +311,7 @@ fn native_wire_rows_and_validation_precedence_on_all_four_deployments() {
     for testnet in [false, true] {
         for merged in [false, true] {
             let mut e = boot(testnet, merged);
+            let before_stats = e.snapshot_frame(NOW).to_vec();
             e.handle(
                 NOW,
                 Event::Command(command(OWNER, "UNKNOWN", Interval::S1, 60001., 60000.)),
@@ -351,7 +355,12 @@ fn native_wire_rows_and_validation_precedence_on_all_four_deployments() {
             };
             reply(&mut e, NOW + 1., &actual, 200, ROWS);
             result_rows(&e.drain_actions().collect::<Vec<_>>());
-            assert!(e.take_frame(NOW + 1.).is_none());
+            assert_request_stats_frame(
+                &before_stats,
+                e.take_frame(NOW + 1.),
+                NOW + 1.,
+                [1, 0, 0, 0, 0],
+            );
         }
     }
 }

@@ -3,10 +3,11 @@ import type { LIST_ORDERS_RESPONSE } from '../reference/coinbase/coinbase.types'
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { ExchangeOptions, LogSeverity, Market, OrderSide, OrderStatus, OrderType } from '../../types';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 import { ENDPOINTS } from '../reference/coinbase/coinbase.types';
-import { DefaultStore } from '../../store/store.base';
-import { ExchangeOptions, LogSeverity, Market, OrderSide, OrderStatus, OrderType } from '../../types';
 
 const OPEN_ORDER_STATUSES = ['PENDING', 'OPEN', 'QUEUED', 'CANCEL_QUEUED', 'EDIT_QUEUED'];
 
@@ -57,8 +58,12 @@ const makeRestOrder = (
 });
 
 const createExchange = (markets: Market[] = [SPOT_MARKET]) => {
-  const store = new DefaultStore();
-  store.update({ markets });
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    { markets },
+    store.markets.map((row) => row.symbol),
+  );
   const exchange = new CoinbaseExchange(
     'coinbase' as any,
     { key: 'api-key', secret: 'api-secret', tealstreetProxy: false, tealstreetTunnel: false } as ExchangeOptions,
@@ -215,7 +220,11 @@ describe('Coinbase REST open-order polling', () => {
       info: {},
       lastUpdate: 1,
     };
-    store.update({ orders: [existingOrder] });
+    applyReferenceFixture(
+      store,
+      { orders: [existingOrder] },
+      store.markets.map((row) => row.symbol),
+    );
 
     const rateLimitError = new Error('GET /orders/historical/batch failed with 429') as Error & {
       response?: { status: number; data?: { message?: string } };
@@ -262,7 +271,9 @@ describe('Coinbase REST open-order polling', () => {
     // One line per reason for the whole poll — not one line per skipped order.
     const calls = (exchange.emitAndLogError as any).mock.calls;
     const messages = calls.map((call: unknown[]) => call[0]);
-    const missingMarketCalls = messages.filter((m: string) => m?.startsWith?.('Coinbase orders skipped, missing market'));
+    const missingMarketCalls = messages.filter((m: string) =>
+      m?.startsWith?.('Coinbase orders skipped, missing market'),
+    );
     const unsupportedShapeCalls = messages.filter((m: string) =>
       m?.startsWith?.('Coinbase orders skipped, unsupported REST shape'),
     );
@@ -344,7 +355,11 @@ describe('Coinbase REST open-order polling', () => {
       // Older than the 5s REST-lag tolerance; treat REST as authoritative.
       lastUpdate: now - 10_000,
     };
-    store.update({ orders: [freshWsOrder, staleWsOrder] });
+    applyReferenceFixture(
+      store,
+      { orders: [freshWsOrder, staleWsOrder] },
+      store.markets.map((row) => row.symbol),
+    );
 
     const restOrder = makeRestOrder({ order_id: 'rest-only-order', filled_size: '0' });
     const merged = (exchange as any).mergeRestOrdersWithFreshWsState([

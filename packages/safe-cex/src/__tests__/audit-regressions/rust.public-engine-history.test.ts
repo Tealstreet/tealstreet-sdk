@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
@@ -33,7 +33,7 @@ describe.each([
       const exchange = new RustEngineExchange(
         'bitget',
         { key: '', secret: '', publicDataOnly: true, ...shape },
-        new DefaultStore(),
+        new FrameStore(),
       );
       const forwarded = vi.fn();
       const errors = vi.fn();
@@ -49,7 +49,7 @@ describe.each([
 });
 
 it('a keyless mirror of a keyed account still asks its worker', async () => {
-  const exchange = new RustEngineExchange('bitget', { key: '', secret: '', workerMirror: true }, new DefaultStore());
+  const exchange = new RustEngineExchange('bitget', { key: '', secret: '', workerMirror: true }, new FrameStore());
   const forwarded = vi.fn();
   exchange.on('callMethod', forwarded);
 

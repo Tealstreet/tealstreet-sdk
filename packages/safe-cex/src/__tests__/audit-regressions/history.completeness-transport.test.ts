@@ -7,7 +7,7 @@ import { EngineHost } from '@tealstreet/safe-cex-wasm/host';
 import nativeUnknown from '../../../../../sdk-rs/engine/tests/fixtures/history-unknown-output.json';
 import { BaseExchange } from '../../exchanges/base';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { CallMethodHandler } from '../../webworker/handlers/CallMethodHandler';
 
 const exchanges: BaseExchange[] = [];
@@ -23,7 +23,7 @@ const transport = (
   clone: (value: StoreWorkerPayload) => StoreWorkerPayload,
   method: 'fetchHistoricalFills' | 'fetchClosedPnl',
 ) => {
-  const main = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+  const main = new RustEngineExchange('bybit', { key: '', secret: '' }, new FrameStore());
   exchanges.push(main);
   const calls: StoreWorkerPayload[] = [];
   const reply = (message: StoreWorkerPayload) => {
@@ -85,7 +85,7 @@ for (const [name, clone] of [
 
 it('ignores a late flagged reply after timeout rather than marking a later request', async () => {
   vi.useFakeTimers();
-  const main = new BaseExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+  const main = new BaseExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
   exchanges.push(main);
   const ids: string[] = [];
   main.emitter.on('callMethod', ({ requestId }: { requestId: string }) => ids.push(requestId));
@@ -104,7 +104,7 @@ it('ignores a late flagged reply after timeout rather than marking a later reque
 });
 
 it('keeps a correlated terminal failure rejected even with an incomplete record', async () => {
-  const main = new BaseExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+  const main = new BaseExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
   exchanges.push(main);
   main.emitter.on('callMethod', ({ requestId }: { requestId: string }) => {
     main.emitter.emit('callMethod:done', {

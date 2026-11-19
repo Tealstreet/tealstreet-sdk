@@ -449,10 +449,11 @@ async fn resnapshot_keeps_rate_and_stops_the_old_pending_publication() {
                 *session.joined["acct"].client.publish_interval.borrow(),
                 500
             );
-            drain(&mut sent);
+            let mut after_snapshot = drain(&mut sent);
             tick(600).await;
+            after_snapshot.extend(drain(&mut sent));
             assert!(
-                public_frames(&drain(&mut sent)).is_empty(),
+                public_frames(&after_snapshot).is_empty(),
                 "old pump emitted a stale cached frame"
             );
             update(&session, &account, 222, 2);
@@ -460,7 +461,17 @@ async fn resnapshot_keeps_rate_and_stops_the_old_pending_publication() {
             let messages = drain(&mut sent);
             let updates = public_frames(&messages);
             assert_eq!(updates.len(), 1);
-            assert_eq!(updates[0]["d"]["seq"], 2);
+            // Rule 5 / #3640 (7b723d8837): section 35 request statistics publish
+            // immediately and may precede the public update after resnapshot.
+            let frames: Vec<_> = after_snapshot
+                .iter()
+                .chain(messages.iter())
+                .filter(|message| message["d"]["op"] == "frame")
+                .collect();
+            for (offset, frame) in frames.iter().enumerate() {
+                assert_eq!(frame["d"]["seq"], offset + 2);
+            }
+            assert_eq!(updates[0]["d"]["seq"], frames.len() + 1);
             session.close();
             account.handle.dispose();
         })
@@ -515,6 +526,7 @@ async fn saturated_pump(change_interval: bool) {
         1,
         dropped,
         handle,
+        "acct".into(),
         "acct".into(),
         out,
         Arc::default(),

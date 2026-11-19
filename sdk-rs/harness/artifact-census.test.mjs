@@ -10,6 +10,10 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const budgetPath = 'sdk-rs/harness/wasm-budget.mjs';
 const policyPath = 'packages/safe-cex/src/exchanges/rust/construction-rules.json';
 const budget = readFileSync(join(root, budgetPath), 'utf8');
+// Mutate the actual entry so measured cap updates cannot disable these probes.
+const weexRow = budget.match(/^  weex: ([0-9_]+),$/m);
+assert.ok(weexRow, 'WEEX budget fixture entry must exist');
+const weexCap = Number(weexRow[1].replaceAll('_', ''));
 const policy = readFileSync(join(root, policyPath), 'utf8');
 
 function probe(t, artifact, source) {
@@ -54,21 +58,21 @@ test('unchanged complete budget imports and construction checks remain valid', (
   }
 });
 
-for (const value of ['2_043_904', '9_000_000']) {
+for (const value of [weexCap, 9_000_000]) {
   test(`raw budget refuses a duplicate venue before last-wins evaluation (${value})`, (t) => {
-    const mutated = budget.replace('  weex: 2_043_904,', `  weex: 2_043_904,\n  weex: ${value},`);
+    const mutated = budget.replace(weexRow[0], `${weexRow[0]}\n  weex: ${value},`);
     assert.notEqual(mutated, budget);
     refuses(probe(t, budgetPath, mutated), /duplicate.*weex/i);
   });
 }
 
 test('budget census refuses an unknown entry', (t) => {
-  const mutated = budget.replace('  weex: 2_043_904,', '  weex: 2_043_904,\n  unreviewedvenue: 2_043_904,');
+  const mutated = budget.replace(weexRow[0], `${weexRow[0]}\n  unreviewedvenue: ${weexCap},`);
   refuses(probe(t, budgetPath, mutated), /unexpected.*unreviewedvenue/i);
 });
 
 test('budget census refuses a deleted entry before a default cap can hide it', (t) => {
-  refuses(probe(t, budgetPath, budget.replace('  weex: 2_043_904,', '')), /missing.*weex/i);
+  refuses(probe(t, budgetPath, budget.replace(weexRow[0], '')), /missing.*weex/i);
 });
 
 for (const name of ['krakenspot', 'kraken\\u0073pot']) {
@@ -119,7 +123,7 @@ for (const [label, expression] of [
 ]) {
   test(`budget import ignores inert declaration in ${label}`, (t) => {
     const source = budget + '\nconst prose = ' + expression + ';\n' +
-      'if (WASM_VENUE_OVERRIDES.weex !== 2_043_904) throw new Error("cap changed");';
+      `if (WASM_VENUE_OVERRIDES.weex !== ${weexCap}) throw new Error("cap changed");`;
     const result = probe(t, budgetPath, source);
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr + result.stdout);
@@ -132,7 +136,7 @@ for (const [label, expression] of [
 ]) {
   test(`budget import refuses grouped duplicate map despite a stale ${label}`, (t) => {
     const grouped = budgetDeclaration.replace('Object.freeze({', 'Object.freeze(({')
-      .replace('  weex: 2_043_904,', '  weex: 2_043_904,\n  weex: 9_000_000,')
+      .replace(weexRow[0], `${weexRow[0]}\n  weex: 9_000_000,`)
       .replace(/\}\);$/, '}));');
     assert.notEqual(grouped, budgetDeclaration);
     const source = budget.replace(budgetDeclaration, grouped) + '\nconst prose = ' + expression + ';';

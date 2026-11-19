@@ -378,19 +378,6 @@ export type Writable<T> =
             ? { -readonly [K in keyof T]: Writable<T[K]> }
             : T; // is primitive or literal value
 
-export type WritableStoreData = {
-  latency: number | null;
-  balance: Writable<Balance>;
-  markets: Array<Writable<Market>>;
-  tickers: Array<Writable<Ticker>>;
-  orders: Array<Writable<Order>>;
-  positions: Array<Writable<Position>>;
-  loaded: Writable<StoreDataLoaded>;
-  options: Writable<StoreOptions>;
-  userData: Writable<any>;
-  fetchedLeverage: Record<string, FetchedLeverage>;
-};
-
 export const readOnlyOrderStatuses: OrderStatus[] = [
   OrderStatus.Creating,
   OrderStatus.Updating,
@@ -413,6 +400,8 @@ export type IncomeHistoryOptions = {
  * Any Exchange/BaseExchange instance satisfies this interface naturally.
  */
 export interface PublicDataSource {
+  /** Native source snapshot, including subscription diagnostics. */
+  snapshotFrame?: () => ArrayBuffer | undefined;
   readonly store: {
     subscribe: (cb: (data: StoreData) => void) => () => void;
     readonly tickers: StoreData['tickers'];

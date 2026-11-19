@@ -307,10 +307,6 @@ export class BaseWebSocket<T extends BaseExchange> {
 
   handlePongEvent = (nextPingTime = 5_000) => {
     this.recordMessageHandlerStats('pong');
-    if (this.pingAt) {
-      const diff = performance.now() - this.pingAt;
-      this.store.update({ latency: Math.round(diff / 2) });
-    }
 
     if (this.pingTimeoutId) {
       clearTimeout(this.pingTimeoutId);

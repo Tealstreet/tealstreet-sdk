@@ -1,14 +1,15 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook, Ticker, Writable } from '../../../types';
-import { resolveTransportRouting } from '../../../transport/registry';
 import type { BitgetExchange } from './bitget.exchange';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
-import { calcOrderBookTotal } from '../../../utils/orderbook';
-import { updateOrderBook } from '../../../utils/updateOrderBook';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { BASE_WS_URL, INTERVAL } from '../../../exchanges/bitget/bitget.types';
-
+import { resolveTransportRouting } from '../../../transport/registry';
+import { calcOrderBookTotal } from '../../../utils/orderbook';
+import { updateOrderBook } from '../../../utils/updateOrderBook';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 type Data = Record<string, any>;
 
@@ -238,7 +239,15 @@ export class BitgetPublicWebsocket extends BaseWebSocket<BitgetExchange> {
       const update = this.buildTickerUpdate(data);
       if (Object.keys(update).length === 0) continue;
 
-      this.parent.store.updateTicker(ticker, update);
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = update;
+        return applyReferenceFixture(
+          this.parent.store,
+          { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.parent.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
   };
 

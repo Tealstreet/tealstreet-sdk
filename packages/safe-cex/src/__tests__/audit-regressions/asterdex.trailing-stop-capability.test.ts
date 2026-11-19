@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
+import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 
 describe('audit regression: AsterDEX trailing-stop capability', () => {
   it('does not advertise trailing stops without a callback-rate input', () => {
@@ -11,11 +11,7 @@ describe('audit regression: AsterDEX trailing-stop capability', () => {
   });
 
   it('rejects direct trailing-stop placement before posting an invalid order', async () => {
-    const exchange = new AsterDEXExchange(
-      'asterdex',
-      { key: 'test-key', secret: 'test-secret' },
-      new DefaultStore(),
-    );
+    const exchange = new AsterDEXExchange('asterdex', { key: 'test-key', secret: 'test-secret' }, new FrameStore());
     const post = vi.fn();
     (exchange as any).secondaryAPI.post = post;
 

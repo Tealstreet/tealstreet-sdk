@@ -1,4 +1,7 @@
 //! Original identity entry and typed-failure assertions on unchanged BingX.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{
@@ -444,7 +447,11 @@ fn capacity(branch: Branch) {
         retire(&mut e, owner);
     }
     retire(&mut e, 900);
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    if matches!(branch, Branch::Remote) {
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
+    } else {
+        assert_eq!(e.account_snapshot_frame(NOW), before);
+    }
 }
 #[test]
 fn missing_primary_requires_read_capacity() {
@@ -598,7 +605,7 @@ fn real_local_provider_preserves_primary_secondary_wire_and_exact_codec() {
         let out = respond(&mut e, NOW, request, 200, body);
         assert_eq!(terminals(&out, 42), [Ok(result.into())]);
         assert!(diagnostics(&out, 42).is_empty());
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
         assert!(respond(&mut e, NOW, request, 200, body).is_empty());
     }
 }
@@ -650,7 +657,15 @@ fn native_malformed_status_and_signature_code_reject_once_without_retry() {
         cleanup(&out, preparation, Some(None));
         native(&out, 42, message);
         assert!(respond(&mut e, NOW, &request, status, body).is_empty());
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(
+            &before,
+            e.account_snapshot_frame(NOW),
+            if status == 200 {
+                [1, 0, 0, 0, 0]
+            } else {
+                [0, 0, 0, 0, 1]
+            },
+        );
     }
 }
 #[test]
@@ -680,7 +695,7 @@ fn released_network_failure_keeps_its_typed_kind_and_single_terminal() {
         )
         .is_empty()
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [0, 0, 0, 1, 0]);
     assert_eq!(
         (error.kind, error.outcome),
         (Some(ErrorKind::Network), None)
@@ -707,7 +722,7 @@ fn released_root_timer_keeps_timeout_kind_and_denies_late_success() {
         )
         .is_empty()
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [0, 0, 0, 1, 0]);
     assert_eq!(
         (error.kind, error.outcome),
         (Some(ErrorKind::Timeout), None)

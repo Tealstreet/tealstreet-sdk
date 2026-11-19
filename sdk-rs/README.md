@@ -4,6 +4,23 @@ One exchange engine for the browser worker and Cloudflare Workers
 (WebAssembly) and for servers (native). The design, the gates and the banned
 patterns are in [`docs/plans/RUST_REWRITE.md`](../docs/plans/RUST_REWRITE.md).
 
+The WASM host declarations import shared native capability types from
+`hosts/wasm/js/capabilities.d.mts`. The wire reader re-exports those same types.
+Keep the host's declaration graph independent of the wire reader's SDK store
+projections so standalone Workers consumers do not inherit browser SDK sources.
+`hosts/wasm/js/write-plan-contract.test.mjs` checks that boundary with strict
+NodeNext declarations and no skipped library checks.
+
+Completed market and ticker snapshots release unused parser growth capacity
+before the store builds lookup tables and native UI frames. Live recovery can
+still append an omitted ticker. Keeping the unused catalogue slots through frame
+projection raises the WASM memory high-water mark, which cannot shrink afterward.
+
+Venue-reported positive position leverage is authoritative. Market settings,
+including successful settings writes, only fill unknown position leverage;
+they cannot confirm a new leverage for an existing position. Fills retain each
+hedged side's leverage and the selected margin-mode boundary.
+
 ## Crates
 
 ### Host ownership observation and teardown

@@ -8,14 +8,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { BaseExchange } from '../../exchanges/base';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { FrameApplier } from '../../store/frameApplier';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, OrderSide, OrderStatus, OrderType, PositionSide } from '../../types';
 import { ChaserOrderInstance } from '../../webworker/chaserOrder/ChaserOrderInstance';
 import { ChaserOrderManager, chaserOrderManagerInstance } from '../../webworker/chaserOrder/ChaserOrderManager';
 import { TwapInstance } from '../../webworker/twap/TwapInstance';
 import { twapManager } from '../../webworker/twap/TwapManager';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { engineCapabilities, quantityUnitsCode } from '../fixtures/engineCapabilities';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
@@ -202,7 +202,7 @@ function fixture(name: ExchangeName = 'bybit', nativeLoaded = loaded, publicData
     return native;
   });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new RustEngineExchange(
     name,
     { publicDataOnly, key: 'fixture-key', secret: 'fixture-secret' },
@@ -236,7 +236,7 @@ function fixture(name: ExchangeName = 'bybit', nativeLoaded = loaded, publicData
 
 describe('Rust native current-account reads', () => {
   it('keeps the Base seam a synchronous no-op', () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = new BaseExchange('bybit', { key: '', secret: '' }, store);
     accounts.push(exchange);
     const update = vi.fn();
@@ -281,8 +281,8 @@ describe('Rust native current-account reads', () => {
 
   it('forwards account frames and a dirty reordered catalog through the same main-thread decoder', async () => {
     const r = fixture();
-    const main = new DefaultStore();
-    const applier = new FrameApplier(main);
+    const main = new FrameStore();
+    const applier = main;
     const frames: Frame[] = [];
     r.exchange.onFrame = (buffer) => {
       const frame = new Frame(buffer);
@@ -301,8 +301,8 @@ describe('Rust native current-account reads', () => {
 
   it('clears main-thread exposure when a forwarded native account snapshot omits closed positions', async () => {
     const r = fixture();
-    const main = new DefaultStore();
-    const applier = new FrameApplier(main);
+    const main = new FrameStore();
+    const applier = main;
     r.exchange.onFrame = (buffer) => applier.apply(new Frame(structuredClone(buffer)));
     await r.start();
     r.update({ positions: [position(), position('ETHUSDT')] });
@@ -314,7 +314,7 @@ describe('Rust native current-account reads', () => {
     r.update({ positions: [] });
     await r.exchange.fetchPositions();
     expect(main.positions).toEqual([]);
-    expect(main.serialize().positions).toEqual([]);
+    expect(main.data.positions).toEqual([]);
     expect(r.store.positions).toEqual([]);
   });
 
@@ -339,8 +339,8 @@ describe('Rust native current-account reads', () => {
 
   it('applies current values without advancing freshness on repeated reads in worker or main', async () => {
     const r = fixture();
-    const main = new DefaultStore();
-    const applier = new FrameApplier(main);
+    const main = new FrameStore();
+    const applier = main;
     r.exchange.onFrame = (buffer) => applier.apply(new Frame(buffer));
     await r.start();
     const ids = { ...r.store.updateIds };
@@ -353,14 +353,17 @@ describe('Rust native current-account reads', () => {
     expect(r.store.updateIds).toEqual(ids);
     expect(main.updateIds).toEqual(mainIds);
     await vi.advanceTimersByTimeAsync(250);
-    expect(r.store.updateIds.orders).toBe(ids.orders + 1);
-    expect(r.store.updateIds.positions).toBe(ids.positions + 1);
-    expect(main.updateIds.orders).toBe(mainIds.orders + 1);
+    // Rule 5 / #3640 review: the later equal stream is a receipt, not another UI change.
+    expect(r.store.updateIds).toEqual(ids);
+    expect(main.updateIds).toEqual(mainIds);
+    expect(r.store.observationIds.orders).toBeGreaterThan(0);
+    expect(r.store.observationIds.positions).toBeGreaterThan(0);
   });
 
   it('does not recursively snapshot when a store observer synchronously reads again', async () => {
     const r = fixture();
     await r.start();
+    r.update({ balance: { total: 200, free: 190, used: 10, upnl: 0 } });
     let calls = 0;
     const off = r.store.subscribe(() => {
       if (++calls <= 2) r.exchange.syncAccountState();
@@ -392,7 +395,11 @@ describe('Rust native current-account reads', () => {
     try {
       await vi.advanceTimersByTimeAsync(1000);
       // Establish the tracked order under the actual manager's update listener.
-      r.store.update({ latency: 1 });
+      applyReferenceFixture(
+        r.store,
+        { latency: 1 },
+        r.store.markets.map((row) => row.symbol),
+      );
       await vi.advanceTimersByTimeAsync(0);
       expect(instance.isStopped).toBe(false);
       r.update({ orders: [] });
@@ -416,7 +423,11 @@ describe('Rust native current-account reads', () => {
 
   it('rejects unstarted or merely JS-seeded synchronous reads', async () => {
     const r = fixture('bybit', { ...loaded, markets: false });
-    r.store.update({ loaded });
+    applyReferenceFixture(
+      r.store,
+      { loaded },
+      r.store.markets.map((row) => row.symbol),
+    );
     expect(() => r.exchange.syncAccountState()).toThrow('not started');
     const starting = r.exchange.start().catch(() => {});
     await vi.advanceTimersByTimeAsync(250);
@@ -430,7 +441,11 @@ describe('Rust native current-account reads', () => {
     const r = fixture();
     await r.start();
     delete r.native.accountSnapshotFrame;
-    r.store.update({ orders: [order()] });
+    applyReferenceFixture(
+      r.store,
+      { orders: [order()] },
+      r.store.markets.map((row) => row.symbol),
+    );
     await expect(r.exchange.fetchOrders()).rejects.toThrow('does not support private account snapshots');
   });
 
@@ -456,7 +471,11 @@ describe('Rust native current-account reads', () => {
 
   it('wakes a cold account read on disposal instead of answering from its JS seed', async () => {
     const r = fixture('bybit', { ...loaded, orders: false }, false);
-    r.store.update({ loaded, orders: [order()] });
+    applyReferenceFixture(
+      r.store,
+      { loaded, orders: [order()] },
+      r.store.markets.map((row) => row.symbol),
+    );
     const reading = r.exchange.fetchOrders();
     const rejected = expect(reading).rejects.toThrow('disposed');
     await vi.advanceTimersByTimeAsync(250);
@@ -508,13 +527,18 @@ describe('Rust native current-account reads', () => {
   it('selects cancel-all symbols and set-all leverage positions from native state', async () => {
     const r = fixture();
     await r.start();
-    r.store.update({ orders: [order('stale', 'ETHUSDT')], positions: [position('ETHUSDT')] });
+    applyReferenceFixture(
+      r.store,
+      { orders: [order('stale', 'ETHUSDT')], positions: [position('ETHUSDT')] },
+      r.store.markets.map((row) => row.symbol),
+    );
     r.update({ orders: [order('a'), order('b')], positions: [position()] });
     await r.exchange.cancelAllOrders();
     await r.exchange.setAllLeverage(9);
     expect(r.commands.filter((c) => c.command !== undefined).map(({ command: _id, ...c }) => c)).toEqual([
       { op: 'cancelSymbolOrders', symbol: 'BTCUSDT' },
       { op: 'setLeverage', symbol: 'BTCUSDT', leverage: 9, side: PositionSide.Long },
+      { op: 'setLeverage', symbol: 'ETHUSDT', leverage: 9 },
     ]);
   });
 
@@ -534,7 +558,11 @@ describe('Rust native current-account reads', () => {
   it('closes one native preflush snapshot with native linear quantities and separate hedge legs', async () => {
     const r = fixture('mexc');
     await r.start();
-    r.store.update({ positions: [{ ...position(), contracts: 9999 }] });
+    applyReferenceFixture(
+      r.store,
+      { positions: [{ ...position(), contracts: 9999 }] },
+      r.store.markets.map((row) => row.symbol),
+    );
     r.update({
       positions: [
         { ...position(), id: 'BTCUSDT-long' },
@@ -572,7 +600,11 @@ describe('Rust native current-account reads', () => {
     r.exchange.on('log', (message: string) => logs.push(message));
     r.exchange.fetchPositions = () => Promise.reject(new Error('positions did not load within 30s'));
     r.exchange.syncAccountState = () => undefined;
-    r.store.update({ loaded: { ...r.store.loaded, positions: false } });
+    applyReferenceFixture(
+      r.store,
+      { loaded: { ...r.store.loaded, positions: false } },
+      r.store.markets.map((row) => row.symbol),
+    );
     await expect(r.exchange.nukePositions()).rejects.toThrow('positions did not load');
     expect(logs.join()).toContain('Open positions: unknown, not loaded');
   });
@@ -826,7 +858,11 @@ describe('Rust native current-account reads', () => {
   it('does not invent a close for empty native positions despite a stale JS row', async () => {
     const r = fixture();
     await r.start();
-    r.store.update({ positions: [position()] });
+    applyReferenceFixture(
+      r.store,
+      { positions: [position()] },
+      r.store.markets.map((row) => row.symbol),
+    );
     await r.exchange.nukePositions(3);
     expect(r.commands.filter((c) => c.op === 'placeOrders')).toEqual([]);
   });
@@ -1048,7 +1084,11 @@ describe('Rust native current-account reads', () => {
   it('reports a missing market without closing anything for it', async () => {
     const r = fixture();
     await r.start();
-    r.store.update({ markets: [] });
+    applyReferenceFixture(
+      r.store,
+      { markets: [] },
+      r.store.markets.map((row) => row.symbol),
+    );
     r.update({ positions: [position()] });
     await expect(r.exchange.nukePositions()).rejects.toThrow('BTCUSDT: market not found');
     expect(r.commands.filter((c) => c.op === 'placeOrders')).toEqual([]);

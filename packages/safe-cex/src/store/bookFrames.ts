@@ -54,12 +54,15 @@ function side(levels: BookLevels, descending: boolean): OrderBook['bids'] {
 /** Reconstruct format-1 books atomically, keeping baselines off transferable buffers. */
 export class BookFrames {
   private states = new Map<string, BookState>();
-  private readonly frames = new WeakMap<Frame, FrameBook[]>();
+  private frames = new WeakMap<Frame, FrameBook[]>();
   private symbols?: readonly string[];
   private ids?: readonly string[];
 
   clear(): void {
     this.states.clear();
+    this.frames = new WeakMap();
+    this.symbols = undefined;
+    this.ids = undefined;
   }
 
   read(frame: Frame, symbols: readonly string[], ids: readonly string[]): FrameBook[] {

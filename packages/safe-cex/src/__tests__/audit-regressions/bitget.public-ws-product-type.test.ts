@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { BitgetUSDCExchange } from '../reference/bitget/bitgetusdc.exchange';
 
@@ -32,7 +32,7 @@ const variants: BitgetVariant[] = [
       new BitgetExchange(
         'bitget',
         { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase' },
-        new DefaultStore(),
+        new FrameStore(),
       ),
   },
   {
@@ -49,7 +49,7 @@ const variants: BitgetVariant[] = [
       new BitgetUSDCExchange(
         'bitgetusdc',
         { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase' },
-        new DefaultStore(),
+        new FrameStore(),
       ),
   },
 ];
@@ -64,53 +64,65 @@ const attachOpenSocket = (websocket: { ws?: unknown }, frames: string[]) => {
 const parseFrames = (frames: string[]) => frames.map((frame) => JSON.parse(frame));
 
 describe('audit regression: Bitget public websocket product types', () => {
-  it.each(variants)('$name uses its parent product type for primary and secondary ticker subscriptions', ({ expectedProductType, symbols, create }) => {
-    const exchange = create();
-    const primaryFrames: string[] = [];
-    const secondaryFrames: string[] = [];
-    const primary = exchange.publicWebsocket;
-    const secondary = exchange.secondsTickersWebsocket;
+  it.each(variants)(
+    '$name uses its parent product type for primary and secondary ticker subscriptions',
+    ({ expectedProductType, symbols, create }) => {
+      const exchange = create();
+      const primaryFrames: string[] = [];
+      const secondaryFrames: string[] = [];
+      const primary = exchange.publicWebsocket;
+      const secondary = exchange.secondsTickersWebsocket;
 
-    primary.topics = { ticker: { [symbols.primaryTicker]: 1 } };
-    secondary.topics = { ticker: { [symbols.secondaryTicker]: 1 } };
-    attachOpenSocket(primary, primaryFrames);
-    attachOpenSocket(secondary, secondaryFrames);
-    vi.spyOn(primary, 'ping').mockImplementation(() => {});
-    vi.spyOn(secondary, 'ping').mockImplementation(() => {});
+      primary.topics = { ticker: { [symbols.primaryTicker]: 1 } };
+      secondary.topics = { ticker: { [symbols.secondaryTicker]: 1 } };
+      attachOpenSocket(primary, primaryFrames);
+      attachOpenSocket(secondary, secondaryFrames);
+      vi.spyOn(primary, 'ping').mockImplementation(() => {});
+      vi.spyOn(secondary, 'ping').mockImplementation(() => {});
 
-    primary.onOpen();
-    secondary.onOpen();
-    exchange.emitter.emit('markets:changed', { added: symbols.added.map((symbol) => ({ symbol })) });
+      primary.onOpen();
+      secondary.onOpen();
+      exchange.emitter.emit('markets:changed', { added: symbols.added.map((symbol) => ({ symbol })) });
 
-    expect(parseFrames(primaryFrames)).toEqual([
-      { op: 'subscribe', args: [{ instType: expectedProductType, channel: 'ticker', instId: symbols.primaryTicker }] },
-      { op: 'subscribe', args: [{ instType: expectedProductType, channel: 'ticker', instId: symbols.added[2] }] },
-    ]);
-    expect(parseFrames(secondaryFrames)).toEqual([
-      { op: 'subscribe', args: [{ instType: expectedProductType, channel: 'ticker', instId: symbols.secondaryTicker }] },
-      { op: 'subscribe', args: [{ instType: expectedProductType, channel: 'ticker', instId: symbols.added[0] }] },
-    ]);
-  });
+      expect(parseFrames(primaryFrames)).toEqual([
+        {
+          op: 'subscribe',
+          args: [{ instType: expectedProductType, channel: 'ticker', instId: symbols.primaryTicker }],
+        },
+        { op: 'subscribe', args: [{ instType: expectedProductType, channel: 'ticker', instId: symbols.added[2] }] },
+      ]);
+      expect(parseFrames(secondaryFrames)).toEqual([
+        {
+          op: 'subscribe',
+          args: [{ instType: expectedProductType, channel: 'ticker', instId: symbols.secondaryTicker }],
+        },
+        { op: 'subscribe', args: [{ instType: expectedProductType, channel: 'ticker', instId: symbols.added[0] }] },
+      ]);
+    },
+  );
 
-  it.each(variants)('$name uses its parent product type for candle and orderbook subscribe/unsubscribe frames', ({ expectedProductType, symbols, create }) => {
-    const exchange = create();
-    const frames: string[] = [];
-    const websocket = exchange.publicWebsocket;
+  it.each(variants)(
+    '$name uses its parent product type for candle and orderbook subscribe/unsubscribe frames',
+    ({ expectedProductType, symbols, create }) => {
+      const exchange = create();
+      const frames: string[] = [];
+      const websocket = exchange.publicWebsocket;
 
-    attachOpenSocket(websocket, frames);
+      attachOpenSocket(websocket, frames);
 
-    const stopCandle = websocket.listenOHLCV({ symbol: symbols.candle, interval: '1m' }, vi.fn());
-    const stopOrderBook = websocket.listenOrderBook(symbols.orderBook, vi.fn());
-    stopCandle();
-    stopOrderBook();
+      const stopCandle = websocket.listenOHLCV({ symbol: symbols.candle, interval: '1m' }, vi.fn());
+      const stopOrderBook = websocket.listenOrderBook(symbols.orderBook, vi.fn());
+      stopCandle();
+      stopOrderBook();
 
-    expect(parseFrames(frames)).toEqual([
-      { op: 'subscribe', args: [{ instType: expectedProductType, channel: 'candle1m', instId: symbols.candle }] },
-      { op: 'subscribe', args: [{ instType: expectedProductType, channel: 'books', instId: symbols.orderBook }] },
-      { op: 'unsubscribe', args: [{ instType: expectedProductType, channel: 'candle1m', instId: symbols.candle }] },
-      { op: 'unsubscribe', args: [{ instType: expectedProductType, channel: 'books', instId: symbols.orderBook }] },
-    ]);
-  });
+      expect(parseFrames(frames)).toEqual([
+        { op: 'subscribe', args: [{ instType: expectedProductType, channel: 'candle1m', instId: symbols.candle }] },
+        { op: 'subscribe', args: [{ instType: expectedProductType, channel: 'books', instId: symbols.orderBook }] },
+        { op: 'unsubscribe', args: [{ instType: expectedProductType, channel: 'candle1m', instId: symbols.candle }] },
+        { op: 'unsubscribe', args: [{ instType: expectedProductType, channel: 'books', instId: symbols.orderBook }] },
+      ]);
+    },
+  );
 
   it.each(variants)(
     '$name removes final candle and orderbook topics so reconnects cannot revive them',

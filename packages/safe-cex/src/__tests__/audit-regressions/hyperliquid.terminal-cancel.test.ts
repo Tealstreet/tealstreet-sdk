@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { createExchangeAPI } from '../reference/hyperliquid/hyperliquid.api';
 import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStatus, OrderType } from '../../types';
 
 const PRIVATE_KEY = `0x${'11'.repeat(32)}`;
 const USER = `0x${'22'.repeat(20)}`;
@@ -43,25 +44,29 @@ const createExchange = () => {
       testnet: true,
       tuning: { consoleLogging: false },
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
 
-  exchange.store.update({
-    markets: [
-      {
-        id: 'BTC',
-        symbol: 'BTC-PERP',
-        base: 'BTC',
-        quote: 'USDC',
-        active: true,
-        precision: { amount: 0.00001, price: 1 },
-        limits: { amount: { min: 0.00001, max: 1000 } },
-        contractSize: 1,
-        isSpot: false,
-        info: { hyperliquidId: 0 },
-      } as any,
-    ],
-  });
+  applyReferenceFixture(
+    exchange.store,
+    {
+      markets: [
+        {
+          id: 'BTC',
+          symbol: 'BTC-PERP',
+          base: 'BTC',
+          quote: 'USDC',
+          active: true,
+          precision: { amount: 0.00001, price: 1 },
+          limits: { amount: { min: 0.00001, max: 1000 }, leverage: { min: 1, max: 100 } },
+          contractSize: 1,
+          isSpot: false,
+          info: { hyperliquidId: 0 },
+        } as any,
+      ],
+    },
+    exchange.store.markets.map((row) => row.symbol),
+  );
 
   return exchange;
 };
@@ -124,9 +129,9 @@ describe('Hyperliquid terminal cancel misses after flatten', () => {
     const errors: string[] = [];
     const xhr = createApi(errors);
 
-    await expect(
-      xhr.post('/exchange', { action: { type: 'cancelByCloid', cancels: [] }, nonce: 1 }),
-    ).rejects.toThrow(TERMINAL_CANCEL);
+    await expect(xhr.post('/exchange', { action: { type: 'cancelByCloid', cancels: [] }, nonce: 1 })).rejects.toThrow(
+      TERMINAL_CANCEL,
+    );
     expect(errors).toEqual([]);
   });
 
@@ -169,7 +174,11 @@ describe('Hyperliquid terminal cancel misses after flatten', () => {
 
   it('treats an all-terminal cancel miss as a successful local cleanup', async () => {
     const exchange = createExchange();
-    exchange.store.update({ orders: closeOrders });
+    applyReferenceFixture(
+      exchange.store,
+      { orders: closeOrders },
+      exchange.store.markets.map((row) => row.symbol),
+    );
     exchange.xhr = {
       post: vi.fn().mockRejectedValue(new Error(`${TERMINAL_CANCEL}, ${TERMINAL_CANCEL}, ${TERMINAL_CANCEL}`)),
     } as any;
@@ -180,17 +189,26 @@ describe('Hyperliquid terminal cancel misses after flatten', () => {
 
   it('does not treat a blank cancel failure as an already-gone order', async () => {
     const exchange = createExchange();
-    exchange.store.update({ orders: closeOrders });
+    applyReferenceFixture(
+      exchange.store,
+      { orders: closeOrders },
+      exchange.store.markets.map((row) => row.symbol),
+    );
     exchange.xhr = { post: vi.fn().mockRejectedValue(new Error('')) } as any;
 
+    const published = exchange.store.orders;
     await expect(exchange.cancelOrders(closeOrders)).rejects.toMatchObject({ message: '' });
-    expect(exchange.store.orders).toEqual(closeOrders);
+    expect(exchange.store.orders).toBe(published);
   });
 
   it('does not let a stale frontendOpenOrders response re-add a WS-cancelled positional stop', async () => {
     const exchange = createExchange();
     const order = closeOrders[0];
-    exchange.store.update({ orders: [order] });
+    applyReferenceFixture(
+      exchange.store,
+      { orders: [order] },
+      exchange.store.markets.map((row) => row.symbol),
+    );
     exchange.xhr = {
       post: vi.fn().mockResolvedValue({
         data: [

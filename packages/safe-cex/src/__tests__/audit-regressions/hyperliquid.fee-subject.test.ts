@@ -2,9 +2,9 @@ import type { ExchangeOptions } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
 import { ENDPOINTS } from '../../exchanges/hyperliquid/hyperliquid.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
 
 const AGENT = '0x1111111111111111111111111111111111111111';
 const MASTER = '0x2222222222222222222222222222222222222222';
@@ -21,7 +21,7 @@ const setup = (overrides: Partial<ExchangeOptions> = {}) => {
       tuning: { consoleLogging: false },
       ...overrides,
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   exchanges.push(exchange);
   const post = vi.spyOn((exchange as any).infoXhr, 'post').mockResolvedValue({
