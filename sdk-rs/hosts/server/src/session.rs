@@ -2383,6 +2383,31 @@ impl Session {
         } else {
             Vec::new()
         };
+        // A protective row's amend may complete as a position setting naming no
+        // order (Bybit trading-stop). Capture the target's shape before dispatch.
+        let protective_amend = match (order_frame, args.first()) {
+            (Some(OrderReceipt::Action { kind: "amend", .. }), Some(request)) => {
+                let id = request["order"]["id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                account
+                    .handle
+                    .read(move |store| {
+                        store.order(&id).is_some_and(|order| {
+                            matches!(
+                                order.kind,
+                                safe_cex_engine::model::OrderType::StopLoss
+                                    | safe_cex_engine::model::OrderType::TakeProfit
+                                    | safe_cex_engine::model::OrderType::TrailingStopLoss
+                            )
+                        })
+                    })
+                    .await
+                    .unwrap_or(false)
+            }
+            _ => false,
+        };
         if let Some(OrderReceipt::Action {
             seq,
             kind,
@@ -2516,8 +2541,11 @@ impl Session {
                             seq,
                             kind,
                             unit: matches!(reply, methods::Reply::Unit),
-                            idless_protection: kind == "place"
-                                && crate::full_writes::protection_only(command),
+                            idless_protection: match kind {
+                                "place" => crate::full_writes::protection_only(command),
+                                "amend" => protective_amend,
+                                _ => false,
+                            },
                         },
                     };
                 }

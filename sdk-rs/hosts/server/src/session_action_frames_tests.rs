@@ -1172,6 +1172,52 @@ async fn full_write_protection_shapes_reach_native_signing_without_a_forced_call
     }).await;
 }
 
+/// Live AGT-40: a Full position stop edit goes to `/v5/position/trading-stop`,
+/// which names no order. The native completion is authoritative, so it is applied.
+#[tokio::test]
+async fn full_position_stop_amend_settles_applied_without_an_order_id() {
+    tokio::task::LocalSet::new().run_until(async {
+        let registry = crate::accounts::tests::registry();
+        let tape = Tape { full_stop: true, ..Default::default() };
+        let account = delegated_account(&registry, "A", "bybit", tape.clone());
+        let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+        action(&mut session, json!({"kind":"amend","order":{"id":"full-stop","symbol":"BTCUSDT"},"update":{"price":48000}}), 1, false).await;
+        let result = action_frame(&mut sent, "order.actionOutcome").await;
+        assert_eq!(result["d"]["outcome"], "applied", "{result}");
+        assert_eq!(result["d"]["error"], Value::Null);
+        assert_eq!(result["d"]["result"], json!({"kind":"amend","orderIds":[],"protectionApplied":true}));
+        let rows = native_request_rows(&tape, "trading-stop");
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["tpslMode"], "Full");
+        assert_eq!(rows[0]["stopLoss"], "48000");
+        assert_eq!(tape.writes.lock().unwrap().as_slice(), &["trading"]);
+        session.close(); registry.dispose(&account, Disposal::PageDisposed);
+    }).await;
+}
+
+/// The marker needs the native completion: a trading-stop reply lost after
+/// handoff stays unknown, never applied.
+#[tokio::test]
+async fn full_position_stop_amend_lost_after_handoff_stays_unknown() {
+    tokio::task::LocalSet::new().run_until(async {
+        let registry = crate::accounts::tests::registry();
+        let tape = Tape { full_stop: true, hold: true, ..Default::default() };
+        let account = delegated_account(&registry, "A", "bybit", tape.clone());
+        let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+        action(&mut session, json!({"kind":"amend","order":{"id":"full-stop","symbol":"BTCUSDT"},"update":{"price":48000}}), 1, false).await;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while tape.waiting.lock().unwrap().is_empty() { tokio::task::yield_now().await; }
+        }).await.unwrap();
+        for (id, events) in tape.waiting.lock().unwrap().drain(..) {
+            events.send(HostEvent::HttpFailed(id, "synthetic disconnected after handoff".into())).unwrap();
+        }
+        let result = action_frame(&mut sent, "order.actionOutcome").await;
+        assert_eq!(result["d"]["outcome"], "unknown", "{result}");
+        assert!(result["d"]["result"].is_null());
+        session.close(); registry.dispose(&account, Disposal::PageDisposed);
+    }).await;
+}
+
 #[tokio::test]
 async fn full_write_leverage_fanout_cannot_refuse_after_another_leg_completed() {
     let (out, mut sent, _) = Out::channel(8);

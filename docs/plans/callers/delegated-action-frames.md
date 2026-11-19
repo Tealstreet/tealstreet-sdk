@@ -95,7 +95,8 @@ fabricate an ACK or a not-sent proof.
 
 applied: result is exactly {kind:"amend",orderIds:["venue-order-1"]},
 {kind:"cancel"}, {kind:"cancelAll"}, or {kind:"nuke"}; error is null.
-Amend IDs: 1–32 nonempty strings, each at most 256 UTF-8 bytes.
+Amend IDs: 1–32 nonempty strings, each at most 256 UTF-8 bytes, except the
+ID-less protective amend `{kind:"amend",orderIds:[],protectionApplied:true}` below.
 The result kind must match the original action. Applied means all requested legs
 completed successfully; it does not promise a venue fill or an empty future store.
 
@@ -353,6 +354,13 @@ from the captured protective command shape plus native completion, never from an
 ACK or a missing reply. The SDK accepts it only for a protection-only request;
 ordinary empty placement results and interrupted protection writes stay unknown.
 No venue order ID is invented.
+
+An amend of a protective stop/take-profit/trailing row follows the same rule:
+Bybit edits a Full position stop through trading-stop, which names no order. The
+server captures whether the engine store's target row is protective before
+dispatch, and an authoritative ID-less completion of that amend returns
+`{kind:"amend",orderIds:[],protectionApplied:true}`. An ordinary amend that
+completes without an ID, or any protective amend lost after handoff, stays unknown.
 
 ## Existing algo lifecycle and deferred parameter changes
 

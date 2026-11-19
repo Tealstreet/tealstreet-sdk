@@ -407,11 +407,11 @@ pub fn settle(
     match answer {
         Ok(result) => {
             let applied = match kind {
-                "place"
+                "place" | "amend"
                     if result["protectionApplied"] == true
                         && result["orderIds"].as_array().is_some_and(Vec::is_empty) =>
                 {
-                    Some(json!({"kind":"place","orderIds":[],"protectionApplied":true}))
+                    Some(json!({"kind":kind,"orderIds":[],"protectionApplied":true}))
                 }
                 "amend" | "place" | "close" => {
                     let ids = result.as_array().or_else(|| result["orderIds"].as_array());
@@ -712,6 +712,11 @@ mod tests {
         for (kind, answer, expected) in [
             ("amend", Ok(json!(["changed"])), "applied"),
             ("amend", Ok(json!([])), "unknown"),
+            (
+                "amend",
+                Ok(json!({"orderIds":[],"protectionApplied":true})),
+                "applied",
+            ),
             (
                 "cancel",
                 Err(json!({"message":"connection lost"})),

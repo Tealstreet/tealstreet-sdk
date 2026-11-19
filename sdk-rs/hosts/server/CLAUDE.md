@@ -424,6 +424,10 @@ reduce-only LIMIT price amendments use the ordinary native amend path.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
+An amend whose engine-store target is a stop/take-profit/trailing row, read
+before dispatch, settles an authoritative ID-less completion as applied with
+`protectionApplied` (Bybit Full stops edit via trading-stop; AGT-40 reported
+9/9 such edits as unknown). Ordinary ID-less amends stay unknown.
 Every raw typed-action payload checks recursive key uniqueness before `Value`
 conversion: placement arrays, close orders, scheduling values and algo data.
 Schema rejection follows binding/hash checks and precedes ACK or native work.
