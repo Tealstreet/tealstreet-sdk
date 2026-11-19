@@ -76,7 +76,8 @@ is explicitly Unprotected without a venue call. Lineage and the peer census only
 word the put-back (standalone when unproven). An already-gone cancel still never
 puts back, and an Unknown cancel, replacement or put-back still never resends. The
 post-cancel order check forgives only what our own cancel changes: Bybit's terminal
-row zeroes `leavesQty` (M54, 2026-11-19: comparing it vetoed every replacement and
+row zeroes `leavesQty` and, on inverse, its `remaining_native`/`remaining_notional`
+mirrors (M54, 2026-11-19: comparing them vetoed every replacement and
 put-back); `filled` and every other field still compare.
 Put-back preserves the original
 native size, trigger source and conditional execution fields. Its passive report
