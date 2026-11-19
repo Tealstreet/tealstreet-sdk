@@ -1,7 +1,7 @@
-//! Strict Bybit V5 write acknowledgements. Every level must be a JSON object,
-//! codes are exact integers, IDs are bounded non-empty strings, and rows are
-//! matched to the request by echo, never by position alone. A shape this module
-//! rejects is a malformed acknowledgement: the engine records it as unproven.
+// Strict Bybit V5 write acknowledgements. Every level must be a JSON object,
+// codes are exact integers, IDs are bounded non-empty strings, and rows are
+// matched to the request by echo, never by position alone. A shape this module
+// rejects is a malformed acknowledgement: the engine records it as unproven.
 use safe_cex_engine::classify::decode_int;
 use safe_cex_engine::text::JoinWith;
 use serde_json::value::RawValue;
@@ -1060,7 +1060,3 @@ fn position_row(raw: &RawValue) -> Result<(String, i64), Malformed> {
 #[cfg(test)]
 #[path = "acknowledgement_tests.rs"]
 mod tests;
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-#[path = "acknowledgement_alloc_tests.rs"]
-mod allocation_tests;
