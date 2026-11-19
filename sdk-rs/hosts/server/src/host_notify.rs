@@ -9,7 +9,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// Oldest notifications are dropped past this many queued.
+/// Past this many queued, the oldest low-priority notification is dropped.
 pub const MAX_OUTBOX: usize = 1000;
 pub const MAX_BATCH: usize = 50;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -105,6 +105,14 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// Shutdown notices and algo stops outlive fills and rejections when full.
+    pub fn priority(self) -> bool {
+        matches!(
+            self,
+            Self::Shutdown | Self::ShutdownWarning | Self::AlgoStopped
+        )
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Fill => "fill",
@@ -124,7 +132,7 @@ pub enum Severity {
     Critical,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Side {
     Buy,
@@ -141,7 +149,7 @@ pub enum Verb {
     Finished,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Algo {
     Chase,
@@ -436,12 +444,29 @@ struct Queue {
 }
 
 impl Queue {
+    /// Full: the oldest fill goes first, then other low-priority kinds. A queued
+    /// priority notice is never evicted for an incoming low-priority one.
     fn push(&mut self, notification: HostNotification) {
         if self.items.len() >= MAX_OUTBOX {
-            self.items.pop_front();
             self.dropped += 1;
+            match self.low_priority_victim() {
+                Some(index) => {
+                    self.items.remove(index);
+                }
+                None if !notification.kind.priority() => return,
+                None => {
+                    self.items.pop_front();
+                }
+            }
         }
         self.items.push_back(notification);
+    }
+
+    fn low_priority_victim(&self) -> Option<usize> {
+        self.items
+            .iter()
+            .position(|item| item.kind == Kind::Fill)
+            .or_else(|| self.items.iter().position(|item| !item.kind.priority()))
     }
 
     fn take_batch(&mut self) -> Vec<HostNotification> {
@@ -450,13 +475,14 @@ impl Queue {
         self.items.drain(..count).collect()
     }
 
-    /// A failed batch goes back in front, in order; the cap still drops oldest.
+    /// A failed batch goes back in front, in order; the cap evicts as `push` does.
     fn requeue(&mut self, batch: Vec<HostNotification>) {
         for notification in batch.into_iter().rev() {
             self.items.push_front(notification);
         }
         while self.items.len() > MAX_OUTBOX {
-            self.items.pop_front();
+            let index = self.low_priority_victim().unwrap_or(0);
+            self.items.remove(index);
             self.dropped += 1;
         }
         self.in_flight = 0;

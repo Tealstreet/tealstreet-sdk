@@ -514,7 +514,10 @@ See `DELEGATED_RETENTION.md` for the retention and restart contracts.
 `src/host_notify.rs` queues DELEGATED notifications for the gateway when
 `TEALSTREET_HOST_NOTIFY_URL` is set; unset means off, including the warning
 timer. Retention arms `delegated.shutdownWarning` in its own task and emits
-`delegated.shutdown` on expiry and drain. Build notifications only through
+`delegated.shutdown` on expiry and drain. The algo host's `algo_notify::Tap`
+emits `fill`, `orderRejected` (chase/TWAP placements only, through
+`RejectTap`) and `algoStopped`; it holds the signer weakly, so it never extends
+the key owner's life. Build notifications only through
 `HostNotification::build` and the typed `Fields` setters: never add a free-text
 field, and never log the token. Contract, env vars and delivery semantics:
 `DELEGATED_RETENTION.md` "Host notification lane".

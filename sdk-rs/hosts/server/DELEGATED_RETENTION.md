@@ -65,7 +65,11 @@ AGT-37). Startup environment:
 | `TEALSTREET_BOX` | Sent as `X-Tealstreet-Box`; `TEALSTREET_ROUTER_BOX_ID` is the fallback. One of them is required when the URL is set. |
 
 Delivery uses its own HTTP client (never venue egress), a 5-second timeout and
-a bounded in-memory outbox that drops the oldest past 1000 and logs the count.
+a bounded in-memory outbox of 1000 that logs every drop. When full it evicts
+the oldest `fill`, then the oldest other low-priority notice (`orderRejected`);
+`delegated.shutdown`, `delegated.shutdownWarning` and `algoStopped` are never
+evicted for those, and an incoming low-priority notice is dropped instead.
+Only a queue holding nothing but priority notices drops its oldest.
 Batches carry at most 50. Network failures and non-2xx statuses retry the same
 batch in order with backoff from 1 second, doubling to a 10-minute cap; the
 gateway dedupes the at-least-once delivery on `id`. 400/413/422 drop the batch
@@ -90,6 +94,38 @@ Retention emits for DELEGATED residents only:
 - `delegated.shutdown` with cause `serverRestart` for each DELEGATED resident
   stopped by drain/SIGTERM. The drain waits for delivery beside the engine
   shutdown, bounded to 3 seconds.
+
+The algo host (`src/algo_notify.rs`) emits, for DELEGATED residents only and
+never from a snapshot or a rejoin replay:
+
+- `fill`: live fills from flush frames, aggregated per order until 2 seconds
+  pass without another fill. `filled` only when the order's own record (its
+  current row, or the row right after its last fill) shows `filled` reaching
+  `amount`; fill amounts are never compared with the order, since lot venues
+  use different units. Anything unproven is `partiallyFilled`, including an
+  IOC or capped market order whose remainder was cancelled in the fill's own
+  batch, and a full fill whose row the venue removed in that batch. It collapses per order through an
+  opaque hash; order ids, prices and sizes stay on the box.
+- `orderRejected`: a chase or TWAP placement the venue refused outright
+  (`Outcome::Rejected`). Client writes, exec and nuke legs use the untapped
+  port and never emit; unknown and not-sent outcomes never emit. At most one
+  per algo, symbol and side per 60 seconds, so a retrying chase pages once.
+  A chase placement on a market whose live chases are all TWAP slices reports
+  `algo: "twap"`.
+- `algoStopped`: a chase end whose recorded reason is not an explicit client
+  stop (`User cancelled`, kept order, `chaser:terminateAll`, nuke), or a TWAP
+  leaving the state map without a client `twap:stop`/`twap:cleanup` or nuke.
+  Reasons are compared before any `; ...` retried-cancel suffix the chaser adds.
+  `Completed`/length-condition chase ends and TWAPs without a slice-failure or
+  shortfall report are `finished`/`algoFinished`; the rest `stopped`/`algoError`.
+  TWAP slice chases report through their TWAP. Exec has no `algoStopped`: it
+  is a one-shot client command answered on its own socket.
+
+Stops caused by account disposal emit no `algoStopped`. Retention expiry and
+drain/SIGTERM are covered by `delegated.shutdown`; router-lease fences, forced
+user drains and revocation disposals send neither notification (a server-lost
+notice from the router is deferred). Fills still waiting out the debounce are
+sent when the algo host shuts down or is fenced.
 
 The lane adds no timing, admission, custody, signing or key lifecycle behavior
 beyond the warning timer, and never cancels resting orders.

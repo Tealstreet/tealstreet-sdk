@@ -2,6 +2,7 @@
 pub mod access;
 pub mod accounts;
 pub mod admission;
+mod algo_notify;
 pub mod algos;
 pub mod audit;
 pub mod auth;

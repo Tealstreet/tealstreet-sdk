@@ -2103,6 +2103,24 @@ impl Registry {
         running.attach_restores(self.interruptions.account(user, registry_name));
         let algo_running = running.clone();
         let algo_identity = identity.clone();
+        // A weak signer: the algo host must never extend the key owner's life.
+        let algo_notify = self
+            .host_notify
+            .clone()
+            .filter(|_| !public_only)
+            .map(|notifier| {
+                let signing = Arc::downgrade(&signing);
+                crate::algo_notify::AlgoNotify::new(
+                    notifier,
+                    crate::host_notify::Scope::new(user, &venue, registry_name),
+                    Arc::new(move || {
+                        signing
+                            .upgrade()
+                            .is_some_and(|signing| signing.resident().is_some())
+                    }),
+                    held.clone(),
+                )
+            });
         let (algos, algo_inbox) = if public_only {
             (None, None)
         } else {
@@ -2178,6 +2196,7 @@ impl Registry {
                                 algo_running,
                                 algo_twap_owner,
                                 algo_identity,
+                                algo_notify,
                                 inbox,
                             ));
                         }
@@ -3726,6 +3745,7 @@ pub mod testing {
             account.running.clone(),
             account.twap_owner.clone(),
             account.identity.clone(),
+            None,
             inbox,
         ));
         account
