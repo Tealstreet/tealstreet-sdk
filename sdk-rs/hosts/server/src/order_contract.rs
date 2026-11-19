@@ -170,6 +170,44 @@ pub(crate) fn client_order_id(venue: &str, intent: &str) -> Option<String> {
     }
 }
 
+/// Hyperliquid's native caller ID for a DELEGATED `place`/`close` order's
+/// `clientOrderId`. A valid cloid is sent verbatim; any other text becomes
+/// `0x` + the first 16 bytes of SHA-256(UTF-8 id), so the caller can recompute it.
+pub(crate) fn hyperliquid_cloid(client_order_id: &str) -> String {
+    let valid = client_order_id.len() == 34
+        && client_order_id.starts_with("0x")
+        && client_order_id[2..]
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    if valid {
+        return client_order_id.to_owned();
+    }
+    let digest = safe_cex_crypto::sha256(client_order_id.as_bytes());
+    format!("0x{}", safe_cex_crypto::hex(&digest[..16]))
+}
+
+/// Map validated `place`/`close` arguments (an order array or one order) to the
+/// venue's caller-ID format. Absent IDs stay absent, so the venue still mints.
+pub(crate) fn venue_caller_ids(venue: &str, args: &mut [Value]) {
+    if !matches!(venue, "hyperliquid" | "hyperliquidspot") {
+        return;
+    }
+    let Some(first) = args.first_mut() else {
+        return;
+    };
+    let orders: Vec<&mut Value> = match first {
+        Value::Array(orders) => orders.iter_mut().collect(),
+        order => vec![order],
+    };
+    for order in orders {
+        if let Some(id) = order.get_mut("clientOrderId")
+            && let Some(text) = id.as_str()
+        {
+            *id = hyperliquid_cloid(text).into();
+        }
+    }
+}
+
 // 116aeae12: protected Session controls pin Bybit's no-caller-ID protection path.
 pub(crate) fn bybit_protection(venue: &str, order: &serde_json::Map<String, Value>) -> bool {
     matches!(venue, "bybit" | "bybitdemo" | "bybitinverse" | "bybitspot")
@@ -397,6 +435,61 @@ mod activation_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn hyperliquid_cloids_are_deterministic_valid_and_keep_valid_caller_ids() {
+        let valid = |id: &str| {
+            id.len() == 34
+                && id.starts_with("0x")
+                && id[2..]
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        };
+        // Pinned so a client (NX web/mobile) can check its own derivation.
+        let derived = hyperliquid_cloid("ts-caller-1");
+        assert_eq!(derived, "0x00c1a4116d5e3f23956990d13202b9dd");
+        assert_eq!(hyperliquid_cloid("ts-caller-1"), derived);
+        assert_ne!(hyperliquid_cloid("ts-caller-2"), derived);
+        let cloid = "0x0123456789abcdef0123456789abcdef";
+        assert_eq!(hyperliquid_cloid(cloid), cloid);
+        // Uppercase is not a cloid the venue echoes back, so it is hashed too.
+        assert_eq!(
+            hyperliquid_cloid("0xABCDEF0123456789ABCDEF0123456789"),
+            "0xe2dfdedc1918a1f4ca9f7dbea7f23d9e"
+        );
+        let uuid = "018bcfe5-6800-7101-8101-010101010101";
+        for id in [
+            "ts-caller-1",
+            cloid,
+            uuid,
+            "",
+            "x",
+            &"7".repeat(256),
+            "0x0123",
+        ] {
+            assert!(valid(&hyperliquid_cloid(id)), "{id}");
+        }
+    }
+
+    #[test]
+    fn venue_caller_ids_map_only_hyperliquid_supplied_ids() {
+        let derived = hyperliquid_cloid("ts-a");
+        for venue in ["hyperliquid", "hyperliquidspot"] {
+            let mut batch = vec![json!([
+                {"symbol":"BTC-PERP","clientOrderId":"ts-a"},
+                {"symbol":"ETH-PERP"},
+            ])];
+            venue_caller_ids(venue, &mut batch);
+            assert_eq!(batch[0][0]["clientOrderId"], derived);
+            assert!(batch[0][1].get("clientOrderId").is_none(), "venue mints");
+            let mut close = vec![json!({"symbol":"BTC-PERP","clientOrderId":"ts-a"})];
+            venue_caller_ids(venue, &mut close);
+            assert_eq!(close[0]["clientOrderId"], derived);
+        }
+        let mut bybit = vec![json!([{"symbol":"BTCUSDT","clientOrderId":"ts-a"}])];
+        venue_caller_ids("bybit", &mut bybit);
+        assert_eq!(bybit[0][0]["clientOrderId"], "ts-a");
     }
 
     #[test]
