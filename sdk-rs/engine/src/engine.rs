@@ -4595,6 +4595,17 @@ pub trait Venue {
     fn capabilities(&self) -> Capabilities {
         Capabilities::BASE
     }
+
+    /// Conservative account subscription capacity for hosts that accept several
+    /// clients. A host must refuse a larger configured account limit before
+    /// startup; None leaves its deployment limit unchanged. This does not
+    /// enlarge any managed feed's frame or interest budget.
+    fn max_account_subscriptions() -> Option<usize>
+    where
+        Self: Sized,
+    {
+        None
+    }
     /// Per-request continuation: what to do with the response.
     type Pending;
     /// Observe typed final authentication evidence without changing retry or state.

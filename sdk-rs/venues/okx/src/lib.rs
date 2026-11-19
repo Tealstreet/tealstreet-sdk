@@ -131,6 +131,8 @@ pub struct Okx {
     history: history::HistoryState,
     closed: closed::ClosedState,
     connections: [Connection; 3],
+    /// Exact missing public topics stay retired across socket reconnections.
+    refused_public_topics: HashSet<String>,
     books: HashMap<String, BookState>,
     marks: HashSet<String>,
     indexes: HashSet<String>,
@@ -246,6 +248,7 @@ impl Okx {
             ticker_refresh_pending: false,
             live_tickers: Default::default(),
             skipped_instruments: HashSet::new(),
+            refused_public_topics: HashSet::new(),
             skipping_instruments: HashSet::new(),
             catalogue_partial: false,
         }
@@ -1095,6 +1098,10 @@ impl Venue for Okx {
             return;
         };
         if message.event == "error" {
+            if channel == PUBLIC && self.retire_missing_public_topic(cx, &message) {
+                self.subscribe(cx, PUBLIC);
+                self.load_catalogue(cx);
+            }
             cx.notice(
                 Level::Error,
                 code::SUBSCRIPTION_REJECTED,

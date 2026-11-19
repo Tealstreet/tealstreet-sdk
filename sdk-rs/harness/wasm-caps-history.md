@@ -1557,6 +1557,58 @@ identical tree. The 27-family census found shortfalls only for Bitunix
 +10 KiB rounded up. The M46 census becomes a floor and the M48 census pins the
 exact caps. Combined measures 18,087,936 − 206,989 B and stays at its ceiling.
 
+## 2026-11-19 — #2301 branch ceiling migrated across AGT-23
+
+The first manual master merge carried the branch's historical 2,130,944-byte
+Bitunix ceiling into `wasm-caps.json`. Sam's explicit AGT-23/L1 ruling supersedes
+that routine practice: PRs do not raise measurement-derived caps or add vetoable
+rule-17 commits without an approved ceiling decision. Intermediate commit
+`29804fae7b37beee9cfe604e6064deec2dc0eb30` restored `wasm-caps.json` byte-for-byte
+to master, including its 2,071,552-byte Bitunix ceiling. That intermediate state
+was superseded by the approved Bitunix decision recorded below.
+These archived receipts set no current cap and convey no approval. The current
+byte ceiling remains a PR gate; a reserve shortfall is advisory, and the master
+measurement bot owns reserve restoration. The cutover floors remain unchanged.
+
+Prior frozen source `415dc392d11267a86f23c175b54ba6e8536a889d`, PR run44445820068,
+artifact14493561482 measures optimized web/Node/replay 2,119,780 bytes, SHA256
+`e13e8e2e27327fe7c9e51d034f6c8ee8d315c906d331571a03af3226864c6baf`.
+The superseded measured +10KiB proposal rounded to 2,130,944 bytes with
+11,164 bytes reserve. These are historical receipts, not an attestation or cap
+setting for the new merge head. New-head required CI/actually-run combined and
+normal independent review remain required. Sam's current generated-cap and fast-mode policies supersede
+old per-round census/release-batch/reviewer-count process notes.
+
+Pre-cutover branch provenance comments, retained verbatim:
+
+```text
+  // #2301 managed-socket refresh, source b1ac2260570b: CI44266617073
+  // family134673305255/replay134673305783 optimized web/Node 2,012,442 B.
+  // SHA256 6dfd360519771817ea5e071168dca2a462a67654ec08592d134783345f9b524c.
+  // Measured +10 KiB rounded up; retain all prior floors and strict cap boundaries.
+  // Alias retention source08d18516706c, CI44275298247/job134703677883,
+  // artifact14414113480: optimized web/Node/replay 2,014,499 B.
+  // SHA256 90538a5261dd88c12a5381a6a1bb40fbfa0a6ebef06a9c1b3305cb6e9faf2434.
+  // Measured +10 KiB rounded up, retaining the 2,023,424 B historical floor.
+  // #2301 post-#3640 source69e878301580a8fe5ad4ce1907fb04cec066bcc5; identical-tree PR merge d4767ecfa103.
+  // Same-run paired diagnostic44441640567/job135283789328, artifact14491204173.
+  // Rust1.99.0 / bindgen0.2.129 / Binaryen132, required two -Oz passes.
+  // Optimized web/Node 2,118,250 B, SHA256 6b5270d93a83bd84da5d5e6a5cfc0e5508c019633555a43c83a2240d5bfd1c55.
+  // Rule17: measured +10 KiB rounded up, retaining every historical floor; 10,646 B reserve.
+  // #2301 scoped review fix05427522bc0a: PR44444577344/job135294362778, artifact14492118639.
+  // Built source0cd4327943df has identical tree; pinned tools/required two -Oz passes unchanged.
+  // Optimized web/Node/replay 2,119,780 B, SHA256 e13e8e2e27327fe7c9e51d034f6c8ee8d315c906d331571a03af3226864c6baf.
+  // Vetoable rule17 proposal: measured +10 KiB rounded up; retain prior2,128,896B floor, 11,164B reserve.
+  // #2301 source fce94fa3c100, dispatch44370048905, artifact14458384002.
+  // Optimized web/Node/replay 2,349,208 B; raw SHA256
+  // 7dddff3650cdad9da9c36934ef16b076483ebf0de5241986c924b316aed627c3.
+  // Measured +10 KiB rounded up; retain all parent floors, 11,112 B reserve.
+  // #2301 source fce94fa3c100, dispatch44370048905, artifact14459236107.
+  // Optimized web/Node/replay 2,309,110 B; raw SHA256
+  // 3b68e23e7f5aad463d481be212ba6eb75e901fbb2ce307042b546cf3c8664add.
+  // Measured +10 KiB rounded up; retain all parent floors, 10,250 B reserve.
+  // Same fresh Hyperliquid family measurement and retained historical floors above.
+```
 
 ## #3671 measured parent floor retained through the generated-cap migration
 
@@ -1650,3 +1702,12 @@ would compute 2,412,544 bytes for this measurement, but restoration belongs to
 the master artifact bot after master measurement. These parent artifacts do not
 replace fresh final-head gates or artifact provenance, and no memory or financial
 guard changes.
+
+## 2026-11-19 — #2301 Bitunix ceiling approved
+
+Rule-17 decision (claude-psmp2r, agreeing with deaws): keep the Bitunix ceiling
+at **2,130,944 bytes**. Approval receipt: [fxdo51's CLEAR 5971731822](https://github.com/Tealstreet/tealstreet-sdk/pull/2301#pullrequestreview-5971731822)
+at `b402d387537b55d7844e677647f911e43ea929e0`. The authenticated 2,120,375-byte
+module retains 10,569 bytes. This approved ceiling supersedes #2301's intermediate
+restoration to 2,071,552 bytes; routine AGT-23 master-bot reserve restoration
+remains unchanged.

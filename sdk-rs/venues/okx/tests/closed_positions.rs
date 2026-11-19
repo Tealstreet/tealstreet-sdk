@@ -65,6 +65,21 @@ fn page(rows: &[String]) -> String {
 }
 
 #[test]
+fn raw_history_retains_a_delisted_instrument_without_current_market_metadata() {
+    let mut e = trading_engine();
+    fetch(&mut e, None, None, None);
+    let first = request(&mut e);
+    let source = row(2, 1_709_500_000_000).replace("BTC-USDT-SWAP", "DELISTED-USDT-SWAP");
+    reply(&mut e, &first, &page(std::slice::from_ref(&source)), NOW);
+    let result: Vec<serde_json::Value> =
+        serde_json::from_str(&done(&actions(&mut e)).unwrap().unwrap()).unwrap();
+    assert_eq!(
+        result,
+        vec![serde_json::from_str::<serde_json::Value>(&source).unwrap()]
+    );
+}
+
+#[test]
 fn rows_page_backwards_by_the_oldest_close_time_and_pass_through_verbatim() {
     let mut e = trading_engine();
     fetch(

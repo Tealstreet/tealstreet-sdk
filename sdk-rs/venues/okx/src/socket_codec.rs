@@ -30,6 +30,40 @@ fn candle_channel(interval: Interval) -> Option<String> {
     bar(interval).map(|bar| format!("candle{bar}"))
 }
 impl Okx {
+    pub(super) fn retire_missing_public_topic(
+        &mut self,
+        cx: &Cx<'_, Pending>,
+        message: &wire::Message<'_>,
+    ) -> bool {
+        if message.code != "60018" || !message.arg.inst_type.is_empty() {
+            return false;
+        }
+        let (channel, id) = if !message.arg.channel.is_empty() && !message.arg.inst_id.is_empty() {
+            (message.arg.channel, message.arg.inst_id)
+        } else if message.arg.channel.is_empty() && message.arg.inst_id.is_empty() {
+            let Some((channel, id)) = message
+                .msg
+                .strip_suffix(" doesn't exist")
+                .and_then(|msg| msg.split_once(" subscribe for "))
+            else {
+                return false;
+            };
+            (channel, id)
+        } else {
+            return false;
+        };
+        let key = interest_key(&Topic::instrument(channel, id));
+        // Bind the refusal to a real desired interest, never arbitrary wire input.
+        if !self
+            .desired_socket_interests(cx.store, PUBLIC)
+            .iter()
+            .any(|interest| interest.key.as_ref() == key)
+        {
+            return false;
+        }
+        self.refused_public_topics.insert(key)
+    }
+
     /// The feed and key `desired_socket_interests` streams `topic` under.
     pub(super) fn topic_interest(
         &self,
@@ -59,8 +93,12 @@ impl Okx {
         channel: usize,
     ) -> Vec<Interest> {
         let mut values = Vec::new();
-        let mut add =
-            |topic: Topic<'_>| values.push(Interest::from_wire_args(interest_key(&topic)));
+        let mut add = |topic: Topic<'_>| {
+            let key = interest_key(&topic);
+            if channel != PUBLIC || !self.refused_public_topics.contains(&key) {
+                values.push(Interest::from_wire_args(key));
+            }
+        };
         if channel == PUBLIC {
             for name in [
                 "tickers",

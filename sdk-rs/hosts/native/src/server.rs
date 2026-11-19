@@ -125,6 +125,16 @@ impl Default for ServerConfig {
 }
 
 impl ServerConfig {
+    fn validate_for<V: Venue>(&self) -> io::Result<()> {
+        self.validate()?;
+        if V::max_account_subscriptions()
+            .is_some_and(|capacity| self.max_subscriptions_per_account > capacity)
+        {
+            return Err(invalid("account subscription limit exceeds venue capacity"));
+        }
+        Ok(())
+    }
+
     fn validate(&self) -> io::Result<()> {
         if self.flush_every.is_zero()
             || self.io_timeout.is_zero()
@@ -305,6 +315,7 @@ impl FrameServer {
         host: Host<V, T>,
         inputs: safe_cex_store_frames::Inputs,
     ) -> io::Result<()> {
+        self.config.validate_for::<V>()?;
         if host.engine.has_received_commands() {
             return Err(invalid(
                 "account engine must not receive commands before server registration",
@@ -448,7 +459,7 @@ fn spawn_account_with_inputs<V: Venue + 'static, T: Transport + 'static>(
     config: ServerConfig,
     inputs: safe_cex_store_frames::Inputs,
 ) -> io::Result<(AccountHandle, JoinHandle<io::Result<()>>)> {
-    config.validate()?;
+    config.validate_for::<V>()?;
     if host.engine.has_received_commands() {
         return Err(invalid(
             "account engine must not receive commands before server registration",
@@ -4161,6 +4172,50 @@ mod tests {
                 server.add_account("a", "token-a", host()).unwrap();
                 assert!(server.add_account("a", "different", host()).is_err());
                 assert!(server.add_account("b", "token-a", host()).is_err());
+            })
+            .await;
+    }
+    #[cfg(feature = "venues")]
+    #[tokio::test]
+    async fn bitunix_subscription_capacity_is_validated_before_account_start() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let config = |limit| ServerConfig {
+                    max_subscriptions_per_account: limit,
+                    ..ServerConfig::default()
+                };
+                let limit = safe_cex_engine::socket_lifecycle::MAX_FRAMES;
+                for max in [limit + 1, limit * 2] {
+                    let result =
+                        spawn_venue_account("bitunix", "{}", NoTransport, None, config(max));
+                    assert!(
+                        matches!(result, Err(ref e) if e.kind() == io::ErrorKind::InvalidInput),
+                        "oversized Bitunix configuration must refuse before spawning"
+                    );
+                    let mut server = FrameServer::new(config(max)).unwrap();
+                    assert!(
+                        matches!(server.add_venue("bitunix", "token", "bitunix", "{}", NoTransport),
+                    Err(ref e) if e.kind() == io::ErrorKind::InvalidInput)
+                    );
+                }
+                for max in [1, limit] {
+                    let (account, task) =
+                        spawn_venue_account("bitunix", "{}", NoTransport, None, config(max))
+                            .expect("within-capacity Bitunix account remains supported");
+                    task.abort();
+                    drop(account);
+                    let mut server = FrameServer::new(config(max)).unwrap();
+                    server
+                        .add_venue("bitunix", "token", "bitunix", "{}", NoTransport)
+                        .unwrap();
+                }
+                // An undeclared venue retains its deployment's larger configured limit.
+                let host = Host::new(
+                    safe_cex_engine::test_support::seeded_engine(Stub(Rc::default())),
+                    NoTransport,
+                );
+                let (_, task) = spawn_account(host, config(limit * 2)).unwrap();
+                task.abort();
             })
             .await;
     }

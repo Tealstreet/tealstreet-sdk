@@ -1,5 +1,15 @@
 # OKX legacy execution parity
 
+## Missing public subscriptions
+
+Native public WS `60018` refusals retire only an exact currently desired topic,
+bound by returned `arg` or the native `<channel> subscribe for <instId> doesn't
+exist` message. The adapter refreshes instruments once for each newly retired
+topic and excludes that topic from reconnect replay for this engine's lifetime.
+Cached market identities remain available to financial state; a refreshed
+catalogue can omit the refused instrument without deleting those cached rows.
+Private/business errors, unbound refusals and other public topics are unchanged.
+
 ## Historical fill fees
 
 OKX v5 `fee` / `fillFee` is negative for a charge and positive for a maker
@@ -148,6 +158,16 @@ The scope remains ordinary orders. Algo/protective history is a separate source;
 position-scoped rows with no native size need an explicit nullable-size model
 before they can be included. No size is fabricated and no archive is represented
 as a complete census of all order populations.
+
+## Unresolved historical order markets
+
+An order can outlive its instrument's current catalogue entry. An in-window row
+that cannot be normalized marks the owning history command `coverageGap`, even
+when no orders can be mapped; it cannot prove completed coverage. Available
+mapped orders retain their sizing and identity. An unrelated instrument or a row
+outside the requested time window does not mark that window incomplete.
+Symbol-scoped order history with no market metadata refuses locally rather than
+returning a successful empty result. No symbol or contract size is guessed.
 
 ## Order-history financial projection
 

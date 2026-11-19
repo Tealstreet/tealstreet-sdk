@@ -3,6 +3,7 @@ import type { ExchangeName, Market } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { historyCompletenessOf } from '../../historyCompleteness';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
 import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
 import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
@@ -205,7 +206,7 @@ describe('Rust journal paths follow the TS venue declarations', () => {
     );
   });
 
-  it('okx maps linear rows with contract conversion and skips inverse and unknown markets', async () => {
+  it('okx maps known linear rows but marks an unresolved historical market incomplete', async () => {
     const linear = {
       instId: 'BTC-USDT-SWAP',
       direction: 'long',
@@ -242,6 +243,53 @@ describe('Rust journal paths follow the TS venue declarations', () => {
         resolveSettleCurrency: () => 'USDT',
       }),
     ]);
+    expect(historyCompletenessOf(records)).toEqual({ incomplete: true, reason: 'coverageGap' });
+    // Keep the source rows/instId available without fabricating a normalized symbol or size.
+    expect(await exchange.fetchClosedPositions({})).toEqual([linear, inverse, unknown]);
+    expect(Object.getOwnPropertyDescriptor(records, 'incomplete')?.enumerable).toBe(false);
+  });
+
+  it('okx does not present an unresolved-only historical window as complete', async () => {
+    const unknown = {
+      instId: 'DELISTED-USDT-SWAP',
+      direction: 'long',
+      closeTotalPos: '3',
+      openAvgPx: '40000',
+      closeAvgPx: '41000',
+      realizedPnl: '1.5',
+      fee: '-0.1',
+      cTime: '1709000000000',
+      uTime: '1709500000000',
+    };
+    const { exchange } = make('okx', { fetchClosedPositions: [unknown] });
+    const records = await exchange.fetchHistoricalPositions({ account: 'acct' });
+    expect(records).toEqual([]);
+    expect(historyCompletenessOf(records)).toEqual({ incomplete: true, reason: 'coverageGap' });
+    expect(await exchange.fetchClosedPositions({})).toEqual([unknown]);
+  });
+
+  it('okx keeps known inverse rows outside the linear journal grade', async () => {
+    const inverse = {
+      instId: 'BTC-USD-SWAP',
+      direction: 'long',
+      closeTotalPos: '3',
+      openAvgPx: '40000',
+      closeAvgPx: '41000',
+      realizedPnl: '1.5',
+      fee: '-0.1',
+      cTime: '1709000000000',
+      uTime: '1709500000000',
+    };
+    const { exchange } = make('okx', { fetchClosedPositions: [inverse] });
+    exchange.store.apply(
+      nativeFixture(
+        { markets: [market({ id: 'BTC-USD-SWAP', symbol: 'BTCUSD', quote: 'USD', contractSize: 100, isInverse: true })] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
+    const records = await exchange.fetchHistoricalPositions({ account: 'acct' });
+    expect(records).toEqual([]);
+    expect(historyCompletenessOf(records)).toBeUndefined();
   });
 
   it('blofin maps rows through its position adapter', async () => {

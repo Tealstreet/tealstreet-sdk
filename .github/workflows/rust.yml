@@ -630,6 +630,7 @@ jobs:
         working-directory: sdk-rs
         run: cargo clippy --locked -p safe-cex-wasm --no-default-features --features '${{ matrix.family }}' --target wasm32-unknown-unknown -- -D warnings
       - name: Seal the selected family build
+        id: family_seal
         run: |
           node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.family }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
           mkdir -p 'sdk-rs/hosts/wasm/pkg/web/${{ matrix.family }}' 'sdk-rs/hosts/wasm/pkg/node/${{ matrix.family }}'
@@ -643,6 +644,8 @@ jobs:
         if: matrix.family == 'mexc'
         run: corepack yarn -s node sdk-rs/harness/capability-feature-control.mjs
       - name: Retain sealed same-run family build
+        # Preserve measured evidence after a cap refusal; the failed job still gates replay/merge.
+        if: ${{ !cancelled() && steps.family_seal.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: wasm-family-${{ matrix.family }}
