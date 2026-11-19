@@ -1160,6 +1160,30 @@ This has landed as the crate `safe-cex-remote-signer` (`sdk-rs/hosts/remote-sign
   - `paradex-public` and `paradex-stark`.
 - **Address and key binding:** Hyperliquid's address and Paradex's Stark key bind through the engine's owned address setup (`create_public_address_setup`). This needs the native host's `address-nonce` feature for those venues.
 
+### Signing correlation in the journal
+
+`sign.timeout` records the SHA-256 `request_id_hash`, original `sent_socket_id`
+(or null before enqueue/after duplicate-ID waiting), current server `socket_id`,
+monotonic `request_age_ms`, `attachment_age_ms`, `last_heard_age_ms` and a closed
+`cause` (`unanswered`, `suspended`, `duplicate`). Attachment age is time on the
+current link attachment, not the lifetime of the browser tab. The original
+15-second deadline and all response/ownership/fatal guards are unchanged.
+
+After all authenticated Session resolvers decline a reply,
+`sign.response_unmatched` records the same ID hash (null for a malformed ID),
+receiving `socket_id`, `socket_age_ms` and that socket's saturating
+`unmatched_count`. Samples are limited to one per second per receiving socket;
+`coalesced_count` preserves suppressed counts on the next sample or a final
+socket-close summary with a null ID hash. No per-request diagnostic map exists.
+Correlating sampled hashes distinguishes a reply to a timed-out
+request from one seen on a different socket; an unmatched line alone does not
+assert which case occurred. No request history or response payload is retained.
+
+These warning lines are journal-only. IDs are always hashed because incoming
+reply IDs are untrusted; signatures, bodies, keys, labels and user IDs are never
+included. A timeout with a recently heard worker does not prove that its page
+thread was able to sign; missing replies alone do not prove a routing fault.
+
 ## Routing (claude-m26ps4)
 
 The module is `safe_cex_native::routing::resolve`. It sits beside the
