@@ -615,7 +615,13 @@ impl Session {
                         diagnostic.refused(refusal);
                     }
                     self.drop_early(&completed.account_name, "verification refused");
-                    out.send(if refusal.unavailable {
+                    out.send(if let Some(conflict) = refusal.settings {
+                        envelope::init_settings_conflict(
+                            &completed.account_name,
+                            conflict,
+                            refusal.stage,
+                        )
+                    } else if refusal.unavailable {
                         envelope::init_proof_unavailable(&completed.account_name)
                     } else {
                         match refusal.transition {
@@ -979,12 +985,17 @@ impl Session {
     }
 
     fn refuse_handover(&self, name: &str, refusal: ProbeRefusal) {
-        self.handover_out(name).send(envelope::init_unverified(
-            name,
-            refusal.transient,
-            envelope::InitRefusalReasonClass::Unknown,
-            refusal.into(),
-        ));
+        let frame = if let Some(conflict) = refusal.settings {
+            envelope::init_settings_conflict(name, conflict, refusal.stage)
+        } else {
+            envelope::init_unverified(
+                name,
+                refusal.transient,
+                envelope::InitRefusalReasonClass::Unknown,
+                refusal.into(),
+            )
+        };
+        self.handover_out(name).send(frame);
     }
 
     /// Exercise the trusted construction entry point from this authenticated

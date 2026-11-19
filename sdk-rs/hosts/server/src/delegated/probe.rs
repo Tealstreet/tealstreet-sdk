@@ -77,6 +77,7 @@ pub(crate) struct ProbeRefusal {
     pub transient: bool,
     pub unavailable: bool,
     pub transition: Option<crate::envelope::ModeTransitionRefusal>,
+    pub settings: Option<crate::accounts::SettingsConflict>,
     pub stage: RefusalStage,
     pub error_kind: Option<ErrorKind>,
     pub venue_code: Option<i64>,
@@ -86,6 +87,7 @@ impl ProbeRefusal {
         transient: false,
         unavailable: false,
         transition: None,
+        settings: None,
         stage: RefusalStage::Unverified,
         error_kind: None,
         venue_code: None,
@@ -98,6 +100,13 @@ impl ProbeRefusal {
         unavailable: true,
         ..Self::INVALID
     };
+
+    pub(crate) fn settings(settings: crate::accounts::SettingsConflict) -> Self {
+        Self {
+            settings: Some(settings),
+            ..Self::INVALID
+        }
+    }
 
     pub(crate) fn transition(reason: crate::envelope::ModeTransitionRefusal) -> Self {
         Self {
@@ -117,6 +126,7 @@ impl ProbeRefusal {
             transient: classify(Err(Some(kind))) != ProbeOutcome::Invalid,
             unavailable: false,
             transition: None,
+            settings: None,
             stage: RefusalStage::PrivateRead,
             error_kind: Some(kind),
             venue_code: None,

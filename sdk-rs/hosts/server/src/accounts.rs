@@ -19,7 +19,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 mod admission;
+mod settings;
 mod signing;
+pub(crate) use settings::SettingsConflict;
 use signing::AccountSigner;
 mod proof_queue;
 mod retention;
@@ -1066,6 +1068,7 @@ pub fn build_fingerprint(init: &InitPayload) -> String {
         Value::Object(options) => options,
         _ => Map::new(),
     };
+    settings::canonicalize_tuning(&mut fields, init);
     fields.insert("venue".into(), init.exchange_name.clone().into());
     if matches!(
         init.exchange_name.as_str(),
@@ -1684,7 +1687,7 @@ impl Registry {
                 if account.is_public()
                     || !same_handover_settings(&account.fingerprint, &fingerprint)
                 {
-                    return Err("Account settings differ; account not attached".into());
+                    return Err(settings::VERIFIED_SETTINGS_DIFFER.into());
                 }
                 attempt.authority.check_admission()?;
                 crate::auth::Verifier::check_expiry(expires_at_ms, now_ms())?;

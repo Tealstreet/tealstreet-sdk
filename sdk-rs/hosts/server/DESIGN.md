@@ -641,6 +641,12 @@ cannot reset an account. Live and parked holders, and a DELEGATED resident copy
 without a socket, prevent an ordinary init from changing private settings.
 The comparison uses normalized engine and routing settings; fields ignored by
 the venue do not create a settings change.
+Fingerprint tuning follows the native projection's effective venue-default OR
+user-tuning behavior; omitted and redundant tuning compare equal. Actual engine
+options and routing remain unchanged. A verified incompatible join replies with
+`kind: "settings-conflict"` and closed `differing_fields` names, also journaled in
+`hosted.admission_refused`; no setting values or raw keys are copied. This refusal
+never stops or replaces the resident actor and never claims invalid credentials.
 
 The action replies `msg` with `op:"applySettings:done"` and
 `data:{success:true,requiresInit:true}` on the admitted registration. This means

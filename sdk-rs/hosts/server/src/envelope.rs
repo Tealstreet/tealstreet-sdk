@@ -327,6 +327,27 @@ pub fn init_refused(account_name: &str, message: &str) -> String {
     )
 }
 
+/// Verified credentials with incompatible shared settings are not a key refusal.
+pub(crate) fn init_settings_conflict(
+    account_name: &str,
+    conflict: crate::accounts::SettingsConflict,
+    stage: InitRefusalStage,
+) -> String {
+    let fields = conflict.names();
+    let message = format!(
+        "Shared account settings differ ({}). Existing orders and algos are unchanged. Join with the current settings and use apply-settings before reinitializing.",
+        fields.join(", ")
+    );
+    msg(
+        account_name,
+        "error",
+        json!([message, {
+            "forceToast": true, "initRefused": true, "kind": "settings-conflict", "transient": false,
+            "differing_fields": fields, "stage": stage,
+        }]),
+    )
+}
+
 /// A closed refusal for connection-local publication metadata; never echo input.
 pub fn publish_interval_refused(
     account_name: Option<&str>,
