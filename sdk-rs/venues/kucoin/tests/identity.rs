@@ -1,5 +1,8 @@
-//! Actual native identity requests: exact routes/signers, failure ownership, no Store commits.
+//! Actual native identity requests: exact routes/signers, failure ownership, no financial Store commits.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
 mod support;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
 use safe_cex_venue_kucoin::Kucoin;
@@ -171,7 +174,7 @@ fn identity_uses_futures_route_read_signer_passphrase_and_broker_provenance() {
             result(respond(&mut engine, &request, 200, body), false).unwrap(),
             r#"{"userId":"9007199254740993","subId":"9007199254740995","affiliateId":"9007199254740997"}"#
         );
-        assert_eq!(engine.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, engine.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
         assert!(respond(&mut engine, &request, 200, body).is_empty());
     }
 }
@@ -226,7 +229,7 @@ fn failed_or_missing_identity_rejects_once_instead_of_empty_success() {
         let before = engine.account_snapshot_frame(NOW).to_vec();
         let request = identity_request(&mut engine);
         result(respond(&mut engine, &request, 200, body), true).unwrap_err();
-        assert_eq!(engine.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, engine.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     }
     for network in [false, true] {
         let mut engine = seeded(options(false));
@@ -245,7 +248,15 @@ fn failed_or_missing_identity_rejects_once_instead_of_empty_success() {
             respond(&mut engine, &request, 503, "unavailable")
         };
         result(actions, true).unwrap_err();
-        assert_eq!(engine.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(
+            &before,
+            engine.account_snapshot_frame(NOW),
+            if network {
+                [0, 0, 0, 1, 0]
+            } else {
+                [0, 0, 0, 0, 1]
+            },
+        );
     }
 }
 #[test]

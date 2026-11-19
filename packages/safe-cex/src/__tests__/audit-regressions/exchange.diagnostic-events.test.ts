@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { BaseExchange } from '../../exchanges/base';
 import { ExchangeEmitter } from '../../exchanges/exchangeEmitter';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderStopTriggerType } from '../../types';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 
@@ -36,7 +36,7 @@ afterEach(() => {
 });
 
 function workerBridge() {
-  const exchange = new BaseExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+  const exchange = new BaseExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
   const postMessage = vi.fn();
   const worker = new ExchangeWorker(
     { postMessage } as unknown as Worker,

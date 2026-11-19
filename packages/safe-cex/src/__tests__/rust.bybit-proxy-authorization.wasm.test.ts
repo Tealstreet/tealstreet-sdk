@@ -1,8 +1,3 @@
-vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
-});
-
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import { afterEach, expect, it, vi } from 'vitest';
@@ -10,10 +5,15 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { setProxyToken, setTokenRefreshFunction } from '../accessToken';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { tealstreetTransport } from '../transport/tealstreet/tealstreetTransport';
 import { PRIVATE_PROXY_JP } from '../transport/tealstreet/transportResolution';
 import { prepareRecordedHttp } from './support/managedHttp';
+
+vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
+});
 
 /**
  * A proxied Bybit account whose proxy token is still warming (the browser
@@ -93,7 +93,7 @@ const edge = (refuseOnce?: string) => {
 };
 
 const account = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new RustEngineExchange(
     'bybit',
     { key: 'k', secret: 's', tealstreetProxy: true, tealstreetTunnel: false, transport: tealstreetTransport },

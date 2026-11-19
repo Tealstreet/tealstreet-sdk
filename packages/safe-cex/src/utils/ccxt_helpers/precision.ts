@@ -11,7 +11,7 @@
  * @param precision - Integer precision (denominator)
  * @returns Decimal amount string
  */
-export function integerPrecisionToAmount(precision: number | string | undefined): string | undefined {
+export function integerPrecisionToAmount(precision: number | string | null | undefined): string | undefined {
   if (precision === undefined || precision === null) {
     return undefined;
   }
@@ -35,7 +35,7 @@ export function integerPrecisionToAmount(precision: number | string | undefined)
  * @param value - The decimal value as string or number
  * @returns Number of decimal places
  */
-export function countDecimals(value: string | number | undefined): number {
+export function countDecimals(value: string | number | null | undefined): number {
   if (value === undefined || value === null) {
     return 0;
   }
@@ -66,7 +66,7 @@ export function countDecimals(value: string | number | undefined): number {
  * @param decimal - The decimal precision value
  * @returns Number of decimal places
  */
-export function decimalToPrecision(decimal: string | number | undefined): number {
+export function decimalToPrecision(decimal: string | number | null | undefined): number {
   if (decimal === undefined || decimal === null) {
     return 0;
   }
@@ -90,7 +90,7 @@ export function decimalToPrecision(decimal: string | number | undefined): number
  * @param isInteger - Whether the value is an integer precision (denominator)
  * @returns Number of decimal places
  */
-export function parsePrecision(value: string | number | undefined, isInteger = false): number {
+export function parsePrecision(value: string | number | null | undefined, isInteger = false): number {
   if (value === undefined || value === null) {
     return 0;
   }

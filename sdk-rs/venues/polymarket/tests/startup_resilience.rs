@@ -1,4 +1,7 @@
 use safe_cex_engine::{Action, Event, Response};
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_venue_polymarket::{Options, Polymarket};
 
 fn released(
@@ -163,7 +166,7 @@ fn all_rejected_catalogue_keeps_current_store_and_recovers_after_backoff() {
                 },
             },
         );
-        assert_eq!(engine.snapshot_frame(0.0), before);
+        assert_unchanged_account(&before, engine.snapshot_frame(0.0), [1, 0, 0, 0, 0]);
         assert_eq!(engine.store().loaded().markets, seeded);
         let actions: Vec<_> = released(&mut engine, 0.).collect();
         assert!(

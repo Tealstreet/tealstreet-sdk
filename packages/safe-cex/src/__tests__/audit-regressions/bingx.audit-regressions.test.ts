@@ -1,13 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { getExchangeMetadata } from '../../exchangeMetadata';
+import { FrameStore } from '../../store/frameStore';
+import {
+  LogSeverity,
+  MarginType,
+  Order,
+  OrderSide,
+  OrderStatus,
+  OrderType,
+  PositionMode,
+  PositionSide,
+} from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BingxExchange } from '../reference/bingx/bingx.exchange';
 import { ENDPOINTS } from '../reference/bingx/bingx.types';
 import { BingxPublicWebsocket } from '../reference/bingx/bingx.ws-public';
-import { DefaultStore } from '../../store/store.base';
-import { LogSeverity, MarginType, Order, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
-import { getExchangeMetadata } from '../../exchangeMetadata';
 
-const createExchange = () => new BingxExchange('bingx', { key: 'key', secret: 'secret' }, new DefaultStore());
+const createExchange = () => new BingxExchange('bingx', { key: 'key', secret: 'secret' }, new FrameStore());
 
 const order = (id: string): Order => ({
   id,
@@ -99,19 +109,24 @@ describe('audit regression: BingX', () => {
 
   it('derives REST ticker touch prices from last price instead of BingX askPrice', () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'PUMP-BTC',
-          symbol: 'PUMPBTC',
-          base: 'PUMP',
-          quote: 'BTC',
-          active: true,
-          precision: { amount: 1, price: 0.0001 },
-          limits: { amount: { min: 1, max: Infinity }, leverage: { min: 1, max: 100 } },
+          markets: [
+            {
+              id: 'PUMP-BTC',
+              symbol: 'PUMPBTC',
+              base: 'PUMP',
+              quote: 'BTC',
+              active: true,
+              precision: { amount: 1, price: 0.0001 },
+              limits: { amount: { min: 1, max: Infinity }, leverage: { min: 1, max: 100 } },
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const [ticker] = exchange.formatTickers({
       dailys: [
@@ -146,36 +161,41 @@ describe('audit regression: BingX', () => {
 
   it('does not keep stale startup ask prices after live public ticker updates', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'OG-USDT',
-          symbol: 'OGUSDT',
-          base: 'OG',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.0001 },
-          limits: { amount: { min: 1, max: Infinity }, leverage: { min: 1, max: 100 } },
+          markets: [
+            {
+              id: 'OG-USDT',
+              symbol: 'OGUSDT',
+              base: 'OG',
+              quote: 'USDT',
+              active: true,
+              precision: { amount: 1, price: 0.0001 },
+              limits: { amount: { min: 1, max: Infinity }, leverage: { min: 1, max: 100 } },
+            },
+          ],
+          tickers: [
+            {
+              id: 'OG-USDT',
+              symbol: 'OGUSDT',
+              bid: 0.2073,
+              ask: 0.2769,
+              last: 0.2077,
+              mark: 0.2077,
+              index: 0.2077,
+              percentage: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+              openInterest: 0,
+            },
+          ],
         },
-      ],
-      tickers: [
-        {
-          id: 'OG-USDT',
-          symbol: 'OGUSDT',
-          bid: 0.2073,
-          ask: 0.2769,
-          last: 0.2077,
-          mark: 0.2077,
-          index: 0.2077,
-          percentage: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-          openInterest: 0,
-        },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await exchange.publicWebsocket.onMessage({
       data: JSON.stringify({
@@ -234,19 +254,24 @@ describe('audit regression: BingX', () => {
 
   it('returns no candles instead of emitting when the BingX kline response has no array payload', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'BTC-USDT',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+          markets: [
+            {
+              id: 'BTC-USDT',
+              symbol: 'BTCUSDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({ data: { code: 0, msg: '', data: undefined } }),
     } as any;
@@ -268,14 +293,22 @@ describe('audit regression: BingX', () => {
       .mockResolvedValueOnce({ data: { code: 100001, msg: 'cancel rejected' } })
       .mockRejectedValueOnce(new Error('network down'));
     exchange.xhr = { delete: deleteOrder } as any;
-    const updateStatuses = vi.spyOn(exchange.store, 'updateOrdersStatus');
+    exchange.store.ingest(nativeFixture({ orders: ['ok', 'gone', 'rejected', 'network'].map(order) }));
+    const updateStatuses = (() => {
+      const observed = vi.fn<(value: typeof exchange.store.orders) => void>();
+      exchange.store.subscribe('orders', (value) => observed(value));
+      return observed;
+    })();
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
 
     await expect(exchange.cancelOrders(['ok', 'gone', 'rejected', 'network'].map(order))).resolves.toBeUndefined();
 
     expect(deleteOrder).toHaveBeenCalledTimes(4);
     expect(updateStatuses).toHaveBeenCalledOnce();
-    expect(updateStatuses).toHaveBeenCalledWith([{ id: 'ok' }, { id: 'gone' }], OrderStatus.Canceled);
+    expect(exchange.store.orders.filter((row) => row.status === OrderStatus.Canceled).map((row) => row.id)).toEqual([
+      'ok',
+      'gone',
+    ]);
   });
 
   it('drops cumulative fill dedupe state as soon as an order reaches FILLED', () => {
@@ -306,10 +339,7 @@ describe('audit regression: BingX', () => {
     ]);
 
     expect((websocket as any).emittedFillQtyByOrderId.has('123')).toBe(false);
-    expect(emitted).toHaveBeenCalledWith(
-      'fill',
-      expect.objectContaining({ id: '123', symbol: 'BTCUSDT', amount: 1 }),
-    );
+    expect(emitted).toHaveBeenCalledWith('fill', expect.objectContaining({ id: '123', symbol: 'BTCUSDT', amount: 1 }));
   });
 
   it('keeps live WORKING limit orders from private WS visible as open orders', () => {
@@ -406,25 +436,30 @@ describe('audit regression: BingX', () => {
 
   it('does not reclassify raw stop-loss rows when mark price is invalid', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      tickers: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'ARB-USDT',
-          symbol: 'ARBUSDT',
-          bid: 0,
-          ask: 0,
-          last: 0,
-          mark: 0,
-          index: 0,
-          percentage: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-          openInterest: 0,
+          tickers: [
+            {
+              id: 'ARB-USDT',
+              symbol: 'ARBUSDT',
+              bid: 0,
+              ask: 0,
+              last: 0,
+              mark: 0,
+              index: 0,
+              percentage: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+              openInterest: 0,
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({
         data: {
@@ -463,51 +498,56 @@ describe('audit regression: BingX', () => {
 
   it('formats documented trailing stops from the internal symbol and exposes the capability', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'BTC-USDT',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+          markets: [
+            {
+              id: 'BTC-USDT',
+              symbol: 'BTCUSDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+            },
+          ],
+          tickers: [
+            {
+              id: 'BTC-USDT',
+              symbol: 'BTCUSDT',
+              bid: 49_999,
+              ask: 50_001,
+              last: 50_000,
+              mark: 50_000,
+              index: 50_000,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+            },
+          ],
+          positions: [
+            {
+              id: 'BTCUSDT-short',
+              symbol: 'BTCUSDT',
+              side: PositionSide.Short,
+              entryPrice: 50_000,
+              notional: 50_000,
+              leverage: 10,
+              marginType: MarginType.Cross,
+              positionMode: PositionMode.Hedged,
+              unrealizedPnl: 0,
+              contracts: 1,
+              liquidationPrice: 60_000,
+            },
+          ],
         },
-      ],
-      tickers: [
-        {
-          id: 'BTC-USDT',
-          symbol: 'BTCUSDT',
-          bid: 49_999,
-          ask: 50_001,
-          last: 50_000,
-          mark: 50_000,
-          index: 50_000,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-        },
-      ],
-      positions: [
-        {
-          id: 'BTCUSDT-short',
-          symbol: 'BTCUSDT',
-          side: PositionSide.Short,
-          entryPrice: 50_000,
-          notional: 50_000,
-          leverage: 10,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.Hedged,
-          unrealizedPnl: 0,
-          contracts: 1,
-          liquidationPrice: 60_000,
-        },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const payloads = await (exchange as any).formatCreateTrailingStopLossOrder({
       symbol: 'BTCUSDT',
@@ -533,34 +573,39 @@ describe('audit regression: BingX', () => {
 
   it('keeps quantity stops partial and sends closePosition only for true full-position stops', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'BTC-USDT',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+          markets: [
+            {
+              id: 'BTC-USDT',
+              symbol: 'BTCUSDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+            },
+          ],
+          positions: [
+            {
+              id: 'BTCUSDT-long',
+              symbol: 'BTCUSDT',
+              side: PositionSide.Long,
+              entryPrice: 50_000,
+              notional: 50_000,
+              leverage: 10,
+              marginType: MarginType.Cross,
+              positionMode: PositionMode.Hedged,
+              unrealizedPnl: 0,
+              contracts: 1,
+              liquidationPrice: 40_000,
+            },
+          ],
         },
-      ],
-      positions: [
-        {
-          id: 'BTCUSDT-long',
-          symbol: 'BTCUSDT',
-          side: PositionSide.Long,
-          entryPrice: 50_000,
-          notional: 50_000,
-          leverage: 10,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.Hedged,
-          unrealizedPnl: 0,
-          contracts: 1,
-          liquidationPrice: 40_000,
-        },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const [partial] = await (exchange as any).formatCreateOrder({
       symbol: 'BTCUSDT',
@@ -597,19 +642,24 @@ describe('audit regression: BingX', () => {
       .mockReturnValueOnce('tsmarketlot2')
       .mockReturnValueOnce('tslimitlot1')
       .mockReturnValueOnce('tslimitlot2');
-    exchange.store.update({
-      markets: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'BTC-USDT',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 1 }, leverage: { min: 1, max: 100 } },
+          markets: [
+            {
+              id: 'BTC-USDT',
+              symbol: 'BTCUSDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 1 }, leverage: { min: 1, max: 100 } },
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange as any)._accountPositionMode = PositionMode.Hedged;
 
     const marketPayloads = await (exchange as any).formatCreateOrder({
@@ -641,51 +691,56 @@ describe('audit regression: BingX', () => {
 
   it('keeps clientOrderId off standalone, attached, and trailing trigger payloads', async () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'BTC-USDT',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+          markets: [
+            {
+              id: 'BTC-USDT',
+              symbol: 'BTCUSDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+            },
+          ],
+          tickers: [
+            {
+              id: 'BTC-USDT',
+              symbol: 'BTCUSDT',
+              bid: 49_999,
+              ask: 50_001,
+              last: 50_000,
+              mark: 50_000,
+              index: 50_000,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+            },
+          ],
+          positions: [
+            {
+              id: 'BTCUSDT-short',
+              symbol: 'BTCUSDT',
+              side: PositionSide.Short,
+              entryPrice: 50_000,
+              notional: 50_000,
+              leverage: 10,
+              marginType: MarginType.Cross,
+              positionMode: PositionMode.Hedged,
+              unrealizedPnl: 0,
+              contracts: 1,
+              liquidationPrice: 60_000,
+            },
+          ],
         },
-      ],
-      tickers: [
-        {
-          id: 'BTC-USDT',
-          symbol: 'BTCUSDT',
-          bid: 49_999,
-          ask: 50_001,
-          last: 50_000,
-          mark: 50_000,
-          index: 50_000,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-        },
-      ],
-      positions: [
-        {
-          id: 'BTCUSDT-short',
-          symbol: 'BTCUSDT',
-          side: PositionSide.Short,
-          entryPrice: 50_000,
-          notional: 50_000,
-          leverage: 10,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.Hedged,
-          unrealizedPnl: 0,
-          contracts: 1,
-          liquidationPrice: 60_000,
-        },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange as any)._accountPositionMode = PositionMode.Hedged;
 
     const [parent, attachedStop, attachedTakeProfit] = await (exchange as any).formatCreateOrder({
@@ -766,5 +821,4 @@ describe('audit regression: BingX', () => {
       vi.useRealTimers();
     }
   });
-
 });

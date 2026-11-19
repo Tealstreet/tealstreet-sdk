@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from './reference/bybit/bybit.exchange';
 import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { LogSeverity } from '../types';
+import { BybitExchange } from './reference/bybit/bybit.exchange';
 
 /**
  * Bybit answers a rejected key inside an HTTP 200 envelope, so the private probe
@@ -12,7 +12,7 @@ import { LogSeverity } from '../types';
 const REJECTION = 'API key is invalid.';
 
 const createExchange = ({ externalPublicData }: { externalPublicData: boolean }) => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new BybitExchange(
     'bybit',
     { key: 'k', secret: 's', testnet: false, tuning: { consoleLogging: false } } as any,

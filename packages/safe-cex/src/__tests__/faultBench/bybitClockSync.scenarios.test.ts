@@ -2,16 +2,17 @@ import type { Market } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { virtualClock } from '../../utils/virtualClock';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { parseBybitServerTimestamp } from '../reference/bybit/bybit.api';
 import { BybitExchange } from '../reference/bybit/bybit.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { virtualClock } from '../../utils/virtualClock';
 import { createFakeVenue } from './fakeVenue';
+import { createFaultAdapter } from './faultAdapter';
 
 // Browser (worker) by default; a server shares one clock across every user's exchange.
 const runtime = vi.hoisted(() => ({ node: false }));
 vi.mock('../../utils/runtime', () => ({ isNodeOrBunRuntime: () => runtime.node }));
-import { createFaultAdapter } from './faultAdapter';
 
 // Reported 2026-10-09: "invalid request, please check your server timestamp or
 // recv_window param" toasted on a client clock 2.1s ahead of Bybit's. The resync
@@ -53,8 +54,13 @@ describe('Bybit clock skew', () => {
     vi.useFakeTimers({ toFake: ['Date'], now: LOCAL_NOW });
     virtualClock.syncFromServerTime(LOCAL_NOW);
     const syncFromServerTime = vi.spyOn(virtualClock, 'syncFromServerTime');
-    const store = new DefaultStore();
-    store.update({ markets: [MARKET] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [MARKET] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BybitExchange('bybit' as any, { key: 'k', secret: 's' } as any, store);
     exchanges.push(exchange);
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
@@ -70,8 +76,13 @@ describe('Bybit clock skew', () => {
   it('resyncs from the venue clock and the one retry succeeds, with nothing shown', async () => {
     vi.useFakeTimers({ toFake: ['Date'], now: LOCAL_NOW });
     virtualClock.syncFromServerTime(LOCAL_NOW);
-    const store = new DefaultStore();
-    store.update({ markets: [MARKET] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [MARKET] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BybitExchange('bybit' as any, { key: 'k', secret: 's' } as any, store);
     exchanges.push(exchange);
     const errors: string[] = [];

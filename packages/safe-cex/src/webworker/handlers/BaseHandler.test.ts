@@ -40,7 +40,7 @@ class TestHandler extends BaseHandler {
     return this._exchange;
   }
 
-  getCtx(): Worker {
+  getCtx(): Pick<Worker, 'postMessage'> {
     return this._ctx;
   }
 

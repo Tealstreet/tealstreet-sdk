@@ -55,7 +55,7 @@ const fastClone = <T>(value: T): T | null => {
  * Deep clone an object. Uses fast recursive clone for plain objects/arrays,
  * falls back to structuredClone for complex types (Date, Map, Set, etc.)
  */
-export const clone = <K extends Record<string, any>>(obj: K): K => {
+export const clone = <K extends object>(obj: K): K => {
   const result = fastClone(obj);
   if (result !== null) {
     return result;

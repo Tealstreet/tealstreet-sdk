@@ -1,4 +1,7 @@
 //! Public candles preserve their native wire contract under shared Read custody.
+#[path = "../../../engine/tests/support/request_stats_frame.rs"]
+mod request_stats_frame;
+use request_stats_frame::assert_request_stats_frame;
 mod support;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{
@@ -206,6 +209,7 @@ fn original_candle_preparation_binding_and_one_claim_preserve_native_rows() {
     ));
     assert!(e.claim_http(NOW + 4., permit).is_err());
     e.drain_actions().for_each(drop);
+    let before_stats = e.snapshot_frame(NOW).to_vec();
     let result = terminals(&reply(&mut e, NOW + 5., &packet, 200, ROWS, true), 7);
     let rows: serde_json::Value = serde_json::from_str(result[0].as_ref().unwrap()).unwrap();
     assert_eq!(
@@ -215,7 +219,12 @@ fn original_candle_preparation_binding_and_one_claim_preserve_native_rows() {
     assert_eq!(rows[1]["timestamp"], 60.001);
     assert_eq!(rows[1]["open"], 0.);
     assert!(reply(&mut e, NOW + 6., &packet, 200, ROWS, false).is_empty());
-    assert!(e.take_frame(NOW + 6.).is_none());
+    assert_request_stats_frame(
+        &before_stats,
+        e.take_frame(NOW + 6.),
+        NOW + 6.,
+        [1, 0, 0, 0, 0],
+    );
 }
 #[test]
 fn original_parked_deadline_refuses_late_readiness_once() {
@@ -559,6 +568,7 @@ fn original_retired_bind_item_failure_and_timer_do_not_touch_reused_owner() {
         ErrorKind::Timeout,
         Some(Outcome::NotSent),
     );
+    let before_stats = e.snapshot_frame(NOW).to_vec();
     let second = release(&mut e, NOW + 20_001., 18);
     assert_ne!(first.id, second.id);
     assert!(e.claim_http(NOW + 20_002., permit).is_err());
@@ -603,7 +613,12 @@ fn original_retired_bind_item_failure_and_timer_do_not_touch_reused_owner() {
         rows,
         serde_json::json!([{"timestamp":900.001,"open":9.,"high":10.,"low":8.,"close":9.5,"volume":11.}])
     );
-    assert!(e.take_frame(NOW + 20_007.).is_none());
+    assert_request_stats_frame(
+        &before_stats,
+        e.take_frame(NOW + 20_007.),
+        NOW + 20_007.,
+        [1, 0, 0, 0, 0],
+    );
     assert_eq!(e.health().auth_failures, 0);
 }
 

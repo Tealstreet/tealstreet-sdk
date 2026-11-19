@@ -1,8 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 // @vitest-environment node
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 
@@ -13,9 +8,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustPublicFeedProvider } from '../../exchanges/rust/publicFeed';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { directTransport } from '../../transport/direct';
 import { prepareRecordedHttp } from '../support/managedHttp';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 /** Documented `metaAndAssetCtxs` shape: BTC's mid and mark are both 97,500.5. */
 const META =
@@ -63,7 +63,7 @@ describe('Hyperliquid trade-sourced last through the shared public feed', () => 
         ...(publicFeed && { publicFeed }),
         transport: { ...directTransport, rest: ({ config }) => ({ baseURL: config?.baseURL, proxied: false }) },
       },
-      new DefaultStore(),
+      new FrameStore(),
     );
     cleanups.push(() => account.dispose());
     return account;

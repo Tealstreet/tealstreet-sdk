@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { createAPI } from '../reference/blofin/blofin.api';
 import { BlofinExchange } from '../reference/blofin/blofin.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 const tickInterval = (exchange: BlofinExchange) => (exchange as any).getTickInterval() as number;
 
 const buildExchange = () =>
-  new BlofinExchange('blofin' as any, { key: 'k', secret: 's', passphrase: 'p' } as any, new DefaultStore());
+  new BlofinExchange('blofin' as any, { key: 'k', secret: 's', passphrase: 'p' } as any, new FrameStore());
 
 const runResponseInterceptor = (exchange: BlofinExchange, response: any) => {
   const xhr = createAPI({ key: 'k', secret: 's', passphrase: 'p' } as any, exchange);

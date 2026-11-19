@@ -417,15 +417,16 @@ jobs:
       - name: Install pinned toolchain
         run: rustup show
       - uses: ./.github/actions/prefetch-cargo
+      # Native store-frame tests run the maintained TS risk and real SCXF receiver oracles.
       - uses: actions/setup-node@v4
-        if: matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers' || matrix.check == 'metadata' || matrix.check == 'candle-cache'
+        if: matrix.check == 'test' || matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers' || matrix.check == 'metadata' || matrix.check == 'candle-cache'
         with:
           node-version: 22
       - uses: ./.github/actions/prepare-yarn
-        if: matrix.check == 'metadata' || matrix.check == 'candle-cache'
+        if: matrix.check == 'test' || matrix.check == 'metadata' || matrix.check == 'candle-cache'
         id: yarn
       - uses: ./.github/actions/install-yarn
-        if: matrix.check == 'metadata' || matrix.check == 'candle-cache'
+        if: matrix.check == 'test' || matrix.check == 'metadata' || matrix.check == 'candle-cache'
         with:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
@@ -738,7 +739,7 @@ jobs:
           corepack yarn workspace @tealstreet/safe-cex-server test-wasm
           corepack yarn workspace @tealstreet/exchange-mcp test-wasm
           corepack yarn workspace @tealstreet/cli test-wasm
-          corepack yarn workspace @tealstreet/safe-cex-react-native test-wasm
+          corepack yarn workspace @tealstreet/safe-cex-react-native test-unit
           corepack yarn -s workspace @tealstreet/exchange-mcp build
           corepack yarn -s workspace @tealstreet/exchange-mcp smoke
       - name: Native product semantics through the real CLI preflight
@@ -1217,7 +1218,7 @@ jobs:
           corepack yarn workspace @tealstreet/safe-cex-server test-wasm
           corepack yarn workspace @tealstreet/exchange-mcp test-wasm
           corepack yarn workspace @tealstreet/cli test-wasm
-          corepack yarn workspace @tealstreet/safe-cex-react-native test-wasm
+          corepack yarn workspace @tealstreet/safe-cex-react-native test-unit
           corepack yarn -s workspace @tealstreet/exchange-mcp build
           corepack yarn -s workspace @tealstreet/exchange-mcp smoke
       - name: Native product semantics through the real CLI preflight
@@ -1416,7 +1417,7 @@ jobs:
       # Collector steps retain strict FAIL reports so every product runs. Only
       # this mandatory verifier can certify the job; unknown/missing gates fail.
       - name: Verify strict replay results and declared known failures
-        if: always()
+        if: always() && steps.cpu_prepare.outcome == 'success'
         id: cpu_collect
         env:
           GITHUB_TOKEN: ${{ github.token }}

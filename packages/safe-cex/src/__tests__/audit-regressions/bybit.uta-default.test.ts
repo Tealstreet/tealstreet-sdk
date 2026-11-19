@@ -1,16 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
+import { FrameStore } from '../../store/frameStore';
 import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { BybitDemoExchange } from '../reference/bybit/bybitdemo.exchange';
 import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 import { BybitSpotExchange } from '../reference/bybit/bybitspot.exchange';
-import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
-import { DefaultStore } from '../../store/store.base';
 
 const createVariants = () => [
-  new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new DefaultStore()),
-  new BybitInverseExchange('bybitinverse', { key: 'key', secret: 'secret' }, new DefaultStore()),
-  new BybitSpotExchange('bybitspot', { key: 'key', secret: 'secret' }, new DefaultStore()),
+  new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new FrameStore()),
+  new BybitInverseExchange('bybitinverse', { key: 'key', secret: 'secret' }, new FrameStore()),
+  new BybitSpotExchange('bybitspot', { key: 'key', secret: 'secret' }, new FrameStore()),
 ];
 
 const unifiedBalance = {
@@ -36,7 +36,7 @@ describe('Bybit UTA-first account behavior', () => {
   });
 
   it('keeps the retired-account error fallback as a defensive retry', async () => {
-    const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new DefaultStore());
+    const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new FrameStore());
     (exchange as any).unifiedMarginStatus = 1;
     const get = vi
       .fn()
@@ -54,7 +54,7 @@ describe('Bybit UTA-first account behavior', () => {
   });
 
   it('always formats UTA account totals and uses the UTA batch-cancel endpoint', async () => {
-    const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new DefaultStore());
+    const exchange = new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new FrameStore());
     (exchange as any).unifiedMarginStatus = 1;
 
     expect(exchange.formatBalance([unifiedBalance])).toMatchObject({
@@ -75,7 +75,7 @@ describe('Bybit UTA-first account behavior', () => {
   });
 
   it('derives Bybit Demo available balance when UTA aggregate margin fields are blank', () => {
-    const exchange = new BybitDemoExchange('bybitdemo', { key: 'key', secret: 'secret' }, new DefaultStore());
+    const exchange = new BybitDemoExchange('bybitdemo', { key: 'key', secret: 'secret' }, new FrameStore());
     const blankAggregateBalance = {
       accountType: 'UNIFIED',
       totalAvailableBalance: '',

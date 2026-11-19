@@ -16,7 +16,7 @@ export const isUnsentSigningFailure = (message: string | undefined): boolean => 
 export const isUnknownOutcome = (error: unknown): boolean => {
   if (typeof error !== 'object' || error === null) return false;
   // Rust venues classify the outcome themselves; text matching is the TS fallback.
-  const { outcome } = error as { outcome?: unknown };
+  const { outcome }: { outcome?: unknown } = error;
   if (outcome === 'unknown') return true;
   if (outcome === 'notSent' || outcome === 'rejected') return false;
   const { code, message, name, response } = error as {

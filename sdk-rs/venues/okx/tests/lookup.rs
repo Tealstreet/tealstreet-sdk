@@ -1,5 +1,8 @@
 //! Query-order covers closed orders; only native 51603 is authoritative absence.
 #![allow(dead_code)]
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 mod support;
 use crate::support::FixtureOptions as Options;
 use crate::support::{MARKET, TICKER, envelope, prepared};
@@ -231,7 +234,7 @@ fn lookup_signs_each_alias_and_preserves_read_only_order_provenance() {
         assert_eq!(o.last_update, 1_710_000_000_123.0);
         assert_eq!(o.info.cl_ord_id, "caller1");
         assert_eq!(o.info.pos_side, "net");
-        assert_eq!(before, e.snapshot_frame(42.0));
+        assert_unchanged_account(&before, e.snapshot_frame(42.0), [1, 0, 0, 0, 0]);
     }
 }
 #[test]
@@ -254,7 +257,7 @@ fn lookup_handles_closed_and_canceled_orders_without_reopening_store() {
         )
         .unwrap();
         assert_eq!(value.order.unwrap().status, expected);
-        assert_eq!(before, e.snapshot_frame(42.0));
+        assert_unchanged_account(&before, e.snapshot_frame(42.0), [1, 0, 0, 0, 0]);
     }
 }
 #[test]
@@ -338,7 +341,7 @@ fn transport_failure_is_never_a_definitive_miss() {
         },
     );
     assert!(done(prepared(&mut e, 1_710_000_000_101.0)).is_err());
-    assert_eq!(before, e.snapshot_frame(42.0));
+    assert_unchanged_account(&before, e.snapshot_frame(42.0), [0, 0, 0, 1, 0]);
 }
 
 #[test]
@@ -489,7 +492,15 @@ fn secondary_account_cache_never_answers_primary_lookup() {
             }
             _ => assert!(lookup.is_err()),
         }
-        assert_eq!(before, e.snapshot_frame(42.0));
+        assert_unchanged_account(
+            &before,
+            e.snapshot_frame(42.0),
+            match outcome {
+                "found" | "absent" => [1, 0, 0, 0, 0],
+                "auth" => [0, 0, 1, 0, 0],
+                _ => [0, 0, 0, 1, 0],
+            },
+        );
     }
 }
 #[test]

@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { betaVenueFamily } from '@tealstreet/safe-cex-wasm/beta-venues';
 import { BETA_VENUES } from '../../exchanges/rust/betaVenues';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
 
 // Read the native capability roster, not a second list of selected test venues.
@@ -95,7 +95,7 @@ const mirror = (venue: ExchangeName, options: Pick<ExchangeOptions, 'signingMode
       publicDataOnly: false,
       ...options,
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   exchanges.push(exchange);
   exchange.setWorkerOwner(() => ({ ownerId: 'fixture-owner', generation: 1 }));

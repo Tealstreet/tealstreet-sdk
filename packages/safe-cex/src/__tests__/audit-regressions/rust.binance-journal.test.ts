@@ -3,12 +3,12 @@ import type { Execution } from '../../types';
 import { expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide } from '../../types';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 it('Binance USD-M journal folds per-symbol fills like the TS venue', async () => {
-  const exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
+  const exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new FrameStore());
   adoptEngineCapabilities(exchange);
   const fold = vi
     .spyOn(
@@ -27,7 +27,7 @@ it('Binance USD-M journal folds per-symbol fills like the TS venue', async () =>
 it('drains a busy lookback through the public Binance positions read', async () => {
   const day = 86_400_000;
   const from = 1_700_000_000_000;
-  const exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
+  const exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new FrameStore());
   adoptEngineCapabilities(exchange);
   const rows: Execution[] = Array.from({ length: 1600 }, (_, index) => ({
     id: String(index),
@@ -74,7 +74,7 @@ it('drains a busy lookback through the public Binance positions read', async () 
 it('keeps sparse five-minute Binance history on one native read root', async () => {
   const from = 1_700_000_000_000;
   const to = from + 5 * 60 * 1000;
-  const exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
+  const exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new FrameStore());
   adoptEngineCapabilities(exchange);
   vi.spyOn(exchange, 'fetchIncomeHistoryRange').mockResolvedValue([
     { symbol: 'BTCUSDT', incomeType: 'FUNDING_FEE', income: 0, asset: 'USDT', timestamp: from, tranId: 'income' },

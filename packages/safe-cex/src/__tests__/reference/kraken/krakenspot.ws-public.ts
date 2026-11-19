@@ -1,7 +1,9 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook, Timeframe } from '../../../types';
 import type { KrakenSpotExchange } from './krakenspot.exchange';
 
 import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, INTERVAL } from './krakenspot.types';
 
 // Kraken Spot WebSocket v2 protocol:
@@ -178,7 +180,15 @@ export class KrakenSpotPublicWebsocket extends BaseWebSocket<KrakenSpotExchange>
       if (volume !== undefined) changes.volume = volume;
       if (percentage !== undefined) changes.percentage = percentage;
 
-      this.store.updateTicker(ticker, changes);
+      (() => {
+        const target = ticker;
+        const nativeChanges: Partial<StoreData['tickers'][number]> = changes;
+        return applyReferenceFixture(
+          this.store,
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...nativeChanges } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
   };
 

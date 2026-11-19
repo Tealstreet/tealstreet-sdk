@@ -1,5 +1,13 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { CoinbaseExchange } from './coinbase.exchange';
 
+import { Market, Order, OrderSide } from '@tealstreet/safe-cex/src/types';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { resolveTransportRouting } from '../../../transport/registry';
+import { add, multiply } from '../../../utils/safe-math';
+import { virtualClock } from '../../../utils/virtualClock';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { BASE_WS_URL, ORDER_EVENT } from './coinbase.types';
 import {
   formatOrderState,
   formatOrderType,
@@ -7,12 +15,6 @@ import {
   resolveCoinbaseUsdEquivalentMarket,
   sign,
 } from './coinbase.utils';
-import { Market, Order, OrderSide } from '@tealstreet/safe-cex/src/types';
-import { resolveTransportRouting } from '../../../transport/registry';
-import { add, multiply } from '../../../utils/safe-math';
-import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { BASE_WS_URL, ORDER_EVENT } from './coinbase.types';
 
 const COINBASE_WS_AUTH_REQUEST_PREFIX = 'coinbase-ws-auth';
 const COINBASE_USER_ORDER_SNAPSHOT_BATCH_SIZE = 50;
@@ -142,7 +144,22 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
       if (this.snapshotOrdersById) {
         this.mergeSnapshotOrders(orders);
       } else {
-        this.store.addOrUpdateOrders(orders);
+        (() => {
+          const incoming: StoreData['orders'] = orders;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
       // emit fills
       orders.forEach((order) => {
@@ -192,10 +209,14 @@ export class CoinbasePrivateWebsocket extends BaseWebSocket<CoinbaseExchange> {
     // snapshot that yielded no orders only contained quarantined records, so it
     // must not replace last-known-good state or mark orders as loaded.
     if (snapshotRawOrderCount === 0 || snapshotOrders.length > 0) {
-      this.store.update({
-        orders: snapshotOrders,
-        loaded: { ...this.store.loaded, orders: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          orders: snapshotOrders,
+          loaded: { orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     }
   };
 

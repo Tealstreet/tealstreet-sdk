@@ -1,7 +1,10 @@
+import type { StoreData } from '../../generated/StoreData';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 const symbol = 'E-BTC-USDT';
 const row = {
@@ -18,7 +21,7 @@ const row = {
 };
 const make = () => {
   vi.useFakeTimers();
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new BitrueExchange('bitrue', { key: 'key', secret: 'secret' }, store);
   vi.spyOn(exchange as any, 'emitAndLogError').mockImplementation(() => undefined);
   const get = vi.fn().mockResolvedValue({ data: { code: '0', data: [row] } });
@@ -58,7 +61,23 @@ describe('Bitrue current TS parity contract', () => {
   it('checks exact cached symbol and client identity without reading', async () => {
     const { exchange, store, get } = make();
     const orders = await exchange.fetchOrdersForSymbol(symbol);
-    store.addOrUpdateOrders(orders);
+    (() => {
+      const incoming: StoreData['orders'] = orders;
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     get.mockClear();
     await expect(exchange.findOrderByClientOrderId(symbol, 'caller-id')).resolves.toMatchObject({
       found: true,

@@ -1,4 +1,7 @@
 //! Public catalog snapshots retain their exact managed Background attempt.
+#[path = "../../../engine/tests/support/request_stats_frame.rs"]
+mod request_stats_frame;
+use request_stats_frame::assert_request_stats_frame;
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{
@@ -174,6 +177,7 @@ fn native_catalog_wire_and_codec_in_all_deployments() {
 #[test]
 fn native_primary_failure_uses_order_books_then_existing_backoff() {
     let mut e = engine(false, false);
+    let before_stats = e.snapshot_frame(NOW).to_vec();
     e.start(NOW);
     let a = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
     let r = a
@@ -206,7 +210,14 @@ fn native_primary_failure_uses_order_books_then_existing_backoff() {
             .any(|a| matches!(a,Action::SetTimer{at_ms,..}if *at_ms>=NOW+752.&&*at_ms<=NOW+1002.))
     );
     assert!(!a.iter().any(|a| matches!(a, Action::Http(_))));
-    empty(&mut e, NOW + 2.);
+    assert!(!e.store().loaded().markets);
+    assert!(e.store().markets().is_empty());
+    assert_request_stats_frame(
+        &before_stats,
+        e.take_frame(NOW + 2.),
+        NOW + 2.,
+        [0, 0, 0, 0, 2],
+    );
     no_command(&a);
 }
 #[test]
@@ -322,6 +333,7 @@ fn bound_catalog_expires_before_claim_and_late_claim_is_inert() {
 #[test]
 fn released_timeout_and_late_response_cannot_replace_fresh_fallback() {
     let mut e = engine(false, false);
+    let before_stats = e.snapshot_frame(NOW).to_vec();
     let a = start(&mut e);
     let timer = deadline(&a);
     let (p, _) = prep(&a, false);
@@ -329,7 +341,14 @@ fn released_timeout_and_late_response_cannot_replace_fresh_fallback() {
     e.handle(NOW + DISCOVERY_DEADLINE_MS, Event::TimerFired { timer });
     let (p, _) = prep(&e.drain_actions().collect::<Vec<_>>(), true);
     reply_at(&mut e, NOW + DISCOVERY_DEADLINE_MS + 1., &old, 200, META);
-    empty(&mut e, NOW + DISCOVERY_DEADLINE_MS + 1.);
+    assert!(!e.store().loaded().markets);
+    assert!(e.store().markets().is_empty());
+    assert_request_stats_frame(
+        &before_stats,
+        e.take_frame(NOW + DISCOVERY_DEADLINE_MS + 1.),
+        NOW + DISCOVERY_DEADLINE_MS + 1.,
+        [0, 0, 0, 1, 0],
+    );
     e.drain_actions().for_each(drop);
     let fresh = release(&mut e, NOW + DISCOVERY_DEADLINE_MS + 2., p);
     reply_at(&mut e, NOW + DISCOVERY_DEADLINE_MS + 3., &fresh, 200, META);
@@ -352,11 +371,19 @@ fn released_timeout_and_late_response_cannot_replace_fresh_fallback() {
 #[test]
 fn malformed_catalog_prefix_never_reaches_store() {
     let mut e = engine(false, false);
+    let before_stats = e.snapshot_frame(NOW).to_vec();
     let (p, _) = prep(&start(&mut e), false);
     let r = release(&mut e, NOW + 1., p);
     let malformed = format!("{}x", META);
     reply_at(&mut e, NOW + 2., &r, 200, &malformed);
-    empty(&mut e, NOW + 2.);
+    assert!(!e.store().loaded().markets);
+    assert!(e.store().markets().is_empty());
+    assert_request_stats_frame(
+        &before_stats,
+        e.take_frame(NOW + 2.),
+        NOW + 2.,
+        [1, 0, 0, 0, 0],
+    );
     let a: Vec<_> = e.drain_actions().collect();
     let _ = prep(&a, true);
 }
@@ -378,6 +405,7 @@ fn completed_catalog_duplicate_response_is_inert() {
 #[test]
 fn streamed_prefix_then_transport_failure_is_discarded_before_fallback() {
     let mut e = engine(false, false);
+    let before_stats = e.snapshot_frame(NOW).to_vec();
     let (p, _) = prep(&start(&mut e), false);
     let old = release(&mut e, NOW + 1., p);
     e.handle(
@@ -406,7 +434,14 @@ fn streamed_prefix_then_transport_failure_is_discarded_before_fallback() {
     );
     let (p, _) = prep(&e.drain_actions().collect::<Vec<_>>(), true);
     e.handle(NOW + 4., Event::HttpEnd { request: old.id });
-    empty(&mut e, NOW + 4.);
+    assert!(!e.store().loaded().markets);
+    assert!(e.store().markets().is_empty());
+    assert_request_stats_frame(
+        &before_stats,
+        e.take_frame(NOW + 4.),
+        NOW + 4.,
+        [0, 0, 0, 1, 0],
+    );
     assert!(e.drain_actions().next().is_none());
     let fresh = release(&mut e, NOW + 5., p);
     reply_at(&mut e, NOW + 6., &fresh, 200, META);

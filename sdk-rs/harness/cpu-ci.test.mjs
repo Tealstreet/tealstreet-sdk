@@ -1,3 +1,4 @@
+import { PHYSICAL_JOB_RELISTS } from './physical-job.mjs';
 import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -201,17 +202,17 @@ test('run 40518541502: the physical producer is re-listed until GitHub records i
     const sleeps = [], reader = { getRun: async () => run, listJobs: async () => listings.length > 1 ? listings.shift() : listings[0] };
     return { sleeps, context: { runId: 7, reader, sleep: async ms => { sleeps.push(ms); } } };
   };
-  for (const listings of [[[row(0)], [row(null)], [row(40)]], [[], [row(40)]]]) {
+  for (const listings of [[[row(0)], [row(null)], [row(40)]], [[], [row(40)]], [...Array.from({ length: 7 }, () => [row(0)]), [row(40)]]]) {
     const x = physical(...listings), { job } = await currentPhysical(x.context, name);
     assert.equal(job.runner_id, 40); assert.deepEqual(x.sleeps, Array(listings.length - 1).fill(10_000));
   }
   const unassigned = physical([row(0)]);
   await assert.rejects(currentPhysical(unassigned.context, name),
     /missing unique original physical job; candidates \[\{"id":30,"name":"Rust \/ replay measurement \(bitget\)","run_attempt":1,"runner_id":0,"status":"in_progress"\}\]/);
-  assert.equal(unassigned.sleeps.length, 6);
+  assert.equal(unassigned.sleeps.length, PHYSICAL_JOB_RELISTS);
   const absent = physical([]);
   await assert.rejects(currentPhysical(absent.context, name), /candidates \[\]/);
-  assert.equal(absent.sleeps.length, 6);
+  assert.equal(absent.sleeps.length, PHYSICAL_JOB_RELISTS);
   for (const listing of [[row(40), row(41)], [{ ...row(40), run_attempt: 2 }]]) {
     const x = physical(listing);
     await assert.rejects(currentPhysical(x.context, name), /missing unique original physical job/);

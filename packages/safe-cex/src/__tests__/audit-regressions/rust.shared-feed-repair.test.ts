@@ -1,9 +1,11 @@
+import type { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+
 import { MessageChannel } from 'node:worker_threads';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { RustPublicFeedProvider, rustPublicFeedIdentity } from '../../exchanges/rust/publicFeed';
-import type { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { rustPublicFeedIdentity, RustPublicFeedProvider } from '../../exchanges/rust/publicFeed';
+import { nativeStoreFrame } from '../cutover/nativeFixture';
 
 // A chart's forced reset on a shared-feed account must repair the source engine's socket:
 // the account's own engine holds no public topics, so a repair there only errors.
@@ -15,7 +17,15 @@ afterEach(() => {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 it('the provider repairs only a candle stream the account holds', async () => {
-  const market = { id: 'BTC', symbol: 'BTC-PERP', contractSize: 1, isSpot: false, isPerpetual: true, isInverse: false, isExpiring: false };
+  const market = {
+    id: 'BTC',
+    symbol: 'BTC-PERP',
+    contractSize: 1,
+    isSpot: false,
+    isPerpetual: true,
+    isInverse: false,
+    isExpiring: false,
+  };
   const repairOHLCV = vi.fn();
   const source = {
     name: 'hyperliquid',
@@ -30,6 +40,8 @@ it('the provider repairs only a candle stream the account holds', async () => {
       marketsBySymbol: { 'BTC-PERP': market },
       tickers: [{ symbol: 'BTC-PERP', last: 100 }],
     },
+    // Rule 5 / #3640: the native source supplies a snapshot even without diagnostics.
+    snapshotFrame: () => nativeStoreFrame({}),
     getActiveTickerSymbols: () => [],
     setActiveTickerSymbols: vi.fn(),
     observePublicFeed: () => () => {},

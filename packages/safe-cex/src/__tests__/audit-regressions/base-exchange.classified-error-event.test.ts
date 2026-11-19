@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { BaseExchange } from '../../exchanges/base';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 // Listeners (health monitor, toasts) branch on the typed kind instead of the text.
-const makeExchange = () => new BaseExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+const makeExchange = () => new BaseExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
 const typedError = () =>
   Object.assign(new Error('API key is invalid.'), { kind: 'authInvalid', outcome: 'rejected', venueCode: '10003' });
 

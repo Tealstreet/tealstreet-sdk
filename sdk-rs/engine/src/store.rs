@@ -16,6 +16,9 @@ use crate::wire::market_flag;
 use crate::wire::{self, FrameWriter, loaded_flag, section};
 use std::collections::{HashMap, HashSet};
 
+/// Captured provider rows retain receive time, so snapshots do not freshen their age.
+type PublicMessageStats = std::collections::BTreeMap<(u8, String), (bool, bool, Option<f64>)>;
+
 /// Each imported column owns its value (including absence) until its inputs
 /// change. A size update must not discard independent native PnL evidence.
 #[derive(Clone, Copy, Default)]
@@ -83,6 +86,9 @@ pub struct Store {
     position_native_extras: Vec<PositionNativeExtras>,
     position_ids: bool,
     balance: Balance,
+    request_stats: [u32; 5],
+    public_message_stats: Option<PublicMessageStats>,
+    balance_info_json: Option<String>,
     coin_balances: Option<Vec<CoinBalance>>,
     currency_balances: Option<Vec<CurrencyBalance>>,
     /// Stable symbols retain account settings across market replacement/delisting.
@@ -120,8 +126,8 @@ pub struct OrderSnapshotToken(
     pub(crate) u64,
 );
 
-/// Packed ticker delta field order; matches `PACKED_TICKER_FIELDS` in
-/// `packages/safe-cex/src/store/store.base.ts`.
+/// Packed ticker delta field order; matches `TICKER_FIELDS` in
+/// `sdk-rs/hosts/wasm/js/wire.mjs`.
 pub const TICKER_FIELDS: [&str; 12] = [
     "bid",
     "ask",
@@ -235,6 +241,9 @@ impl Store {
             self.rejected_empty_catalogue = true;
             return;
         }
+        // Completed snapshots no longer need the streaming parser's growth room.
+        // Release it before allocating the retained lookup tables and UI frames.
+        markets.shrink_to_fit();
         let reindexed = self.markets.len() != markets.len()
             || self
                 .markets
@@ -408,7 +417,8 @@ impl Store {
             .map(|index| &self.tickers[index as usize])
     }
 
-    pub fn set_tickers(&mut self, tickers: Vec<Ticker>) {
+    pub fn set_tickers(&mut self, mut tickers: Vec<Ticker>) {
+        tickers.shrink_to_fit();
         self.ticker_revision = self.ticker_revision.wrapping_add(1);
         self.tickers = tickers;
         // Input-order insertion keeps the last duplicate as the lookup winner.
@@ -920,6 +930,24 @@ impl Store {
         }
     }
 
+    pub(crate) fn set_public_message_stats(
+        &mut self,
+        stats: crate::public_feed::PublicMessageStats,
+        now: f64,
+    ) {
+        let current = self.public_message_stats.get_or_insert_default();
+        if stats.replace {
+            current.clear();
+        }
+        for row in stats.rows {
+            current.insert(
+                (row.group, row.topic),
+                (row.subscribed, row.active, row.age_ms.map(|age| now - age)),
+            );
+        }
+        self.changes.status = true;
+    }
+
     pub fn positions(&self) -> &[Position] {
         &self.positions
     }
@@ -1056,6 +1084,30 @@ impl Store {
         }
     }
 
+    /// Final physical HTTP outcomes, shared by hosted and LOCAL engines.
+    pub fn record_request_outcome(&mut self, status: Option<u16>) {
+        let index = match status {
+            Some(200..=299) => 0,
+            Some(418 | 429) => 1,
+            Some(401 | 403) => 2,
+            None => 3,
+            _ => 4,
+        };
+        self.request_stats[index] = self.request_stats[index].saturating_add(1);
+        self.changes.status = true;
+    }
+
+    /// Opaque venue metadata is decoded only at the host boundary.
+    pub fn balance_info_json(&self) -> Option<&str> {
+        self.balance_info_json.as_deref()
+    }
+    pub fn set_balance_info_json(&mut self, info: String) {
+        if self.balance_info_json.as_ref() != Some(&info) {
+            self.balance_info_json = Some(info);
+            self.changes.balance = true;
+        }
+    }
+
     pub fn set_balance(&mut self, balance: Balance) {
         if !self.loaded.balance || balance != self.balance {
             self.balance = balance;
@@ -1078,6 +1130,7 @@ impl Store {
                     .map(|market| (market.symbol.clone().into_boxed_str(), setting))
             })
             .collect();
+        self.sync_position_leverages();
         self.changes.settings = true;
         #[cfg(feature = "metadata-freshness")]
         if let Some(metadata) = &mut self.metadata {
@@ -1096,10 +1149,37 @@ impl Store {
             .collect();
         if settings != self.settings {
             self.settings = settings;
+            self.sync_position_leverages();
             self.changes.settings = true;
             #[cfg(feature = "metadata-freshness")]
             if let Some(metadata) = &mut self.metadata {
                 metadata.changed(None);
+            }
+        }
+    }
+
+    fn sync_position_leverages(&mut self) {
+        for position in &mut self.positions {
+            // Venue-reported leverage is authoritative. Settings may fill an
+            // unknown row, but an ACK cannot confirm a new position leverage.
+            if position.leverage.is_finite() && position.leverage > 0.0 {
+                continue;
+            }
+            let Some(setting) = self.settings.get(position.symbol.as_str()) else {
+                continue;
+            };
+            // Rule 5 / #3640: selected-mode rails cannot rewrite another live margin mode.
+            if setting.margin_type.is_some() && setting.margin_type != position.margin_type {
+                continue;
+            }
+            let leverage = match position.side {
+                crate::model::PositionSide::Long => setting.buy_leverage,
+                crate::model::PositionSide::Short => setting.sell_leverage,
+            }
+            .unwrap_or(setting.leverage);
+            if leverage.is_finite() && leverage > 0.0 && position.leverage != leverage {
+                position.leverage = leverage;
+                self.changes.positions = true;
             }
         }
     }
@@ -1115,6 +1195,7 @@ impl Store {
                 metadata.changed(Some(symbol));
             }
         }
+        self.sync_position_leverages();
     }
 }
 
@@ -1356,8 +1437,8 @@ impl Store {
         self.ticker_deltas_spare = pending.ticker_deltas;
     }
 
-    /// Write the drained changes as frame sections.
-    pub fn write<'a>(&'a self, pending: &Pending, w: &mut FrameWriter<'a>) {
+    /// Capacity hint for a flush's public tables, before any section is written.
+    pub(crate) fn frame_table_reservation(&self, pending: &Pending) -> (usize, usize) {
         let changes = &pending.changes;
         if changes.markets || changes.tickers_replaced {
             let market_bytes = if changes.markets {
@@ -1368,20 +1449,48 @@ impl Store {
             } else {
                 0
             };
+            // Classification/product tables share the catalogue flush. Their
+            // fixed columns must be reserved before any table can grow the buffer.
+            #[cfg(any(test, feature = "product-semantics"))]
+            let market_bytes = market_bytes
+                + if changes.markets {
+                    self.instrument_classifications
+                        .as_ref()
+                        .map_or(0, |rows| 16 + 16 * rows.len())
+                        + self
+                            .derivative_products
+                            .as_ref()
+                            .map_or(0, |rows| 16 + 44 * rows.len())
+                } else {
+                    0
+                };
             let ticker_bytes = if changes.tickers_replaced {
-                108 * self.tickers.len()
+                (108 + if self.export_ticker_observations {
+                    32
+                } else {
+                    0
+                }) * self.tickers.len()
             } else {
                 0
             };
-            w.reserve_tables(
+            (
                 market_bytes + ticker_bytes + 128,
                 if changes.markets {
                     4 * self.markets.len()
                 } else {
                     0
                 },
-            );
+            )
+        } else {
+            (0, 0)
         }
+    }
+
+    /// Write the drained changes as frame sections.
+    pub fn write<'a>(&'a self, pending: &Pending, w: &mut FrameWriter<'a>) {
+        let changes = &pending.changes;
+        let (bytes, strings) = self.frame_table_reservation(pending);
+        w.reserve_tables(bytes, strings);
         if changes.markets {
             self.write_markets(w);
             #[cfg(any(test, feature = "product-semantics"))]
@@ -1498,6 +1607,25 @@ impl Store {
                 };
             w.u32s([loaded, flags]);
             w.f64(self.latency.unwrap_or(0.0));
+            w.end();
+            if let Some(stats) = &self.public_message_stats {
+                w.begin(section::PUBLIC_MESSAGE_HANDLER_STATS);
+                w.u32s([stats.len() as u32, 1]);
+                for ((group, topic), (subscribed, active, received)) in stats {
+                    let topic = w.string(topic);
+                    w.u32s([
+                        u32::from(*group),
+                        topic,
+                        u32::from(*subscribed) | (u32::from(*active) << 1),
+                        0,
+                    ]);
+                    w.f64(received.map_or(f64::NAN, |at| (self.clock - at).max(0.)));
+                }
+                w.end();
+            }
+            w.begin(section::REQUEST_STATS);
+            w.u32s(self.request_stats);
+            w.pad();
             w.end();
         }
     }
@@ -1739,30 +1867,32 @@ impl Store {
         w.end();
     }
 
+    /// The same independent native quantity/PnL evidence carried by POSITIONS.
+    /// Host projections use this rather than reconstructing venue units.
+    pub fn position_output_extras(&self, index: usize) -> Option<[Option<f64>; 2]> {
+        let position = self.positions.get(index)?;
+        let native = self.position_native_extras.get(index)?;
+        if native.imported == [true; 2] {
+            return Some(native.values);
+        }
+        let market = self
+            .market_by_symbol
+            .get(position.symbol.as_str())
+            .map(|i| &self.markets[*i as usize]);
+        let derived = crate::position_output::native_extras(position, market, self.quantity_units);
+        Some(std::array::from_fn(|i| {
+            if native.imported[i] {
+                native.values[i]
+            } else {
+                derived[i]
+            }
+        }))
+    }
+
     fn write_positions<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let positions = &self.positions;
-        let extras: Vec<_> = positions
-            .iter()
-            .zip(&self.position_native_extras)
-            .map(|(position, native)| {
-                if native.imported == [true; 2] {
-                    return native.values;
-                }
-                let derived = {
-                    let market = self
-                        .market_by_symbol
-                        .get(position.symbol.as_str())
-                        .map(|index| &self.markets[*index as usize]);
-                    crate::position_output::native_extras(position, market, self.quantity_units)
-                };
-                std::array::from_fn(|i| {
-                    if native.imported[i] {
-                        native.values[i]
-                    } else {
-                        derived[i]
-                    }
-                })
-            })
+        let extras: Vec<_> = (0..positions.len())
+            .map(|i| self.position_output_extras(i).expect("position index"))
             .collect();
         w.begin_revision(section::POSITIONS, 2);
         w.u32(positions.len() as u32);
@@ -2153,6 +2283,7 @@ mod tests {
         fn no_cover_writes_no_section() {
             let mut store = Store::default();
             store.upsert_order(row("a", "BTC"));
+            // Rule 5: 7b723d8837 adds native requestStats section 35 to snapshots.
             assert_eq!(
                 sections(&mut store),
                 [
@@ -2160,7 +2291,8 @@ mod tests {
                     section::POSITIONS,
                     section::BALANCE,
                     section::SETTINGS,
-                    section::STATUS
+                    section::STATUS,
+                    section::REQUEST_STATS
                 ]
             );
         }
@@ -2610,6 +2742,31 @@ mod tests {
     }
 
     #[test]
+    fn installed_catalogue_tables_release_parser_growth_capacity() {
+        let mut store = Store::default();
+        let mut markets = Vec::with_capacity(1024);
+        let mut tickers = Vec::with_capacity(1024);
+        for index in 0..750 {
+            let symbol = format!("ROW{index}");
+            markets.push(market(&symbol));
+            tickers.push(ticker(&symbol));
+        }
+        store.set_markets(markets);
+        store.set_tickers(tickers);
+        assert_eq!(
+            (store.markets.capacity(), store.tickers.capacity()),
+            (750, 750)
+        );
+        assert!(store.market("ROW749").is_some());
+        assert!(store.ticker("ROW749").is_some());
+
+        // Compaction must still allow live recovery of an omitted seed ticker.
+        store.set_tickers(vec![ticker("ROW0")]);
+        assert_eq!(store.ensure_ticker("ROW749"), Some(1));
+        assert_eq!(store.ticker("ROW749").unwrap().id, "ROW749");
+    }
+
+    #[test]
     fn replacing_a_large_ticker_table_releases_obsolete_index_capacity() {
         let mut store = Store::default();
         for _ in 0..3 {
@@ -2978,6 +3135,57 @@ mod tests {
             12_501.0
         );
     }
+    #[test]
+    fn settings_ack_preserves_venue_reported_position_leverage() {
+        use crate::model::{PositionMode, PositionSide};
+        let setters: [fn(&mut Store, MarketSetting); 3] = [
+            |store, setting| store.update_setting("BTC", |current| *current = setting),
+            |store, setting| store.set_settings([(0, setting)]),
+            |store, setting| store.replace_settings([("BTC", setting)]),
+        ];
+        for set in setters {
+            for mode in [MarginType::Cross, MarginType::Isolated] {
+                for side in [PositionSide::Long, PositionSide::Short] {
+                    let mut store = Store::default();
+                    store.set_markets(vec![market("BTC")]);
+                    let position = Position {
+                        id: "venue-position".into(),
+                        symbol: "BTC".into(),
+                        side,
+                        entry_price: 100.,
+                        notional: 200.,
+                        leverage: 10.,
+                        margin_type: Some(mode),
+                        position_mode: Some(PositionMode::Hedged),
+                        unrealized_pnl: 7.,
+                        realized_pnl: None,
+                        contracts: 2.,
+                        liquidation_price: 50.,
+                        margin_size: None,
+                        last_update: None,
+                    };
+                    store.set_positions(vec![position.clone()]);
+                    store.take_pending();
+                    let setting = MarketSetting {
+                        leverage: 12.,
+                        margin_type: Some(mode),
+                        buy_leverage: Some(20.),
+                        sell_leverage: Some(30.),
+                    };
+                    set(&mut store, setting);
+                    assert_eq!(store.setting("BTC"), Some(setting));
+                    assert_eq!(store.positions(), [position]);
+                    let pending = store.take_pending();
+                    assert!(pending.changes.settings);
+                    assert!(!pending.changes.positions);
+                    // A settings ACK must not publish a fictitious position change.
+                    set(&mut store, setting);
+                    assert!(!store.take_pending().changes.positions);
+                }
+            }
+        }
+    }
+
     fn market_position_store() -> Store {
         use crate::model::{Limits, MinMax, PositionSide, Precision};
         let mut store = Store::default();

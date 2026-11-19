@@ -26,7 +26,7 @@ import type { RedisLikeMarketCacheClient } from './marketCache';
  *    `TICKER_WRITE_THROTTLE_MS` in exchange-server's `public-data-cache.ts`
  *    must stay comfortably under this.
  *  - How stale a CONNECTING CLIENT's first ticker render can be. The seed is
- *    not as invisible as it looks: `ExchangeWorker._prepareStorePayload` emits
+ *    not as invisible as it looks: the native ticker frame writer emits
  *    the full `tickers` array on the first payload after init, so the seeded
  *    values land in the server's `lastStoreData` and are replayed to every
  *    session that connects before the venue's first real update overwrites

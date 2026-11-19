@@ -2,13 +2,14 @@ import type { BybitBboOrderOpts, BybitTickSizeMarketOrderOpts } from '../../inde
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange, formatBybitTradingAgreementError } from '../reference/bybit/bybit.exchange';
 import { getBybitOrderExecutionParams } from '../../exchanges/bybit/bybit.order-params';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
+import { OrderSide, OrderTimeInForce, OrderType, PositionMode } from '../../types';
+import { referenceStore } from '../cutover/referenceFixture';
+import { BybitExchange, formatBybitTradingAgreementError } from '../reference/bybit/bybit.exchange';
 import { BybitDemoExchange } from '../reference/bybit/bybitdemo.exchange';
 import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 import { BybitSpotExchange } from '../reference/bybit/bybitspot.exchange';
-import { OrderSide, OrderTimeInForce, OrderType, PositionMode } from '../../types';
 
 class BybitOrderLinkIdExchange extends BybitExchange {
   protected requiresOrderLinkId() {
@@ -43,17 +44,7 @@ const createStore = (symbol: string, quote: string, isInverse = false) => {
     limits: { amount: { min: isInverse ? 1 : 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
     isInverse,
   };
-  return {
-    subscribe: vi.fn(),
-    markets: [market],
-    marketsBySymbol: { [symbol]: market },
-    tickersBySymbol: {},
-    orders: [],
-    positions: [],
-    // Demo placement optimistically upserts the just-placed row so the chaser
-    // can see its own order when the private WS drops the event.
-    addOrUpdateOrders: vi.fn(),
-  } as any;
+  return referenceStore({ markets: [market] });
 };
 
 const mockPositionMode = (exchange: BybitExchange | BybitDemoExchange | BybitInverseExchange) => {
@@ -383,13 +374,17 @@ describe('Bybit adapter-only advanced order parameters', () => {
 
   it('treats Bybit Demo trading-stop not-modified responses as successful no-ops', async () => {
     vi.useFakeTimers();
-    const exchange = new BybitDemoExchange('bybitdemo', { key: 'key', secret: 'secret' }, createStore('BTCUSDT', 'USDT'));
+    const exchange = new BybitDemoExchange(
+      'bybitdemo',
+      { key: 'key', secret: 'secret' },
+      createStore('BTCUSDT', 'USDT'),
+    );
     mockPositionMode(exchange);
     const post = vi.fn().mockResolvedValue({ data: { retMsg: 'not modified', result: {} } });
     const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
-    const fetchAndSetPrivateSnapshotHelper = vi.spyOn(exchange, 'fetchAndSetPrivateSnapshotHelper').mockResolvedValue(
-      undefined,
-    );
+    const fetchAndSetPrivateSnapshotHelper = vi
+      .spyOn(exchange, 'fetchAndSetPrivateSnapshotHelper')
+      .mockResolvedValue(undefined);
     exchange.xhr = { post } as any;
 
     await expect(

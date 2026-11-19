@@ -1,4 +1,7 @@
 //! FetchAccount refusals and remote validation retain genuine initial Read custody.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
@@ -348,7 +351,11 @@ fn capacity(branch: Branch) {
         retire(&mut e, owner);
     }
     retire(&mut e, 900);
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    if matches!(branch, Branch::Remote) {
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
+    } else {
+        assert_eq!(e.account_snapshot_frame(NOW), before);
+    }
 }
 #[test]
 fn invalid_read_auth_refusal_requires_read_capacity() {
@@ -443,6 +450,6 @@ fn native_remote_wire_primary_namespace_and_selected_signer_are_preserved() {
         );
         assert_eq!(request.headers, expected);
         success(&mut e, 830, &request);
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     }
 }

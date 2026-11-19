@@ -4,8 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ExchangeEmitter } from '../../exchanges/exchangeEmitter';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
@@ -46,7 +47,7 @@ describe('exchange event listener isolation', () => {
   });
 
   it('retains the TS venue store bridge after an earlier update listener throws', () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = new BinanceExchange('binance', { key: '', secret: '', publicDataOnly: true }, store);
     dispose.push(() => exchange.dispose());
     const cause = new Error('consumer failed', { cause: new Error('original cause') });
@@ -56,13 +57,19 @@ describe('exchange event listener isolation', () => {
     const later = vi.fn();
     exchange.on('update', later);
 
-    expect(() => store.update({ latency: 15 })).not.toThrow();
+    expect(() =>
+      applyReferenceFixture(
+        store,
+        { latency: 15 },
+        store.markets.map((row) => row.symbol),
+      ),
+    ).not.toThrow();
     expect(later).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ latency: 15 }));
     expectDiagnosticError('[binance] Event "update" listener failed', cause);
   });
 
   it('delivers the original binary Rust fill to a later listener before forwarding its frame', () => {
-    const exchange = new RustEngineExchange('grvt', { key: '', secret: '' }, new DefaultStore());
+    const exchange = new RustEngineExchange('grvt', { key: '', secret: '' }, new FrameStore());
     dispose.push(() => exchange.dispose());
     const cause = new Error('fill consumer failed');
     exchange.on('fill', () => {

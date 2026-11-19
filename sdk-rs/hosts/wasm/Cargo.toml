@@ -93,6 +93,7 @@ okx = ["safe-cex-venues/okx", "text-ingress", "dispatch-signing", "hosted-signin
 orderly = ["safe-cex-venues/orderly", "text-ingress"]
 
 [dependencies]
+safe-cex-store-frames.workspace = true
 zeroize.workspace = true
 safe-cex-engine = { workspace = true, features = ["polling-control"] }
 safe-cex-venues.workspace = true

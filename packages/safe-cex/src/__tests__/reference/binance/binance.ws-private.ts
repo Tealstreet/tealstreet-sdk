@@ -1,17 +1,7 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { BinanceExchange } from './binance.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import {
-  LogSeverity,
-  OrderRejectReason,
-  OrderStatus,
-  OrderType,
-  PositionMode,
-  PositionSide,
-} from '../../../types';
-import { createPositionId } from '../../../utils/createPositionId';
-import { v } from '../../../utils/get-key';
-import { virtualClock } from '../../../utils/virtualClock';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import {
   BASE_WS_URL,
@@ -22,6 +12,12 @@ import {
   POSITION_SIDE,
   TIME_IN_FORCE,
 } from '../../../exchanges/binance/binance.types';
+import { LogSeverity, OrderRejectReason, OrderStatus, OrderType, PositionMode, PositionSide } from '../../../types';
+import { createPositionId } from '../../../utils/createPositionId';
+import { v } from '../../../utils/get-key';
+import { virtualClock } from '../../../utils/virtualClock';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 // Binance expires a listenKey 60 minutes after the last keepalive.
 const LISTEN_KEY_REFRESH_MS = 30 * 60 * 1000;
@@ -184,57 +180,108 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         const orderId = data.i?.toString();
         const filled = parseFloat(data.z);
         const amount = parseFloat(data.q);
-        this.store.updateOrder(
-          { id: orderId },
-          {
+        (() => {
+          const target = { id: orderId };
+          const changes: Partial<StoreData['orders'][number]> = {
             filled,
             remaining: amount - filled,
             lastUpdate: virtualClock.getCurrentTimeMs(),
-          },
-        );
+          };
+          return applyReferenceFixture(
+            this.store,
+            { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
 
       if (data.X === 'NEW') {
-        this.store.addOrUpdateOrder({
-          id: data.i?.toString(),
-          status: OrderStatus.Open,
-          symbol: data.s,
-          type: ORDER_TYPE[data.ot],
-          timeInForce: TIME_IN_FORCE[data.f],
-          side: ORDER_SIDE[data.S],
-          price: parseFloat(data.p) || parseFloat(data.sp),
-          amount: parseFloat(data.q),
-          filled: parseFloat(data.z),
-          lastUpdate: virtualClock.getCurrentTimeMs(),
-          remaining: parseFloat(data.q) - parseFloat(data.z),
-          reduceOnly: data.R || false,
-          info: { ...data, orderId: data.i?.toString() },
-          ...(ORDER_TYPE[data.ot] === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
-          ...(ORDER_TYPE[data.ot] === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
-        });
+        (() => {
+          const incoming: StoreData['orders'] = [
+            {
+              id: data.i?.toString(),
+              status: OrderStatus.Open,
+              symbol: data.s,
+              type: ORDER_TYPE[data.ot],
+              timeInForce: TIME_IN_FORCE[data.f],
+              side: ORDER_SIDE[data.S],
+              price: parseFloat(data.p) || parseFloat(data.sp),
+              amount: parseFloat(data.q),
+              filled: parseFloat(data.z),
+              lastUpdate: virtualClock.getCurrentTimeMs(),
+              remaining: parseFloat(data.q) - parseFloat(data.z),
+              reduceOnly: data.R || false,
+              info: { ...data, orderId: data.i?.toString() },
+              ...(ORDER_TYPE[data.ot] === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
+              ...(ORDER_TYPE[data.ot] === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
+            },
+          ];
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
 
       if (data.X === 'CANCELED' || data.X === 'EXPIRED' || data.X === 'CANCELLED') {
         const orderId = data.i?.toString();
-        this.store.updateOrderStatus({ id: orderId }, OrderStatus.Canceled);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
 
         const rejectReason = this.getOrderRejectReason(data);
         if (rejectReason) {
           const existingOrder = this.store.orders.find((order) => order.id === orderId);
-          this.store.updateOrder(
-            { id: orderId },
-            {
+          (() => {
+            const target = { id: orderId };
+            const changes: Partial<StoreData['orders'][number]> = {
               extra: {
                 ...existingOrder?.extra,
                 rejectReason,
               },
-            },
-          );
+            };
+            return applyReferenceFixture(
+              this.store,
+              { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
       }
 
       if (data.X === 'FILLED') {
-        this.store.updateOrderStatus({ id: data.i?.toString() }, OrderStatus.Closed);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: data.i?.toString() }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     });
 
@@ -265,27 +312,56 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         //   price: parseFloat(data.ap) || parseFloat(data.tp) || 0,
         //   amount: parseFloat(data.aq) || parseFloat(data.q) || 0,
         // });
-        this.store.updateOrderStatus({ id: orderId }, OrderStatus.Closed);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
 
       if (algoStatus === 'NEW') {
-        this.store.addOrUpdateOrder({
-          id: orderId,
-          status: OrderStatus.Open,
-          symbol: data.s,
-          type: orderType,
-          side: ORDER_SIDE[data.S],
-          price: parseFloat(data.tp) || 0,
-          amount: parseFloat(data.q) || 0,
-          filled: 0,
-          lastUpdate: virtualClock.getCurrentTimeMs(),
-          remaining: parseFloat(data.q) || 0,
-          reduceOnly: data.R || false,
-          close: data.cp || false,
-          info: { algoId: data.aid, ...data },
-          ...(orderType === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[data.wt] }),
-          ...(orderType === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[data.wt] }),
-        });
+        (() => {
+          const incoming: StoreData['orders'] = [
+            {
+              id: orderId,
+              status: OrderStatus.Open,
+              symbol: data.s,
+              type: orderType,
+              side: ORDER_SIDE[data.S],
+              price: parseFloat(data.tp) || 0,
+              amount: parseFloat(data.q) || 0,
+              filled: 0,
+              lastUpdate: virtualClock.getCurrentTimeMs(),
+              remaining: parseFloat(data.q) || 0,
+              reduceOnly: data.R || false,
+              close: data.cp || false,
+              info: { algoId: data.aid, ...data },
+              ...(orderType === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[data.wt] }),
+              ...(orderType === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[data.wt] }),
+            },
+          ];
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
 
       if (
@@ -294,11 +370,35 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         algoStatus === 'EXPIRED' ||
         algoStatus === 'REJECTED'
       ) {
-        this.store.updateOrderStatus({ id: orderId }, OrderStatus.Canceled);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
 
       if (algoStatus === 'FINISHED') {
-        this.store.updateOrderStatus({ id: orderId }, OrderStatus.Closed);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     });
 
@@ -341,26 +441,43 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
             position?.leverage,
             side === PositionSide.Long ? confirmed?.buyLeverage : confirmed?.sellLeverage,
             closedSettings?.leverage,
-          ].find((value) => value !== undefined && Number.isFinite(value) && value > 0) ?? Number.NaN;
+          ].find((value) => value !== undefined && Number.isFinite(value) && value > 0) ?? 0;
 
-        this.store.addOrUpdatePosition({
-          ...position,
-          id,
-          symbol,
-          side,
-          entryPrice,
-          contracts,
-          notional: Math.abs(signedContracts * entryPrice + upnl),
-          unrealizedPnl: upnl,
-          leverage,
-          liquidationPrice: position?.liquidationPrice ?? null,
-          marginType: position?.marginType ?? confirmed?.marginType ?? closedSettings?.marginType,
-          positionMode,
-          info: {
-            ...position?.info,
-            ...p,
-          },
-        });
+        (() => {
+          const incoming: StoreData['positions'] = [
+            {
+              ...position,
+              id,
+              symbol,
+              side,
+              entryPrice,
+              contracts,
+              notional: Math.abs(signedContracts * entryPrice + upnl),
+              unrealizedPnl: upnl,
+              leverage,
+              liquidationPrice: nativeLiquidationPrice(position?.liquidationPrice ?? null),
+              marginType: position?.marginType ?? confirmed?.marginType ?? closedSettings?.marginType,
+              positionMode,
+              info: {
+                ...position?.info,
+                ...p,
+              },
+            },
+          ];
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       });
     });
   };
@@ -410,7 +527,19 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
     try {
       const positions = await this.parent.fetchPositions();
       if (!this.isDisposed && eventVersionAtStart === this.parent.getPositionStateVersion()) {
-        this.store.addOrUpdatePositionsFull(positions);
+        (() => {
+          const incoming: StoreData['positions'] = positions;
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     } catch {
       // Silent failure, will retry on next event
@@ -467,13 +596,14 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceExchange> {
         const orders = await this.parent.fetchOrders();
         // A failed fetch returns the current store; do not mark it freshly loaded.
         if (this.isDisposed || this.parent.ordersSnapshotStale) return;
-        this.parent.store.update({
-          orders,
-          loaded: {
-            ...this.parent.store.loaded,
-            orders: true,
+        applyReferenceFixture(
+          this.parent.store,
+          {
+            orders,
+            loaded: { orders: true },
           },
-        });
+          this.parent.store.markets.map((row) => row.symbol),
+        );
       } catch {
         // Silent failure, will retry on next event
       }

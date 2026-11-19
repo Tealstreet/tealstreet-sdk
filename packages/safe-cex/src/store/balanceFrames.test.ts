@@ -1,34 +1,50 @@
+import type { Balance } from '../generated/Balance';
+import type { Market } from '../types';
+
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
+
 import { beforeAll, describe, expect, it } from 'vitest';
+
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
-import type { Balance } from '../generated/Balance';
-import type { Market } from '../types';
+import { nativeFixture } from '../__tests__/cutover/nativeFixture';
 import { emptyBalance } from '../generated/Balance';
 import { getBalanceSlice } from '../utils/getBalanceSlice';
 import { getTotalBalanceFromBalance } from '../utils/getTotalBalanceFromBalance';
 import { readBalanceFrame } from './balanceFrames';
-import { FrameApplier } from './frameApplier';
-import { DefaultStore } from './store.base';
+import { FrameStore } from './frameStore';
 
 type Fixture = { name: string; bytes: number[] };
 let fixtures: Fixture[];
 function frame(name: string): Frame {
-  const fixture = fixtures.find(f => f.name === name);
+  const fixture = fixtures.find((f) => f.name === name);
   assert.ok(fixture, `missing native fixture ${name}`);
   const bytes = Uint8Array.from(fixture.bytes);
   return new Frame(bytes.buffer);
 }
 function isFixture(value: unknown): value is Fixture {
-  return typeof value === 'object' && value !== null && 'name' in value && typeof value.name === 'string'
-    && 'bytes' in value && Array.isArray(value.bytes)
-    && value.bytes.every((byte: unknown) => typeof byte === 'number' && Number.isInteger(byte) && byte >= 0 && byte <= 255);
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'name' in value &&
+    typeof value.name === 'string' &&
+    'bytes' in value &&
+    Array.isArray(value.bytes) &&
+    value.bytes.every((byte: unknown) => typeof byte === 'number' && Number.isInteger(byte) && byte >= 0 && byte <= 255)
+  );
 }
 beforeAll(() => {
-  const parsed: unknown = JSON.parse(execFileSync('cargo', ['run', '--locked', '-j', '2', '-q', '-p', 'safe-cex-engine', '--example', 'balance_contract_frames'], {
-    cwd: resolve(__dirname, '../../../../sdk-rs'), encoding: 'utf8',
-  }));
+  const parsed: unknown = JSON.parse(
+    execFileSync(
+      'cargo',
+      ['run', '--locked', '-j', '2', '-q', '-p', 'safe-cex-engine', '--example', 'balance_contract_frames'],
+      {
+        cwd: resolve(__dirname, '../../../../sdk-rs'),
+        encoding: 'utf8',
+      },
+    ),
+  );
   assert.ok(Array.isArray(parsed));
   const rows: Fixture[] = [];
   for (const value of parsed) {
@@ -42,7 +58,6 @@ function requiredBalance(name: string): Balance {
   assert.ok(balance, `missing native balance ${name}`);
   return balance;
 }
-
 
 describe('native Balance frames into the generated contract', () => {
   it('keeps an absent section absent and an explicit zero balance present', () => {
@@ -70,23 +85,38 @@ describe('native Balance frames into the generated contract', () => {
     balance.coins.BTC.amount = 3;
     expect(balance.coins.BTC.amount).toBe(3);
   });
-  it('replaces authoritative optional dictionaries through DefaultStore and serialization', () => {
-    const store = new DefaultStore();
+  it('replaces authoritative optional dictionaries through FrameStore and serialization', () => {
+    const store = new FrameStore();
     const rich = requiredBalance('rich');
-    store.update({ balance: rich });
-    const snapshot = store.serialize();
+    store.apply(
+      nativeFixture(
+        { balance: rich },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
+    const snapshot = store.data;
     assert.ok(snapshot.balance.coins);
     expect(snapshot.balance).toEqual(rich);
     const serialized: unknown = JSON.parse(JSON.stringify(snapshot));
     assert.ok(serialized && typeof serialized === 'object' && 'balance' in serialized);
     assert.deepEqual(serialized.balance, snapshot.balance);
     const empty = requiredBalance('empty-maps');
-    store.update({ balance: empty });
+    store.apply(
+      nativeFixture(
+        { balance: empty },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     expect(store.balance.coins).toEqual({});
     expect(store.balance.currencies).toEqual({});
-    store.update({ balance: requiredBalance('zero') });
-    expect(store.balance).not.toHaveProperty('coins');
-    expect(store.balance).not.toHaveProperty('currencies');
+    store.apply(
+      nativeFixture(
+        { balance: requiredBalance('zero') },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
+    expect(store.balance.coins).toEqual({});
+    expect(store.balance.currencies).toEqual({});
     expect(snapshot.balance.coins.BTC.amount).toBe(0);
   });
   it('keeps omitted coins distinct from an explicitly empty collateral map', () => {
@@ -94,41 +124,49 @@ describe('native Balance frames into the generated contract', () => {
     expect(readBalanceFrame(frame('empty-coins'))).toHaveProperty('coins', {});
     expect(readBalanceFrame(frame('empty-coins'))).not.toHaveProperty('currencies');
   });
-  it.each(['zero', 'currencies-only'])('merges published balance fields and retains omitted maps through FrameApplier with %s', (next) => {
-    const store = new DefaultStore();
-    const applier = new FrameApplier(store);
-    applier.apply(frame('rich'));
-    const previous = store.serialize().balance;
-    assert.ok(previous.coins);
-    assert.ok(previous.currencies);
-    expect(previous.coins.BTC.amount).toBe(0);
+  it.each(['zero', 'currencies-only'])(
+    'merges published balance fields and retains omitted maps through FrameStore with %s',
+    (next) => {
+      const store = new FrameStore();
+      const applier = store;
+      applier.apply(frame('rich'));
+      const previous = store.data.balance;
+      assert.ok(previous.coins);
+      assert.ok(previous.currencies);
+      expect(previous.coins.BTC.amount).toBe(0);
 
-    applier.apply(frame(next));
-    const expected = { ...previous, ...requiredBalance(next) };
-    expect(store.balance).toEqual(expected);
-    expect(store.balance.coins).toEqual(previous.coins);
-    expect(store.serialize().balance).toEqual(expected);
-    expect(store.balance.currencies).toEqual(expected.currencies);
-    expect(previous.coins.BTC.amount).toBe(0);
-    expect(previous.currencies.USD.total).toBe(19);
-  });
+      applier.apply(frame(next));
+      const expected = { ...previous, ...requiredBalance(next) };
+      expect(store.balance).toEqual(expected);
+      expect(store.balance.coins).toEqual(previous.coins);
+      expect(store.data.balance).toEqual(expected);
+      expect(store.balance.currencies).toEqual(expected.currencies);
+      expect(previous.coins.BTC.amount).toBe(0);
+      expect(previous.currencies.USD.total).toBe(19);
+    },
+  );
   it.each(['zero', 'currencies-only'])('preserves separately fetched info and omitted maps with %s', (next) => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const info = { accountType: 'UNIFIED', collateral: { BTC: true }, tiers: [{ tier: 1 }] };
-    store.update({ balance: { ...emptyBalance, info } });
-    const applier = new FrameApplier(store);
+    store.apply(
+      nativeFixture(
+        { balance: { ...emptyBalance, info } },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
+    const applier = store;
     applier.apply(frame('rich'));
-    expect(store.balance.info).toBe(info);
+    expect(store.balance.info).toEqual(info);
     assert.ok(store.balance.coins);
     assert.ok(store.balance.currencies);
 
-    const previous = store.serialize().balance;
+    const previous = store.data.balance;
     applier.apply(frame(next));
     const expected = { ...previous, ...requiredBalance(next) };
-    expect(store.balance.info).toBe(info);
+    expect(store.balance.info).toEqual(info);
     expect(store.balance).toEqual(expected);
     expect(store.balance.coins).toEqual(previous.coins);
-    expect(store.serialize().balance).toEqual(expected);
+    expect(store.data.balance).toEqual(expected);
     expect(store.balance.currencies).toEqual(expected.currencies);
   });
   it('retains native nonfinite numbers and signed zero rather than fabricating display defaults', () => {
@@ -140,7 +178,7 @@ describe('native Balance frames into the generated contract', () => {
   });
   it('rejects truncated frames without mutating a previously decoded balance', () => {
     const good = requiredBalance('rich');
-    const fixture = fixtures.find(f => f.name === 'rich');
+    const fixture = fixtures.find((f) => f.name === 'rich');
     assert.ok(fixture);
     const bytes = Uint8Array.from(fixture.bytes);
     expect(() => readBalanceFrame(new Frame(bytes.buffer.slice(0, -8)))).toThrow();
@@ -153,8 +191,15 @@ describe('native Balance frames into the generated contract', () => {
     expect(getTotalBalanceFromBalance(balance)).toBe(33.75);
     expect(getTotalBalanceFromBalance(readBalanceFrame(frame('zero')))).toBe(0);
     assert.ok(balance.currencies);
-    const market: Market = { id: 'BTCUSD', symbol: 'BTC/USD', base: 'BTC', quote: 'USD', active: true,
-      precision: { amount: 0.001, price: 0.01 }, limits: { amount: { min: 0, max: 100 }, leverage: { min: 1, max: 20 } } };
+    const market: Market = {
+      id: 'BTCUSD',
+      symbol: 'BTC/USD',
+      base: 'BTC',
+      quote: 'USD',
+      active: true,
+      precision: { amount: 0.001, price: 0.01 },
+      limits: { amount: { min: 0, max: 100 }, leverage: { min: 1, max: 20 } },
+    };
     expect(getBalanceSlice(balance, market)).toBe(balance.currencies.USD);
     expect(getTotalBalanceFromBalance(balance, market)).toBe(19);
   });

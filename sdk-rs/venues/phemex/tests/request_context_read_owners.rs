@@ -1,4 +1,7 @@
 //! Read-owner handoff, native financial behavior, expiry and failure recovery.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::HttpAction;
 use safe_cex_engine::{
@@ -672,7 +675,7 @@ fn native_identity_secondary_exact_uid_and_no_account_publication() {
     );
     let out: Vec<_> = e.drain_actions().collect();
     assert_eq!(out.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command:42, result }) if result == r#"{"userId":"9007199254740993"}"#)).count(), 1);
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     response(
         &mut e,
         NOW + 2.,

@@ -17,6 +17,10 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
+Bybit order-history retention is decided at completion and preserves earlier
+page-failure causes. Fresh family and combined artifacts must retain the
+10 KiB reserve.
+
 MEXC's HTTP 425 read labels are diagnostics only; typed refusals, backoff,
 signing and write outcomes retain their existing controls. Exact source
 06c5b32372b7, Rust SDK run 44220118208, artifact 14390662738 measures equal
@@ -106,6 +110,25 @@ Bybit terminal order-history retention is documented in `sdk-rs/venues/bybit/REA
 Its `history.rs` change is a counted beta-WASM input and requires a fresh release/pin;
 this routing correction does not change family caps or construction membership.
 
+Session adapter integration consumes native frames through `FrameStore`, including
+fresh snapshot baselines on reconnect. The retained Lighter TS replay oracle uses
+the generated nullable liquidation price contract: unknown prices, including
+zero-quantity placeholders, are null before fixture encoding. It retains the
+order-ID randomness and signature verification assertions.
+
+#3640 includes native store projection and wire emission in every venue-family
+artifact. Its final cap entries require optimized web/Node byte counts
+and SHA-256 hashes from Rust 1.99.0, bindgen 0.2.129 and Binaryen 132 (two -Oz
+passes), with at least 10 KiB reserve rounded up to KiB. Historical floors and
+the combined ceiling remain unchanged. After M44, remeasure all families on the
+merged tree and record new provenance in a follow-up commit; pre-M44 evidence
+does not establish the merged composition.
+
+The retained Bybit and inverse TS replay oracles publish unknown/nonpositive
+liquidation prices as native null, including flat and option positions. Their
+SCXF fixtures must pass the same generated Position contract as the Rust engine;
+a zero/invalid liquidation sentinel cannot complete TS private replay startup.
+
 BingX Spot replay tracks production decoder receipts alongside pending account reads.
 Bounded drains precede ticks, checkpoints and final capture; event-loop yields
 alone cannot establish completion of gzip decoding or its queued text messages.
@@ -119,3 +142,84 @@ retaining the prior 2,290,688-byte floor and 11,165 bytes of reserve.
 The combined artifact `14447356528` measures 17,685,652 bytes, leaving
 140,140 bytes under its unchanged cap. Pinned Rust1.99.0, bindgen0.2.129,
 Binaryen132 and required -Oz settings are unchanged.
+
+#3640's final allocation/chaser sweep is CI44266062446 at source
+`283acdd2f583259fa40113dc88f58b54adac610d`. All 27 exact family builds
+completed with matching optimized web/Node bytes and hashes. Their native-input
+fingerprint `399b3f8467a191b58ea8841ec5c9292b6533b2342ba6c1efbecdbfcc49a0a8f5`
+matches branch `c0113a933d`; the complete synthetic merge tree is not asserted
+identical. The follow-up refreshes bb6590f792 provenance after the native fixes.
+Every non-Bybit cap is measured +10 KiB rounded to KiB, retaining historical floors.
+Bybit measures 2,670,297 B at its fixed 2,696,192 B ceiling. The exact local
+combined build at c0113a933d measures 17,866,681 B (paired web/Node SHA256
+`0ed474e4613e860eea7c61babae81aff07fffd8aceb282e84de9282c58e87d8f`)
+at its fixed 18,087,936 B ceiling. Final-head combined consumers must still run
+and succeed in CI; local measurements do not grant that verdict.
+
+#3640 retained BingX Spot and OKX fixture callbacks publish SCXF through the
+explicit reference producer. Aster installs its taped axios transport before
+construction so its closed secondary read client inherits it as well.
+GitHub runner assignment metadata may lag started measurement steps: CI44248450357
+returned runner_id=0 beyond the former 60-second window. Physical-job discovery
+now re-lists for at most five minutes; missing/duplicate identities, retries and
+nonpositive runner IDs still refuse, and replay/signing deadlines stay unchanged.
+
+The native workspace test row installs pinned Node and locked Yarn dependencies:
+store-frames' risk and ownership tests execute maintained TypeScript/FrameStore
+oracles. Missing tsx/TypeScript must fail setup rather than drop those cross-language tests.
+
+Orderly account settings preserve simultaneous Cross/Isolated leverage: a
+selected margin mode updates only that mode's positions. Unknown/global settings
+retain their existing behavior. Orderly opts into full-order TIF comparison, representing absence as explicit
+null across order types while retaining every reported value. Other families
+keep their established limit-only comparison scope. The projection never
+manufactures a compared TIF. Known-failure and accepted-difference manifests
+are unchanged by this correction.
+
+Native-store frame memory reservations include product metadata, ticker observation
+columns, message-stat numeric rows and their string tail before temporary interning
+tables are allocated. Full books reserve their known level columns, and the string
+tail includes final alignment. LOCAL copies each owned flush once to JavaScript; snapshots keep independent
+baselines.
+The public 16-pair memory gate and all compared fields remain unchanged.
+
+#3640 post-master rule-17 reserve audit uses CI44302321301, built source
+`1fdd2db8279b2d4ab697720f2169cd0b6941a078` (the exact tree of PR head
+`7e9d5723fad5e8820242a18b205c068dd8eb851f`). All 27 sealed family artifacts
+have matching optimized web/Node bytes and hashes, verified source/run/input
+fingerprints, and pinned tools. The complete 49-name routing and 31-name explicit
+budget census found shortfalls only for ApeX, Binance, Kraken, Lighter, TxFlow and
+WOO; their vetoable cap refreshes use measured +10 KiB rounded up to KiB, never
+lowering a prior cap, with shared budget aliases kept equal. The budget tests
+retain every family measurement and module SHA256 and require exact caps,
+10 KiB reserves, alias coverage, and cap/cap+1 boundaries. Combined measures
+17,869,568 B (SHA256 `b7693720dffd5c3878c09ea239e9949532c43d110e4883080aa07b476ad482a3`),
+leaving 218,368 B at the unchanged 18,087,936 B ceiling. No runtime inputs change.
+
+#3640's vetoable M46 reserve refresh uses CI44319661954 after all 31 family
+measurement jobs, including shared aliases, completed successfully. Built source
+`de42fedbb4021e94d1162e4420b8583d0d20906a` has the exact tree of PR head
+`d931514bb9750d82e2f538ed454b0d24edd0db5f`. All 27 sealed family artifacts
+pass source/run/input fingerprints, pinned Rust1.99.0/bindgen0.2.129/Binaryen132
+and optimized web/Node SHA256 checks. The complete 49-name routing and 31-entry
+budget census found shortfalls only for BingX, Hyperliquid, MEXC and OKX.
+Their caps use measured +10 KiB rounded up to KiB, never lowering a prior cap;
+shared aliases follow their parent family. Per-family bytes and hashes are pinned
+in wasm-budget.test.mjs; changed caps retain all provenance comments and floors.
+Combined measures 17,876,808 B, SHA256
+`12320b94f86e8c4561366588bc255edc0d1b438fdcd3c8989d9e22714cc44cee`,
+leaving 211,128 B at its unchanged 18,087,936 B ceiling.
+This budget-only composition changes no runtime inputs; required new-head CI
+and combined consumers still have to run and succeed.
+
+#3640's vetoable M48 reserve refresh, after merging master 04a2f14e5b at
+`d123c9b38c4559ab38b5df8142981c7fdcc008b5`, uses CI44389135230. Its built
+source `42e792c614d768737151090feb06c4da4558855a` (GitHub's merge ref) has the
+identical tree. The 27-family census found shortfalls only for Bitunix
+(10,219 B), KuCoin Spot (10,212 B) and OKX (9,982 B); each moves to measured
++10 KiB rounded up. The M46 census becomes a floor and the M48 census pins the
+exact caps. Combined measures 18,087,936 − 206,989 B and stays at its ceiling.
+
+Managed HTTP preparation observations change shipped host JS, so they move the
+beta input fingerprint and require a new release/pin. They do not change Rust
+sources or waive fresh combined-consumer/size evidence or any retained floor.

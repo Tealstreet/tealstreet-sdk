@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { HyperliquidPrivateWebSocket } from './reference/hyperliquid/hyperliquid.ws-private';
 import { PositionMode, PositionSide } from '../types';
+import { nativeMarket } from './cutover/nativeMarket';
+import { nativePosition } from './cutover/nativePosition';
+import { applyReferenceFixture, referenceStore } from './cutover/referenceFixture';
+import { HyperliquidPrivateWebSocket } from './reference/hyperliquid/hyperliquid.ws-private';
 
 const hasSeenFillMock = vi.fn();
 const markFillSeenMock = vi.fn();
@@ -12,32 +15,23 @@ vi.mock('./reference/hyperliquid/hyperliquid.cross-cache', () => ({
 }));
 
 const createParentMock = () => {
-  const market = {
-    id: 'BTC',
-    symbol: 'BTC-PERP',
-    info: {},
-  };
+  const market = nativeMarket({ id: 'BTC', symbol: 'BTC-PERP', info: {} });
 
-  const store = {
-    marketsById: { BTC: market },
-    marketsBySymbol: { 'BTC-PERP': market },
-    positions: [],
-    update: vi.fn(),
-    addOrUpdatePosition: vi.fn(),
-    addOrUpdatePositions: vi.fn(),
-    addOrUpdatePositionsFull: vi.fn(),
-  };
+  const store = referenceStore({ markets: [market] });
+  const positionChanges = vi.fn<(rows: typeof store.positions) => void>();
+  store.subscribe('positions', (rows) => positionChanges(rows));
 
   const parent = {
     name: 'hyperliquid',
     isDisposed: false,
     options: { testnet: false } as Record<string, unknown>,
     store,
+    positionChanges,
     hip3DexNames: [],
     marketsLowerCaseMap: new Map<string, typeof market>(),
     emitter: { emit: vi.fn() },
     log: vi.fn(),
-    _getSymbolConfigurationFromAssetData: vi.fn(() => ({})),
+    _getSymbolConfigurationFromAssetData: vi.fn(() => ({ leverage: 10, positionMode: PositionMode.OneWay })),
     getFakePositions: vi.fn(() => []),
     scheduleHip3PositionRefresh: vi.fn(),
     syncBalanceFromLivePositions: vi.fn(),
@@ -213,7 +207,7 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
       },
     });
 
-    expect(parent.store.addOrUpdatePositions).toHaveBeenCalledWith([
+    expect(parent.store.positions).toEqual([
       expect.objectContaining({
         symbol: 'BTC-PERP',
         contracts: 0.25,
@@ -246,19 +240,19 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
       symbol: 'VNTLS|GAS-PERP',
       info: { hip3Dex: 'vntls' },
     };
-    (parent.store as any).marketsById['vntls:GAS'] = hip3Market;
-    (parent.store as any).marketsBySymbol['VNTLS|GAS-PERP'] = hip3Market;
-    (parent.store as any).positions = [
-      { id: 'BTC-PERP', symbol: 'BTC-PERP', contracts: 1 },
-      { id: 'VNTLS|GAS-PERP', symbol: 'VNTLS|GAS-PERP', contracts: 2 },
-    ];
+    applyReferenceFixture(parent.store, { markets: [...parent.store.markets, nativeMarket(hip3Market)] });
+    applyReferenceFixture(parent.store, {
+      positions: [
+        nativePosition({ id: 'BTC-PERP', symbol: 'BTC-PERP', contracts: 1 }),
+        nativePosition({ id: 'VNTLS|GAS-PERP', symbol: 'VNTLS|GAS-PERP', contracts: 2 }),
+      ],
+    });
+    parent.positionChanges.mockClear();
     const ws = new HyperliquidPrivateWebSocket(parent as any);
 
     ws.applyCoreClearinghouseState({ assetPositions: [] }, true);
 
-    expect(parent.store.addOrUpdatePositionsFull).toHaveBeenCalledWith([
-      expect.objectContaining({ id: 'VNTLS|GAS-PERP', contracts: 2 }),
-    ]);
+    expect(parent.store.positions).toEqual([expect.objectContaining({ id: 'VNTLS|GAS-PERP', contracts: 2 })]);
   });
 
   it('does not let an older REST snapshot overwrite a newer core WebSocket state', () => {
@@ -266,11 +260,11 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
     const ws = new HyperliquidPrivateWebSocket(parent as any);
 
     ws.applyCoreClearinghouseState({ ...createSampleClearinghouseState(), time: 200 });
-    (parent.store.addOrUpdatePositionsFull as any).mockClear();
+    parent.positionChanges.mockClear();
 
     ws.applyCoreClearinghouseState({ assetPositions: [], time: 100 }, true);
 
-    expect(parent.store.addOrUpdatePositionsFull).not.toHaveBeenCalled();
+    expect(parent.positionChanges).not.toHaveBeenCalled();
   });
 
   it('routes userEvents fill payloads through fill handling', () => {
@@ -308,8 +302,8 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
       user: '0xuser',
     });
 
-    expect(parent.store.addOrUpdatePosition).toHaveBeenCalledTimes(1);
-    expect(parent.store.addOrUpdatePosition).toHaveBeenCalledWith(
+    expect(parent.positionChanges).toHaveBeenCalledTimes(1);
+    expect(parent.store.positions[0]).toEqual(
       expect.objectContaining({
         symbol: 'BTC-PERP',
         contracts: 0.5,
@@ -373,8 +367,8 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
 
     ws.applyCoreClearinghouseState(createSampleClearinghouseState());
 
-    expect(parent.store.addOrUpdatePositions).toHaveBeenCalledTimes(1);
-    const firstUpdate = (parent.store.addOrUpdatePositions as any).mock.calls[0][0];
+    expect(parent.positionChanges).toHaveBeenCalledTimes(1);
+    const firstUpdate = parent.positionChanges.mock.calls[0][0];
 
     expect(firstUpdate).toHaveLength(1);
     expect(firstUpdate[0]).toEqual(
@@ -413,8 +407,8 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
 
     ws.applyCoreClearinghouseState(createSampleClearinghouseState());
 
-    expect(parent.store.addOrUpdatePositions).toHaveBeenCalledTimes(1);
-    const firstUpdate = (parent.store.addOrUpdatePositions as any).mock.calls[0][0];
+    expect(parent.positionChanges).toHaveBeenCalledTimes(3);
+    const firstUpdate = parent.store.positions;
 
     expect(firstUpdate).toHaveLength(1);
     expect(firstUpdate[0]).toEqual(
@@ -434,8 +428,7 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
       symbol: 'VNTLS|GAS-PERP',
       info: { hip3Dex: 'vntls' },
     };
-    (parent.store as any).marketsById['vntls:GAS'] = hip3Market;
-    (parent.store as any).marketsBySymbol['VNTLS|GAS-PERP'] = hip3Market;
+    applyReferenceFixture(parent.store, { markets: [...parent.store.markets, nativeMarket(hip3Market)] });
     const ws = new HyperliquidPrivateWebSocket(parent as any);
 
     ws.handleHip3ClearinghouseState('vntls', {
@@ -454,8 +447,8 @@ describe('HyperliquidPrivateWebSocket realized PnL behavior', () => {
       ],
     } as any);
 
-    expect(parent.store.addOrUpdatePositionsFull).toHaveBeenCalledTimes(1);
-    const positions = (parent.store.addOrUpdatePositionsFull as any).mock.calls[0][0];
+    expect(parent.positionChanges).toHaveBeenCalledTimes(1);
+    const positions = parent.positionChanges.mock.calls[0][0];
     expect(positions).toHaveLength(1);
     expect(positions[0]).toEqual(
       expect.objectContaining({

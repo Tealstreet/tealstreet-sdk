@@ -4,12 +4,12 @@ import { describe, expect, it } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { BASE_URLS, BASE_WS_URLS } from '../../exchanges/okx/okx.types';
-import { OKXDemoExchange } from '../reference/okx/okxdemo.exchange';
-import { OKXEUDemoExchange } from '../reference/okx/okxeudemo.exchange';
 import { exchangeRegistry } from '../../exchanges/registry';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { resolveExchangeRouting } from '../../transport/tealstreet/routing/resolveExchangeRouting';
+import { OKXDemoExchange } from '../reference/okx/okxdemo.exchange';
+import { OKXEUDemoExchange } from '../reference/okx/okxeudemo.exchange';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -41,7 +41,7 @@ describe('OKX Demo transport and metadata', () => {
   });
 
   it('uses the OKX runtime with demo mode forced on', () => {
-    const exchange = new OKXDemoExchange('okxdemo', options, new DefaultStore());
+    const exchange = new OKXDemoExchange('okxdemo', options, new FrameStore());
 
     expect(exchange.isDemo).toBe(true);
     expect(exchange.options.testnet).toBe(true);
@@ -58,7 +58,7 @@ describe('OKX Demo transport and metadata', () => {
   });
 
   it('uses the OKX EU runtime with EEA demo mode forced on', () => {
-    const exchange = new OKXEUDemoExchange('okxeudemo', options, new DefaultStore());
+    const exchange = new OKXEUDemoExchange('okxeudemo', options, new FrameStore());
 
     expect(exchange.isDemo).toBe(true);
     expect(exchange.options.testnet).toBe(true);

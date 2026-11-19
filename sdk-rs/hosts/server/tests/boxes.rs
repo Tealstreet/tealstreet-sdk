@@ -191,7 +191,7 @@ async fn joined_page(on: &TestBox, user: &str) -> Page {
 async fn chasing_page(on: &TestBox, user: &str) -> (Page, Value) {
     let mut page = joined_page(on, user).await;
     page.op("acct", "chaser:start", web_chase()).await;
-    let store = page.until("store", |d| chases(d) == 1).await;
+    let store = page.until("native-frame", |d| chases(d) == 1).await;
     let id = store["data"]["activeChasers"][0]["id"].clone();
     (page, id)
 }
@@ -304,7 +304,7 @@ async fn a_box_killed_mid_chase_leaves_nothing_and_the_other_box_reports_no_chas
 
     // The page's fresh init on B (no resume: B never issued A's id).
     let again = joined_page(&b, "u1").await;
-    let rows = again.ops("store");
+    let rows = again.ops("native-frame");
     let rows: Vec<&&Value> = rows
         .iter()
         .filter(|d| d["data"].get("activeChasers").is_some())

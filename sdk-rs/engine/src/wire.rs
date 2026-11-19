@@ -60,6 +60,10 @@ pub mod section {
     pub const TICKER_OBSERVATIONS: u16 = 24;
     /// Per-subscription group, topic ref, subscribed/active flags and monotonic message age.
     pub const MESSAGE_HANDLER_STATS: u16 = 25;
+    /// Shared public-provider diagnostics, independently replaced from private groups.
+    pub const PUBLIC_MESSAGE_HANDLER_STATS: u16 = 34;
+    /// HTTP outcomes [ok, rateLimit, auth, network, other], emitted with STATUS.
+    pub const REQUEST_STATS: u16 = 35;
 }
 
 pub mod status_flag {
@@ -243,6 +247,15 @@ impl<'a> FrameWriter<'a> {
     pub fn finish(mut self) -> Vec<u8> {
         if !self.strings.is_empty() {
             let strings = std::mem::take(&mut self.strings);
+            // Interning is complete. Release its temporary index before growing
+            // the output, and include final alignment in the exact reservation.
+            self.string_index = HashMap::new();
+            let tail = 8
+                + 4
+                + (strings.len() + 1) * 4
+                + strings.iter().map(|text| text.len()).sum::<usize>();
+            let padding = (8 - (self.buf.len() + tail) % 8) % 8;
+            self.buf.reserve_exact(tail + padding);
             self.begin(section::STRINGS);
             self.u32(strings.len() as u32);
             let mut offset = 0u32;
@@ -397,6 +410,42 @@ mod tests {
     }
 
     #[test]
+    fn large_book_frame_reserves_level_columns_without_geometric_growth() {
+        let mut book = crate::book::Book::default();
+        book.load_sorted(
+            crate::book::BookSide::Bids,
+            (0..10_000).map(|i| ((10_000 - i) as f64, 1.)),
+        );
+        book.load_sorted(
+            crate::book::BookSide::Asks,
+            (0..10_000).map(|i| ((10_001 + i) as f64, 2.)),
+        );
+        let mut writer = FrameWriter::new(Vec::new(), 0.);
+        crate::book_output::write(&book, 0, &mut writer);
+        let frame = writer.finish();
+        assert_eq!(frame.len(), 16 + 24 + 20_000 * 24);
+        assert_eq!(
+            frame.capacity(),
+            frame.len(),
+            "book columns must not double the output buffer"
+        );
+        assert_eq!(sections(&frame).count(), 1);
+    }
+
+    #[test]
+    fn string_tail_reserves_its_final_padding_without_doubling_the_frame() {
+        let text = "x".repeat(256_000);
+        let mut writer = FrameWriter::new(Vec::new(), 0.);
+        writer.string(&text);
+        let frame = writer.finish();
+        assert_eq!(
+            frame.capacity(),
+            frame.len(),
+            "the final four padding bytes must not double a large frame"
+        );
+        assert_eq!(sections(&frame).count(), 1);
+    }
+    #[test]
     fn interning_resolves_hash_collisions_by_full_string_equality() {
         let mut w = FrameWriter::new(Vec::new(), 0.);
         assert_eq!(w.intern("one", 7), 0);
@@ -452,6 +501,32 @@ mod tests {
                     last: index as f64 + 1.,
                     mid_price: Some(index as f64 + 0.5),
                     ..Ticker::default()
+                })
+                .collect(),
+        );
+        // Product/region tables travel with the same native catalogue.
+        store.set_instrument_classifications(
+            (0..128)
+                .map(|market| crate::model::InstrumentClassification {
+                    market,
+                    symbol_type: Some("PERP".into()),
+                    market_region: Some("EEA".into()),
+                    underlying_ticker: Some(format!("asset-{market}")),
+                })
+                .collect(),
+        );
+        store.set_derivative_products(
+            (0..128)
+                .map(|market| crate::model::DerivativeProduct {
+                    market,
+                    kind: crate::model::ProductKind::Future,
+                    underlying: format!("asset-{market}"),
+                    expiry: Some(1_000_000.),
+                    strike: None,
+                    settlement_asset: Some("USDC".into()),
+                    premium_asset: None,
+                    style: None,
+                    settlement: None,
                 })
                 .collect(),
         );
@@ -569,12 +644,14 @@ mod tests {
             at += 8 + length;
         }
         assert_eq!(at, frame.len());
+        // Rule 5: 7b723d8837 adds native requestStats section 35 to snapshots.
         assert_eq!(
             kinds,
             [
                 section::MARKETS,
                 section::TICKERS,
                 section::STATUS,
+                section::REQUEST_STATS,
                 section::CANDLES,
                 section::STRINGS
             ]

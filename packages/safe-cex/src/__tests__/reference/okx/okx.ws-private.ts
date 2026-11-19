@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { OKXExchange } from './okx.exchange';
 
 import createHmac from 'create-hmac';
@@ -5,14 +6,15 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { BASE_WS_URLS } from '../../../exchanges/okx/okx.types';
 import { resolveTransportRouting } from '../../../transport/registry';
 import { isWsRelayEnabled } from '../../../transport/tealstreet/wsRelay';
 import { OrderStatus } from '../../../types';
 import { roundUSD } from '../../../utils/roundUSD';
 import { virtualClock } from '../../../utils/virtualClock';
 import { WsDirectFallback } from '../../../utils/wsDirectFallback';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { BASE_WS_URLS } from '../../../exchanges/okx/okx.types';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
   private recentFillKeys = new Map<string, number>();
@@ -231,11 +233,39 @@ export class OKXPrivateWebsocket extends BaseWebSocket<OKXExchange> {
       if (orders.length) {
         if (o.state === 'filled' || o.state === 'canceled' || o.state === 'mmp_canceled') {
           // OKX's filled and (mmp_)canceled are final; a snapshot read before this must not reopen it.
-          this.store.markOrdersTerminal(orders, o.state === 'filled' ? OrderStatus.Closed : OrderStatus.Canceled);
+          (() => {
+            const targets: Array<Pick<StoreData['orders'][number], 'id'>> = orders;
+            const status: StoreData['orders'][number]['status'] =
+              o.state === 'filled' ? OrderStatus.Closed : OrderStatus.Canceled;
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
 
         if (o.state === 'live' || o.state === 'partially_filled') {
-          this.store.addOrUpdateOrders(orders);
+          (() => {
+            const incoming: StoreData['orders'] = orders;
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
 
         if (o.state === 'filled' || o.state === 'partially_filled') {
@@ -404,10 +434,29 @@ WS MESSAGE
       //     : [[{ id: createPositionId(p.symbol, p.side) }, p]],
       // );
 
-      this.store.addOrUpdatePositions(positions);
-      this.store.update({
-        balance: { ...this.store.balance, used, upnl },
-      });
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
+      applyReferenceFixture(
+        this.store,
+        {
+          balance: { ...this.store.balance, used, upnl },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     }
   };
 
