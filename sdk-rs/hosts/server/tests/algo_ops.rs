@@ -637,7 +637,7 @@ async fn a_same_user_resume_keeps_a_running_twap() {
                 !algos
                     .seen
                     .iter()
-                    .any(|event| event.to_string().contains("cancelled-for-owner-change")),
+                    .any(|event| event.to_string().contains("account connection changed")),
                 "a same-user resume cancelled the TWAP"
             );
         })
@@ -727,12 +727,9 @@ async fn an_exec_sleep_cannot_start_a_twap_after_its_binding_is_retired() {
                 let result = first(&result["data"]);
                 assert_eq!(result["success"], !rebind, "{result}");
                 if rebind {
-                    assert!(
-                        result["error"]
-                            .as_str()
-                            .unwrap()
-                            .contains("cancelled-for-owner-change")
-                    );
+                    assert!(result["error"].as_str().unwrap().contains(
+                        "The TWAP couldn’t start because the account connection changed"
+                    ));
                     assert!(algos.commands.lock().unwrap().is_empty());
                 } else {
                     assert!(algos.seen.iter().any(|event| {
@@ -1142,7 +1139,10 @@ async fn router_fence_parks_a_pending_slice_and_chase_without_any_cancel_or_repl
                 .await
                 .unwrap()
                 .unwrap();
-            assert!(kept.summary().contains("Resting orders were kept"));
+            assert!(
+                kept.summary()
+                    .contains("without cancelling existing orders")
+            );
             let mut frames = Vec::new();
             tokio::time::timeout(Duration::from_secs(2), async {
                 while let Some(text) = algos.out.recv().await {

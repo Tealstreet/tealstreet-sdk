@@ -72,10 +72,8 @@ fn start_owner_change_error(dispatched: bool) -> VenueError {
         VenueError::new("The account connection changed while the TWAP was starting. Check your open orders before restarting it.")
             .outcome(Outcome::Unknown)
     } else {
-        VenueError::new(
-            "TWAP start cancelled-for-owner-change: authenticated connection binding changed",
-        )
-        .outcome(Outcome::NotSent)
+        VenueError::new("The TWAP couldn’t start because the account connection changed")
+            .outcome(Outcome::NotSent)
     }
 }
 
@@ -314,10 +312,7 @@ impl Inner {
             return false;
         }
         if had_rows {
-            report(
-                cx,
-                "TWAPs stopped: authenticated connection binding changed",
-            );
+            report(cx, "TWAPs stopped because the account connection changed");
         }
         cx.port.emit("twap:stateUpdate", "{}".into());
         inner.rescheduled.notify_one();
