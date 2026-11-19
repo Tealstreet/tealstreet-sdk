@@ -1358,6 +1358,42 @@ async fn full_write_execution_constraints_are_never_silently_dropped_or_partiall
     }).await;
 }
 
+/// AGT-42: a Hyperliquid caller ID reaches the native order as a cloid the
+/// caller can recompute, the same one every time; other venues keep it verbatim.
+#[tokio::test]
+async fn hyperliquid_place_and_close_send_the_caller_derived_cloid() {
+    tokio::task::LocalSet::new().run_until(async {
+        let cloid = "0x0123456789abcdef0123456789abcdef";
+        for (venue, caller, expected) in [
+            ("hyperliquid", "ts-caller-1", crate::order_contract::hyperliquid_cloid("ts-caller-1")),
+            ("hyperliquidspot", "ts-caller-1", crate::order_contract::hyperliquid_cloid("ts-caller-1")),
+            ("hyperliquid", cloid, cloid.to_owned()),
+            ("bybit", "ts-caller-1", "ts-caller-1".to_owned()),
+        ] {
+            let registry = crate::accounts::tests::registry(); let tape = Tape::default();
+            let account = delegated_account(&registry, "A", venue, tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let order = json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":50000,"clientOrderId":caller});
+            let close = json!({"symbol":"BTCUSDT","type":"market","side":"sell","amount":0.001,"reduceOnly":true,"clientOrderId":caller});
+            for payload in [
+                json!({"kind":"place","orders":[order.clone()]}),
+                json!({"kind":"place","orders":[order]}),
+                json!({"kind":"close","order":close}),
+            ] {
+                let id = action(&mut session, payload, 1, false).await;
+                let result = action_frame(&mut sent, "order.actionOutcome").await;
+                assert_eq!(result["d"]["intentId"], id);
+                assert_eq!(result["d"]["outcome"], "applied", "{venue}: {result}");
+                // The router's closed result shape is unchanged: no caller ID is added.
+                assert!(result["d"]["result"].get("clientOrderId").is_none());
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+            assert_eq!(*tape.client_order_ids.lock().unwrap(), vec![expected; 3], "{venue} {caller}");
+            session.close(); registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
+
 #[tokio::test]
 async fn full_write_keeps_local_unit_reply_semantics_after_native_completion() {
     let (out, mut sent, _) = Out::channel(8);

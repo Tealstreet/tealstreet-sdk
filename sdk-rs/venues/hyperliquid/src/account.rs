@@ -100,6 +100,8 @@ pub enum Request {
         id: String,
         amend: crate::trading::AmendRead,
         symbol: String,
+        /// When it was queued: a mark the stream observed since then is newer.
+        issued_at: f64,
     },
 }
 impl Request {
@@ -1041,6 +1043,7 @@ impl Hyperliquid {
                 id: id.to_owned(),
                 amend,
                 symbol: symbol.to_owned(),
+                issued_at: cx.now,
             },
         );
     }
@@ -1549,7 +1552,12 @@ impl Hyperliquid {
                     Err(error) => self.amend_source_read(cx, &id, amend, Err(error)),
                 }
             }
-            Request::AmendMark { id, amend, symbol } => {
+            Request::AmendMark {
+                id,
+                amend,
+                symbol,
+                issued_at,
+            } => {
                 if !self.amend_read_pending(cx, &id, amend) {
                     return;
                 }
@@ -1564,7 +1572,7 @@ impl Hyperliquid {
                 let read = serde_json::from_str::<Mark>(raw)
                     .ok()
                     .filter(|row| self.symbol(&row.coin) == Some(symbol.as_str()))
-                    .map(|row| row.mark_px)
+                    .map(|row| (row.mark_px, issued_at))
                     .ok_or_else(|| "the mark read was unreadable".to_owned());
                 self.amend_mark_answered(cx, &id, amend, &symbol, read);
             }
@@ -1975,7 +1983,9 @@ impl Hyperliquid {
                 }
                 self.amend_source_read(cx, &id, amend, Err(error.to_owned()));
             }
-            Request::AmendMark { id, amend, symbol } => {
+            Request::AmendMark {
+                id, amend, symbol, ..
+            } => {
                 if !self.amend_read_current(&id, amend) {
                     return;
                 }
