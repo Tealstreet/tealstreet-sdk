@@ -351,8 +351,11 @@ Hyperliquid/Spot client order IDs are `0x` plus its 32 lowercase hex digits;
 Bitget, OKX, BloFin and Binance PM use the bare 32 hex digits. Bybit and other
 compatible text adapters retain the UUID. Lighter/Robinhood, Binance inverse,
 AsterDEX, Kraken and MEXC receive no caller venue ID, per the spec's supported-ID
-condition; receipts keep `clientOrderId: null`. The router UUID/fingerprint ledger
-remains primary dedupe in every case. Numeric adapters retain their current
+condition; receipts keep `clientOrderId: null`. WOO also receives none: until
+2026-11-19 it got the UUID, which WOO refuses, so every plain market submit failed
+before the venue. A numeric WOO ID needs NX router and SDK outbox outcome checks
+to accept it before the box emits one. The router UUID/fingerprint ledger
+remains primary dedupe in every case. Backpack and GRVT retain their current
 refusal pending their separate bounded-hash mapping. Bybit protection also omits
 its unsupported caller ID and reports null. HyroTrader retains its native
 caller-ID refusal. Other modes keep `callMethod` unchanged. Pending joins
