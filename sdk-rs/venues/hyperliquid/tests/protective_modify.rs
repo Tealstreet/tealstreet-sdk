@@ -618,8 +618,11 @@ fn held_restore_rechecks_position_newer_protection_and_fresh_original_trigger() 
     use safe_cex_engine::request_context::{HttpAction, Prepared};
     // "stale" left this refusal set (AGT-47 follow-up): a put-back whose mark went
     // stale is now released, because being protected beats the freshness gate. See
-    // `stale_held_restore_is_released_with_an_unverified_outcome` in protective_mark_freshness.rs.
-    for case in ["closed", "newer", "crossed", "filled"] {
+    // `stale_held_restore_is_released` in protective_mark_freshness.rs.
+    // "crossed" left it too (AGT-47, Sam 2026-11-20): a put-back through the mark is
+    // placed as-is and the venue fires it. See
+    // `restore_through_the_mark_is_placed_as_is_for_tp_and_sl_long_and_short` below.
+    for case in ["closed", "newer", "filled"] {
         let row = order("Take Profit Market", "120", "0");
         let (mut e, s) = setup(&row);
         let replacement = fallback_place(&mut e, &row);
@@ -681,7 +684,6 @@ fn held_restore_rechecks_position_newer_protection_and_fresh_original_trigger() 
                         .to_string(),
                 );
             }
-            "crossed" => mark(&mut e, s, at, 125.),
             "filled" => message(
                 &mut e,
                 s,
@@ -693,7 +695,7 @@ fn held_restore_rechecks_position_newer_protection_and_fresh_original_trigger() 
         }
         assert!(
             e.claim_http(at, permit).is_err(),
-            "{case}: obsolete or immediately firing restore must not be released"
+            "{case}: an obsolete restore must not be released"
         );
         let a = prepared_now(&mut e);
         assert!(
@@ -704,6 +706,73 @@ fn held_restore_rechecks_position_newer_protection_and_fresh_original_trigger() 
             a.iter()
                 .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 90, .. }))),
             "{case}: visible terminal"
+        );
+    }
+}
+
+/// The original protection goes back unchanged even when the mark has already
+/// crossed its trigger: the venue fires it, never a market close (AGT-47, Sam 2026-11-20).
+#[test]
+fn restore_through_the_mark_is_placed_as_is_for_tp_and_sl_long_and_short() {
+    use safe_cex_engine::error::Protection;
+    const SHORT: &str = r#"{"channel":"clearinghouseState","data":{"user":"0x14791697260e4c9a71f18484c9f997b308e59325","dex":"","clearinghouseState":{"assetPositions":[{"position":{"coin":"BTC","szi":"-2","entryPx":"100","positionValue":"200","unrealizedPnl":"0","liquidationPx":"150","marginUsed":"20","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"1000","totalMarginUsed":"20"},"time":1400}}}"#;
+    // (position, kind, original trigger, tpsl, a valid edit target, mark through the trigger)
+    for (short, kind, trigger, tag, target, through) in [
+        (false, "Take Profit Market", "120", "tp", 125., 121.),
+        (false, "Stop Market", "80", "sl", 75., 79.),
+        (true, "Take Profit Market", "80", "tp", 75., 79.),
+        (true, "Stop Market", "120", "sl", 125., 121.),
+    ] {
+        let case = format!("{} {tag}", if short { "short" } else { "long" });
+        let mut row = order(kind, trigger, "0");
+        if short {
+            row["side"] = json!("B");
+            row["limitPx"] = json!("130");
+        }
+        let (mut e, s) = ready("disabled");
+        if short {
+            message(&mut e, s, 1400., SHORT);
+        }
+        let frame =
+            json!({"channel":"orderUpdates","data":[{"order":row,"status":"open"}]}).to_string();
+        message(&mut e, s, 1500., &frame);
+        prepared_now(&mut e);
+        let read = amend(&mut e, target, None);
+        let replacement = replace_after_read(&mut e, &read, &row);
+        reply(
+            &mut e,
+            &replacement,
+            200,
+            r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order has invalid price."}]}}}"#,
+        );
+        let a = prepared_now(&mut e);
+        mark(&mut e, s, 2_400., through);
+        let a = advance_packet_timers(&mut e, a, 2_668.);
+        let restore = write(&a).clone();
+        let wire = &action(&restore)["orders"][0];
+        assert_eq!(wire["t"]["trigger"]["triggerPx"], trigger, "{case}");
+        assert_eq!(wire["t"]["trigger"]["tpsl"], tag, "{case}");
+        assert_eq!(wire["b"], short, "{case}");
+        reply(
+            &mut e,
+            &restore,
+            200,
+            r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
+        );
+        let a = prepared_now(&mut e);
+        let errors: Vec<_> = a
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 90, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "{case}");
+        assert_eq!(errors[0].protection, Some(Protection::Restored), "{case}");
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange"))),
+            "{case}: no market close follows the put-back"
         );
     }
 }
