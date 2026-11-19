@@ -497,10 +497,20 @@ Retained DELEGATED accounts share the canonical protected owner through the sole
 `AccountSigner`; escaped engine handles have no independent erasure authority.
 The 48-hour clock starts only after the last admitted holder disconnects and is
 cancelled only by admitted reconnect. Removal/off/key removal erase immediately.
-For a selected proxy transport, token expiry has an explicitly interim terminal
-stop/erase with recorded reason `proxy-token-expired`; no issuer renewal, direct
-fallback or authority extension is implied. Sam still owns the long-term policy.
+For a selected proxy transport, token expiry is a terminal stop/erase with
+recorded reason `proxy-token-expired`; there is no issuer renewal, direct
+fallback or authority extension (Sam, 2026-11-20, AGT-37: permanent contract).
 See `DELEGATED_RETENTION.md` for the retention and restart contracts.
+
+## Host notifications (AGT-37)
+
+`src/host_notify.rs` queues DELEGATED notifications for the gateway when
+`TEALSTREET_HOST_NOTIFY_URL` is set; unset means off, including the warning
+timer. Retention arms `delegated.shutdownWarning` in its own task and emits
+`delegated.shutdown` on expiry and drain. Build notifications only through
+`HostNotification::build` and the typed `Fields` setters: never add a free-text
+field, and never log the token. Contract, env vars and delivery semantics:
+`DELEGATED_RETENTION.md` "Host notification lane".
 
 
 ## DELEGATED intent clock skew
