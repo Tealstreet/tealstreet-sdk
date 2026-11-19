@@ -51,9 +51,7 @@ async fn settings_conflict(parked: bool, delegated: bool) {
     } else {
         init(Some("web"))
     };
-    request.tuning = Some(safe_cex_venues::DisplayTuning {
-        calculate_upnl_from_realtime_last_price: true,
-    });
+    request.enable_spot_markets = Some(true);
     web.init(request).await.unwrap();
     let completed = proof(&mut web, &mut sent, &mut done).await;
     assert!(
@@ -76,9 +74,14 @@ async fn settings_conflict(parked: bool, delegated: bool) {
     );
     assert_eq!(
         refusal["d"]["data"][1]["differing_fields"],
-        json!(["tuning"])
+        json!(["enableSpotMarkets"])
     );
-    assert!(refusal["d"]["data"][0].as_str().unwrap().contains("tuning"));
+    assert!(
+        refusal["d"]["data"][0]
+            .as_str()
+            .unwrap()
+            .contains("enableSpotMarkets")
+    );
     assert!(
         !refusal["d"]["data"][0]
             .as_str()
@@ -95,7 +98,7 @@ async fn settings_conflict(parked: bool, delegated: bool) {
         })
         .expect("classified admission audit");
     assert_eq!(audit["kind"], "settings-conflict");
-    assert_eq!(audit["differing_fields"], json!(["tuning"]));
+    assert_eq!(audit["differing_fields"], json!(["enableSpotMarkets"]));
     assert!(!audit.to_string().contains(SECRET));
     assert!(!audit.to_string().contains(KEY));
     assert!(!web.joined.contains_key("acct"));
@@ -164,4 +167,79 @@ async fn first_connect_public_before_keyed_and_connection_cadence_share_identity
     resident.session.take().unwrap().close();
     f.registry
         .dispose(&original, crate::accounts::Disposal::PageDisposed);
+}
+
+#[tokio::test]
+async fn first_connect_equivalent_bybit_tuning_admits_live_and_parked_holders() {
+    for parked in [false, true] {
+        for explicit in [false, true] {
+            let f = fixture_with_auth(true).await;
+            let mut resident = Resident::start(&f, &mut Device::default()).await;
+            let original = resident.account.clone();
+            if parked {
+                let mut old = resident.session.take().unwrap();
+                old.identity.resumable = true;
+                old.close();
+                assert!(original.has_parked_holders());
+            }
+            let (mut web, mut sent) = candidate(&f, "alice");
+            let mut done = web.take_verified();
+            let mut request = init(Some("web-equivalent"));
+            request.tuning = Some(safe_cex_venues::DisplayTuning {
+                calculate_upnl_from_realtime_last_price: explicit,
+            });
+            assert_eq!(
+                safe_cex_store_frames::Inputs::new("", "bybit", false).calculate_upnl_from_last,
+                safe_cex_store_frames::Inputs::new("", "bybit", explicit).calculate_upnl_from_last,
+                "the actual native projection proves behavior equality"
+            );
+            web.init(request).await.unwrap();
+            let completed = proof(&mut web, &mut sent, &mut done).await;
+            assert!(completed.probe.as_ref().unwrap().permit.is_ok());
+            web.verification_completed(completed).await.unwrap();
+            let replies: Vec<_> = std::iter::from_fn(|| sent.try_recv().ok()).collect();
+            assert!(
+                web.joined.contains_key("acct"),
+                "equivalent tuning must admit: parked={parked}, explicit={explicit}, replies={replies:?}"
+            );
+            assert!(Arc::ptr_eq(&web.joined["acct"].account, &original));
+            assert!(original.handle.disposal_cause().is_none());
+            assert_eq!(f.private_writes.load(Ordering::SeqCst), 0);
+            web.close();
+            if let Some(old) = resident.session.take() {
+                old.close();
+            }
+            f.registry
+                .dispose(&original, crate::accounts::Disposal::PageDisposed);
+        }
+    }
+}
+
+#[test]
+fn first_connect_fingerprint_tracks_each_native_tuning_effect() {
+    for venue in ["bybit", "bingx", "okx", "hyperliquid", "binanceoptions"] {
+        let base = InitPayload {
+            account_name: "acct".into(),
+            exchange_name: venue.into(),
+            key: "synthetic-key".into(),
+            ..Default::default()
+        };
+        for explicit in [false, true] {
+            let changed = InitPayload {
+                tuning: Some(safe_cex_venues::DisplayTuning {
+                    calculate_upnl_from_realtime_last_price: explicit,
+                }),
+                ..base.clone()
+            };
+            let before =
+                safe_cex_store_frames::Inputs::new("", venue, false).calculate_upnl_from_last;
+            let after =
+                safe_cex_store_frames::Inputs::new("", venue, explicit).calculate_upnl_from_last;
+            assert_eq!(
+                base.fingerprint() == changed.fingerprint(),
+                before == after,
+                "{venue}/{explicit}: compare the native effect, not field presence"
+            );
+        }
+    }
 }
