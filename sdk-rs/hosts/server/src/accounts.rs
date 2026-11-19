@@ -647,6 +647,8 @@ struct Parked {
     alias_until: Option<u64>,
     /// The one socket whose resume consumed this id; only it may claim DELEGATED labels.
     resumed_by: Option<u64>,
+    /// In-band proof issued to the parking socket; never part of a URL.
+    proof: Option<String>,
 }
 
 type AccountEntries = HashMap<(String, String), Arc<Account>>;
@@ -2853,6 +2855,7 @@ impl Registry {
                 accounts: parked,
                 alias_until: None,
                 resumed_by: None,
+                proof: None,
             },
         );
         let registry = self.clone();
@@ -3008,6 +3011,13 @@ impl Registry {
 }
 
 impl Registry {
+    /// Binds the parking socket's in-band proof; called before `session_closed`.
+    pub fn bind_resume_proof(&self, resume_id: &str, proof: &str) {
+        if let Some(entry) = self.parked.lock().unwrap().get_mut(resume_id) {
+            entry.proof = Some(proof.to_owned());
+        }
+    }
+
     /// DELEGATED labels still parked under `resume_id` that `socket` may claim.
     pub fn delegated_resumable(&self, resume_id: &str, user: &str, socket: u64) -> Vec<String> {
         let parked = self.parked.lock().unwrap();
@@ -3047,9 +3057,11 @@ impl Registry {
         let fingerprint = init.fingerprint();
         let account = {
             let mut parked = self.parked.lock().unwrap();
-            let entry = parked
-                .get_mut(resume_id)
-                .filter(|entry| entry.user == user && entry.resumed_by == Some(socket))?;
+            let entry = parked.get_mut(resume_id).filter(|entry| {
+                entry.user == user
+                    && entry.resumed_by == Some(socket)
+                    && proof_matches(entry.proof.as_deref(), init.resume_proof.as_deref())
+            })?;
             let index = entry.accounts.iter().position(|(account, park_holder)| {
                 account.delegated().is_some()
                     && account.venue == init.exchange_name
@@ -3085,6 +3097,19 @@ impl Registry {
             ))
         .then_some(account)
     }
+}
+
+/// Constant-time over equal lengths; a missing proof never matches.
+fn proof_matches(expected: Option<&str>, presented: Option<&str>) -> bool {
+    let (Some(expected), Some(presented)) = (expected, presented) else {
+        return false;
+    };
+    expected.len() == presented.len()
+        && expected
+            .bytes()
+            .zip(presented.bytes())
+            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+            == 0
 }
 
 /// Engine/routing settings after possession proof; mode and passphrase are

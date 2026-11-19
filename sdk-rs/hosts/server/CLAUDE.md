@@ -508,9 +508,11 @@ See `DELEGATED_RETENTION.md` for the retention and restart contracts.
 AGT-54: a reconnect inside the 60-second resume grace re-attaches a parked
 DELEGATED label without a key offer, handover or venue probe. `open()` advertises
 claimable labels as `session.delegatedResume`; the client then sends
-`init {signingMode:"delegated", resume:true}` without `sealed`. Only the socket
-whose resume consumed the id may claim, one label at a time, and owner, label,
-venue, identity digest and `same_handover_settings` must match the parked account.
+`init {signingMode:"delegated", resume:true, resumeProof}` without `sealed`.
+`resumeProof` is the parking socket's in-band session-frame value: the resume id
+rides the URL (with the proxy token), so it alone must never authorize a signer.
+Only the socket whose resume consumed the id may claim, one label at a time, and
+owner, label, venue, identity digest and `same_handover_settings` must match.
 The claim cancels retention like any admitted hold and never revives a disposed,
 replaced or retention-expired account. Every refusal is the transient
 `resume_unavailable` init error; the client falls back to the ordinary handover.

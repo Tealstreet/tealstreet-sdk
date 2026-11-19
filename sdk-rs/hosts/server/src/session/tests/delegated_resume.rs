@@ -46,9 +46,9 @@ async fn session_frame(sent: &mut crate::out::Receiver) -> Value {
     .expect("bounded session frame")
 }
 
-fn resume_init(key: &str) -> Value {
+fn resume_init(key: &str, proof: &str) -> Value {
     json!({"t":"init","d":{"accountName":ACCOUNT,"exchangeName":"bybit","key":key,
-        "instanceId":INSTANCE,"signingMode":"delegated","resume":true}})
+        "instanceId":INSTANCE,"signingMode":"delegated","resume":true,"resumeProof":proof}})
 }
 
 async fn refused_resume(session: &mut Session, sent: &mut crate::out::Receiver, init: Value) {
@@ -150,7 +150,7 @@ async fn delegated_resume_skips_handover_and_probe_on_reconnect() {
         Arc::ptr_eq(&account, &held),
         "handover joins the same resident"
     );
-    let parked_id = second.resume_id.clone();
+    let (parked_id, proof) = (second.resume_id.clone(), second.resume_proof.clone());
     second.close();
 
     // After: the resume init claims the parked label with no handover or probe.
@@ -161,7 +161,7 @@ async fn delegated_resume_skips_handover_and_probe_on_reconnect() {
         json!([ACCOUNT])
     );
     let started = Instant::now();
-    wire(&mut third, resume_init(&key)).await;
+    wire(&mut third, resume_init(&key, &proof)).await;
     assert!(
         third.joined.contains_key(ACCOUNT) && third.pending_verifications.is_empty(),
         "joined synchronously: no key offer, sealed init or venue probe"
@@ -201,14 +201,14 @@ async fn delegated_resume_binds_socket_owner_label_venue_and_identity() {
     session_frame(&mut sent).await;
     handover(&mut first, &mut sent, &vector, &bytes).await;
     let account = registry.held(USER, ACCOUNT, first.socket).unwrap();
-    let parked_id = first.resume_id.clone();
+    let (parked_id, proof) = (first.resume_id.clone(), first.resume_proof.clone());
     first.close();
 
     // A socket that did not present the id cannot claim it.
     let (mut stranger, mut sent) = resumable(registry.clone(), USER, None);
     stranger.open().await;
     session_frame(&mut sent).await;
-    refused_resume(&mut stranger, &mut sent, resume_init(&key)).await;
+    refused_resume(&mut stranger, &mut sent, resume_init(&key, &proof)).await;
     stranger.close();
 
     // Another user presenting the id is neither offered nor admitted.
@@ -221,27 +221,37 @@ async fn delegated_resume_binds_socket_owner_label_venue_and_identity() {
             .get("delegatedResume")
             .is_none()
     );
-    refused_resume(&mut other, &mut sent, resume_init(&key)).await;
+    refused_resume(&mut other, &mut sent, resume_init(&key, &proof)).await;
     other.close();
 
     let (mut owner, mut sent) = resumable(registry.clone(), USER, Some(parked_id.clone()));
     owner.open().await;
-    assert_eq!(
-        session_frame(&mut sent).await["delegatedResume"],
-        json!([ACCOUNT])
+    let frame = session_frame(&mut sent).await;
+    assert_eq!(frame["delegatedResume"], json!([ACCOUNT]));
+    assert_eq!(frame["resumeProof"], owner.resume_proof.as_str());
+    assert_ne!(
+        frame["resumeProof"],
+        proof.as_str(),
+        "a fresh proof per socket"
     );
-    // Identity digest (key), label, venue and settings mismatches, and a sealed
-    // resume, each fall back without consuming the parked label.
-    let mut wrong_label = resume_init(&key);
+    // A missing or wrong in-band proof, identity digest (key), label, venue and
+    // settings mismatches, and a sealed resume each fall back without consuming
+    // the parked label.
+    let mut wrong_label = resume_init(&key, &proof);
     wrong_label["d"]["accountName"] = json!("synthetic-other");
-    let mut wrong_venue = resume_init(&key);
+    let mut wrong_venue = resume_init(&key, &proof);
     wrong_venue["d"]["exchangeName"] = json!("bybitinverse");
-    let mut wrong_settings = resume_init(&key);
+    let mut wrong_settings = resume_init(&key, &proof);
     wrong_settings["d"]["testnet"] = json!(true);
-    let mut sealed = resume_init(&key);
+    let mut sealed = resume_init(&key, &proof);
     sealed["d"]["sealed"] = json!({"attemptId":"synthetic","enc":"AA","ciphertext":"AA"});
+    let mut no_proof = resume_init(&key, &proof);
+    no_proof["d"].as_object_mut().unwrap().remove("resumeProof");
+    let wrong_proof = resume_init(&key, &owner.resume_proof.clone());
     for init in [
-        resume_init("synthetic-rotated-key"),
+        no_proof,
+        wrong_proof,
+        resume_init("synthetic-rotated-key", &proof),
         wrong_venue,
         wrong_settings,
         sealed,
@@ -253,7 +263,7 @@ async fn delegated_resume_binds_socket_owner_label_venue_and_identity() {
     let refusal = next(&mut sent, "error").await;
     assert_eq!(refusal["d"]["accountName"], "synthetic-other");
     assert_eq!(refusal["d"]["data"][1]["reason"], "resume_unavailable");
-    wire(&mut owner, resume_init(&key)).await;
+    wire(&mut owner, resume_init(&key, &proof)).await;
     let held = registry.held(USER, ACCOUNT, owner.socket).unwrap();
     assert!(Arc::ptr_eq(&account, &held));
     owner.close();
@@ -267,7 +277,7 @@ async fn delegated_resume_binds_socket_owner_label_venue_and_identity() {
             .get("delegatedResume")
             .is_none()
     );
-    refused_resume(&mut late, &mut sent, resume_init(&key)).await;
+    refused_resume(&mut late, &mut sent, resume_init(&key, &proof)).await;
     late.close();
 }
 
@@ -286,7 +296,7 @@ async fn delegated_resume_after_grace_requires_a_handover() {
     session_frame(&mut sent).await;
     handover(&mut first, &mut sent, &vector, &bytes).await;
     let account = registry.held(USER, ACCOUNT, first.socket).unwrap();
-    let parked_id = first.resume_id.clone();
+    let (parked_id, proof) = (first.resume_id.clone(), first.resume_proof.clone());
     first.close();
     tokio::time::sleep(Duration::from_millis(400)).await;
 
@@ -298,7 +308,7 @@ async fn delegated_resume_after_grace_requires_a_handover() {
             .get("delegatedResume")
             .is_none()
     );
-    refused_resume(&mut late, &mut sent, resume_init(&key)).await;
+    refused_resume(&mut late, &mut sent, resume_init(&key, &proof)).await;
     // Retention kept the account; the fallback handover joins the same resident.
     handover(&mut late, &mut sent, &vector, &bytes).await;
     let held = registry.held(USER, ACCOUNT, late.socket).unwrap();

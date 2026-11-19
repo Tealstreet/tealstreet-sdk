@@ -24,6 +24,9 @@ pub struct InitPayload {
     /// Connection-local, like `sealed`; never a setting or fingerprint field.
     #[serde(default, skip_serializing)]
     pub resume: Option<bool>,
+    /// The previous socket's in-band `resumeProof`; the URL's resume id alone is not enough.
+    #[serde(default, skip_serializing)]
+    pub resume_proof: Option<String>,
     /// Reply provenance only; never an engine option or account fingerprint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instance_id: Option<String>,
@@ -631,13 +634,22 @@ pub fn init_unsupported(account_name: &str, venue: &str) -> String {
 }
 
 pub fn session(resume_id: &str, resumed: bool) -> String {
-    session_with_delegated(resume_id, resumed, &[])
+    envelope(
+        "session",
+        json!({"resumeId": resume_id, "resumed": resumed}),
+    )
 }
 
-/// `delegatedResume` names the labels this socket may claim with a `resume` init.
-/// Omitted when empty, so clients only send that init to a server that offers it.
-pub fn session_with_delegated(resume_id: &str, resumed: bool, delegated: &[String]) -> String {
-    let mut data = json!({"resumeId": resume_id, "resumed": resumed});
+/// `resumeProof` travels only in-band and must accompany a later `resume` init;
+/// `delegatedResume` names the labels this socket may claim with one. The latter
+/// is omitted when empty, so clients only send that init to a box that offers it.
+pub fn session_with_delegated(
+    resume_id: &str,
+    resumed: bool,
+    proof: &str,
+    delegated: &[String],
+) -> String {
+    let mut data = json!({"resumeId": resume_id, "resumed": resumed, "resumeProof": proof});
     if !delegated.is_empty() {
         data["delegatedResume"] = json!(delegated);
     }

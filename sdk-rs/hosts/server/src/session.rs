@@ -111,6 +111,8 @@ pub struct Session {
     pub socket: u64,
     sign_responses: crate::signing_diagnostics::ReplyMisses,
     pub resume_id: String,
+    /// In-band companion to `resume_id` for DELEGATED claims (AGT-54).
+    resume_proof: String,
     out: Out,
     joined: HashMap<String, Joined>,
     /// Current fallback reply registration, independent of live account authority.
@@ -276,6 +278,7 @@ impl Session {
             socket,
             sign_responses: crate::signing_diagnostics::ReplyMisses::new(socket),
             resume_id: crate::accounts::resume_id(),
+            resume_proof: crate::accounts::resume_id(),
             out,
             joined: HashMap::new(),
             registration_outputs: HashMap::new(),
@@ -1120,6 +1123,7 @@ impl Session {
         self.send(envelope::session_with_delegated(
             &self.resume_id,
             resumed,
+            &self.resume_proof,
             &delegated,
         ));
     }
@@ -3139,6 +3143,8 @@ impl Session {
         }
         if let Some(user) = &self.identity.user {
             self.registry.park(self.resume_id.clone(), user, parked);
+            self.registry
+                .bind_resume_proof(&self.resume_id, &self.resume_proof);
             self.registry.session_closed(&self.resume_id);
         }
     }
