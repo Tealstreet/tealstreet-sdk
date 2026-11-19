@@ -133,6 +133,7 @@ pub struct FrameWriter<'a> {
     sections: u16,
     open: Option<usize>,
     strings: Vec<&'a str>,
+    prefixes: Vec<(std::ops::Range<u32>, &'a str)>,
     string_index: HashMap<u32, u32>,
 }
 
@@ -148,6 +149,7 @@ impl<'a> FrameWriter<'a> {
             sections: 0,
             open: None,
             strings: Vec::new(),
+            prefixes: Vec::new(),
             string_index: HashMap::new(),
         }
     }
@@ -182,6 +184,30 @@ impl<'a> FrameWriter<'a> {
                 }
             }
         }
+    }
+
+    /// Native stat IDs have a unique feed/key pair; borrow both parts instead
+    /// of retaining one formatted copy of every subscription topic.
+    #[cfg(feature = "managed-sockets")]
+    pub(crate) fn prefixed_string(&mut self, prefix: &'a str, value: &'a str) -> u32 {
+        let index = self.strings.len() as u32;
+        self.strings.push(value);
+        if let Some((range, previous)) = self.prefixes.last_mut()
+            && range.end == index
+            && *previous == prefix
+        {
+            range.end += 1;
+        } else {
+            self.prefixes.push((index..index + 1, prefix));
+        }
+        index
+    }
+
+    fn prefix(&self, index: usize) -> &'a str {
+        self.prefixes
+            .iter()
+            .find_map(|(range, prefix)| range.contains(&(index as u32)).then_some(*prefix))
+            .unwrap_or("")
     }
 
     pub fn optional_string(&mut self, value: Option<&'a str>) -> u32 {
@@ -253,18 +279,25 @@ impl<'a> FrameWriter<'a> {
             let tail = 8
                 + 4
                 + (strings.len() + 1) * 4
-                + strings.iter().map(|text| text.len()).sum::<usize>();
+                + strings.iter().map(|text| text.len()).sum::<usize>()
+                + self
+                    .prefixes
+                    .iter()
+                    .map(|(range, prefix)| (range.end - range.start) as usize * prefix.len())
+                    .sum::<usize>();
             let padding = (8 - (self.buf.len() + tail) % 8) % 8;
             self.buf.reserve_exact(tail + padding);
             self.begin(section::STRINGS);
             self.u32(strings.len() as u32);
             let mut offset = 0u32;
             self.u32(0);
-            for s in &strings {
-                offset += s.len() as u32;
+            for (index, s) in strings.iter().enumerate() {
+                offset += (self.prefix(index).len() + s.len()) as u32;
                 self.u32(offset);
             }
-            for s in &strings {
+            for (index, s) in strings.iter().enumerate() {
+                let prefix = self.prefix(index);
+                self.buf.extend_from_slice(prefix.as_bytes());
                 self.buf.extend_from_slice(s.as_bytes());
             }
             self.end();
@@ -456,6 +489,32 @@ mod tests {
         assert_eq!(w.intern("wrap", u32::MAX), 3);
         assert_eq!(w.intern("wrap-two", u32::MAX), 4);
         assert_eq!(w.intern("wrap-two", u32::MAX), 4);
+    }
+
+    #[cfg(feature = "managed-sockets")]
+    #[test]
+    fn prefixed_stats_preserve_utf8_empty_keys_and_interleaved_strings() {
+        let mut writer = FrameWriter::new(Vec::new(), 0.);
+        writer.string("plain");
+        writer.prefixed_string("0.", "é");
+        writer.prefixed_string("0.", "");
+        writer.string("tail");
+        writer.prefixed_string("1.", "private");
+        writer.prefixed_string("0.", "last");
+        assert_eq!(writer.string("plain"), 0);
+        let frame = writer.finish();
+        let strings = sections(&frame)
+            .find(|(kind, _)| *kind == section::STRINGS)
+            .unwrap()
+            .1;
+        let expected = ["plain", "0.é", "0.", "tail", "1.private", "0.last"];
+        assert_eq!(u32_at(strings, 0), expected.len() as u32);
+        let data = 4 + (expected.len() + 1) * 4;
+        for (index, text) in expected.iter().enumerate() {
+            let start = u32_at(strings, 4 + index * 4) as usize;
+            let end = u32_at(strings, 8 + index * 4) as usize;
+            assert_eq!(&strings[data + start..data + end], text.as_bytes());
+        }
     }
 
     #[test]
