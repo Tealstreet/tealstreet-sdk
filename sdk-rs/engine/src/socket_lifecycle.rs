@@ -610,6 +610,35 @@ impl TopicStats {
     }
 }
 
+// Every admitted feed ID fits this decimal prefix, including its trailing dot.
+const STATS_PREFIX_CAPACITY: usize = (MAX_FEEDS - 1).ilog10() as usize + 2;
+struct StatsPrefix {
+    bytes: [u8; STATS_PREFIX_CAPACITY],
+    start: u8,
+}
+impl StatsPrefix {
+    fn new(mut id: usize) -> Self {
+        let mut bytes = [b'.'; STATS_PREFIX_CAPACITY];
+        let mut start = STATS_PREFIX_CAPACITY - 1;
+        loop {
+            start -= 1;
+            bytes[start] = b'0' + (id % 10) as u8;
+            id /= 10;
+            if id == 0 {
+                break;
+            }
+        }
+        Self {
+            bytes,
+            start: start as u8,
+        }
+    }
+    fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[usize::from(self.start)..])
+            .expect("decimal feed prefix is ASCII")
+    }
+}
+
 struct Feed {
     policy: FeedPolicy,
     generation: u64,
@@ -622,7 +651,7 @@ struct Feed {
     pong_seen: bool,
     interests: Interests,
     message_stats: Map<Arc<str>, TopicStats>,
-    stats_prefix: Box<str>,
+    stats_prefix: StatsPrefix,
     implicit_stats: bool,
     implicit_received: f64,
     implicit_observed: bool,
@@ -895,7 +924,7 @@ impl Lifecycle {
             .flat_map(|feed| {
                 feed.message_stats
                     .iter()
-                    .map(move |(key, stats)| (feed.stats_prefix.len() + key.len(), stats))
+                    .map(move |(key, stats)| (feed.stats_prefix.as_str().len() + key.len(), stats))
             })
             .filter(|(_, stats)| full || stats.dirty)
             .fold((32, 0), |(bytes, strings), (length, _)| {
@@ -942,7 +971,7 @@ impl Lifecycle {
                 } else {
                     stats.subscribed
                 };
-                let topic = writer.prefixed_string(&f.stats_prefix, key);
+                let topic = writer.prefixed_string(f.stats_prefix.as_str(), key);
                 writer.u32(if stats.public_topic { 0 } else { group });
                 writer.u32(topic);
                 writer.u32(u32::from(subscribed) | (u32::from(subscribed && stats.observed) << 1));
@@ -1082,7 +1111,7 @@ impl Lifecycle {
             pong_seen: false,
             interests: Interests::default(),
             message_stats: Map::default(),
-            stats_prefix: format!("{}.", id.0).into_boxed_str(),
+            stats_prefix: StatsPrefix::new(id.0),
             implicit_stats,
             implicit_received: f64::NAN,
             implicit_observed: false,
@@ -3564,6 +3593,14 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn inline_stats_prefix_preserves_every_admitted_feed_identity() {
+        for id in 0..MAX_FEEDS {
+            let prefix = StatsPrefix::new(id);
+            assert_eq!(prefix.as_str(), format!("{id}."));
         }
     }
 

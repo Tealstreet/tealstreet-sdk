@@ -19,6 +19,7 @@ certification instructions are not current CI requirements.
 
 Native message-stat IDs borrow the existing topic key and one cached feed prefix
 when encoding a frame, rather than retaining another formatted copy per topic.
+The feed prefix uses inline decimal bytes; registering a feed adds no heap allocation.
 The captured OKXEU X-Perp allocation regression preserves every emitted identity;
 UTF-8, empty keys, interleaved strings and reconnect controls cover the writer.
 The fixed 16-pair public replay and its 10% memory bound remain unchanged.
