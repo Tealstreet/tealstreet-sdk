@@ -2105,6 +2105,7 @@ impl BybitLinear {
                 leg,
                 local: None,
                 results: None,
+                create_peers: Vec::new(),
             });
         }
         let Stage::Plan(run) = &mut entry.stage else {
