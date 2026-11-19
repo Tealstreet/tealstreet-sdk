@@ -7,7 +7,9 @@
 # wasm-caps-history.md line and a CLEAR naming the growth. Raised caps go to the bot-owned branch bot/wasm-caps and
 # the job summary; this workflow calls no PR API. Actions may not create or approve
 # PRs here (coordinator decision on #3686), so Sam's fleet-watch opens the PR with
-# a user token, which also lets CI run on it normally.
+# a user token. A GITHUB_TOKEN push starts no workflows, so after pushing, the job
+# dispatches the required CI and Rust SDK workflows at the new head; a run whose
+# caps match the bot branch pushes nothing, so the open PR's head and checks stay put.
 #
 # Keep every step GitHub-owned: this repo's Actions policy allows only
 # GitHub-owned actions.
@@ -21,7 +23,8 @@ on:
 
 permissions:
   contents: write
-  actions: read
+  # write only to dispatch the required workflows at the pushed head.
+  actions: write
 
 concurrency:
   group: wasm-caps
@@ -87,6 +90,10 @@ jobs:
             echo "Every measured module keeps its rule-17 reserve; \`$BOT_BRANCH\` unchanged." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          if [ -f "$RUNNER_TEMP/bot-wasm-caps.json" ] && cmp -s "$RUNNER_TEMP/bot-wasm-caps.json" sdk-rs/harness/wasm-caps.json; then
+            echo "\`$BOT_BRANCH\` already carries these caps; not pushed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git switch -c "$BOT_BRANCH"
@@ -94,7 +101,18 @@ jobs:
             -m "Measured by Rust SDK run $RUN_URL at $MEASURED_SHA." -- sdk-rs/harness/wasm-caps.json
           # Bot-owned branch, recreated from master each run; the lease refuses if it moved since the fetch.
           git push --force-with-lease="refs/heads/$BOT_BRANCH:${BOT_LEASE:-}" origin "HEAD:refs/heads/$BOT_BRANCH"
+          echo "PUSHED=true" >> "$GITHUB_ENV"
           {
             echo "Pushed raised caps to \`$BOT_BRANCH\` from [Rust SDK run $MEASURED_RUN]($RUN_URL) at \`$MEASURED_SHA\`."
             echo "fleet-watch opens the PR \"chore(wasm): restore rule-17 reserve\" with a user token."
           } >> "$GITHUB_STEP_SUMMARY"
+      # workflow_dispatch is the one event a GITHUB_TOKEN may start; it reports the
+      # required `ci` and `Rust / required coverage` checks on the pushed head.
+      - name: Run the required checks at the pushed head
+        if: env.PUSHED == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run ci.yml --ref "$BOT_BRANCH"
+          gh workflow run rust.yml --ref "$BOT_BRANCH"
+          echo "Dispatched CI and Rust SDK on \`$BOT_BRANCH\`." >> "$GITHUB_STEP_SUMMARY"
