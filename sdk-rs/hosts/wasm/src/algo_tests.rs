@@ -212,7 +212,29 @@ fn engine_on(venue_name: &str) -> (WasmEngine, Rc<RefCell<Vec<Command>>>, RestFi
 }
 
 fn emits(engine: &mut WasmEngine) -> Vec<Value> {
-    serde_json::from_str::<Vec<Value>>(&engine.algo_emits()).unwrap()
+    let mut events = serde_json::from_str::<Vec<Value>>(&engine.algo_emits()).unwrap();
+    assert!(
+        !events.iter().any(|event| event["op"] == "store"),
+        "store side channel removed"
+    );
+    // Inspect the actual native snapshot sections; algo lifecycle notifications
+    // remain ordinary events, while account rows travel exclusively in SCXF.
+    let frame = engine.inner.snapshot(0.0).to_vec();
+    let frame = engine
+        .store_frames
+        .frame(frame, engine.inner.store(), true, 0.0);
+    let mut rows = serde_json::Map::new();
+    for (kind, payload) in safe_cex_engine::wire::sections(&frame) {
+        let name = match kind {
+            27 => "activeChasers",
+            28 => "activeTWAPs",
+            _ => continue,
+        };
+        let value = safe_cex_store_frames::decode_section(payload).unwrap();
+        rows.insert(name.into(), serde_json::to_value(value).unwrap());
+    }
+    events.push(serde_json::json!({ "op": "frame", "data": rows }));
+    events
 }
 
 fn placements(commands: &RefCell<Vec<Command>>) -> Vec<CommandId> {
@@ -386,8 +408,11 @@ fn a_chase_places_through_the_engine_and_completes_on_its_fill() {
     let (mut engine, commands) = engine();
     engine.algo_start("acct", 0.0, WALL).unwrap();
     let rows = emits(&mut engine);
-    assert_eq!(rows[0]["op"], "store");
-    assert_eq!(rows[0]["data"]["activeChasers"], serde_json::json!([]));
+    assert_eq!(rows.last().unwrap()["op"], "frame");
+    assert_eq!(
+        rows.last().unwrap()["data"]["activeChasers"],
+        serde_json::json!([])
+    );
 
     let actions = engine
         .algo_op("chaser:start", BUY_ONE, 10.0, WALL + 10.0)
@@ -426,7 +451,7 @@ fn a_chase_places_through_the_engine_and_completes_on_its_fill() {
     let row = started
         .iter()
         .rev()
-        .find(|emit| emit["op"] == "store")
+        .find(|emit| emit["op"] == "frame")
         .unwrap();
     assert_eq!(row["data"]["activeChasers"][0]["symbol"], "BTCUSDT");
     // The chase settles after placing: its timer is the next deadline.
@@ -453,7 +478,7 @@ fn a_chase_places_through_the_engine_and_completes_on_its_fill() {
     let row = done
         .iter()
         .rev()
-        .find(|emit| emit["op"] == "store")
+        .find(|emit| emit["op"] == "frame")
         .unwrap();
     assert_eq!(row["data"]["activeChasers"], serde_json::json!([]));
 }
@@ -570,7 +595,7 @@ fn stop_all_stops_twaps_and_chases_and_reports_once_cancels_settle() {
     let store = rows
         .iter()
         .rev()
-        .find(|emit| emit["op"] == "store")
+        .find(|emit| emit["op"] == "frame")
         .unwrap();
     let chase_id = store["data"]["activeChasers"][0]["id"].clone();
     let twap_id = store["data"]["activeTWAPs"][0]["id"].clone();
@@ -594,7 +619,7 @@ fn stop_all_stops_twaps_and_chases_and_reports_once_cancels_settle() {
     let store = stopped
         .iter()
         .rev()
-        .find(|emit| emit["op"] == "store")
+        .find(|emit| emit["op"] == "frame")
         .unwrap();
     assert_eq!(store["data"]["activeTWAPs"], serde_json::json!([]));
     assert_eq!(store["data"]["activeChasers"], serde_json::json!([]));
@@ -626,7 +651,7 @@ fn a_fill_tracked_chase_reports_its_rest_reconciled_fill_on_completion() {
     let store = rows
         .iter()
         .rev()
-        .find(|emit| emit["op"] == "store")
+        .find(|emit| emit["op"] == "frame")
         .unwrap();
     let chase_id = store["data"]["activeChasers"][0]["id"].to_string();
     rest_fills.borrow_mut().insert("o1".into(), 0.4);

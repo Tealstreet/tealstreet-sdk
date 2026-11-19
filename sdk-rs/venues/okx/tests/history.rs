@@ -94,6 +94,59 @@ struct Execution {
     maker: bool,
     position_side: String,
 }
+
+#[test]
+fn fills_preserve_signed_fee_costs_and_maker_rebates() {
+    // OKX v5: fee/fillFee is negative for a charge and positive for a rebate.
+    // Canonical commission uses the opposite, cost-positive convention.
+    for (fee, fill_fee, cost) in [
+        (Some("0.4"), None, -0.4),
+        (Some("-0.4"), None, 0.4),
+        (Some("0"), None, 0.0),
+        (None, None, 0.0),
+        (Some(""), None, 0.0),
+        (None, Some("0.4"), -0.4),
+        (None, Some("-0.4"), 0.4),
+        (Some(""), Some("0.4"), -0.4),
+        (Some("-0.4"), Some("0.8"), 0.4),
+    ] {
+        for archived in [false, true] {
+            let mut row: serde_json::Value = serde_json::from_str(FILL).unwrap();
+            row.as_object_mut().unwrap().remove("fee");
+            if let Some(fee) = fee {
+                row["fee"] = fee.into();
+            }
+            if let Some(fill_fee) = fill_fee {
+                row["fillFee"] = fill_fee.into();
+            }
+            let body = envelope(&row.to_string());
+            let empty = envelope("");
+            let mut e = trading_engine();
+            let recent = query(&mut e, fills());
+            reply(&mut e, &recent, if archived { &empty } else { &body }, 10.0);
+            let archive = prepared(&mut e, 1_710_000_000_010.)
+                .into_iter()
+                .find(|a| matches!(a, Action::Http(_)))
+                .unwrap();
+            reply(
+                &mut e,
+                &archive,
+                if archived { &body } else { &empty },
+                11.0,
+            );
+            let rows: Vec<Execution> = serde_json::from_str(&result(&mut e)).unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(
+                rows[0].commission, cost,
+                "fee={fee:?}, fillFee={fill_fee:?}, archived={archived}"
+            );
+            assert_eq!(rows[0].commission_asset, "USDT");
+            assert_eq!(rows[0].realized_pnl, 3.0);
+            assert!(rows[0].maker);
+        }
+    }
+}
+
 #[test]
 fn fills_fallback_deduplicates_trade_identity_and_converts_contracts() {
     let mut e = trading_engine();
@@ -112,7 +165,7 @@ fn fills_fallback_deduplicates_trade_identity_and_converts_contracts() {
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].id, "200");
     assert_eq!(rows[1].id, "201");
-    assert_eq!(rows[0].timestamp, 1_710_000_000.0);
+    assert_eq!(rows[0].timestamp, 1_710_000_000.123);
     assert_eq!(rows[0].qty, 0.02);
     assert_eq!(rows[0].commission, 0.4);
     assert_eq!(rows[0].realized_pnl, 3.0);
@@ -251,6 +304,68 @@ fn unknown_historical_order_market_prevents_complete_coverage() {
             );
         }
     }
+}
+
+// Drive a native orders-history reply through the real query/HTTP/serialization path.
+fn order_finance(extra: &str) -> serde_json::Value {
+    let mut e = trading_engine();
+    let a = query(&mut e, orders(None));
+    let native = order("999");
+    let native = format!("{},{extra}}}", native.strip_suffix('}').unwrap());
+    reply(&mut e, &a, &envelope(&native), 10.0);
+    let mut rows: Vec<serde_json::Value> = serde_json::from_str(&result(&mut e)).unwrap();
+    assert_eq!(rows.len(), 1, "financial fields must not discard the order");
+    rows.remove(0)
+}
+
+#[test]
+fn history_retains_native_order_finance_without_netting_pnl() {
+    for (fee, pnl, cost, rebate) in [
+        ("-0.4", "3.5", Some(0.4), None),
+        ("0.1", "-2", None, Some(0.1)),
+        ("0", "0", Some(0.0), None),
+    ] {
+        let row = order_finance(&format!(r#""fee":"{fee}","feeCcy":"USDT","pnl":"{pnl}""#));
+        assert_eq!(row["realizedPnl"].as_f64(), pnl.parse::<f64>().ok());
+        assert_eq!(row.get("fees").and_then(serde_json::Value::as_f64), cost);
+        assert_eq!(
+            row.get("rebate").and_then(serde_json::Value::as_f64),
+            rebate
+        );
+        assert_eq!(row["feeAsset"], "USDT");
+        assert_eq!(
+            row.get("rebateAsset").and_then(serde_json::Value::as_str),
+            rebate.map(|_| "USDT")
+        );
+        // Existing order identity, contract conversion and terminal state are controls.
+        assert_eq!(row["id"], "999");
+        assert_eq!(row["status"], "canceled");
+        assert_eq!(row["amount"], 0.03);
+        assert_eq!(row["filled"], 0.015);
+    }
+}
+
+#[test]
+fn history_omits_unknown_order_finance_and_preserves_reported_zero() {
+    for extra in [
+        r#""feeCcy":"""#,
+        r#""fee":"","feeCcy":"","pnl":"""#,
+        r#""fee":null,"feeCcy":null,"pnl":null"#,
+        r#""fee":"bad","feeCcy":"","pnl":"bad""#,
+        r#""fee":"NaN","feeCcy":"","pnl":"Infinity""#,
+        r#""fee":"1e309","feeCcy":"","pnl":"-1e309""#,
+    ] {
+        let row = order_finance(extra);
+        for key in ["fees", "feeAsset", "rebate", "rebateAsset", "realizedPnl"] {
+            assert!(
+                row.get(key).is_none(),
+                "{key} must remain absent for {extra}"
+            );
+        }
+    }
+    let row = order_finance(r#""fee":"0","feeCcy":"USDT","pnl":"0""#);
+    assert_eq!(row["fees"], 0.0);
+    assert_eq!(row["realizedPnl"], 0.0);
 }
 
 fn next_page(e: &mut Engine<Okx>) -> Action {
@@ -568,7 +683,7 @@ fn history_page_cap_keeps_rows_and_owns_its_warning_before_done() {
 }
 
 #[test]
-fn fills_preserve_ts_seconds_bounds_normalization_and_floor_milliseconds() {
+fn fills_preserve_seconds_bounds_normalization_and_millisecond_precision() {
     // RustEngineExchange forwards ExecutionsOptions.from/to unchanged. TS accepts
     // Unix seconds here even though the engine query fields are named *_ms.
     for (from, to) in [
@@ -590,7 +705,7 @@ fn fills_preserve_ts_seconds_bounds_normalization_and_floor_milliseconds() {
         reply(&mut e, &a, &envelope(FILL), 10.0);
         let rows: Vec<Execution> = serde_json::from_str(&result(&mut e)).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].timestamp, 1_710_000_000.0);
+        assert_eq!(rows[0].timestamp, 1_710_000_000.123);
     }
 }
 
@@ -620,7 +735,7 @@ fn block_trade_fills_omit_missing_order_id_and_invalid_commission_like_ts() {
 }
 
 #[test]
-fn fills_apply_bounds_to_native_milliseconds_before_output_seconds_are_truncated() {
+fn fills_apply_bounds_to_native_milliseconds_before_output_seconds_conversion() {
     for (from, to) in [
         (1_710_000_001_500.0, 1_710_000_002_500.0),
         (1_710_000_001.5, 1_710_000_002.5),
@@ -653,7 +768,7 @@ fn fills_apply_bounds_to_native_milliseconds_before_output_seconds_are_truncated
         let rows: Vec<Execution> = serde_json::from_str(&result(&mut e)).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "200");
-        assert_eq!(rows[0].timestamp, 1_710_000_001.0);
+        assert_eq!(rows[0].timestamp, 1_710_000_001.6);
     }
 }
 
@@ -692,4 +807,52 @@ fn window_fills_with_no_limit_flag_a_full_page_and_keep_every_row() {
         Action::Notice(Notice::CommandDone { result, .. })
             if serde_json::from_str::<Vec<Execution>>(result).unwrap().len() == 100
     )));
+}
+
+#[test]
+fn historical_fills_preserve_milliseconds_without_changing_dedupe_keys() {
+    for identified in [true, false] {
+        for time in ["1710000000123", "1710000000.123"] {
+            let mut e = trading_engine();
+            let a = query(&mut e, fills());
+            reply(&mut e, &a, &envelope(""), 10.0);
+            let archive = prepared(&mut e, 1_710_000_000_010.0)
+                .into_iter()
+                .find(|a| matches!(a, Action::Http(_)))
+                .unwrap();
+            let early = FILL.replace("1710000000123", time);
+            let later = early
+                .replace(
+                    time,
+                    if time.contains('.') {
+                        "1710000000.987"
+                    } else {
+                        "1710000000987"
+                    },
+                )
+                .replace("\"tradeId\":\"200\"", "\"tradeId\":\"201\"");
+            let mut body = format!("{early},{later}");
+            if !identified {
+                body = body
+                    .replace("\"tradeId\":\"200\"", "\"tradeId\":\"\"")
+                    .replace("\"tradeId\":\"201\"", "\"tradeId\":\"\"")
+                    .replace("\"billId\":\"900\"", "\"billId\":\"\"");
+            }
+            reply(&mut e, &archive, &envelope(&body), 11.0);
+            let rows: Vec<serde_json::Value> = serde_json::from_str(&result(&mut e)).unwrap();
+            assert_eq!(rows.len(), if identified { 2 } else { 1 });
+            assert_eq!(rows[0]["timestamp"], 1_710_000_000.987);
+            assert_eq!(
+                rows[0]["timestamp"].as_f64().unwrap() * 1000.0,
+                1_710_000_000_987.0
+            );
+            if identified {
+                assert_eq!(rows[0]["id"], "201");
+                assert_eq!(rows[1]["id"], "200");
+                assert_eq!(rows[1]["timestamp"], 1_710_000_000.123);
+            } else {
+                assert!(rows[0].get("id").is_none());
+            }
+        }
+    }
 }

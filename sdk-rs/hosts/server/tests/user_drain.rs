@@ -149,7 +149,7 @@ async fn capped_drain_lists_parked_jobs_blocks_starts_and_cancel_keeps_them_runn
         page.until("frame", |d| d["snapshot"] == true).await;
         let chase = json!({"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"});
         page.op("acct", "chaser:start", chase.clone()).await;
-        let store = page.until("store", |d| d["data"]["activeChasers"].as_array().is_some_and(|r| r.len()==1)).await;
+        let store = page.until("native-frame", |d| d["data"]["activeChasers"].as_array().is_some_and(|r| r.len()==1)).await;
         let id = store["data"]["activeChasers"][0]["id"].clone();
         let (_, started) = json_post(&address, "/admin/user-drain/start", json!({"userId":"target","capMs":1}), "").await;
         assert!(started["drainId"].is_string(), "{started}");
@@ -201,9 +201,9 @@ async fn natural_completion_waits_for_the_whole_user_and_force_is_user_scoped() 
         other.until("frame",|d|d["snapshot"]==true).await;
         let chase = json!({"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"});
         page.op("acct","chaser:start",chase.clone()).await;
-        let active = page.until("store", |d|d["data"]["activeChasers"].as_array().is_some_and(|r|r.len()==1)).await;
+        let active = page.until("native-frame", |d|d["data"]["activeChasers"].as_array().is_some_and(|r|r.len()==1)).await;
         other.op("acct","chaser:start",chase).await;
-        other.until("store", |d|d["data"]["activeChasers"].as_array().is_some_and(|r|r.len()==1)).await;
+        other.until("native-frame", |d|d["data"]["activeChasers"].as_array().is_some_and(|r|r.len()==1)).await;
         let (_, drain) = json_post(&address,"/admin/user-drain/start",json!({"userId":"target"}),"").await;
         assert_eq!(idle_tab.ending(Duration::from_millis(30)).await,support::Ending::StillOpen,"an idle tab cannot leave while its user's other tab runs an algo");
         page.op("acct","chaser:terminate",active["data"]["activeChasers"][0]["id"].clone()).await;
@@ -218,7 +218,7 @@ async fn natural_completion_waits_for_the_whole_user_and_force_is_user_scoped() 
         survivor_page.init(&init).await;
         survivor_page.until("frame", |d| d["snapshot"] == true).await;
         survivor_page.op("acct", "chaser:start", json!({"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"})).await;
-        survivor_page.until("store", |d| d["data"]["activeChasers"].as_array().is_some_and(|r| r.len()==1)).await;
+        survivor_page.until("native-frame", |d| d["data"]["activeChasers"].as_array().is_some_and(|r| r.len()==1)).await;
         let (_, other_drain) = json_post(&address,"/admin/user-drain/start",json!({"userId":"other","capMs":1}),"").await;
         tokio::time::sleep(Duration::from_millis(10)).await;
         let (code, forced) = json_post(&address,"/admin/user-drain/force",json!({"userId":"other","drainId":other_drain["drainId"]}),"").await;
@@ -249,10 +249,10 @@ async fn queued_starts_cannot_run_after_the_latch_and_paused_twaps_are_inventory
         assert!(frame.is_object());
         let market = json!({"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":100}},"isPerpetual":true});
         page.op("acct","twap:start",json!({"accountName":"acct","activeMarket":market,"size":0.1,"duration":600,"ordersCount":10,"side":"buy","chaserDelay":500,"reduceOnly":false,"randomnessPercentage":0,"useLimitOrders":false,"useChaserOrders":false,"origin":"web"})).await;
-        let store = page.until("store",|d|d["data"]["activeTWAPs"].as_array().is_some_and(|r|r.len()==1)).await;
+        let store = page.until("native-frame",|d|d["data"]["activeTWAPs"].as_array().is_some_and(|r|r.len()==1)).await;
         let id = store["data"]["activeTWAPs"][0]["id"].clone();
         page.op("acct","twap:pause",id.clone()).await;
-        page.until("store",|d|d["data"]["activeTWAPs"][0]["status"]=="paused").await;
+        page.until("native-frame",|d|d["data"]["activeTWAPs"][0]["status"]=="paused").await;
         page.close().await;
         let (_, inventory) = json_post(&address,"/admin/users",json!({}),"").await;
         let entry = inventory["users"].as_array().unwrap().iter().find(|u|u["userId"]=="paused").unwrap();
@@ -287,7 +287,7 @@ async fn box_break_glass_surfaces_the_interruption_toast_before_4100() {
         page.init(&init).await;
         page.until("frame", |d| d["snapshot"] == true).await;
         page.op("acct", "chaser:start", json!({"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"})).await;
-        page.until("store", |d| d["data"]["activeChasers"].as_array().is_some_and(|rows| rows.len() == 1)).await;
+        page.until("native-frame", |d| d["data"]["activeChasers"].as_array().is_some_and(|rows| rows.len() == 1)).await;
         let (status, _) = json_post(&address, "/admin/drain?now=1", json!({}), "").await;
         assert_eq!(status, 200);
         assert_eq!(page.ending(Duration::from_secs(3)).await, support::Ending::Closed(4100, "draining: reconnect".into()));
@@ -314,7 +314,7 @@ async fn self_fence_parks_and_same_box_reconnect_gets_the_retained_notice() {
         page.init(&init).await;
         page.until("frame", |d| d["snapshot"] == true).await;
         page.op("acct", "chaser:start", json!({"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"})).await;
-        page.until("store", |d| d["data"]["activeChasers"].as_array().is_some_and(|rows| rows.len() == 1)).await;
+        page.until("native-frame", |d| d["data"]["activeChasers"].as_array().is_some_and(|rows| rows.len() == 1)).await;
         // Parked accounts count too: no live socket is needed to expire a lease.
         page.close().await;
         tokio::time::sleep(Duration::from_millis(1600)).await;
@@ -350,9 +350,9 @@ async fn self_fence_parks_and_same_box_reconnect_gets_the_retained_notice() {
         let owner = _fresh.twap_owner.snapshot();
         returned.op("acct", "twap:state", json!([{"id":"parked-twap","ownerId":owner.owner_id,
             "ownerGeneration":owner.generation,"options":options,"state":state}])).await;
-        let store = returned.until("store", |d| d["data"]["activeTWAPs"].as_array().is_some_and(|rows| !rows.is_empty())).await;
+        let store = returned.until("native-frame", |d| d["data"]["activeTWAPs"].as_array().is_some_and(|rows| !rows.is_empty())).await;
         assert_eq!(store["data"]["activeTWAPs"][0]["status"], "paused");
-        assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"], 7);
+        assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"].as_f64(), Some(7.0));
         returned.close().await;
     }).await;
 }

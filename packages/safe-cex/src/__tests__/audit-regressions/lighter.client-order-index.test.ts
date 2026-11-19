@@ -2,9 +2,10 @@ import type { PlaceOrderOpts } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LighterExchange } from '../reference/lighter/lighter.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { LighterExchange } from '../reference/lighter/lighter.exchange';
 
 vi.mock('@tealstreet/poseidon-crypto', () => ({
   initWasm: vi.fn(),
@@ -44,27 +45,36 @@ const setup = (maxSize = 100) => {
   const exchange = new LighterExchange(
     'lighter',
     { key: '', secret: '', apiKeyIndex: '1', applicationId: '123', tuning: { consoleLogging: false } },
-    new DefaultStore(),
+    new FrameStore(),
   );
   exchanges.push(exchange);
-  exchange.store.update({
-    markets: [
+  exchange.store.apply(
+    nativeFixture(
       {
-        id: '1',
-        symbol: order.symbol,
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: maxSize }, leverage: { min: 1, max: 50 } },
-        info: { amountDecimals: 3, priceDecimals: 1, min_quote_amount: '1' },
+        markets: [
+          {
+            id: '1',
+            symbol: order.symbol,
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: maxSize }, leverage: { min: 1, max: 50 } },
+            info: { amountDecimals: 3, priceDecimals: 1, min_quote_amount: '1' },
+          },
+        ],
       },
-    ],
-  });
+      exchange.store.markets.map((row) => row.symbol),
+    ),
+  );
   const createOrder = vi.fn().mockResolvedValue('accepted');
   const createOrders = vi.fn().mockResolvedValue(['accepted']);
   const createGroupedOrders = vi.fn().mockResolvedValue('accepted');
-  vi.spyOn(exchange as any, 'ensureSignerAdapter').mockResolvedValue({ createOrder, createOrders, createGroupedOrders });
+  vi.spyOn(exchange as any, 'ensureSignerAdapter').mockResolvedValue({
+    createOrder,
+    createOrders,
+    createGroupedOrders,
+  });
   vi.spyOn(exchange as any, 'ensurePartnerAttributionTierEligible').mockResolvedValue(undefined);
   vi.spyOn(exchange as any, 'ensurePartnerAttributionApproved').mockResolvedValue(undefined);
   return { exchange, createOrder, createOrders, createGroupedOrders };

@@ -145,7 +145,7 @@ export class WaitCommand extends BaseCommand {
       return this.error('Invalid condition');
     }
 
-    const exchange = ctx.exchange!;
+    const exchange = ctx.exchange;
     const focusedSymbol = ctx.symbol;
     // The check context carries the PreprocessStore so `@<liveVar>`
     // LHS conditions can resolve at poll time. Other condition kinds

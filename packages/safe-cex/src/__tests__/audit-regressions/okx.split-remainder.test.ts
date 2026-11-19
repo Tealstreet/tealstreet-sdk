@@ -2,10 +2,11 @@ import type { ExchangeOptions, Market } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { OKXExchange } from '../reference/okx/okx.exchange';
 import { BROKER_ID, ENDPOINTS } from '../../exchanges/okx/okx.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType, PositionMode } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -47,8 +48,13 @@ describe('OKX oversized order regression', () => {
     },
   ])('sends exact, bounded, uniquely identified lots for $name', async (testCase) => {
     const market = createMarket(testCase.amountStep, testCase.maxAmount);
-    const store = new DefaultStore();
-    store.update({ markets: [market] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [market] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const exchange = new OKXExchange('okx', options, store);
     exchange._accountPositionMode = PositionMode.OneWay;
@@ -95,8 +101,13 @@ describe('OKX oversized order regression', () => {
     { name: 'zero amount precision', maxAmount: 10, amountStep: 0, errorField: 'amount precision' },
   ])('rejects $name before submitting for $errorField', async ({ maxAmount, amountStep, errorField }) => {
     const market = createMarket(amountStep, maxAmount);
-    const store = new DefaultStore();
-    store.update({ markets: [market] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [market] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const exchange = new OKXExchange('okx', options, store);
     exchange._accountPositionMode = PositionMode.OneWay;
@@ -119,8 +130,13 @@ describe('OKX oversized order regression', () => {
 
   it.each([NaN, Infinity, 0, -1, 0.1])('rejects invalid adjusted amount %s before submitting', async (amount) => {
     const market = createMarket(1, 10);
-    const store = new DefaultStore();
-    store.update({ markets: [market] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [market] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const exchange = new OKXExchange('okx', options, store);
     exchange._accountPositionMode = PositionMode.OneWay;

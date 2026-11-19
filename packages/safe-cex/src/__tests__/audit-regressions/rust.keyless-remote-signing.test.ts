@@ -8,7 +8,6 @@ import { assertBetaAccount } from '../../exchanges/rust/betaVenues';
 import { deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
 import { runsOnRustEngine, RUST_VENUES, RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { createExchange } from '../../index';
-import { DefaultStore } from '../../store/store.base';
 import { virtualClock } from '../../utils/virtualClock';
 
 const remoteSigner: RemoteSigner = {
@@ -41,7 +40,9 @@ describe('Rust-only hosted account selection', () => {
         expect(exchange).toBeInstanceOf(RustEngineExchange);
         exchange.dispose();
       } else {
-        expect(() => assertBetaAccount(name, options)).toThrow(`${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`);
+        expect(() => assertBetaAccount(name, options)).toThrow(
+          `${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`,
+        );
         await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
       }
     }

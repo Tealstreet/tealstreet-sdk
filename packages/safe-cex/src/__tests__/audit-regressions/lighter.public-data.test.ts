@@ -2,9 +2,10 @@ import type { ExchangeOptions, Market, OrderBook, Ticker } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { LighterExchange } from '../reference/lighter/lighter.exchange';
 import { ENDPOINTS } from '../../exchanges/lighter/lighter.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { LighterExchange } from '../reference/lighter/lighter.exchange';
 
 const market: Market = {
   id: '77',
@@ -45,8 +46,13 @@ const options: ExchangeOptions = {
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [market], tickers: [{ ...ticker }] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [market], tickers: [{ ...ticker }] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new LighterExchange('lighter', options, store);
   const websocket = exchange.publicWebsocket;
   websocket.ws = { readyState: WebSocket.OPEN } as WebSocket;
@@ -127,7 +133,10 @@ describe('Lighter public-data audit regressions', () => {
 
     await (websocket as any).fetchAndApplyTickerFallback();
 
-    expect(get).toHaveBeenCalledWith(ENDPOINTS.EXCHANGE_STATS, expect.objectContaining({ __suppressExchangeError: true }));
+    expect(get).toHaveBeenCalledWith(
+      ENDPOINTS.EXCHANGE_STATS,
+      expect.objectContaining({ __suppressExchangeError: true }),
+    );
     expect(exchange.store.tickersBySymbol.BTC.last).toBe(61_234.5);
 
     const reconnect = vi.spyOn(websocket, 'reconnect');
@@ -160,7 +169,11 @@ describe('Lighter public-data audit regressions', () => {
 
     await (websocket as any).fetchAndEmitOrderBookFromRest('order_book:77', '77', orderBook, callback);
 
-    expect(getOrderBookOrders).toHaveBeenCalledWith(77, 100, expect.objectContaining({ __suppressExchangeError: true }));
+    expect(getOrderBookOrders).toHaveBeenCalledWith(
+      77,
+      100,
+      expect.objectContaining({ __suppressExchangeError: true }),
+    );
     expect(orderBook.bids.map((level) => [level.price, level.amount, level.total])).toEqual([
       [101, 3.25, 3.25],
       [100, 1.5, 4.75],

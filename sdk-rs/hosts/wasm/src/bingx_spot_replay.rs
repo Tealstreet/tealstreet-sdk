@@ -31,6 +31,7 @@ pub fn fixture(public_data_only: bool) -> Result<WasmEngine, js_sys::Error> {
         dispatch_signing: true,
         external_signer: false,
         construction: "{}".into(),
+        store_frames: Default::default(),
         #[cfg(feature = "coinbase")]
         coinbase_binding: None,
         #[cfg(feature = "hosted-signing")]

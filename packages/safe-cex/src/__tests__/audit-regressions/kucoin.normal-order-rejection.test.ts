@@ -2,15 +2,15 @@ import type { ExchangeOptions } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 // KuCoin rejects orders as HTTP 200 with a non-'200000' `code`. The normal
 // order path (placeOrderBatch) used to emit the rejection but resolve with an
 // empty id list, so awaiting callers saw "success" with no ids while the order
 // never existed on the venue. It must throw, matching placeAlgoOrders.
 const makeExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new KucoinExchange(
     'kucoin' as any,
     { key: 'k', secret: 's', passphrase: 'p' } as ExchangeOptions,

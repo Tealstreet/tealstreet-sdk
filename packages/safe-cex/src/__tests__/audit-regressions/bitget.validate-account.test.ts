@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
+import { FrameStore } from '../../store/frameStore';
 import { createAPI } from '../reference/bitget/bitget.api';
 import { BitgetExchange } from '../reference/bitget/bitget.exchange';
-import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
-import { DefaultStore } from '../../store/store.base';
 
 const createExchange = () =>
   new BitgetExchange(
     'bitget',
     { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
-    new DefaultStore(),
+    new FrameStore(),
   );
 
 const runResponseInterceptor = (exchange: BitgetExchange, response: any) => {

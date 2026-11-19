@@ -2,7 +2,8 @@ import type { DisplayedPosition, StoreData, Writable } from '../../types';
 
 import { describe, expect, it } from 'vitest';
 
-import { DefaultStore } from '../../store/store.base';
+import { nativeFixture } from '../../__tests__/cutover/nativeFixture';
+import { FrameStore } from '../../store/frameStore';
 import { PositionSide } from '../../types';
 import { DisplayedMarginPostprocessor } from './DisplayedMarginPostprocessor';
 
@@ -76,15 +77,30 @@ describe('DisplayedMarginPostprocessor', () => {
   });
 
   it('keeps unknown totals null through serialization, JSON and a receiving store', () => {
-    const store = new DefaultStore();
-    store.update({ displayedPositions: [pos(L, null), pos(S, 250)] });
-    const snapshot = store.serialize();
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { displayedPositions: [pos(L, null), pos(S, 250)] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
+    const snapshot = store.data;
     createProcessor().process(snapshot);
-    store.update({ displayedMargin: snapshot.displayedMargin });
-    const serialized = store.serialize();
+    store.apply(
+      nativeFixture(
+        { displayedMargin: snapshot.displayedMargin },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
+    const serialized = store.data;
     expect(serialized.displayedMargin).toEqual({ longExposure: null, shortExposure: 250, totalNotional: null });
-    const receiving = new DefaultStore();
-    receiving.update(JSON.parse(JSON.stringify(serialized)));
+    const receiving = new FrameStore();
+    receiving.apply(
+      nativeFixture(
+        JSON.parse(JSON.stringify(serialized)),
+        receiving.markets.map((row) => row.symbol),
+      ),
+    );
     expect(receiving.displayedMargin).toEqual(serialized.displayedMargin);
   });
 

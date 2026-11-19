@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BinanceSpotExchange } from '../reference/binance/binancespot.exchange';
 import { BinancePrivateWebsocket } from '../reference/binance/binancespot.ws-private';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStatus, OrderType } from '../../types';
 
 const createSubject = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new BinanceSpotExchange('binancespot', { key: 'key', secret: 'secret' }, store);
   return { exchange, store, websocket: new BinancePrivateWebsocket(exchange) };
 };
@@ -48,25 +49,30 @@ describe('Binance Spot official private stream wire shape', () => {
 
   it('reads outboundAccountPosition balances from the top-level B array', () => {
     const { store, websocket } = createSubject();
-    store.update({
-      tickers: [
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTC/USDT',
-          symbol: 'BTCUSDT',
-          bid: 40_000,
-          ask: 40_000,
-          last: 40_000,
-          mark: 40_000,
-          index: 40_000,
-          percentage: 0,
-          fundingTime: 0,
-          fundingRate: 0,
-          volume: 0,
-          quoteVolume: 0,
-          openInterest: 0,
+          tickers: [
+            {
+              id: 'BTC/USDT',
+              symbol: 'BTCUSDT',
+              bid: 40_000,
+              ask: 40_000,
+              last: 40_000,
+              mark: 40_000,
+              index: 40_000,
+              percentage: 0,
+              fundingTime: 0,
+              fundingRate: 0,
+              volume: 0,
+              quoteVolume: 0,
+              openInterest: 0,
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     websocket.handleAccountEvents([
       {

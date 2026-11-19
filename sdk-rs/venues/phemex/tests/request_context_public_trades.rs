@@ -1,4 +1,7 @@
 //! Unsigned public-trades custody and unchanged signed-read compatibility.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 mod support;
 use safe_cex_engine::model::{Interval, Limits, Market, MinMax, Precision};
 use safe_cex_engine::request_context::{Claim, Error, HttpAction, Prepared, RoutingIntent};
@@ -413,7 +416,7 @@ fn native_public_duplicates_keep_exact_values_without_live_account_mutation() {
     assert_eq!(rows[0]["timestamp"], 1_666_860_389_799.);
     assert_eq!(rows[0]["price"], 20702.1);
     assert_eq!(rows[0]["qty"], 0.949);
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     assert!(reply(&mut e, NOW + 2., &request, 200, TRADE).is_empty());
 }
 

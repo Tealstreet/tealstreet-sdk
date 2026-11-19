@@ -2,7 +2,7 @@
 export type TwapOwner = Readonly<{ ownerId: string; generation: number }>;
 
 /** Multi-user hosts supply this before constructing their ExchangeWorker. */
-export type TwapWorkerContext = Worker & { getTwapOwner?: () => TwapOwner | null };
+export type TwapWorkerContext = Pick<Worker, 'postMessage'> & { getTwapOwner?: () => TwapOwner | null };
 
 /** Copy the snapshot: a host may update its live owner object during a wait. */
 export const captureTwapOwner = (getOwner?: () => TwapOwner | null): TwapOwner | null | undefined => {

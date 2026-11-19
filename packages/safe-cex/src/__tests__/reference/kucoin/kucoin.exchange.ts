@@ -1,6 +1,6 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../../store/store.interface';
+import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
@@ -9,6 +9,9 @@ import partition from 'lodash/partition';
 import uniqBy from 'lodash/uniqBy';
 import { mapSeries } from 'p-iteration';
 
+import { BaseExchange } from '../../../exchanges/base';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -38,8 +41,8 @@ import { adjust, divide, multiply, subtract } from '../../../utils/safe-math';
 import { toBinance } from '../../../utils/symbolConverter';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI } from './kucoin.api';
 import {
   ENDPOINTS,
@@ -71,7 +74,7 @@ export class KucoinExchange extends BaseExchange {
 
   // private leverageHash: Record<string, number> = {};
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 3 }) });
@@ -192,10 +195,14 @@ export class KucoinExchange extends BaseExchange {
         const markets = await this.fetchMarkets();
         if (this.isDisposed) return;
 
-        this.store.update({
-          markets,
-          loaded: { ...this.store.loaded, markets: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            markets,
+            loaded: { markets: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
 
         this.log(`Loaded ${markets.length} KuCoin Futures markets`);
 
@@ -203,10 +210,14 @@ export class KucoinExchange extends BaseExchange {
         const tickers = await this.fetchTickers();
         if (this.isDisposed) return;
 
-        this.store.update({
-          tickers,
-          loaded: { ...this.store.loaded, tickers: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            tickers,
+            loaded: { tickers: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
 
         this.log(`Loaded ${tickers.length} KuCoin Futures tickers`);
 
@@ -221,9 +232,13 @@ export class KucoinExchange extends BaseExchange {
 
       const publicDataOnly = this.isPublicDataOnly;
       if (publicDataOnly) {
-        this.store.update({
-          loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            loaded: { balance: true, positions: true, orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
         return;
       }
 
@@ -237,10 +252,14 @@ export class KucoinExchange extends BaseExchange {
       const orders = await this.fetchOrders();
       if (this.isDisposed) return;
 
-      this.store.update({
-        orders,
-        loaded: { ...this.store.loaded, orders: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          orders,
+          loaded: { orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       this.log(`Loaded ${orders.length} KuCoin Futures orders`);
       this.log(`Ready to trade on KuCoin Futures`);
@@ -256,7 +275,19 @@ export class KucoinExchange extends BaseExchange {
       try {
         const positions = await this.fetchPositions();
         if (this.isDisposed) return;
-        this.store.addOrUpdatePositionsFull(positions);
+        (() => {
+          const incoming: StoreData['positions'] = positions;
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
 
         let balance;
         if (count % 4 === 0) {
@@ -282,16 +313,15 @@ export class KucoinExchange extends BaseExchange {
         if (this.isDisposed) return;
         //}
 
-        this.store.update({
-          ...(balance && { balance }),
-          ...(orders && { orders }),
-          loaded: {
-            ...this.store.loaded,
-            ...(balance && { balance: true }),
-            positions: true,
-            ...(orders && { orders: true }),
+        applyReferenceFixture(
+          this.store,
+          {
+            ...(balance && { balance }),
+            ...(orders && { orders }),
+            loaded: { ...(balance && { balance: true }), positions: true, ...(orders && { orders: true }) },
           },
-        });
+          this.store.markets.map((row) => row.symbol),
+        );
       } catch (err: any) {
         this.emitAndLogError(err?.response?.data?.msg || err?.message);
       }
@@ -418,7 +448,7 @@ export class KucoinExchange extends BaseExchange {
         notional: 0,
         unrealizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
         info: {
           ...metadata,
         },
@@ -475,7 +505,7 @@ export class KucoinExchange extends BaseExchange {
           leverage: parseInt(p.leverage || '1'),
           unrealizedPnl: parseFloat(p.unrealisedPnl || '0'),
           contracts: contractsBase,
-          liquidationPrice: parseFloat(p.liquidationPrice || '0'),
+          liquidationPrice: nativeLiquidationPrice(parseFloat(p.liquidationPrice || '0')),
           positionMode,
           marginType,
           extra: { contractsNative },
@@ -1182,7 +1212,22 @@ export class KucoinExchange extends BaseExchange {
 
       // Fetch updated positions to confirm the change
       const positions = await this.fetchPositions([symbol]);
-      this.store.addOrUpdatePositions(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     } catch (err: any) {
       this.emitAndLogError(err, err?.response?.data?.msg || err?.message);
       throw err;
@@ -1212,7 +1257,22 @@ export class KucoinExchange extends BaseExchange {
 
       // Fetch positions to get updated margin type
       const positions = await this.fetchPositions([symbol]);
-      this.store.addOrUpdatePositions(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;
@@ -1241,7 +1301,11 @@ export class KucoinExchange extends BaseExchange {
 
       // Fetch updated positions
       const updatedPositions = await this.fetchPositions();
-      this.store.update({ positions: updatedPositions });
+      applyReferenceFixture(
+        this.store,
+        { positions: updatedPositions },
+        this.store.markets.map((row) => row.symbol),
+      );
     } catch (err: any) {
       this.emitAndLogError(err, err?.response?.data?.msg || err?.message);
       throw err;

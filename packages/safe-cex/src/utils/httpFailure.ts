@@ -49,7 +49,7 @@ const readStatusText = (response: HttpFailureShape): string => {
  */
 export const getHttpFailure = (response: unknown): HttpFailure | undefined => {
   if (typeof response !== 'object' || response === null || Array.isArray(response)) return undefined;
-  const shape = response as HttpFailureShape;
+  const shape: HttpFailureShape = response;
   if (typeof shape.status !== 'number' || shape.status < 400) return undefined;
   return { status: shape.status, statusText: readStatusText(shape) };
 };

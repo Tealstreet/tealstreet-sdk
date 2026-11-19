@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { PhemexExchange } from '../reference/phemex/phemex.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import {
   LogSeverity,
   MarginType,
@@ -12,39 +11,46 @@ import {
   PositionMode,
   PositionSide,
 } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTC/USDT:USDT',
-        symbol: 'BTCUSDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
-        info: { symbol: 'BTCUSDT' },
+        markets: [
+          {
+            id: 'BTC/USDT:USDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+            info: { symbol: 'BTCUSDT' },
+          },
+        ] as any,
+        tickers: [{ id: 'BTC/USDT:USDT', symbol: 'BTCUSDT', last: 60_000 } as any],
+        positions: [
+          {
+            id: 'BTCUSDT-long',
+            symbol: 'BTCUSDT',
+            side: PositionSide.Long,
+            contracts: 0.25,
+            entryPrice: 59_000,
+            notional: 14_750,
+            leverage: 10,
+            marginType: MarginType.Cross,
+            positionMode: PositionMode.Hedged,
+            unrealizedPnl: 250,
+            liquidationPrice: 50_000,
+          },
+        ],
       },
-    ] as any,
-    tickers: [{ id: 'BTC/USDT:USDT', symbol: 'BTCUSDT', last: 60_000 } as any],
-    positions: [
-      {
-        id: 'BTCUSDT-long',
-        symbol: 'BTCUSDT',
-        side: PositionSide.Long,
-        contracts: 0.25,
-        entryPrice: 59_000,
-        notional: 14_750,
-        leverage: 10,
-        marginType: MarginType.Cross,
-        positionMode: PositionMode.Hedged,
-        unrealizedPnl: 250,
-        liquidationPrice: 50_000,
-      },
-    ],
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   return new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
 };
 
@@ -82,7 +88,7 @@ describe('audit regression: Phemex dormant orders and public subscription cap', 
   });
 
   it('hydrates a missing symbol market before formatting a market order', async () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = new PhemexExchange('phemex' as any, { key: 'test', secret: 'test' } as any, store);
     vi.spyOn(exchange, 'fetchMarkets').mockResolvedValue([
       {

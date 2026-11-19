@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { BaseExchange } from '../../exchanges/base';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 // Command rejections report through emitAndLogError; in a worker its sentryData rides the 'error' event.
 afterEach(() => {
@@ -11,7 +11,7 @@ afterEach(() => {
 describe('typed engine errors are tagged for Sentry', () => {
   test('in the worker branch of emitAndLogError', () => {
     vi.stubGlobal('window', undefined);
-    const exchange = new BaseExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    const exchange = new BaseExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
     const listener = vi.fn();
     exchange.emitter.on('error', listener);
     exchange.emitAndLogError(

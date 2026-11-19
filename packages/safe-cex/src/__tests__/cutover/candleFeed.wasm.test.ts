@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustPublicFeedProvider } from '../../exchanges/rust/publicFeed';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { realVenue } from './realVenue';
 
 const accounts: RustEngineExchange[] = [];
@@ -43,7 +43,7 @@ it('releases one native Aster candle subscription after its listeners leave', as
     },
   };
   setRustEngineTransport(() => transport);
-  const source = new RustEngineExchange('asterdex', input.options, new DefaultStore());
+  const source = new RustEngineExchange('asterdex', input.options, new FrameStore());
   accounts.push(source);
   const sourceReady = source.start();
   void sourceReady.catch(() => {});
@@ -61,7 +61,7 @@ it('releases one native Aster candle subscription after its listeners leave', as
       ...receiverInput.options,
       publicFeed: { mode: 'shared', port: channel.port2 as unknown as MessagePort },
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   accounts.push(receiver);
   await receiver.start();

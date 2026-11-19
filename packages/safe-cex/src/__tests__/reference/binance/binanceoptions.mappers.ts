@@ -212,7 +212,7 @@ export const mapBinanceOptionPosition = (
     leverage: 1,
     unrealizedPnl: num(raw.unrealizedPNL),
     contracts,
-    liquidationPrice: 0,
+    liquidationPrice: null,
     extra: { contractsNative: contracts },
     info: raw,
     lastUpdate: now,

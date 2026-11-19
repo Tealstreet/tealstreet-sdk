@@ -15,6 +15,10 @@ target start from a stale position; unavailable native state fails before any
 placement. TS exchanges keep their ordinary local store read through a no-op
 Base seam.
 
+Equal native order censuses arrive through FrameStore's separate account-observation
+subscription. They can confirm a tracked order disappeared without incrementing
+UI updateIds or waking UI subscribers. Cleanup detaches this subscription too.
+
 Completed chasers are not history rows. Every internal completion path routes
 through `cleanupInstance`, which detaches listeners, cancels remaining IDs, and
 splices the instance from the singleton, so completed chasers cannot pin full

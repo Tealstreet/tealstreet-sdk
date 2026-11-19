@@ -147,7 +147,7 @@ describe('OrderBookSubscriptionsHandler', () => {
         });
       });
 
-      it('should update ticker BBO from orderbook', () => {
+      it('forwards orderbook BBO while native frames retain ticker authority', () => {
         const payload: StoreWorkerPayload = {
           op: 'subscribeOrderBook',
           data: { subId: 'sub-5', symbol: 'BTCUSDT' },
@@ -164,7 +164,11 @@ describe('OrderBookSubscriptionsHandler', () => {
 
         callback(orderbook);
 
-        expect(mockStore.updateTicker).toHaveBeenCalledWith(mockStore.tickers[0], { ask: 50002, bid: 50000 });
+        expect(mockStore.updateTicker).not.toHaveBeenCalled();
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'listenOrderBook',
+          data: { subId: 'sub-5', symbol: 'BTCUSDT', orderbook },
+        });
       });
 
       it('should not update ticker if BBO unchanged', () => {

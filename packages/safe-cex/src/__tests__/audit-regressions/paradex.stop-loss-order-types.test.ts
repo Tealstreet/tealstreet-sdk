@@ -1,11 +1,11 @@
 import type { Axios } from 'axios';
+import type { ORDER_RESPONSE } from '../reference/paradex/paradex.types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { ParadexExchange } from '../reference/paradex/paradex.exchange';
-import type { ORDER_RESPONSE } from '../reference/paradex/paradex.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderStatus, OrderType } from '../../types';
+import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 
 const ORDER_VARIANTS = [
   ['STOP_MARKET', OrderType.StopLoss],
@@ -38,7 +38,7 @@ const orderResponse = (type: ORDER_RESPONSE['type']): ORDER_RESPONSE =>
   }) as ORDER_RESPONSE;
 
 const createExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new ParadexExchange('paradex', { publicDataOnly: true } as any, store);
   const get = vi.fn();
 
@@ -95,5 +95,4 @@ describe('Paradex protective stop order regression', () => {
     (exchange.privateWebsocket as any).handleOrderUpdate({ data: currentResponse });
     expect(store.orders).toContainEqual(expect.objectContaining({ id: currentResponse.id, reduceOnly: true }));
   });
-
 });

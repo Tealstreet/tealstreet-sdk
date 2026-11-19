@@ -58,24 +58,28 @@ fn fills(limit: u32) -> Query {
 }
 
 #[test]
-fn a_saturated_fills_window_keeps_its_rows_and_marks_the_result_incomplete() {
+fn an_unbounded_saturated_fills_page_keeps_rows_and_marks_incomplete() {
     let mut h = harness();
+    // B6 drains bounded ranges; an unbounded full page still cannot prove absence.
     h.event(Event::Command(Command::Query {
         command: 1,
-        query: fills(2),
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(2),
+        },
     }));
-    // The first 7-day window fills its page of two; the second does not.
-    let first = h.take("/userTrades");
+    let page = h.take("/userTrades");
     h.reply(
-        first.id,
+        page.id,
         200,
         "",
         &format!("[{},{}]", fill(1, 10.0), fill(2, 20.0)),
     );
-    let second = h.take("/userTrades");
-    h.reply(second.id, 200, "", &format!("[{}]", fill(3, WEEK + 1.0)));
-    assert_eq!(rows(&h, 1), 3, "every accepted fill is kept");
-    assert!(marked(&h, 1), "a saturated window is not proof of absence");
+    assert_eq!(rows(&h, 1), 2);
+    assert!(marked(&h, 1));
 }
 
 #[test]
@@ -95,14 +99,15 @@ fn unsaturated_fills_windows_complete_without_a_marker() {
 
 #[test]
 fn a_saturated_order_page_keeps_its_rows_and_marks_the_result_incomplete() {
+    // B6: retain the unbounded marker; bounded draining is tested separately.
     for (limit, saturated) in [(2, true), (3, false)] {
         let mut h = harness();
         h.event(Event::Command(Command::Query {
             command: 3,
             query: Query::OrderHistory {
                 symbol: Some("BTCUSDT".into()),
-                from_ms: Some(0.0),
-                to_ms: Some(1_000.0),
+                from_ms: None,
+                to_ms: None,
                 limit: Some(limit),
             },
         }));

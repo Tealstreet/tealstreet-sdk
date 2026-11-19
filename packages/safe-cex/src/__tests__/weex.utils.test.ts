@@ -1,14 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { WeexExchange } from './reference/weex/weex.exchange';
-import {
-  normalizeMarket,
-  normalizePosition,
-  normalizePublicTrade,
-  normalizeTicker,
-  normalizeTimestampToMs,
-} from './reference/weex/weex.utils';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import {
   MarginType,
   OrderSide,
@@ -18,6 +10,15 @@ import {
   PositionMode,
   PositionSide,
 } from '../types';
+import { nativeFixture } from './cutover/nativeFixture';
+import { WeexExchange } from './reference/weex/weex.exchange';
+import {
+  normalizeMarket,
+  normalizePosition,
+  normalizePublicTrade,
+  normalizeTicker,
+  normalizeTimestampToMs,
+} from './reference/weex/weex.utils';
 
 const rawMarket = {
   symbol: 'BTCUSDT',
@@ -155,9 +156,14 @@ describe('WEEX normalizers', () => {
 
 describe('WEEX order payload formatting', () => {
   const createExchange = () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = new WeexExchange('weex', { key: '', secret: '', passphrase: '', publicDataOnly: true }, store);
-    store.update({ markets: [normalizeMarket(rawMarket)] });
+    store.apply(
+      nativeFixture(
+        { markets: [normalizeMarket(rawMarket)] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     return exchange;
   };
 

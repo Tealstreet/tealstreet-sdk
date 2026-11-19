@@ -1,5 +1,14 @@
+export type HistoryFailureDetail = {
+  readonly operation: 'bybitClosedPnl' | 'bybitOrders' | 'bybitFills' | 'bybitIncome' | 'bybitTrades';
+  readonly kind: 'rejected' | 'invalidInput' | 'insufficientBalance' | 'authInvalid' | 'authExpired' |
+    'authPermission' | 'rateLimited' | 'network' | 'timeout' | 'venueUnavailable' | 'unsupported' | 'internal';
+  readonly venueCode?: '10000' | '10001' | '10002' | '10003' | '10004' | '10005' | '10006' | '10010' |
+    '10016' | '10018' | '10024' | '10027' | '10028' | '10029' | '100028' | '33004' | '429' | 'other';
+};
+export function historyFailureOf(value: unknown): HistoryFailureDetail | undefined;
+
 /** Runs a WasmEngine against a transport. See host.mjs. */
-import type { EngineCapabilities } from './wire.mjs';
+import type { EngineCapabilities } from './capabilities.mjs';
 
 export type { EngineCapabilities };
 export type HistoryDecodeDetail = {
@@ -78,7 +87,11 @@ export interface HttpPacket {
   /** Native admission hint; never sent as an HTTP header or payload field. */
   readClass?: 'normal' | 'critical' | 'reconciliation' | 'bulk';
   signal?: AbortSignal;
+  /** Host-only observation; never serialized or used for admission authority. */
+  onPreparationStage?(stage: HttpPreparationStage, route?: 'direct' | 'proxy' | 'tunnel'): void;
 }
+export type HttpPreparationStage = 'route_resolve' | 'proxy_token' | 'tunnel' | 'transport_prepare' | 'catalogue_wait' | 'budget_wait';
+
 export interface PreparedHttp {
   /** Optional absolute engine raw time. */
   expiresAt?: number;

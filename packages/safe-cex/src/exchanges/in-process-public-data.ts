@@ -40,78 +40,7 @@ export class InProcessPublicDataProvider {
 
     this.log('Connecting to in-process public data source', LogSeverity.Info);
 
-    // Seed with current data if source already has it
-    const { tickers, markets, loaded } = this.source.store;
-
-    if (loaded.tickers && tickers.length > 0) {
-      this.noteDataObserved();
-      this.parent.store.update({
-        tickers,
-        loaded: { ...this.parent.store.loaded, tickers: true },
-      });
-    }
-
-    if (loaded.markets && markets.length > 0) {
-      this.noteDataObserved();
-      this.parent.store.update({
-        markets: this.parent.adaptExternalMarkets(markets),
-        loaded: { ...this.parent.store.loaded, markets: true },
-      });
-    }
-
-    // Subscribe to ongoing updates.
-    // Hot-path guard: the source store mutates ticker/market fields in
-    // place and notifies on every delta. The parent's tickerIndexMap and
-    // hashmaps already point to the same ticker objects (shared refs via
-    // `stripTickerInfo` returning the same reference when there's no
-    // `info`), so per-frame mutations are visible without re-running
-    // `parent.store.update({ tickers })` — which would otherwise rebuild
-    // the parent's maps from scratch on every source notify.
-    //
-    // Only propagate a full update when the array *reference* or length
-    // actually changes (snapshot replacement, ticker added, ticker
-    // removed). On Bybit linear this avoids ~600 full-rebuild
-    // propagations/sec, each touching ~600 hashmap entries.
-    let lastTickers: typeof this.source.store.tickers | undefined;
-    let lastMarkets: typeof this.source.store.markets | undefined;
-
-    this.unsubscribeStore = this.source.store.subscribe((data: StoreData) => {
-      if (this.isDisposed) return;
-
-      const sourceTickers = data.tickers;
-      const sourceMarkets = data.markets;
-      const hasTickers = !!sourceTickers && sourceTickers.length > 0;
-      const hasMarkets = !!sourceMarkets && sourceMarkets.length > 0;
-      if (!hasTickers && !hasMarkets) return;
-
-      // Stamp liveness BEFORE the change filter below. The source mutates
-      // ticker fields in place and only trips that filter when the array
-      // reference or length changes, so a filtered notify is still proof the
-      // source is delivering — stamping after it would report a live feed as
-      // stale within seconds.
-      this.noteDataObserved();
-
-      const tickersChanged =
-        hasTickers && (sourceTickers !== lastTickers || sourceTickers.length !== lastTickers?.length);
-      const marketsChanged =
-        hasMarkets && (sourceMarkets !== lastMarkets || sourceMarkets.length !== lastMarkets?.length);
-
-      if (!tickersChanged && !marketsChanged) return;
-
-      if (tickersChanged) lastTickers = sourceTickers;
-      if (marketsChanged) lastMarkets = sourceMarkets;
-
-      this.parent.store.update({
-        ...(tickersChanged ? { tickers: sourceTickers } : {}),
-        ...(marketsChanged ? { markets: this.parent.adaptExternalMarkets(sourceMarkets) } : {}),
-        loaded: {
-          ...this.parent.store.loaded,
-          ...(tickersChanged ? { tickers: true } : {}),
-          ...(marketsChanged ? { markets: true } : {}),
-        },
-      });
-    });
-
+    throw new Error('In-process native public data must use the Rust shared-feed transport');
     this.log('Connected to in-process public data source', LogSeverity.Info);
   };
 

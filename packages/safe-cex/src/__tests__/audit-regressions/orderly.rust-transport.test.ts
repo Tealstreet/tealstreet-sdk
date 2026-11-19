@@ -1,9 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
-import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { Transport as EngineHostTransport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
@@ -14,14 +8,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { createEngineTransport, resolveEngineRoutingPlan } from '../../transport/engine';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { directTransport } from '../../transport/direct';
+import { createEngineTransport, resolveEngineRoutingPlan } from '../../transport/engine';
 import { setDefaultTransport } from '../../transport/registry';
 import { tealstreetTransport } from '../../transport/tealstreet/tealstreetTransport';
 import { OrderStatus } from '../../types';
-import { adoptEngineCapabilities, engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { adoptEngineCapabilities, engineCapabilities } from '../fixtures/engineCapabilities';
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 const origin = 'https://api-evm.orderly.org';
 const query = '/v1/order?symbol=PERP_BTC_USDC&client_order_id=a%20b%2Fc';
@@ -82,7 +83,7 @@ describe('Orderly Rust transport boundary', () => {
     const load = vi.fn(() => new Promise<WasmEngineModule>(() => {}));
     setWasmEngineLoader(load);
     setRustEngineTransport(() => base);
-    const exchange = new RustEngineExchange('mode', options(undefined, { publicDataOnly: true }), new DefaultStore());
+    const exchange = new RustEngineExchange('mode', options(undefined, { publicDataOnly: true }), new FrameStore());
     const startup = exchange.start();
     expect(exchange.start()).toBe(startup);
     const account = exchange.getAccount();
@@ -121,7 +122,7 @@ describe('Orderly Rust transport boundary', () => {
         }),
     );
     setRustEngineTransport(() => base);
-    const exchange = new RustEngineExchange('mode', options(undefined, { publicDataOnly: true }), new DefaultStore());
+    const exchange = new RustEngineExchange('mode', options(undefined, { publicDataOnly: true }), new FrameStore());
     const startup = exchange.start();
     expect(exchange.start()).toBe(startup);
     const starting = expect(startup).rejects.toThrow('disposed during startup');
@@ -158,13 +159,17 @@ describe('Orderly Rust transport boundary', () => {
         const result = JSON.stringify({ userId: 'account-id', affiliateId: 'account-id' });
         return JSON.stringify([{ op: 'done', command: command.command, result }]);
       }),
-      takeFrame: () => new Uint8Array(consumerFrame({
-        loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
-      })),
+      takeFrame: () =>
+        new Uint8Array(
+          consumerFrame({
+            loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+          }),
+        ),
       snapshotFrame: () => new Uint8Array(),
       wsOpen: noActions,
       wsMessage: noActions,
-      wsClose: noActions, wsRouteExhausted: noActions,
+      wsClose: noActions,
+      wsRouteExhausted: noActions,
       httpStart: noActions,
       httpChunk: noActions,
       httpEnd: noActions,
@@ -174,9 +179,13 @@ describe('Orderly Rust transport boundary', () => {
     const construct = vi.fn(function () {
       return engine;
     });
-    const store = new DefaultStore();
+    const store = new FrameStore();
     installNativeStartupFrames(engine, store);
-    store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+    applyReferenceFixture(
+      store,
+      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+      store.markets.map((row) => row.symbol),
+    );
     const exchange = new RustEngineExchange(
       'mode',
       options(undefined, {
@@ -215,7 +224,7 @@ describe('Orderly Rust transport boundary', () => {
     });
     setWasmEngineLoader(load);
     setRustEngineTransport(() => base);
-    const exchange = new RustEngineExchange('mode', options(undefined, { publicDataOnly: true }), new DefaultStore());
+    const exchange = new RustEngineExchange('mode', options(undefined, { publicDataOnly: true }), new FrameStore());
     try {
       const startup = exchange.start();
       expect(exchange.start()).toBe(startup);
@@ -233,7 +242,7 @@ describe('Orderly Rust transport boundary', () => {
   it.each<ExchangeName>(['kodiakfi', 'mode', 'what', 'woofi'])(
     '%s refuses unsupported order history filters before dispatching a command',
     async (name) => {
-      const exchange = new RustEngineExchange(name, options(undefined, { publicDataOnly: true }), new DefaultStore());
+      const exchange = new RustEngineExchange(name, options(undefined, { publicDataOnly: true }), new FrameStore());
       adoptEngineCapabilities(exchange);
       // Supply the engine record without starting a host; the capability guard must prevent dispatch.
       for (const filter of [{ orderId: '42' }, { status: [OrderStatus.Closed] }, { status: [] }]) {
@@ -247,7 +256,7 @@ describe('Orderly Rust transport boundary', () => {
 
   it('preserves history dispatch for supported Orderly options and other venues', async () => {
     for (const name of ['mode', 'binance'] as const) {
-      const exchange = new RustEngineExchange(name, options(undefined, { publicDataOnly: true }), new DefaultStore());
+      const exchange = new RustEngineExchange(name, options(undefined, { publicDataOnly: true }), new FrameStore());
       adoptEngineCapabilities(exchange);
       try {
         // Past the filter guard to the command, where a public-only account's history is not read.
@@ -277,20 +286,25 @@ describe('Orderly Rust transport boundary', () => {
   });
 
   it.each<ExchangeName>(['kodiakfi', 'mode', 'what', 'woofi'])(
-    '%s uses shared direct/proxy routes and keeps escaped queries and signed body lexemes exact', async (name) => {
+    '%s uses shared direct/proxy routes and keeps escaped queries and signed body lexemes exact',
+    async (name) => {
       const { base } = createBase();
       base.request.mockResolvedValue({ status: 200, headers: '', body: new Uint8Array() } as never);
       const authorize = vi.fn(async (config: InternalAxiosRequestConfig) => {
         config.headers.set('Authorization', 'Bearer intermediary');
       });
       const rest = vi.fn(({ config }: Parameters<TransportProvider['rest']>[0]) => ({
-        baseURL: `https://proxy.test/${config.baseURL}`, proxied: true, authorize,
+        baseURL: `https://proxy.test/${config.baseURL}`,
+        proxied: true,
+        authorize,
       }));
       const transport = createEngineTransport(name, options(provider({ rest })), base);
       await transport.request(signed());
       expect(base.request).toHaveBeenCalledExactlyOnceWith({
-        ...signed(), url: `https://proxy.test/${origin}${query}`,
-        headers: { ...signed().headers, Authorization: 'Bearer intermediary' }, signal: expect.any(AbortSignal),
+        ...signed(),
+        url: `https://proxy.test/${origin}${query}`,
+        headers: { ...signed().headers, Authorization: 'Bearer intermediary' },
+        signal: expect.any(AbortSignal),
       });
       expect(authorize).toHaveBeenCalledOnce();
       expect(rest.mock.calls[0][0].config.baseURL).toBe(origin);
@@ -303,7 +317,10 @@ describe('Orderly Rust transport boundary', () => {
     base.request.mockResolvedValue({ status: 200, headers: '', body: new Uint8Array() } as never);
     const unused = vi.fn();
     setDefaultTransport(provider({ rest: unused }));
-    const rest = vi.fn(({ config }: Parameters<TransportProvider['rest']>[0]) => ({ baseURL: config.baseURL, proxied: false }));
+    const rest = vi.fn(({ config }: Parameters<TransportProvider['rest']>[0]) => ({
+      baseURL: config.baseURL,
+      proxied: false,
+    }));
     const transport = createEngineTransport('mode', options(provider({ rest }), { testnet: true }), base);
     const request = { ...signed(), url: signed().url.replace('https://api-', 'https://testnet-api-') };
     await transport.request(request);
@@ -317,10 +334,17 @@ describe('Orderly Rust transport boundary', () => {
     const { base } = createBase();
     const adapter = vi.fn<AxiosAdapter>(async (config) => raw(config, body, 429));
     const restAdapter = vi.fn(() => adapter);
-    const transport = createEngineTransport('woofi', options(provider({ restAdapter }), { tealstreetTunnel: true }), base);
+    const transport = createEngineTransport(
+      'woofi',
+      options(provider({ restAdapter }), { tealstreetTunnel: true }),
+      base,
+    );
     const result = await transport.request(signed());
-    expect(restAdapter).toHaveBeenCalledExactlyOnceWith({ exchange: 'woofi', options: expect.any(Object),
-      variant: { region: 'SG', raw: true, WebSocket: undefined } });
+    expect(restAdapter).toHaveBeenCalledExactlyOnceWith({
+      exchange: 'woofi',
+      options: expect.any(Object),
+      variant: { region: 'SG', raw: true, WebSocket: undefined },
+    });
     expect(adapter).toHaveBeenCalledOnce();
     const config = adapter.mock.calls[0][0];
     expect(config.url).toBe(`${origin}${query}`);
@@ -339,8 +363,14 @@ describe('Orderly Rust transport boundary', () => {
         if (failure === 'lost') throw new Error('response lost after accepted write');
         return raw(config, { order_id: 9007199254740992 });
       });
-      const transport = createEngineTransport('what', options(provider({ restAdapter: () => adapter }), { tealstreetTunnel: true }), base);
-      await expect(transport.request(signed())).rejects.toThrow(failure === 'lost' ? 'response lost' : 'raw response body');
+      const transport = createEngineTransport(
+        'what',
+        options(provider({ restAdapter: () => adapter }), { tealstreetTunnel: true }),
+        base,
+      );
+      await expect(transport.request(signed())).rejects.toThrow(
+        failure === 'lost' ? 'response lost' : 'raw response body',
+      );
       expect(adapter).toHaveBeenCalledOnce();
       expect(base.request).not.toHaveBeenCalled();
       transport.dispose?.();
@@ -349,21 +379,42 @@ describe('Orderly Rust transport boundary', () => {
 
   it.each([false, true])('refuses signed packet mutations before any dispatch (HOW=%s)', async (tunnel) => {
     const mutations = [
-      (config: InternalAxiosRequestConfig) => { config.data = '{}'; },
-      (config: InternalAxiosRequestConfig) => { config.url = '/v1/other'; },
-      (config: InternalAxiosRequestConfig) => { config.baseURL = 'https://other.test'; },
-      (config: InternalAxiosRequestConfig) => { config.method = 'DELETE'; },
-      (config: InternalAxiosRequestConfig) => { config.params = { added: 1 }; },
-      (config: InternalAxiosRequestConfig) => { config.headers.set('orderly-signature', 'changed'); },
-      (config: InternalAxiosRequestConfig) => { config.signal = new AbortController().signal; },
+      (config: InternalAxiosRequestConfig) => {
+        config.data = '{}';
+      },
+      (config: InternalAxiosRequestConfig) => {
+        config.url = '/v1/other';
+      },
+      (config: InternalAxiosRequestConfig) => {
+        config.baseURL = 'https://other.test';
+      },
+      (config: InternalAxiosRequestConfig) => {
+        config.method = 'DELETE';
+      },
+      (config: InternalAxiosRequestConfig) => {
+        config.params = { added: 1 };
+      },
+      (config: InternalAxiosRequestConfig) => {
+        config.headers.set('orderly-signature', 'changed');
+      },
+      (config: InternalAxiosRequestConfig) => {
+        config.signal = new AbortController().signal;
+      },
     ];
     for (const mutate of mutations) {
       const { base } = createBase();
       const adapter = vi.fn<AxiosAdapter>(async (config) => raw(config));
-      const transport = createEngineTransport('mode', options(provider({
-        restAdapter: () => adapter,
-        rest: () => ({ baseURL: 'https://proxy.test', proxied: true, authorize: async (config) => mutate(config) }),
-      }), { tealstreetTunnel: tunnel }), base);
+      const transport = createEngineTransport(
+        'mode',
+        options(
+          provider({
+            restAdapter: () => adapter,
+            rest: () => ({ baseURL: 'https://proxy.test', proxied: true, authorize: async (config) => mutate(config) }),
+          }),
+          { tealstreetTunnel: tunnel },
+        ),
+        base,
+      );
       await expect(transport.request(signed())).rejects.toThrow('changed signed request');
       expect(base.request).not.toHaveBeenCalled();
       expect(adapter).not.toHaveBeenCalled();
@@ -373,10 +424,18 @@ describe('Orderly Rust transport boundary', () => {
 
   it('protects venue headers from a provider mutating routing inputs', async () => {
     const { base } = createBase();
-    const transport = createEngineTransport('mode', options(provider({ rest: ({ config }) => {
-      (config.headers as Record<string, string>)['orderly-signature'] = 'changed';
-      return { baseURL: config.baseURL, proxied: false };
-    } })), base);
+    const transport = createEngineTransport(
+      'mode',
+      options(
+        provider({
+          rest: ({ config }) => {
+            (config.headers as Record<string, string>)['orderly-signature'] = 'changed';
+            return { baseURL: config.baseURL, proxied: false };
+          },
+        }),
+      ),
+      base,
+    );
     await expect(transport.request(signed())).rejects.toThrow('changed signed request');
     expect(base.request).not.toHaveBeenCalled();
     transport.dispose?.();
@@ -385,9 +444,22 @@ describe('Orderly Rust transport boundary', () => {
   it('disposes while intermediary authorization is pending and never dispatches the late write', async () => {
     const { base } = createBase();
     let authorized!: () => void;
-    const transport = createEngineTransport('mode', options(provider({ rest: () => ({
-      baseURL: 'https://proxy.test', proxied: true, authorize: () => new Promise((resolve) => { authorized = resolve; }),
-    }) })), base);
+    const transport = createEngineTransport(
+      'mode',
+      options(
+        provider({
+          rest: () => ({
+            baseURL: 'https://proxy.test',
+            proxied: true,
+            authorize: () =>
+              new Promise((resolve) => {
+                authorized = resolve;
+              }),
+          }),
+        }),
+      ),
+      base,
+    );
     const result = transport.request(signed());
     const rejected = expect(result).rejects.toThrow('disposed');
     transport.dispose?.();
@@ -397,48 +469,83 @@ describe('Orderly Rust transport boundary', () => {
     expect(base.request).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])('routes declared public/funding/private sockets using exact venue URLs (testnet=%s)', (testnet) => {
-    const { base } = createBase();
-    const transport = createEngineTransport('mode', options(provider(), { testnet }), base);
-    const prefix = testnet ? 'testnet-' : '';
-    const publicUrl = `wss://${prefix}ws-evm.orderly.org/ws/stream/account-id`;
-    const privateUrl = `wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/account-id`;
-    for (const [url, channel, feed] of [[publicUrl, 'public', 'market'], [publicUrl, 'public', 'funding'], [privateUrl, 'private', 'account']] as const) {
-      const handlers = { channel, context: { feed, recover: false }, onOpen: vi.fn(), onMessage: vi.fn(), onClose: vi.fn() };
-      transport.connect(url, handlers);
-      // Diagnostics wrap lifecycle callbacks; exact routing and event delivery remain the contract.
-      expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers: {}, onMessage: expect.any(Function), onBinary: expect.any(Function), onOpen: expect.any(Function), onClose: expect.any(Function) });
-      const forwarded = base.connect.mock.lastCall![1];
-      forwarded.onOpen();
-      forwarded.onClose(1006);
-      expect(handlers.onOpen).toHaveBeenCalledExactlyOnceWith();
-      expect(handlers.onClose).toHaveBeenCalledExactlyOnceWith(1006);
-    }
-    transport.dispose?.();
-  });
+  it.each([false, true])(
+    'routes declared public/funding/private sockets using exact venue URLs (testnet=%s)',
+    (testnet) => {
+      const { base } = createBase();
+      const transport = createEngineTransport('mode', options(provider(), { testnet }), base);
+      const prefix = testnet ? 'testnet-' : '';
+      const publicUrl = `wss://${prefix}ws-evm.orderly.org/ws/stream/account-id`;
+      const privateUrl = `wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/account-id`;
+      for (const [url, channel, feed] of [
+        [publicUrl, 'public', 'market'],
+        [publicUrl, 'public', 'funding'],
+        [privateUrl, 'private', 'account'],
+      ] as const) {
+        const handlers = {
+          channel,
+          context: { feed, recover: false },
+          onOpen: vi.fn(),
+          onMessage: vi.fn(),
+          onClose: vi.fn(),
+        };
+        transport.connect(url, handlers);
+        // Diagnostics wrap lifecycle callbacks; exact routing and event delivery remain the contract.
+        expect(base.connect).toHaveBeenLastCalledWith(url, {
+          ...handlers,
+          headers: {},
+          onMessage: expect.any(Function),
+          onBinary: expect.any(Function),
+          onOpen: expect.any(Function),
+          onClose: expect.any(Function),
+        });
+        const forwarded = base.connect.mock.lastCall![1];
+        forwarded.onOpen();
+        forwarded.onClose(1006);
+        expect(handlers.onOpen).toHaveBeenCalledExactlyOnceWith();
+        expect(handlers.onClose).toHaveBeenCalledExactlyOnceWith(1006);
+      }
+      transport.dispose?.();
+    },
+  );
 
   it.each([false, true].flatMap((testnet) => [false, true].map((privateRoute) => ({ testnet, privateRoute }))))(
-    'preflights required custom upgrade headers before SDK construction: %j', async ({ testnet, privateRoute }) => {
+    'preflights required custom upgrade headers before SDK construction: %j',
+    async ({ testnet, privateRoute }) => {
       const { base } = createBase();
       const construct = vi.fn();
       setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
       setRustEngineTransport(() => ({ ...base, webSocketHeaders: false }));
-      const wsConnection = vi.fn((url: string) => url.includes('ws-private-') === privateRoute
-        ? { kind: 'headers' as const, headers: { Authorization: 'required-custom-auth' } } : undefined);
-      const exchange = new RustEngineExchange('mode', options(provider({ wsConnection }), {
-        key: '11111111111111111111111111111111', secret: '11111111111111111111111111111111',
-        publicDataOnly: !privateRoute, testnet, ...(privateRoute ? { applicationId: 'account-id' } : {}),
-      }), new DefaultStore());
+      const wsConnection = vi.fn((url: string) =>
+        url.includes('ws-private-') === privateRoute
+          ? { kind: 'headers' as const, headers: { Authorization: 'required-custom-auth' } }
+          : undefined,
+      );
+      const exchange = new RustEngineExchange(
+        'mode',
+        options(provider({ wsConnection }), {
+          key: '11111111111111111111111111111111',
+          secret: '11111111111111111111111111111111',
+          publicDataOnly: !privateRoute,
+          testnet,
+          ...(privateRoute ? { applicationId: 'account-id' } : {}),
+        }),
+        new FrameStore(),
+      );
       try {
         await expect(exchange.start()).rejects.toThrow('upgrade header support');
         const prefix = testnet ? 'testnet-' : '';
-        expect(wsConnection).toHaveBeenLastCalledWith(privateRoute
-          ? `wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/account-id`
-          : `wss://${prefix}ws-evm.orderly.org/ws/stream/OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY`);
+        expect(wsConnection).toHaveBeenLastCalledWith(
+          privateRoute
+            ? `wss://${prefix}ws-private-evm.orderly.org/v2/ws/private/stream/account-id`
+            : `wss://${prefix}ws-evm.orderly.org/ws/stream/OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY`,
+        );
         expect(construct).not.toHaveBeenCalled();
         expect(base.connect).not.toHaveBeenCalled();
         expect(base.request).not.toHaveBeenCalled();
-      } finally { exchange.dispose(); }
+      } finally {
+        exchange.dispose();
+      }
     },
   );
 
@@ -455,7 +562,14 @@ describe('Orderly Rust transport boundary', () => {
     const capable = createEngineTransport('mode', options(custom), base);
     capable.connect(url, handlers);
     // Diagnostics wrap lifecycle callbacks without changing custom upgrade headers.
-    expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers, onMessage: expect.any(Function), onBinary: expect.any(Function), onOpen: expect.any(Function), onClose: expect.any(Function) });
+    expect(base.connect).toHaveBeenLastCalledWith(url, {
+      ...handlers,
+      headers,
+      onMessage: expect.any(Function),
+      onBinary: expect.any(Function),
+      onOpen: expect.any(Function),
+      onClose: expect.any(Function),
+    });
     const forwarded = base.connect.mock.lastCall![1];
     forwarded.onOpen();
     forwarded.onClose(1006);
@@ -466,11 +580,16 @@ describe('Orderly Rust transport boundary', () => {
   });
 
   it.each<ExchangeName>(['kodiakfi', 'mode', 'what', 'woofi'])(
-    '%s native routing plan uses the same serializable HOW policy', (name) => {
+    '%s native routing plan uses the same serializable HOW policy',
+    (name) => {
       const plan = resolveEngineRoutingPlan(name, options(tealstreetTransport, { tealstreetTunnel: true }), origin);
       // Was fsjnpy143pbz.asia (AWS) until AWS_EXIT.md step 3e.
-      expect(plan.http).toMatchObject({ mode: 'how', prefix: '', authorize: false,
-        tunnelUrl: 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel' });
+      expect(plan.http).toMatchObject({
+        mode: 'how',
+        prefix: '',
+        authorize: false,
+        tunnelUrl: 'wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel',
+      });
       expect(plan.ws).toEqual({ public: {}, private: {}, business: {} });
       expect(JSON.stringify(plan)).not.toContain('unused-test-secret');
     },

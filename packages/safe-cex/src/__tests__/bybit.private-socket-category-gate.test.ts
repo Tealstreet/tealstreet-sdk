@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { FrameStore } from '../store/frameStore';
 import { BybitExchange } from './reference/bybit/bybit.exchange';
-import { DefaultStore } from '../store/store.base';
 
 /**
  * Bybit's /v5/private socket carries every category on a unified account. A normal Tealstreet bybit connection
@@ -12,7 +12,7 @@ const live: BybitExchange[] = [];
 afterEach(() => live.splice(0).forEach((exchange) => exchange.dispose()));
 
 const create = (toggles: { enableInverseMarkets?: boolean; enableOptionMarkets?: boolean } = {}) => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new BybitExchange(
     'bybit',
     { key: 'k', secret: 's', ...toggles, tuning: { consoleLogging: false } } as any,

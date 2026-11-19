@@ -141,6 +141,16 @@ struct HistoricalOrder {
     created_time: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     updated_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    realized_pnl: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fees: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fee_asset: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rebate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rebate_asset: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -216,6 +226,9 @@ struct OrderRow<'a> {
     pos_side: &'a str,
     c_time: &'a str,
     u_time: &'a str,
+    fee: Option<&'a str>,
+    fee_ccy: Option<&'a str>,
+    pnl: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -265,9 +278,9 @@ fn fill_bound(value: Option<f64>) -> Option<f64> {
 }
 fn fill_seconds(value: f64) -> f64 {
     if value > 1_000_000_000_000.0 {
-        (value / 1000.0).floor()
+        value / 1000.0
     } else {
-        value.floor()
+        value
     }
 }
 fn positive(value: &str) -> Option<f64> {
@@ -970,7 +983,12 @@ impl Okx {
                 let id = text(row.trade_id).or_else(|| text(row.bill_id));
                 let timestamp = fill_seconds(time);
                 let key = id.as_ref().map(|id| format!("id:{id}")).unwrap_or_else(|| {
-                    format!("{}:{timestamp}:{price}:{qty}:{}", order_id, row.side)
+                    // Keep the existing fallback identity at whole-second precision.
+                    let identity_timestamp = timestamp.floor();
+                    format!(
+                        "{}:{identity_timestamp}:{price}:{qty}:{}",
+                        order_id, row.side
+                    )
                 });
                 let execution = Execution {
                     id,
@@ -982,7 +1000,7 @@ impl Okx {
                     side: row.side.into(),
                     commission: {
                         let value = first(&[row.fee, row.fill_fee]);
-                        parse_decimal(if value.is_empty() { "0" } else { value }).map(f64::abs)
+                        parse_decimal(if value.is_empty() { "0" } else { value }).map(|fee| -fee)
                     },
                     commission_asset: text(first(&[row.fee_ccy, row.ccy])),
                     position_side: (!row.pos_side.is_empty()).then(|| hedge(row.pos_side)),
@@ -1018,6 +1036,10 @@ impl Okx {
                 if r.symbol.as_deref().is_some_and(|s| s != m.symbol) {
                     return;
                 }
+                // Derivative fee is a signed aggregate: negative charge, positive credit.
+                // Preserve the reported total in its direction; do not infer gross fee/rebate splits.
+                let fee = row.fee.and_then(parse_decimal);
+                let rebate = fee.filter(|value| *value > 0.0);
                 let order = HistoricalOrder {
                     id: row.ord_id.into(),
                     symbol: m.symbol.clone(),
@@ -1057,6 +1079,12 @@ impl Okx {
                     position_side: hedge(row.pos_side),
                     created_time: time,
                     updated_time: positive(row.u_time),
+                    // Native order pnl excludes fees; it is not position-history net realizedPnl.
+                    realized_pnl: row.pnl.and_then(parse_decimal),
+                    fees: fee.filter(|value| *value <= 0.0).map(f64::abs),
+                    fee_asset: row.fee_ccy.and_then(text),
+                    rebate,
+                    rebate_asset: rebate.and(row.fee_ccy).and_then(text),
                 };
                 if let Rows::Orders(rows) = &mut r.rows {
                     Request::put(&mut r.indices, rows, row.ord_id.into(), order);

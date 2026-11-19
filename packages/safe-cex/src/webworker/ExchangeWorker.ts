@@ -2,13 +2,9 @@ import { bingxWriteShapeFromError } from '@tealstreet/safe-cex-wasm/host';
 import type { CommandProgress } from '@tealstreet/safe-cex-wasm/host';
 import type { SerializedCommandError } from '../commandOutcome';
 import type { Exchange } from '../exchanges/base';
-import type { PackedTickerDelta, Store } from '../store/store.interface';
 import type { ExchangeName, ExchangeOptions, OrderFillEvent, StoreData, Ticker } from '../types';
-import type { StoreWorkerCommandProgress, StoreWorkerPayload, StoreWorkerStorePayload } from './StoreWorkerPayload';
+import type { StoreWorkerCommandProgress, StoreWorkerPayload } from './StoreWorkerPayload';
 import type { TwapOwner, TwapWorkerContext } from './twap/TwapOwner';
-import { captureTwapOwner } from './twap/TwapOwner';
-
-import throttle from 'lodash/throttle';
 
 import { onTunnelLaneFallback, tunnelLanePort } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { classifiedError, exchangeErrorTags, historyErrorDiagnostics, isErrorReported } from '../commandOutcome';
@@ -17,7 +13,7 @@ import { exchangeRegistry } from '../exchanges/registry';
 import { assertBetaAccount } from '../exchanges/rust/betaVenues';
 import { snapshotDelegatedSigningOptions } from '../exchanges/rust/delegatedSigningSnapshot';
 import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
-import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { unsupportedVenueError } from '../unsupportedVenue';
 import { diagnosticConsole, diagnosticText, redactDiagnosticData } from '../utils/diagnosticRedaction';
 import { virtualClock } from '../utils/virtualClock';
@@ -35,7 +31,7 @@ import { OrderBookSubscriptionsHandler } from './handlers/OrderBookSubscriptions
 import { TwapHandler } from './handlers/TwapHandler';
 import { UiStateHandler } from './handlers/UiStateHandler';
 import { UpdatePositionsHandler } from './handlers/UpdatePositionsHandler';
-import { exchangeDependentPostprocessors, independentPostprocessors } from './postProcessors/registry';
+import { captureTwapOwner } from './twap/TwapOwner';
 
 // The tunnel lane is per realm, so one live ExchangeWorker reports this realm's fallback.
 const liveExchangeWorkers = new Set<ExchangeWorker>();
@@ -115,11 +111,10 @@ export class ExchangeWorker {
   private readonly _settings: AppSettingsWorkerType;
   private readonly _metadata: ExchangeMetadataWorkerType;
   private readonly _sessionKey: string;
-  private _throttledStoreUpdate: ReturnType<typeof throttle<(data: StoreData) => void>>;
   instanceId: string | undefined = undefined;
 
   private _exchange: Exchange | null = null;
-  private _store: Store = new DefaultStore();
+  private _store = new FrameStore();
   private _messageBuffer: StoreWorkerPayload[] = [];
   // Monotonic token bumped on every dispose() to invalidate any in-flight
   // start() call. Together with _cancelStartup, this lets a dispose abort a
@@ -133,7 +128,6 @@ export class ExchangeWorker {
   private _recovering = false;
   private _recoveryAttempted = false;
   private _recoveryTimer: ReturnType<typeof setTimeout> | null = null;
-  private _recoveryUpdateIds: StoreData['updateIds'] | undefined;
   private _startTimedOut = false;
   private _startAnswer: string | undefined;
   private _startRetries = 0;
@@ -158,15 +152,7 @@ export class ExchangeWorker {
     UiStateHandler,
   ];
 
-  private _postprocessors: { process(store: any): void; readsAccountData?: boolean }[] = [];
-  private _exchangeDependentPostprocessors: { process(store: any): void }[] = [];
   private _handlers: BaseHandler[] = [];
-  private _lastSentMarketsVersion: number | null = null;
-  private _lastSentTickersVersion: number | null = null;
-  private _lastSentTickerBaseline: Ticker[] | null = null;
-  private _lastSentOrdersUpdateId: number | null = null;
-  private _lastSentPositionsUpdateId: number | null = null;
-  private _lastPayloadHadActiveChasers = false;
   /** Venue data reaches main as engine frames, not in store payloads. */
   private _forwardsFrames = false;
   /** Main decodes books, candles and fills from the frames itself, so their ops go quiet. */
@@ -196,11 +182,6 @@ export class ExchangeWorker {
     this._sessionKey = sessionKey;
     this.instanceId = instanceId;
     liveExchangeWorkers.add(this);
-
-    const throttleMs = 250 * (this._options?.tuning?.dataUpdateThrottleMultiplier || 1);
-    this._throttledStoreUpdate = throttle((data: StoreData) => this._storeUpdate(data), throttleMs, {
-      trailing: true,
-    });
   }
 
   /**
@@ -410,9 +391,8 @@ export class ExchangeWorker {
         );
       }
       if (this._recoveryAttempted) this._exchange.setActiveTickerSymbols(this._activeTickerSymbols);
-      if (mainAcceptsFrames()) this._mainDecodesFrames = this.forwardFrames(generation, true);
+      this._mainDecodesFrames = this.forwardFrames(generation, true);
       // A recovered exchange keeps forwarding where main asked for this account's frames.
-      else if (this._forwardsFrames) this.forwardFrames(generation, false);
 
       // When privateOnly, disable public websocket connections before start().
       // Public data (tickers, orderbook, OHLCV) is provided by a shared public exchange.
@@ -469,8 +449,7 @@ export class ExchangeWorker {
         return false;
       }
 
-      this._throttledStoreUpdate.cancel();
-      this._storeUpdate(this._store.serialize(), { forceFullStore: true });
+      this.sendSnapshot();
       if (this._exchange?.isDisposed) return false;
       this._started = true;
       return true;
@@ -517,335 +496,6 @@ export class ExchangeWorker {
     }
   }
 
-  /**
-   * Sanitize data to remove circular references before sending via postMessage.
-   * The main culprit is the 'info' property on orders and positions which contains raw exchange data.
-   *
-   * Per-array fast-path: scan once for any item carrying `info`. If none do,
-   * keep the original array reference instead of running `.map()` (which
-   * always allocates a new array of the same length, even when every callback
-   * returns the input). Skips a meaningful chunk of allocator pressure when
-   * exchanges trim `info` upstream or for fresh accounts with no live data.
-   */
-  private _sanitizeForPostMessage = (
-    data: StoreData,
-    options?: { omitOrders?: boolean; omitPositions?: boolean },
-  ): StoreWorkerStorePayload => {
-    const result: StoreWorkerStorePayload = { ...data };
-
-    // Decouple updateIds from the live store reference. Without this, a WS frame
-    // (e.g. order:update Canceled) firing addOrUpdateOrders between
-    // _prepareStorePayload returning and the structured clone running at
-    // postMessage time will bump `prepared.updateIds.orders` after the
-    // shouldSendOrders decision is already locked in as `omit`. The receiver
-    // then sees a payload claiming "updateIds=N+1" with `orders` omitted,
-    // advances its own updateIds, and the controller's pruneUnchangedWorkerStorePayload
-    // drops the orders from the next (real) payload because the updateIds match.
-    if (result.updateIds) {
-      result.updateIds = { ...result.updateIds };
-    }
-    if (result.loaded) {
-      result.loaded = { ...result.loaded };
-    }
-    if (result.socketHealth) {
-      result.socketHealth = { ...result.socketHealth };
-    }
-
-    if (options?.omitOrders) {
-      delete result.orders;
-    } else if (result.orders && Array.isArray(result.orders)) {
-      let needs = false;
-      for (let i = 0; i < result.orders.length; i++) {
-        if (result.orders[i].info) {
-          needs = true;
-          break;
-        }
-      }
-      if (needs) {
-        result.orders = result.orders.map((order) => {
-          if (order.info) {
-            const { info: _info, ...orderWithoutInfo } = order;
-            return orderWithoutInfo;
-          }
-          return order;
-        });
-      }
-    }
-
-    if (options?.omitPositions) {
-      delete result.positions;
-    } else if (result.positions && Array.isArray(result.positions)) {
-      let needs = false;
-      for (let i = 0; i < result.positions.length; i++) {
-        if (result.positions[i].info) {
-          needs = true;
-          break;
-        }
-      }
-      if (needs) {
-        result.positions = result.positions.map((position) => {
-          if (position.info) {
-            const { info: _info, ...positionWithoutInfo } = position;
-            return positionWithoutInfo;
-          }
-          return position;
-        });
-      }
-    }
-
-    if (result.displayedPositions && Array.isArray(result.displayedPositions)) {
-      let needs = false;
-      for (let i = 0; i < result.displayedPositions.length; i++) {
-        if (result.displayedPositions[i].info) {
-          needs = true;
-          break;
-        }
-      }
-      if (needs) {
-        result.displayedPositions = result.displayedPositions.map((position) => {
-          if (position.info) {
-            const { info: _info, ...positionWithoutInfo } = position;
-            return positionWithoutInfo;
-          }
-          return position;
-        });
-      }
-    }
-
-    return result;
-  };
-
-  private _shouldSendUpdateIdBackedSnapshot = (
-    updateId: number | undefined,
-    lastSentUpdateId: number | null,
-    forceFullStore: boolean | undefined,
-  ) => {
-    if (forceFullStore) {
-      return true;
-    }
-    if (typeof updateId !== 'number') {
-      return true;
-    }
-    return lastSentUpdateId !== updateId;
-  };
-
-  private _recordSentUpdateIdBackedSnapshot = (updateId: number | undefined) => {
-    return typeof updateId === 'number' ? updateId : null;
-  };
-
-  private _copyTickerBaseline = (tickers: StoreData['tickers']) => {
-    let baseline = this._lastSentTickerBaseline;
-    if (!baseline || baseline.length !== tickers.length) {
-      baseline = new Array<Ticker>(tickers.length);
-      this._lastSentTickerBaseline = baseline;
-    }
-
-    for (let i = 0; i < tickers.length; i++) {
-      const ticker = tickers[i];
-      let snapshot = baseline[i] as Ticker | undefined;
-      if (!snapshot) {
-        snapshot = {
-          id: ticker.id,
-          symbol: ticker.symbol,
-        } as Ticker;
-        baseline[i] = snapshot;
-      }
-
-      const writableSnapshot = snapshot as any;
-      writableSnapshot.id = ticker.id;
-      writableSnapshot.symbol = ticker.symbol;
-      for (let fieldIndex = 0; fieldIndex < PACKED_TICKER_FIELDS.length; fieldIndex++) {
-        const field = PACKED_TICKER_FIELDS[fieldIndex];
-        writableSnapshot[field] = ticker[field];
-      }
-    }
-  };
-
-  private _packTickerDeltasSinceBaseline = (tickers: StoreData['tickers']): PackedTickerDelta[] | null => {
-    const baseline = this._lastSentTickerBaseline;
-    if (!baseline || baseline.length !== tickers.length) {
-      return null;
-    }
-
-    const packed: PackedTickerDelta[] = [];
-    for (let i = 0; i < tickers.length; i++) {
-      const ticker = tickers[i];
-      const previous = baseline[i];
-      if (!previous || ticker.id !== previous.id || ticker.symbol !== previous.symbol) {
-        return null;
-      }
-
-      let mask = 0;
-      const values: number[] = [];
-      const writablePrevious = previous as any;
-      for (let fieldIndex = 0; fieldIndex < PACKED_TICKER_FIELDS.length; fieldIndex++) {
-        const field = PACKED_TICKER_FIELDS[fieldIndex];
-        const value = ticker[field];
-        if (value !== previous[field]) {
-          writablePrevious[field] = value;
-          if (typeof value === 'number' || field === 'midPrice') {
-            mask |= 1 << fieldIndex;
-            values.push(value ?? NaN);
-          }
-        }
-      }
-
-      if (mask !== 0) {
-        packed.push([i, mask, ...values]);
-      }
-    }
-
-    return packed;
-  };
-
-  private _prepareStorePayload = (data: StoreData, options?: { forceFullStore?: boolean }): StoreWorkerStorePayload => {
-    const ordersUpdateId = data.updateIds?.orders;
-    const positionsUpdateId = data.updateIds?.positions;
-    const hasActiveChasers = (data.activeChasers?.length ?? 0) > 0;
-    const canOmitOrders = !hasActiveChasers && !this._lastPayloadHadActiveChasers;
-    const shouldSendOrders =
-      !canOmitOrders ||
-      this._shouldSendUpdateIdBackedSnapshot(ordersUpdateId, this._lastSentOrdersUpdateId, options?.forceFullStore);
-    const shouldSendPositions = this._shouldSendUpdateIdBackedSnapshot(
-      positionsUpdateId,
-      this._lastSentPositionsUpdateId,
-      options?.forceFullStore,
-    );
-
-    // Raw positions are updateId-backed. Raw orders are too, except active
-    // chaser enrichment can update order.extra from activeChasers without an
-    // orders updateId bump. displayedPositions are derived from positions plus
-    // tickers, markets, balance, active algos, and rolling PnL, so do not gate
-    // them on the raw positions updateId here.
-    const sanitizedData = this._sanitizeForPostMessage(data, {
-      omitOrders: !shouldSendOrders,
-      omitPositions: !shouldSendPositions,
-    });
-    const marketsVersion = this._store.getMarketsVersion();
-    const tickersVersion = this._store.getTickersVersion();
-    const tickers = sanitizedData.tickers ?? data.tickers;
-    let payload: StoreWorkerStorePayload = sanitizedData;
-    const ensurePayloadCopy = () => {
-      if (payload === sanitizedData) {
-        payload = { ...sanitizedData };
-      }
-      return payload;
-    };
-
-    // Packing ticker deltas is a BROWSER-worker optimization: it shrinks the
-    // structured clone across a real `postMessage`. In hosted mode the far side
-    // is a VirtualWorkerContext that already does its own per-item partial diff
-    // of `tickers` (`PARTIAL_DELTA_KEYS`), so packing here stacks two delta
-    // layers — and that stack is what froze tickers in production on
-    // 2026-09-14.
-    //
-    // Stacking is unsafe because the layers have different properties. A full
-    // array is idempotent: drop it and the next one carries current values. A
-    // delta is not: this function advances `_lastSentTickerBaseline` WHILE
-    // packing, so anything lost downstream is never sent again. The outer layer
-    // both throttles (dropping payloads) and treats the inner delta list as
-    // accumulated STATE, which is exactly the mismatch.
-    const packTickerDeltas = !this._options.hostedMode;
-
-    const shouldSendFullTickers =
-      !packTickerDeltas ||
-      options?.forceFullStore ||
-      this._lastSentTickersVersion !== tickersVersion ||
-      this._lastSentTickerBaseline === null;
-
-    if (shouldSendOrders) {
-      this._lastSentOrdersUpdateId = this._recordSentUpdateIdBackedSnapshot(ordersUpdateId);
-    }
-    if (shouldSendPositions) {
-      this._lastSentPositionsUpdateId = this._recordSentUpdateIdBackedSnapshot(positionsUpdateId);
-    }
-    this._lastPayloadHadActiveChasers = hasActiveChasers;
-
-    if (shouldSendFullTickers) {
-      this._lastSentTickersVersion = tickersVersion;
-      // No baseline in hosted mode: nothing consumes it, and maintaining it is
-      // an O(tickers) copy on every payload.
-      if (packTickerDeltas) this._copyTickerBaseline(tickers);
-    } else {
-      const packedTickerDeltas = this._packTickerDeltasSinceBaseline(tickers);
-      if (packedTickerDeltas === null) {
-        this._lastSentTickersVersion = tickersVersion;
-        this._copyTickerBaseline(tickers);
-      } else {
-        delete ensurePayloadCopy().tickers;
-        if (packedTickerDeltas.length > 0) {
-          ensurePayloadCopy().tickerDeltas = packedTickerDeltas;
-        }
-      }
-    }
-
-    if (!options?.forceFullStore && this._lastSentMarketsVersion === marketsVersion) {
-      delete ensurePayloadCopy().markets;
-      return payload;
-    }
-
-    this._lastSentMarketsVersion = marketsVersion;
-    return payload;
-  };
-
-  private _storeUpdate = (data: StoreData, options?: { forceFullStore?: boolean }) => {
-    let processedData = data;
-    for (let i = 0; i < this._exchangeDependentPostprocessors.length; i++) {
-      this._exchangeDependentPostprocessors[i].process(processedData);
-    }
-    for (let i = 0; i < this._postprocessors.length; i++) {
-      // A public-only engine reports account data loaded without reading any.
-      if (this._options.publicDataOnly && this._postprocessors[i].readsAccountData) continue;
-      this._postprocessors[i].process(processedData);
-    }
-
-    if (this._forwardsFrames) {
-      this._ctx.postMessage({ op: 'store', data: this._derivedStorePayload(processedData, options?.forceFullStore) });
-      return;
-    }
-
-    // Send store data with full baseline fields preserved for initial load /
-    // sendSnapshot(). Routine live payloads can omit stable fields here; the
-    // main-thread store applies the remaining fields as a partial update.
-    this._ctx.postMessage({ op: 'store', data: this._prepareStorePayload(processedData, options) });
-  };
-
-  /**
-   * Frame mode: venue state (markets, tickers, orders, positions, balance,
-   * loaded flags) reaches main in frames. Rare query-derived leverage also
-   * travels in store payloads when changed, including late-client snapshots.
-   * So does the balance when its `info` changes (Bybit wallet, Lighter tier):
-   * frames carry no `info`, and this balance already includes every frame sent.
-   */
-  private _lastFrameLeverage?: StoreData['fetchedLeverage'];
-  private _lastFrameBalanceInfo?: unknown;
-
-  private _derivedStorePayload = (data: StoreData, force = false): StoreWorkerStorePayload => {
-    const includeLeverage = force || data.fetchedLeverage !== this._lastFrameLeverage;
-    this._lastFrameLeverage = data.fetchedLeverage;
-    const info = data.balance?.info;
-    const includeBalance = info !== undefined && (force || info !== this._lastFrameBalanceInfo);
-    this._lastFrameBalanceInfo = info;
-    const {
-      markets: _markets,
-      tickers: _tickers,
-      orders: _orders,
-      positions: _positions,
-      balance,
-      fetchedLeverage,
-      loaded: _loaded,
-      latency: _latency,
-      options: _options,
-      updateIds: _updateIds,
-      ...derived
-    } = this._sanitizeForPostMessage(data);
-    return {
-      ...derived,
-      ...(includeLeverage && { fetchedLeverage }),
-      ...(includeBalance && { balance }),
-    };
-  };
-
   get store() {
     return this._store;
   }
@@ -859,7 +509,6 @@ export class ExchangeWorker {
   }
 
   sendSnapshot() {
-    this._throttledStoreUpdate.cancel();
     if (this._exchange?.isDisposed) {
       return;
     }
@@ -867,7 +516,6 @@ export class ExchangeWorker {
       const frame = this._exchange.snapshotFrame();
       if (frame) this._ctx.postMessage({ op: 'frame', data: frame, snapshot: true }, [frame]);
     }
-    this._storeUpdate(this._store.serialize(), { forceFullStore: true });
   }
 
   /**
@@ -904,7 +552,6 @@ export class ExchangeWorker {
     this._started = false;
     this._recovering = false;
     this._generation++;
-    this._throttledStoreUpdate.cancel();
     if (this._recoveryTimer !== null) clearTimeout(this._recoveryTimer);
     this._recoveryTimer = null;
     this._publicDemand.clear();
@@ -932,11 +579,8 @@ export class ExchangeWorker {
   private _clearRuntimePipeline() {
     this._unsubscribeStore?.();
     this._unsubscribeStore = null;
-    this._throttledStoreUpdate.cancel();
     this._handlers.forEach((handler) => handler.dispose());
     this._handlers = [];
-    this._postprocessors = [];
-    this._exchangeDependentPostprocessors = [];
   }
 
   handlePayload = (payload: StoreWorkerPayload) => {
@@ -993,30 +637,6 @@ export class ExchangeWorker {
     const requestKey = this._requestKey(payload);
     if (requestKey) this._pendingRequests.set(requestKey, { payload, generation: this._generation });
     switch (payload.op) {
-      case 'store':
-        this._exchange.store.update(payload.data);
-        break;
-      case 'merge-loaded':
-        // Merge loaded flags from shared public exchange without clobbering
-        // existing loaded flags (e.g., balance/orders/positions from private exchange).
-        if (payload.data && this._exchange) {
-          this._exchange.store.update({
-            loaded: { ...this._exchange.store.loaded, ...payload.data },
-          });
-        }
-        break;
-      case 'merge-message-handler-stats':
-        // Merge hosted public websocket stats into the private account store
-        // without overwriting private stats like pong/account streams.
-        if (payload.data && this._exchange) {
-          this._exchange.store.update({
-            messageHandlerStats: {
-              ...this._exchange.store.messageHandlerStats,
-              ...(payload.data as Record<string, unknown>),
-            },
-          });
-        }
-        break;
       case 'sayHi':
         break;
       case 'forwardFrames':
@@ -1186,15 +806,7 @@ export class ExchangeWorker {
   }
 
   private _invalidateReadiness() {
-    const unavailable = {
-      loaded: { markets: false, tickers: false, balance: false, orders: false, positions: false },
-      activeChasers: [],
-      activeTWAPs: [],
-    };
-    this._store.update(unavailable);
-    // Availability is host lifecycle metadata. Keep last known venue values
-    // until a replacement emits its real native empty/full snapshots.
-    this._ctx.postMessage({ op: 'store', data: unavailable });
+    this._store.reset();
   }
 
   private _twapOwnerCurrent(): boolean {
@@ -1208,9 +820,6 @@ export class ExchangeWorker {
     // Startup belongs to store.webworker's !started cleanup. Never race it by
     // scheduling a replacement before that initial start has returned.
     if (this._stopped) return;
-    // BaseExchange.dispose resets its store. Preserve the last native freshness
-    // counters before releasing it, so the replacement cannot rewind them.
-    this._recoveryUpdateIds = { ...this._store.updateIds };
     if (!this._started || this._recovering) {
       // An op that beat startup can have started a Rust TWAP already.
       this._finishRustTwaps();
@@ -1243,10 +852,9 @@ export class ExchangeWorker {
     if (cannotRecover) {
       this._stopped = true;
       this._recovering = false;
-      const message =
-        !ownerCurrent
-          ? 'TWAP owner changed; reinitialize the account worker.'
-          : this._options.publicFeed?.mode === 'shared'
+      const message = !ownerCurrent
+        ? 'TWAP owner changed; reinitialize the account worker.'
+        : this._options.publicFeed?.mode === 'shared'
           ? 'Rust shared public feed requires a fresh provider attachment and account init after engine failure.'
           : 'Rust engine recovery exhausted; reinitialize the account to retry.';
       this._ctx.postMessage({ op: 'warning', data: [message] });
@@ -1281,7 +889,6 @@ export class ExchangeWorker {
     }
     this._startTimedOut = false;
     this._startRetries++;
-    this._recoveryUpdateIds = { ...this._store.updateIds };
     this._recovering = true;
     this._deferInterruptedRequests({
       message: 'Exchange start timed out; interrupted operation outcomes are unknown and were not replayed.',
@@ -1322,23 +929,7 @@ export class ExchangeWorker {
       this._ctx.postMessage({ op: 'warning', data: ['TWAP owner changed; reinitialize the account worker.'] });
       return;
     }
-    const previousUpdateIds = this._recoveryUpdateIds ?? this._store.serialize().updateIds;
-    this._store = new DefaultStore();
-    this._store.update({
-      updateIds: {
-        orders: (previousUpdateIds?.orders ?? 0) + 1,
-        positions: (previousUpdateIds?.positions ?? 0) + 1,
-      },
-    });
-    this._lastSentMarketsVersion = null;
-    this._lastSentTickersVersion = null;
-    this._lastSentTickerBaseline = null;
-    this._lastSentOrdersUpdateId = null;
-    this._lastSentPositionsUpdateId = null;
-    this._lastPayloadHadActiveChasers = false;
-    // In frame mode this is deliberately a FULL reset payload, rather than a
-    // derived-only payload, so stale balances/orders/loaded flags disappear.
-    this._ctx.postMessage({ op: 'store', data: this._sanitizeForPostMessage(this._store.serialize()) });
+    this._store = new FrameStore();
     const started = await this.start();
     if (token !== this._startupToken || this._stopped) return;
     if (!this._twapOwnerCurrent()) {
@@ -1365,19 +956,6 @@ export class ExchangeWorker {
   }
 
   private _initializeProcessorsAndHandlers() {
-    // In hosted mode, independent post-processors run client-side (ExchangeServerWorker).
-    // In non-hosted mode, everything runs here.
-    if (!this._options.hostedMode) {
-      this._postprocessors = independentPostprocessors.map(
-        (Cls) => new (Cls as any)(this._accountName, this._exchangeName, this._options),
-      );
-    }
-
-    // Exchange-dependent post-processors always run where the exchange lives.
-    this._exchangeDependentPostprocessors = exchangeDependentPostprocessors.map(
-      (Cls) => new (Cls as any)(this._accountName, this._exchangeName, this._options, this._exchange!),
-    );
-
     const generation = this._generation;
     const handlerContext = new Proxy(this._ctx, {
       get: (target, property) =>
@@ -1411,9 +989,6 @@ export class ExchangeWorker {
     const exchange = this._exchange!;
     const generation = this._generation;
     const isCurrent = () => generation === this._generation && !this._stopped;
-    this._unsubscribeStore = exchange.store.subscribe((data) => {
-      if (isCurrent()) this._throttledStoreUpdate(data);
-    });
     if (exchange instanceof RustEngineExchange) {
       exchange.on('command-progress', (progress: CommandProgress) => {
         // A command deadline can remove its RPC before native code chooses an

@@ -1,4 +1,7 @@
 //! Background ticker snapshots own their preparation, response and retirement.
+#[path = "../../../engine/tests/support/request_stats_frame.rs"]
+mod request_stats_frame;
+use request_stats_frame::assert_request_stats_frame;
 mod support;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{
@@ -242,6 +245,7 @@ fn retry(engine: &mut Engine<Lighter>, actions: &[Action]) -> Preparation {
 fn failed_prefixes_and_typed_failures_discard_rows_and_recover() {
     for failure in 0..5 {
         let (mut engine, poll, _) = boot(false, false);
+        let before_stats = engine.snapshot_frame(NOW).to_vec();
         let (token, unsigned) = prep(&fire(&mut engine, ISSUE, poll));
         if failure == 0 {
             engine.http_preparation_failed(
@@ -295,7 +299,17 @@ fn failed_prefixes_and_typed_failures_discard_rows_and_recover() {
             }
         }
         assert_eq!(engine.store().ticker("ETH").unwrap().mark, 0.);
-        assert!(engine.take_frame(ISSUE + 2.).is_none());
+        assert_request_stats_frame(
+            &before_stats,
+            engine.take_frame(ISSUE + 2.),
+            ISSUE + 2.,
+            match failure {
+                0 => [0; 5],
+                1 => [0, 0, 0, 0, 1],
+                2 | 3 => [1, 0, 0, 0, 0],
+                _ => [0, 0, 0, 1, 0],
+            },
+        );
         let actions: Vec<_> = engine.drain_actions().collect();
         let next = retry(&mut engine, &actions);
         assert_ne!(token, next);
@@ -310,6 +324,7 @@ fn failed_prefixes_and_typed_failures_discard_rows_and_recover() {
 fn parked_and_released_requests_share_original_deadline() {
     for released in [false, true] {
         let (mut engine, poll, _) = boot(false, false);
+        let before_stats = engine.snapshot_frame(NOW).to_vec();
         let actions = fire(&mut engine, ISSUE, poll);
         let (token, unsigned) = prep(&actions);
         let deadline = timer(&actions, ISSUE + 20_000.);
@@ -318,7 +333,12 @@ fn parked_and_released_requests_share_original_deadline() {
         }
         let actions = fire(&mut engine, ISSUE + 20_000., deadline);
         assert_eq!(engine.store().ticker("ETH").unwrap().mark, 0.);
-        assert!(engine.take_frame(ISSUE + 20_000.).is_none());
+        assert_request_stats_frame(
+            &before_stats,
+            engine.take_frame(ISSUE + 20_000.),
+            ISSUE + 20_000.,
+            if released { [0, 0, 0, 1, 0] } else { [0; 5] },
+        );
         let next = retry(&mut engine, &actions);
         assert_ne!(token, next);
         reply_at(&mut engine, ISSUE + 21_001., &unsigned, 200, BODY);

@@ -2,11 +2,12 @@ import type { Market, OrderFillEvent } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { createIncrementalFills } from '../../utils/incrementalFills';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { createIncrementalFills } from '../../utils/incrementalFills';
 
 // A fill event reports THIS execution. Consumers add them up (the chaser,
 // provisional positions), so a cumulative amount double-counts every partial.
@@ -76,8 +77,13 @@ describe('Bybit fill events', () => {
   });
 
   it('reports each partial once, so the partials sum to the order', () => {
-    const store = new DefaultStore();
-    store.update({ markets: [MARKET] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [MARKET] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BybitExchange('bybit', { key: 'k', secret: 's' }, store);
     exchanges.push(exchange);
     const fills: OrderFillEvent[] = [];
@@ -97,8 +103,13 @@ describe('Bybit fill events', () => {
   // 4847.5704 / 0.058 is 83578.79999999999 in floats — the price a user saw in
   // the fill toast. Differences of cumulative fields carry the same noise.
   it('reports price and size without float noise', () => {
-    const store = new DefaultStore();
-    store.update({ markets: [MARKET] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [MARKET] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BybitExchange('bybit', { key: 'k', secret: 's' }, store);
     exchanges.push(exchange);
     const fills: OrderFillEvent[] = [];
@@ -120,8 +131,13 @@ describe('Bybit fill events', () => {
 describe('Bybit inverse fill events', () => {
   // Inverse value is base coin, quantity is USD contracts: price = qty / value.
   it('prices each execution as contracts over coin, not its reciprocal', () => {
-    const store = new DefaultStore();
-    store.update({ markets: [{ ...MARKET, id: 'BTCUSD', symbol: 'BTCUSD', quote: 'USD', isInverse: true }] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [{ ...MARKET, id: 'BTCUSD', symbol: 'BTCUSD', quote: 'USD', isInverse: true }] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BybitInverseExchange('bybitinverse', { key: 'k', secret: 's' }, store);
     exchanges.push(exchange);
     const fills: OrderFillEvent[] = [];
@@ -154,8 +170,13 @@ describe('Bybit inverse fill events', () => {
 
 describe('AsterDEX fill events', () => {
   it('carry the contract fields, so consumers do not read amount as NaN', () => {
-    const store = new DefaultStore();
-    store.update({ markets: [MARKET] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [MARKET] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new AsterDEXExchange('asterdex', { key: 'k', secret: 's' }, store);
     exchanges.push(exchange as any);
     const fills: OrderFillEvent[] = [];
@@ -185,8 +206,13 @@ describe('AsterDEX fill events', () => {
   });
 
   it('emits nothing for a frame on a filled order that executed nothing', () => {
-    const store = new DefaultStore();
-    store.update({ markets: [MARKET] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [MARKET] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new AsterDEXExchange('asterdex', { key: 'k', secret: 's' }, store);
     exchanges.push(exchange as any);
     const fills: OrderFillEvent[] = [];

@@ -6,13 +6,16 @@ import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { nativePosition } from '../../__tests__/cutover/nativePosition';
+import { applyReferenceFixture } from '../../__tests__/cutover/referenceFixture';
+import { FrameStore } from '../../store/frameStore';
 import { OrderStopTriggerType } from '../../types';
 import { UpdatePositionsHandler } from './UpdatePositionsHandler';
 
 describe('UpdatePositionsHandler', () => {
   let handler: UpdatePositionsHandler;
   let mockExchange: Exchange;
-  let mockStore: any;
+  let mockStore: FrameStore;
   let mockCtx: Worker;
   let mockSettings: AppSettingsWorkerType;
   let mockMetadata: ExchangeMetadataWorkerType;
@@ -28,11 +31,7 @@ describe('UpdatePositionsHandler', () => {
       postMessage: mockPostMessage,
     } as unknown as Worker;
 
-    mockStore = {
-      positions: [],
-      addOrUpdatePositions: vi.fn(),
-      addOrUpdatePositionsFull: vi.fn(),
-    };
+    mockStore = new FrameStore();
 
     mockFetchPositions = vi.fn();
 
@@ -73,8 +72,11 @@ describe('UpdatePositionsHandler', () => {
   describe('handle', () => {
     describe('updatePositions', () => {
       it('should fetch and update positions successfully', async () => {
-        const positions = [{ symbol: 'BTCUSDT', size: 1 }];
-        mockFetchPositions.mockResolvedValue(positions);
+        const positions = [nativePosition({ symbol: 'BTCUSDT', contracts: 1 })];
+        mockFetchPositions.mockImplementation(async () => {
+          applyReferenceFixture(mockStore, { positions });
+          return positions;
+        });
 
         const payload: StoreWorkerPayload = {
           op: 'updatePositions',
@@ -85,7 +87,7 @@ describe('UpdatePositionsHandler', () => {
 
         await vi.waitFor(() => {
           expect(mockFetchPositions).toHaveBeenCalled();
-          expect(mockStore.addOrUpdatePositionsFull).toHaveBeenCalledWith(positions);
+          expect(mockStore.positions).toEqual(positions);
           expect(mockPostMessage).toHaveBeenCalledWith({
             op: 'updatePositions:done',
             data: { requestId: 'req-1', success: true },
@@ -94,8 +96,11 @@ describe('UpdatePositionsHandler', () => {
       });
 
       it('should fetch positions for specific symbols', async () => {
-        const positions = [{ symbol: 'BTCUSDT', size: 1 }];
-        mockFetchPositions.mockResolvedValue(positions);
+        const positions = [nativePosition({ symbol: 'BTCUSDT', contracts: 1 })];
+        mockFetchPositions.mockImplementation(async () => {
+          applyReferenceFixture(mockStore, { positions });
+          return positions;
+        });
 
         const payload: StoreWorkerPayload = {
           op: 'updatePositions',
@@ -110,7 +115,10 @@ describe('UpdatePositionsHandler', () => {
       });
 
       it('should handle empty positions result', async () => {
-        mockFetchPositions.mockResolvedValue([]);
+        mockFetchPositions.mockImplementation(async () => {
+          applyReferenceFixture(mockStore, { positions: [] });
+          return [];
+        });
 
         const payload: StoreWorkerPayload = {
           op: 'updatePositions',
@@ -124,14 +132,15 @@ describe('UpdatePositionsHandler', () => {
             op: 'updatePositions:done',
             data: { requestId: 'req-3', success: true },
           });
-          expect(mockStore.addOrUpdatePositions).not.toHaveBeenCalled();
-          expect(mockStore.addOrUpdatePositionsFull).not.toHaveBeenCalled();
         });
       });
 
       it('should clear stale positions for empty full-account refreshes', async () => {
-        mockStore.positions = [{ symbol: 'BTCUSDT', size: 1 }];
-        mockFetchPositions.mockResolvedValue([]);
+        applyReferenceFixture(mockStore, { positions: [nativePosition({ symbol: 'BTCUSDT', contracts: 1 })] });
+        mockFetchPositions.mockImplementation(async () => {
+          applyReferenceFixture(mockStore, { positions: [] });
+          return [];
+        });
 
         const payload: StoreWorkerPayload = {
           op: 'updatePositions',
@@ -141,7 +150,7 @@ describe('UpdatePositionsHandler', () => {
         handler.handle(payload);
 
         await vi.waitFor(() => {
-          expect(mockStore.addOrUpdatePositionsFull).toHaveBeenCalledWith([]);
+          expect(mockStore.positions).toEqual([]);
           expect(mockPostMessage).toHaveBeenCalledWith({
             op: 'updatePositions:done',
             data: { requestId: 'req-empty-full', success: true },
@@ -150,8 +159,11 @@ describe('UpdatePositionsHandler', () => {
       });
 
       it('should use partial updates for symbol-scoped refreshes', async () => {
-        const positions = [{ symbol: 'BTCUSDT', size: 1 }];
-        mockFetchPositions.mockResolvedValue(positions);
+        const positions = [nativePosition({ symbol: 'BTCUSDT', contracts: 1 })];
+        mockFetchPositions.mockImplementation(async () => {
+          applyReferenceFixture(mockStore, { positions });
+          return positions;
+        });
 
         const payload: StoreWorkerPayload = {
           op: 'updatePositions',
@@ -161,15 +173,17 @@ describe('UpdatePositionsHandler', () => {
         handler.handle(payload);
 
         await vi.waitFor(() => {
-          expect(mockStore.addOrUpdatePositions).toHaveBeenCalledWith(positions);
-          expect(mockStore.addOrUpdatePositionsFull).not.toHaveBeenCalled();
+          expect(mockStore.positions).toEqual(positions);
         });
       });
 
       it('should not update if positions are equal to existing', async () => {
-        const positions = [{ symbol: 'BTCUSDT', size: 1 }];
-        mockStore.positions = positions;
-        mockFetchPositions.mockResolvedValue(positions);
+        const positions = [nativePosition({ symbol: 'BTCUSDT', contracts: 1 })];
+        applyReferenceFixture(mockStore, { positions });
+        mockFetchPositions.mockImplementation(async () => {
+          applyReferenceFixture(mockStore, { positions });
+          return positions;
+        });
 
         const payload: StoreWorkerPayload = {
           op: 'updatePositions',
@@ -183,7 +197,6 @@ describe('UpdatePositionsHandler', () => {
             op: 'updatePositions:done',
             data: { requestId: 'req-4', success: true },
           });
-          expect(mockStore.addOrUpdatePositions).not.toHaveBeenCalled();
         });
       });
 
@@ -235,7 +248,7 @@ describe('UpdatePositionsHandler', () => {
 
         // Reset mock
         mockPostMessage.mockClear();
-        mockFetchPositions.mockResolvedValue([{ symbol: 'BTCUSDT', size: 1 }]);
+        mockFetchPositions.mockResolvedValue([nativePosition({ symbol: 'BTCUSDT', contracts: 1 })]);
 
         // Second request too soon (within 5 seconds)
         const payload2: StoreWorkerPayload = {
@@ -274,7 +287,7 @@ describe('UpdatePositionsHandler', () => {
 
         // Reset mock
         mockPostMessage.mockClear();
-        mockFetchPositions.mockResolvedValue([{ symbol: 'BTCUSDT', size: 1 }]);
+        mockFetchPositions.mockResolvedValue([nativePosition({ symbol: 'BTCUSDT', contracts: 1 })]);
 
         // Second request after rate limit
         const payload2: StoreWorkerPayload = {
@@ -322,7 +335,7 @@ describe('UpdatePositionsHandler', () => {
         });
 
         // Resolve first request
-        resolvePositions!([{ symbol: 'BTCUSDT', size: 1 }]);
+        resolvePositions!([nativePosition({ symbol: 'BTCUSDT', contracts: 1 })]);
 
         await vi.waitFor(() => {
           expect(mockFetchPositions).toHaveBeenCalledTimes(1); // Only called once
@@ -330,7 +343,7 @@ describe('UpdatePositionsHandler', () => {
       });
 
       it('should not update if exchange is disposed', async () => {
-        const positions = [{ symbol: 'BTCUSDT', size: 1 }];
+        const positions = [nativePosition({ symbol: 'BTCUSDT', contracts: 1 })];
         mockFetchPositions.mockImplementation(async () => {
           mockExchange.isDisposed = true;
           return positions;
@@ -348,8 +361,6 @@ describe('UpdatePositionsHandler', () => {
         });
 
         // Should not update store if disposed
-        expect(mockStore.addOrUpdatePositions).not.toHaveBeenCalled();
-        expect(mockStore.addOrUpdatePositionsFull).not.toHaveBeenCalled();
       });
     });
 

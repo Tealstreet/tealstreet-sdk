@@ -58,7 +58,9 @@ function check(text) {
   assert.match(job(text, 'combined'), /CHANGED_INTEGRATION_TESTS: \$\{\{ needs.selection.outputs.integrationTests \}\}/);
   assert.match(job(text, 'combined'), /\['--import', 'tsx', '--test', \.\.\.tests\]/);
   const native = job(text, 'native');
-  assert.match(native, /cargo test --locked --workspace/);
+  // Fail-complete (AGT-24): `--no-fail-fast` joined every native cargo test so one
+  // run reports all failures; the selection after it is unchanged.
+  assert.match(native, /cargo test --locked --no-fail-fast --workspace/);
   assert.match(native, /python3 scripts\/test-http-plan-feature-modes.py/);
   assert.match(native, /check: mutation-barriers/);
   assert.match(job(text, 'result'), /if: always\(\)/);
@@ -74,7 +76,7 @@ function checkIsolatedTypes(text) {
   const command = candle.split('\n').find(line => /cargo test .* -p safe-cex-types /.test(line));
   assert(command, 'missing types test command');
   assert.match(command, /SAFE_CEX_TYPESCRIPT_PATH="\$GITHUB_WORKSPACE\/node_modules\/typescript"/);
-  assert.match(command, /cargo test --locked -p safe-cex-types --tests\s*$/);
+  assert.match(command, /cargo test --locked --no-fail-fast -p safe-cex-types --tests\s*$/);
   assert.doesNotMatch(command, /--skip|--lib|--workspace/);
   assert.match(candle, /python3 scripts\/check-serde-json-features.py/);
   for (const action of ['actions/setup-node', './.github/actions/prepare-yarn', './.github/actions/install-yarn']) {
@@ -87,17 +89,36 @@ function checkIsolatedTypes(text) {
     assert(lanes.includes('candle-cache'), `${action} must admit isolated types`);
   }
   assert.equal((native.match(/\n        id: yarn\n/g) ?? []).length, 1, 'one shared Yarn preparation step');
-  assert.match(native, /cargo test --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types/);
+  assert.match(native, /cargo test --locked --no-fail-fast --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types/);
 }
 
 test('complete types suite retains isolation and dependencies for both native oracle lanes', () => checkIsolatedTypes(source));
 
 test('types suite rejects a skipped audit, library-only selection or missing compiler', () => {
   for (const changed of [
-    source.replace('cargo test --locked -p safe-cex-types --tests', 'cargo test --locked -p safe-cex-types --lib'),
-    source.replace('cargo test --locked -p safe-cex-types --tests', 'cargo test --locked -p safe-cex-types --tests -- --skip position_record'),
+    source.replace('cargo test --locked --no-fail-fast -p safe-cex-types --tests', 'cargo test --locked --no-fail-fast -p safe-cex-types --lib'),
+    source.replace('cargo test --locked --no-fail-fast -p safe-cex-types --tests', 'cargo test --locked --no-fail-fast -p safe-cex-types --tests -- --skip position_record'),
     source.replace('SAFE_CEX_TYPESCRIPT_PATH="$GITHUB_WORKSPACE/node_modules/typescript" ', ''),
   ]) assert.throws(() => checkIsolatedTypes(changed));
+});
+
+function checkFailComplete(text) {
+  const native = job(text, 'native');
+  const tests = native.split('\n').filter((line) => /\bcargo test\b/.test(line) && !line.trim().startsWith('#'));
+  assert(tests.length > 0, 'native cargo test commands');
+  for (const line of tests) assert.match(line, /cargo test --locked --no-fail-fast /, line.trim());
+  assert.doesNotMatch(native, /command: .*&&/, 'chained commands stop at the first failure');
+  assert.match(native, /CHECK_COMMANDS: \$\{\{ matrix.command \}\}\n        run: node harness\/run-all-checks\.mjs/);
+}
+
+test('native checks are fail-complete: no cargo fail-fast, no chains, one summarising runner', () => checkFailComplete(source));
+
+test('fail-complete guard rejects a fail-fast cargo test, a chain or a bare matrix command', () => {
+  for (const [before, after] of [
+    ['cargo test --locked --no-fail-fast -p safe-cex-num --lib', 'cargo test --locked -p safe-cex-num --lib'],
+    ['command: cargo fmt --all --check', 'command: cargo fmt --all --check && cargo fmt --check'],
+    ['run: node harness/run-all-checks.mjs', 'run: ${{ matrix.command }}'],
+  ]) assert.throws(() => checkFailComplete(source.replace(before, after)), before);
 });
 
 test('adding types dependencies must not retire the existing metadata lane', () => {

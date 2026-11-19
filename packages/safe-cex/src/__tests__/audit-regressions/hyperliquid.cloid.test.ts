@@ -2,10 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { replacementClientOrderIdOf } from '../../exchanges/clientOrderId';
 import { mintHyperliquidCloid, placementRecordFromWire } from '../../exchanges/hyperliquid/hyperliquid.cloid';
-import { getCrossCache, PLACEMENT_RECORD_TTL_MS } from '../reference/hyperliquid/hyperliquid.cross-cache';
-import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
-import { HyperliquidSpotExchange } from '../reference/hyperliquid/hyperliquidspot.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import {
   MarginType,
   OrderSide,
@@ -15,6 +12,10 @@ import {
   PositionMode,
   PositionSide,
 } from '../../types';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { getCrossCache, PLACEMENT_RECORD_TTL_MS } from '../reference/hyperliquid/hyperliquid.cross-cache';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
+import { HyperliquidSpotExchange } from '../reference/hyperliquid/hyperliquidspot.exchange';
 
 // Every Hyperliquid order carries a client order ID (cloid, wire field `c`):
 // `0x` + 32 hex chars, on any order including triggers and TP/SL groupings.
@@ -31,7 +32,7 @@ const okResponse = (statuses: unknown[]) => ({
 });
 
 const createExchange = (options: Record<string, unknown> = {}) => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const market = {
     id: 'BTC',
     symbol: 'BTC-PERP',
@@ -39,30 +40,36 @@ const createExchange = (options: Record<string, unknown> = {}) => {
     quote: 'USDC',
     active: true,
     precision: { amount: 0.00001, price: 1 },
-    limits: { amount: { min: 0.00001, max: 1000 } },
+    limits: { amount: { min: 0.00001, max: 1000 }, leverage: { min: 1, max: 100 } },
     contractSize: 1,
     isSpot: false,
     info: { hyperliquidId: 0 },
   } as any;
-  store.update({
-    markets: [market],
-    tickers: [{ id: 'BTC', symbol: 'BTC-PERP', bid: 78490, ask: 78510, last: 78500, mark: 78500, index: 78502 } as any],
-    positions: [
-      {
-        id: 'BTC-PERP:long',
-        symbol: 'BTC-PERP',
-        side: PositionSide.Long,
-        contracts: 0.5,
-        entryPrice: 78500,
-        notional: 39250,
-        leverage: 1,
-        unrealizedPnl: 0,
-        liquidationPrice: 0,
-        marginType: MarginType.Cross,
-        positionMode: PositionMode.OneWay,
-      } as any,
-    ],
-  });
+  applyReferenceFixture(
+    store,
+    {
+      markets: [market],
+      tickers: [
+        { id: 'BTC', symbol: 'BTC-PERP', bid: 78490, ask: 78510, last: 78500, mark: 78500, index: 78502 } as any,
+      ],
+      positions: [
+        {
+          id: 'BTC-PERP:long',
+          symbol: 'BTC-PERP',
+          side: PositionSide.Long,
+          contracts: 0.5,
+          entryPrice: 78500,
+          notional: 39250,
+          leverage: 1,
+          unrealizedPnl: 0,
+          liquidationPrice: null,
+          marginType: MarginType.Cross,
+          positionMode: PositionMode.OneWay,
+        } as any,
+      ],
+    },
+    store.markets.map((row) => row.symbol),
+  );
   const exchange = new HyperliquidExchange(
     'hyperliquid' as any,
     { key: WALLET, secret: SECRET, ...options } as any,
@@ -336,22 +343,26 @@ describe('placementRecordFromWire', () => {
 
 describe('hyperliquidspot placement wires carry a cloid', () => {
   it('limit entry with an attached stop', async () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [
-        {
-          id: '@1',
-          symbol: 'HFUN/USDC',
-          base: 'HFUN',
-          quote: 'USDC',
-          active: true,
-          isSpot: true,
-          precision: { amount: 0.01, price: 0.0001 },
-          limits: { amount: { min: 0.01, max: 1000000 } },
-          info: { hyperliquidId: 10001 },
-        } as any,
-      ],
-    });
+    const store = new FrameStore();
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: '@1',
+            symbol: 'HFUN/USDC',
+            base: 'HFUN',
+            quote: 'USDC',
+            active: true,
+            isSpot: true,
+            precision: { amount: 0.01, price: 0.0001 },
+            limits: { amount: { min: 0.01, max: 1000000 }, leverage: { min: 1, max: 100 } },
+            info: { hyperliquidId: 10001 },
+          } as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const exchange = new HyperliquidSpotExchange(
       'hyperliquidspot' as any,
       { key: WALLET, secret: SECRET } as any,

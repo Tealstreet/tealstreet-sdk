@@ -1,11 +1,9 @@
-import type { PublicDataSource } from '../../types';
-
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
-import { InProcessPublicDataProvider } from '../../exchanges/in-process-public-data';
-import { DefaultStore } from '../../store/store.base';
 
 // The shared public exchange has no keys, so fetchMarkets builds every market
 // with leverage.max = 1. An account reading those markets must overlay its own
@@ -21,31 +19,37 @@ const sharedMarket = () => ({
 });
 
 const sharedSourceWith = (markets: unknown[]) => {
-  const sourceStore = new DefaultStore();
-  sourceStore.update({ markets: markets as any, loaded: { ...sourceStore.loaded, markets: true } });
+  const sourceStore = new FrameStore();
+  applyReferenceFixture(
+    sourceStore,
+    { markets: markets as any, loaded: { ...sourceStore.loaded, markets: true } },
+    sourceStore.markets.map((row) => row.symbol),
+  );
   return sourceStore;
 };
 
-const connectToSharedSource = (exchange: BinanceExchange | BinancePMExchange, sourceStore: DefaultStore) => {
-  const source = {
-    store: sourceStore,
-    listenOrderBook: () => () => {},
-    listenOHLCV: () => () => {},
-  } as unknown as PublicDataSource;
-  const provider = new InProcessPublicDataProvider(exchange, source);
-  provider.connect();
-  return provider;
+// Retained protocol producer: encode each account catalogue as SCXF before it
+// reaches FrameStore. The removed mutable InProcess provider has no writer role.
+const connectToSharedSource = (exchange: BinanceExchange | BinancePMExchange, sourceStore: FrameStore) => {
+  const publish = () => {
+    const overlay: unknown = Reflect.get(exchange, 'accountMarketOverlay');
+    const markets = typeof overlay === 'function' ? overlay(sourceStore.markets) : sourceStore.markets;
+    applyReferenceFixture(exchange.store, { markets, loaded: { markets: true } });
+  };
+  const dispose = sourceStore.subscribe('markets', publish);
+  publish();
+  return { publish, dispose };
 };
 
 const variants = [
   {
     name: 'binance',
-    create: () => new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, new DefaultStore()),
+    create: () => new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, new FrameStore()),
     bracketClient: (ex: any) => ex.xhr,
   },
   {
     name: 'binancepm',
-    create: () => new BinancePMExchange('binancepm', { key: 'test-key', secret: 'test-secret' }, new DefaultStore()),
+    create: () => new BinancePMExchange('binancepm', { key: 'test-key', secret: 'test-secret' }, new FrameStore()),
     bracketClient: (ex: any) => ex.papiXhr,
   },
 ] as const;
@@ -65,14 +69,19 @@ describe.each(variants)('$name account on a shared public exchange', ({ create, 
     mockBrackets(exchange);
     const shared = sharedMarket();
     const sourceStore = sharedSourceWith([shared]);
-    connectToSharedSource(exchange, sourceStore);
+    const producer = connectToSharedSource(exchange, sourceStore);
 
     await (exchange as any).loadAccountMaxLeverage();
+    producer.publish();
 
     expect(exchange.store.markets[0].limits.leverage.max).toBe(20);
     expect(shared.limits.leverage.max).toBe(1);
 
-    sourceStore.update({ markets: [sharedMarket()] as any });
+    applyReferenceFixture(
+      sourceStore,
+      { markets: [sharedMarket()] as any },
+      sourceStore.markets.map((row) => row.symbol),
+    );
 
     expect(exchange.store.markets[0].limits.leverage.max).toBe(20);
   });

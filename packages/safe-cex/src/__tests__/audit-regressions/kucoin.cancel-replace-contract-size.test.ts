@@ -1,8 +1,10 @@
 import type { Axios } from 'axios';
+import type { StoreData } from '../../generated/StoreData';
 
-import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { Market, Order, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
 
 const MARKET: Market = {
   id: 'XBTUSDTM',
@@ -19,8 +21,13 @@ const MARKET: Market = {
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
 
   const exchange = new KucoinExchange(
     'kucoin',
@@ -66,7 +73,12 @@ describe('KuCoin cancel-replace contract sizing', () => {
   it('re-places a normal order with native contracts after a price-only update', async () => {
     const { exchange, store, deleteRequest, postRequest } = createExchange();
     const [order] = mapOrder(exchange);
-    store.update({ orders: [order] });
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     expect(order.amount).toBe(0.005);
 
@@ -89,7 +101,12 @@ describe('KuCoin cancel-replace contract sizing', () => {
       filledSize: '0',
       remainSize: '11618',
     });
-    store.update({ orders: [order] });
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     expect(order.amount).toBe(19.982);
     expect(order.remaining).toBe(11.618);
@@ -112,7 +129,23 @@ describe('KuCoin cancel-replace contract sizing', () => {
       filledSize: '0',
       remainSize: '11618',
     });
-    store.addOrUpdateOrder(websocketOrder);
+    (() => {
+      const incoming: StoreData['orders'] = [websocketOrder];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
 
     // KuCoin's REST Get Order List example supplies size/filledSize, but no
     // remainSize. This is the 500 ms polling response that full-replaces the
@@ -127,7 +160,12 @@ describe('KuCoin cancel-replace contract sizing', () => {
       .mockResolvedValueOnce({ data: { code: '200000', data: { items: [] } } });
 
     const orders = await exchange.fetchOrders();
-    store.update({ orders });
+    store.apply(
+      nativeFixture(
+        { orders },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const [restReplacedOrder] = store.orders;
     expect(restReplacedOrder.extra?.remainingNative).toBe(11_618);
@@ -155,7 +193,12 @@ describe('KuCoin cancel-replace contract sizing', () => {
       filledSize: '0',
       remainSize: 0,
     });
-    store.update({ orders: [partiallyFilled, zeroRemaining] });
+    store.apply(
+      nativeFixture(
+        { orders: [partiallyFilled, zeroRemaining] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     getRequest
       .mockResolvedValueOnce({
         data: {
@@ -184,7 +227,12 @@ describe('KuCoin cancel-replace contract sizing', () => {
       filledSize: '0',
       remainSize: '5',
     });
-    store.update({ orders: [previousOrder] });
+    store.apply(
+      nativeFixture(
+        { orders: [previousOrder] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     getRequest
       .mockResolvedValueOnce({
         data: {
@@ -222,7 +270,12 @@ describe('KuCoin cancel-replace contract sizing', () => {
     });
     expect(mappedOrder.extra?.filledInPlacementUnits).toBe(9);
     const order: Order = { ...mappedOrder, extra: undefined };
-    store.update({ orders: [order] });
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     expect(order.amount).toBe(0.02);
     expect(order.remaining).toBe(0.011);
@@ -238,7 +291,12 @@ describe('KuCoin cancel-replace contract sizing', () => {
   it('does not convert an explicit native amount update a second time', async () => {
     const { exchange, store, postRequest } = createExchange();
     const [order] = mapOrder(exchange, { id: 'amount-update-order-id' });
-    store.update({ orders: [order] });
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await exchange.updateOrder({ order, update: { amount: 7 } });
 
@@ -257,7 +315,12 @@ describe('KuCoin cancel-replace contract sizing', () => {
       stop: 'down',
       stopPrice: '49000',
     });
-    store.update({ orders: [order] });
+    store.apply(
+      nativeFixture(
+        { orders: [order] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     expect(order.type).toBe(OrderType.StopLoss);
     expect(order.amount).toBe(0.005);
@@ -281,7 +344,12 @@ describe('KuCoin cancel-replace contract sizing', () => {
       triggerStopUpPrice: '52000',
     });
     const stopLossOrder = orders.find((order) => order.id.endsWith('__stop_loss'))!;
-    store.update({ orders });
+    store.apply(
+      nativeFixture(
+        { orders },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     expect(orders[0].amount).toBe(0.005);
 

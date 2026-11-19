@@ -1,18 +1,19 @@
-vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
-});
-
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName } from '../types';
 
 import bs58 from 'bs58';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createExchange } from '../index';
+
 import { RustEngineExchange, setRustEngineTransport } from '../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../store/store.base';
+import { createExchange } from '../index';
+import { FrameStore } from '../store/frameStore';
 import { OrderSide, OrderType } from '../types';
 import { prepareRecordedHttp } from './support/managedHttp';
+
+vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
+});
 
 const aliases: ExchangeName[] = ['kodiakfi', 'woofi', 'mode', 'what'];
 const tags = ['TEALKODIAK', 'TEALSTREET', 'TEALMODE', 'TEALWHAT'];
@@ -37,9 +38,11 @@ const transport = (validation = 200) => {
     },
     async request(request) {
       const path = new URL(request.url).pathname;
-      if (path === '/v1/client/info' && validation !== 200) return {
-        status: validation, body: new TextEncoder().encode('{"success":false,"message":"rejected"}'),
-      };
+      if (path === '/v1/client/info' && validation !== 200)
+        return {
+          status: validation,
+          body: new TextEncoder().encode('{"success":false,"message":"rejected"}'),
+        };
       if (request.method !== 'GET') {
         writes.push(request);
         return { status: 200, body: envelope(path === '/v1/order' ? { order_id: '9007199254740995' } : {}) };
@@ -47,21 +50,58 @@ const transport = (validation = 200) => {
       let data: unknown;
       switch (path) {
         case '/v1/public/info':
-          data = { rows: [{ symbol: 'PERP_BTC_USDC', base_tick: 0.001, quote_tick: 0.1, base_min: 0.001, base_max: 20, base_imr: 0.01 }] };
+          data = {
+            rows: [
+              {
+                symbol: 'PERP_BTC_USDC',
+                base_tick: 0.001,
+                quote_tick: 0.1,
+                base_min: 0.001,
+                base_max: 20,
+                base_imr: 0.01,
+              },
+            ],
+          };
           break;
         case '/v1/public/futures':
           data = { rows: [{ symbol: 'PERP_BTC_USDC', '24h_open': 50000, '24h_close': 51000, mark_price: 51000 }] };
           break;
-        case '/v1/client/info': data = { max_leverage: 20 }; break;
-        case '/v1/client/margin_modes': data = { rows: [{ symbol: 'PERP_BTC_USDC', default_margin_mode: 'CROSS' }] }; break;
-        case '/v1/positions':
-          data = { rows: [
-            { symbol: 'PERP_BTC_USDC', position_qty: 1, average_open_price: 50000, mark_price: 51000, margin_mode: 'CROSS', leverage: 10 },
-            { symbol: 'PERP_BTC_USDC', position_qty: -0.5, average_open_price: 52000, mark_price: 51000, margin_mode: 'ISOLATED', leverage: 5 },
-          ], total_collateral_value: 10000, free_collateral: 7000 };
+        case '/v1/client/info':
+          data = { max_leverage: 20 };
           break;
-        case '/v1/orders': case '/v1/algo/orders': data = { rows: [], meta: { total: 0 } }; break;
-        default: throw new Error(`Unexpected Orderly read ${request.url}`);
+        case '/v1/client/margin_modes':
+          data = { rows: [{ symbol: 'PERP_BTC_USDC', default_margin_mode: 'CROSS' }] };
+          break;
+        case '/v1/positions':
+          data = {
+            rows: [
+              {
+                symbol: 'PERP_BTC_USDC',
+                position_qty: 1,
+                average_open_price: 50000,
+                mark_price: 51000,
+                margin_mode: 'CROSS',
+                leverage: 10,
+              },
+              {
+                symbol: 'PERP_BTC_USDC',
+                position_qty: -0.5,
+                average_open_price: 52000,
+                mark_price: 51000,
+                margin_mode: 'ISOLATED',
+                leverage: 5,
+              },
+            ],
+            total_collateral_value: 10000,
+            free_collateral: 7000,
+          };
+          break;
+        case '/v1/orders':
+        case '/v1/algo/orders':
+          data = { rows: [], meta: { total: 0 } };
+          break;
+        default:
+          throw new Error(`Unexpected Orderly read ${request.url}`);
       }
       return { status: 200, body: envelope(data) };
     },
@@ -73,13 +113,16 @@ const transport = (validation = 200) => {
 
 describe('retained Orderly Rust family oracle', () => {
   let exchange: RustEngineExchange | undefined;
-  afterEach(() => { exchange?.dispose(); vi.restoreAllMocks(); });
+  afterEach(() => {
+    exchange?.dispose();
+    vi.restoreAllMocks();
+  });
 
   it.each(aliases)('createExchange loads %s through the default WASM loader', async (name) => {
     const tape = transport();
     setRustEngineTransport(() => tape.native);
-    const store = new DefaultStore();
-    exchange = await createExchange(name, { key: '', secret: '', publicDataOnly: true }, store) as RustEngineExchange;
+    const store = new FrameStore();
+    exchange = (await createExchange(name, { key: '', secret: '', publicDataOnly: true }, store)) as RustEngineExchange;
     expect(exchange).toBeInstanceOf(RustEngineExchange);
     await exchange.start();
     expect(store.markets.map((m) => m.symbol)).toEqual(['BTCUSDC']);
@@ -90,24 +133,48 @@ describe('retained Orderly Rust family oracle', () => {
   it.each(aliases)('%s preserves dual margin identity and exact caller IDs with broker attribution', async (name) => {
     const tape = transport();
     setRustEngineTransport(() => tape.native);
-    const store = new DefaultStore();
-    exchange = await createExchange(name, {
-      key: `ed25519:${bs58.encode(new Uint8Array(32))}`,
-      secret: `ed25519:${bs58.encode(new Uint8Array(32).fill(7))}`,
-      applicationId: 'documented-test-account', testnet: true,
-    }, store) as RustEngineExchange;
+    const store = new FrameStore();
+    exchange = (await createExchange(
+      name,
+      {
+        key: `ed25519:${bs58.encode(new Uint8Array(32))}`,
+        secret: `ed25519:${bs58.encode(new Uint8Array(32).fill(7))}`,
+        applicationId: 'documented-test-account',
+        testnet: true,
+      },
+      store,
+    )) as RustEngineExchange;
     await exchange.start();
     expect(store.positions.map((p) => p.id).sort()).toEqual(['BTCUSDC', 'BTCUSDC:isolated']);
-    expect(await exchange.getAccount()).toEqual({ userId: 'documented-test-account', affiliateId: 'documented-test-account' });
-    await expect(exchange.placeOrder({ symbol: 'BTCUSDC', type: OrderType.Limit, side: OrderSide.Buy,
-      amount: 1, price: 50000, clientOrderId: 'caller-Exact-42' })).resolves.toEqual(['9007199254740995']);
+    expect(await exchange.getAccount()).toEqual({
+      userId: 'documented-test-account',
+      affiliateId: 'documented-test-account',
+    });
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDC',
+        type: OrderType.Limit,
+        side: OrderSide.Buy,
+        amount: 1,
+        price: 50000,
+        clientOrderId: 'caller-Exact-42',
+      }),
+    ).resolves.toEqual(['9007199254740995']);
     const payload = JSON.parse(tape.writes[0].body!);
     expect(payload.client_order_id).toBe('caller-Exact-42');
     expect(payload.order_tag).toBe(tags[aliases.indexOf(name)]);
     expect(payload.broker_id).toBe('e708a644-9ce5-46c6-b50c-74b15f62d8ca');
     expect(tape.writes[0].url).toContain('testnet-api-evm.orderly.org');
-    await expect(exchange.placeOrder({ symbol: 'BTCUSDC', type: OrderType.Market, side: OrderSide.Buy,
-      amount: 1, clientOrderId: 'caller', stopLoss: 49000 })).rejects.toThrow(/clientOrderId cannot be honored/);
+    await expect(
+      exchange.placeOrder({
+        symbol: 'BTCUSDC',
+        type: OrderType.Market,
+        side: OrderSide.Buy,
+        amount: 1,
+        clientOrderId: 'caller',
+        stopLoss: 49000,
+      }),
+    ).rejects.toThrow(/clientOrderId cannot be honored/);
     expect(tape.writes).toHaveLength(1);
   });
   it('reports each native rejection once and preserves partial acknowledgements and receipts', async () => {
@@ -119,18 +186,24 @@ describe('retained Orderly Rust family oracle', () => {
     tape.native.request = (input) => {
       if (input.method === 'POST' && new URL(input.url).pathname === '/v1/order' && ++submissions === 2) {
         tape.writes.push(input);
-        return Promise.resolve({ status: 200, body: new TextEncoder().encode(JSON.stringify({
-          success: false, message: 'Second fixture order refused',
-        })) });
+        return Promise.resolve({
+          status: 200,
+          body: new TextEncoder().encode(
+            JSON.stringify({
+              success: false,
+              message: 'Second fixture order refused',
+            }),
+          ),
+        });
       }
       return request(input);
     };
     setRustEngineTransport(() => tape.native);
-    exchange = await createExchange('woofi', {
+    exchange = (await createExchange('woofi', {
       key: `ed25519:${bs58.encode(new Uint8Array(32))}`,
       secret: `ed25519:${bs58.encode(new Uint8Array(32).fill(7))}`,
       applicationId: 'documented-test-account',
-    }) as RustEngineExchange;
+    })) as RustEngineExchange;
     const errors: string[] = [];
     const logs: string[] = [];
     exchange.on('error', (message: string) => errors.push(message));
@@ -144,13 +217,17 @@ describe('retained Orderly Rust family oracle', () => {
     }
     expect(errors[0]).toBe(errors[1]);
     expect(tape.writes).toHaveLength(0);
-    const failure = await exchange.placeOrders([
-      { ...order, clientOrderId: 'receipt-first' },
-      { ...order, clientOrderId: 'receipt-second' },
-    ]).catch((error: unknown) => error);
+    const failure = await exchange
+      .placeOrders([
+        { ...order, clientOrderId: 'receipt-first' },
+        { ...order, clientOrderId: 'receipt-second' },
+      ])
+      .catch((error: unknown) => error);
     expect(failure).toMatchObject({
       message: expect.stringContaining('Second fixture order refused'),
-      partialOrderIds: ['9007199254740995'], partialOrderCount: 1, totalOrderCount: 2,
+      partialOrderIds: ['9007199254740995'],
+      partialOrderCount: 1,
+      totalOrderCount: 2,
       actualClientOrderIds: ['receipt-first', 'receipt-second'],
     });
     expect(failure).not.toHaveProperty('outcome');
@@ -164,11 +241,11 @@ describe('retained Orderly Rust family oracle', () => {
   it('rejects terminal startup and releases its subscription', async () => {
     const tape = transport(401);
     setRustEngineTransport(() => tape.native);
-    exchange = await createExchange('woofi', {
+    exchange = (await createExchange('woofi', {
       key: `ed25519:${bs58.encode(new Uint8Array(32))}`,
       secret: `ed25519:${bs58.encode(new Uint8Array(32).fill(7))}`,
       applicationId: 'documented-test-account',
-    }) as RustEngineExchange;
+    })) as RustEngineExchange;
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
     const deactivated = vi.fn();
     exchange.on('deactivate', deactivated);
@@ -180,7 +257,11 @@ describe('retained Orderly Rust family oracle', () => {
   it('rejects malformed credentials before network access', async () => {
     const tape = transport();
     setRustEngineTransport(() => tape.native);
-    exchange = await createExchange('woofi', { key: 'invalid', secret: 'invalid', applicationId: 'account' }) as RustEngineExchange;
+    exchange = (await createExchange('woofi', {
+      key: 'invalid',
+      secret: 'invalid',
+      applicationId: 'account',
+    })) as RustEngineExchange;
     await expect(exchange.start()).rejects.toThrow(/base58-encoded 32-byte/);
     expect(tape.sockets).toEqual([]);
     expect(tape.writes).toEqual([]);
@@ -190,12 +271,11 @@ describe('retained Orderly Rust family oracle', () => {
     const tape = transport();
     tape.native.request = () => new Promise(() => {});
     setRustEngineTransport(() => tape.native);
-    exchange = await createExchange('woofi', { key: '', secret: '', publicDataOnly: true }) as RustEngineExchange;
+    exchange = (await createExchange('woofi', { key: '', secret: '', publicDataOnly: true })) as RustEngineExchange;
     const pending = expect(exchange.start()).rejects.toThrow(/disposed during startup/);
     await new Promise((resolve) => setTimeout(resolve, 10));
     exchange.dispose();
     await pending;
     expect((exchange as any).startupWaiters.size).toBe(0);
   });
-
 });

@@ -8,14 +8,21 @@ import test from 'node:test';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const budgetPath = 'sdk-rs/harness/wasm-budget.mjs';
+const capsPath = 'sdk-rs/harness/wasm-caps.json';
 const policyPath = 'packages/safe-cex/src/exchanges/rust/construction-rules.json';
-const budget = readFileSync(join(root, budgetPath), 'utf8');
+// AGT-23 moved the cap numbers from a JS literal in wasm-budget.mjs to the generated
+// wasm-caps.json; these probes now mutate that file (read through readWasmCaps).
+const caps = readFileSync(join(root, capsPath), 'utf8');
+// Mutate the actual entry so generated cap updates cannot disable these probes.
+const weexRow = caps.match(/^    "weex": ([0-9]+),$/m);
+assert.ok(weexRow, 'WEEX cap fixture entry must exist');
+const weexCap = Number(weexRow[1]);
 const policy = readFileSync(join(root, policyPath), 'utf8');
 
 function probe(t, artifact, source) {
   const scratch = mkdtempSync(join(tmpdir(), 'sdk-artifact-census-'));
   t.after(() => rmSync(scratch, { recursive: true, force: true }));
-  for (const path of [budgetPath, policyPath, 'sdk-rs/harness/artifact-census.mjs',
+  for (const path of [budgetPath, capsPath, policyPath, 'sdk-rs/harness/artifact-census.mjs',
     'sdk-rs/artifact-census.json', 'sdk-rs/harness/construction-features.test.mjs',
     'sdk-rs/hosts/wasm/Cargo.toml', 'sdk-rs/hosts/wasm/js']) {
     if (!existsSync(join(root, path))) continue;
@@ -23,7 +30,7 @@ function probe(t, artifact, source) {
     cpSync(join(root, path), join(scratch, path), { recursive: true });
   }
   writeFileSync(join(scratch, artifact), source);
-  const args = artifact === budgetPath
+  const args = artifact === capsPath
     ? ['--input-type=module', '-e', `import('./${budgetPath}')`]
     : ['--test', '--test-reporter=tap', '--test-concurrency=1', 'sdk-rs/harness/construction-features.test.mjs'];
   // The child owns its runner; inheriting node:test's context silently skips it.
@@ -47,28 +54,49 @@ function duplicatePolicy(name, value) {
 }
 
 test('unchanged complete budget imports and construction checks remain valid', (t) => {
-  for (const [path, source] of [[budgetPath, budget], [policyPath, policy]]) {
+  for (const [path, source] of [[capsPath, caps], [policyPath, policy]]) {
     const result = probe(t, path, source);
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr + result.stdout);
   }
 });
 
-for (const value of ['2_043_904', '9_000_000']) {
-  test(`raw budget refuses a duplicate venue before last-wins evaluation (${value})`, (t) => {
-    const mutated = budget.replace('  weex: 2_043_904,', `  weex: 2_043_904,\n  weex: ${value},`);
-    assert.notEqual(mutated, budget);
-    refuses(probe(t, budgetPath, mutated), /duplicate.*weex/i);
+for (const value of [weexCap, 9_000_000]) {
+  test(`generated caps refuse a duplicate family before last-wins evaluation (${value})`, (t) => {
+    const mutated = caps.replace(weexRow[0], `${weexRow[0]}\n    "weex": ${value},`);
+    assert.notEqual(mutated, caps);
+    refuses(probe(t, capsPath, mutated), /duplicate.*weex/i);
   });
 }
 
+test('generated caps refuse an escaped duplicate spelling of a family', (t) => {
+  const mutated = caps.replace(weexRow[0], `${weexRow[0]}\n    "we\\u0065x": 9000000,`);
+  refuses(probe(t, capsPath, mutated), /duplicate.*weex/i);
+});
+
 test('budget census refuses an unknown entry', (t) => {
-  const mutated = budget.replace('  weex: 2_043_904,', '  weex: 2_043_904,\n  unreviewedvenue: 2_043_904,');
-  refuses(probe(t, budgetPath, mutated), /unexpected.*unreviewedvenue/i);
+  const mutated = caps.replace(weexRow[0], `${weexRow[0]}\n    "unreviewedvenue": ${weexCap},`);
+  refuses(probe(t, capsPath, mutated), /unexpected.*unreviewedvenue/i);
 });
 
 test('budget census refuses a deleted entry before a default cap can hide it', (t) => {
-  refuses(probe(t, budgetPath, budget.replace('  weex: 2_043_904,', '')), /missing.*weex/i);
+  refuses(probe(t, capsPath, caps.replace(`${weexRow[0]}\n`, '')), /missing.*weex/i);
+});
+
+for (const [label, value, reason] of [
+  ['an unaligned cap', weexCap + 1, /invalid wasm cap: weex/],
+  ['a zero cap', 0, /invalid wasm cap: weex/],
+  ['a string cap', `"${weexCap}"`, /invalid wasm cap: weex/],
+]) {
+  test(`generated caps refuse ${label}`, (t) => {
+    refuses(probe(t, capsPath, caps.replace(weexRow[0], `    "weex": ${value},`)), reason);
+  });
+}
+
+test('generated caps refuse a changed reserve, schema or extra field', (t) => {
+  refuses(probe(t, capsPath, caps.replace('"reserveBytes": 10240', '"reserveBytes": 0')), /reserve must stay 10 KiB/);
+  refuses(probe(t, capsPath, caps.replace('"schema": 1', '"schema": 2')), /unsupported wasm caps schema/);
+  refuses(probe(t, capsPath, caps.replace('"schema": 1,', '"schema": 1,\n  "venue": 1343488,')), /unexpected wasm caps field: venue/);
 });
 
 for (const name of ['krakenspot', 'kraken\\u0073pot']) {
@@ -104,38 +132,5 @@ test('construction census treats object order as immaterial', (t) => {
   assert.equal(result.status, 0, result.stderr + result.stdout);
 });
 
-const budgetDeclaration = budget.match(/^export const WASM_VENUE_OVERRIDES = Object\.freeze\(\{[\s\S]*?^\}\);/m)?.[0];
-assert.ok(budgetDeclaration);
-const compactDeclaration = budgetDeclaration.replace(/\/\/[^\n]*/g, '');
-const quotedDeclaration = JSON.stringify(compactDeclaration);
-const templateDeclaration = '`' + compactDeclaration + '`';
-
-for (const [label, expression] of [
-  ['ordinary quoted prose', quotedDeclaration],
-  ['template prose', templateDeclaration],
-  ['interpolated template prose', '`prefix ${"value"} ' + compactDeclaration + '`'],
-  ['nested template prose', '`prefix ${`nested ' + compactDeclaration + '`}`'],
-  ['escaped template delimiters', '`escaped \\` ' + compactDeclaration + ' \\` end`'],
-]) {
-  test(`budget import ignores inert declaration in ${label}`, (t) => {
-    const source = budget + '\nconst prose = ' + expression + ';\n' +
-      'if (WASM_VENUE_OVERRIDES.weex !== 2_043_904) throw new Error("cap changed");';
-    const result = probe(t, budgetPath, source);
-    assert.ifError(result.error);
-    assert.equal(result.status, 0, result.stderr + result.stdout);
-  });
-}
-
-for (const [label, expression] of [
-  ['plain template', templateDeclaration],
-  ['nested interpolated template', '`prefix ${`nested ' + compactDeclaration + '`}`'],
-]) {
-  test(`budget import refuses grouped duplicate map despite a stale ${label}`, (t) => {
-    const grouped = budgetDeclaration.replace('Object.freeze({', 'Object.freeze(({')
-      .replace('  weex: 2_043_904,', '  weex: 2_043_904,\n  weex: 9_000_000,')
-      .replace(/\}\);$/, '}));');
-    assert.notEqual(grouped, budgetDeclaration);
-    const source = budget.replace(budgetDeclaration, grouped) + '\nconst prose = ' + expression + ';';
-    refuses(probe(t, budgetPath, source), /literal WASM_VENUE_OVERRIDES declaration/i);
-  });
-}
+// The JS-literal grammar probes (inert template/quoted declarations, grouped maps)
+// were retired by AGT-23 with the literal itself: caps are JSON read by readWasmCaps.

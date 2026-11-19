@@ -26,7 +26,7 @@ export interface EnhancedAxiosError extends Error {
  * Enhances axios error messages with more context for better debugging and Sentry tracking
  */
 export function enhanceAxiosError(error: AxiosError, exchangeName?: string): EnhancedAxiosError {
-  let enhancedError = error as EnhancedAxiosError;
+  let enhancedError: EnhancedAxiosError = error;
 
   // if somehow error is not an error
   if (typeof error !== 'object' || !(error instanceof Error)) {

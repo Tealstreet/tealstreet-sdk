@@ -59,6 +59,8 @@ export type PositionInterval = {
   readonly openedAt: number;
   /** Absent while the position is still open at the end of the fills window. */
   readonly closedAt?: number;
+  /** Native execution that flattened this leg (also the closing half of a flip). */
+  readonly closingExecutionId?: string;
   /** Peak absolute size the position reached. */
   readonly maxSize: number;
   /** Total volume closed over the interval. */
@@ -104,9 +106,10 @@ export type PositionInterval = {
   /** Commission summed over every fill in the interval, positive = cost. */
   readonly fees: number;
   /**
-   * Every distinct commission asset seen. Binance can charge fees in BNB while the position
-   * settles in USDT, so a single summed `fees` number is only meaningful when this holds one
-   * currency — otherwise it is adding different units together.
+   * Every distinct asset with a nonzero commission contribution. Binance can charge fees
+   * in BNB while the position settles in USDT, so a single summed `fees` number is only
+   * meaningful when this holds one currency — otherwise it adds different units together.
+   * An empty member means a nonzero contribution had no reported currency.
    */
   readonly feeCurrencies: string[];
 };
@@ -162,7 +165,9 @@ const freshPosition = (over: Partial<RunningPosition> = {}): RunningPosition => 
 const accrueFill = (position: RunningPosition, execution: Execution, reduces = false) => {
   if (execution.commission !== undefined) {
     position.fees += execution.commission;
-    if (execution.commissionAsset) position.feeCurrencies.add(execution.commissionAsset);
+    if (execution.commission !== 0) {
+      position.feeCurrencies.add(execution.commissionAsset ?? '');
+    }
   }
   if (execution.realizedPnl !== undefined) {
     position.realizedPnl += execution.realizedPnl;
@@ -191,12 +196,14 @@ const finish = (
   symbol: string,
   leg: PositionSide | 'both',
   closedAt?: number,
+  closingExecutionId?: string,
 ): PositionInterval => ({
   symbol,
   positionSide: leg,
   side: position.signed > 0 ? PositionSide.Long : PositionSide.Short,
   openedAt: position.openedAt,
   closedAt,
+  closingExecutionId,
   maxSize: position.maxSize,
   closedSize: position.closedSize,
   complete: position.complete,
@@ -329,7 +336,7 @@ export const reconstructPositionIntervals = (
 
     if (!crossed) {
       accrueFill(current, execution, true);
-      intervals.push({ ...finish(current, execution.symbol, leg, at), closedByFlip: false });
+      intervals.push({ ...finish(current, execution.symbol, leg, at, execution.id), closedByFlip: false });
       running.delete(key);
       continue;
     }
@@ -346,17 +353,18 @@ export const reconstructPositionIntervals = (
       },
       true,
     );
-    intervals.push({ ...finish(current, execution.symbol, leg, at), closedByFlip: true });
+    intervals.push({ ...finish(current, execution.symbol, leg, at, execution.id), closedByFlip: true });
 
     const openedSize = Math.abs(next);
+    const openingFee = execution.commission === undefined ? 0 : execution.commission * (1 - closedShare);
     const opened = freshPosition({
       signed: next,
       openedAt: at,
       maxSize: openedSize,
       entryQty: openedSize,
       entryNotional: openedSize * price,
-      fees: execution.commission === undefined ? 0 : execution.commission * (1 - closedShare),
-      feeCurrencies: new Set(execution.commissionAsset ? [execution.commissionAsset] : []),
+      fees: openingFee,
+      feeCurrencies: new Set(openingFee !== 0 ? [execution.commissionAsset ?? ''] : []),
     });
     running.set(key, opened);
   }
@@ -373,6 +381,8 @@ export const reconstructPositionIntervals = (
   return intervals.sort((a, b) => (a.closedAt ?? Number.MAX_SAFE_INTEGER) - (b.closedAt ?? Number.MAX_SAFE_INTEGER));
 };
 
+export type FundingRow = { readonly symbol: string; readonly timestamp: number; readonly income: number };
+
 /**
  * Sum signed funding for a symbol over the interval a position was open.
  *
@@ -387,10 +397,10 @@ export const reconstructPositionIntervals = (
  */
 export const attributeFunding = (
   interval: PositionInterval,
-  fundingRows: Array<{ symbol: string; timestamp: number; income: number }>,
+  fundingRows: readonly FundingRow[],
   opts: { hedged: boolean },
 ): { funding: number; attributed: boolean } => {
-  if (interval.closedAt === undefined || !interval.complete) {
+  if (interval.closedAt === undefined || !interval.complete || opts.hedged) {
     return { funding: 0, attributed: false };
   }
 
@@ -401,7 +411,54 @@ export const attributeFunding = (
     funding += row.income;
   }
 
-  // A hedged symbol's funding cannot be split between the legs, so the SUM is reported but
-  // flagged unattributed — the number is right for the symbol and wrong for the leg.
-  return { funding, attributed: !opts.hedged };
+  return { funding, attributed: true };
+};
+
+/**
+ * Assign each ledger row at most once, using ALL visible intervals, including open legs
+ * and lookback intervals. A symbol-level row shared by hedge legs has no per-leg owner.
+ * Keep it separately instead of copying its money onto every matching position.
+ */
+export const allocateFunding = (
+  intervals: readonly PositionInterval[],
+  fundingRows: readonly FundingRow[],
+): {
+  byInterval: ReadonlyMap<PositionInterval, { funding: number; attributed: boolean }>;
+  unattributedFunding: FundingRow[];
+} => {
+  const assigned = new Map<PositionInterval, FundingRow[]>();
+  const ambiguous = new Set<PositionInterval>();
+  const unattributedFunding: FundingRow[] = [];
+
+  for (const row of fundingRows) {
+    const candidates = intervals.filter(
+      (interval) =>
+        interval.symbol === row.symbol &&
+        // An incomplete interval's true opening time is unknown; a first visible fill
+        // cannot prove the leg was absent from an earlier funding event.
+        (!interval.complete || row.timestamp >= interval.openedAt) &&
+        (interval.closedAt === undefined || row.timestamp <= interval.closedAt),
+    );
+    const candidate = candidates[0];
+    if (candidate && candidates.length === 1 && candidate.complete && candidate.closedAt !== undefined) {
+      const rows = assigned.get(candidate) ?? [];
+      rows.push(row);
+      assigned.set(candidate, rows);
+    } else {
+      unattributedFunding.push(row);
+      for (const interval of candidates) ambiguous.add(interval);
+    }
+  }
+
+  const byInterval = new Map<PositionInterval, { funding: number; attributed: boolean }>();
+  for (const interval of intervals) {
+    // These rows already have exactly one visible owner. Any ambiguous remainder stays
+    // outside the per-leg amount and makes that amount explicitly incomplete.
+    const attribution = attributeFunding(interval, assigned.get(interval) ?? [], { hedged: false });
+    byInterval.set(interval, {
+      funding: attribution.funding,
+      attributed: attribution.attributed && !ambiguous.has(interval),
+    });
+  }
+  return { byInterval, unattributedFunding };
 };

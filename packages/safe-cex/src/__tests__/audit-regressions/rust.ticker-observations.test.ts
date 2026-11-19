@@ -10,7 +10,9 @@ import {
   RustPublicFeedProvider,
 } from '../../exchanges/rust/publicFeed';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeMarket } from '../cutover/nativeMarket';
 
 const observationFrame = (times: number[]) => {
   const bytes = new ArrayBuffer(56);
@@ -26,13 +28,33 @@ const observationFrame = (times: number[]) => {
 };
 
 it('a real observation-only frame reaches MessagePort consumers with source time and legacy negotiation', async () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [{ id: 'BTC', symbol: 'BTC-PERP', contractSize: 1 }] as Market[],
-    tickers: [{ id: 'BTC', symbol: 'BTC-PERP', bid: 0, ask: 0, mark: 100, last: 99, index: 98,
-      percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0 }],
-    loaded: { markets: true, tickers: true, balance: false, orders: false, positions: false },
-  });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      {
+        markets: [nativeMarket({ id: 'BTC', symbol: 'BTC-PERP', contractSize: 1 })],
+        tickers: [
+          {
+            id: 'BTC',
+            symbol: 'BTC-PERP',
+            bid: 0,
+            ask: 0,
+            mark: 100,
+            last: 99,
+            index: 98,
+            percentage: 0,
+            openInterest: 0,
+            fundingRate: 0,
+            fundingTime: 0,
+            volume: 0,
+            quoteVolume: 0,
+          },
+        ],
+        loaded: { markets: true, tickers: true, balance: false, orders: false, positions: false },
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const source = new RustEngineExchange('hyperliquid', { key: '', secret: '', publicDataOnly: true }, store);
   Object.defineProperty(source, 'hasStarted', { get: () => true });
   const provider = new RustPublicFeedProvider(source);
@@ -82,16 +104,45 @@ it('a real observation-only frame reaches MessagePort consumers with source time
 });
 
 it('worker object snapshots retain observation provenance without dating their arrival', () => {
-  const store = new DefaultStore();
-  const row: Ticker = { id: 'BTC', symbol: 'BTC-PERP', bid: 0, ask: 0, last: 99, mark: 100, index: 0,
-    percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0,
-    observedAt: [1000, 8500, null] };
-  store.update({ tickers: [row] });
+  const store = new FrameStore();
+  const row: Ticker = {
+    id: 'BTC',
+    symbol: 'BTC-PERP',
+    bid: 0,
+    ask: 0,
+    last: 99,
+    mark: 100,
+    index: 0,
+    percentage: 0,
+    openInterest: 0,
+    fundingRate: 0,
+    fundingTime: 0,
+    volume: 0,
+    quoteVolume: 0,
+    observedAt: [1000, 8500, null],
+  };
+  store.apply(
+    nativeFixture(
+      { tickers: [row] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const identity = store.tickers[0];
-  store.update({ tickers: [{ ...row, observedAt: [1000, 9000, null] }] }, true);
-  expect(store.tickers[0]).toBe(identity);
+  store.apply(
+    nativeFixture(
+      { tickers: [{ ...row, observedAt: [1000, 9000, null] }] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
+  expect(store.tickers[0]).not.toBe(identity);
+  expect(identity.observedAt).toEqual([1000, 8500, null]);
   expect(store.tickers[0].observedAt).toEqual([1000, 9000, null]);
   const { observedAt: _observedAt, ...legacy } = row;
-  store.update({ tickers: [legacy] }, true);
+  store.apply(
+    nativeFixture(
+      { tickers: [legacy] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   expect(store.tickers[0]).not.toHaveProperty('observedAt');
 });

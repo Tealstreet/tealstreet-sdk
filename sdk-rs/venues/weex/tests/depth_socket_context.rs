@@ -1,4 +1,7 @@
 //! Original runtime boundaries; all authority comes from real engine admission.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::ControlFrame;
 mod support;
 
@@ -451,7 +454,7 @@ fn nonfinite_returned_failure(now: f64) {
         false,
     );
     exact_cleanup(&failed, issued);
-    assert_eq!(store(&d), before);
+    assert_unchanged_account(&before, &store(&d), [0, 0, 0, 1, 0]);
 }
 #[test]
 fn nan_returned_depth_failure_only_cleans_issued_work() {
@@ -1132,7 +1135,11 @@ fn physical_depth_timeout(held: bool) {
         },
         true,
     );
-    assert_eq!(store(&d), before);
+    if held {
+        assert_eq!(store(&d), before);
+    } else {
+        assert_unchanged_account(&before, &store(&d), [0, 0, 0, 1, 0]);
+    }
     let mut cleanup = Trace::default();
     let mut retry = None;
     let mut diagnostics = 0;

@@ -1,28 +1,47 @@
+import type { Market } from '../../types';
+
+import { afterEach, expect, it, vi } from 'vitest';
+
+import { LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
+import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
+
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
   return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
 });
 
-import type { Market } from '../../types';
-
-import { afterEach, expect, it, vi } from 'vitest';
-import { LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
-
-import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
-
 const exchanges: RustEngineExchange[] = [];
 afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
 const setup = (publicDataOnly = false) => {
-  const store = new DefaultStore();
-  store.update({ markets: [{
-    id: 'E-BTC-USDT', symbol: 'E-BTC-USDT', base: 'BTC', quote: 'USDT', active: true,
-    precision: { amount: 0.001, price: 0.1 },
-    limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } }, info: {},
-  } satisfies Market] });
-  const exchange = new RustEngineExchange('bitrue', { key: 'replay-key', secret: 'replay-secret', publicDataOnly }, store);
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      {
+        markets: [
+          {
+            id: 'E-BTC-USDT',
+            symbol: 'E-BTC-USDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+            info: {},
+          } satisfies Market,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
+  const exchange = new RustEngineExchange(
+    'bitrue',
+    { key: 'replay-key', secret: 'replay-secret', publicDataOnly },
+    store,
+  );
   exchanges.push(exchange);
   const command = vi.fn().mockResolvedValue(125);
   Object.defineProperty(exchange, 'command', { value: command });

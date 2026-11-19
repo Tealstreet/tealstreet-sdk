@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { prepareRecordedHttp } from '../support/managedHttp';
 import { endpoints, signature, STAMP } from './backpackHostedFixtures';
 
@@ -33,7 +33,7 @@ function fixture(options: Partial<ExchangeOptions> = {}) {
   const exchange = new RustEngineExchange(
     'backpack',
     { key: 'fixture-key', secret: Buffer.alloc(32, 7).toString('base64'), ...options },
-    new DefaultStore(),
+    new FrameStore(),
   );
   const logs: string[] = [];
   exchange.emitter.on('log', (message: string) => {
@@ -45,14 +45,24 @@ function fixture(options: Partial<ExchangeOptions> = {}) {
 
 it('private PayloadSigner is typed unsupported while explicit public-only callbacks confer no primary custody', async () => {
   let error: unknown;
-  try { fixture({ payloadSigner: vi.fn() }); } catch (value) { error = value; }
+  try {
+    fixture({ payloadSigner: vi.fn() });
+  } catch (value) {
+    error = value;
+  }
   expect(error).toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
   const sign = vi.fn();
   const remoteSigner: RemoteSigner = { sign, isAvailable: () => true, onAvailabilityChange: () => () => {} };
   const publicOnly = fixture({ publicDataOnly: true, remoteSigner });
-  const result = await publicOnly.exchange.signWsAuth({ id: 'public', type: 'ws-auth', exchangeName: 'backpack',
-    wsAuth: { outputFormat: 'backpack-ed25519', toSign: '{"slot":"primary","payload":"fixture"}' } });
-  expect(result.wsAuthSignature).toBeUndefined(); expect(result.error).toBeTruthy(); expect(sign).not.toHaveBeenCalled();
+  const result = await publicOnly.exchange.signWsAuth({
+    id: 'public',
+    type: 'ws-auth',
+    exchangeName: 'backpack',
+    wsAuth: { outputFormat: 'backpack-ed25519', toSign: '{"slot":"primary","payload":"fixture"}' },
+  });
+  expect(result.wsAuthSignature).toBeUndefined();
+  expect(result.error).toBeTruthy();
+  expect(sign).not.toHaveBeenCalled();
 });
 
 it('actual WASM local/device and keyless remote/origin sign every native endpoint identically', async () => {
@@ -174,7 +184,13 @@ it('actual WASM failure/unavailability never falls back and keeps seed material 
     id: 'failure',
     type: 'http',
     exchangeName: 'backpack',
-    config: { method: 'DELETE', url: '/api/v1/order', baseURL: 'https://api.backpack.exchange', data: '{"orderId":"123"}', headers: {} },
+    config: {
+      method: 'DELETE',
+      url: '/api/v1/order',
+      baseURL: 'https://api.backpack.exchange',
+      data: '{"orderId":"123"}',
+      headers: {},
+    },
   };
   const result = await server.exchange.signHttpRequest(request);
   expect(result.config).toBeUndefined();
@@ -226,11 +242,7 @@ it('actual WASM keyless private startup sends provider-signed account reads and 
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
   }));
-  const server = new RustEngineExchange(
-    'backpack',
-    { key: 'fixture-key', secret: '', remoteSigner },
-    new DefaultStore(),
-  );
+  const server = new RustEngineExchange('backpack', { key: 'fixture-key', secret: '', remoteSigner }, new FrameStore());
   live.push(server);
   const errors: unknown[] = [];
   void server.start().catch((error) => errors.push(error));
