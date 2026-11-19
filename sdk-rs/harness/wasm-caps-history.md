@@ -1559,19 +1559,22 @@ exact caps. Combined measures 18,087,936 − 206,989 B and stays at its ceiling.
 
 ## 2026-11-19 — #2301 branch ceiling migrated across AGT-23
 
-The manual master merge retains the branch's 2,130,944-byte Bitunix ceiling in
-`wasm-caps.json` rather than reintroducing per-PR caps or census tests in the
-mechanism. This ports the existing vetoable branch value; it does not invent a
-CLEAR or claim a new coordinator approval. All other generated family/combined
-ceilings retain the larger parent value. The cutover floors remain unchanged.
+The first manual master merge carried the branch's historical 2,130,944-byte
+Bitunix ceiling into `wasm-caps.json`. Sam's explicit AGT-23/L1 ruling supersedes
+that practice: PRs do not raise measurement-derived caps or add vetoable rule-17
+commits. After the plain post-#3688 master refresh, the feature branch restores
+`wasm-caps.json` byte-for-byte to master, including its generated Bitunix ceiling.
+These archived receipts set no current cap and convey no approval. The current
+byte ceiling remains a PR gate; a reserve shortfall is advisory, and the master
+measurement bot owns reserve restoration. The cutover floors remain unchanged.
 
 Prior frozen source `415dc392d11267a86f23c175b54ba6e8536a889d`, PR run44445820068,
 artifact14493561482 measures optimized web/Node/replay 2,119,780 bytes, SHA256
 `e13e8e2e27327fe7c9e51d034f6c8ee8d315c906d331571a03af3226864c6baf`.
-Measured +10KiB rounded to KiB gives 2,130,944 bytes and 11,164 bytes reserve.
-These are historical cap-setting receipts, not an attestation for the new merge
-head. New-head required CI/actually-run combined and normal independent review
-remain required. Sam's current generated-cap and fast-mode policies supersede
+The superseded measured +10KiB proposal rounded to 2,130,944 bytes with
+11,164 bytes reserve. These are historical receipts, not an attestation or cap
+setting for the new merge head. New-head required CI/actually-run combined and
+normal independent review remain required. Sam's current generated-cap and fast-mode policies supersede
 old per-round census/release-batch/reviewer-count process notes.
 
 Pre-cutover branch provenance comments, retained verbatim:
