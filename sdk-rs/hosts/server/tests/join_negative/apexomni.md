@@ -8,6 +8,8 @@ The committed unchecked-verifier checkpoints compiled with two controls passing 
 
 A first candidate also exposed a fixture lifecycle mistake: native ApeX pipelines private subscriptions before the login ACK, while the fake initially panicked on an unproved subscription and poisoned the observation lock. The focused committed regression fails before the correction. The final fake returns an explicit authentication refusal without private data, preserving per-socket login isolation and all shared permanent/resident assertions. Those former timeouts are not security rejections.
 
+ApeX resends a signature-refused read once with its legacy canonicalization, which floors the stamp to whole seconds. The replay attempt therefore starts 1.1 s after the prior attempt: with the shared 5 ms delay, a prior stamp ending in `000` intermittently recurred byte-for-byte in the resend and tripped the harness's signing-byte-boundary precondition (master run 44585942681). That collision is ApeX's own timestamp-window model, not a weakened guard; the control `replay_attempt_cannot_land_in_a_whole_prior_second` pins the delay.
+
 Omitting the OmniKey seed retains the native monitoring diagnostic and placement refusal; the suite does not invent a seed, silence the warning or claim L2 signing capability. No live venue certification.
 
 From the repository root:
