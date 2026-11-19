@@ -28,6 +28,8 @@ const EXCLUDED = new Set([
 // change to one must not force a cut. Tests prove no build, loader or shipped host imports
 // them; release-only size checks may still use the budget.
 export const HARNESS_NOT_BUILT = Object.freeze([
+  // Agent guidance only; the exact path is audited independently of #3591's broad Markdown policy.
+  /^sdk-rs\/harness\/CLAUDE\.md$/,
   /^sdk-rs\/harness\/[^/]+\.test\.mjs$/,
   /^sdk-rs\/harness\/beta-wasm-release-guard\.mjs$/,
   /^sdk-rs\/harness\/ci-result\.mjs$/,
