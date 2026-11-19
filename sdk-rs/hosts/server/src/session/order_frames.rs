@@ -364,7 +364,15 @@ pub(super) fn settle_intent(
             }
         }
         Err(error) => {
-            data["outcome"] = if error["outcome"] == "unknown" {
+            // Only a whole-order proof leaves `unknown`: the engine's notSent, or its
+            // `rejected` (every released leg definitively refused by the venue).
+            // Any accepted leg, element or protective side effect stays unknown.
+            let whole = !partial_effects(&error);
+            let outcome = match error["outcome"].as_str() {
+                Some(proof @ ("notSent" | "rejected")) if whole => proof,
+                _ => "unknown",
+            };
+            data["outcome"] = if outcome == "unknown" {
                 "unknown"
             } else {
                 "refused"
@@ -376,18 +384,86 @@ pub(super) fn settle_intent(
                 .chars()
                 .take(512)
                 .collect();
-            data["error"] = json!({"message":message});
-            if matches!(error["outcome"].as_str(), Some("unknown" | "notSent")) {
-                data["error"]["outcome"] = error["outcome"].clone();
-            }
+            data["error"] = json!({"message":message,"outcome":outcome});
         }
     }
     out.order_outcome(name, data);
 }
 
+/// Native evidence that some part of the command took effect at the venue.
+fn partial_effects(error: &Value) -> bool {
+    error["partial"].is_object()
+        || error["partialOrderIds"]
+            .as_array()
+            .is_some_and(|ids| !ids.is_empty())
+        || error["partialOrderCount"].as_u64().is_some_and(|n| n > 0)
+        || error["protection"].is_string()
+        || error["elements"].as_array().is_some_and(|elements| {
+            elements
+                .iter()
+                .any(|element| element["status"] != "notSent")
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn settled(error: Value) -> Value {
+        let (out, mut sent, _) = Out::channel(1);
+        let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
+        settle_intent(&out, "a", &id, None, 1, Err(error));
+        let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+        frame["d"].clone()
+    }
+
+    #[tokio::test]
+    async fn only_a_whole_order_venue_rejection_reaches_the_client_as_rejected() {
+        let reason = "Bybit inverse requires enabling the settlement asset as collateral";
+        let rejected = settled(json!({"name":"ExchangeError","message":reason,
+            "kind":"rejected","outcome":"rejected","venueCode":"110007"}))
+        .await;
+        assert_eq!(rejected["outcome"], "refused");
+        assert_eq!(rejected["venueOrderId"], Value::Null);
+        assert_eq!(
+            rejected["error"],
+            json!({"message":reason,"outcome":"rejected"})
+        );
+        // A single refused element is still the whole order.
+        let element = settled(json!({"message":reason,"outcome":"rejected",
+            "elements":[{"index":0,"status":"notSent","error":{"message":reason,"outcome":"rejected"}}]}))
+        .await;
+        assert_eq!(element["error"]["outcome"], "rejected");
+
+        let ambiguous = [
+            // A split/multi-leg placement where an earlier leg was accepted.
+            json!({"message":"leg 2 rejected","outcome":"rejected",
+                "partial":{"orderIds":["a"],"total":2,"failedIndex":1}}),
+            json!({"message":"leg 2 rejected","outcome":"rejected","partialOrderIds":["a"],"partialOrderCount":1}),
+            json!({"message":"leg 2 rejected","outcome":"rejected","elements":[
+                {"index":0,"status":"placed","orderIds":["a"]},
+                {"index":1,"status":"notSent","error":{"message":"leg 2 rejected","outcome":"rejected"}}]}),
+            json!({"message":"replacement refused","outcome":"rejected","protection":"unprotected"}),
+            // Accepted legs plus known refusals: the engine leaves outcome unset.
+            json!({"message":"leg 2 rejected","partial":{"orderIds":["a"]}}),
+            json!({"message":"timed out","kind":"timeout","outcome":"unknown"}),
+            json!({"name":"AuthExpired","message":"token expired"}),
+            json!({"message":"venue said no"}),
+            json!({"message":"unsent leg","outcome":"notSent","partialOrderIds":["a"]}),
+        ];
+        for error in ambiguous {
+            let frame = settled(error.clone()).await;
+            assert_eq!(frame["outcome"], "unknown", "{error}");
+            assert_eq!(frame["error"]["outcome"], "unknown", "{error}");
+            assert_eq!(frame["error"]["message"], error["message"], "{error}");
+        }
+
+        let not_sent =
+            settled(json!({"message":"account is busy; command not sent","outcome":"notSent"}))
+                .await;
+        assert_eq!(not_sent["outcome"], "refused");
+        assert_eq!(not_sent["error"]["outcome"], "notSent");
+    }
 
     #[tokio::test]
     async fn order_contract_receipts_are_bounded_and_sequenced_per_account() {

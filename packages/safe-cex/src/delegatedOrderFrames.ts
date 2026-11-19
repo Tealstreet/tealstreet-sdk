@@ -22,7 +22,8 @@ export interface DelegatedOrderOutcomeFrame {
     outcome: 'placed' | 'refused' | 'unknown';
     venueOrderId: string | null;
     clientOrderId: string | null;
-    error: { message: string; outcome?: 'notSent' | 'unknown' } | null;
+    /** `rejected`: the venue refused the whole order. Not notSent proof; the outbox keeps it unknown. */
+    error: { message: string; outcome?: 'notSent' | 'rejected' | 'unknown' } | null;
   };
 }
 export interface DelegatedOrderCancelQueuedFrame {
