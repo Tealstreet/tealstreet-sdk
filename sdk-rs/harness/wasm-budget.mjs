@@ -359,7 +359,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Built source 1fdd2db8279b2d4ab697720f2169cd0b6941a078; same tree as PR head 7e9d5723fad5e8820242a18b205c068dd8eb851f.
   // Optimized web/Node 2,399,452 B; SHA256 1b0d30cbaca03f7b322134826f216aabd1173dc04c021febbb14213a6caf0146.
   // Parent cap 2,409,472 B left 10,020 B; coordinator: measured + 10 KiB, rounded up to KiB.
-  binance: 2_410_496,
+  // #3671 M49 merged head6c9370d8ecdd0e082ecb8e8942077ac011101096; own PR run44441524748.
+  // CI checkout7d23ca64972600ed7bd9df6e690116388190e4c5 is tree-identical; job135283817066/artifact14491516834.
+  // Optimized web/Node/replay 2,402,182 B; SHA256 4fc6206781d53b27a652363155d0410a0bc4d75b5a677efaf2fea609e64930df.
+  // Required -Oz, Rust1.99/bindgen0.2.129/Binaryen132; measured+10KiB rounded up, retaining2,410,496 floor.
+  binance: 2_412_544,
   // #3438 merged-head local build.sh --venue bingx: web/node 2,130,988 B.
   // Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
   // #3290 CI 43563699705, source 8043e2bb11e5, artifact 14101497823: web/Node/replay 2,137,074 B.

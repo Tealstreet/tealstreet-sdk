@@ -223,3 +223,15 @@ exact caps. Combined measures 18,087,936 − 206,989 B and stays at its ceiling.
 Managed HTTP preparation observations change shipped host JS, so they move the
 beta input fingerprint and require a new release/pin. They do not change Rust
 sources or waive fresh combined-consumer/size evidence or any retained floor.
+
+#3671's M49 composition at `6c9370d8ecdd0e082ecb8e8942077ac011101096`
+uses its own PR CI `44441524748` and the tree-identical checkout
+`7d23ca64972600ed7bd9df6e690116388190e4c5`. All 27 optimized family
+artifacts retain pinned tools, source/run/input seals and matching web/Node/replay
+hashes. Only Binance misses the 10 KiB reserve: job `135283817066`, artifact
+`14491516834` measures 2,402,182 bytes, leaving 8,314 under the inherited cap.
+Measured +10 KiB rounded up gives 2,412,544 bytes, retaining the 2,410,496-byte
+parent floor and 10,362 bytes of reserve. The M48 census remains a floor;
+the M49 census pins every current family cap, alias and cap/cap+1 refusal.
+No runtime input or other family/combined ceiling changes. Final-head required
+coverage and actual native/combined consumers remain independent gates.
