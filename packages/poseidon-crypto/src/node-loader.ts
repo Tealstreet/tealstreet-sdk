@@ -32,8 +32,7 @@ export async function initWasm(): Promise<void> {
       const wasmPath = path.join(__dirname, 'wasm', 'poseidon_crypto.wasm');
       const wasmBuffer = fs.readFileSync(wasmPath);
 
-      // @ts-ignore - Go global from wasm_exec.js
-      const go = new (globalThis as any).Go();
+      const go = new globalThis.Go();
       const result = await WebAssembly.instantiate(wasmBuffer, go.importObject);
       go.run(result.instance);
 
@@ -67,19 +66,19 @@ export function getCryptoApi(): PoseidonCrypto {
 
   return {
     isReady: () => wasmReady,
-    poseidon2Hash: (input: string) => (globalThis as any).poseidon2Hash(input),
+    poseidon2Hash: (input: string) => globalThis.poseidon2Hash(input),
     poseidon2HashFp5: (input: string) => {
-      const hashFp5Fn = (globalThis as any).poseidon2HashFp5 ?? (globalThis as any).poseidon2Hash;
+      const hashFp5Fn = globalThis.poseidon2HashFp5 ?? globalThis.poseidon2Hash;
       if (typeof hashFp5Fn !== 'function') {
         return { error: 'poseidon2HashFp5 function not available' };
       }
       return hashFp5Fn(input);
     },
-    poseidon2HashTwoToOne: (hash1: string, hash2: string) => (globalThis as any).poseidon2HashTwoToOne(hash1, hash2),
-    schnorrGenerateKeys: () => (globalThis as any).schnorrGenerateKeys(),
-    schnorrPkFromSk: (privateKey: string) => (globalThis as any).schnorrPkFromSk(privateKey),
-    schnorrSign: (message: string, privateKey: string) => (globalThis as any).schnorrSign(message, privateKey),
+    poseidon2HashTwoToOne: (hash1: string, hash2: string) => globalThis.poseidon2HashTwoToOne(hash1, hash2),
+    schnorrGenerateKeys: () => globalThis.schnorrGenerateKeys(),
+    schnorrPkFromSk: (privateKey: string) => globalThis.schnorrPkFromSk(privateKey),
+    schnorrSign: (message: string, privateKey: string) => globalThis.schnorrSign(message, privateKey),
     schnorrVerify: (message: string, publicKey: string, signature: string) =>
-      (globalThis as any).schnorrVerify(message, publicKey, signature),
+      globalThis.schnorrVerify(message, publicKey, signature),
   };
 }

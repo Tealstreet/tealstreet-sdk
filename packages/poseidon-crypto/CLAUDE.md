@@ -60,3 +60,7 @@ cp src/wasm/poseidon_crypto.wasm ../../apps/web/public/wasm/poseidon_crypto.wasm
 - **Loader imports must use literal specifiers**, not a variable. `initWasm()`
   picks the browser/node loader with `isBrowserLikeRuntime() ? import('./browser-loader') : import('./node-loader')`. A variable specifier (`import(loaderPath)`) is not statically resolvable by vite/vitest and broke `@tealstreet/lighter-sdk`'s WASM init when poseidon-crypto is imported across the package boundary (source consumption). The unused branch is code-split out at build.
 - **`wasm/wasm_exec.d.ts`** exists only so consumers that follow this source (lighter-sdk's tsc) can resolve the side-effect `import('./wasm/wasm_exec.js')` — the Go glue is a script, not an ES module. Don't delete it.
+
+The wasm runtime sidecar owns the global `Go` constructor, import object and run
+signature. Crypto globals are declared in `src/types.ts`; loaders use those
+existing signatures while retaining their readiness guards and fp5 fallback.
