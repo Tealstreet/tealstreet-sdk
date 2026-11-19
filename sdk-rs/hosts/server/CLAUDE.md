@@ -366,6 +366,13 @@ the server supplies no dedupe ledger or queued-order storage. `order.cancelQueue
 is a router operation and never becomes a venue cancellation. The interception
 contract is documented in `docs/plans/callers/delegated-order-frames.md`.
 
+Placement completions (`settle_intent`) send `refused` with `error.outcome:
+"rejected"` and the venue's message only when the engine marked the whole order
+`rejected` and its detail carries no partial IDs/count, non-`notSent` element or
+`protection`. Every other failure without `notSent` proof, including a partially
+accepted split/multi-leg placement, is `unknown`/`unknown`. NX shows `rejected`
+as the venue's refusal; the SDK still keeps the intent unknown and never resends.
+
 Whole-action guards before any native command return their real `notSent`
 reason; guards after possible effects remain unknown. Typed completion audits add
 only closed `result_shape`; initial refusals log `stage: preflight` and the real reason.
@@ -449,6 +456,14 @@ Rejecting that frame uses the ordinary error envelope: it supplies no proof
 about an earlier action and cannot fabricate an action refusal or negative ACK.
 See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
 `tests/data/delegated-actions-v1.json` contract.
+
+## Algo outcome notices
+
+`warning` and `chaser:complete` reach every live tab/device holding the account,
+as algo errors do, not only the signing socket: a non-signing tab that missed a
+chase end reported it as lost ("Hosted server stopped reporting it"). The unheard
+record lists every socket told, so a rejoining page still gets its replay.
+Correlated `callMethod:done` replies stay on the signing socket.
 
 ## Classified admission refusals
 
