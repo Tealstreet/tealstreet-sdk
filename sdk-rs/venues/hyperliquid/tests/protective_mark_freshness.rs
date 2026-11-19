@@ -3,7 +3,7 @@
 mod support;
 use safe_cex_engine::model::OrderStatus;
 use safe_cex_engine::model::StopTriggerType::MarkPrice;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, SocketId};
+use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, SocketId, TimerId};
 use safe_cex_venue_hyperliquid::Hyperliquid;
 use serde_json::{Value, json};
 use support::*;
@@ -446,5 +446,84 @@ fn a_delayed_mark_read_never_overwrites_a_newer_streamed_mark() {
     assert!(
         e.claim_http(7_600., permit).is_err(),
         "a put-back that would fire at once is not released"
+    );
+}
+
+/// AGT-55: the TP account with the `xyz` catalogue awaiting its retry, so firing
+/// it rediscovers the market list and carries BTC's existing ticker row.
+fn setup_with_pending_discovery() -> (Engine<Hyperliquid>, SocketId, Value, TimerId) {
+    let (mut e, s, retry) = ready_with_dex_catalogue_retry();
+    let row = take_profit();
+    let frame =
+        json!({"channel":"orderUpdates","data":[{"order":row,"status":"open"}]}).to_string();
+    message(&mut e, s, 1500., &frame);
+    prepared_now(&mut e);
+    (e, s, row, retry)
+}
+/// Fire the catalogue retry at `at` and answer it: a rediscovery of the market list.
+/// Returns every action the retry and its answer produced.
+fn rediscover(e: &mut Engine<Hyperliquid>, retry: TimerId, at: f64) -> Vec<Action> {
+    e.handle(at, Event::TimerFired { timer: retry });
+    let mut actions = prepared_now(e);
+    let meta = info(&actions, "metaAndAssetCtxs").expect("catalogue retry");
+    answer(e, at, &meta, 200, HIP3_META);
+    actions.extend(prepared_now(e));
+    assert!(
+        e.store().ticker("XYZ|FOO-PERP").is_some(),
+        "the catalogue committed"
+    );
+    actions
+}
+
+#[test]
+fn rediscovery_does_not_let_a_stale_mark_pass_the_protective_freshness_gate() {
+    let (mut e, s, row, retry) = setup_with_pending_discovery();
+    contexts(&mut e, s, 2_000., json!({"markPx":"100"}));
+    assert!(!sends(&rediscover(&mut e, retry, 8_000.)));
+    assert_eq!(e.store().ticker("BTC-PERP").unwrap().mark, 100.);
+    assert_eq!(
+        e.store().reference_seen_at("BTC-PERP", MarkPrice),
+        Some(2_000.),
+        "carrying BTC's row is not a new observation of its mark"
+    );
+    let actions = amend_and_size(&mut e, 9_000., &row);
+    assert!(
+        !sends(&actions),
+        "a 7 s old mark cannot release the guarded cancel"
+    );
+    assert!(
+        info(&actions, "activeAssetData").is_some(),
+        "the mark is read first"
+    );
+}
+
+#[test]
+fn rediscovery_cannot_preempt_an_in_flight_on_demand_mark_read() {
+    let (mut e, s, row, retry) = setup_with_pending_discovery();
+    contexts(&mut e, s, 2_000., json!({"markPx":"100"}));
+    let actions = amend_and_size(&mut e, 9_000., &row);
+    let read = info(&actions, "activeAssetData").expect("one bounded mark read");
+    let actions = rediscover(&mut e, retry, 9_100.);
+    assert!(!sends(&actions), "still waiting on the read");
+    assert_eq!(
+        e.store().reference_seen_at("BTC-PERP", MarkPrice),
+        Some(2_000.)
+    );
+    answer(
+        &mut e,
+        9_200.,
+        &read,
+        200,
+        r#"{"coin":"BTC","markPx":"101.5"}"#,
+    );
+    let actions = prepared_now(&mut e);
+    assert_eq!(e.store().ticker("BTC-PERP").unwrap().mark, 101.5);
+    assert_eq!(
+        e.store().reference_seen_at("BTC-PERP", MarkPrice),
+        Some(9_200.)
+    );
+    assert!(
+        sends(&actions),
+        "the read's mark releases the guarded cancel"
     );
 }

@@ -73,6 +73,10 @@ mark is re-read once (1.5 s bound, plan held); if no fresh mark results, the ori
 is re-placed anyway and the Restored outcome says no fresh mark was available. A
 fresh mark still refuses a put-back that would fire immediately.
 
+Rediscovering the market list (a HIP-3 catalogue retry) carries existing ticker
+rows without re-dating their marks (AGT-55), so it neither passes a stale mark nor
+pre-empts an in-flight `activeAssetData` read.
+
 ## Candle catalogue readiness
 
 The first nonempty catalogue opens MARKETS before all HIP-3 DEX and optional spot

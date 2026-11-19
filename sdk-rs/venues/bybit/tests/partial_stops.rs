@@ -174,9 +174,20 @@ fn ready(profile: Profile) -> Harness {
         ticker.last = 100.0;
         ticker.index = 100.0;
     }
-    h.engine.store_mut().set_tickers(tickers);
+    observe_reference_prices(&mut h, tickers);
     h.requests.clear();
     h
+}
+
+/// Install these rows as freshly observed: an unchanged value in `set_tickers`
+/// keeps its old seen-time (AGT-55), so the observation is reported explicitly.
+fn observe_reference_prices(h: &mut Harness, tickers: Vec<safe_cex_engine::model::Ticker>) {
+    let store = h.engine.store_mut();
+    store.set_tickers(tickers);
+    let symbols: Vec<String> = store.tickers().iter().map(|t| t.symbol.clone()).collect();
+    for symbol in symbols {
+        store.observe_ticker_fields(&symbol, (1 << 2) | (1 << 3) | (1 << 4));
+    }
 }
 
 fn body(request: &HttpRequest) -> &str {
@@ -1679,7 +1690,7 @@ fn set_reference_prices(h: &mut Harness, mark: f64, last: f64) {
         ticker.last = last;
     }
     h.message("/v5/private", r#"{"op":"pong"}"#);
-    h.engine.store_mut().set_tickers(tickers);
+    observe_reference_prices(h, tickers);
 }
 
 fn defer_partial_cancel(h: &mut Harness) -> safe_cex_engine::request_context::Preparation {

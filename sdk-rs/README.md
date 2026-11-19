@@ -108,6 +108,17 @@ REST seeds and other symbols' traffic cannot supply it. The protective-amend
 freshness limit remains five seconds without confirmation; unknown prices stay
 unknown. Spot, options and Hyro retain their existing snapshot/observation rules.
 
+## Ticker reference seen-times across table replacement
+
+`Store::reference_seen_at` dates a symbol's last, mark and index price on the
+engine host clock; protective-edit freshness gates read it. `Store::set_tickers`
+replaces the table but keeps a surviving symbol's seen and observed times for each
+of those prices whose value is bitwise unchanged (AGT-55). Market rediscovery
+carries existing rows, so re-dating them passed a stale mark as fresh. New symbols
+and changed values are stamped now. A REST refresh that returns an identical
+price is therefore not a new observation; a venue that genuinely re-read it
+reports that with `observe_ticker_fields`.
+
 ## Browser request-failure diagnostics
 
 The JS host emits `http.request_failed` at Debug for failed managed HTTP work,

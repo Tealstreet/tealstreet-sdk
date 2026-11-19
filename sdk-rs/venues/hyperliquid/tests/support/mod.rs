@@ -109,6 +109,26 @@ pub fn ready_holding_dex_orders(dex: &str) -> (Engine<Hyperliquid>, SocketId, Ve
     );
     (engine, socket, held)
 }
+/// A HIP-3 account whose first `xyz` catalogue read was unusable, and that
+/// catalogue's pending retry timer: firing it rediscovers the market list.
+pub fn ready_with_dex_catalogue_retry() -> (Engine<Hyperliquid>, SocketId, safe_cex_engine::TimerId)
+{
+    let (engine, socket, _, timers) = ready_identity_timers(
+        "disabled",
+        true,
+        None,
+        "30",
+        None,
+        safe_cex_engine::PublicFeedPolicy::Direct,
+        Hip3 {
+            meta: "{}",
+            hold_orders: None,
+        },
+    );
+    // The jittered startup backoff (~1 s) is the earliest timer armed.
+    let retry = timers.iter().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+    (engine, socket, retry.0)
+}
 /// The HIP-3 dex's metadata, and a dex whose open-orders read is held back.
 struct Hip3<'a> {
     meta: &'a str,
@@ -127,6 +147,26 @@ fn ready_identity_policy(
     Engine<Hyperliquid>,
     SocketId,
     (Vec<String>, Vec<HttpRequest>),
+) {
+    let (engine, socket, reads, _) =
+        ready_identity_timers(mode, hip, builder, approval, vault, policy, hip3);
+    (engine, socket, reads)
+}
+/// `ready_identity_policy`, plus the timers armed after the start instant, unfired.
+#[allow(clippy::type_complexity)]
+fn ready_identity_timers(
+    mode: &str,
+    hip: bool,
+    builder: Option<safe_cex_venue_hyperliquid::Builder>,
+    approval: &str,
+    vault: Option<String>,
+    policy: safe_cex_engine::PublicFeedPolicy,
+    hip3: Hip3<'_>,
+) -> (
+    Engine<Hyperliquid>,
+    SocketId,
+    (Vec<String>, Vec<HttpRequest>),
+    Vec<(safe_cex_engine::TimerId, f64)>,
 ) {
     let Hip3 {
         meta: hip_meta,
@@ -151,6 +191,7 @@ fn ready_identity_policy(
     let mut socket = None;
     let mut subscriptions = Vec::new();
     let mut held = Vec::new();
+    let mut timers = Vec::new();
     for _ in 0..20 {
         let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
         if actions.is_empty() {
@@ -181,11 +222,12 @@ fn ready_identity_policy(
                 Action::SetTimer { timer, at_ms } if at_ms == 1000.0 => {
                     e.handle(at_ms, Event::TimerFired { timer });
                 }
+                Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
                 _ => {}
             }
         }
     }
-    (e, socket.unwrap(), (subscriptions, held))
+    (e, socket.unwrap(), (subscriptions, held), timers)
 }
 pub fn message(e: &mut Engine<Hyperliquid>, s: SocketId, now: f64, text: &str) {
     e.handle(now, Event::WsMessage { socket: s, text });

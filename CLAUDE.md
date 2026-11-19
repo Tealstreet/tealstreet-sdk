@@ -15,6 +15,8 @@ Native hosted diagnostic owner attribution is documented in
 
 Bybit's sparse ticker freshness contract lives in
 [`sdk-rs/README.md`](sdk-rs/README.md#bybit-ticker-reference-freshness).
+Ticker seen-times survive `Store::set_tickers` for unchanged prices; see
+[`sdk-rs/README.md`](sdk-rs/README.md#ticker-reference-seen-times-across-table-replacement).
 
 Bitget login-only timestamp-expiry recovery samples a bounded public clock and
 re-signs on the current socket at dispatch. See `sdk-rs/venues/bitget/README.md`.
