@@ -1,21 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderTimeInForce, OrderType } from '../../types';
+import { nativeMarket } from '../cutover/nativeMarket';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 
 const createExchange = (apiVersion: 'v1' | 'v3') => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
-      {
-        symbol: 'BTCUSDT',
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { max: 100 } },
-        info: { filters: [{ filterType: 'PRICE_FILTER', tickSize: '0.1' }] },
-      } as any,
-    ],
-  });
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        nativeMarket({
+          symbol: 'BTCUSDT',
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { max: 100 }, leverage: { min: 1, max: 100 } },
+          info: { filters: [{ filterType: 'PRICE_FILTER', tickSize: '0.1' }] },
+        }) as any,
+      ],
+    },
+    store.markets.map((row) => row.symbol),
+  );
 
   return new AsterDEXExchange(
     'asterdex',

@@ -185,12 +185,13 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
             }]),
         })
         .await;
-    let restored = twap_row(&mut sent, "paused").await;
+    let mut loaded = session.take_loaded();
+    let restored = twap_row(&mut session, &mut loaded, &mut sent, "paused").await;
     assert_eq!(
         restored["status"], "paused",
         "key admission never auto-replays a job"
     );
-    assert_eq!(restored["ordersExecuted"], 7);
+    assert_eq!(restored["ordersExecuted"].as_f64(), Some(7.0));
     assert_eq!(restored["id"], "client-held-twap");
     session
         .msg(AccountMsg {
@@ -215,13 +216,16 @@ async fn delegated_restart_waits_then_clears_only_after_admitted_handover() {
         account,
         &f.registry.held("alice", "acct", session.socket).unwrap()
     ));
-    account
-        .algos
-        .as_ref()
-        .unwrap()
-        .send(crate::algos::AlgoInput::Joined)
-        .unwrap();
-    let still_paused = twap_row(&mut sent, "paused").await;
+    // A refused resume changes no native state, so the delta stream correctly
+    // suppresses the identical TWAP section. Read an authoritative snapshot.
+    session
+        .msg(AccountMsg {
+            op: "sendSnapshot".into(),
+            account_name: Some("acct".into()),
+            data: Value::Null,
+        })
+        .await;
+    let still_paused = twap_row(&mut session, &mut loaded, &mut sent, "paused").await;
     assert_eq!(
         still_paused, restored,
         "refused resume must retain the paused schedule and its progress"
@@ -300,26 +304,38 @@ fn assert_partial_action_refusal(sent: &mut crate::out::Receiver, op: &str) {
     );
 }
 
-async fn twap_row(sent: &mut crate::out::Receiver, status: &str) -> Value {
+async fn twap_row(
+    session: &mut Session,
+    loaded: &mut tokio::sync::mpsc::UnboundedReceiver<(String, u64)>,
+    sent: &mut crate::out::Receiver,
+    status: &str,
+) -> Value {
     tokio::time::timeout(Duration::from_secs(5), async {
-        while let Some(frame) = sent.recv().await {
+        loop {
+            // Native sections obey the startup snapshot hold. Drive the same
+            // loaded callback as the real socket loop before expecting frames.
+            let frame = tokio::select! {
+                callback = loaded.recv() => {
+                    let (name, client) = callback.expect("session loaded channel");
+                    session.account_loaded(&name, client).await;
+                    continue;
+                }
+                frame = sent.recv() => frame.expect("account output ended before the TWAP row"),
+            };
             let frame: Value = serde_json::from_str(&frame).unwrap();
             assert_ne!(
                 frame["d"]["op"], "error",
                 "unexpected algo refusal: {frame}"
             );
-            if frame["d"]["op"] == "store"
-                && let Some(row) = frame["d"]["data"]["activeTWAPs"]
-                    .as_array()
-                    .and_then(|rows| {
-                        rows.iter()
-                            .find(|row| row["id"] == "client-held-twap" && row["status"] == status)
-                    })
+            if let Some(rows) = crate::accounts::testing::native_frame_data(&frame)
+                && let Some(row) = rows["activeTWAPs"].as_array().and_then(|rows| {
+                    rows.iter()
+                        .find(|row| row["id"] == "client-held-twap" && row["status"] == status)
+                })
             {
                 return row.clone();
             }
         }
-        panic!("account output ended before the TWAP row");
     })
     .await
     .expect("native algo reply")

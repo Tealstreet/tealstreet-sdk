@@ -161,6 +161,15 @@ impl Page {
             .await;
     }
 
+    fn record(&mut self, envelope: Value) {
+        if let Some(rows) =
+            safe_cex_exchange_server::accounts::testing::native_frame_data(&envelope)
+        {
+            self.seen.push(json!({"t":"msg","d":{"op":"native-frame","accountName":envelope["d"]["accountName"],"data":rows}}));
+        }
+        self.seen.push(envelope);
+    }
+
     /// The `d` of the next envelope of type `t` (or `msg` op `t`) that matches.
     pub async fn until(&mut self, t: &str, matches: impl Fn(&Value) -> bool) -> Value {
         let found = tokio::time::timeout(Duration::from_secs(10), async {
@@ -173,7 +182,17 @@ impl Page {
                 };
                 let envelope: Value = serde_json::from_str(text.as_str()).unwrap();
                 let d = envelope["d"].clone();
-                self.seen.push(envelope.clone());
+                self.record(envelope.clone());
+                if t == "native-frame"
+                    && let Some(rows) =
+                        safe_cex_exchange_server::accounts::testing::native_frame_data(&envelope)
+                {
+                    let projected =
+                        json!({"op":"native-frame","accountName":d["accountName"],"data":rows});
+                    if matches(&projected) {
+                        return Some(projected);
+                    }
+                }
                 let kind = if envelope["t"] == "msg" {
                     &d["op"]
                 } else {
@@ -202,7 +221,7 @@ impl Page {
                     Some(Ok(Message::Close(None))) => return Ending::Closed(1005, String::new()),
                     Some(Err(_)) | None => return Ending::Dropped,
                     Some(Ok(Message::Text(text))) => {
-                        self.seen.push(serde_json::from_str(text.as_str()).unwrap());
+                        self.record(serde_json::from_str(text.as_str()).unwrap());
                     }
                     Some(Ok(_)) => {}
                 }

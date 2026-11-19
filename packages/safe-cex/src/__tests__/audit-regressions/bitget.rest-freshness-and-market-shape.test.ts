@@ -1,15 +1,18 @@
+import type { StoreData } from '../../generated/StoreData';
+
 import { describe, expect, it, vi } from 'vitest';
 
-import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 // The fallback-route assertion is about Tealstreet's routing, which only exists once registered.
 import '../../transport/registerTealstreetTransport';
 
 const createExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new BitgetExchange(
     'bitget',
     { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
@@ -161,7 +164,22 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
   it('keeps fresher WS positions when REST reconciliation returns an older row', async () => {
     const exchange = createExchange();
     const wsPosition = exchange.mapPosition(rawPosition({ total: '2', openPriceAvg: '51000', uTime: '2000' }));
-    exchange.store.addOrUpdatePosition(wsPosition);
+    (() => {
+      const incoming: StoreData['positions'] = [wsPosition];
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          positions: [
+            ...exchange.store.positions.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.positions.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      );
+    })();
     (exchange.privateWebsocket as any).markWsPositions([wsPosition], 'update');
     exchange.fetchPositions = vi
       .fn()
@@ -183,9 +201,36 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     const positionId = createPositionId('BTCUSDT', PositionSide.Long, PositionMode.OneWay);
     const staleRestPosition = exchange.mapPosition(rawPosition({ total: '1', uTime: '1000' }));
 
-    exchange.store.addOrUpdatePosition(staleRestPosition);
+    (() => {
+      const incoming: StoreData['positions'] = [staleRestPosition];
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          positions: [
+            ...exchange.store.positions.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.positions.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      );
+    })();
     (exchange.privateWebsocket as any).markWsPositions([], 'snapshot');
-    exchange.store.addOrUpdatePositionsFull([]);
+    (() => {
+      const incoming: StoreData['positions'] = [];
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          positions: incoming.map((row) => ({
+            ...exchange.store.positions.find((old) => old.id === row.id),
+            ...row,
+          })),
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      );
+    })();
     exchange.fetchPositions = vi.fn().mockResolvedValue([staleRestPosition]);
 
     await (exchange.privateWebsocket as any).executePositionFetch();
@@ -352,9 +397,24 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     const fillListener = vi.fn();
     exchange.on('fill', fillListener);
 
-    exchange.store.addOrUpdateOrder(
-      exchange.mapOrder(rawAlgoOrder({ orderId: 'tp-1', status: 'not_trigger', triggerPrice: '51000' }))[0],
-    );
+    (() => {
+      const incoming: StoreData['orders'] = [
+        exchange.mapOrder(rawAlgoOrder({ orderId: 'tp-1', status: 'not_trigger', triggerPrice: '51000' }))[0],
+      ];
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          orders: [
+            ...exchange.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      );
+    })();
 
     websocket.handleAlgoOrdersTopic({
       data: [rawAlgoOrder({ orderId: 'tp-1', status: 'triggered', actualSize: '1' })],
@@ -374,9 +434,24 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     const fillListener = vi.fn();
     exchange.on('fill', fillListener);
 
-    exchange.store.addOrUpdateOrder(
-      exchange.mapOrder(rawAlgoOrder({ orderId: 'tp-1', status: 'not_trigger', triggerPrice: '51000' }))[0],
-    );
+    (() => {
+      const incoming: StoreData['orders'] = [
+        exchange.mapOrder(rawAlgoOrder({ orderId: 'tp-1', status: 'not_trigger', triggerPrice: '51000' }))[0],
+      ];
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          orders: [
+            ...exchange.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      );
+    })();
 
     // The shared ORDER_STATUS map treats `executed` and `success` as Closed,
     // but on Bitget WS those strings often mean a successful cancel/modify ack
@@ -402,17 +477,32 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     const fillListener = vi.fn();
     exchange.on('fill', fillListener);
 
-    exchange.store.addOrUpdateOrder(
-      exchange.mapOrder({
-        orderId: 'o-1',
-        symbol: 'BTCUSDT',
-        orderType: 'limit',
-        status: 'live',
-        side: 'buy',
-        price: '50000',
-        size: '1',
-      })[0],
-    );
+    (() => {
+      const incoming: StoreData['orders'] = [
+        exchange.mapOrder({
+          orderId: 'o-1',
+          symbol: 'BTCUSDT',
+          orderType: 'limit',
+          status: 'live',
+          side: 'buy',
+          price: '50000',
+          size: '1',
+        })[0],
+      ];
+      return applyReferenceFixture(
+        exchange.store,
+        {
+          orders: [
+            ...exchange.store.orders.map((row) => {
+              const change = incoming.find((item) => item.id === row.id);
+              return change ? { ...row, ...change } : row;
+            }),
+            ...incoming.filter((row) => !exchange.store.orders.some((old) => old.id === row.id)),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      );
+    })();
 
     websocket.handleOrderTopic({
       data: [

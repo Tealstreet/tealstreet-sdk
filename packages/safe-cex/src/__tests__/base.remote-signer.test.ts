@@ -1,12 +1,13 @@
+import type { ExchangeOptions, RemoteSigner, RemoteSignerRequest, RemoteSignerResponse } from '../types';
+
 import { describe, expect, it } from 'vitest';
 
-import type { ExchangeOptions, RemoteSigner, RemoteSignerRequest, RemoteSignerResponse } from '../types';
-import { DefaultStore } from '../store/store.base';
 import { BaseExchange } from '../exchanges/base';
+import { FrameStore } from '../store/frameStore';
 
 class TestExchange extends BaseExchange {
   constructor(options: ExchangeOptions) {
-    super('binance', options, new DefaultStore());
+    super('binance', options, new FrameStore());
   }
 
   waitForSigner() {

@@ -422,7 +422,12 @@ mod tests {
             let current = out.account("acct").with_instance_id(Some("registration-B"));
             assert!(release.send(current.clone()).is_ok());
             callback.await.unwrap();
-            assert!(current.send(crate::envelope::msg("acct", "store", serde_json::json!({}))));
+            assert!(current.send(crate::envelope::frame(
+                "acct",
+                1,
+                true,
+                b"SCXF\x01\0\0\0\0\0\0\0\0\0\0\0"
+            )));
             let mut requests = 0;
             while let Ok(text) = sent.try_recv() {
                 let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -513,7 +518,12 @@ mod tests {
         let first = out.with_instance_id(Some("A"));
         pending.finish_registration(&first);
         pending.finish_registration(&out.with_instance_id(Some("B")));
-        assert!(pending.send(crate::envelope::msg("acct", "store", serde_json::json!({}))));
+        assert!(pending.send(crate::envelope::frame(
+            "acct",
+            1,
+            true,
+            b"SCXF\x01\0\0\0\0\0\0\0\0\0\0\0"
+        )));
         let frame: serde_json::Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
         assert_eq!(frame["d"]["instanceId"], "A");
 

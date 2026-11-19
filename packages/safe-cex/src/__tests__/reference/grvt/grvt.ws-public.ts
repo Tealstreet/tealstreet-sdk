@@ -1,8 +1,11 @@
+import type { StoreData } from '../../../generated/StoreData';
+
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { Candle, OHLCVOptions, OrderBook } from '../../../types';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { GrvtExchange } from './grvt.exchange';
 import { GrvtCandlestickInterval, WSS_URLS } from '../../../exchanges/grvt/grvt.types';
+import { Candle, OHLCVOptions, OrderBook } from '../../../types';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { GrvtExchange } from './grvt.exchange';
 
 /**
  * GRVT Public WebSocket - Market data streams
@@ -476,8 +479,7 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
       // Parse next funding time (nanoseconds to milliseconds)
       const nextFundingTimeRaw = feed.nf ?? feed.next_funding_time;
       if (nextFundingTimeRaw !== undefined) {
-        const fundingTimeMs =
-          number(nextFundingTimeRaw) / 1000000;
+        const fundingTimeMs = number(nextFundingTimeRaw) / 1000000;
         changes.fundingTime = fundingTimeMs / 1000; // Convert to seconds
       }
 
@@ -497,7 +499,19 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
       }
 
       // Update ticker in store
-      this.parent.store.updateTicker({ id: market.id }, changes);
+      (() => {
+        const target = { id: market.id };
+        const nativeChanges: Partial<StoreData['tickers'][number]> = changes;
+        return applyReferenceFixture(
+          this.parent.store,
+          {
+            tickers: this.parent.store.tickers.map((row) =>
+              row.id === target.id ? { ...row, ...nativeChanges } : row,
+            ),
+          },
+          this.parent.store.markets.map((row) => row.symbol),
+        );
+      })();
 
       // Keep margin upnl in sync with live ticker moves for open positions.
       const hasOpenPositionForSymbol = this.parent.store.positions.some(
@@ -552,7 +566,17 @@ export class GrvtPublicWebSocket extends BaseWebSocket<GrvtExchange> {
         // Update ticker's last price from candle close
         // This ensures the ticker is updated even if ticker WS stream doesn't send last_price
         if (closePrice > 0) {
-          this.parent.store.updateTicker({ id: market.id }, { last: closePrice });
+          (() => {
+            const target = { id: market.id };
+            const changes: Partial<StoreData['tickers'][number]> = { last: closePrice };
+            return applyReferenceFixture(
+              this.parent.store,
+              {
+                tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+              },
+              this.parent.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
       }
     };

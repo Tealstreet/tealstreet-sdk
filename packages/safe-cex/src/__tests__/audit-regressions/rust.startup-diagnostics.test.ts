@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { startupDiagnosticTags } from '../../exchanges/rust/startupDiagnostics';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 vi.mock('../../utils/virtualClock', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../utils/virtualClock')>();
@@ -22,7 +22,7 @@ it('carries startup stage, elapsed/deadline and 429 count through the real error
   const exchange = new RustEngineExchange(
     'hyperliquid',
     { key: '', secret: '', publicDataOnly: true },
-    new DefaultStore(),
+    new FrameStore(),
   );
   accounts.push(exchange);
   const errors = vi.fn();
@@ -77,7 +77,7 @@ it('does not turn arbitrary stage text or invalid counters into Sentry tags', ()
 
 it('forwards bounded request failure facts with the actual venue and no additional error', () => {
   vi.stubGlobal('window', undefined);
-  const exchange = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+  const exchange = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
   accounts.push(exchange);
   const events = vi.fn(),
     errors = vi.fn();
@@ -134,7 +134,7 @@ it('accepts failure enums before the watchdog, without inferring a kind from err
   const exchange = new RustEngineExchange(
     'hyperliquid',
     { key: '', secret: '', publicDataOnly: true },
-    new DefaultStore(),
+    new FrameStore(),
   );
   accounts.push(exchange);
   exchange.on('error', vi.fn());
@@ -152,7 +152,7 @@ it('invalidates cached catalogues only on typed discovery failures', () => {
   const exchange = new RustEngineExchange(
     'hyperliquid',
     { key: '', secret: '', publicDataOnly: true },
-    new DefaultStore(),
+    new FrameStore(),
   );
   accounts.push(exchange);
   exchange.on('error', vi.fn());
@@ -176,7 +176,7 @@ it('invalidates cached catalogues only on typed discovery failures', () => {
 it('derives all five startup causes from a hosted-shaped event at the BaseExchange boundary', () => {
   vi.stubGlobal('window', undefined);
   vi.stubGlobal('self', {});
-  const exchange = new RustEngineExchange('bitget', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+  const exchange = new RustEngineExchange('bitget', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
   accounts.push(exchange);
   const errors = vi.fn();
   exchange.on('error', errors);

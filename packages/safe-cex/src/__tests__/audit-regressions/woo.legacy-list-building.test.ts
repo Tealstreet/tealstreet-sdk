@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { WOOXExchange } from '../reference/woo/woo.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, OrderType, PositionMode, PositionSide } from '../../types';
+import { nativeMarket } from '../cutover/nativeMarket';
+import { nativePosition } from '../cutover/nativePosition';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { WOOXExchange } from '../reference/woo/woo.exchange';
 
 const makeExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new WOOXExchange(
     'woo' as any,
     {
@@ -16,16 +19,30 @@ const makeExchange = () => {
     } as any,
     store,
   );
-  store.update({
-    markets: [
-      { id: 'btc-market', symbol: 'BTCUSDT', precision: { amount: 0.001, price: 0.1 }, limits: {} } as any,
-      { id: 'eth-market', symbol: 'ETHUSDT', precision: { amount: 0.001, price: 0.1 }, limits: {} } as any,
-    ],
-    tickers: [
-      { id: 'btc-market', symbol: 'BTCUSDT', mark: 110, last: 110 } as any,
-      { id: 'eth-market', symbol: 'ETHUSDT', mark: 190, last: 190 } as any,
-    ],
-  });
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        nativeMarket({
+          id: 'btc-market',
+          symbol: 'BTCUSDT',
+          precision: { amount: 0.001, price: 0.1 },
+          limits: {},
+        }) as any,
+        nativeMarket({
+          id: 'eth-market',
+          symbol: 'ETHUSDT',
+          precision: { amount: 0.001, price: 0.1 },
+          limits: {},
+        }) as any,
+      ],
+      tickers: [
+        { id: 'btc-market', symbol: 'BTCUSDT', mark: 110, last: 110 } as any,
+        { id: 'eth-market', symbol: 'ETHUSDT', mark: 190, last: 190 } as any,
+      ],
+    },
+    store.markets.map((row) => row.symbol),
+  );
   vi.spyOn(exchange, 'getPositionMode').mockResolvedValue(PositionMode.OneWay);
   return { exchange, store };
 };

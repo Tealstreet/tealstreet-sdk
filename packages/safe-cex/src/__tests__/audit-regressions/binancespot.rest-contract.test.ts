@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { BinanceSpotExchange } from '../reference/binance/binancespot.exchange';
 import { ENDPOINTS } from '../../exchanges/binance/binancespot.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderTimeInForce, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BinanceSpotExchange } from '../reference/binance/binancespot.exchange';
 
 const ticker = {
   id: 'BTC/USDT',
@@ -33,8 +34,13 @@ describe('Binance Spot REST contract', () => {
   });
 
   it('maps spot balances without expecting futures positions or totals', async () => {
-    const store = new DefaultStore();
-    store.update({ tickers: [ticker] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { tickers: [ticker] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BinanceSpotExchange('binancespot', { key: 'key', secret: 'secret' }, store);
     vi.spyOn(exchange.xhr, 'get').mockResolvedValue({
       data: {
@@ -55,7 +61,7 @@ describe('Binance Spot REST contract', () => {
   });
 
   it('fetches all currently open spot orders without an allOrders symbol parameter', async () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = new BinanceSpotExchange('binancespot', { key: 'key', secret: 'secret' }, store);
     vi.spyOn(exchange.xhr, 'get').mockResolvedValue({ data: [] } as any);
 
@@ -64,7 +70,7 @@ describe('Binance Spot REST contract', () => {
   });
 
   it('uses exchange filters for tradable steps and decimal powers only as fallback', async () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = new BinanceSpotExchange('binancespot', { key: 'key', secret: 'secret' }, store);
     vi.spyOn(exchange.xhr, 'get').mockResolvedValue({
       data: {
@@ -103,21 +109,26 @@ describe('Binance Spot REST contract', () => {
   });
 
   it('builds spot order payloads without futures-only parameters', () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTC/USDT',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          isSpot: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 1 } },
+          markets: [
+            {
+              id: 'BTC/USDT',
+              symbol: 'BTCUSDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              isSpot: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 1 } },
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BinanceSpotExchange('binancespot', { key: 'key', secret: 'secret' }, store);
 
     const payload = (exchange as any).formatCreateOrder({
@@ -147,21 +158,26 @@ describe('Binance Spot REST contract', () => {
   });
 
   it('rejects zero-quantity spot orders before posting to Binance', () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTC/USDT',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          isSpot: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 1 } },
+          markets: [
+            {
+              id: 'BTC/USDT',
+              symbol: 'BTCUSDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              isSpot: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 1 } },
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BinanceSpotExchange('binancespot', { key: 'key', secret: 'secret' }, store);
     const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
 
@@ -180,21 +196,26 @@ describe('Binance Spot REST contract', () => {
   });
 
   it('does not treat a zero maxQty as an infinite split count', () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTC/USDT',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          isSpot: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 0 }, leverage: { min: 1, max: 1 } },
+          markets: [
+            {
+              id: 'BTC/USDT',
+              symbol: 'BTCUSDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              isSpot: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 0 }, leverage: { min: 1, max: 1 } },
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BinanceSpotExchange('binancespot', { key: 'key', secret: 'secret' }, store);
 
     const payload = (exchange as any).formatCreateOrder({
@@ -210,21 +231,26 @@ describe('Binance Spot REST contract', () => {
   });
 
   it('maps post-only to LIMIT_MAKER and rejects unsupported trailing-stop inputs', () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTC/USDT',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          isSpot: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 1 } },
+          markets: [
+            {
+              id: 'BTC/USDT',
+              symbol: 'BTCUSDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              isSpot: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 1 } },
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BinanceSpotExchange('binancespot', { key: 'key', secret: 'secret' }, store);
 
     const [postOnly] = (exchange as any).formatCreateOrder({
@@ -250,21 +276,26 @@ describe('Binance Spot REST contract', () => {
   });
 
   it('rejects failed order placement instead of resolving with no order IDs', async () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTC/USDT',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          isSpot: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 1 } },
+          markets: [
+            {
+              id: 'BTC/USDT',
+              symbol: 'BTCUSDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              isSpot: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 1 } },
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BinanceSpotExchange('binancespot', { key: 'key', secret: 'secret' }, store);
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
     vi.spyOn(exchange.unlimitedXHR, 'post').mockRejectedValue({

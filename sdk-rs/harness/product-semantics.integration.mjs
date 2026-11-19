@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 import { BaseExchange } from '../../packages/safe-cex/src/exchanges/base.ts';
 import { RustEngineExchange } from '../../packages/safe-cex/src/exchanges/rust/rust.exchange.ts';
-import { DefaultStore } from '../../packages/safe-cex/src/store/store.base.ts';
+import { FrameStore } from '../../packages/safe-cex/src/store/frameStore.ts';
 import { prepareCliOrder } from '../../packages/cli-core/src/order/prepareCliOrder.ts';
 import { classifyMarket } from '../../packages/safe-cex/src/instrument-class/resolve.ts';
 
@@ -67,8 +67,8 @@ test('native Bybit discovery survives transfer and the real CLI TradFi preflight
     assert.ok(frame.instrumentClassifications(), 'Native instrument classifications must be present');
     assert.equal(frame.instrumentClassifications().count, labels.length);
     const options = { key: '', secret: '', publicDataOnly: true };
-    const worker = new RustEngineExchange('bybit', options, new DefaultStore());
-    const main = new BaseExchange('bybit', options, new DefaultStore());
+    const worker = new RustEngineExchange('bybit', options, new FrameStore());
+    const main = new BaseExchange('bybit', options, new FrameStore());
     worker.onFrame = (buffer) => main.applyWorkerFrame(structuredClone(buffer, { transfer: [buffer] }));
     try {
       worker.receiveFrame(transferred);

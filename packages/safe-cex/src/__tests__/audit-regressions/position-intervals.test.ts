@@ -271,10 +271,10 @@ describe('attributeFunding', () => {
     expect(attributeFunding(interval, rows, { hedged: false })).toEqual({ funding: -1, attributed: true });
   });
 
-  it('reports the symbol total but refuses to attribute it in hedge mode', () => {
+  it('keeps an unallocated symbol total out of the per-leg amount in hedge mode', () => {
     // Funding arrives per SYMBOL, not per leg. With both legs open there is no
     // venue-reported split, and inventing one is a fabrication.
-    expect(attributeFunding(interval, rows, { hedged: true })).toEqual({ funding: -1, attributed: false });
+    expect(attributeFunding(interval, rows, { hedged: true })).toEqual({ funding: 0, attributed: false });
   });
 
   it('refuses to attribute when the interval started before the window', () => {

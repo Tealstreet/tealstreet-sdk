@@ -100,5 +100,20 @@ Hyperliquid pre-send `/info` admission diagnostics retain timeout/NotSent with t
 closed `info_admission` cause. The relay/post-handoff boundary is documented in
 `sdk-rs/README.md` under Browser request-failure diagnostics.
 
+Bybit's closed later-page read diagnostics and owning-result completeness bridge
+are documented in `sdk-rs/venues/bybit/README.md` under Later-page history failure
+diagnostics. They add no pagination, retry or write authority.
+
 BingX sent cancel/amend invalid-input diagnostics carry only closed request shape;
 its bounds and replacement-provenance semantics live in `sdk-rs/venues/bingx/README.md`.
+
+OKX ordinary historical orders retain native gross close PnL and signed aggregate
+fee/credit totals with their currencies. Unknown money remains absent; this does
+not promote the orders axis grade. The projection and limits are documented in
+[`sdk-rs/venues/okx/README.md`](sdk-rs/venues/okx/README.md#order-history-financial-projection).
+
+## Native server image PR checks
+
+`docker-native-server-pr.yml` builds both production Dockerfiles from the repo root on PRs.
+It imports the master image caches with a read-only automatic token; it never publishes images or caches.
+The existing master-only workflows remain the sole image publishers and signers.

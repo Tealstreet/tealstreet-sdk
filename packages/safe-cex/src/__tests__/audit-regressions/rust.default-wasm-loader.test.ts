@@ -2,8 +2,9 @@ import type { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { directTransport } from '../../transport/direct';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 
 const wasm = vi.hoisted(() => ({ loads: [] as string[], engines: [] as string[] }));
@@ -19,7 +20,11 @@ vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
     view.setUint16(4, 1, true);
     view.setUint16(6, 3, true);
     let at = 16;
-    for (const [kind, length] of [[2, 8], [3, 8], [10, 16]]) {
+    for (const [kind, length] of [
+      [2, 8],
+      [3, 8],
+      [10, 16],
+    ]) {
       view.setUint16(at, kind, true);
       view.setUint32(at + 4, length, true);
       if (kind === 10) view.setUint32(at + 8, 31, true);
@@ -35,7 +40,10 @@ vi.mock('@tealstreet/safe-cex-wasm/engine', () => {
 
       capabilities = () => engineCapabilities('binance');
       private pending = false;
-      start = () => { this.pending = true; return ''; };
+      start = () => {
+        this.pending = true;
+        return '';
+      };
       command = () => '';
       takeFrame = () => {
         if (!this.pending) return undefined;
@@ -84,8 +92,13 @@ const setup = async () => {
     clearTimeout() {},
   }));
   const account = (name: 'binance' | 'bybitspot' | 'woofi' = 'binance') => {
-    const store = new DefaultStore();
-    store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new sdk.RustEngineExchange(
       name,
       { key: '', secret: '', publicDataOnly: true, transport: directTransport },

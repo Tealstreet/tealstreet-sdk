@@ -43,3 +43,21 @@ fn invalid_clock_refuses_local_setting_without_io_or_store_change() {
     );
     assert!(engine.store().hedged());
 }
+
+#[test]
+fn invalid_clock_refuses_fixed_leverage_without_caching_rails() {
+    let mut engine =
+        safe_cex_engine::test_support::seeded_engine(Polymarket::new(Options::default()));
+    engine.handle(
+        f64::NAN,
+        Event::Command(Command::FetchLeverage {
+            command: 8,
+            symbol: "unknown".into(),
+        }),
+    );
+    assert!(engine.store().setting("unknown").is_none());
+    assert!(matches!(
+        engine.drain_actions().next(),
+        Some(Action::Notice(Notice::CommandFailed { command: 8, .. }))
+    ));
+}

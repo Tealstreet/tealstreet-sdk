@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { nativePosition } from '../cutover/nativePosition';
+import { nativeTicker } from '../cutover/nativeTicker';
+import { referenceStore } from '../cutover/referenceFixture';
 import { decodeHyperliquidFastAssetCtxs } from '../reference/hyperliquid/hyperliquid.fast-asset-ctxs';
 import { HyperliquidPublicWebSocket } from '../reference/hyperliquid/hyperliquid.ws-public';
 
@@ -14,13 +17,10 @@ const createWebsocket = (positions: unknown[] = []) => {
     isDisposed: false,
     name: 'hyperliquid',
     options: { testnet: false },
-    store: {
-      markets: [],
-      positions,
-      tickersById: { BTC: btcTicker, 'xyz:TSLA': tslaTicker },
-      update: vi.fn(),
-      updateTicker: vi.fn((ticker, update) => Object.assign(ticker, update)),
-    },
+    store: referenceStore({
+      positions: positions.map(() => nativePosition({ symbol: 'BTC-PERP' })),
+      tickers: [nativeTicker(btcTicker), nativeTicker(tslaTicker)],
+    }),
     emitter: { emit: vi.fn() },
     log: vi.fn(),
     syncBalanceFromLivePositions: vi.fn(),
@@ -57,9 +57,9 @@ describe('Hyperliquid fastAssetCtxs', () => {
 
     websocket.handleFastAssetCtxs(FAST_ASSET_CTXS_FIXTURE);
 
-    expect(btcTicker).toMatchObject({ mark: 100.25, last: 100.5, midPrice: 100.5 });
-    expect(tslaTicker).toMatchObject({ mark: 250.1, last: 241, midPrice: 241 });
-    expect(parent.store.updateTicker).toHaveBeenCalledTimes(2);
+    expect(parent.store.tickersById.BTC).toMatchObject({ mark: 100.25, last: 100.5, midPrice: 100.5 });
+    expect(parent.store.tickersById['xyz:TSLA']).toMatchObject({ mark: 250.1, last: 241, midPrice: 241 });
+    expect(btcTicker).toMatchObject({ mark: 90, last: 91, midPrice: 91 });
     expect(parent.syncBalanceFromLivePositions).toHaveBeenCalledWith(new Set(['BTC-PERP']));
   });
 
@@ -71,12 +71,12 @@ describe('Hyperliquid fastAssetCtxs', () => {
     } as MessageEvent);
 
     expect(btcTicker).toMatchObject({ mark: 90, last: 91, midPrice: 91 });
-    expect(parent.store.updateTicker).not.toHaveBeenCalled();
+    expect(parent.store.tickersById.BTC).toMatchObject(btcTicker);
 
     websocket.onMessage({
       data: JSON.stringify({ channel: 'allMids', data: { mids: { BTC: '92.5' } } }),
     } as MessageEvent);
 
-    expect(btcTicker).toMatchObject({ mark: 90, last: 92.5, midPrice: 92.5 });
+    expect(parent.store.tickersById.BTC).toMatchObject({ mark: 90, last: 92.5, midPrice: 92.5 });
   });
 });

@@ -1,10 +1,6 @@
 import type { Balance, Candle, Execution, Market, Order, OrderBook, Position, Ticker } from '../../../types';
 
 import { parsePrecision } from '@tealstreet/ccxt-compat/src/functions/ccxt_exchange';
-import { createPositionId } from '../../../utils/createPositionId';
-import { omitUndefined } from '../../../utils/omitUndefined';
-import { calcOrderBookTotal } from '../../../utils/orderbook';
-import { parseBinanceSymbol } from '../../../utils/symbolConverter';
 import {
   MarginType,
   OrderSide,
@@ -15,6 +11,11 @@ import {
   PositionMode,
   PositionSide,
 } from '../../../types';
+import { createPositionId } from '../../../utils/createPositionId';
+import { omitUndefined } from '../../../utils/omitUndefined';
+import { calcOrderBookTotal } from '../../../utils/orderbook';
+import { parseBinanceSymbol } from '../../../utils/symbolConverter';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import {
   MARGIN_TYPE,
   ORDER_SIDE,
@@ -69,7 +70,8 @@ export const getContractSize = (market?: Market): number => {
   return contractSize > 0 ? contractSize : 1;
 };
 
-export const nativeVolumeToAmount = (value: unknown, market?: Market): number => toNumber(value) * getContractSize(market);
+export const nativeVolumeToAmount = (value: unknown, market?: Market): number =>
+  toNumber(value) * getContractSize(market);
 
 export const amountToNativeVolume = (amount: number, market?: Market): number => amount / getContractSize(market);
 
@@ -149,8 +151,8 @@ const normalizeOrderbookSide = (rows: unknown, market: Market): OrderBook['bids'
   if (!Array.isArray(rows)) return [];
 
   return rows.reduce<OrderBook['bids']>((acc, row) => {
-    const price = Array.isArray(row) ? row[0] : row?.p ?? row?.price;
-    const amount = Array.isArray(row) ? row[1] : row?.v ?? row?.vol ?? row?.amount;
+    const price = Array.isArray(row) ? row[0] : (row?.p ?? row?.price);
+    const amount = Array.isArray(row) ? row[1] : (row?.v ?? row?.vol ?? row?.amount);
     const parsedPrice = toNumber(price);
     const parsedAmount = nativeVolumeToAmount(amount, market);
     if (parsedPrice > 0 && parsedAmount >= 0) {
@@ -300,7 +302,7 @@ export const normalizePosition = (
     unrealizedPnl,
     realizedPnl: toNumber(raw.realised ?? raw.realizedPnl, 0),
     contracts,
-    liquidationPrice: toNumber(raw.liquidatePrice ?? raw.liquidationPrice),
+    liquidationPrice: nativeLiquidationPrice(toNumber(raw.liquidatePrice ?? raw.liquidationPrice)),
     marginSize: toNumber(raw.im ?? raw.margin ?? raw.positionMargin, notional && leverage ? notional / leverage : 0),
     info: raw,
     extra: {
@@ -330,7 +332,7 @@ export const fakePositionsForMarket = (
     unrealizedPnl: 0,
     realizedPnl: 0,
     contracts: 0,
-    liquidationPrice: 0,
+    liquidationPrice: null,
     marginSize: 0,
     info: {},
     extra: {
@@ -343,10 +345,14 @@ export const fakePositionsForMarket = (
 
 const normalizeBracketTrend = (trend: unknown): OrderStopTriggerType | undefined => {
   switch (toNumber(trend, Number.NaN)) {
-    case 1: return OrderStopTriggerType.LastPrice;
-    case 2: return OrderStopTriggerType.MarkPrice;
-    case 3: return OrderStopTriggerType.IndexPrice;
-    default: return undefined;
+    case 1:
+      return OrderStopTriggerType.LastPrice;
+    case 2:
+      return OrderStopTriggerType.MarkPrice;
+    case 3:
+      return OrderStopTriggerType.IndexPrice;
+    default:
+      return undefined;
   }
 };
 

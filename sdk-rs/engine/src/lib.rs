@@ -113,3 +113,9 @@ pub use public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 #[cfg(feature = "address-nonce")]
 pub use engine::{AddressSetupCleanup, AddressSetupProgress, SetupHostSupport};
 pub use engine::{AddressSetupSlots, SetupRetirement};
+
+/// Native UI sections of the account frame.
+pub mod store_frame_wire;
+
+#[cfg(all(test, feature = "managed-sockets"))]
+mod test_alloc;

@@ -22,7 +22,7 @@ import { CORE_READ_MANIFEST } from '@tealstreet/script-api-core/src/runtime/read
  * makes that pair a cycle.
  */
 export const SHAPE_BY_METHOD: ReadonlyMap<string, ReadResultShape> = new Map(
-  CORE_READ_MANIFEST.map((entry) => [entry.method as string, entry.resultShape]),
+  CORE_READ_MANIFEST.map((entry) => [entry.method, entry.resultShape]),
 );
 
 /**
@@ -75,7 +75,7 @@ const narrowingOf = (params: readonly string[], shape: ReadResultShape): ReadNar
 
 export const NARROWING_BY_METHOD: ReadonlyMap<string, ReadNarrowing> = new Map(
   CORE_READ_MANIFEST.map((entry) => [
-    entry.method as string,
+    entry.method,
     narrowingOf(Object.keys(entry.params.properties), entry.resultShape),
   ]),
 );

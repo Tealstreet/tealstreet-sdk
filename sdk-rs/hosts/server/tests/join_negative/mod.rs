@@ -92,7 +92,7 @@ pub struct Device {
     pub replayed: usize,
 }
 impl Device {
-    fn answer<V: Venue>(&mut self, frame: &Value, answer: Answer) -> Value {
+    pub(super) fn answer<V: Venue>(&mut self, frame: &Value, answer: Answer) -> Value {
         let (slot, preimage, fresh) = V::signature(frame, matches!(answer, Answer::OtherKey));
         let mut reply = if matches!(answer, Answer::Replay) && V::replayable(frame) {
             let (old, reply) = self

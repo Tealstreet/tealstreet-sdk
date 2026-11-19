@@ -2,9 +2,10 @@ import type { OrderBook } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { MexcExchange } from '../reference/mexc/mexc.exchange';
 import { normalizeMarket } from '../reference/mexc/mexc.utils';
-import { DefaultStore } from '../../store/store.base';
 
 type Snapshot = OrderBook & { lastUpdateId?: string };
 
@@ -39,18 +40,23 @@ describe('MEXC incremental futures depth', () => {
   });
 
   const setup = () => {
-    const exchange = new MexcExchange('mexc', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    const exchange = new MexcExchange('mexc', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
     exchanges.push(exchange);
-    exchange.store.update({
-      markets: [
-        normalizeMarket({
-          symbol: 'BTC_USDT',
-          baseCoin: 'BTC',
-          quoteCoin: 'USDT',
-          contractSize: 0.0001,
-        }),
-      ],
-    });
+    exchange.store.apply(
+      nativeFixture(
+        {
+          markets: [
+            normalizeMarket({
+              symbol: 'BTC_USDT',
+              baseCoin: 'BTC',
+              quoteCoin: 'USDT',
+              contractSize: 0.0001,
+            }),
+          ],
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const socket = { readyState: 1, send: vi.fn(), close: vi.fn(), removeEventListener: vi.fn() };
     const ws = exchange.publicWebsocket;
     ws.ws = socket as any;

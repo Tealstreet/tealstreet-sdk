@@ -1,11 +1,19 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { BinanceSpotExchange } from './binancespot.exchange';
 
-import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import createHmac from 'create-hmac';
+
+import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import {
+  BASE_WS_URL,
+  ORDER_SIDE,
+  ORDER_TYPE_SPOT,
+  USER_DATA_RECV_WINDOW,
+} from '../../../exchanges/binance/binancespot.types';
 import { OrderStatus, OrderType } from '../../../types';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { BASE_WS_URL, ORDER_SIDE, ORDER_TYPE_SPOT, USER_DATA_RECV_WINDOW } from '../../../exchanges/binance/binancespot.types';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 export const BINANCE_SPOT_USER_DATA_REQUEST_ID = 'tealstreet-user-data';
 export const BINANCE_SPOT_HEARTBEAT_REQUEST_ID = 42;
@@ -162,42 +170,88 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> 
         const orderId = data.c;
         const filled = parseFloat(data.z);
         const amount = parseFloat(data.q);
-        this.store.updateOrder(
-          { id: orderId },
-          {
+        (() => {
+          const target = { id: orderId };
+          const changes: Partial<StoreData['orders'][number]> = {
             filled,
             remaining: amount - filled,
             lastUpdate: virtualClock.getCurrentTimeMs(),
-          },
-        );
+          };
+          return applyReferenceFixture(
+            this.store,
+            { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
 
         // Fully filled (`z === q`, or order status FILLED) → transition out of Open.
         if (data.X === 'FILLED' || filled >= amount) {
-          this.store.updateOrderStatus({ id: orderId }, OrderStatus.Closed);
+          (() => {
+            const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
+            const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
       }
 
       if (data.X === 'NEW') {
-        this.store.addOrUpdateOrder({
-          id: data.c,
-          status: OrderStatus.Open,
-          symbol: data.s,
-          // Spot reports the order type in `o` (LIMIT/STOP_LOSS_LIMIT/LIMIT_MAKER/…),
-          // NOT the futures `ot` field. Spot has no reduceOnly concept.
-          type: ORDER_TYPE_SPOT[data.o] || OrderType.Limit,
-          side: ORDER_SIDE[data.S],
-          price: parseFloat(data.p) || parseFloat(data.sp),
-          amount: parseFloat(data.q),
-          filled: parseFloat(data.z),
-          lastUpdate: virtualClock.getCurrentTimeMs(),
-          remaining: parseFloat(data.q) - parseFloat(data.z),
-          reduceOnly: false,
-          info: data,
-        });
+        (() => {
+          const incoming: StoreData['orders'] = [
+            {
+              id: data.c,
+              status: OrderStatus.Open,
+              symbol: data.s,
+              // Spot reports the order type in `o` (LIMIT/STOP_LOSS_LIMIT/LIMIT_MAKER/…),
+              // NOT the futures `ot` field. Spot has no reduceOnly concept.
+              type: ORDER_TYPE_SPOT[data.o] || OrderType.Limit,
+              side: ORDER_SIDE[data.S],
+              price: parseFloat(data.p) || parseFloat(data.sp),
+              amount: parseFloat(data.q),
+              filled: parseFloat(data.z),
+              lastUpdate: virtualClock.getCurrentTimeMs(),
+              remaining: parseFloat(data.q) - parseFloat(data.z),
+              reduceOnly: false,
+              info: data,
+            },
+          ];
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
 
       if (data.X === 'CANCELED' || data.X === 'REJECTED' || data.X === 'EXPIRED') {
-        this.store.updateOrderStatus({ id: data.c }, OrderStatus.Canceled);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: data.c }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     });
   };
@@ -228,9 +282,13 @@ export class BinancePrivateWebsocket extends BaseWebSocket<BinanceSpotExchange> 
         total += balance.total * price;
       }
 
-      this.store.update({
-        balance: { free, used, total, upnl: 0, currencies, coins, info: event },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          balance: { free, used, total, upnl: 0, currencies, coins, info: event },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     });
   };
 }

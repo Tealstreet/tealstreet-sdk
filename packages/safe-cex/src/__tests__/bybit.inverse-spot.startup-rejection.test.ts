@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../store/frameStore';
 import { BybitInverseExchange } from './reference/bybit/bybitinverse.exchange';
 import { BybitSpotExchange } from './reference/bybit/bybitspot.exchange';
-import { DefaultStore } from '../store/store.base';
 
 /**
  * A rejected key answers the margin probe before the markets load. The probe used to get
@@ -20,7 +20,7 @@ describe.each(variants)('%s startup with a rejected key', (name, Exchange, publi
     const exchange = new Exchange(
       name,
       { key: 'k', secret: 's', testnet: false, tuning: { consoleLogging: false } } as any,
-      new DefaultStore(),
+      new FrameStore(),
     );
     for (const method of ['fetchFees', 'fetchAndCacheApiKeyInfo', 'tick', 'fetchOrdersPositionsAndBalance']) {
       if (typeof (exchange as any)[method] === 'function') vi.spyOn(exchange as any, method).mockResolvedValue([]);

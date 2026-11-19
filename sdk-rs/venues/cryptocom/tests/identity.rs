@@ -1,5 +1,8 @@
 //! Actual signed identity queries are isolated from financial reconciliation.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
 mod support;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, ReadCredentials, Response,
 };
@@ -122,7 +125,7 @@ fn identity_primary_signed_post_retains_exact_uuid_with_secondary_configured() {
         result(respond(&mut e, &r, 200, body), 42, false).unwrap(),
         r#"{"userId":"9007199254740993","affiliateId":null}"#
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     assert!(respond(&mut e, &r, 200, body).is_empty());
 }
 #[test]
@@ -152,7 +155,7 @@ fn identity_missing_false_zero_empty_and_malformed_reject_without_store_changes(
         let before = e.account_snapshot_frame(NOW).to_vec();
         let r = take(ask(&mut e));
         result(respond(&mut e, &r, 200, body), 42, true).unwrap_err();
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     }
 }
 #[test]
@@ -216,7 +219,7 @@ fn identity_transport_retry_budget_and_other_errors_settle_once() {
             result(actions, 42, true).unwrap_err();
         }
     }
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [0, 0, 0, 4, 0]);
     for (status, body) in [
         (503, "unavailable"),
         (200, r#"{"code":10004,"message":"denied"}"#),

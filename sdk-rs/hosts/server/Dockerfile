@@ -4,6 +4,7 @@ WORKDIR /build
 ENV CARGO_BUILD_JOBS=2
 COPY sdk-rs/ sdk-rs/
 COPY packages/safe-cex/src/exchanges/rust/construction-rules.json packages/safe-cex/src/exchanges/rust/construction-rules.json
+COPY packages/safe-cex/src/exchange-display-policy.json packages/safe-cex/src/exchange-display-policy.json
 WORKDIR /build/sdk-rs
 RUN cargo build --release --locked -p safe-cex-exchange-server --bin exchange-server --features delegated-order-frames \
     && install -D target/release/exchange-server /out/exchange-server

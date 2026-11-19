@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
@@ -11,7 +11,7 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
 afterEach(() => vi.restoreAllMocks());
 
 it.each(['twap:start', 'chaser:start', 'exec'])('refuses %s when owner-bound startup throws', (op) => {
-  const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+  const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new FrameStore());
   const run = vi.fn();
   const refuse = vi.fn();
   const host = {

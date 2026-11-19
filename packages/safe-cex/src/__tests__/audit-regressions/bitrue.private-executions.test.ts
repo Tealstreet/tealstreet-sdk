@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { Market, OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
 
 const market: Market = {
   id: 'E-BTC-USDT',
@@ -17,8 +18,12 @@ const market: Market = {
 };
 const make = () => {
   vi.useFakeTimers();
-  const store = new DefaultStore();
-  store.update({ markets: [market] });
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    { markets: [market] },
+    store.markets.map((row) => row.symbol),
+  );
   const exchange = new BitrueExchange('bitrue', { key: 'key', secret: 'secret' }, store);
   const fills = vi.fn();
   exchange.on('fill', fills);
@@ -61,7 +66,11 @@ describe('Bitrue futures private execution contract', () => {
         found: true,
         order: { id: '2334151155877155281', timeInForce },
       });
-      store.update({ orders: [{ ...store.orders[0], timeInForce: OrderTimeInForce.GoodTillCancel }] });
+      applyReferenceFixture(
+        store,
+        { orders: [{ ...store.orders[0], timeInForce: OrderTimeInForce.GoodTillCancel }] },
+        store.markets.map((row) => row.symbol),
+      );
       socket.handleOrderTradeUpdate(row(0, 'NEW', { o: type, x: 'NEW', c: 'caller-bitrue-1' }) as any);
       expect(store.orders[0].timeInForce).toBe(timeInForce);
       expect(fetchOrders).not.toHaveBeenCalled();
@@ -72,7 +81,11 @@ describe('Bitrue futures private execution contract', () => {
   it('preserves a known time in force when a private delta omits that metadata', () => {
     const { exchange, socket, store } = make();
     socket.handleOrderTradeUpdate(row(0, 'NEW', { o: 'LIMIT', x: 'NEW' }) as any);
-    store.update({ orders: [{ ...store.orders[0], timeInForce: OrderTimeInForce.PostOnly }] });
+    applyReferenceFixture(
+      store,
+      { orders: [{ ...store.orders[0], timeInForce: OrderTimeInForce.PostOnly }] },
+      store.markets.map((row) => row.symbol),
+    );
     socket.handleOrderTradeUpdate(row(0, 'NEW', { o: 'LIMIT', x: 'NEW' }) as any);
     expect(store.orders[0].timeInForce).toBe(OrderTimeInForce.PostOnly);
     exchange.dispose();
@@ -95,7 +108,11 @@ describe('Bitrue futures private execution contract', () => {
     socket.handleOrderTradeUpdate(row(0, 'CANCELED', { x: 'CANCEL' }) as any);
     socket.handleOrderTradeUpdate(row(0, 'NEW', { x: 'NEW' }) as any);
     expect(store.orders[0].status).toBe(OrderStatus.Canceled);
-    store.update({ orders: [] });
+    applyReferenceFixture(
+      store,
+      { orders: [] },
+      store.markets.map((row) => row.symbol),
+    );
     socket.handleOrderTradeUpdate(row(0, 'NEW', { x: 'NEW' }) as any);
     expect(store.orders).toEqual([]);
     socket.handleOrderTradeUpdate(row(10, 'FILLED') as any);
@@ -118,23 +135,27 @@ describe('Bitrue futures private execution contract', () => {
   });
   it('does not re-emit executions already included in an authoritative order snapshot', () => {
     const { socket, store, fills } = make();
-    store.update({
-      orders: [
-        {
-          id: '2334151155877155281',
-          symbol: market.symbol,
-          type: OrderType.Limit,
-          side: OrderSide.Buy,
-          status: OrderStatus.Open,
-          price: 100,
-          amount: 100,
-          filled: 40,
-          remaining: 60,
-          reduceOnly: false,
-          lastUpdate: 0,
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        orders: [
+          {
+            id: '2334151155877155281',
+            symbol: market.symbol,
+            type: OrderType.Limit,
+            side: OrderSide.Buy,
+            status: OrderStatus.Open,
+            price: 100,
+            amount: 100,
+            filled: 40,
+            remaining: 60,
+            reduceOnly: false,
+            lastUpdate: 0,
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     socket.handleOrderTradeUpdate(row(4) as any);
     expect(fills).not.toHaveBeenCalled();
   });
@@ -150,7 +171,11 @@ describe('Bitrue futures private execution contract', () => {
   it('reseeds cumulative value when REST advances beyond the last stream execution', () => {
     const { socket, store, fills } = make();
     socket.handleOrderTradeUpdate(row(1, 'PART_FILLED', { ap: '100', L: undefined }) as any);
-    store.update({ orders: [{ ...store.orders[0], filled: 30, remaining: 70, info: { avgPrice: 110 } }] });
+    applyReferenceFixture(
+      store,
+      { orders: [{ ...store.orders[0], filled: 30, remaining: 70, info: { avgPrice: 110 } }] },
+      store.markets.map((row) => row.symbol),
+    );
     socket.handleOrderTradeUpdate(row(4, 'PART_FILLED', { ap: '115', L: undefined }) as any);
     expect(fills.mock.calls.map(([fill]) => [fill.price, fill.amount])).toEqual([
       [100, 10],

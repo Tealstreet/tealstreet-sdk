@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from './reference/bybit/bybit.exchange';
 import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
+import { nativeMarket } from './cutover/nativeMarket';
+import { applyReferenceFixture } from './cutover/referenceFixture';
+import { BybitExchange } from './reference/bybit/bybit.exchange';
 
 const createExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new BybitExchange('bybit', { testnet: false, tuning: { consoleLogging: false } } as any, store);
   vi.spyOn(exchange as any, 'fetchFees').mockResolvedValue([]);
   return { exchange, store };
@@ -65,8 +67,12 @@ describe('Bybit market startup', () => {
 
   it('falls back to cached markets when the required Trading request fails', async () => {
     const { exchange, store } = createExchange();
-    const cachedMarket = marketPayload('ETHUSDT');
-    store.update({ markets: [cachedMarket as any] });
+    const cachedMarket = nativeMarket({ id: 'ETHUSDT', symbol: 'ETHUSDT', base: 'ETH', quote: 'USDT' });
+    applyReferenceFixture(
+      store,
+      { markets: [cachedMarket] },
+      store.markets.map((row) => row.symbol),
+    );
 
     (exchange.xhr.get as any) = vi.fn((url: string, config: any) => {
       expect(url).toBe(ENDPOINTS.MARKETS);
@@ -130,7 +136,11 @@ describe('Bybit market startup', () => {
 
   it('fails startup when the required Trading response is not OK', async () => {
     const { exchange, store } = createExchange();
-    store.update({ markets: [marketPayload('ETHUSDT') as any] });
+    applyReferenceFixture(
+      store,
+      { markets: [nativeMarket({ id: 'ETHUSDT', symbol: 'ETHUSDT', base: 'ETH', quote: 'USDT' })] },
+      store.markets.map((row) => row.symbol),
+    );
 
     (exchange.xhr.get as any) = vi.fn((url: string, config: any) => {
       expect(url).toBe(ENDPOINTS.MARKETS);
@@ -147,7 +157,11 @@ describe('Bybit market startup', () => {
 
   it('does not use cached markets for Trading market mapper errors', async () => {
     const { exchange, store } = createExchange();
-    store.update({ markets: [marketPayload('ETHUSDT') as any] });
+    applyReferenceFixture(
+      store,
+      { markets: [nativeMarket({ id: 'ETHUSDT', symbol: 'ETHUSDT', base: 'ETH', quote: 'USDT' })] },
+      store.markets.map((row) => row.symbol),
+    );
 
     (exchange.xhr.get as any) = vi.fn((url: string, config: any) => {
       expect(url).toBe(ENDPOINTS.MARKETS);

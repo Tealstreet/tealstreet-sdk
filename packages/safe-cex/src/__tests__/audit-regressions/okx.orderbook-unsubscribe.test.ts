@@ -2,8 +2,9 @@ import type { ExchangeOptions, Market } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { OKXExchange } from '../reference/okx/okx.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -29,11 +30,16 @@ const market: Market = {
 
 describe('OKX orderbook subscription regression', () => {
   it('preserves shared state until the final listener unsubscribes', () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [market],
-      loaded: { ...store.loaded, markets: true },
-    });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        {
+          markets: [market],
+          loaded: { ...store.loaded, markets: true },
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const exchange = new OKXExchange('okx', options, store);
     const websocket = exchange.publicWebsocket;

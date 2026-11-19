@@ -1,4 +1,4 @@
-import type { ReadManifestEntry } from '@tealstreet/script-api-core/src/runtime/readBindings';
+import type { JsonSchemaField } from '@tealstreet/script-api-core/src/runtime/readBindings';
 import type { OemsContext } from './context.types';
 
 import { AGENT_READ_API_PATHS } from '@tealstreet/script-api-core/src/runtime/runtimeSurface';
@@ -90,7 +90,7 @@ describe('READ_CALL_SCHEMA is OpenAI strict-mode valid', () => {
   it('refuses to build a union when two tools give one field name different types', () => {
     // Synthetic tools: no real pair conflicts today, which is the point of the
     // guard — it has to be exercised deliberately or it is never reached.
-    const field = (type: string) => ({
+    const field = (type: JsonSchemaField['type']) => ({
       type: 'object' as const,
       additionalProperties: false as const,
       required: ['x'],
@@ -99,7 +99,7 @@ describe('READ_CALL_SCHEMA is OpenAI strict-mode valid', () => {
     const clash = [
       { ...AGENT_READ_TOOLS[0], method: 'a', params: field('string') },
       { ...AGENT_READ_TOOLS[0], method: 'b', params: field('number') },
-    ] as unknown as readonly ReadManifestEntry[];
+    ];
     expect(() => buildReadCallProperties(clash)).toThrow(/cannot express both/);
   });
 
@@ -110,7 +110,7 @@ describe('READ_CALL_SCHEMA is OpenAI strict-mode valid', () => {
   /** Tool names reach the provider as enum values, and the plan's own `kind`
    *  enum is snake_case; a collision would make one vocabulary two things. */
   it('uses provider-legal names that cannot collide with a plan step kind', () => {
-    const kinds = new Set(OEMS_PLAN_SCHEMA.properties.steps.items.properties.kind.enum as readonly string[]);
+    const kinds = new Set<string>(OEMS_PLAN_SCHEMA.properties.steps.items.properties.kind.enum);
     for (const name of AGENT_READ_TOOL_NAMES) {
       expect(name).toMatch(/^[a-zA-Z0-9_-]+$/);
       expect(kinds.has(name)).toBe(false);
@@ -225,7 +225,17 @@ describe('parseReadCalls', () => {
 
   it('drops nulls so an optional argument reaches the binding as absent', () => {
     const { calls } = parseReadCalls(
-      [{ tool: 'getCandles', symbol: 'BTCUSDT', timeframe: '4h', account: 'binance-main', from: null, to: null, limit: 100 }],
+      [
+        {
+          tool: 'getCandles',
+          symbol: 'BTCUSDT',
+          timeframe: '4h',
+          account: 'binance-main',
+          from: null,
+          to: null,
+          limit: 100,
+        },
+      ],
       context(),
     );
     expect(calls[0].args).toEqual({ symbol: 'BTCUSDT', timeframe: '4h', account: 'binance-main', limit: 100 });

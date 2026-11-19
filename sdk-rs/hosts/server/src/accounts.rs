@@ -892,6 +892,12 @@ pub fn refuse_misplaced_site(init: &InitPayload) -> Result<(), String> {
 
 pub fn engine_options(init: &InitPayload, public_only: bool) -> Value {
     let mut options = Map::new();
+    if let Some(tuning) = &init.tuning {
+        options.insert(
+            "tuning".into(),
+            serde_json::to_value(tuning).expect("display tuning"),
+        );
+    }
     if !public_only && matches!(init.exchange_name.as_str(), "coinbase" | "coinbasespot") {
         options.insert(
             "coinbaseJwtAlgorithm".into(),
@@ -3001,6 +3007,37 @@ pub fn resume_id() -> String {
 /// (`tests/boxes.rs`); built only for tests or the `test-support` feature.
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing {
+    /// Inspect real native account sections in transport fixtures. This creates
+    /// no production store message or mutable-store implementation.
+    pub fn native_frame_data(envelope: &serde_json::Value) -> Option<serde_json::Value> {
+        use base64::Engine;
+        if envelope["d"]["op"] != "frame" {
+            return None;
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(envelope["d"]["data"].as_str()?)
+            .ok()?;
+        let mut rows = serde_json::Map::new();
+        for (kind, payload) in safe_cex_engine::wire::sections(&bytes) {
+            let field = match kind {
+                26 => "socketHealth",
+                27 => "activeChasers",
+                28 => "activeTWAPs",
+                29 => "ordersRisk",
+                30 => "displayedPositions",
+                31 => "displayedMargin",
+                32 => "balanceInfo",
+                _ => continue,
+            };
+            let value = safe_cex_store_frames::decode_section(payload).expect("native section");
+            rows.insert(
+                field.into(),
+                serde_json::to_value(value).expect("fixture native value"),
+            );
+        }
+        Some(serde_json::Value::Object(rows))
+    }
+
     /// Integration fixtures route real probe and resident transports to loopback.
     /// This does not disable admission, replace proof strategies or inject outcomes.
     pub fn set_routing(
@@ -4875,19 +4912,16 @@ pub(crate) mod tests {
                         }),
                     );
                 }
-                account
-                    .algos
-                    .as_ref()
-                    .unwrap()
-                    .send(crate::algos::AlgoInput::Joined)
-                    .unwrap();
+                // A refused algo command is still a reply for every holder;
+                // native state itself now travels on each holder's SCXF pump.
+                testing::algo_op(&account, "chaser:start", "{}");
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 let seen = seen.lock().unwrap();
                 for id in [8, 9] {
                     assert!(
                         seen.iter()
                             .any(|(holder, frame)| *holder == id
-                                && frame.contains(r#""op":"store""#)),
+                                && frame.contains(r#""op":"error""#)),
                         "holder {id}: {seen:?}"
                     );
                 }

@@ -1,11 +1,14 @@
+import type { Position } from '../types';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
+import { FrameStore } from '../store/frameStore';
+import { OrderSide, OrderTimeInForce, OrderType, PositionSide } from '../types';
+import { nativeFixture } from './cutover/nativeFixture';
 import { BybitExchange } from './reference/bybit/bybit.exchange';
 import { mapBybitOptionInstrument } from './reference/bybit/bybit.options';
-import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
 import { BybitDemoExchange } from './reference/bybit/bybitdemo.exchange';
-import { DefaultStore } from '../store/store.base';
-import { OrderSide, OrderTimeInForce, OrderType } from '../types';
 
 const OPTION = 'BTC-6NOV26-84000-C-USDT';
 
@@ -41,7 +44,7 @@ const live: BybitExchange[] = [];
 afterEach(() => live.splice(0).forEach((e) => e.dispose()));
 
 const create = (enableOptionMarkets: boolean, Exchange: typeof BybitExchange = BybitExchange) => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new Exchange(
     'bybit',
     { key: 'k', secret: 's', enableOptionMarkets, tuning: { consoleLogging: false } } as any,
@@ -90,13 +93,23 @@ describe('Bybit options on the bybit connection', () => {
     const markets = await exchange.fetchMarkets();
     expect(markets.map((m) => m.symbol)).toEqual(['BTCUSDT', OPTION]);
 
-    store.update({ markets });
+    store.apply(
+      nativeFixture(
+        { markets },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     expect(exchange.getTickerSymbolsForCategory('linear')).toEqual(['BTCUSDT']);
   });
 
   it('keeps the loaded option markets when a refresh of them fails', async () => {
     const { exchange, store } = create(true);
-    store.update({ markets: [mapBybitOptionInstrument(optionRow)!] });
+    store.apply(
+      nativeFixture(
+        { markets: [mapBybitOptionInstrument(optionRow)!] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     routeGets(exchange, () => Promise.reject(new Error('timeout')));
 
     const markets = await exchange.fetchMarkets();
@@ -105,8 +118,23 @@ describe('Bybit options on the bybit connection', () => {
 
   it('keeps option positions the store holds when one poll of them fails', async () => {
     const { exchange, store } = create(true);
-    const held = { id: 'p', symbol: OPTION, contracts: 0.01 } as any;
-    store.update({ positions: [held] });
+    const held: Position = {
+      id: 'p',
+      symbol: OPTION,
+      side: PositionSide.Long,
+      contracts: 0.01,
+      entryPrice: 2900,
+      notional: 29,
+      leverage: 1,
+      unrealizedPnl: 0.5,
+      liquidationPrice: null,
+    };
+    store.apply(
+      nativeFixture(
+        { positions: [held] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange.xhr.get as any) = vi.fn((_url: string, config: any) =>
       config.params.category === 'option'
         ? Promise.resolve({ data: { retCode: 10002, retMsg: 'timeout' } })
@@ -119,7 +147,12 @@ describe('Bybit options on the bybit connection', () => {
   describe('option orders', () => {
     const placing = () => {
       const { exchange, store } = create(true);
-      store.update({ markets: [mapBybitOptionInstrument(optionRow)!] });
+      store.apply(
+        nativeFixture(
+          { markets: [mapBybitOptionInstrument(optionRow)!] },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
       const post = vi.fn((_url: string, payload: any) =>
         Promise.resolve({ data: { retCode: 0, retMsg: 'OK', result: { orderId: 'o-1' } }, payload }),
       );
@@ -164,9 +197,9 @@ describe('Bybit options on the bybit connection', () => {
 
     it('refuses impliedVolatility on a market order before sending anything', async () => {
       const { exchange, post } = placing();
-      await expect(
-        exchange.placeOrder({ ...order, type: OrderType.Market, impliedVolatility: 0.45 }),
-      ).rejects.toThrow('limit option orders only');
+      await expect(exchange.placeOrder({ ...order, type: OrderType.Market, impliedVolatility: 0.45 })).rejects.toThrow(
+        'limit option orders only',
+      );
       expect(post).not.toHaveBeenCalled();
     });
 
@@ -198,13 +231,18 @@ describe('Bybit options on the bybit connection', () => {
       vega: '0.84',
       theta: '-0.64',
     });
-    expect(position).toMatchObject({ symbol: OPTION, contracts: 0.01, leverage: 1, liquidationPrice: 0 });
+    expect(position).toMatchObject({ symbol: OPTION, contracts: 0.01, leverage: 1, liquidationPrice: null });
     expect(position.option?.greeks).toMatchObject({ delta: 0.0051, vega: 0.84, theta: -0.64 });
   });
 
   it('sends option orders in a batch one at a time through the option path', async () => {
     const { exchange, store } = create(true);
-    store.update({ markets: [mapBybitOptionInstrument(optionRow)!] });
+    store.apply(
+      nativeFixture(
+        { markets: [mapBybitOptionInstrument(optionRow)!] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const post = vi.fn((_url: string, payload: any) =>
       Promise.resolve({ data: { retCode: 0, retMsg: 'OK', result: { orderId: 'o-1' } }, payload }),
     );

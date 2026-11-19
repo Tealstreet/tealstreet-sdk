@@ -2,25 +2,39 @@ import type { Candle } from '../../types';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { ParadexExchange } from '../reference/paradex/paradex.exchange';
-import { DefaultStore } from '../../store/store.base';
 
-afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 it('retains newer trade candles when an old poll or an older trade bucket arrives', async () => {
   vi.useFakeTimers();
   const now = 1_710_000_120_000;
   vi.setSystemTime(now);
-  const exchange = new ParadexExchange('paradex', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+  const exchange = new ParadexExchange('paradex', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
   let resolve!: (candles: Candle[]) => void;
-  const pending = new Promise<Candle[]>((done) => { resolve = done; });
+  const pending = new Promise<Candle[]>((done) => {
+    resolve = done;
+  });
   const fetch = vi.spyOn(exchange, 'fetchOHLCV').mockReturnValueOnce(pending).mockResolvedValue([]);
   const candles: Candle[] = [];
-  const stop = exchange.publicWebsocket.listenOHLCV({ symbol: 'BTC-USD-PERP', interval: '1m' }, (candle) => candles.push(candle));
-  const trade = (price: number, created_at: number) => exchange.publicWebsocket.onMessage({ data: JSON.stringify({
-    jsonrpc: '2.0', method: 'subscription', params: { channel: 'trades.BTC-USD-PERP',
-      data: { market: 'BTC-USD-PERP', price: String(price), size: '1', created_at } },
-  }) } as MessageEvent);
+  const stop = exchange.publicWebsocket.listenOHLCV({ symbol: 'BTC-USD-PERP', interval: '1m' }, (candle) =>
+    candles.push(candle),
+  );
+  const trade = (price: number, created_at: number) =>
+    exchange.publicWebsocket.onMessage({
+      data: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'subscription',
+        params: {
+          channel: 'trades.BTC-USD-PERP',
+          data: { market: 'BTC-USD-PERP', price: String(price), size: '1', created_at },
+        },
+      }),
+    } as MessageEvent);
   trade(100, now);
   trade(50, now - 120000);
   expect(candles).toEqual([{ timestamp: now, open: 100, high: 100, low: 100, close: 100, volume: 1 }]);
@@ -38,21 +52,37 @@ it('rejects older buckets and decreased quantity from polls started after the la
   vi.useFakeTimers();
   const now = 1_710_000_120_000;
   vi.setSystemTime(now);
-  const exchange = new ParadexExchange('paradex', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
-  const row = (timestamp: number, close: number, volume: number): Candle => ({ timestamp, open: close, high: close, low: close, close, volume });
-  const fetch = vi.spyOn(exchange, 'fetchOHLCV')
+  const exchange = new ParadexExchange('paradex', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
+  const row = (timestamp: number, close: number, volume: number): Candle => ({
+    timestamp,
+    open: close,
+    high: close,
+    low: close,
+    close,
+    volume,
+  });
+  const fetch = vi
+    .spyOn(exchange, 'fetchOHLCV')
     .mockResolvedValueOnce([])
     .mockResolvedValueOnce([row(now - 60_000, 90, 99)])
     .mockResolvedValueOnce([row(now, 90, 1)])
     .mockResolvedValueOnce([row(now, 101, 3)])
     .mockResolvedValueOnce([row(now + 60_000, 120, 1)]);
   const candles: Candle[] = [];
-  const stop = exchange.publicWebsocket.listenOHLCV({ symbol: 'BTC-USD-PERP', interval: '1m' }, (candle) => candles.push(candle));
+  const stop = exchange.publicWebsocket.listenOHLCV({ symbol: 'BTC-USD-PERP', interval: '1m' }, (candle) =>
+    candles.push(candle),
+  );
   await Promise.resolve();
-  exchange.publicWebsocket.onMessage({ data: JSON.stringify({
-    jsonrpc: '2.0', method: 'subscription', params: { channel: 'trades.BTC-USD-PERP',
-      data: { market: 'BTC-USD-PERP', price: '100', size: '2', created_at: now } },
-  }) } as MessageEvent);
+  exchange.publicWebsocket.onMessage({
+    data: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'subscription',
+      params: {
+        channel: 'trades.BTC-USD-PERP',
+        data: { market: 'BTC-USD-PERP', price: '100', size: '2', created_at: now },
+      },
+    }),
+  } as MessageEvent);
   expect(candles).toEqual([row(now, 100, 2)]);
   await vi.advanceTimersByTimeAsync(3000);
   expect(candles).toEqual([row(now, 100, 2)]);

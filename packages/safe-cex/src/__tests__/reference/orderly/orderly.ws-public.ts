@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook } from '../../../types';
 import type { OrderlyExchange } from './orderly.exchange';
 
@@ -5,10 +6,11 @@ import flatten from 'lodash/flatten';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { v } from '../../../utils/get-key';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBook } from '../../../utils/updateOrderBook';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, ENDPOINTS } from './orderly.types';
 import { normalizeSymbol, reverseSymbol } from './orderly.utils';
 
@@ -66,7 +68,9 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
       this.send(JSON.stringify({ event: 'subscribe', topic: 'markprices' }));
       if (this.replaySnapshots) {
         if (!this.fundingSockets.length) {
-          const topics = this.parent.store.markets.map((market) => `${reverseSymbol(market.symbol)}@estfundingrate`).sort();
+          const topics = this.parent.store.markets
+            .map((market) => `${reverseSymbol(market.symbol)}@estfundingrate`)
+            .sort();
           for (let at = 0; at < topics.length; at += 90) {
             const socket = new OrderlyPublicWebsocket(this.parent);
             socket.replaySnapshots = true;
@@ -136,11 +140,19 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
         const ticker = this.parent.store.tickersBySymbol[symbol];
 
         if (ticker) {
-          this.store.updateTicker(ticker, {
-            last: row.close,
-            quoteVolume: row.amount,
-            volume: row.volume,
-          });
+          (() => {
+            const target = ticker;
+            const changes: Partial<StoreData['tickers'][number]> = {
+              last: row.close,
+              quoteVolume: row.amount,
+              volume: row.volume,
+            };
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
       }
     });
@@ -153,10 +165,18 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
         const ticker = this.parent.store.tickersBySymbol[symbol];
 
         if (ticker) {
-          this.store.updateTicker(ticker, {
-            bid: row.bid,
-            ask: row.ask,
-          });
+          (() => {
+            const target = ticker;
+            const changes: Partial<StoreData['tickers'][number]> = {
+              bid: row.bid,
+              ask: row.ask,
+            };
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
       }
     });
@@ -169,9 +189,17 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
         const ticker = this.parent.store.tickersBySymbol[symbol];
 
         if (ticker) {
-          this.store.updateTicker(ticker, {
-            mark: row.price,
-          });
+          (() => {
+            const target = ticker;
+            const changes: Partial<StoreData['tickers'][number]> = {
+              mark: row.price,
+            };
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
       }
     });
@@ -184,10 +212,18 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
         const ticker = this.parent.store.tickersBySymbol[symbol];
 
         if (ticker) {
-          this.store.updateTicker(ticker, {
-            fundingRate: parseFloat(v(row, 'fundingRate')),
-            fundingTime: parseFloat(v(row, 'fundingTs')),
-          });
+          (() => {
+            const target = ticker;
+            const changes: Partial<StoreData['tickers'][number]> = {
+              fundingRate: parseFloat(v(row, 'fundingRate')),
+              fundingTime: parseFloat(v(row, 'fundingTs')),
+            };
+            return applyReferenceFixture(
+              this.store,
+              { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
       }
     });
@@ -250,15 +286,19 @@ export class OrderlyPublicWebsocket extends BaseWebSocket<OrderlyExchange> {
 
     const fetchSnapshot = async () => {
       try {
-        const data = this.replaySnapshots ? await new Promise<Data>((resolve) => {
-          const id = `reference-${++this.snapshotSequence}`;
-          this.snapshots.set(id, resolve);
-          this.send(JSON.stringify({ id, event: 'request', params: { type: 'orderbook', symbol: reverseSymbol(symbol) } }));
-        }) : await this.parent.xhr.get(`${ENDPOINTS.ORDERBOOK}/${reverseSymbol(symbol)}`).then(({ data: { data } }) => ({
-          ts: data.timestamp,
-          bids: data.bids.map((row: Data) => [row.price, row.quantity]),
-          asks: data.asks.map((row: Data) => [row.price, row.quantity]),
-        }));
+        const data = this.replaySnapshots
+          ? await new Promise<Data>((resolve) => {
+              const id = `reference-${++this.snapshotSequence}`;
+              this.snapshots.set(id, resolve);
+              this.send(
+                JSON.stringify({ id, event: 'request', params: { type: 'orderbook', symbol: reverseSymbol(symbol) } }),
+              );
+            })
+          : await this.parent.xhr.get(`${ENDPOINTS.ORDERBOOK}/${reverseSymbol(symbol)}`).then(({ data: { data } }) => ({
+              ts: data.timestamp,
+              bids: data.bids.map((row: Data) => [row.price, row.quantity]),
+              asks: data.asks.map((row: Data) => [row.price, row.quantity]),
+            }));
 
         if (!this.isDisposed) {
           orderBook.bids = data.bids.map(([price, amount]: [number, number]) => ({

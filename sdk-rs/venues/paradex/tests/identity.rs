@@ -1,5 +1,8 @@
 //! Rare identity reads preserve JWT queue behavior without touching financial state.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
 mod support;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice};
 use safe_cex_venue_paradex::Options;
 use support::*;
@@ -118,7 +121,7 @@ fn identity_reuses_current_jwt_and_returns_exact_account_number_without_store_co
             output(&mut h, 42, false).unwrap(),
             format!(r#"{{"userId":"{expected}","affiliateId":null}}"#)
         );
-        assert_eq!(h.e.account_snapshot_frame(h.now), before);
+        assert_unchanged_account(&before, h.e.account_snapshot_frame(h.now), [1, 0, 0, 0, 0]);
         assert!(
             h.pending.is_empty(),
             "identity must not start a reconciliation cycle"
@@ -150,7 +153,7 @@ fn identity_waits_for_existing_auth_then_dispatches_with_token_and_same_account_
         output(&mut h, 42, false).unwrap(),
         r#"{"userId":"queued-account","affiliateId":null}"#
     );
-    assert_eq!(h.e.account_snapshot_frame(h.now), before);
+    assert_unchanged_account(&before, h.e.account_snapshot_frame(h.now), [1, 0, 0, 0, 0]);
 }
 #[test]
 fn identity_expired_jwt_joins_single_refresh_and_preserves_authentication_route() {
@@ -203,7 +206,15 @@ fn identity_missing_false_zero_empty_and_failed_response_reject_once_without_sto
         let r = take(&mut h);
         h.respond(r, status, body);
         output(&mut h, 42, true).unwrap_err();
-        assert_eq!(h.e.account_snapshot_frame(h.now), before);
+        assert_unchanged_account(
+            &before,
+            h.e.account_snapshot_frame(h.now),
+            if status == 200 {
+                [1, 0, 0, 0, 0]
+            } else {
+                [0, 0, 1, 0, 0]
+            },
+        );
         assert!(h.pending.is_empty());
     }
 }
@@ -222,7 +233,7 @@ fn identity_transport_failure_settles_once_and_keeps_financial_state() {
     );
     h.collect();
     output(&mut h, 42, true).unwrap_err();
-    assert_eq!(h.e.account_snapshot_frame(h.now), before);
+    assert_unchanged_account(&before, h.e.account_snapshot_frame(h.now), [0, 0, 0, 1, 0]);
     h.e.handle(
         h.now,
         Event::HttpFailed {

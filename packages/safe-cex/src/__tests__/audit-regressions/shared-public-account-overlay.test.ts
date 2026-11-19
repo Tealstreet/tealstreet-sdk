@@ -2,11 +2,11 @@ import type { Market } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { virtualClock } from '../../utils/virtualClock';
 import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 import { OKXEUExchange } from '../reference/okx/okxeu.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { virtualClock } from '../../utils/virtualClock';
 
 // On exchange-server, accounts take markets from a keyless shared exchange,
 // which cannot fetch account-scoped data. start() must load that data BEFORE
@@ -48,13 +48,12 @@ describe('account market overlay on a shared public exchange', () => {
   it.each([
     {
       name: 'bybit',
-      create: () => new BybitExchange('bybit' as any, { key: 'k', secret: 's' } as any, new DefaultStore()),
+      create: () => new BybitExchange('bybit' as any, { key: 'k', secret: 's' } as any, new FrameStore()),
       symbol: 'BTCUSDT',
     },
     {
       name: 'bybitinverse',
-      create: () =>
-        new BybitInverseExchange('bybitinverse' as any, { key: 'k', secret: 's' } as any, new DefaultStore()),
+      create: () => new BybitInverseExchange('bybitinverse' as any, { key: 'k', secret: 's' } as any, new FrameStore()),
       symbol: 'BTCUSD',
     },
   ])('$name loads account fee rates before the provider seeds markets', async ({ create, symbol }) => {
@@ -72,7 +71,7 @@ describe('account market overlay on a shared public exchange', () => {
     const exchange: any = new OKXEUExchange(
       'okxeu' as any,
       { key: 'k', secret: 's', passphrase: 'p' } as any,
-      new DefaultStore(),
+      new FrameStore(),
     );
     const accountInstrument = {
       instId: 'BTC-USDT-SWAP',

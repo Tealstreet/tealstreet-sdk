@@ -72,12 +72,13 @@ messages are rejected. Authentication uses the native server's
 version. The session also offers `safe-cex-frame.account-auth`, which opts it in
 to `accountAuth` notices; servers that predate it ignore the offer. Error messages exposed by the adapter omit target URLs and tokens.
 
-Clients use the shared `Frame` decoder and `FrameApplier` on every binary
-message. The first binary message is a full snapshot; notices can arrive before
-it. Subsequent BOOK_DELTA sections require that snapshot and later full BOOK
-baselines. A reconnect is a new session with a **new** store/applier (with the
-venue's native/inverse amount flags, as in `RustExchange`), never reuse a stale
-book baseline. Applications using only raw frame consumers need no server-side
+Clients apply each binary message with the pure-JS `Frame` reader and
+`FrameStore.ingest(frame, { snapshot, seq })`. The first binary message is a
+full snapshot; notices can arrive before it. Subsequent BOOK_DELTA sections
+require that snapshot and later full BOOK baselines. Reconnect establishes a
+new snapshot baseline (a new FrameStore, or an explicit snapshot/reset on the
+existing instance); stale book baselines cannot cross sessions. Native sizing
+extras are already published in frames. Raw frame consumers need no server-side
 TS exchange/store. A sink may transfer the ArrayBuffer after accepting it.
 
 Commands use the native/WASM JSON command protocol, not arbitrary worker method

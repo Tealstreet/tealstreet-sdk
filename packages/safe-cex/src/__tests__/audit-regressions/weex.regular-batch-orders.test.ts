@@ -1,26 +1,33 @@
+import type { PlaceOrderOpts } from '../../types';
+
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { WeexExchange } from '../reference/weex/weex.exchange';
 import { ENDPOINTS } from '../reference/weex/weex.types';
-import { DefaultStore } from '../../store/store.base';
-import type { PlaceOrderOpts } from '../../types';
-import { OrderSide, OrderTimeInForce, OrderType } from '../../types';
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTCUSDT',
-        symbol: 'BTCUSDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+        markets: [
+          {
+            id: 'BTCUSDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+          },
+        ] as any,
       },
-    ] as any,
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new WeexExchange(
     'weex' as any,
     { key: 'key', secret: 'secret', passphrase: 'passphrase' } as any,
@@ -127,7 +134,27 @@ describe('audit regression: WEEX Contract V3 regular batch placement', () => {
 
   it('keeps successful PostOnly provenance while surfacing every per-row failure', async () => {
     const { exchange, store } = createExchange();
-    const updateOrder = vi.spyOn(store, 'updateOrder');
+    store.ingest(
+      nativeFixture({
+        orders: [
+          {
+            id: '101',
+            symbol: 'BTCUSDT',
+            type: OrderType.Limit,
+            side: OrderSide.Buy,
+            status: OrderStatus.Open,
+            price: 50_000,
+            amount: 0.001,
+            filled: 0,
+            remaining: 0.001,
+            reduceOnly: false,
+            lastUpdate: 0,
+          },
+        ],
+      }),
+    );
+    const updateOrder = vi.fn<(rows: typeof store.orders) => void>();
+    store.subscribe('orders', (rows) => updateOrder(rows));
     const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
     exchange.xhr = {
       post: vi.fn().mockImplementation((_endpoint: string, body: any) =>
@@ -166,10 +193,9 @@ describe('audit regression: WEEX Contract V3 regular batch placement', () => {
         regularOrder(2),
       ]),
     ).rejects.toThrow(/bad size.*bad price/);
-    expect(updateOrder).toHaveBeenCalledWith(
-      { id: '101' },
-      { timeInForce: OrderTimeInForce.PostOnly },
-    );
+    expect(updateOrder).toHaveBeenCalledWith([
+      expect.objectContaining({ id: '101', timeInForce: OrderTimeInForce.PostOnly }),
+    ]);
     expect(emitAndLogError).toHaveBeenCalledOnce();
   });
 
@@ -177,9 +203,7 @@ describe('audit regression: WEEX Contract V3 regular batch placement', () => {
     ['a non-array envelope', (_clientOrderIds: string[]) => ({ success: true })],
     [
       'a row-count mismatch',
-      (clientOrderIds: string[]) => [
-        { orderId: '1', clientOrderId: clientOrderIds[0], success: true },
-      ],
+      (clientOrderIds: string[]) => [{ orderId: '1', clientOrderId: clientOrderIds[0], success: true }],
     ],
     [
       'a duplicate echoed identity',

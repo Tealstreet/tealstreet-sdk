@@ -1,6 +1,9 @@
+import type { StoreData } from '../../../generated/StoreData';
+
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { OrderSide } from '../../../types';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { OrderSide } from '../../../types';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { systemSubscriptionTypes } from './hyperliquidspot.constants';
 import { HyperliquidSpotExchange } from './hyperliquidspot.exchange';
 import { UserFills, UserFundingEntry, UserNonFundingLedgerEntry, WSS_URLS } from './hyperliquidspot.types';
@@ -85,11 +88,23 @@ export class HyperliquidSpotPrivateWebSocket extends BaseWebSocket<HyperliquidSp
                   const position = allPositions[i];
                   if (position.symbol !== market.symbol) continue;
                   const isOpenPosition = position.contracts > 0;
-                  this.parent.store.updatePosition(position, {
-                    positionMode: symbolConfiguration.positionMode,
-                    marginType: isOpenPosition ? position.marginType : symbolConfiguration.marginType,
-                    leverage: isOpenPosition ? position.leverage : symbolConfiguration.leverage,
-                  });
+                  (() => {
+                    const target = position;
+                    const changes: Partial<StoreData['positions'][number]> = {
+                      positionMode: symbolConfiguration.positionMode,
+                      marginType: isOpenPosition ? position.marginType : symbolConfiguration.marginType,
+                      leverage: isOpenPosition ? position.leverage : symbolConfiguration.leverage,
+                    };
+                    return applyReferenceFixture(
+                      this.parent.store,
+                      {
+                        positions: this.parent.store.positions.map((row) =>
+                          row.id === target.id ? { ...row, ...changes } : row,
+                        ),
+                      },
+                      this.parent.store.markets.map((row) => row.symbol),
+                    );
+                  })();
                 }
               }
             }

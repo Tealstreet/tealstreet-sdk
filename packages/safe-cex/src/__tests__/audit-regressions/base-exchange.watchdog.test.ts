@@ -2,11 +2,11 @@ import type { ExchangeOptions } from '../../types';
 
 import { BaseExchange } from '../../exchanges/base';
 import { BaseWebSocket } from '../../exchanges/base.ws';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 class WatchdogExchange extends BaseExchange {
   constructor() {
-    super('binance', { key: '', secret: '', publicDataOnly: true } as ExchangeOptions, new DefaultStore());
+    super('binance', { key: '', secret: '', publicDataOnly: true } as ExchangeOptions, new FrameStore());
   }
 
   setPublicSocket(socket: BaseWebSocket<this>) {
