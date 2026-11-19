@@ -2,9 +2,7 @@ use super::*;
 use safe_cex_engine::signing::{Algorithm, KeyRef, Operation, PayloadPart, SignError, SignRequest};
 use safe_cex_remote_signer::SIGN_TIMEOUT;
 
-fn signing(
-    link: Arc<safe_cex_remote_signer::SignerLink>,
-) -> tokio::task::JoinHandle<Result<(), SignError>> {
+async fn sign_once(link: Arc<safe_cex_remote_signer::SignerLink>) -> Result<(), SignError> {
     let account = safe_cex_remote_signer::remote_account(
         link,
         "bybit",
@@ -19,23 +17,27 @@ fn signing(
             .unwrap()
             .into(),
     );
-    tokio::spawn(async move {
-        account
-            .provider
-            .sign(SignRequest {
-                receipt: Default::default(),
-                context: Default::default(),
-                operations: vec![Operation::Sign {
-                    algorithm: Algorithm::HmacSha256,
-                    key,
-                    payload: vec![PayloadPart::Bytes {
-                        bytes: b"BODY_CANARY".to_vec(),
-                    }],
+    account
+        .provider
+        .sign(SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha256,
+                key,
+                payload: vec![PayloadPart::Bytes {
+                    bytes: b"BODY_CANARY".to_vec(),
                 }],
-            })
-            .await
-            .map(|_| ())
-    })
+            }],
+        })
+        .await
+        .map(|_| ())
+}
+
+fn signing(
+    link: Arc<safe_cex_remote_signer::SignerLink>,
+) -> tokio::task::JoinHandle<Result<(), SignError>> {
+    tokio::spawn(sign_once(link))
 }
 
 fn events(lines: Vec<String>) -> Vec<Value> {
@@ -367,4 +369,51 @@ async fn accepted_join_proof_is_not_reported_or_counted() {
     assert!(task.await.unwrap().is_ok());
     assert_eq!(session.sign_responses.count(), 0);
     assert!(capture.finish().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn session_reply_and_timeout_at_the_same_instant_emit_exactly_one_outcome() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    for reply_first in [true, false] {
+        let (mut session, _sent) = user_session(crate::accounts::tests::registry(), "USER_CANARY");
+        let (link, mut frames) = session_signer(&mut session);
+        let mut request = Box::pin(sign_once(link.clone()));
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(request.as_mut().poll(&mut context).is_pending());
+        let frame: Value = serde_json::from_str(&frames.try_recv().unwrap()).unwrap();
+        let response =
+            json!({"t":"sign-res","d":{"id":frame["d"]["id"],"wsAuthSignature":"00".repeat(32)}})
+                .to_string();
+        link.heard(session.socket);
+        let capture = crate::state::log_capture::capture();
+        tokio::time::advance(SIGN_TIMEOUT).await;
+        if reply_first {
+            session.handle(&response).await.unwrap();
+            assert!(request.await.is_ok());
+            assert_eq!(session.sign_responses.count(), 0);
+            assert!(
+                capture.finish().is_empty(),
+                "accepted reply has no timeout row"
+            );
+        } else {
+            assert!(matches!(
+                request.as_mut().poll(&mut context),
+                Poll::Ready(Err(SignError::TimedOut))
+            ));
+            session.handle(&response).await.unwrap();
+            let rows = events(capture.finish());
+            assert_eq!(session.sign_responses.count(), 1);
+            assert_eq!(rows.len(), 2, "one timeout and one late-reply row");
+            assert_eq!(rows[0]["event"], "sign.timeout");
+            assert_eq!(rows[1]["event"], "sign.response_unmatched");
+            assert_eq!(rows[0]["request_id_hash"], rows[1]["request_id_hash"]);
+        }
+        assert!(
+            frames.try_recv().is_err(),
+            "neither schedule resends a request"
+        );
+    }
 }
