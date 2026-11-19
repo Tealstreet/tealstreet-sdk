@@ -51,86 +51,19 @@ export function readConstructionPolicy(source) {
   return rules;
 }
 
-// This budget file accepts strings, comments and nested templates, but no regex
-// or division syntax. Rejecting unsupported slash tokens keeps boundaries closed.
-function budgetTokens(source) {
-  let index = 0;
-  function quoted(quote) {
-    const start = index++;
-    while (index < source.length) {
-      const char = source[index++];
-      if (char === '\\') index++;
-      else if (char === quote) return source.slice(start, index);
-    }
-    throw new Error('unterminated budget string');
+// The generated cap file: exact fields, one entry per census family, KiB-aligned
+// positive integers. Raw duplicates refuse before JSON.parse can pick a winner.
+export function readWasmCaps(source) {
+  const caps = parseUniqueJson(source);
+  if (!caps || typeof caps !== 'object' || Array.isArray(caps)) throw new Error('invalid wasm caps file');
+  exactNames(Object.keys(caps), ['schema', 'reserveBytes', 'combined', 'families'], 'wasm caps field');
+  if (caps.schema !== 1) throw new Error(`unsupported wasm caps schema: ${caps.schema}`);
+  if (caps.reserveBytes !== 10_240) throw new Error('wasm caps reserve must stay 10 KiB (rule 17)');
+  if (!caps.families || typeof caps.families !== 'object' || Array.isArray(caps.families))
+    throw new Error('missing wasm caps families');
+  exactNames(Object.keys(caps.families), census.budgetVenues, 'budget venues');
+  for (const [name, cap] of [['combined', caps.combined], ...Object.entries(caps.families)]) {
+    if (!Number.isSafeInteger(cap) || cap <= 0 || cap % 1024) throw new Error(`invalid wasm cap: ${name}`);
   }
-  function template() {
-    index++;
-    while (index < source.length) {
-      const char = source[index++];
-      if (char === '\\') index++;
-      else if (char === '`') return;
-      else if (char === '$' && source[index] === '{') {
-        index++;
-        code(true);
-      }
-    }
-    throw new Error('unterminated budget template');
-  }
-  function code(interpolation = false) {
-    const tokens = [];
-    let depth = interpolation ? 1 : 0;
-    while (index < source.length) {
-      const char = source[index];
-      if (/\s/.test(char)) { index++; continue; }
-      if (source.startsWith('//', index)) {
-        while (index < source.length && !/[\n\r\u2028\u2029]/.test(source[index])) index++;
-        continue;
-      }
-      if (source.startsWith('/*', index)) {
-        const end = source.indexOf('*/', index + 2);
-        if (end === -1) throw new Error('unterminated budget comment');
-        index = end + 2;
-        continue;
-      }
-      if (char === '/') throw new Error('unsupported budget slash syntax');
-      if (char === '"' || char === "'") { tokens.push(quoted(char)); continue; }
-      if (char === '`') { template(); tokens.push('<template>'); continue; }
-      if (interpolation && char === '{') depth++;
-      if (interpolation && char === '}' && --depth === 0) { index++; return tokens; }
-      const token = source.slice(index).match(/^(?:[a-zA-Z_$][\w$]*|\d[\d_]*)/)?.[0] ?? char;
-      tokens.push(token);
-      index += token.length;
-    }
-    if (interpolation) throw new Error('unterminated budget interpolation');
-    return tokens;
-  }
-  return code();
-}
-
-// Only this closed literal grammar is accepted for the live export; inert
-// template text and its recursively scanned expressions cannot impersonate it.
-export function validateWasmBudgetSource(source) {
-  const tokens = budgetTokens(source);
-  const declaration = ['export', 'const', 'WASM_VENUE_OVERRIDES', '=', 'Object', '.', 'freeze', '(', '{'];
-  const starts = tokens.flatMap((_, index) => declaration.every((token, offset) => tokens[index + offset] === token) ? [index + declaration.length] : []);
-  if (starts.length !== 1) throw new Error('expected one literal WASM_VENUE_OVERRIDES declaration');
-  let index = starts[0];
-  const names = [];
-  while (tokens[index] !== '}') {
-    const key = tokens[index++];
-    if (!/^(?:[a-z][a-z0-9-]*|'[a-z][a-z0-9-]*'|"[a-z][a-z0-9-]*")$/.test(key ?? ''))
-      throw new Error('invalid literal budget venue');
-    const name = key.replace(/^['"]|['"]$/g, '');
-    if (names.includes(name)) throw new Error(`duplicate budget venue: ${name}`);
-    names.push(name);
-    if (tokens[index++] !== ':') throw new Error(`missing budget value: ${name}`);
-    const amount = tokens[index++];
-    if (!/^[1-9][\d_]*$/.test(amount ?? '') || !Number.isSafeInteger(Number(amount.replaceAll('_', ''))))
-      throw new Error(`invalid literal budget value: ${name}`);
-    if (tokens[index] === ',') index++;
-    else if (tokens[index] !== '}') throw new Error(`invalid budget separator: ${name}`);
-  }
-  if (tokens[++index] !== ')' || tokens[++index] !== ';') throw new Error('invalid budget literal boundary');
-  exactNames(names, census.budgetVenues, 'budget venues');
+  return caps;
 }

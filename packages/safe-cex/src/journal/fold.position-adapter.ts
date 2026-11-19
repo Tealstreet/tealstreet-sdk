@@ -68,6 +68,13 @@ export const mapFoldedInterval = (interval: PositionInterval, deps: FoldPosition
   // nowhere, and the residual reads as a mapping defect rather than as missing data.
   if (interval.realizedPnl === undefined) return null;
 
+  const settleCurrency = deps.resolveSettleCurrency(interval.symbol);
+  // A BNB charge is not a USDT cost. Without historical FX, refuse the fold
+  // rather than publish mixed units or silently omit this closed position.
+  if (interval.feeCurrencies.some((currency) => !currency || currency !== settleCurrency)) {
+    throw new Error('journal fold: fee currency conversion is unavailable');
+  }
+
   // A native execution can flatten this symbol+leg only once. Times cannot identify a
   // lifecycle: even native millisecond timestamps can be shared by several round trips.
   // Refuse missing identity instead of emitting a colliding key or silently dropping money.
@@ -85,7 +92,7 @@ export const mapFoldedInterval = (interval: PositionInterval, deps: FoldPosition
       .join('|'),
     account: deps.account,
     symbol: interval.symbol,
-    settleCurrency: deps.resolveSettleCurrency(interval.symbol),
+    settleCurrency,
     side: interval.side,
     positionSide: interval.positionSide,
     state: 'closed',

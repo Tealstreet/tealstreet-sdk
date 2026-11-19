@@ -111,6 +111,9 @@ test('harness files that only gate or measure a release leave the fingerprint al
   for (const path of [
     'sdk-rs/harness/wasm-budget.test.mjs',
     'sdk-rs/harness/wasm-budget.mjs',
+    'sdk-rs/harness/wasm-caps.json',
+    'sdk-rs/harness/wasm-caps-history.md',
+    'sdk-rs/harness/update-wasm-caps.mjs',
     'sdk-rs/harness/beta-wasm-release-guard.mjs',
     'sdk-rs/harness/ci-result.mjs',
     'sdk-rs/harness/cpu-ci.mjs',

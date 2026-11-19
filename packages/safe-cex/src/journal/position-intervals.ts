@@ -106,9 +106,10 @@ export type PositionInterval = {
   /** Commission summed over every fill in the interval, positive = cost. */
   readonly fees: number;
   /**
-   * Every distinct commission asset seen. Binance can charge fees in BNB while the position
-   * settles in USDT, so a single summed `fees` number is only meaningful when this holds one
-   * currency — otherwise it is adding different units together.
+   * Every distinct asset with a nonzero commission contribution. Binance can charge fees
+   * in BNB while the position settles in USDT, so a single summed `fees` number is only
+   * meaningful when this holds one currency — otherwise it adds different units together.
+   * An empty member means a nonzero contribution had no reported currency.
    */
   readonly feeCurrencies: string[];
 };
@@ -164,7 +165,9 @@ const freshPosition = (over: Partial<RunningPosition> = {}): RunningPosition => 
 const accrueFill = (position: RunningPosition, execution: Execution, reduces = false) => {
   if (execution.commission !== undefined) {
     position.fees += execution.commission;
-    if (execution.commissionAsset) position.feeCurrencies.add(execution.commissionAsset);
+    if (execution.commission !== 0) {
+      position.feeCurrencies.add(execution.commissionAsset ?? '');
+    }
   }
   if (execution.realizedPnl !== undefined) {
     position.realizedPnl += execution.realizedPnl;
@@ -353,14 +356,15 @@ export const reconstructPositionIntervals = (
     intervals.push({ ...finish(current, execution.symbol, leg, at, execution.id), closedByFlip: true });
 
     const openedSize = Math.abs(next);
+    const openingFee = execution.commission === undefined ? 0 : execution.commission * (1 - closedShare);
     const opened = freshPosition({
       signed: next,
       openedAt: at,
       maxSize: openedSize,
       entryQty: openedSize,
       entryNotional: openedSize * price,
-      fees: execution.commission === undefined ? 0 : execution.commission * (1 - closedShare),
-      feeCurrencies: new Set(execution.commissionAsset ? [execution.commissionAsset] : []),
+      fees: openingFee,
+      feeCurrencies: new Set(openingFee !== 0 ? [execution.commissionAsset ?? ''] : []),
     });
     running.set(key, opened);
   }
