@@ -145,17 +145,30 @@ fn verdict(row: &OrderRow) -> Option<Verdict> {
         || status.starts_with("cancelled"))
     .then_some(Verdict::Live)
 }
+/// The text fields a failed transaction's `event_info` has been seen to carry.
+#[derive(Deserialize)]
+struct EventInfo {
+    #[serde(default)]
+    ae: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    err: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+}
 /// A failed transaction's bounded native text; `event_info` has no schema.
 fn tx_reason(reply: &TxReply) -> String {
-    let parsed = serde_json::from_str::<HashMap<String, serde_json::Value>>(&reply.event_info);
-    let text = parsed
+    let text = serde_json::from_str::<EventInfo>(&reply.event_info)
         .ok()
         .and_then(|info| {
-            ["ae", "error", "err", "message", "reason"]
-                .iter()
-                .find_map(|key| info.get(*key)?.as_str().map(str::to_owned))
+            [info.ae, info.error, info.err, info.message, info.reason]
+                .into_iter()
+                .flatten()
+                .find(|text| !text.is_empty())
         })
-        .filter(|text| !text.is_empty())
         .or_else(|| (!reply.message.is_empty()).then(|| reply.message.clone()))
         .unwrap_or_else(|| "transaction failed".into());
     let mut end = text.len().min(REASON_BYTES);
