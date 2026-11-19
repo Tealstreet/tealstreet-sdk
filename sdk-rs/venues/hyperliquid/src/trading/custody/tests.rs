@@ -40,6 +40,7 @@ impl Venue for RetirementProbe {
             amend_filled: false,
             amend_total: None,
             amend_read: false,
+            amend_mark_read: false,
             amend_deadline: None,
             builder_checked: false,
             amend_builder: None,

@@ -2383,6 +2383,31 @@ impl Session {
         } else {
             Vec::new()
         };
+        // A protective row's amend may complete as a position setting naming no
+        // order (Bybit trading-stop). Capture the target's shape before dispatch.
+        let protective_amend = match (order_frame, args.first()) {
+            (Some(OrderReceipt::Action { kind: "amend", .. }), Some(request)) => {
+                let id = request["order"]["id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                account
+                    .handle
+                    .read(move |store| {
+                        store.order(&id).is_some_and(|order| {
+                            matches!(
+                                order.kind,
+                                safe_cex_engine::model::OrderType::StopLoss
+                                    | safe_cex_engine::model::OrderType::TakeProfit
+                                    | safe_cex_engine::model::OrderType::TrailingStopLoss
+                            )
+                        })
+                    })
+                    .await
+                    .unwrap_or(false)
+            }
+            _ => false,
+        };
         if let Some(OrderReceipt::Action {
             seq,
             kind,
@@ -2516,8 +2541,11 @@ impl Session {
                             seq,
                             kind,
                             unit: matches!(reply, methods::Reply::Unit),
-                            idless_protection: kind == "place"
-                                && crate::full_writes::protection_only(command),
+                            idless_protection: match kind {
+                                "place" => crate::full_writes::protection_only(command),
+                                "amend" => protective_amend,
+                                _ => false,
+                            },
                         },
                     };
                 }
@@ -6638,6 +6666,33 @@ mod tests {
         assert_eq!(reply["d"]["data"]["success"], false);
         assert_eq!(reply["d"]["data"]["result"]["outcome"], "unknown");
         assert_eq!(reply["d"]["data"]["result"]["message"], "rejected");
+    }
+
+    /// AGT-34: a Bybit partial-stop edit sent on unconfirmed evidence is a presented
+    /// CommandFailed (native `done` + `error`), so its "second stop may exist" text is in
+    /// the action result a DELEGATED client shows, not only in a side `commandError`.
+    #[test]
+    fn a_partial_stop_edit_warning_reaches_the_action_result() {
+        let (out, mut sent, _) = Out::channel(16);
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        pending.lock().unwrap().insert(
+            4,
+            Pending {
+                request_id: json!(11),
+                method: "amendOrder".into(),
+                reply: methods::Reply::Result,
+                group: None,
+                incomplete: None,
+                audit: None,
+            },
+        );
+        let message = "Your BTCUSDT edit was sent, but Bybit did not confirm that the old order was cancelled, so a second stop may exist; check Open Orders [proof: axis=target http=503; axis=final final-len=0]";
+        let notice =
+            json!({"type":"done","command":4,"error":message,"detail":{"kind":"rejected"}});
+        notice_to_msg(&out, "acct", &notice, &pending);
+        let reply: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(reply["d"]["data"]["success"], false);
+        assert_eq!(reply["d"]["data"]["result"]["message"], message);
     }
 
     #[test]

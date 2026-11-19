@@ -26,6 +26,13 @@ host obeys, and that had already happened: the CLI adapter applied none of it.
 `downSizeReduceOrder` took a web `OpenOrder` (`Order & { account }`) and reads
 none of the extra field, so it takes `readonly Order[]` here.
 
+**Held size is the larger of the TP side and the SL side, never their sum**
+(`locksPositionSize`, Bitget). Reduce-only limits and take profits fill on a
+favourable move, stops and trailing stops on an adverse one; a close order of
+unknown direction (`Conditional`, an in-flight market) is added outright.
+Summing them refused closing the unprotected half of a position whose TP and
+SL each covered the other half (AGT-44).
+
 **`oems-core` consumes this package, never the reverse.** `rounding.ts` started
 in `oems-core`; moving the policy here would have closed a cycle
 (`script-api-core` -> `oems-core` -> `script-api-core`), which turbo fails the

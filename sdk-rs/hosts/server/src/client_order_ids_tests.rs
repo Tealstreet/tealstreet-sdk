@@ -251,14 +251,12 @@ fn client_id_phemex() {
     assert_eq!(actual, json!(INTENT), "phemex: native uuid contract");
 }
 
+// Was `json!(INTENT)` until the 2026-11-19 woo-t report: WOO refused the UUID
+// before the venue, so every DELEGATED plain market `order.submit` failed.
 #[test]
 fn client_id_woo() {
     let actual = serde_json::to_value(client_order_id("woo", INTENT)).unwrap();
-    assert_eq!(
-        actual,
-        json!(INTENT),
-        "woo: native numeric-follow-up contract"
-    );
+    assert_eq!(actual, Value::Null, "woo: native none contract");
 }
 
 #[test]

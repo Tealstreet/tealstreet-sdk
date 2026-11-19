@@ -2562,3 +2562,74 @@ fn a_partly_succeeded_cancel_envelope_stops_but_retains_applied_facts() {
     )));
     assert!(h.e.store().order("1000171264712").is_none());
 }
+
+/// AGT-46: reduce-only stop-market and stop-limit triggers were refused as an
+/// opening shape. They place on order-algo with `reduceOnly: "true"`.
+#[test]
+fn reduce_only_conditional_stop_market_and_stop_limit_place_on_order_algo() {
+    use safe_cex_engine::model::OrderType;
+    for (limit, order_price) in [("", "-1"), (r#","price":54900"#, "54900")] {
+        let mut h = Harness::new();
+        h.open_private();
+        h.seed();
+        place(
+            &mut h,
+            &format!(
+                r#"[{{"symbol":"BTCUSDT","type":"conditional","side":"sell","amount":1,"triggerPrice":55000,"reduceOnly":true{limit}}}]"#
+            ),
+        );
+        assert!(h.failures.is_empty(), "{order_price}: {:?}", h.failures);
+        let request = h.take("order-algo");
+        let body: serde_json::Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+        assert_eq!(body["orderType"], "trigger");
+        assert_eq!(body["reduceOnly"], "true");
+        assert_eq!(body["side"], "sell");
+        assert_eq!(body["positionSide"], "net");
+        assert_eq!(body["triggerPrice"], "55000");
+        assert_eq!(body["triggerPriceType"], "last");
+        assert_eq!(body["orderPrice"], order_price);
+        assert_eq!(body["size"], "1");
+        h.respond(
+            request,
+            r#"{"code":"0","data":{"algoId":"501","code":"0"}}"#,
+        );
+        assert!(!done(&h), "{order_price}: {:?}", h.failures);
+        h.ws(&format!(r#"{{"arg":{{"channel":"orders-algo"}},"data":[{{"instId":"BTC-USDT","algoId":"501","orderType":"trigger","side":"sell","size":"1","triggerPrice":"55000","orderPrice":"{order_price}","triggerPriceType":"last","marginMode":"cross","positionSide":"net","reduceOnly":"true","state":"live"}}]}}"#));
+        let order =
+            h.e.store()
+                .order("501")
+                .expect("reduce-only trigger is listed");
+        assert_eq!(order.kind, OrderType::Conditional);
+        assert!(order.reduce_only);
+        assert_eq!(order.price, 55000.0);
+    }
+}
+
+#[test]
+fn opening_triggers_still_validate_their_shape() {
+    let mut h = Harness::new();
+    h.seed();
+    place(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1,"triggerPrice":61000}]"#,
+    );
+    let request = h.take("order-algo");
+    let body: serde_json::Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+    assert!(body.get("reduceOnly").is_none());
+    assert_eq!(body["orderPrice"], "-1");
+    for refused in [
+        r#"[{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1,"triggerPrice":61000,"close":true}]"#,
+        r#"[{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1,"triggerPrice":61000,"timeInForce":"ImmediateOrCancel"}]"#,
+        r#"[{"symbol":"BTCUSDT","type":"conditional","side":"buy","amount":1}]"#,
+        r#"[{"symbol":"BTCUSDT","type":"conditional","side":"sell","amount":1,"reduceOnly":true}]"#,
+    ] {
+        let mut h = Harness::new();
+        h.seed();
+        place(&mut h, refused);
+        assert!(done(&h), "{refused}");
+        assert!(
+            !h.pending.iter().any(|r| r.url.contains("order-algo")),
+            "{refused}"
+        );
+    }
+}
