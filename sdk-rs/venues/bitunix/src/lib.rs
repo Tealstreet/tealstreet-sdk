@@ -1084,6 +1084,9 @@ impl Venue for BitunixFutures {
                 if self.books.contains_key(&symbol) {
                     return;
                 }
+                if !self.admit_futures_interest(cx, Self::futures_interest_key(&symbol, None)) {
+                    return;
+                }
                 self.books.insert(symbol, BookState::default());
                 self.sync_futures(cx);
             }
@@ -1101,6 +1104,9 @@ impl Venue for BitunixFutures {
                         code::COMMAND_UNSUPPORTED,
                         "Unsupported Bitunix candle interval",
                     );
+                    return;
+                }
+                if !self.admit_futures_interest(cx, Self::futures_interest_key(&symbol, Some(i))) {
                     return;
                 }
                 self.read_symbol_settings(cx, &symbol);

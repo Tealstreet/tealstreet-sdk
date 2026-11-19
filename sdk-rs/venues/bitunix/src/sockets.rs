@@ -70,6 +70,11 @@ impl BitunixFutures {
     }
 
     pub(crate) fn connect_feed(&mut self, cx: &mut Cx<'_, Pending>, feed: Feed) {
+        // Legacy Cx::connect suppressed every role when frames come from the host.
+        // Do not register a managed feed either: it must never acquire an epoch.
+        if cx.frame_fed() {
+            return;
+        }
         // Shared/disabled public data intentionally suppresses these shards,
         // just as legacy Cx::connect did; it is not an admission failure.
         if matches!(feed, Feed::Public { .. })
@@ -112,6 +117,42 @@ impl BitunixFutures {
             .iter()
             .find(|s| cx.socket_epoch(s.id).is_some_and(|e| e.socket() == socket))
             .map(|s| &s.feed)
+    }
+
+    pub(crate) fn futures_interest_key(symbol: &str, candle: Option<Interval>) -> String {
+        match candle {
+            Some(i) => format!("candle:{}:{}", symbol.to_ascii_lowercase(), interval(i)),
+            None => format!("book:{}", symbol.to_ascii_lowercase()),
+        }
+    }
+
+    /// Bound committed intent before mutation, even before discovery or while no
+    /// epoch exists. Unresolved books reserve their eventual native topic too.
+    /// Canonical caller aliases share the same future wire topic.
+    pub(crate) fn admit_futures_interest(&self, cx: &mut Cx<'_, Pending>, key: String) -> bool {
+        let limit = safe_cex_engine::socket_lifecycle::MAX_FRAMES;
+        if self.books.len() + self.candles.len() < limit {
+            return true;
+        }
+        let topics: HashSet<_> = self
+            .books
+            .keys()
+            .map(|s| Self::futures_interest_key(s, None))
+            .chain(
+                self.candles
+                    .iter()
+                    .map(|(s, i)| Self::futures_interest_key(s, Some(*i))),
+            )
+            .collect();
+        if topics.len() < limit || topics.contains(&key) {
+            return true;
+        }
+        cx.notice(
+            Level::Error,
+            code::SUBSCRIPTION_REJECTED,
+            "Bitunix subscription exceeds managed replay capacity",
+        );
+        false
     }
 
     fn futures_interests(&self, cx: &Cx<'_, Pending>) -> Vec<Interest> {

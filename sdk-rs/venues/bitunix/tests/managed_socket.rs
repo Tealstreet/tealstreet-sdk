@@ -39,6 +39,14 @@ impl H {
         Self::start_with_policy(pairs, tickers, PublicFeedPolicy::Direct)
     }
     fn start_with_policy(pairs: &str, tickers: &str, policy: PublicFeedPolicy) -> Self {
+        Self::start_with_mode(pairs, tickers, policy, false)
+    }
+    fn start_with_mode(
+        pairs: &str,
+        tickers: &str,
+        policy: PublicFeedPolicy,
+        frame_fed: bool,
+    ) -> Self {
         let mut h = Self {
             engine: support::engine(support::Options {
                 key: Some("replay-key".into()),
@@ -54,6 +62,9 @@ impl H {
             notices: vec![],
         };
         h.engine.set_public_feed_policy(policy).unwrap();
+        if frame_fed {
+            h.engine.set_frame_fed().unwrap();
+        }
         h.engine.start(h.now);
         h.collect();
         h.reply("trading_pairs", pairs);
@@ -538,6 +549,22 @@ fn private_connect_timeout_does_not_claim_a_missing_login_answer() {
 }
 
 #[test]
+fn frame_fed_discovery_never_registers_or_dials_managed_sockets() {
+    let h = H::start_with_mode(
+        support::PAIRS,
+        support::TICKERS,
+        PublicFeedPolicy::Direct,
+        true,
+    );
+    assert!(
+        h.sockets.is_empty(),
+        "frame-fed discovery must not dial: {:?}",
+        h.sockets
+    );
+    assert!(h.closed.is_empty());
+}
+
+#[test]
 fn reconnect_restores_the_native_hosts_full_subscription_limit() {
     let mut h = H::start();
     let socket = h.futures();
@@ -571,6 +598,40 @@ fn reconnect_restores_the_native_hosts_full_subscription_limit() {
         "all accepted subscriptions were live"
     );
     assert_eq!(topics_on(&h, socket), expected);
+    // Caller aliases share one wire topic, including at the exact replay cap.
+    h.event(Event::Command(Command::SubscribeCandles {
+        symbol: "t0usdt".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    }));
+    let before = h.sent.len();
+    let notice_count = h.notices.len();
+    h.subscribe_book();
+    h.event(Event::Command(Command::SubscribeCandles {
+        symbol: "OVERFLOWUSDT".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    }));
+    assert_eq!(
+        h.sent.len(),
+        before,
+        "refused topics publish no subscription"
+    );
+    assert!(
+        h.notices.len() >= notice_count + 2,
+        "both overflow commands must refuse"
+    );
+    assert!(
+        !h.closed.contains(&socket),
+        "refusal must retain the live feed"
+    );
+    h.event(Event::Command(Command::UnsubscribeCandles {
+        symbol: "OVERFLOWUSDT".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    }));
+    assert_eq!(
+        h.sent.len(),
+        before,
+        "rejected candle intent must not remain resident"
+    );
     h.event(Event::WsClosed { socket, code: 1006 });
     let (timer, at) = h
         .timers
@@ -588,5 +649,74 @@ fn reconnect_restores_the_native_hosts_full_subscription_limit() {
     assert_eq!(topics_on(&h, replacement), expected);
     for topic in ["system_notice", "reconnected", "onconnected"] {
         assert_eq!(h.sent_on(replacement, topic), 1);
+    }
+}
+
+#[test]
+fn a_freed_topic_accepts_a_book_after_direct_engine_overflow_refusal() {
+    let mut h = H::start();
+    let socket = h.futures();
+    h.open(socket);
+    for index in 0..safe_cex_engine::socket_lifecycle::MAX_FRAMES {
+        h.event(Event::Command(Command::SubscribeCandles {
+            symbol: format!("T{index}USDT"),
+            interval: safe_cex_engine::model::Interval::M1,
+        }));
+    }
+    h.subscribe_book();
+    h.event(Event::Command(Command::UnsubscribeCandles {
+        symbol: "T1USDT".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    }));
+    h.subscribe_book();
+    h.message(socket, DEPTH);
+    assert_eq!(
+        h.best_bid(),
+        Some(96_000.0),
+        "refusal must not stop the feed or retain rejected book intent"
+    );
+}
+
+#[test]
+fn direct_replay_capacity_is_enforced_before_open_and_while_no_epoch_is_live() {
+    for before_open in [false, true] {
+        let mut h = H::start();
+        let old = h.futures();
+        h.event(Event::WsClosed {
+            socket: old,
+            code: 1006,
+        });
+        for index in 0..safe_cex_engine::socket_lifecycle::MAX_FRAMES {
+            h.event(Event::Command(Command::SubscribeCandles {
+                symbol: format!("T{index}USDT"),
+                interval: safe_cex_engine::model::Interval::M1,
+            }));
+        }
+        let retry = |h: &mut H| {
+            let (timer, at) = h
+                .timers
+                .iter()
+                .copied()
+                .find(|(_, at)| (750.0..=1000.0).contains(&(*at - h.now)))
+                .expect("retry");
+            h.now = at;
+            h.event(Event::TimerFired { timer });
+        };
+        if before_open {
+            retry(&mut h);
+        }
+        let notices = h.notices.len();
+        h.subscribe_book();
+        assert!(
+            h.notices.len() > notices,
+            "pending overflow must refuse before recording book intent: before_open={before_open}"
+        );
+        if !before_open {
+            retry(&mut h);
+        }
+        let replacement = h.futures();
+        h.open(replacement);
+        assert!(!h.closed.contains(&replacement));
+        assert_eq!(h.sent_on(replacement, "klineop_1min"), 4096);
     }
 }

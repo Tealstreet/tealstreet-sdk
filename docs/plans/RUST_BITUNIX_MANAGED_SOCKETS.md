@@ -139,3 +139,12 @@ Two reserve regressions fail against the inherited caps and pass with these
 minimal corrections. This budget-only follow-up requires fresh exact-head
 required coverage, correctness and actually executed combined consumers before
 lnmtfl/q6i90x re-review. The release-batch hold remains.
+
+Frame-fed engines register no managed Bitunix feed, including futures/private:
+the host supplies those frames, preserving legacy socket suppression. Direct
+engine book/candle intent also enforces the 4096-topic reconnect limit before
+mutation or discovery reads. Case aliases share a native topic; unresolved books
+reserve their future topic before discovery. Overflow emits SUBSCRIPTION_REJECTED
+without stopping the accepted feed or changing its resident intent, including
+before first open and while waiting for a replacement epoch. Removing an accepted
+topic frees capacity for the next command. Fresh WASM artifacts remain required.
