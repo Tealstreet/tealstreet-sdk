@@ -741,10 +741,13 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
     let a = http(&out);
     assert!(matches!(a, Action::Http(r) if r.url.ends_with("/cancel-algos")));
     let out = ack(&mut e, a, true);
-    assert!(
-        out.iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
-    );
+    // AGT-69 (fix/agt-69-okx-partial-cancel): this used to end CommandDone even
+    // though order 19 was refused. Every batch still runs, then the terminal
+    // names what is left open.
+    assert!(out.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 2, error })
+            if error.message.contains("OKX left 1 of 22 orders open: 19: Parameter error (code 51000)"))),
+        "{out:?}");
 }
 
 #[test]
