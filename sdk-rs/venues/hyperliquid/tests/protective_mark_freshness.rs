@@ -216,22 +216,25 @@ fn answer_at(e: &mut Engine<Hyperliquid>, r: &HttpRequest, at: f64, body: &str) 
     );
 }
 /// Fire the catalogue retry at `at` and answer it: a rediscovery of the market list.
-fn rediscover(e: &mut Engine<Hyperliquid>, retry: TimerId, at: f64) {
+/// Returns every action the retry and its answer produced.
+fn rediscover(e: &mut Engine<Hyperliquid>, retry: TimerId, at: f64) -> Vec<Action> {
     e.handle(at, Event::TimerFired { timer: retry });
-    let meta = info(&prepared_now(e), "metaAndAssetCtxs").expect("catalogue retry");
+    let mut actions = prepared_now(e);
+    let meta = info(&actions, "metaAndAssetCtxs").expect("catalogue retry");
     answer_at(e, &meta, at, HIP3_META);
-    prepared_now(e);
+    actions.extend(prepared_now(e));
     assert!(
         e.store().ticker("XYZ|FOO-PERP").is_some(),
         "the catalogue committed"
     );
+    actions
 }
 
 #[test]
 fn rediscovery_does_not_let_a_stale_mark_pass_the_protective_freshness_gate() {
     let (mut e, s, row, retry) = setup_with_pending_discovery();
     contexts(&mut e, s, 2_000., json!({"markPx":"100"}));
-    rediscover(&mut e, retry, 8_000.);
+    assert!(!sends(&rediscover(&mut e, retry, 8_000.)));
     assert_eq!(e.store().ticker("BTC-PERP").unwrap().mark, 100.);
     assert_eq!(
         e.store().reference_seen_at("BTC-PERP", MarkPrice),
@@ -255,12 +258,12 @@ fn rediscovery_cannot_preempt_an_in_flight_on_demand_mark_read() {
     contexts(&mut e, s, 2_000., json!({"markPx":"100"}));
     let actions = amend_and_size(&mut e, 9_000., &row);
     let read = info(&actions, "activeAssetData").expect("one bounded mark read");
-    rediscover(&mut e, retry, 9_100.);
+    let actions = rediscover(&mut e, retry, 9_100.);
+    assert!(!sends(&actions), "still waiting on the read");
     assert_eq!(
         e.store().reference_seen_at("BTC-PERP", MarkPrice),
         Some(2_000.)
     );
-    assert!(!sends(&prepared_now(&mut e)), "still waiting on the read");
     answer_at(&mut e, &read, 9_200., r#"{"coin":"BTC","markPx":"101.5"}"#);
     let actions = prepared_now(&mut e);
     assert_eq!(e.store().ticker("BTC-PERP").unwrap().mark, 101.5);
