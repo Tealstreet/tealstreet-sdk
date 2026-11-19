@@ -50,6 +50,21 @@ store effects and empty created IDs, and pins journal, terminal guidance and
 diagnostics independently with the Unknown row first, middle and last. Confirmed
 and already-gone cancellations remain successful without Unknown diagnostics.
 
+## Protective-edit mark freshness
+
+A protective cancel-then-place is vetoed at the cancel's release unless the mark
+was observed within five seconds (`FRESH_TICKER_MS`). `fastAssetCtxs` diffs omit an
+unchanged mark, so a quiet mark on a streaming symbol used to age out and refuse
+the edit (AGT-47). A later row for the symbol omitting `markPx` now confirms the
+mark this socket last sent, only while the stored mark still equals it. A new
+socket, an unreadable frame, an explicit null or a mark set by any other source
+retires that proof; other symbols' rows never supply it.
+
+When the mark would still not be fresh one second after sizing (capped at the
+amend bound), the amend reads `activeAssetData` once under the same owner and
+bound before anything is canceled. A failed, mismatched or unanswered read refuses
+with the order unchanged. The release veto itself is unchanged.
+
 ## Candle catalogue readiness
 
 The first nonempty catalogue opens MARKETS before all HIP-3 DEX and optional spot
