@@ -26,7 +26,9 @@ pub const REJECT_REPEAT: Duration = Duration::from_secs(60);
 const MAX_PENDING_FILLS: usize = 512;
 
 /// Chase stop reasons that are an explicit client stop, never an `algoStopped`.
-/// They are the literal reasons `safe_cex_chaser` and exec's nuke record.
+/// They are the literal reasons `safe_cex_chaser` and exec's nuke record; a
+/// retried cancel appends `; ...` to them (`cancel_until_settled`), so callers
+/// compare `base_reason`.
 const CLIENT_CHASE_STOPS: [&str; 4] = [
     "User cancelled",
     safe_cex_chaser::KEPT_ORDER_STOP_REASON,
@@ -80,7 +82,13 @@ struct PendingFill {
     due: Instant,
 }
 
-type TwapChild = Box<dyn Fn(&str) -> bool>;
+/// The chaser book's live rows, read weakly; TWAP slices carry `twap_id`.
+type ActiveChases = Box<dyn Fn() -> Vec<safe_cex_chaser::ActiveChaser>>;
+
+/// The recorded reason before any `; <retry/settlement detail>` suffix.
+fn base_reason(reason: &str) -> &str {
+    reason.split_once(';').map_or(reason, |(base, _)| base)
+}
 
 struct TwapSeen {
     symbol: String,
@@ -96,10 +104,11 @@ pub(crate) struct Tap {
     fills: RefCell<HashMap<String, PendingFill>>,
     pub(crate) wake: tokio::sync::Notify,
     twaps: RefCell<HashMap<String, TwapSeen>>,
+    /// TWAPs a client stop was dispatched for; removed when it is refused.
     client_stopped: RefCell<HashSet<String>>,
     rejected: RefCell<HashMap<(Algo, String, Side), Instant>>,
-    /// True for a chase that is a TWAP slice; the TWAP reports its own end.
-    twap_child: RefCell<Option<TwapChild>>,
+    /// A TWAP slice chase reports through its TWAP, and its rejections as `twap`.
+    chases: RefCell<Option<ActiveChases>>,
 }
 
 fn open<'a>(store: &'a AlgoStore, order_id: &str) -> Option<&'a safe_cex_engine::model::Order> {
@@ -160,7 +169,7 @@ impl Tap {
             twaps: RefCell::default(),
             client_stopped: RefCell::default(),
             rejected: RefCell::default(),
-            twap_child: RefCell::default(),
+            chases: RefCell::default(),
         }
     }
 
@@ -168,8 +177,15 @@ impl Tap {
         (self.notify.delegated)()
     }
 
-    pub(crate) fn set_twap_child(&self, check: TwapChild) {
-        *self.twap_child.borrow_mut() = Some(check);
+    pub(crate) fn set_chases(&self, chases: ActiveChases) {
+        *self.chases.borrow_mut() = Some(chases);
+    }
+
+    fn active_chases(&self) -> Vec<safe_cex_chaser::ActiveChaser> {
+        self.chases
+            .borrow()
+            .as_ref()
+            .map_or_else(Vec::new, |chases| chases())
     }
 
     pub(crate) fn end(&self) {
@@ -177,8 +193,16 @@ impl Tap {
     }
 
     /// Before dispatch: a client `twap:stop`/`twap:cleanup` or nuke is no `algoStopped`.
+    /// Only a TWAP this tap has seen running is recorded.
     pub(crate) fn client_stop(&self, twap_id: &str) {
-        self.client_stopped.borrow_mut().insert(twap_id.to_owned());
+        if self.twaps.borrow().contains_key(twap_id) {
+            self.client_stopped.borrow_mut().insert(twap_id.to_owned());
+        }
+    }
+
+    /// A refused stop must not suppress that TWAP's later genuine end.
+    pub(crate) fn client_stop_refused(&self, twap_id: &str) {
+        self.client_stopped.borrow_mut().remove(twap_id);
     }
 
     /// Live fills from flush frames only; a rejoin snapshot never reaches here.
@@ -272,6 +296,21 @@ impl Tap {
         if self.ended.get() || !self.delegated() {
             return;
         }
+        // A chase placement on a market whose live chases are all TWAP slices is the TWAP's.
+        let algo = if algo == Algo::Chase {
+            let matching: Vec<_> = self
+                .active_chases()
+                .into_iter()
+                .filter(|chase| chase.symbol == symbol && chase.side == order_side)
+                .collect();
+            if !matching.is_empty() && matching.iter().all(|chase| chase.twap_id.is_some()) {
+                Algo::Twap
+            } else {
+                Algo::Chase
+            }
+        } else {
+            algo
+        };
         let now = Instant::now();
         let key = (algo, symbol.to_owned(), side(order_side));
         {
@@ -323,13 +362,13 @@ impl Tap {
         ) else {
             return;
         };
+        let reason = base_reason(reason);
         if self.ended.get()
             || CLIENT_CHASE_STOPS.contains(&reason)
             || self
-                .twap_child
-                .borrow()
-                .as_ref()
-                .is_some_and(|check| check(id))
+                .active_chases()
+                .iter()
+                .any(|chase| chase.id == id && chase.twap_id.is_some())
             || !self.delegated()
         {
             return;

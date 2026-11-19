@@ -154,6 +154,23 @@ async fn non_delegated_accounts_emit_nothing() {
     assert!(sent(&notifier).is_empty());
 }
 
+fn slice(id: &str, symbol: &str, side: OrderSide) -> safe_cex_chaser::ActiveChaser {
+    safe_cex_chaser::ActiveChaser {
+        id: id.into(),
+        symbol: symbol.into(),
+        size: 1.0,
+        side,
+        max_attempts: 10.0,
+        reduce_only: false,
+        attempts: 1,
+        is_stopped: false,
+        stop_reason: String::new(),
+        current_order_ids: Vec::new(),
+        origin: None,
+        twap_id: Some("t1".into()),
+    }
+}
+
 fn chase_end(id: &str, reason: &str) -> String {
     json!({"id": id, "clientId": "client-secret", "symbol": "ETHUSDT", "side": "sell",
         "reduceOnly": false, "size": 2.5, "filled": 1.25, "stopReason": reason})
@@ -175,7 +192,9 @@ fn chase_ends_classify_client_stops_finishes_and_errors() {
         "chaser:complete",
         &chase_end("c2", "Failed to place orders after 3 tries"),
     );
-    tap.set_twap_child(Box::new(|id| id == "slice"));
+    tap.set_chases(Box::new(|| {
+        vec![slice("slice", "ETHUSDT", OrderSide::Sell)]
+    }));
     tap.observe(
         "chaser:complete",
         &chase_end("slice", "Failed to cancel orders"),
@@ -345,4 +364,72 @@ async fn algo_child_rejections_notify_once_per_window_and_other_failures_never()
     assert_eq!(sent(&notifier).len(), 2, "a new window notifies again");
     let text = serde_json::to_string(&sent(&notifier)).unwrap();
     assert!(!text.contains("123.45") && !text.contains("70000") && !text.contains("refusal"));
+}
+
+#[test]
+fn retried_cancel_suffixes_keep_client_stops_silent() {
+    let (tap, notifier) = tap(true, false);
+    for reason in [
+        "User cancelled; retrying the cancel of order o1. Cancel it on the venue to stop now.",
+        "User cancelled; order o1 is cancelled, nothing filled",
+        "Stopped by nuke; order o1 filled 0.5",
+        "Client disconnected while chase was active; order o1 is cancelled after filling 0.2",
+        "User cancelled, kept order in book; retrying",
+    ] {
+        tap.observe("chaser:complete", &chase_end("c", reason));
+    }
+    assert!(
+        sent(&notifier).is_empty(),
+        "a retried client cancel is still a client stop"
+    );
+    tap.observe(
+        "chaser:complete",
+        &chase_end("done", "Completed; order o2 filled 1"),
+    );
+    tap.observe(
+        "chaser:complete",
+        &chase_end("bad", "Failed to cancel orders; order o3 filled 1"),
+    );
+    let queued = sent(&notifier);
+    assert_eq!(queued.len(), 2);
+    assert_eq!(queued[0]["fields"]["cause"], "algoFinished");
+    assert_eq!(queued[1]["fields"]["cause"], "algoError");
+}
+
+#[test]
+fn a_refused_or_unknown_client_stop_never_hides_a_later_twap_end() {
+    let (tap, notifier) = tap(true, false);
+    tap.client_stop("t1");
+    tap.observe(
+        "twap:stateUpdate",
+        &twap_state(&[("t1", "BTCUSDT"), ("t2", "ETHUSDT")]),
+    );
+    tap.client_stop("t2");
+    tap.client_stop_refused("t2");
+    tap.observe("twap:stateUpdate", &twap_state(&[]));
+    let queued = sent(&notifier);
+    assert_eq!(
+        queued.len(),
+        2,
+        "neither an unseen nor a refused stop suppresses the end"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn twap_slice_chase_rejections_report_the_twap() {
+    let (tap, notifier) = tap(true, false);
+    tap.set_chases(Box::new(|| vec![slice("s1", "BTCUSDT", OrderSide::Sell)]));
+    let venue = Rc::new(Venue {
+        store: RefCell::new(store(Vec::new())),
+        outcome: Cell::new(Some(Outcome::Rejected)),
+    });
+    let port = RejectTap {
+        port: venue,
+        tap: tap.clone(),
+        algo: Algo::Chase,
+    };
+    let _ = port.command(place()).await;
+    let queued = sent(&notifier);
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0]["fields"]["algo"], "twap");
 }

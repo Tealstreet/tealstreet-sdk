@@ -1001,12 +1001,9 @@ pub(crate) async fn run_with_identity(
     let book = chasers.book();
     if let Some(tap) = &tap {
         let book = Rc::downgrade(&book);
-        tap.set_twap_child(Box::new(move |id| {
-            book.upgrade().is_some_and(|book| {
-                book.active_chasers()
-                    .iter()
-                    .any(|chase| chase.id == id && chase.twap_id.is_some())
-            })
+        tap.set_chases(Box::new(move || {
+            book.upgrade()
+                .map_or_else(Vec::new, |book| book.active_chasers())
         }));
         // On its own task, like the recount: `feed.next()` must not race a timer.
         let (tap, port) = (tap.clone(), port.clone());
@@ -1222,9 +1219,10 @@ pub(crate) async fn run_with_identity(
                         running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
                         result
                     };
-                    if let Some(tap) = &tap && matches!(op.as_str(), "twap:stop" | "twap:cleanup")
-                        && let Ok(id) = serde_json::from_str::<String>(&data) {
-                        tap.client_stop(&id);
+                    let client_stop = tap.as_ref().filter(|_| matches!(op.as_str(), "twap:stop" | "twap:cleanup"))
+                        .and_then(|tap| Some((tap, serde_json::from_str::<String>(&data).ok()?)));
+                    if let Some((tap, id)) = &client_stop {
+                        tap.client_stop(id);
                     }
                     let dispatched = if crate::user_drain::starts_job(&op) {
                         if let Some(user) = running.user.get() {
@@ -1250,6 +1248,9 @@ pub(crate) async fn run_with_identity(
                         && let Some(id) = &resume && let Some(guard) = running.restores.get()
                         && twap.active_twaps(&name).iter().any(|row| row["id"] == id.as_str() && row["status"] == "running") {
                         guard.acknowledge_resume(id, epoch);
+                    }
+                    if let Some((tap, id)) = &client_stop && !matches!(dispatched, Some(Ok(()))) {
+                        tap.client_stop_refused(id);
                     }
                     let result = match &dispatched {
                         Some(Ok(())) => Value::from("ok"),

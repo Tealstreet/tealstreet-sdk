@@ -100,17 +100,22 @@ never from a snapshot or a rejoin replay:
   (`Outcome::Rejected`). Client writes, exec and nuke legs use the untapped
   port and never emit; unknown and not-sent outcomes never emit. At most one
   per algo, symbol and side per 60 seconds, so a retrying chase pages once.
+  A chase placement on a market whose live chases are all TWAP slices reports
+  `algo: "twap"`.
 - `algoStopped`: a chase end whose recorded reason is not an explicit client
   stop (`User cancelled`, kept order, `chaser:terminateAll`, nuke), or a TWAP
   leaving the state map without a client `twap:stop`/`twap:cleanup` or nuke.
+  Reasons are compared before any `; ...` retried-cancel suffix the chaser adds.
   `Completed`/length-condition chase ends and TWAPs without a slice-failure or
   shortfall report are `finished`/`algoFinished`; the rest `stopped`/`algoError`.
   TWAP slice chases report through their TWAP. Exec has no `algoStopped`: it
   is a one-shot client command answered on its own socket.
 
-Stops caused by account disposal, including retention expiry, drain and
-router-lease fences, emit no `algoStopped`; `delegated.shutdown` covers them.
-Fills still waiting out the debounce are sent when the algo host shuts down.
+Stops caused by account disposal emit no `algoStopped`. Retention expiry and
+drain/SIGTERM are covered by `delegated.shutdown`; router-lease fences, forced
+user drains and revocation disposals send neither notification (a server-lost
+notice from the router is deferred). Fills still waiting out the debounce are
+sent when the algo host shuts down or is fenced.
 
 The lane adds no timing, admission, custody, signing or key lifecycle behavior
 beyond the warning timer, and never cancels resting orders.
