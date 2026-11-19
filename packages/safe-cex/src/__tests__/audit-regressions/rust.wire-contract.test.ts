@@ -2,8 +2,7 @@ import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
 
 import { expect, it } from 'vitest';
 
-import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
-import { DefaultStore } from '../../store/store.base';
+import { FrameApplyError, FrameStore } from '../../store/frameStore';
 
 const frame = (overrides: object = {}) =>
   ({
@@ -54,8 +53,8 @@ const fills = (symbol?: string) => ({
 });
 
 it('keeps the last good table and uses explicit fill identity when new market metadata is malformed', () => {
-  const store = new DefaultStore();
-  const applier = new FrameApplier(store);
+  const store = new FrameStore();
+  const applier = store;
   applier.apply(frame({ markets: () => markets(['A', 'B']) }));
   const broken = frame({
     markets: () => markets(['B', 'A']),
@@ -80,14 +79,18 @@ it('keeps the last good table and uses explicit fill identity when new market me
 });
 
 it.each(
-  ([['native', 1], ['contracts', 3], ['inverse', 2]] as const).flatMap(([profile, units]) =>
-    [[], ['OTHER']].map((table) => [profile, units, table] as const),
-  ),
+  (
+    [
+      ['native', 1],
+      ['contracts', 3],
+      ['inverse', 2],
+    ] as const
+  ).flatMap(([profile, units]) => [[], ['OTHER']].map((table) => [profile, units, table] as const)),
 )(
   'retains orphan identity without deriving NaN %s position quantities (units %i, table %j)',
   (_profile, units, table) => {
-    const store = new DefaultStore();
-    const applier = new FrameApplier(store);
+    const store = new FrameStore();
+    const applier = store;
     applier.apply(frame({ markets: () => markets(['ORPHAN'], units) }));
     const positions = {
       count: 1,
@@ -119,8 +122,8 @@ it.each(
 );
 
 it('refuses unknown fill sides and leaves unknown derivative kinds absent', () => {
-  const store = new DefaultStore();
-  const applier = new FrameApplier(store);
+  const store = new FrameStore();
+  const applier = store;
   const product = {
     count: 1,
     market: Uint32Array.of(0),

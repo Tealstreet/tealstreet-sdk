@@ -141,6 +141,16 @@ struct HistoricalOrder {
     created_time: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     updated_time: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    realized_pnl: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fees: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fee_asset: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rebate: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rebate_asset: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -216,6 +226,9 @@ struct OrderRow<'a> {
     pos_side: &'a str,
     c_time: &'a str,
     u_time: &'a str,
+    fee: Option<&'a str>,
+    fee_ccy: Option<&'a str>,
+    pnl: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -1016,6 +1029,10 @@ impl Okx {
                 {
                     return;
                 }
+                // Derivative fee is a signed aggregate: negative charge, positive credit.
+                // Preserve the reported total in its direction; do not infer gross fee/rebate splits.
+                let fee = row.fee.and_then(parse_decimal);
+                let rebate = fee.filter(|value| *value > 0.0);
                 let order = HistoricalOrder {
                     id: row.ord_id.into(),
                     symbol: m.symbol.clone(),
@@ -1055,6 +1072,12 @@ impl Okx {
                     position_side: hedge(row.pos_side),
                     created_time: time,
                     updated_time: positive(row.u_time),
+                    // Native order pnl excludes fees; it is not position-history net realizedPnl.
+                    realized_pnl: row.pnl.and_then(parse_decimal),
+                    fees: fee.filter(|value| *value <= 0.0).map(f64::abs),
+                    fee_asset: row.fee_ccy.and_then(text),
+                    rebate,
+                    rebate_asset: rebate.and(row.fee_ccy).and_then(text),
                 };
                 if let Rows::Orders(rows) = &mut r.rows {
                     Request::put(&mut r.indices, rows, row.ord_id.into(), order);

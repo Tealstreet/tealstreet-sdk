@@ -5,9 +5,10 @@ import { AxiosError } from 'axios';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { TDG } from '@tealstreet/grvt-client';
-import { GrvtExchange } from '../reference/grvt/grvt.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 
 const instruments = [
   'BTC_USDT_Perp',
@@ -30,18 +31,23 @@ afterEach(() => {
 });
 
 const fixture = (initial = instruments.map((instrument, i) => order(instrument, `0x${i + 1}`, String(i + 1)))) => {
-  const store = new DefaultStore();
-  store.update({
-    markets: instruments.map((id): Market => ({
-      id,
-      symbol: id.toUpperCase(),
-      base: 'BTC',
-      quote: 'USDT',
-      active: true,
-      precision: { amount: 0.001, price: 0.1 },
-      limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
-    })),
-  });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      {
+        markets: instruments.map((id): Market => ({
+          id,
+          symbol: id.toUpperCase(),
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+        })),
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new GrvtExchange('grvt', { key: '', secret: '' }, store);
   instances.push(exchange);
   exchange.grvtTradingAccountId = '777';
@@ -306,23 +312,28 @@ describe('GRVT exact instrument cancellation', () => {
       const f = fixture([order(instruments[0], '0x00', '9')]);
       f.authenticate.mockResolvedValueOnce({}).mockImplementationOnce(async () => {
         if (change === 'orders')
-          f.exchange.store.update({
-            orders: [
+          f.exchange.store.apply(
+            nativeFixture(
               {
-                id: '9',
-                symbol: instruments[1].toUpperCase(),
-                type: OrderType.Limit,
-                side: OrderSide.Buy,
-                status: OrderStatus.Open,
-                amount: 1,
-                filled: 0,
-                remaining: 1,
-                price: 1,
-                reduceOnly: false,
-                lastUpdate: 1700000000000,
+                orders: [
+                  {
+                    id: '9',
+                    symbol: instruments[1].toUpperCase(),
+                    type: OrderType.Limit,
+                    side: OrderSide.Buy,
+                    status: OrderStatus.Open,
+                    amount: 1,
+                    filled: 0,
+                    remaining: 1,
+                    price: 1,
+                    reduceOnly: false,
+                    lastUpdate: 1700000000000,
+                  },
+                ],
               },
-            ],
-          });
+              f.exchange.store.markets.map((row) => row.symbol),
+            ),
+          );
         if (change === 'native-id') f.exchange._nonceToOrderId.set('9', '0xdead');
         if (change === 'creation') f.exchange._nonceCreationTimes.set('9', 1700000000000);
         return {};

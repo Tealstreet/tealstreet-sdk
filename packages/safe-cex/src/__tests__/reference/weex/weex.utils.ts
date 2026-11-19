@@ -24,6 +24,7 @@ import { createPositionId } from '../../../utils/createPositionId';
 import { incomeCategoryFromType } from '../../../utils/incomeCategoryFromType';
 import { omitUndefined } from '../../../utils/omitUndefined';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
 import {
   MARGIN_TYPE,
   ORDER_SIDE,
@@ -321,7 +322,7 @@ export const normalizePosition = (
     unrealizedPnl,
     realizedPnl: toNumber(raw.realizedPnl ?? raw.realizePnl),
     contracts,
-    liquidationPrice: toNumber(raw.liquidatePrice ?? raw.liquidationPrice),
+    liquidationPrice: nativeLiquidationPrice(toNumber(raw.liquidatePrice ?? raw.liquidationPrice)),
     marginType,
     positionMode,
     marginSize: toNumber(raw.marginSize ?? raw.isolatedMargin),
@@ -384,7 +385,7 @@ export const normalizeExecution = (raw: Record<string, any>, market?: Market): E
     // The venue's own fill id. Without it a fill has no idempotent key and
     // cannot be stored or de-duplicated — orderId cannot serve, since one order
     // fills across many rows.
-    id: raw.tradeId ?? raw.fillId ?? raw.id ? toIntegerString(raw.tradeId ?? raw.fillId ?? raw.id) : undefined,
+    id: (raw.tradeId ?? raw.fillId ?? raw.id) ? toIntegerString(raw.tradeId ?? raw.fillId ?? raw.id) : undefined,
     timestamp,
     symbol,
     orderId: raw.orderId ? toIntegerString(raw.orderId) : undefined,
@@ -496,7 +497,7 @@ export const fakePositionsForMarket = (
     leverage,
     unrealizedPnl: 0,
     contracts: 0,
-    liquidationPrice: 0,
+    liquidationPrice: null,
     marginType,
     positionMode,
     info: {},

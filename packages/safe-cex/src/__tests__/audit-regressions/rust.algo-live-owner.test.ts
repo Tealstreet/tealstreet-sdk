@@ -1,11 +1,11 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { TwapOwner } from '../../webworker/twap/TwapOwner';
 
-import { EngineHost } from '@tealstreet/safe-cex-wasm/host';
 import { afterEach, expect, it, vi } from 'vitest';
 
+import { EngineHost } from '@tealstreet/safe-cex-wasm/host';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
@@ -14,52 +14,69 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
 
 afterEach(() => vi.useRealTimers());
 
-it.each(['unchanged', 'generation', 'returning'] as const)('carries the initiating owner through engine readiness: %s', (transition) => {
-  let owner: TwapOwner = { ownerId: 'A', generation: 7 };
-  const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
-  exchange.setTwapOwnerProvider(() => owner);
-  const run = vi.fn();
-  const refused = vi.fn();
-  exchange.routeAlgoOp('acct', 'exec', run, refused);
-  if (transition === 'generation') owner = { ownerId: 'A', generation: 8 };
-  if (transition === 'returning') {
-    owner = { ownerId: 'B', generation: 8 };
-    owner = { ownerId: 'A', generation: 9 };
-  }
-  Reflect.set(exchange, 'host', {
-    algoStart: vi.fn(), algosRunning: true, algoDispose: vi.fn(async () => {}), dispose: vi.fn(),
-    // Execution now uses the explicit host fence; the queue's creation lease is tested here.
-    checkAlgosForExecution: () => true,
-  });
-  try {
-    exchange.startAlgos('acct');
-    expect(run).toHaveBeenCalledTimes(transition === 'unchanged' ? 1 : 0);
-    expect(refused).toHaveBeenCalledTimes(transition === 'unchanged' ? 0 : 1);
-  } finally {
-    exchange.dispose();
-  }
-});
+it.each(['unchanged', 'generation', 'returning'] as const)(
+  'carries the initiating owner through engine readiness: %s',
+  (transition) => {
+    let owner: TwapOwner = { ownerId: 'A', generation: 7 };
+    const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new FrameStore());
+    exchange.setTwapOwnerProvider(() => owner);
+    const run = vi.fn();
+    const refused = vi.fn();
+    exchange.routeAlgoOp('acct', 'exec', run, refused);
+    if (transition === 'generation') owner = { ownerId: 'A', generation: 8 };
+    if (transition === 'returning') {
+      owner = { ownerId: 'B', generation: 8 };
+      owner = { ownerId: 'A', generation: 9 };
+    }
+    Reflect.set(exchange, 'host', {
+      algoStart: vi.fn(),
+      algosRunning: true,
+      algoDispose: vi.fn(async () => {}),
+      dispose: vi.fn(),
+      // Execution now uses the explicit host fence; the queue's creation lease is tested here.
+      checkAlgosForExecution: () => true,
+    });
+    try {
+      exchange.startAlgos('acct');
+      expect(run).toHaveBeenCalledTimes(transition === 'unchanged' ? 1 : 0);
+      expect(refused).toHaveBeenCalledTimes(transition === 'unchanged' ? 0 : 1);
+    } finally {
+      exchange.dispose();
+    }
+  },
+);
 
 it.each(['unchanged', 'generation', 'returning', 'logout'] as const)(
   'checks the creation binding on the cached algo route: %s',
   (transition) => {
     let owner: TwapOwner | null = { ownerId: 'A', generation: 7 };
-    const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+    const exchange = new RustEngineExchange('bybit', { key: '', secret: '' }, new FrameStore());
     const nativeOp = vi.fn(() => '[]');
     const free = vi.fn();
-    const host = new EngineHost({
-      algoStart: vi.fn(),
-      algoStartOwned: vi.fn(),
-      algoRunning: () => true,
-      algoDeadline: () => undefined,
-      algoOp: nativeOp,
-      algoEmits: () => '[]',
-      free,
-    } as unknown as WasmEngineLike, {
-      now: () => 0, setTimeout, clearTimeout,
-      connect: () => { throw new Error('unexpected socket'); },
-      request: async () => { throw new Error('unexpected request'); },
-    }, {}, { ownsEngine: true });
+    const host = new EngineHost(
+      {
+        algoStart: vi.fn(),
+        algoStartOwned: vi.fn(),
+        algoRunning: () => true,
+        algoDeadline: () => undefined,
+        algoOp: nativeOp,
+        algoEmits: () => '[]',
+        free,
+      } as unknown as WasmEngineLike,
+      {
+        now: () => 0,
+        setTimeout,
+        clearTimeout,
+        connect: () => {
+          throw new Error('unexpected socket');
+        },
+        request: async () => {
+          throw new Error('unexpected request');
+        },
+      },
+      {},
+      { ownsEngine: true },
+    );
     Reflect.set(exchange, 'host', host);
     exchange.setTwapOwnerProvider(() => owner);
     expect(exchange.startAlgos('acct')).toBe(true);

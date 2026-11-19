@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BackpackExchange } from '../reference/backpack/backpack.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { ExchangeOptions, OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BackpackExchange } from '../reference/backpack/backpack.exchange';
 
 const symbol = 'BTC_USDC_PERP';
 
@@ -11,23 +12,28 @@ describe('Backpack trigger reference audit regression', () => {
   let post: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
         {
-          id: symbol,
-          symbol,
-          base: 'BTC',
-          quote: 'USDC',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
-          contractSize: 1,
-          takerFee: 0,
-          makerFee: 0,
+          markets: [
+            {
+              id: symbol,
+              symbol,
+              base: 'BTC',
+              quote: 'USDC',
+              active: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+              contractSize: 1,
+              takerFee: 0,
+              makerFee: 0,
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     exchange = new BackpackExchange('backpack', { key: '', secret: '', testnet: false } as ExchangeOptions, store);
     post = vi.fn().mockImplementation(() => Promise.resolve({ data: { id: 'order-id' } }));

@@ -210,7 +210,7 @@ export class DelegatedSignerSetup {
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) invalid();
       const {
         remoteSigner: _remote, payloadSigner: _payload, signing: _signing, readCredentials: _readCredentials, ...safe
-      } = withoutSigningCredentials(parsed as ExchangeOptions) as ExchangeOptions & { signing?: unknown; readCredentials?: unknown };
+      }: ExchangeOptions & { signing?: unknown; readCredentials?: unknown } = withoutSigningCredentials(parsed as ExchangeOptions);
       return new Constructor(venue, JSON.stringify({ ...safe, ...(this.#publicOnly ? { publicDataOnly: true } : {}), signing: this.#identities,
         ...(this.#coinbaseSigning && { coinbaseSigning: this.#coinbaseSigning }),
         remoteSigning: !this.#publicOnly, payloadSigner: this.usesPayloadSigner, publicMode: this.#publicMode }));
@@ -232,5 +232,5 @@ export class DelegatedSignerSetup {
 /** Only admitted delegated setups remove callbacks; legacy families retain theirs. */
 export const withoutDelegatedSigning = (options: ExchangeOptions): ExchangeOptions => {
   const { remoteSigner: _remote, payloadSigner: _payload, ...safe } = withoutSigningCredentials(options);
-  return safe as ExchangeOptions;
+  return safe;
 };

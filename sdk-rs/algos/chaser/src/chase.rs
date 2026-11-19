@@ -74,7 +74,7 @@ impl ChaserOptions {
 }
 
 /// One `store.activeChasers` row, as the TS `ActiveChaser`.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActiveChaser {
     pub id: String,
@@ -82,6 +82,7 @@ pub struct ActiveChaser {
     pub size: f64,
     pub side: OrderSide,
     pub max_attempts: f64,
+    #[serde(default)]
     pub reduce_only: bool,
     pub attempts: u32,
     pub is_stopped: bool,

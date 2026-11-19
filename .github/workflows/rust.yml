@@ -355,21 +355,26 @@ jobs:
           - check: fmt
             command: cargo fmt --all --check
           - check: clippy
-            command: cargo clippy --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types --all-targets -- -D warnings && cargo clippy --locked -p safe-cex-crypto --all-targets --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 -- -D warnings
+            command: |
+              cargo clippy --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types --all-targets -- -D warnings
+              cargo clippy --locked -p safe-cex-crypto --all-targets --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 -- -D warnings
           - check: test
             # Workspace builds unify crypto features; prove disabled and enabled provider arms.
-            command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 --lib signer::'
+            command: |
+              RUSTFLAGS=-Dwarnings cargo test --locked --no-fail-fast --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types
+              RUSTFLAGS=-Dwarnings cargo test --locked --no-fail-fast -p safe-cex-crypto --lib signer::
+              RUSTFLAGS=-Dwarnings cargo test --locked --no-fail-fast -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 --lib signer::
           # Run the feature-gated integration suites independently of workspace
           # feature unification. The managed-flow suite also needs address-nonce.
           - check: crypto-admission
             command: |
-              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features admission,address-nonce,ed25519,secp256k1,stark,schnorr --test admission --test starknet_verify --test stark_public_seal --test scalar_only_managed_flow -j2
-              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --no-default-features --doc -j2
+              RUSTFLAGS=-Dwarnings cargo test --locked --no-fail-fast -p safe-cex-crypto --features admission,address-nonce,ed25519,secp256k1,stark,schnorr --test admission --test starknet_verify --test stark_public_seal --test scalar_only_managed_flow -j2
+              RUSTFLAGS=-Dwarnings cargo test --locked --no-fail-fast -p safe-cex-crypto --no-default-features --doc -j2
           # The default workspace does not enable the opt-in order frame protocol.
           - check: delegated-order-frames
             command: |
               cargo clippy --locked -p safe-cex-exchange-server --features delegated-order-frames --all-targets -j2 -- -D warnings
-              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-exchange-server --features delegated-order-frames --lib --tests -j2 -- --test-threads=2
+              RUSTFLAGS=-Dwarnings cargo test --locked --no-fail-fast -p safe-cex-exchange-server --features delegated-order-frames --lib --tests -j2 -- --test-threads=2
           # Workspace resolution unifies family features. Exercise each
           # standalone engine closure, including both Plan configurations.
           - check: engine-feature-modes
@@ -379,7 +384,7 @@ jobs:
             command: |
               node --test safe-cex-types/tests/metadata-freshness.test.cjs
               cargo clippy --locked -p safe-cex-types --test exchange_metadata -- -D warnings
-              cargo test --locked -p safe-cex-types --test exchange_metadata
+              cargo test --locked --no-fail-fast -p safe-cex-types --test exchange_metadata
           # The restored master candle-cache crates (mono candle-server image) build
           # alone, with master's serde_json features, never unified into the port.
           - check: candle-cache
@@ -388,20 +393,20 @@ jobs:
               cargo clippy --locked -p safe-cex-candle-cache -p safe-cex-num -p safe-cex-types --lib --bins -- -D warnings
               # The fix_audit and monthly_behavior targets and two lib tests load the TypeScript
               # compiler over TS venue sources, which the Rust-only bundle deletes.
-              cargo test --locked -p safe-cex-candle-cache --lib --bins --test backend_api --test divergence_audit --test field_identity --test numeric_ingress --test owner_lifecycle --test p4_calendar --test runtime_backends -- --skip tests::cleaning_2000_nan_permutations_match_actual_source_order --skip tests::cleaning_source_nan_permutations_keep_first_duplicates
-              cargo test --locked -p safe-cex-num --lib
+              cargo test --locked --no-fail-fast -p safe-cex-candle-cache --lib --bins --test backend_api --test divergence_audit --test field_identity --test numeric_ingress --test owner_lifecycle --test p4_calendar --test runtime_backends -- --skip tests::cleaning_2000_nan_permutations_match_actual_source_order --skip tests::cleaning_source_nan_permutations_keep_first_duplicates
+              cargo test --locked --no-fail-fast -p safe-cex-num --lib
               # Keep the restored types isolated while executing their live TS oracles.
-              SAFE_CEX_TYPESCRIPT_PATH="$GITHUB_WORKSPACE/node_modules/typescript" cargo test --locked -p safe-cex-types --tests
+              SAFE_CEX_TYPESCRIPT_PATH="$GITHUB_WORKSPACE/node_modules/typescript" cargo test --locked --no-fail-fast -p safe-cex-types --tests
               python3 scripts/check-serde-json-features.py
           - check: mutation-barriers
             command: |
               cargo clippy --locked -p safe-cex-engine --all-targets --no-default-features --features http-mutation-barriers,test-support,order-locks,managed-sockets -- -D warnings
-              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-engine --no-default-features --features http-mutation-barriers,test-support,order-locks,managed-sockets --test plan_mutation_prepare_barrier --test multi_constraint_pacing
-              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-engine --no-default-features --features http-plans,test-support --lib disabled_barrier_refusal
+              RUSTFLAGS=-Dwarnings cargo test --locked --no-fail-fast -p safe-cex-engine --no-default-features --features http-mutation-barriers,test-support,order-locks,managed-sockets --test plan_mutation_prepare_barrier --test multi_constraint_pacing
+              RUSTFLAGS=-Dwarnings cargo test --locked --no-fail-fast -p safe-cex-engine --no-default-features --features http-plans,test-support --lib disabled_barrier_refusal
               cargo clippy --locked -p safe-cex-native --no-default-features --features http-mutation-barriers --all-targets -- -D warnings
-              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-native --no-default-features --features http-mutation-barriers --lib managed_http
-              CARGO_TARGET_DIR=target cargo test --locked --manifest-path hosts/native/tests/barrier-feature-unification/Cargo.toml
-              CARGO_TARGET_DIR=target cargo test --locked --manifest-path hosts/native/tests/barrier-feature-unification/Cargo.toml --features host-barriers
+              RUSTFLAGS=-Dwarnings cargo test --locked --no-fail-fast -p safe-cex-native --no-default-features --features http-mutation-barriers --lib managed_http
+              CARGO_TARGET_DIR=target cargo test --locked --no-fail-fast --manifest-path hosts/native/tests/barrier-feature-unification/Cargo.toml
+              CARGO_TARGET_DIR=target cargo test --locked --no-fail-fast --manifest-path hosts/native/tests/barrier-feature-unification/Cargo.toml --features host-barriers
               node --test hosts/wasm/js/hostmanagedhttp.test.mjs hosts/wasm/js/hostmanagedhttp-group.test.mjs
     steps:
       - uses: actions/checkout@v7
@@ -417,15 +422,16 @@ jobs:
       - name: Install pinned toolchain
         run: rustup show
       - uses: ./.github/actions/prefetch-cargo
+      # Native store-frame tests run the maintained TS risk and real SCXF receiver oracles.
       - uses: actions/setup-node@v4
-        if: matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers' || matrix.check == 'metadata' || matrix.check == 'candle-cache'
+        if: matrix.check == 'test' || matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers' || matrix.check == 'metadata' || matrix.check == 'candle-cache'
         with:
           node-version: 22
       - uses: ./.github/actions/prepare-yarn
-        if: matrix.check == 'metadata' || matrix.check == 'candle-cache'
+        if: matrix.check == 'test' || matrix.check == 'metadata' || matrix.check == 'candle-cache'
         id: yarn
       - uses: ./.github/actions/install-yarn
-        if: matrix.check == 'metadata' || matrix.check == 'candle-cache'
+        if: matrix.check == 'test' || matrix.check == 'metadata' || matrix.check == 'candle-cache'
         with:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
@@ -434,8 +440,13 @@ jobs:
         if: matrix.check == 'test'
         run: |
           printf '%s\n' CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_DEV_DEBUG=0 >> "$GITHUB_ENV"
+      # Fail-complete: every line runs even after a failure, and cargo test runs
+      # with --no-fail-fast, so one run reports every failing test (PR #3640).
       - name: Run ${{ matrix.check }}
-        run: ${{ matrix.command }}
+        env:
+          CHECK_NAME: Rust / native ${{ matrix.check }}
+          CHECK_COMMANDS: ${{ matrix.command }}
+        run: node harness/run-all-checks.mjs
 
 
   wasm:
@@ -738,7 +749,7 @@ jobs:
           corepack yarn workspace @tealstreet/safe-cex-server test-wasm
           corepack yarn workspace @tealstreet/exchange-mcp test-wasm
           corepack yarn workspace @tealstreet/cli test-wasm
-          corepack yarn workspace @tealstreet/safe-cex-react-native test-wasm
+          corepack yarn workspace @tealstreet/safe-cex-react-native test-unit
           corepack yarn -s workspace @tealstreet/exchange-mcp build
           corepack yarn -s workspace @tealstreet/exchange-mcp smoke
       - name: Native product semantics through the real CLI preflight
@@ -1217,7 +1228,7 @@ jobs:
           corepack yarn workspace @tealstreet/safe-cex-server test-wasm
           corepack yarn workspace @tealstreet/exchange-mcp test-wasm
           corepack yarn workspace @tealstreet/cli test-wasm
-          corepack yarn workspace @tealstreet/safe-cex-react-native test-wasm
+          corepack yarn workspace @tealstreet/safe-cex-react-native test-unit
           corepack yarn -s workspace @tealstreet/exchange-mcp build
           corepack yarn -s workspace @tealstreet/exchange-mcp smoke
       - name: Native product semantics through the real CLI preflight
@@ -1416,7 +1427,7 @@ jobs:
       # Collector steps retain strict FAIL reports so every product runs. Only
       # this mandatory verifier can certify the job; unknown/missing gates fail.
       - name: Verify strict replay results and declared known failures
-        if: always()
+        if: always() && steps.cpu_prepare.outcome == 'success'
         id: cpu_collect
         env:
           GITHUB_TOKEN: ${{ github.token }}

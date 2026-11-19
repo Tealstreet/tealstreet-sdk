@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { ENDPOINTS } from '../reference/paradex/paradex.types';
-import { DefaultStore } from '../../store/store.base';
 
 const createExchange = () =>
-  new ParadexExchange('paradex', { publicDataOnly: true, tuning: { consoleLogging: false } } as any, new DefaultStore());
+  new ParadexExchange('paradex', { publicDataOnly: true, tuning: { consoleLogging: false } } as any, new FrameStore());
 
 afterEach(() => {
   vi.useRealTimers();
@@ -77,19 +78,24 @@ describe('audit regression: Paradex current REST and lifecycle contracts', () =>
   it('uses order history, not open orders, when fills are unavailable', async () => {
     const exchange = createExchange();
     Object.defineProperty(exchange, 'isPublicDataOnly', { value: false });
-    exchange.store.update({
-      markets: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'BTC-USD-PERP',
-          symbol: 'BTC-USD-PERP',
-          base: 'BTC',
-          quote: 'USD',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
+          markets: [
+            {
+              id: 'BTC-USD-PERP',
+              symbol: 'BTC-USD-PERP',
+              base: 'BTC',
+              quote: 'USD',
+              active: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
+            },
+          ],
         },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     (exchange as any).jwtManager = {};
     const get = vi.fn(async (endpoint: string) => {
       if (endpoint === ENDPOINTS.FILLS) return { data: { results: [] } };

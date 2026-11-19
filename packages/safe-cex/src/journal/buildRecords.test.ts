@@ -21,14 +21,16 @@ const TO = FROM + 24 * 60 * 60 * 1000;
 
 /** A buy then a sell, which folds into exactly one closed round trip. */
 const roundTrip = (symbol: string): Execution[] => [
-  { timestamp: FROM / 1000 + 60, symbol, price: 100, qty: 1, side: OrderSide.Buy, commission: 0.1 },
+  { id: '1', timestamp: FROM / 1000 + 60, symbol, price: 100, qty: 1, side: OrderSide.Buy, commission: 0.1, commissionAsset: 'USDT' },
   {
+    id: '2',
     timestamp: FROM / 1000 + 120,
     symbol,
     price: 110,
     qty: 1,
     side: OrderSide.Sell,
     commission: 0.1,
+    commissionAsset: 'USDT',
     realizedPnl: 10,
   },
 ];
@@ -283,5 +285,36 @@ describe('buildFoldedPositionRecords — incomplete history cannot claim complet
     expect(result.totalFills).toBe(2);
     expect(result.records[0].funding).toBe(-0.5);
     expect(result.records[0].fundingAttributed).toBe(true);
+  });
+});
+
+describe('buildFoldedPositionRecords — foreign fee currencies', () => {
+  it('propagates refusal of a nonzero commission with no reported asset', async () => {
+    const fills = roundTrip('BTCUSDT').map((fill, index) => ({
+      ...fill,
+      commissionAsset: index === 0 ? undefined : fill.commissionAsset,
+    }));
+    await expect(
+      buildFoldedPositionRecords(
+        { fetchHistoricalFills: async () => fills, fetchIncomeHistoryRange: async () => [] },
+        options(),
+      ),
+    ).rejects.toThrow(/fee currency conversion/);
+  });
+
+  it('rejects the derived result instead of silently dropping its unconvertible position', async () => {
+    const fills = roundTrip('BTCUSDT').map((fill, index) => ({
+      ...fill,
+      commissionAsset: index === 0 ? 'BNB' : 'USDT',
+    }));
+    await expect(
+      buildFoldedPositionRecords(
+        {
+          fetchHistoricalFills: async () => fills,
+          fetchIncomeHistoryRange: async () => [{ symbol: 'BTCUSDT' }],
+        },
+        options({ symbolScoped: true }),
+      ),
+    ).rejects.toThrow(/fee currency conversion/);
   });
 });

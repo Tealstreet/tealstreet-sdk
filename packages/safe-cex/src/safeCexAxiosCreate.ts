@@ -184,35 +184,6 @@ const stringifyResponseBody = (body: unknown): string =>
  *
  * Never throws. A counter must not be able to fail a request.
  */
-const recordRequestOutcome = (
-  exchange: BaseExchange,
-  status: number | undefined,
-  hadResponse: boolean,
-  config: unknown,
-) => {
-  try {
-    // A signing-capture round trip never touches the network — counting its
-    // synthetic 200 would report one phantom `ok` per signature, and in hosted
-    // mode that is every request twice over.
-    if (isSigningCaptureRequest(config)) return;
-
-    const outcome: RequestOutcome = !hadResponse
-      ? 'network'
-      : status === undefined
-        ? 'other'
-        : status === 429 || status === 418
-          ? 'rateLimit'
-          : status === 401 || status === 403
-            ? 'auth'
-            : status >= 200 && status < 300
-              ? 'ok'
-              : 'other';
-    exchange.store?.recordRequestOutcome(outcome);
-  } catch {
-    /* counting must never break a request */
-  }
-};
-
 export const safeCexAxiosCreateNoProxy = (
   config: CreateAxiosDefaults,
   options: ExchangeOptions,
@@ -236,7 +207,6 @@ export const safeCexAxiosCreateNoProxy = (
   // Add error interceptor for enhanced error messages
   axiosInstance.interceptors.response.use(
     (response) => {
-      recordRequestOutcome(exchange, response.status, true, response.config);
       // Mirrors the signing-capture guard in recordRequestOutcome: the capture
       // adapter's synthetic 200 is not a failure so it would clear rather than
       // record, which is correct — but keep the guard explicit so the two stay
@@ -250,7 +220,6 @@ export const safeCexAxiosCreateNoProxy = (
     },
     (error) => {
       httpStats.recordError();
-      recordRequestOutcome(exchange, error?.response?.status, Boolean(error?.response), error?.config);
       if (!isSigningCaptureRequest(error?.config)) noteRestFailure(exchange.name, error);
       // Enhance the error with more context
       const enhancedError = enhanceAxiosError(error, exchange.name);
@@ -349,7 +318,6 @@ export const safeCexAxiosCreate = (
   });
   axiosInstance.interceptors.response.use(
     async (response) => {
-      recordRequestOutcome(exchange, response.status, true, response.config);
       // Mirrors the signing-capture guard in recordRequestOutcome: the capture
       // adapter's synthetic 200 is not a failure so it would clear rather than
       // record, which is correct — but keep the guard explicit so the two stay
@@ -409,7 +377,6 @@ export const safeCexAxiosCreate = (
 
       const status = error?.response?.status;
 
-      recordRequestOutcome(exchange, status, Boolean(error?.response), error?.config);
       if (!isSigningCaptureRequest(error?.config)) noteRestFailure(exchange.name, error);
 
       // Detect proxy/tunnel failures — surface them clearly instead of letting

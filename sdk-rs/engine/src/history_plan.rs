@@ -31,7 +31,7 @@ pub struct PlanHistoryRows<T> {
     accepted: Vec<T>,
     pending: Vec<T>,
     page: Option<(Context, Attempt)>,
-    incomplete: Option<(IncompleteReason, String)>,
+    incomplete: Option<Incomplete>,
 }
 
 struct AcceptedPlanPrefix {
@@ -153,7 +153,7 @@ impl<T, P> PlanRowsAdmission<'_, '_, T, P> {
     pub fn incomplete(&mut self, reason: IncompleteReason, message: impl Into<String>) {
         self.rows
             .incomplete
-            .get_or_insert_with(|| (reason, message.into()));
+            .get_or_insert_with(|| Incomplete::new(reason, message.into()));
     }
     pub fn accept_page(self) -> Result<(), ContextError> {
         self.rows
@@ -212,7 +212,7 @@ impl<T, P> PlanFailureAdmission<'_, '_, T, P> {
             return self.rows.reject(self.cx, error);
         };
         let marker = self.rows.incomplete.clone().unwrap_or_else(|| {
-            (
+            Incomplete::new(
                 IncompleteReason::LaterPageFailed,
                 format!("history is INCOMPLETE: {}", error.message),
             )

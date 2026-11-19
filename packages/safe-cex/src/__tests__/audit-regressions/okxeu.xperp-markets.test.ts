@@ -3,8 +3,9 @@ import type { ExchangeOptions, Market, Ticker } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ENDPOINTS } from '../../exchanges/okx/okx.types';
+import { FrameStore } from '../../store/frameStore';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { OKXEUExchange } from '../reference/okx/okxeu.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -67,7 +68,7 @@ const regularFutureInstrument = {
   ruleType: 'normal',
 };
 
-const createExchange = () => new OKXEUExchange('okxeu', options, new DefaultStore());
+const createExchange = () => new OKXEUExchange('okxeu', options, new FrameStore());
 
 const ticker = (instId: string, instType = 'SWAP') => ({
   instType,
@@ -131,11 +132,7 @@ describe('OKX EU X-Perp market support', () => {
   });
 
   it('keeps public OKX EU market discovery available for public-only sessions', async () => {
-    const exchange = new OKXEUExchange(
-      'okxeu',
-      { ...options, publicDataOnly: true },
-      new DefaultStore(),
-    );
+    const exchange = new OKXEUExchange('okxeu', { ...options, publicDataOnly: true }, new FrameStore());
     const get = vi.fn(async (endpoint: string, opts?: { params?: Record<string, string> }) => {
       if (endpoint === ENDPOINTS.MARKETS && opts?.params?.instType === 'SWAP') {
         return { data: { data: [swapInstrument] } };
@@ -168,7 +165,11 @@ describe('OKX EU X-Perp market support', () => {
       }) as any;
       return exchange.fetchMarkets();
     })();
-    exchange.store.update({ markets, loaded: { ...exchange.store.loaded, markets: true } });
+    applyReferenceFixture(
+      exchange.store,
+      { markets, loaded: { ...exchange.store.loaded, markets: true } },
+      exchange.store.markets.map((row) => row.symbol),
+    );
 
     const get = vi.fn(async (endpoint: string, opts?: { params?: Record<string, string> }) => {
       if (endpoint === ENDPOINTS.TICKERS && opts?.params?.instType === 'SWAP') {
@@ -227,11 +228,15 @@ describe('OKX EU X-Perp market support', () => {
         info: xperpInstrument,
       },
     ];
-    exchange.store.update({
-      markets,
-      tickers: markets.map(storedTicker),
-      loaded: { ...exchange.store.loaded, markets: true, tickers: true },
-    });
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets,
+        tickers: markets.map(storedTicker),
+        loaded: { ...exchange.store.loaded, markets: true, tickers: true },
+      },
+      exchange.store.markets.map((row) => row.symbol),
+    );
 
     exchange.publicWebsocket.handleIndexTickerEvents({ data: [{ instId: 'ETH-USD', idxPx: '2500' }] });
 

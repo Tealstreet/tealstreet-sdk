@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { accountToExchangeOptions } from '../createExchangeFromAccount';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { prepareRecordedHttp } from './support/managedHttp';
 
 vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
@@ -75,7 +75,7 @@ it("the worker started from a mirror's options gets the key and starts the priva
   const mirror = new RustEngineExchange(
     'bybit',
     { ...accountToExchangeOptions(BEAR5, { workerMirror: true }), engine: 'rust' },
-    new DefaultStore(),
+    new FrameStore(),
   );
   exchanges.push(mirror);
   expect(mirror.isPublicDataOnly).toBe(false);
@@ -83,7 +83,7 @@ it("the worker started from a mirror's options gets the key and starts the priva
   // exchangeAccountController's worker init.
   const forwarded = structuredClone({ ...mirror.options, workerMirror: undefined });
   expect(forwarded.key).toBe('dummykey0123456789');
-  const worker = new RustEngineExchange('bybit', forwarded, new DefaultStore());
+  const worker = new RustEngineExchange('bybit', forwarded, new FrameStore());
   exchanges.push(worker);
   expect(worker.isPublicDataOnly).toBe(false);
   // The worker's own options keep no signing material.

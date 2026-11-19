@@ -32,19 +32,7 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
 
   private _sendOrderBookUpdate = (data: { symbol: string; subId: string }, o: OrderBook) => {
     this._ctx.postMessage({ op: 'listenOrderBook', data: { ...data, orderbook: o } });
-    // some ticker ws feed don't include BBO or are too slow so we inject it from OB if we can. Otherwise track price,
-    // quick orders can be delayed or revert to using last price
-    if (o.asks[0] && o.bids[0]) {
-      const foundTicker = this._exchange.store.tickers.find((t) => t.symbol === data.symbol);
-      if (foundTicker) {
-        if (foundTicker.ask !== o.asks[0].price || foundTicker.bid !== o.bids[0].price) {
-          this._exchange.store.updateTicker(foundTicker, {
-            ask: o.asks[0].price,
-            bid: o.bids[0].price,
-          });
-        }
-      }
-    }
+
   };
 
   handle(payload: StoreWorkerPayload): void {

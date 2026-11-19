@@ -58,7 +58,9 @@ it('starts a saved account through the CLI factory and reads native account stat
         exchange!.store.loaded.balance,
         JSON.stringify({ requests: fixture.requests, failures: fixture.failures, loaded: exchange!.store.loaded }),
       ).toBe(true),
-    { timeout: 5000 },
+    // Native Coinbase startup pages futures and spot orders through its paced
+    // transport; the observed offline sequence needs about 6.4 seconds.
+    { timeout: 12000 },
   );
   await startup;
   expect(exchange.store.markets.map((market) => market.symbol)).toContain('BTC-CDE');

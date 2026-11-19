@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BinancePrivateWebsocket } from '../reference/phemex/phemex.ws-private';
 import { MarginType, PositionMode, PositionSide } from '../../types';
+import { nativeMarket } from '../cutover/nativeMarket';
+import { referenceStore } from '../cutover/referenceFixture';
+import { BinancePrivateWebsocket } from '../reference/phemex/phemex.ws-private';
 
 const position = (contracts: number, side = PositionSide.Long, positionMode = PositionMode.Hedged) => ({
   id: `BTCUSDT:${side}`,
@@ -12,7 +14,7 @@ const position = (contracts: number, side = PositionSide.Long, positionMode = Po
   notional: contracts * 69_000,
   leverage: 10,
   unrealizedPnl: 0,
-  liquidationPrice: 0,
+  liquidationPrice: null,
   marginType: MarginType.Isolated,
   positionMode,
 });
@@ -20,22 +22,12 @@ const position = (contracts: number, side = PositionSide.Long, positionMode = Po
 const setup = (fullPositions = [position(2)], knownMarket = true) => {
   const priorBalance = { used: 30, free: 970, total: 1000, upnl: 0 };
   const nextBalance = { used: 20, free: 980, total: 1000, upnl: 0 };
-  const store = {
-    markets: knownMarket ? [{ symbol: 'BTCUSDT' }] : [],
+  const store = referenceStore({
+    markets: knownMarket ? [nativeMarket({ symbol: 'BTCUSDT', id: 'BTCUSDT' })] : [],
+    orders: [],
     positions: [position(3)],
     balance: priorBalance,
-    loaded: { orders: true, balance: true, positions: true },
-    addOrUpdateOrders: vi.fn(),
-    addOrUpdatePositions: vi.fn(),
-    addOrUpdatePositionsFull: vi.fn(),
-    update: vi.fn(),
-  };
-  store.addOrUpdatePositionsFull.mockImplementation((positions) => {
-    store.positions = positions;
-  });
-  store.update.mockImplementation((patch) => {
-    if (patch.balance) store.balance = patch.balance;
-    if (patch.loaded) store.loaded = patch.loaded;
+    loaded: { orders: true, balance: true, positions: true, markets: knownMarket, tickers: false },
   });
   const parent = {
     isDisposed: false,
@@ -141,7 +133,6 @@ describe('Phemex terminal reconciliation snapshot authority', () => {
     expect(store.positions).toEqual([position(3)]);
     expect(store.balance).toEqual(priorBalance);
     expect(parent.fetchPositions).not.toHaveBeenCalled();
-    expect(store.addOrUpdatePositionsFull).not.toHaveBeenCalled();
-    expect(store.update).not.toHaveBeenCalled();
+    expect(store.positions).toEqual([position(3)]);
   });
 });

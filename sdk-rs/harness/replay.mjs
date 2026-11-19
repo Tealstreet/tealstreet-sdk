@@ -10,7 +10,7 @@ import { prepareRecordedHttp } from './recorded-http.mjs';
 import { replayPositions } from './bitget-anchor-positions.mjs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
-import { NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
+import { Frame, NONE, ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, replayVenueOf } from './venues.mjs';
 import { Tape, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
@@ -603,7 +603,7 @@ function rustAccount({ markets, orders, positions, positionGreeks, balance, sett
 }
 
 async function runTs() {
-  const { memory: heapBefore, loadMetrics, loaded: { tape, TapeWebSocket, Exchange, DefaultStore, ExchangeWorker, adapter } } = await idleLoadedBaseline({
+  const { memory: heapBefore, loadMetrics, loaded: { tape, TapeWebSocket, Exchange, FrameStore, adapter } } = await idleLoadedBaseline({
     baseline,
     load: async () => {
       await initializeReplay();
@@ -668,7 +668,7 @@ async function runTs() {
       const wsModule = require.resolve('ws');
       require.cache[wsModule] = { id: wsModule, filename: wsModule, loaded: true, exports: TapeWebSocket };
       const { [venue.ts.className]: Exchange } = await import(venue.ts.module);
-      const { DefaultStore } = await import('../../packages/safe-cex/src/store/store.base.ts');
+      const { FrameStore } = await import('../../packages/safe-cex/src/store/frameStore.ts');
       const adapter = async (config) => {
         const base = config.baseURL ?? '';
         const url = new URL(config.url.startsWith('http') ? config.url : `${base.replace(/\/+$/, '')}/${config.url.replace(/^\/+/, '')}`);
@@ -715,9 +715,8 @@ async function runTs() {
         }
         return response;
       };
-      const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
       await venue.loadTs?.({ isPrivate });
-      return { tape, TapeWebSocket, Exchange, DefaultStore, ExchangeWorker, adapter };
+      return { tape, TapeWebSocket, Exchange, FrameStore, adapter };
     },
   });
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
@@ -726,19 +725,23 @@ async function runTs() {
   const clock = deterministicReplay(venue, isPrivate) ? new ReplayClock(metadata?.epoch ?? Date.now(), frozenReplayStartup(venue, isPrivate), continuousReplayStartup(venue, isPrivate)) : undefined;
   clock?.install();
 
-  const store = new DefaultStore();
-  const mainStore = new DefaultStore();
-  // Exercise the production browser-worker packer, including its ticker
-  // baseline, and the real receiver. Rust already transfers every store table.
-  const worker = new ExchangeWorker({}, 'replay', venue.ts.name, {}, {}, {}, 'replay');
-  worker._store = store;
-  let state;
-  store.subscribe((data) => {
-    state = data;
-  });
-  const postStore = () => {
-    if (!values['no-egress'] && state) mainStore.update(structuredClone(worker._prepareStorePayload(state)), true);
+  const store = new FrameStore();
+  const mainStore = new FrameStore();
+  // Transfer each source frame through the same native receiver used by main.
+  const pendingFrames = [];
+  const apply = store.apply.bind(store);
+  store.apply = (frame, ...args) => {
+    const result = apply(frame, ...args);
+    if (!values['no-egress']) pendingFrames.push(frame.buffer.slice(0));
+    return result;
   };
+  const postFrames = () => {
+    for (const buffer of pendingFrames.splice(0))
+      mainStore.ingest(new Frame(structuredClone(buffer, { transfer: [buffer] })));
+  };
+  // Install the tape before construction: Aster's read-key proxy retains a
+  // private axios client that instance enumeration cannot reach afterwards.
+  await venue.prepareTsTransport?.(adapter);
   const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
   // Model worker dispatch through the exchange's real local methods.
   exchange.emitter.on('callMethod', ({ method, args, requestId }) => {
@@ -754,11 +757,11 @@ async function runTs() {
     });
   });
   venue.configureTs?.(exchange);
-  await venue.prepareTs?.(exchange, TapeWebSocket);
+  const { applyReferenceFixture } = await import('../../packages/safe-cex/src/__tests__/cutover/referenceFixture.ts');
+  await venue.prepareTs?.(exchange, TapeWebSocket, (data) => applyReferenceFixture(store, data));
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
-  await venue.prepareTsTransport?.(exchange, adapter);
   const finalBooks = {};
   const started = exchange.start();
   const subscribed = (async () => {
@@ -828,7 +831,7 @@ async function runTs() {
   const frames = await tape.play(
     (t) => {
       if (t - lastFlush >= 250) {
-        postStore();
+        postFrames();
         if (!values['no-egress']) {
           for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
         }
@@ -850,7 +853,7 @@ async function runTs() {
     clock,
     undefined,
     values.performance ? undefined : (point) => {
-      postStore();
+      postFrames();
       if (!values['no-egress'])
         for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
       checkpoints.push(captureCheckpoint(point, () => comparisonSnapshot(capture(point.ordinal))));
@@ -864,7 +867,7 @@ async function runTs() {
   await settle();
   if (drain) await drain();
   if (!values.performance) tape.assertWritesConsumed();
-  postStore();
+  postFrames();
   if (!values['no-egress'])
     for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
   const finish = values.performance ? measureBeforeCapture : finalizeReplay;

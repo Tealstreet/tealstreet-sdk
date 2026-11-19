@@ -69,9 +69,9 @@ Gates: `cargo test --locked -p safe-cex-types --tests`, which drives the Node
 oracles in `tests/`, plus strict clippy on the host.
 Rust CI runs these tests in the isolated candle-cache lane with locked root Yarn
 dependencies and `SAFE_CEX_TYPESCRIPT_PATH` pointing at `node_modules/typescript`.
-Keep this package out of workspace-wide feature unification: its serde_json
-number/map features belong to the restored candle-cache stack, not the engine.
-From `sdk-rs`, generate bindings with
+Native hosts must not depend on this restored port crate. Native UI frames use
+engine and algorithm models, with their encoder in `engine/src/store_frame_wire.rs`.
+Keep this source-parity/cache stack isolated from native host builds. From `sdk-rs`, generate bindings with
 `cargo run --locked -p safe-cex-types --example generate`, then
 `node safe-cex-types/generate.cjs`. `tests/generate.test.cjs` checks the generation
 rules; run it as well. The oracles are the reason a field rename here is cheap

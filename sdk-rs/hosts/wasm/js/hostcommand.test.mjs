@@ -861,6 +861,43 @@ test('known address setup retirement without negotiated support disposes the hos
   assert.equal(r.timers.size, 0);
 });
 
+
+test('later-page closed diagnostics follow only their owning incomplete result', async () => {
+  const r = rig();
+  const partial = r.host.command({ op: 'fetchClosedPositions' });
+  const other = r.host.command({ op: 'fetchClosedPositions' });
+  r.host.run(JSON.stringify([
+    { op: 'event', level: 'warn', code: 'history.incomplete', message: 'PRIVATE_CANARY', fields: {
+      command: 1, reason: 'laterPageFailed', historyOperation: 'bybitClosedPnl',
+      historyFailureKind: 'rateLimited', historyVenueCode: '10006', raw: 'PRIVATE_CANARY',
+    } },
+    { op: 'done', command: 1, result: '[{"id":"accepted"}]' },
+    { op: 'done', command: 2, result: '[]' },
+  ]));
+  const rows = await partial;
+  assert.deepEqual(rows.historyFailure, { operation: 'bybitClosedPnl', kind: 'rateLimited', venueCode: '10006' });
+  assert.equal(rows.incompleteReason, 'laterPageFailed');
+  assert.equal(Object.getOwnPropertyDescriptor(rows, 'historyFailure').enumerable, false);
+  assert.equal(JSON.stringify(rows), '[{"id":"accepted"}]');
+  assert.equal((await other).historyFailure, undefined);
+});
+
+test('malformed later-page metadata cannot smuggle values or mark ordinary results', async () => {
+  for (const fields of [
+    { reason: 'pageBudget', historyOperation: 'bybitClosedPnl', historyFailureKind: 'network' },
+    { reason: 'laterPageFailed', historyOperation: 'PRIVATE_CANARY', historyFailureKind: 'network' },
+    { reason: 'laterPageFailed', historyOperation: 'bybitOrders', historyFailureKind: 'PRIVATE_CANARY' },
+    { reason: 'laterPageFailed', historyOperation: 'bybitOrders', historyFailureKind: 'network', historyVenueCode: 'PRIVATE_CANARY' },
+  ]) {
+    const r = rig();
+    const promise = r.host.command({ op: 'fetchClosedPositions' });
+    r.host.run(JSON.stringify([
+      { op: 'event', level: 'warn', code: 'history.incomplete', message: 'PRIVATE_CANARY', fields: { command: 1, ...fields } },
+      { op: 'done', command: 1, result: '[]' },
+    ]));
+    assert.equal((await promise).historyFailure, undefined);
+  }
+});
 for (const op of ['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
   'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode',
   'setStpMode', 'setAccountTier', 'scheduleCancel']) {

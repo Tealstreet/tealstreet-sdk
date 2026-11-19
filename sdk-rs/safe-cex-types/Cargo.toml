@@ -4,11 +4,18 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[features]
+default = ["source-json"]
+# Source-parity/cache callers retain JSON lexemes and insertion order. Native
+# host frame production uses the retained carrier directly and leaves the
+# venue engine's existing serde_json feature profile untouched.
+source-json = ["serde_json/arbitrary_precision", "serde_json/preserve_order"]
+
 [dependencies]
 ryu-js.workspace = true
 indexmap = { version = "2.14.2", features = ["serde"] }
 serde.workspace = true
-serde_json = { version = "1.0.152", features = ["float_roundtrip", "preserve_order", "arbitrary_precision", "raw_value"] }
+serde_json = { version = "1.0.152", features = ["float_roundtrip", "raw_value"] }
 ts-rs = { workspace = true, features = ["no-serde-warnings"] }
 
 [dev-dependencies]

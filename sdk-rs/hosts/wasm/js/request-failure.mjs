@@ -31,6 +31,31 @@ export function transportFailureMessage(error) {
   return `HTTP transport request failed (cause: ${cause})`;
 }
 
+
+// Encoded class names survive the canonical SyntaxError text scrub without an exemption.
+const ERROR_NAMES = new Map([
+  ['Error', 'error'], ['TypeError', 'type_error'], ['SyntaxError', 'syntax_error'], ['RangeError', 'range_error'],
+  ['URIError', 'uri_error'], ['ReferenceError', 'reference_error'], ['EvalError', 'eval_error'],
+  ['AbortError', 'abort_error'], ['TimeoutError', 'timeout_error'], ['ProxyTokenUnavailableError', 'proxy_token_unavailable'],
+  ['TradeTunnelTimeoutError', 'tunnel_timeout'], ['TradeTunnelReadinessError', 'tunnel_readiness'],
+  ['TradeTunnelCanceledError', 'tunnel_canceled'], ['TradeTunnelDisposedError', 'tunnel_disposed'],
+  ['TradeTunnelResponseDecodeError', 'tunnel_response_decode'], ['TradeTunnelError', 'tunnel_error'],
+]);
+/** A finite class label; never call provider accessors or stringify a cause. */
+export function failureErrorName(error) {
+  try {
+    const name = Object.getOwnPropertyDescriptor(error, 'name');
+    if (name) return ERROR_NAMES.get(name.value) ?? 'other';
+    if (typeof DOMException === 'function' && error instanceof DOMException) {
+      const value = Object.getOwnPropertyDescriptor(DOMException.prototype, 'name').get.call(error);
+      return ERROR_NAMES.get(value) ?? 'other';
+    }
+    for (const Class of [SyntaxError, TypeError, RangeError, URIError, ReferenceError, EvalError, Error])
+      if (error instanceof Class) return ERROR_NAMES.get(Class.name);
+  } catch { /* Foreign objects disclose no caller text. */ }
+  return 'other';
+}
+
 export function requestFailureFields(packet) {
   let path = '/:unknown';
   try {

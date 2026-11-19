@@ -4,7 +4,7 @@ import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import { setImmediate } from 'node:timers';
 
 import { IDBFactory } from 'fake-indexeddb';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prepareRecordedHttp } from '../__tests__/support/managedHttp';
 
@@ -177,4 +177,33 @@ it('refuses a cached handoff after the wall clock rolls behind its publication',
   expect(bound.ready()).toBe(false);
   expect(() => bound.dispatch()).toThrow();
   expect(raw.request).toHaveBeenCalledTimes(1);
+});
+
+
+describe('passive preparation stage observations', () => {
+  beforeEach(async () => {
+    // Keep real storage tasks and cold module setup outside the unchanged 5 s case budget.
+    vi.useRealTimers();
+    await import('./engine');
+  });
+
+  it('observes direct public preparation stages without changing the physical request', async () => {
+    const { transport, raw, answer } = await setup();
+    const stages: [string, string | undefined][] = [];
+    const request = { ...packet(), onPreparationStage: (stage: string, route?: string) => { stages.push([stage, route]); } };
+    const result = await (await transport.prepareHttp!({ ...request, intent: 'public' })).bind(request).dispatch();
+    expect(result.body).toEqual(answer);
+    expect(raw.request).toHaveBeenCalledOnce();
+    expect(stages).toContainEqual(['route_resolve', 'direct']);
+    expect(stages.map(([stage]) => stage)).toEqual(expect.arrayContaining(['catalogue_wait', 'transport_prepare', 'budget_wait']));
+    expect(stages.some(([stage]) => stage === 'proxy_token' || stage === 'tunnel')).toBe(false);
+  });
+
+  it('a throwing diagnostic observer cannot prevent a healthy public request', async () => {
+    const { transport, raw, answer } = await setup();
+    const request = { ...packet(), onPreparationStage: () => { throw new Error('PRIVATE_OBSERVER'); } };
+    const result = await (await transport.prepareHttp!({ ...request, intent: 'public' })).bind(request).dispatch();
+    expect(result.body).toEqual(answer);
+    expect(raw.request).toHaveBeenCalledOnce();
+  });
 });

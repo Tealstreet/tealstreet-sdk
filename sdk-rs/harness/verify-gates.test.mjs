@@ -158,3 +158,12 @@ test('enabled Bitget collection retains an eligible miss as unresolved without r
   assert.ok(verifyGateSuite({ suite: 'bitget', entries: values, manifest }).errors.length, 'default strict still rejects');
   assert.ok(verifyGateSuite({ suite: 'bitgetusdc', entries: values, manifest, mode: 'collect' }).errors.length, 'wrong suite cannot substitute Bitget workload identities');
 });
+
+test('missing replay output reports the earlier failed build instead of a raw ENOENT', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'missing-replay-output-'));
+  try {
+    assert.throws(() => loadGateLedger({ root: directory }), /no strict replay ledger.*earlier.*build|size/i);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

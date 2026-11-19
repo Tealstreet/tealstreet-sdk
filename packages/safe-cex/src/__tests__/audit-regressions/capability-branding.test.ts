@@ -1,15 +1,15 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CAPABILITY_METHODS } from '../../exchanges/base';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { legacyVenueRegistry as exchangeRegistry } from '../reference/legacyVenueRegistry';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 // Capability discovery needs no Starknet account or remote SDK configuration.
 vi.mock('../reference/paradex/paradex.sdk', async (original) => ({
@@ -66,7 +66,7 @@ const NO_LEDGER_VENUE: ExchangeName = 'binancepm' as ExchangeName;
 const liveInstances: any[] = [];
 const construct = async (name: ExchangeName) => {
   const Exchange = await exchangeRegistry[name]();
-  const exchange: any = new Exchange(name, options, new DefaultStore());
+  const exchange: any = new Exchange(name, options, new FrameStore());
   liveInstances.push(exchange);
   return exchange;
 };

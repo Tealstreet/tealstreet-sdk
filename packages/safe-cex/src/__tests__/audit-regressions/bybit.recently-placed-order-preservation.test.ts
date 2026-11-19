@@ -1,14 +1,16 @@
+import type { StoreData } from '../../generated/StoreData';
 import type { ExchangeOptions } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { Order, OrderSide, OrderStatus, OrderType } from '../../types';
+import { virtualClock } from '../../utils/virtualClock';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { BybitDemoExchange } from '../reference/bybit/bybitdemo.exchange';
 import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 import { BybitSpotExchange } from '../reference/bybit/bybitspot.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { Order, OrderSide, OrderStatus, OrderType } from '../../types';
-import { virtualClock } from '../../utils/virtualClock';
 
 // Regression: `/v5/order/realtime` lags order creation (worst on api-demo), and
 // several paths wholesale-replace `store.orders` from that endpoint —
@@ -43,7 +45,7 @@ const makeOrder = (id: string, overrides: Partial<Order> = {}): Order =>
   }) as Order;
 
 const makeExchange = (demo = false, optionOverrides: Partial<ExchangeOptions> = {}) => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const options = { key: 'k', secret: 's', ...optionOverrides } as ExchangeOptions;
   const exchange = demo
     ? new BybitDemoExchange('bybitdemo' as any, options, store)
@@ -51,11 +53,8 @@ const makeExchange = (demo = false, optionOverrides: Partial<ExchangeOptions> = 
   return { exchange: exchange as any, store };
 };
 
-const makeVariantExchange = (
-  variant: 'bybitinverse' | 'bybitspot',
-  optionOverrides: Partial<ExchangeOptions> = {},
-) => {
-  const store = new DefaultStore();
+const makeVariantExchange = (variant: 'bybitinverse' | 'bybitspot', optionOverrides: Partial<ExchangeOptions> = {}) => {
+  const store = new FrameStore();
   const options = { key: 'k', secret: 's', ...optionOverrides } as ExchangeOptions;
   const exchange =
     variant === 'bybitinverse'
@@ -93,7 +92,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
     const { exchange, store } = makeExchange();
     seedRecentlyPlaced(exchange, makeOrder('new-1', { price: 100 }));
     const storeRow = makeOrder('new-1', { price: 101, filled: 0.5 });
-    store.addOrUpdateOrders([storeRow]);
+    (() => {
+      const incoming: StoreData['orders'] = [storeRow];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
 
     const result = exchange.preserveRecentlyPlacedOrders([]);
 
@@ -199,7 +214,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
   it('locally retires Bybit Brazil rows after a successful cancel', async () => {
     const { exchange, store } = makeExchange(false, { bybitSiteId: 'BRA_BTL' });
     const placed = makeOrder('brazil-1');
-    store.addOrUpdateOrders([placed]);
+    (() => {
+      const incoming: StoreData['orders'] = [placed];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     exchange.unlimitedXHR = {
       post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: {}, retExtInfo: { list: [] } } }),
     };
@@ -212,7 +243,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
   it('locally updates Bybit Brazil rows after a successful REST amend', async () => {
     const { exchange, store } = makeExchange(false, { bybitSiteId: 'BRA_BTL' });
     const placed = makeOrder('brazil-1', { price: 100 });
-    store.addOrUpdateOrders([placed]);
+    (() => {
+      const incoming: StoreData['orders'] = [placed];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     exchange.xhr = {
       post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: { orderId: 'brazil-1' } } }),
     };
@@ -286,7 +333,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
   // order from a vanished one, so a degraded-WS chase never completes.
   it('fetches fills for chaser order reconciliation by order id', async () => {
     const { exchange, store } = makeExchange();
-    store.addOrUpdateOrders([makeOrder('filled-1')]);
+    (() => {
+      const incoming: StoreData['orders'] = [makeOrder('filled-1')];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     exchange.xhr = {
       get: async () => ({
         data: {
@@ -312,7 +375,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
   // replacement overfilled the target.
   it('still reconciles fills for an order whose row was just retired', async () => {
     const { exchange, store } = makeExchange(true);
-    store.addOrUpdateOrders([makeOrder('chased-1')]);
+    (() => {
+      const incoming: StoreData['orders'] = [makeOrder('chased-1')];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     exchange.unlimitedXHR = {
       post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: {}, retExtInfo: { list: [] } } }),
     };
@@ -336,7 +415,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
 
   it('pages execution history to exhaustion before reporting fills', async () => {
     const { exchange, store } = makeExchange(true);
-    store.addOrUpdateOrders([makeOrder('big-1')]);
+    (() => {
+      const incoming: StoreData['orders'] = [makeOrder('big-1')];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     const pages = [
       { list: [{ orderId: 'big-1', execQty: '0.5' }], nextPageCursor: 'page-2' },
       { list: [{ orderId: 'big-1', execQty: '0.25' }], nextPageCursor: '' },
@@ -352,7 +447,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
 
   it('fails closed when execution history will not stop paging', async () => {
     const { exchange, store } = makeExchange(true);
-    store.addOrUpdateOrders([makeOrder('loop-1')]);
+    (() => {
+      const incoming: StoreData['orders'] = [makeOrder('loop-1')];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     let cursor = 0;
     exchange.xhr = {
       get: async () => ({
@@ -365,7 +476,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
 
   it('fails closed when Bybit fill reconciliation errors', async () => {
     const { exchange, store } = makeExchange();
-    store.addOrUpdateOrders([makeOrder('filled-1')]);
+    (() => {
+      const incoming: StoreData['orders'] = [makeOrder('filled-1')];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     exchange.xhr = {
       get: async () => ({ data: { retCode: 10001, retMsg: 'bad request', result: { list: [] } } }),
     };
@@ -381,7 +508,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
   // Each chaser reprice cancels and replaces, so the debris accumulates.
   it('retires cancelled rows from the demo store, since no WS frame will', async () => {
     const { exchange, store } = makeExchange(true);
-    store.addOrUpdateOrders([makeOrder('stale-1'), makeOrder('keep-1')]);
+    (() => {
+      const incoming: StoreData['orders'] = [makeOrder('stale-1'), makeOrder('keep-1')];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     exchange.unlimitedXHR = {
       post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: {}, retExtInfo: { list: [] } } }),
     };
@@ -393,7 +536,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
 
   it('retires the row when Bybit reports the order was already gone', async () => {
     const { exchange, store } = makeExchange(true);
-    store.addOrUpdateOrders([makeOrder('stale-1')]);
+    (() => {
+      const incoming: StoreData['orders'] = [makeOrder('stale-1')];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     exchange.unlimitedXHR = {
       post: async () => ({
         data: {
@@ -412,7 +571,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
 
   it('leaves the row alone when a cancel genuinely fails', async () => {
     const { exchange, store } = makeExchange(true);
-    store.addOrUpdateOrders([makeOrder('live-1')]);
+    (() => {
+      const incoming: StoreData['orders'] = [makeOrder('live-1')];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     exchange.unlimitedXHR = {
       post: async () => ({
         data: {
@@ -433,7 +608,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
   // the WS-driven reconciliation that owns the row.
   it('does not retire rows locally on live bybit', async () => {
     const { exchange, store } = makeExchange(false);
-    store.addOrUpdateOrders([makeOrder('live-1')]);
+    (() => {
+      const incoming: StoreData['orders'] = [makeOrder('live-1')];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     exchange.unlimitedXHR = {
       post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: {}, retExtInfo: { list: [] } } }),
     };
@@ -445,7 +636,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
 
   it('cancelSymbolOrders retires that symbol only, and marks the ids seen', async () => {
     const { exchange, store } = makeExchange(true);
-    store.addOrUpdateOrders([makeOrder('eth-1', { symbol: 'ETHUSDT' }), makeOrder('btc-1')]);
+    (() => {
+      const incoming: StoreData['orders'] = [makeOrder('eth-1', { symbol: 'ETHUSDT' }), makeOrder('btc-1')];
+      return store.apply(
+        nativeFixture(
+          {
+            orders: [
+              ...store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     seedRecentlyPlaced(exchange, makeOrder('eth-1', { symbol: 'ETHUSDT' }));
     exchange.unlimitedXHR = {
       post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: {} } }),
@@ -544,7 +751,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
       it('locally updates Brazil rows after successful REST amend', async () => {
         const { exchange, store } = makeVariantExchange(variant, { bybitSiteId: 'BRA_BTL' });
         const placed = makeOrder('brazil-1', { price: 100 });
-        store.addOrUpdateOrders([placed]);
+        (() => {
+          const incoming: StoreData['orders'] = [placed];
+          return store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
         exchange.xhr = {
           post: async () => ({ data: { retCode: 0, retMsg: 'OK', result: { orderId: 'brazil-1' } } }),
         };
@@ -557,7 +780,23 @@ describe('Bybit recently-placed order snapshot preservation', () => {
       it('locally retires Brazil rows after successful or already-gone REST cancel', async () => {
         const { exchange, store } = makeVariantExchange(variant, { bybitSiteId: 'BRA_BTL' });
         const placed = makeOrder('brazil-1');
-        store.addOrUpdateOrders([placed]);
+        (() => {
+          const incoming: StoreData['orders'] = [placed];
+          return store.apply(
+            nativeFixture(
+              {
+                orders: [
+                  ...store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              store.markets.map((row) => row.symbol),
+            ),
+          );
+        })();
         seedRecentlyPlaced(exchange, placed);
         exchange.unlimitedXHR = {
           post: async () => ({

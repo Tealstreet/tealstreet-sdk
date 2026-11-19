@@ -130,9 +130,39 @@ and prevents an unavailable terminal slice from refusing the default history.
 Terminal bounds use the shared integer wire-timestamp conversion after clipping;
 fractional calibration, default query bounds and scheduling clocks are unchanged.
 Caller deadlines, read-key selection, pacing, cursors and partial-row markers
-remain shared with the original walk. This does not recover terminal rows the
-venue no longer retains.
+remain shared with the original walk.
 
+A successful order-history result whose effective start precedes that 24-hour
+boundary at completion (including time spent fetching pages) carries
+`incompleteReason: "retentionLimit"`, including an empty result.
+The diagnostic names the unfilled `Cancelled`/`Rejected`/`Deactivated` population;
+older filled orders still return. Omitted starts use V5's seven-day default before
+the supplied end (or now). Ranges still inside retention at completion retain
+their usual completeness.
+A failed later page preserves its more specific incomplete reason.
+Frequent reads while an authenticated engine exists can collect those terminal
+rows before expiry. This does not recover expired rows or provide durable capture
+while no engine is running; deeper backfill cannot close that retention gap.
+
+
+## Later-page history failure diagnostics
+
+Closed-PnL and query history capture their closed native operation when binding
+an owned read. If a later page fails after accepted rows, the original result
+remains incomplete with reason `laterPageFailed`. Its existing command-attributed
+marker also carries `historyOperation`, `historyFailureKind`, and an optional
+allowlisted `historyVenueCode`; unlisted native codes become `other`. Messages,
+URLs, cursor tokens, credentials and row values are not diagnostic metadata.
+The non-default engine feature `history-page-diagnostics` is enabled by Bybit;
+other families do not opt into these additional native fields.
+
+The browser host and SDK completeness helpers retain those facts as optional
+`failure: { operation, kind, venueCode? }` beside the positive incomplete marker,
+through mapping and worker/hosted JSON. This distinguishes a closed-PnL failure
+from an auxiliary order-history failure without treating a retained prefix as
+complete coverage. An earlier missing-coverage reason remains authoritative;
+first-page failures and serialization failures still reject. These diagnostics
+do not change requests, deadlines, retry policy, pacing or writes.
 ## HyroTrader auth refusal during admission
 
 A current, correlated `auth` acknowledgement with explicit `success:false` and
@@ -142,3 +172,10 @@ credential, changing resident ownership, or authorizing any write. The numeric
 code is retained without interpreting its cause; raw reply text is not copied.
 Missing/null success, other codes, subscription responses, stale request IDs and
 transport/handshake timeouts retain their existing uncertainty and retry behavior.
+
+## Execution-history fees
+
+Historical fills preserve the signed `execFee`: positive is a cost and negative
+is a maker rebate. The transaction-log income row uses the opposite cash-flow
+sign. Missing, empty or invalid execution fees stay absent; an explicitly
+reported zero remains zero. Timestamps, pagination and order identity are unchanged.

@@ -624,7 +624,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
   };
   const signWallet = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
     if (!remoteSigner) throw refused();
-    const kinds = operations.map((operation) => (operation as { kind?: unknown })?.kind);
+    const kinds = operations.map((operation) => operation?.kind);
     const keyOf = (operation: unknown) => (record(operation) ? operation.key : undefined);
     const entry = owned.get(keyOf(operations.at(-1)) as string);
     if (!entry || !entry.primary || operations.some((operation) => record(operation)
@@ -733,7 +733,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     const parts = Array.isArray(statement.payload) && statement.payload.length === 1 ? statement.payload[0] : undefined;
     if (!record(parts) || parts.kind !== 'bytes' || !Array.isArray(parts.bytes) || parts.bytes.length > MAX_PAYLOAD
       || parts.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw refused();
-    const preimage = Uint8Array.from(parts.bytes as number[]);
+    const preimage = Uint8Array.from(parts.bytes);
     const entry = owned.get((signs[0] as { key?: string }).key as string);
     if (!entry || !entry.primary || signs.some((sign) => sign?.kind !== 'sign' || sign.algorithm !== 'schnorrDigest'
       || sign.key !== entry.identity.signing)) throw refused();
@@ -783,7 +783,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     const part = Array.isArray(first.payload) && first.payload.length === 1 ? first.payload[0] : undefined;
     if (!record(part) || part.kind !== 'bytes' || !Array.isArray(part.bytes) || part.bytes.length > MAX_PAYLOAD
       || part.bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) throw refused();
-    const preimage = Uint8Array.from(part.bytes as number[]);
+    const preimage = Uint8Array.from(part.bytes);
     const joined = hexBytes(await askDevice(decodeUtf8(preimage), 'paradex-stark', signal), 64 * signs.length);
     const signatures = signs.map((_, index) => joined.slice(index * 64, index * 64 + 64));
     return { values: [Array.from(sha256(preimage)), ...signatures], receipt };

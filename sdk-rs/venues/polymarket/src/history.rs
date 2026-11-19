@@ -123,11 +123,19 @@ impl Polymarket {
                     Err("Polymarket self-trade prevention settings are unsupported".into()),
                 );
             }
-            Command::FetchLeverage { .. } => public_read::local(
-                cx,
-                Operation::Read,
-                Ok(r#"{"buyLeverage":1,"sellLeverage":1}"#.into()),
-            ),
+            Command::FetchLeverage { symbol, .. } => {
+                if public_read::local_result(
+                    cx,
+                    Operation::Read,
+                    Ok(r#"{"buyLeverage":1,"sellLeverage":1}"#.into()),
+                ) {
+                    cx.store.update_setting(&symbol, |setting| {
+                        setting.leverage = 1.0;
+                        setting.buy_leverage = Some(1.0);
+                        setting.sell_leverage = Some(1.0);
+                    });
+                }
+            }
             Command::FetchMaxLeverage { .. } => {
                 public_read::local(cx, Operation::Read, Ok("1".into()))
             }

@@ -1,5 +1,8 @@
-//! Actual native identity requests: exact routes/signers, failure ownership, no Store commits.
+//! Actual native identity requests: exact routes/signers, failure ownership, no financial Store commits.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
 use crate::support::FixtureOptions as Options;
+use account_snapshot::assert_unchanged_account;
 mod support;
 use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
@@ -152,7 +155,11 @@ fn every_product_uses_spot_identity_route_and_selected_read_credentials() {
                     result(respond(&mut engine, &request, 200, body), false).unwrap(),
                     r#"{"userId":"9007199254740995","subId":"9007199254740993","affiliateId":"9007199254740997"}"#
                 );
-                assert_eq!(engine.account_snapshot_frame(NOW), before);
+                assert_unchanged_account(
+                    &before,
+                    engine.account_snapshot_frame(NOW),
+                    [1, 0, 0, 0, 0],
+                );
                 assert!(respond(&mut engine, &request, 200, body).is_empty());
             }
         }
@@ -213,7 +220,7 @@ fn failures_reject_once_preserve_state_and_do_not_start_account_detection() {
         let before = engine.account_snapshot_frame(NOW).to_vec();
         let request = identity_request(&mut engine);
         result(respond(&mut engine, &request, 200, body), true).unwrap_err();
-        assert_eq!(engine.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, engine.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     }
     for network in [false, true] {
         let mut engine = seeded(options(false, Product::Usdt));
@@ -232,7 +239,15 @@ fn failures_reject_once_preserve_state_and_do_not_start_account_detection() {
             respond(&mut engine, &request, 503, "unavailable")
         };
         result(actions, true).unwrap_err();
-        assert_eq!(engine.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(
+            &before,
+            engine.account_snapshot_frame(NOW),
+            if network {
+                [0, 0, 0, 1, 0]
+            } else {
+                [0, 0, 0, 0, 1]
+            },
+        );
     }
 }
 #[test]

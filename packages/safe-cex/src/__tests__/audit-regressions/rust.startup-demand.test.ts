@@ -10,10 +10,11 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { directTransport } from '../../transport/direct';
-import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 
 const accounts: RustEngineExchange[] = [];
 const cleanups: Array<() => void> = [];
@@ -71,7 +72,8 @@ function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOption
     start: idle,
     wsOpen: idle,
     wsMessage: idle,
-    wsClose: idle, wsRouteExhausted: idle,
+    wsClose: idle,
+    wsRouteExhausted: idle,
     httpStart: idle,
     httpChunk: idle,
     httpEnd: idle,
@@ -107,9 +109,14 @@ function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOption
     setTimeout,
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   }));
-  const store = new DefaultStore();
+  const store = new FrameStore();
   // A worker restores old cached state before constructing its new native engine.
-  store.update({ markets: [market('CACHE')], tickers: [], loaded: flags(true, true) });
+  store.apply(
+    nativeFixture(
+      { markets: [market('CACHE')], tickers: [], loaded: flags(true, true) },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new RustEngineExchange(
     name,
     { key: 'key', secret: 'secret', transport: directTransport, ...options },

@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { nativeMarket } from './cutover/nativeMarket';
+import { nativeTicker } from './cutover/nativeTicker';
+import { referenceStore } from './cutover/referenceFixture';
+
 import '../transport/registerTealstreetTransport';
 
 import { ENDPOINTS, resolveLighterDeploymentProfile } from '../exchanges/lighter/lighter.types';
-import { LighterPublicWebsocket } from './reference/lighter/lighter.ws-public';
 import { resolveExchangeRouting } from '../transport/tealstreet/routing/resolveExchangeRouting';
+import { LighterPublicWebsocket } from './reference/lighter/lighter.ws-public';
 
 // Lighter's public proxy WS host, now sourced from the routing table (was WS_PROXY_URL.public).
 const WS_PROXY_PUBLIC = resolveExchangeRouting('lighter', { tealstreetWsRoute: true }).wsPublic.host!;
@@ -19,14 +23,7 @@ const LIGHTER_ROBINHOOD_WS = resolveLighterDeploymentProfile({
 
 const OPEN_STATE = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;
 
-const lighterMarketStore = () => ({
-  markets: [{ id: '1', symbol: 'BTCUSDT' }],
-  marketsBySymbol: {
-    BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
-  },
-  positions: [],
-  tickers: [],
-});
+const lighterMarketStore = () => referenceStore({ markets: [nativeMarket({ id: '1', symbol: 'BTCUSDT' })] });
 
 const createMockParent = (overrides?: Partial<Record<string, unknown>>) =>
   ({
@@ -44,12 +41,7 @@ const createMockParent = (overrides?: Partial<Record<string, unknown>>) =>
       off: vi.fn(),
     },
     syncSocketHealthToStore: vi.fn(),
-    store: {
-      markets: [],
-      marketsBySymbol: {},
-      positions: [],
-      tickers: [],
-    },
+    store: referenceStore({ markets: [], positions: [], tickers: [] }),
     ...overrides,
   }) as any;
 
@@ -138,14 +130,11 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       lighterApiClient: {
         get: getMock,
       },
-      store: {
-        markets: [{ id: '1', symbol: 'BTCUSDT' }],
-        marketsBySymbol: {
-          BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
-        },
+      store: referenceStore({
+        markets: [nativeMarket({ id: '1', symbol: 'BTCUSDT' })],
         positions: [],
         tickers: [
-          {
+          nativeTicker({
             id: '1',
             symbol: 'BTCUSDT',
             bid: 0,
@@ -159,10 +148,9 @@ describe('LighterPublicWebsocket routing and backoff', () => {
             fundingTime: 0,
             volume: 0,
             quoteVolume: 0,
-          },
+          }),
         ],
-        updateTicker: vi.fn(),
-      },
+      }),
     });
     const ws = new LighterPublicWebsocket(parent);
     ws.ws = createMockWs();
@@ -189,14 +177,11 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       lighterApiClient: {
         get: getMock,
       },
-      store: {
-        markets: [{ id: '1', symbol: 'BTCUSDT' }],
-        marketsBySymbol: {
-          BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
-        },
+      store: referenceStore({
+        markets: [nativeMarket({ id: '1', symbol: 'BTCUSDT' })],
         positions: [],
         tickers: [
-          {
+          nativeTicker({
             id: '1',
             symbol: 'BTCUSDT',
             bid: 0,
@@ -210,10 +195,9 @@ describe('LighterPublicWebsocket routing and backoff', () => {
             fundingTime: 0,
             volume: 0,
             quoteVolume: 0,
-          },
+          }),
         ],
-        updateTicker: vi.fn(),
-      },
+      }),
     });
     const ws = new LighterPublicWebsocket(parent);
     vi.spyOn(ws as any, 'createWebsocket').mockReturnValue(createMockWs());
@@ -232,12 +216,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       lighterApiClient: {
         get: getMock,
       },
-      store: {
-        markets: [],
-        marketsBySymbol: {},
-        positions: [],
-        tickers: [],
-      },
+      store: referenceStore({ markets: [], positions: [], tickers: [] }),
     });
     const ws = new LighterPublicWebsocket(parent);
     vi.spyOn(ws as any, 'createWebsocket').mockReturnValue(createMockWs());
@@ -258,14 +237,11 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       lighterApiClient: {
         get: getMock,
       },
-      store: {
-        markets: [{ id: '1', symbol: 'BTCUSDT' }],
-        marketsBySymbol: {
-          BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
-        },
+      store: referenceStore({
+        markets: [nativeMarket({ id: '1', symbol: 'BTCUSDT' })],
         positions: [],
         tickers: [
-          {
+          nativeTicker({
             id: '1',
             symbol: 'BTCUSDT',
             bid: 0,
@@ -279,10 +255,9 @@ describe('LighterPublicWebsocket routing and backoff', () => {
             fundingTime: 0,
             volume: 0,
             quoteVolume: 0,
-          },
+          }),
         ],
-        updateTicker: vi.fn(),
-      },
+      }),
     });
     const ws = new LighterPublicWebsocket(parent);
     vi.spyOn(ws as any, 'createWebsocket').mockReturnValue(createMockWs());
@@ -307,7 +282,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     const getMock = vi.fn().mockResolvedValue({
       market_stats: {},
     });
-    const ticker = {
+    const ticker = nativeTicker({
       id: '1',
       symbol: 'BTCUSDT',
       bid: 0,
@@ -321,7 +296,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       fundingTime: 0,
       volume: 0,
       quoteVolume: 0,
-    };
+    });
     const updateTicker = vi.fn((target, update) => {
       Object.assign(target, update);
     });
@@ -329,15 +304,11 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       lighterApiClient: {
         get: getMock,
       },
-      store: {
-        markets: [{ id: '1', symbol: 'BTCUSDT' }],
-        marketsBySymbol: {
-          BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
-        },
+      store: referenceStore({
+        markets: [nativeMarket({ id: '1', symbol: 'BTCUSDT' })],
         positions: [],
         tickers: [ticker],
-        updateTicker,
-      },
+      }),
     });
     const ws = new LighterPublicWebsocket(parent);
     vi.spyOn(ws as any, 'createWebsocket').mockReturnValue(createMockWs());
@@ -358,13 +329,15 @@ describe('LighterPublicWebsocket routing and backoff', () => {
     await Promise.resolve();
     await vi.advanceTimersByTimeAsync(3_000);
 
-    expect(updateTicker).toHaveBeenCalledWith(ticker, expect.objectContaining({ last: 100, bid: 99, ask: 101 }));
+    expect(parent.store.tickersBySymbol[ticker.symbol]).toEqual(
+      expect.objectContaining({ last: 100, bid: 99, ask: 101 }),
+    );
     expect(getMock.mock.calls.filter(([endpoint]) => endpoint === ENDPOINTS.EXCHANGE_STATS)).toHaveLength(1);
   });
 
   it('keeps market_stats daily price change in percent units', () => {
     const updateTicker = vi.fn();
-    const ticker = {
+    const ticker = nativeTicker({
       id: '100',
       symbol: 'PROVE',
       bid: 0,
@@ -378,17 +351,13 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       fundingTime: 0,
       volume: 0,
       quoteVolume: 0,
-    };
+    });
     const parent = createMockParent({
-      store: {
-        markets: [{ id: '100', symbol: 'PROVE' }],
-        marketsBySymbol: {
-          PROVE: { id: '100', symbol: 'PROVE' },
-        },
+      store: referenceStore({
+        markets: [nativeMarket({ id: '100', symbol: 'PROVE' })],
         positions: [],
         tickers: [ticker],
-        updateTicker,
-      },
+      }),
     });
     const ws = new LighterPublicWebsocket(parent);
 
@@ -405,12 +374,12 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       },
     });
 
-    expect(updateTicker).toHaveBeenCalledWith(ticker, expect.objectContaining({ percentage: 40.5225 }));
+    expect(parent.store.tickersBySymbol[ticker.symbol]).toEqual(expect.objectContaining({ percentage: 40.5225 }));
   });
 
   it('applies market_stats by market id when symbol is omitted', () => {
     const updateTicker = vi.fn();
-    const ticker = {
+    const ticker = nativeTicker({
       id: '120',
       symbol: 'LIT',
       bid: 0,
@@ -424,17 +393,13 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       fundingTime: 0,
       volume: 0,
       quoteVolume: 0,
-    };
+    });
     const parent = createMockParent({
-      store: {
-        markets: [{ id: '120', symbol: 'LIT' }],
-        marketsBySymbol: {
-          LIT: { id: '120', symbol: 'LIT' },
-        },
+      store: referenceStore({
+        markets: [nativeMarket({ id: '120', symbol: 'LIT' })],
         positions: [],
         tickers: [ticker],
-        updateTicker,
-      },
+      }),
     });
     const ws = new LighterPublicWebsocket(parent);
 
@@ -449,15 +414,14 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       },
     });
 
-    expect(updateTicker).toHaveBeenCalledWith(
-      ticker,
+    expect(parent.store.tickersBySymbol[ticker.symbol]).toEqual(
       expect.objectContaining({ mark: 12.228, bid: 12.22, ask: 12.23 }),
     );
   });
 
   it('does not zero existing ticker prices when market_stats omits price fields', () => {
     const updateTicker = vi.fn();
-    const ticker = {
+    const ticker = nativeTicker({
       id: '120',
       symbol: 'LIT',
       bid: 12.22,
@@ -471,17 +435,13 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       fundingTime: 0,
       volume: 0,
       quoteVolume: 0,
-    };
+    });
     const parent = createMockParent({
-      store: {
-        markets: [{ id: '120', symbol: 'LIT' }],
-        marketsBySymbol: {
-          LIT: { id: '120', symbol: 'LIT' },
-        },
+      store: referenceStore({
+        markets: [nativeMarket({ id: '120', symbol: 'LIT' })],
         positions: [],
         tickers: [ticker],
-        updateTicker,
-      },
+      }),
     });
     const ws = new LighterPublicWebsocket(parent);
 
@@ -494,13 +454,15 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       },
     });
 
-    expect(updateTicker).toHaveBeenCalledWith(ticker, expect.not.objectContaining({ mark: 0, last: 0, index: 0 }));
-    expect(updateTicker).toHaveBeenCalledWith(ticker, expect.objectContaining({ fundingRate: 0.0001 }));
+    expect(parent.store.tickersBySymbol[ticker.symbol]).toEqual(
+      expect.not.objectContaining({ mark: 0, last: 0, index: 0 }),
+    );
+    expect(parent.store.tickersBySymbol[ticker.symbol]).toEqual(expect.objectContaining({ fundingRate: 0.0001 }));
   });
 
   it('keeps ticker priceChange24h in percent units when present', () => {
     const updateTicker = vi.fn();
-    const ticker = {
+    const ticker = nativeTicker({
       id: '100',
       symbol: 'PROVE',
       bid: 0,
@@ -514,17 +476,13 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       fundingTime: 0,
       volume: 0,
       quoteVolume: 0,
-    };
+    });
     const parent = createMockParent({
-      store: {
-        markets: [{ id: '100', symbol: 'PROVE' }],
-        marketsBySymbol: {
-          PROVE: { id: '100', symbol: 'PROVE' },
-        },
+      store: referenceStore({
+        markets: [nativeMarket({ id: '100', symbol: 'PROVE' })],
         positions: [],
         tickers: [ticker],
-        updateTicker,
-      },
+      }),
     });
     const ws = new LighterPublicWebsocket(parent);
 
@@ -536,12 +494,12 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       },
     });
 
-    expect(updateTicker).toHaveBeenCalledWith(ticker, expect.objectContaining({ percentage: 40.5225 }));
+    expect(parent.store.tickersBySymbol[ticker.symbol]).toEqual(expect.objectContaining({ percentage: 40.5225 }));
   });
 
   it('normalizes market_stats funding from 1h percent to internal 8h decimal', () => {
     const updateTicker = vi.fn();
-    const ticker = {
+    const ticker = nativeTicker({
       id: '120',
       symbol: 'LIT',
       bid: 0,
@@ -555,17 +513,13 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       fundingTime: 0,
       volume: 0,
       quoteVolume: 0,
-    };
+    });
     const parent = createMockParent({
-      store: {
-        markets: [{ id: '120', symbol: 'LIT' }],
-        marketsBySymbol: {
-          LIT: { id: '120', symbol: 'LIT' },
-        },
+      store: referenceStore({
+        markets: [nativeMarket({ id: '120', symbol: 'LIT' })],
         positions: [],
         tickers: [ticker],
-        updateTicker,
-      },
+      }),
     });
     const ws = new LighterPublicWebsocket(parent);
 
@@ -579,12 +533,12 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       },
     });
 
-    expect(updateTicker).toHaveBeenCalledWith(ticker, expect.objectContaining({ fundingRate: 0.0001 }));
+    expect(parent.store.tickersBySymbol[ticker.symbol]).toEqual(expect.objectContaining({ fundingRate: 0.0001 }));
   });
 
   it('normalizes ticker funding from 1h percent to internal 8h decimal', () => {
     const updateTicker = vi.fn();
-    const ticker = {
+    const ticker = nativeTicker({
       id: '100',
       symbol: 'PROVE',
       bid: 0,
@@ -598,17 +552,13 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       fundingTime: 0,
       volume: 0,
       quoteVolume: 0,
-    };
+    });
     const parent = createMockParent({
-      store: {
-        markets: [{ id: '100', symbol: 'PROVE' }],
-        marketsBySymbol: {
-          PROVE: { id: '100', symbol: 'PROVE' },
-        },
+      store: referenceStore({
+        markets: [nativeMarket({ id: '100', symbol: 'PROVE' })],
         positions: [],
         tickers: [ticker],
-        updateTicker,
-      },
+      }),
     });
     const ws = new LighterPublicWebsocket(parent);
 
@@ -620,7 +570,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       },
     });
 
-    expect(updateTicker).toHaveBeenCalledWith(ticker, expect.objectContaining({ fundingRate: 0.0002 }));
+    expect(parent.store.tickersBySymbol[ticker.symbol]).toEqual(expect.objectContaining({ fundingRate: 0.0002 }));
   });
 
   it('cools down ticker REST fallback after a 403', async () => {
@@ -913,14 +863,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
 
   it('dispatches order book updates when server emits slash-delimited channels', () => {
     const parent = createMockParent({
-      store: {
-        markets: [{ id: '1', symbol: 'BTCUSDT' }],
-        marketsBySymbol: {
-          BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
-        },
-        positions: [],
-        tickers: [],
-      },
+      store: referenceStore({ markets: [nativeMarket({ id: '1', symbol: 'BTCUSDT' })], positions: [], tickers: [] }),
     });
     const ws = new LighterPublicWebsocket(parent);
     ws.ws = createMockWs();
@@ -946,14 +889,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
 
   it('re-subscribes stale order book stream before forcing reconnect', () => {
     const parent = createMockParent({
-      store: {
-        markets: [{ id: '1', symbol: 'BTCUSDT' }],
-        marketsBySymbol: {
-          BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
-        },
-        positions: [],
-        tickers: [],
-      },
+      store: referenceStore({ markets: [nativeMarket({ id: '1', symbol: 'BTCUSDT' })], positions: [], tickers: [] }),
     });
     const ws = new LighterPublicWebsocket(parent);
     const mockSocket = createMockWs();
@@ -986,14 +922,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       asks: [['101', '2']],
     });
     const parent = createMockParent({
-      store: {
-        markets: [{ id: '1', symbol: 'BTCUSDT' }],
-        marketsBySymbol: {
-          BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
-        },
-        positions: [],
-        tickers: [],
-      },
+      store: referenceStore({ markets: [nativeMarket({ id: '1', symbol: 'BTCUSDT' })], positions: [], tickers: [] }),
       orderApi: {
         getOrderBookOrders,
       },
@@ -1015,14 +944,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       asks: [['101', '2']],
     });
     const parent = createMockParent({
-      store: {
-        markets: [{ id: '1', symbol: 'BTCUSDT' }],
-        marketsBySymbol: {
-          BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
-        },
-        positions: [],
-        tickers: [],
-      },
+      store: referenceStore({ markets: [nativeMarket({ id: '1', symbol: 'BTCUSDT' })], positions: [], tickers: [] }),
       orderApi: {
         getOrderBookOrders,
       },
@@ -1056,14 +978,7 @@ describe('LighterPublicWebsocket routing and backoff', () => {
       asks: [['101', '2']],
     });
     const parent = createMockParent({
-      store: {
-        markets: [{ id: '1', symbol: 'BTCUSDT' }],
-        marketsBySymbol: {
-          BTCUSDT: { id: '1', symbol: 'BTCUSDT' },
-        },
-        positions: [],
-        tickers: [],
-      },
+      store: referenceStore({ markets: [nativeMarket({ id: '1', symbol: 'BTCUSDT' })], positions: [], tickers: [] }),
       orderApi: {
         getOrderBookOrders,
       },

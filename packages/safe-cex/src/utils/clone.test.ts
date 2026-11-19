@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
+
 import { clone } from './clone';
 
 describe('clone', () => {
@@ -37,10 +38,18 @@ describe('clone', () => {
     });
 
     it('should clone nested arrays', () => {
-      const obj = { arr: [[1, 2], [3, 4]] };
+      const obj = {
+        arr: [
+          [1, 2],
+          [3, 4],
+        ],
+      };
       const cloned = clone(obj);
 
-      expect(cloned.arr).toEqual([[1, 2], [3, 4]]);
+      expect(cloned.arr).toEqual([
+        [1, 2],
+        [3, 4],
+      ]);
       expect(cloned.arr[0]).not.toBe(obj.arr[0]);
     });
 
@@ -161,7 +170,7 @@ describe('clone', () => {
     });
 
     it('should handle deeply nested structures', () => {
-      let obj: Record<string, any> = { value: 'deep' };
+      let obj: Record<string, unknown> = { value: 'deep' };
       for (let i = 0; i < 10; i++) {
         obj = { nested: obj };
       }

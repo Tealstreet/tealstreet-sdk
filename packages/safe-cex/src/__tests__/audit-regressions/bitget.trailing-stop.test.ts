@@ -1,47 +1,53 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, OrderSide, OrderStopTriggerType, OrderType, PositionMode } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 
 describe('audit regression: Bitget trailing-stop placement', () => {
   it('builds the documented place-plan-order contract', async () => {
     const exchange = new BitgetExchange(
       'bitget',
       { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase' },
-      new DefaultStore(),
+      new FrameStore(),
     );
-    exchange.store.update({
-      markets: [
+    exchange.store.apply(
+      nativeFixture(
         {
-          id: 'BTCUSDT',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+          markets: [
+            {
+              id: 'BTCUSDT',
+              symbol: 'BTCUSDT',
+              base: 'BTC',
+              quote: 'USDT',
+              active: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+            },
+          ],
+          tickers: [
+            {
+              id: 'BTCUSDT',
+              symbol: 'BTCUSDT',
+              bid: 99,
+              ask: 101,
+              last: 100,
+              mark: 100,
+              index: 100,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+              volume: 0,
+              quoteVolume: 0,
+            },
+          ],
         },
-      ],
-      tickers: [
-        {
-          id: 'BTCUSDT',
-          symbol: 'BTCUSDT',
-          bid: 99,
-          ask: 101,
-          last: 100,
-          mark: 100,
-          index: 100,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-        },
-      ],
-    });
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange as any, 'getOrFetchPositionMode').mockResolvedValue(PositionMode.Hedged);
     vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
     const post = vi.fn().mockResolvedValue({ data: { code: '00000', data: { orderId: 'trail-1' } } });

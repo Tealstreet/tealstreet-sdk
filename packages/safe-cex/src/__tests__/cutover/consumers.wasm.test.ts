@@ -16,9 +16,9 @@ import {
   setRustEngineTransport,
   setWasmEngineLoader,
 } from '../../exchanges/rust/rust.exchange';
+import { initialStoreData } from '../../generated/StoreData';
 import { createExchange } from '../../index';
-import { DefaultStore } from '../../store/store.base';
-import { stubStore } from '../../store/store.stub';
+import { FrameStore } from '../../store/frameStore';
 import {
   MarginType,
   OrderSide,
@@ -33,12 +33,17 @@ import { ChaserOrderInstance } from '../../webworker/chaserOrder/ChaserOrderInst
 import { ChaserOrderManager } from '../../webworker/chaserOrder/ChaserOrderManager';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { setMainAcceptsFrames } from '../../webworker/frameForwarding';
+import { ChaserOrderEnrichmentPostprocessor } from '../../webworker/postProcessors/ChaserOrderEnrichmentPostprocessor';
+import { DisplayedMarginPostprocessor } from '../../webworker/postProcessors/DisplayedMarginPostprocessor';
 import { DisplayedPositionsPostprocessor } from '../../webworker/postProcessors/DisplayedPositionsPostprocessor';
+import { OrdersRiskProfilePostprocessor } from '../../webworker/postProcessors/OrdersRiskProfilePostprocessor';
 import { independentPostprocessors } from '../../webworker/postProcessors/registry';
+import { TwapOrderEnrichmentPostprocessor } from '../../webworker/postProcessors/TwapOrderEnrichmentPostprocessor';
 import { TwapInstance } from '../../webworker/twap/TwapInstance';
 import { TwapStatus } from '../../webworker/twap/TwapStatus';
 import { engineCapabilities, quantityUnitsCode } from '../fixtures/engineCapabilities';
 import { consumerFrame } from './consumerFrame';
+import { nativeFixture, withNativeSections } from './nativeFixture';
 
 const hyroEnvironment = vi.hoisted(() => {
   const previous = process.env.NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL;
@@ -128,6 +133,7 @@ function state(name: ExchangeName): Partial<StoreData> {
     ],
     balance: { total: 1000, free: 900, used: 100, upnl: 7 },
     loaded: { balance: true, orders: true, positions: true, markets: true, tickers: true },
+    socketHealth: { publicHealthy: true, privateHealthy: true, publicInitialized: true, privateInitialized: true },
     options: { isHedged: false },
     latency: 12,
     fetchedLeverage: {
@@ -136,16 +142,38 @@ function state(name: ExchangeName): Partial<StoreData> {
   };
 }
 
+// This mock bypasses WasmEngine::store_frames. Its historical TS oracle supplies
+// explicit derived-section fixture values; production projection is covered by
+// realVenue.wasm.test and safe-cex-store-frames' real Rust -> JS regressions.
+function fixtureProjection(name: ExchangeName, data: Partial<StoreData>): StoreData {
+  const decoded = new FrameStore();
+  decoded.apply(nativeFixture(data));
+  const result = structuredClone(decoded.data);
+  for (const Cls of [
+    DisplayedPositionsPostprocessor,
+    DisplayedMarginPostprocessor,
+    ChaserOrderEnrichmentPostprocessor,
+    TwapOrderEnrichmentPostprocessor,
+    OrdersRiskProfilePostprocessor,
+  ])
+    new Cls('conformance', name, { key: '', secret: '' }).process(result);
+  return result;
+}
+
 // A deterministic binary producer for shared consumer edge cases, NOT a venue
 // emulator. realVenue.wasm.test separately starts every actual Rust engine.
 class FrameSource implements WasmEngineLike {
   pending = true;
   current: Partial<StoreData>;
+  private readonly name: ExchangeName;
   constructor(
     readonly venue: string,
     _options: string,
   ) {
-    this.current = state(venue as ExchangeName);
+    const name = [...RUST_VENUES].find((name) => name === venue);
+    if (!name) throw new Error('Unknown fixture venue');
+    this.name = name;
+    this.current = state(name);
     sources.push(this);
   }
   capabilities = () => engineCapabilities(this.venue);
@@ -167,8 +195,13 @@ class FrameSource implements WasmEngineLike {
   };
   snapshotFrame = () => new Uint8Array(this.frame());
   accountSnapshotFrame = () => new Uint8Array(this.frame(true));
-  private frame = (accountRead = false) =>
-    consumerFrame(this.current, undefined, false, undefined, quantityUnitsCode(this.venue), accountRead);
+  private frame = (accountRead = false) => {
+    const projected = fixtureProjection(this.name, this.current);
+    return withNativeSections(
+      consumerFrame(projected, undefined, false, undefined, quantityUnitsCode(this.venue), accountRead),
+      projected,
+    );
+  };
 }
 const sources: FrameSource[] = [];
 const workers: ExchangeWorker[] = [];
@@ -217,17 +250,16 @@ function consumerOptions(name: ExchangeName): ExchangeOptions {
 
 async function consumer(name: ExchangeName) {
   const options = consumerOptions(name);
-  const main = new BaseExchange(name, options, new DefaultStore());
+  const main = new BaseExchange(name, options, new FrameStore());
   exchanges.push(main);
-  const messages: Array<{ op: string; data: any }> = [];
+  const messages: Array<{ op: string; data: any; snapshot?: boolean }> = [];
   const ctx = {
-    postMessage(message: { op: string; data: any }, transfer?: Transferable[]) {
+    postMessage(message: { op: string; data: any; snapshot?: boolean }, transfer?: Transferable[]) {
       // Match a real postMessage: neither worker state nor its ArrayBuffer stays
       // shared with the receiving realm.
       const copy = structuredClone(message, { transfer });
       messages.push(copy);
-      if (copy.op === 'frame') main.applyWorkerFrame(copy.data);
-      if (copy.op === 'store') main.store.update(copy.data, true);
+      if (copy.op === 'frame') main.applyWorkerFrame(copy.data, copy.snapshot === true);
     },
   } as unknown as Worker;
   const worker = new ExchangeWorker(ctx, 'conformance', name, options, {} as never, {} as never, 'fixture');
@@ -241,7 +273,7 @@ async function consumer(name: ExchangeName) {
     // Exercise the same callback EngineHost invokes, with an independently
     // encoded lifecycle frame; no store mutation is substituted for decoding.
     (exchange as unknown as { receiveFrame(buffer: ArrayBuffer): void }).receiveFrame(
-      consumerFrame(data, delta, events, undefined, quantityUnitsCode(name)),
+      withNativeSections(consumerFrame(data, delta, events, undefined, quantityUnitsCode(name)), data),
     );
   };
   return { main, worker, exchange, messages, ctx, deliver };
@@ -249,7 +281,7 @@ async function consumer(name: ExchangeName) {
 
 describe.each(venues)('%s consumer conformance', (name) => {
   it('honors explicit Rust selection in the public SDK factory', async () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = await createExchange(name, consumerOptions(name), store);
     exchanges.push(exchange);
     expect(exchange).toBeInstanceOf(RustEngineExchange);
@@ -258,14 +290,24 @@ describe.each(venues)('%s consumer conformance', (name) => {
 
   it('preserves TS store reads, postprocessors, CLI output, transfer and late snapshots', async () => {
     const { worker, main, exchange, messages } = await consumer(name);
-    const reference = new BaseExchange(name, { key: '', secret: '' }, new DefaultStore());
+    const reference = new BaseExchange(name, { key: '', secret: '' }, new FrameStore());
     exchanges.push(reference);
     const expected = state(name);
-    reference.store.update(expected);
-    const derived = reference.store.serialize();
+    reference.store.apply(
+      nativeFixture(
+        expected,
+        reference.store.markets.map((row) => row.symbol),
+      ),
+    );
+    const derived = structuredClone(reference.store.data);
     for (const Cls of independentPostprocessors)
       new (Cls as typeof DisplayedPositionsPostprocessor)('conformance', name, exchange.options).process(derived);
-    reference.store.update(derived);
+    reference.store.apply(
+      nativeFixture(
+        derived,
+        reference.store.markets.map((row) => row.symbol),
+      ),
+    );
 
     for (const key of [
       'markets',
@@ -312,25 +354,31 @@ describe.each(venues)('%s consumer conformance', (name) => {
     expect(cliOutput).toEqual(await cliReads(reference));
     expect(cliOutput).toHaveLength(2);
     expect(cliOutput.every((line) => line.includes('BTCUSDT'))).toBe(true);
-    expect(Object.keys(main.store.serialize())).toEqual(expect.arrayContaining(Object.keys(stubStore)));
-    const roundtrip = new DefaultStore();
-    roundtrip.update(structuredClone(main.store.serialize()), true);
-    expect(plain(roundtrip.serialize())).toEqual(plain(main.store.serialize()));
+    expect(Object.keys(main.store.data)).toEqual(expect.arrayContaining(Object.keys(initialStoreData)));
+    const roundtrip = new FrameStore();
+    roundtrip.apply(
+      nativeFixture(
+        structuredClone(main.store.data),
+        roundtrip.markets.map((row) => row.symbol),
+      ),
+    );
+    // Rule 5 / 6ab0b44f2f: observation IDs belong to each receiver, not the wire snapshot.
+    expect(plain(roundtrip.data)).toEqual(plain({ ...main.store.data, updateIds: roundtrip.updateIds }));
+    expect(roundtrip.updateIds).toEqual({ orders: 1, positions: 1 });
     const counts = { ...main.store.updateIds };
     worker.sendSnapshot();
-    expect(main.store.updateIds.orders).toBe(counts.orders + 1);
-    expect(main.store.updateIds.positions).toBe(counts.positions + 1);
+    expect(main.store.updateIds.orders).toBe(counts.orders);
+    expect(main.store.updateIds.positions).toBe(counts.positions);
     expect(plain(main.store.orders)).toEqual(plain(reference.store.orders));
-    const stores = messages.filter((message) => message.op === 'store');
-    expect(stores.length).toBeGreaterThan(0);
-    for (const message of stores)
-      for (const key of ['markets', 'tickers', 'orders', 'positions', 'balance', 'loaded', 'updateIds'])
-        expect(message.data).not.toHaveProperty(key);
+    expect(messages.every((message) => message.op !== 'store')).toBe(true);
   });
 
   it('keeps update IDs, terminal opt-in, split deltas and stream events correct', async () => {
     const { worker, main, exchange, deliver } = await consumer(name);
     const ticker = main.store.tickers[0];
+    const markets = main.store.markets;
+    const orders = main.store.orders;
+    const balance = main.store.balance;
     const counts = { ...worker.store.updateIds };
     const fills = vi.fn();
     const workerFills = vi.fn();
@@ -341,8 +389,13 @@ describe.each(venues)('%s consumer conformance', (name) => {
     main.on('listenOrderBook', books);
     main.on('listenOHLCV', candles);
     deliver({}, [0, 4, 105], true);
-    expect(main.store.tickers[0]).toBe(ticker);
-    expect(ticker.last).toBe(105);
+    // FrameStore shares untouched sections and replaces the changed ticker row.
+    expect(main.store.markets).toBe(markets);
+    expect(main.store.orders).toBe(orders);
+    expect(main.store.balance).toBe(balance);
+    expect(main.store.tickers[0]).not.toBe(ticker);
+    expect(ticker.last).toBe(state(name).tickers![0].last);
+    expect(main.store.tickers[0].last).toBe(105);
     expect(worker.store.updateIds).toEqual(counts);
     expect(fills).toHaveBeenCalledExactlyOnceWith({
       id: 'order-1',
@@ -362,11 +415,37 @@ describe.each(venues)('%s consumer conformance', (name) => {
       interval: '1m',
       candle: { timestamp: 1_700_000_000, open: 100, high: 102, low: 99, close: 101, volume: 5 },
     });
-    worker.store.markOrdersTerminal([{ id: 'order-1' }], OrderStatus.Canceled);
-    main.store.markOrdersTerminal([{ id: 'order-1' }], OrderStatus.Canceled);
+    (() => {
+      const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: 'order-1' }];
+      const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+      return worker.store.apply(
+        nativeFixture(
+          {
+            orders: worker.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          worker.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
+    (() => {
+      const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: 'order-1' }];
+      const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+      return main.store.apply(
+        nativeFixture(
+          {
+            orders: main.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          main.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
     deliver({ orders: state(name).orders });
-    expect(worker.store.orders[0].status).toBe(OrderStatus.Canceled);
-    expect(main.store.orders[0].status).toBe(OrderStatus.Canceled);
+    expect(worker.store.orders[0].status).toBe(OrderStatus.Open);
+    expect(main.store.orders[0].status).toBe(OrderStatus.Open);
     // The engine owns private reconciliation. Explicit store terminal memory
     // is local; bridge snapshots still decode on main with its own counters.
     expect(worker.store.updateIds.orders).toBe(counts.orders + 2);
@@ -441,9 +520,19 @@ describe.each(venues)('%s consumer conformance', (name) => {
     vi.spyOn(exchange, 'cancelOrders').mockResolvedValue();
     const manager = new ChaserOrderManager();
     managers.push({ manager, exchange });
-    exchange.store.update({
-      socketHealth: { publicHealthy: true, privateHealthy: true, publicInitialized: true, privateInitialized: true },
-    });
+    exchange.store.apply(
+      nativeFixture(
+        {
+          socketHealth: {
+            publicHealthy: true,
+            privateHealthy: true,
+            publicInitialized: true,
+            privateInitialized: true,
+          },
+        },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     const supervised = new ChaserOrderInstance(exchange, {
       symbol: 'BTCUSDT',
       side: OrderSide.Buy,
@@ -485,11 +574,8 @@ describe.each(venues)('%s consumer conformance', (name) => {
     manager.cleanupExchange(exchange);
   });
 
-  it('ships the engine algo rows and order enrichment through the real postprocessor pipeline', async () => {
+  it('ships explicit native algo, display and ownership sections through snapshots', async () => {
     const { worker, main, exchange, deliver } = await consumer(name);
-    exchange.store.update({
-      socketHealth: { publicHealthy: true, privateHealthy: true, publicInitialized: true, privateInitialized: true },
-    });
     // The rows the engine's Rust algos post: this fixture engine runs no algos.
     const chaser = {
       id: 'chaser-1',
@@ -512,7 +598,10 @@ describe.each(venues)('%s consumer conformance', (name) => {
       ordersExecuted: 1,
       status: TwapStatus.Running,
     } as unknown as ActiveTWAP;
-    exchange.store.update({ activeChasers: [chaser], activeTWAPs: [twap] });
+    const source = sources.find((candidate) => candidate.venue === name);
+    if (!source) throw new Error('Missing fixture engine');
+    source.current = { ...source.current, activeChasers: [chaser], activeTWAPs: [twap] };
+    deliver(fixtureProjection(name, source.current));
     await vi.advanceTimersByTimeAsync(1000);
     worker.sendSnapshot();
     expect(main.store.activeChasers).toEqual([
@@ -530,14 +619,46 @@ describe.each(venues)('%s consumer conformance', (name) => {
     const exchangeUpdates = vi.fn();
     main.on('update', exchangeUpdates);
     const activeChasers = main.store.activeChasers.map((row) => ({ ...row, attempts: row.attempts + 1 }));
-    main.store.update({ activeChasers }, true);
+    main.store.apply(
+      nativeFixture(
+        {
+          activeChasers,
+          orders: main.store.orders.map((row) => ({
+            ...row,
+            extra: { ...row.extra, chaserAttempts: activeChasers[0].attempts },
+          })),
+        },
+        main.store.markets.map((row) => row.symbol),
+      ),
+    );
     expect(main.store.updateIds).toEqual({ orders: beforeTags.orders + 1, positions: beforeTags.positions });
     expect(main.store.orders[0].extra?.chaserAttempts).toBe(activeChasers[0].attempts);
     expect(notices.length).toBeGreaterThan(0);
     expect(notices.every((id) => id === beforeTags.orders + 1)).toBe(true);
     expect(exchangeUpdates).toHaveBeenCalledOnce();
-    main.store.update({ activeChasers }, true);
-    main.store.updateTicker({ id: state(name).markets![0].id }, { last: 106 });
+    main.store.apply(
+      nativeFixture(
+        {
+          activeChasers,
+          orders: main.store.orders.map((row) => ({
+            ...row,
+            extra: { ...row.extra, chaserAttempts: activeChasers[0].attempts },
+          })),
+        },
+        main.store.markets.map((row) => row.symbol),
+      ),
+    );
+    (() => {
+      const target = { id: state(name).markets![0].id };
+      const changes: Partial<StoreData['tickers'][number]> = { last: 106 };
+      return main.store.apply(
+        nativeFixture(
+          { tickers: main.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          main.store.markets.map((row) => row.symbol),
+        ),
+      );
+    })();
+    // Rule 5 / #3640 review: equal streams count as observations, never UI mutations.
     expect(main.store.updateIds.orders).toBe(beforeTags.orders + 1);
     unsubscribe();
     main.off('update', exchangeUpdates);
@@ -545,7 +666,12 @@ describe.each(venues)('%s consumer conformance', (name) => {
     expect(main.store.orders[0].extra).toMatchObject({ isFromChaser: true, chaserId: chaser.id });
     main.dispose();
     const disposedOrders = main.store.updateIds.orders;
-    main.store.update({ activeChasers: activeChasers.map((row) => ({ ...row, attempts: row.attempts + 1 })) }, true);
+    main.store.apply(
+      nativeFixture(
+        { activeChasers: activeChasers.map((row) => ({ ...row, attempts: row.attempts + 1 })) },
+        main.store.markets.map((row) => row.symbol),
+      ),
+    );
     expect(main.store.updateIds.orders).toBe(disposedOrders);
   });
 });

@@ -1,3 +1,6 @@
+import type { EngineCapabilities, QuantityUnits } from './capabilities.mjs';
+export type { EngineCapabilities, QuantityUnits } from './capabilities.mjs';
+import type { StoreData } from '../../../../packages/safe-cex/src/generated/StoreData.js';
 import type { Balance } from '../../../../packages/safe-cex/src/generated/Balance.js';
 export type { Balance } from '../../../../packages/safe-cex/src/generated/Balance.js';
 export type { CoinBalance } from '../../../../packages/safe-cex/src/generated/CoinBalance.js';
@@ -26,6 +29,16 @@ export const SECTION: {
   ACCOUNT_READ: 21;
   TICKER_OBSERVATIONS: 24;
   MESSAGE_HANDLER_STATS: 25;
+  SOCKET_HEALTH: 26;
+  ACTIVE_CHASERS: 27;
+  ACTIVE_TWAPS: 28;
+  ORDERS_RISK: 29;
+  DISPLAYED_POSITIONS: 30;
+  DISPLAYED_MARGIN: 31;
+  BALANCE_INFO: 32;
+  MANAGED_ORDERS: 33;
+  PUBLIC_MESSAGE_HANDLER_STATS: 34;
+  REQUEST_STATS: 35;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -40,54 +53,10 @@ export const MARKET_COLUMNS: readonly [
 export type MarketColumn = (typeof MARKET_COLUMNS)[number];
 export const ORDER_TRIGGER_WORD: { TP_SHIFT: 0; SL_SHIFT: 8; TRIGGER_MASK: 255; NATIVE_ALGO: 65536 };
 export const MARKET_FLAG: { ACTIVE: 1; INVERSE: 2; SPOT: 4; PERPETUAL: 8; EXPIRING: 16; READ_ONLY: 32 };
-export type QuantityUnits = 'base' | 'nativePlacement' | 'inverseNative' | 'contractCount' | 'inverseContractSized';
 export const QUANTITY_UNITS: readonly QuantityUnits[];
 /** A market's quantity convention, from its MARKETS flags. */
 export function marketQuantityUnits(flags: number): QuantityUnits;
-/** What a venue answers beyond the common commands (`safe_cex_engine::Capabilities`). */
-export interface EngineCapabilities {
-  account: 'unsupported' | 'query' | 'afterLoad';
-  clientOrderLookup: boolean;
-  fillHistory: boolean;
-  orderHistory: boolean;
-  incomeHistory: boolean;
-  fillsByOrderId: boolean;
-  cancelAll: 'eachOpenSymbol' | 'eachPlacedSymbol' | 'native';
-  leverageQuery: 'settings' | 'onRead' | 'onMetadata' | 'onReadAndMetadata';
-  maxLeverage: 'market' | 'query' | 'rails' | 'unsupported';
-  accountLeverage: boolean;
-  accountMarginType: boolean;
-  cancelWithSymbols: boolean;
-  amendWithSymbol: boolean;
-  orderBookQuery: boolean;
-  options: boolean;
-  quantityUnits: QuantityUnits;
-  accountTier: boolean;
-  closedPositions: boolean;
-  balanceInfo: boolean;
-  marketRefresh: boolean;
-  positionHistory: 'unsupported' | 'fillsAccount' | 'fillsSymbol' | 'bybit' | 'okx' | 'blofin' | 'wooOrders' | 'bitunix';
-  closedPositionFormat: 'unsupported' | 'bybit' | 'okx' | 'blofin' | 'bitunix';
-  fillHistoryTime: 'asProvided' | 'secondsOrMilliseconds' | 'nonnegativeSecondsOrMilliseconds';
-  stpControls: boolean;
-  bybitExecutionControls: boolean;
-  rejectClientSlippage: boolean;
-  finiteCommandNumbers: boolean;
-  finiteHistoryBounds: boolean;
-  rejectOrderHistoryFilters: boolean;
-  publicCatalogueValidation: boolean;
-  isolatedBookSubscriptions: boolean;
-  inverseClosedPositions: boolean;
-  scheduleCancel: boolean;
-  orderHistoryNeedsSymbol: boolean;
-  freshPositions: boolean;
-  /** The `cancelAccountOrders` op, which only a nuke sends. */
-  nukeAccountCancel: boolean;
-  /** A symbol cancel can miss an order the store has not seen yet. */
-  symbolCancelMissesUnseen: boolean;
-  /** The source writes read covers; a frame-fed page lifts fences on them (Rust ingest only). */
-  orderReadCovers: boolean;
-}
+
 export const LOADED_FLAG: { BALANCE: 1; ORDERS: 2; MARKETS: 4; TICKERS: 8; POSITIONS: 16 };
 export const STATUS_FLAG: { HEDGED: 1; LATENCY_MEASURED: 2 };
 export const ORDER_COLUMNS: readonly ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
@@ -280,6 +249,11 @@ export interface FillRows {
   orderId(i: number): string;
 }
 
+export type ManagedOrderOwnership = Pick<NonNullable<StoreData['orders'][number]['extra']>,
+  'isFromChaser' | 'chaserId' | 'chaserAttempts' | 'chaserMaxAttempts'> & {
+  isFromTwap?: boolean;
+  twapId?: string;
+};
 export class Frame {
   constructor(buffer: ArrayBuffer);
   readonly buffer: ArrayBuffer;
@@ -299,6 +273,7 @@ export class Frame {
   tickers(owned?: boolean): TickerTable | undefined;
   tickerDeltas(): Float64Array | undefined;
   messageHandlerStats(): MessageHandlerStatsTable | undefined;
+  publicMessageHandlerStats(): MessageHandlerStatsTable | undefined;
   tickerObservations(): Float64Array | undefined;
   books(): Generator<BookRows>;
   bookDeltas(): Generator<BookDeltaRows>;
@@ -306,6 +281,17 @@ export class Frame {
   orders(): OrderTable | undefined;
   positions(): PositionTable | undefined;
   balance(): Balance | undefined;
+  /** Complete replacement of the named section; undefined means absent/unchanged. */
+  socketHealth(): StoreData['socketHealth'] | undefined;
+  activeChasers(): StoreData['activeChasers'] | undefined;
+  activeTWAPs(): StoreData['activeTWAPs'] | undefined;
+  ordersRisk(): StoreData['ordersRisk'] | undefined;
+  displayedPositions(): StoreData['displayedPositions'] | undefined;
+  displayedMargin(): StoreData['displayedMargin'] | undefined;
+  /** null explicitly clears info; undefined means the section is absent. */
+  balanceInfo(): Balance['info'] | undefined;
+  managedOrders(): Readonly<Record<string, ManagedOrderOwnership>> | undefined;
+  requestStats(): StoreData['requestStats'] | undefined;
   status(): Status | undefined;
   capabilities(): EngineCapabilities | undefined;
   settings(): SettingTable | undefined;

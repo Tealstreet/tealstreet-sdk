@@ -2,18 +2,13 @@ import type { ExchangeOptions, Market } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { BROKER_ID as OKX_BROKER_ID } from '../../exchanges/okx/okx.types';
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionMode } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { OKXExchange } from '../reference/okx/okx.exchange';
-import { BROKER_ID as OKX_BROKER_ID } from '../../exchanges/okx/okx.types';
-import { DefaultStore } from '../../store/store.base';
-import {
-  OrderSide,
-  OrderStopTriggerType,
-  OrderTimeInForce,
-  OrderType,
-  PositionMode,
-} from '../../types';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -41,8 +36,13 @@ const withoutDynamicIds = (payload: Record<string, unknown>) => {
 
 describe('audit regression: exact order payload normalization', () => {
   it('matches Binance USD-M market, post-only reduce limit, and conditional stop contracts', () => {
-    const store = new DefaultStore();
-    store.update({ markets: [market('BTCUSDT')] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [market('BTCUSDT')] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BinanceExchange('binance', options, store);
 
     const marketOrder = (exchange as any).formatCreateOrder({
@@ -104,8 +104,13 @@ describe('audit regression: exact order payload normalization', () => {
   });
 
   it('matches OKX market, post-only reduce limit, and conditional stop contracts', () => {
-    const store = new DefaultStore();
-    store.update({ markets: [market('BTC-USDT-SWAP')] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [market('BTC-USDT-SWAP')] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new OKXExchange('okx', options, store);
     exchange._accountPositionMode = PositionMode.OneWay;
     exchange._accountLevel = 2;
@@ -171,8 +176,13 @@ describe('audit regression: exact order payload normalization', () => {
 
   // Builds a full Bitget client; under CI load this outruns vitest's 5s default.
   it('matches Bitget V2 market, post-only reduce limit, and TPSL stop contracts', async () => {
-    const store = new DefaultStore();
-    store.update({ markets: [market('BTCUSDT')] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [market('BTCUSDT')] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BitgetExchange('bitget', options, store);
     // This is the V2/Classic payload fixture, not the lazy account-type probe.
     vi.spyOn(exchange as any, 'ensureAccountTypeDetected').mockResolvedValue(undefined);

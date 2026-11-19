@@ -10,6 +10,8 @@ import { venueFamily } from '../hosts/wasm/js/venues.mjs';
 
 const INPUTS = Object.freeze([
   'sdk-rs/engine', 'sdk-rs/crypto', 'sdk-rs/registry', 'sdk-rs/venues',
+  'sdk-rs/hosts/store-frames', 'sdk-rs/algos',
+  'packages/safe-cex/src/exchange-display-policy.json',
   'sdk-rs/hosts/wasm', 'sdk-rs/Cargo.toml', 'sdk-rs/Cargo.lock',
   'sdk-rs/rust-toolchain.toml', 'sdk-rs/.cargo', 'sdk-rs/harness/build.sh',
   'sdk-rs/harness/install-binaryen.sh', 'sdk-rs/harness/ci-wasm.mjs',

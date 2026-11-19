@@ -1,21 +1,29 @@
 import type { Frame } from '@tealstreet/safe-cex-wasm/wire';
-import { TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
+
 import { expect, it } from 'vitest';
-import { FrameApplier } from '../../store/frameApplier';
-import { DefaultStore } from '../../store/store.base';
+
+import { TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
+import { FrameStore } from '../../store/frameStore';
 
 it('hydrates and updates a native orphan ticker without inventing a market', () => {
-  const store = new DefaultStore();
-  const applier = new FrameApplier(store);
+  const store = new FrameStore();
+  const applier = store;
   const table = {
-    count: 1, market: Uint32Array.of(0xffffffff),
+    count: 1,
+    market: Uint32Array.of(0xffffffff),
     identity: () => ({ symbol: 'DELISTEDUSDT', id: 'native-retired-id' }),
     ...Object.fromEntries(TICKER_FIELDS.map((field, index) => [field, Float64Array.of(index + 1)])),
   };
   const frame = {
-    tickers: () => table, tickerDeltas: () => undefined, tickerObservations: () => undefined,
-    markets: () => undefined, orders: () => undefined, positions: () => undefined,
-    balance: () => undefined, status: () => undefined, settings: () => undefined,
+    tickers: () => table,
+    tickerDeltas: () => undefined,
+    tickerObservations: () => undefined,
+    markets: () => undefined,
+    orders: () => undefined,
+    positions: () => undefined,
+    balance: () => undefined,
+    status: () => undefined,
+    settings: () => undefined,
   } as unknown as Frame;
   applier.apply(frame);
   expect(store.markets).toHaveLength(0);
