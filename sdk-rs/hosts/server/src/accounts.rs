@@ -117,6 +117,9 @@ pub struct Account {
     /// Chases and TWAPs its algo host is running; none for public accounts.
     pub running: Arc<crate::algos::Running>,
     pub twap_owner: Arc<crate::twap_owner::Binding>,
+    /// The socket whose newer init disposed this account, if one did. Only that
+    /// path sets it: a crash or any other disposal must never read as a takeover.
+    pub(crate) superseded_by: std::sync::OnceLock<u64>,
 }
 
 /// Concurrent waiting store reads per account; more are refused, not queued.
@@ -386,6 +389,11 @@ impl Account {
 
     pub(crate) fn moving(&self) -> bool {
         self.handle.disposal_cause() == Some(DisposalCause::Moving)
+    }
+
+    /// Whether a newer init from a socket other than `socket` disposed this account.
+    pub(crate) fn superseded_for(&self, socket: u64) -> bool {
+        self.superseded_by.get().is_some_and(|by| *by != socket)
     }
 
     fn proxy_authority_required(&self) -> bool {
@@ -1790,6 +1798,8 @@ impl Registry {
                 return Err(refusal);
             }
             if apply.is_none() {
+                // Before disposal, so the old holders' stop frame can name the takeover.
+                let _ = account.superseded_by.set(holder);
                 self.dispose(
                     &account,
                     Disposal::rebuild(account.is_public(), public_only),
@@ -1868,6 +1878,7 @@ impl Registry {
             if apply.is_some() {
                 self.stop_for_new_settings(&replaced, outbox, Disposal::SettingsChanged);
             } else {
+                let _ = replaced.superseded_by.set(holder);
                 self.dispose_for(
                     &replaced,
                     Disposal::Replaced,
@@ -2189,6 +2200,7 @@ impl Registry {
             metadata_refreshes: Arc::new(tokio::sync::Semaphore::new(MAX_METADATA_REFRESHES)),
             running,
             twap_owner,
+            superseded_by: std::sync::OnceLock::new(),
         };
         Ok((account, remote))
     }
@@ -3359,6 +3371,7 @@ pub mod testing {
             metadata_refreshes: Arc::new(tokio::sync::Semaphore::new(MAX_METADATA_REFRESHES)),
             running,
             twap_owner: Arc::new(crate::twap_owner::Binding::new(user)),
+            superseded_by: std::sync::OnceLock::new(),
         });
         (account, inbox)
     }
@@ -4471,6 +4484,50 @@ pub(crate) mod tests {
                     .obtain("u", &init_frame(""), true, 2, None, Arc::new(|_| true))
                     .await;
                 assert!(refused.is_err_and(|error| error.contains("restarting")));
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn a_newer_init_rebuilding_an_account_records_the_socket_that_took_it_over() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let (account, _inbox) = held_account();
+                hold_live(&account, 7, Arc::new(|_| true));
+                registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .insert(("u".into(), "a".into()), account.clone());
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    registry.obtain("u", &init_frame(""), true, 8, None, Arc::new(|_| true)),
+                )
+                .await;
+                assert!(
+                    account.superseded_for(7),
+                    "the old holder is told a newer init took over"
+                );
+                assert!(
+                    !account.superseded_for(8),
+                    "never the socket whose init it was"
+                );
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn a_disposal_without_a_newer_init_is_never_a_takeover() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let (account, _inbox) = held_account();
+                hold_live(&account, 7, Arc::new(|_| true));
+                registry.signer_failed(&account);
+                registry.dispose(&account, Disposal::PageDisposed);
+                account.handle.dispose();
+                assert!(!account.superseded_for(7));
             })
             .await;
     }

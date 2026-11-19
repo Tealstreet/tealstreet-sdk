@@ -287,6 +287,16 @@ pub fn moving(account_name: &str, message: &str) -> String {
     )
 }
 
+/// A newer init from another socket took the account (and its signing) over.
+/// Additive within v1: old clients still read only the first argument.
+pub fn superseded(account_name: &str, message: &str) -> String {
+    envelope(
+        "msg",
+        json!({"op":"error", "accountName":account_name,
+        "data":[message, {"reason":"superseded"}]}),
+    )
+}
+
 /// An algo error: shown even over a reconnect or to a hidden tab (`forceToast`), which
 /// would otherwise only log it, since it can mean an order is left resting.
 pub fn algo_error(account_name: &str, message: Value) -> String {

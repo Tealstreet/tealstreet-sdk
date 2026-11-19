@@ -1898,6 +1898,8 @@ impl Session {
             && self.registry.planned_move(&account.user)
         {
             envelope::moving(&account.name, error)
+        } else if error == "account stopped" && account.superseded_for(self.socket) {
+            envelope::superseded(&account.name, error)
         } else {
             envelope::error(Some(&account.name), error)
         };
@@ -4805,6 +4807,58 @@ mod tests {
                     assert_eq!(frame["d"]["data"][0], "account stopped");
                     if matches!(mode, "user" | "box") {
                         assert_eq!(frame["d"]["data"][1]["reason"], "moving", "{mode}: {frame}");
+                    } else {
+                        assert_eq!(
+                            frame["d"]["data"],
+                            json!(["account stopped"]),
+                            "{mode}: {frame}"
+                        );
+                    }
+                }
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn only_a_newer_init_from_another_socket_marks_a_stop_superseded() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for mode in ["other_socket", "own_socket", "crash"] {
+                    let registry = crate::accounts::tests::registry();
+                    let init = acct_init();
+                    let account = crate::accounts::testing::trading_account(&registry, "u", &init);
+                    let (mut session, _frames) = user_session(registry.clone(), "u");
+                    assert!(session.init(init).await.is_ok());
+                    let (mut late, mut frames) = user_session(registry, "u");
+                    match mode {
+                        "other_socket" => account.superseded_by.set(late.socket + 1).unwrap(),
+                        "own_socket" => account.superseded_by.set(late.socket).unwrap(),
+                        _ => {}
+                    }
+                    account.handle.dispose();
+                    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                        while account.handle.join(99_997, true).await.is_ok() {
+                            account.handle.leave(99_997);
+                            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                        }
+                    })
+                    .await
+                    .expect("the account really ended");
+                    late.join(
+                        account,
+                        late.out.clone(),
+                        envelope::AccountSigningMode::Cosigned,
+                        0,
+                    )
+                    .await;
+                    let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
+                    assert_eq!(frame["d"]["op"], "error");
+                    if mode == "other_socket" {
+                        assert_eq!(
+                            frame["d"]["data"],
+                            json!(["account stopped", {"reason": "superseded"}]),
+                            "{mode}: {frame}"
+                        );
                     } else {
                         assert_eq!(
                             frame["d"]["data"],
