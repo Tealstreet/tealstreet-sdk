@@ -641,6 +641,12 @@ cannot reset an account. Live and parked holders, and a DELEGATED resident copy
 without a socket, prevent an ordinary init from changing private settings.
 The comparison uses normalized engine and routing settings; fields ignored by
 the venue do not create a settings change.
+Fingerprint tuning follows the native projection's effective venue-default OR
+user-tuning behavior; omitted and redundant tuning compare equal. Actual engine
+options and routing remain unchanged. A verified incompatible join replies with
+`kind: "settings-conflict"` and closed `differing_fields` names, also journaled in
+`hosted.admission_refused`; no setting values or raw keys are copied. This refusal
+never stops or replaces the resident actor and never claims invalid credentials.
 
 The action replies `msg` with `op:"applySettings:done"` and
 `data:{success:true,requiresInit:true}` on the admitted registration. This means
@@ -890,15 +896,21 @@ Server to client, one message per engine flush per account:
 - **`snapshot: true`:** marks a full native snapshot. It replaces the client's catalog, book and order baselines.
   - The server sends one immediately after a successful init, and after every `sendSnapshot`.
   - A socket that joins an account later gets its own snapshot before any delta, which is FrameServer's join contract.
-- **Client side:** the client keeps one `FrameApplier` plus `DefaultStore` per account, and applies frames in `seq` order.
+- **Client side:** the client keeps one native `FrameStore` per account and applies frames in `seq` order. Its public rows use the generated types and retain unchanged section identities.
   - A `seq` gap, an `Invalid engine frame` or a `FrameApplyError` makes the client send the existing `{t:'msg', d:{op:'sendSnapshot', accountName}}`.
   - It then ignores deltas until a `snapshot: true` frame arrives. This reuses today's `hostedFrameClient.requestSnapshot` rate limit.
 - **Size:** FrameServer already splits a delta frame that is too big under `max_frame_bytes`. Each segment is its own `seq`.
 
-State that SCXF does not carry stays JSON, under the existing op names and shapes:
+All account state is carried by SCXF. The shared Rust `hosts/store-frames` producer
+adds socket health, active chasers/TWAPs, order risk, displayed positions/margin
+and retained balance info to the account actor's ordered frame stream. Native
+subscription diagnostics use section 25; shared public diagnostics use section 34, request outcomes section 35 and managed-order ownership section 33. Display policy is shared with SDK metadata and optional init tuning; holder relabeling preserves tuning. There is no `op:'store'` side channel.
+The LOCAL wasm host uses the same producer; mobile imports only the pure-JS
+frame reader. See `hosts/store-frames/README.md` for replacement/clear semantics.
 
-- **`op:'store'` partial payloads:** these carry only the fields frames don't (`fetchedLeverage`, `balance.info`, `socketHealth`, `messageHandlerStats`, `activeChasers`, `activeTWAPs`, `ordersRisk`). They are merged over the frame store, which matches the worker's `_derivedStorePayload` in frame mode.
-- **Unchanged replies:** `error`, `warning`, `log`, `engine-event`, `command-progress`, `callMethod:done`, `exec-result`, `updatePositions:done`, `chaser:*` and `twap:*`.
+Non-state replies keep their existing envelopes: `error`, `warning`, `log`,
+`engine-event`, `command-progress`, `callMethod:done`, `exec-result`,
+`updatePositions:done`, `chaser:*` and `twap:*`.
 
 Account output captures a socket-local account generation before a callback,
 detached read, signer or frame pump can defer it. An accepted rebuilding init
@@ -956,6 +968,21 @@ How FrameServer notices map onto `msg`:
 | `deactivate` | `deactivate-status` |
 | `startupFailed` | `start-status` `{ok:false, detail}`, plus `error` |
 | `accountAuth` | `engine-event` with code `accountAuth`. The server always opts in |
+
+A command-owned `history.incomplete` event also records that pending read's
+positive assertion. A successful `callMethod:done` carries
+`data.completeness: {incomplete:true, reason?, failure?}` beside its retained
+rows. Native NoticeFields encodes command IDs as floating-point JSON numbers;
+only exact integral u32 values can identify a pending owner. String, fractional,
+negative, out-of-range or unrelated IDs cannot mark another reply.
+
+Reasons are the closed engine incompleteness codes. Only `laterPageFailed` can
+carry `failure: {operation, kind, venueCode?}`, with the same five Bybit operations,
+typed error kinds and allowlisted codes as the SDK history-failure validator.
+Unknown metadata retains the incomplete marker without inventing a failure;
+replacement assertions clear previous detail. No native message, URL, cursor,
+credential or response value enters the metadata. Existing rejected replies,
+read completion, request policy and account output ownership remain unchanged.
 
 ### Recovering a refused native startup
 
@@ -1138,6 +1165,30 @@ This has landed as the crate `safe-cex-remote-signer` (`sdk-rs/hosts/remote-sign
   - `lighter-tx`;
   - `paradex-public` and `paradex-stark`.
 - **Address and key binding:** Hyperliquid's address and Paradex's Stark key bind through the engine's owned address setup (`create_public_address_setup`). This needs the native host's `address-nonce` feature for those venues.
+
+### Signing correlation in the journal
+
+`sign.timeout` records the SHA-256 `request_id_hash`, original `sent_socket_id`
+(or null before enqueue/after duplicate-ID waiting), current server `socket_id`,
+monotonic `request_age_ms`, `attachment_age_ms`, `last_heard_age_ms` and a closed
+`cause` (`unanswered`, `suspended`, `duplicate`). Attachment age is time on the
+current link attachment, not the lifetime of the browser tab. The original
+15-second deadline and all response/ownership/fatal guards are unchanged.
+
+After all authenticated Session resolvers decline a reply,
+`sign.response_unmatched` records the same ID hash (null for a malformed ID),
+receiving `socket_id`, `socket_age_ms` and that socket's saturating
+`unmatched_count`. Samples are limited to one per second per receiving socket;
+`coalesced_count` preserves suppressed counts on the next sample or a final
+socket-close summary with a null ID hash. No per-request diagnostic map exists.
+Correlating sampled hashes distinguishes a reply to a timed-out
+request from one seen on a different socket; an unmatched line alone does not
+assert which case occurred. No request history or response payload is retained.
+
+These warning lines are journal-only. IDs are always hashed because incoming
+reply IDs are untrusted; signatures, bodies, keys, labels and user IDs are never
+included. A timeout with a recently heard worker does not prove that its page
+thread was able to sign; missing replies alone do not prove a routing fault.
 
 ## Routing (claude-m26ps4)
 

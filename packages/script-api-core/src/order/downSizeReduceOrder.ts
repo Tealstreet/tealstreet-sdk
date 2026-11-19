@@ -61,10 +61,24 @@ export const formatAmount = (amount: number, precision: number): string => {
 /** What a close order still holds: its unfilled part. */
 const unfilled = (order: Order): number => Math.max(0, order.amount - (order.filled || 0));
 
+// Limits and take profits fill on a favourable move, stops on an adverse one. A close need only leave
+// room for either side to fill in full, not both: once one side fills, the other has nothing to close.
+const fillsOnFavourableMove = (o: Order) => o.type === OrderType.Limit || o.type === OrderType.TakeProfit;
+const fillsOnAdverseMove = (o: Order) => o.type === OrderType.StopLoss || o.type === OrderType.TrailingStopLoss;
+
+/** The larger of the TP-side and SL-side totals; a close order of unknown direction is added outright. */
+const heldSize = (holding: readonly Order[]): number => {
+  const total = (pick: (o: Order) => boolean) => holding.filter(pick).reduce((sum, o) => sum + unfilled(o), 0);
+  return (
+    Math.max(total(fillsOnFavourableMove), total(fillsOnAdverseMove)) +
+    total((o) => !fillsOnFavourableMove(o) && !fillsOnAdverseMove(o))
+  );
+};
+
 export const downSizeReduceOrder = (
   market: Market,
   order: PlaceOrderOpts,
-  positions: Position[],
+  positions: readonly Position[],
   orders: readonly Order[],
   price: number,
   {
@@ -110,7 +124,7 @@ export const downSizeReduceOrder = (
 
   // Close orders the venue holds size for, at any price: reduce-only limits and sized plans.
   const holding = locksPositionSize ? orders.filter((o) => resting(o) && o.reduceOnly && unfilled(o) > 0) : [];
-  const locked = holding.reduce((sum, o) => sum + unfilled(o), 0);
+  const locked = heldSize(holding);
   const free = position.contracts - locked;
   if (holding.length > 0 && roundToNearestMultiple(Math.max(0, free), precision) <= 0) {
     throw new ReduceOrderLockedError(

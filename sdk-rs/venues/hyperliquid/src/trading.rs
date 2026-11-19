@@ -73,6 +73,8 @@ struct Job {
     amend_total: Option<f64>,
     /// The read that sizes this amend has been issued.
     amend_read: bool,
+    /// A protective amend is re-reading a mark too old to outlast its cancel release.
+    amend_mark_read: bool,
     /// Exclusive absolute bound from command receipt through the cancel release.
     amend_deadline: Option<f64>,
     builder_checked: bool,
@@ -582,6 +584,7 @@ impl Hyperliquid {
                 amend_source,
                 amend_total: amend_size,
                 amend_read: false,
+                amend_mark_read: false,
                 amend_filled: false,
                 builder_checked: false,
                 amend_builder: None,
@@ -1631,13 +1634,23 @@ impl Hyperliquid {
         self.pump_trades(cx);
     }
     fn expire_amend(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.finish_trade(
-            cx,
-            Err(
-                not_sent("Hyperliquid amendment not sent: the order read did not answer")
-                    .kind(ErrorKind::Timeout),
-            ),
-        );
+        if self.protective_restoring()
+            && let Some(symbol) = self.protective_mark_reading()
+        {
+            self.settle_restore_mark(cx, &symbol, None);
+            return;
+        }
+        let message = if self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|job| job.amend_mark_read)
+        {
+            protective::STALE_MARK
+        } else {
+            "Hyperliquid amendment not sent: the order read did not answer"
+        };
+        self.finish_trade(cx, Err(not_sent(message).kind(ErrorKind::Timeout)));
     }
     pub(crate) fn amend_read_current(&self, id: &str, amend: AmendRead) -> bool {
         self.trading.active.as_ref().is_some_and(|job| {
@@ -1726,12 +1739,52 @@ impl Hyperliquid {
                     order.filled = filled;
                     order.remaining = left;
                 });
+                if let Some(symbol) = self.protective_mark_unfresh(cx, amend.deadline) {
+                    // Still parked under the same owner and bound as the sizing read.
+                    self.trading.active.as_mut().unwrap().amend_mark_read = true;
+                    self.trading.amend_wait = Some((cx.set_timer(amend.deadline - cx.now), amend));
+                    self.read_amend_mark(cx, id, amend, &symbol);
+                    return;
+                }
                 self.release_trade_builder(cx);
             }
             Err(error) => {
                 let error = not_sent(format!("Hyperliquid amendment not sent: {error}"));
                 self.finish_trade(cx, Err(error));
             }
+        }
+    }
+    /// The on-demand mark a protective amend waits on; nothing has been canceled yet.
+    pub(crate) fn amend_mark_answered(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: &str,
+        amend: AmendRead,
+        symbol: &str,
+        read: Result<(f64, f64), String>,
+    ) {
+        if !self.amend_read_pending(cx, id, amend) {
+            return;
+        }
+        // A 429 clears soon; the read bound still ends the wait.
+        if read.as_ref().is_err_and(|error| error.contains("HTTP 429")) {
+            self.trading.amend_retry = Some((cx.set_timer(AMEND_RETRY_MS), id.to_owned(), amend));
+            return;
+        }
+        if let Some((timer, _)) = self.trading.amend_wait.take() {
+            cx.clear_timer(timer);
+        }
+        let mark = read.ok().filter(|(mark, _)| mark.is_finite() && *mark > 0.);
+        if self.protective_restoring() {
+            self.settle_restore_mark(cx, symbol, mark);
+            return;
+        }
+        match mark {
+            Some((mark, issued_at)) => {
+                protective::apply_read_mark(cx, symbol, mark, issued_at);
+                self.release_trade_builder(cx);
+            }
+            None => self.finish_trade(cx, Err(not_sent(protective::STALE_MARK))),
         }
     }
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
@@ -1746,7 +1799,10 @@ impl Hyperliquid {
             .is_some_and(|(t, _, _)| *t == timer)
             && let Some((_, id, amend)) = self.trading.amend_retry.take()
         {
-            self.read_amend_source(cx, &id, amend);
+            match self.protective_mark_reading() {
+                Some(symbol) => self.read_amend_mark(cx, &id, amend, &symbol),
+                None => self.read_amend_source(cx, &id, amend),
+            }
         }
         if let Some((current, amend)) = self.trading.amend_wait
             && current == timer

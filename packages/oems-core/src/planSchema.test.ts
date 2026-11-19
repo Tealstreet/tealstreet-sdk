@@ -1,3 +1,5 @@
+import { isRecord, requireArray, requireRecord } from './typeChecks.testHelpers';
+
 import { OEMS_PLAN_SCHEMA, OEMS_PLAN_SCHEMA_NAME } from './planSchema';
 
 /**
@@ -5,20 +7,21 @@ import { OEMS_PLAN_SCHEMA, OEMS_PLAN_SCHEMA_NAME } from './planSchema';
  * as a runtime provider error in production rather than as a review comment.
  * Walking the whole tree is cheap insurance against that.
  */
-const isObjectSchema = (node: unknown): node is { type: unknown; properties?: Record<string, unknown> } => {
-  if (typeof node !== 'object' || node === null) return false;
-  const type = (node as { type?: unknown }).type;
+const isObjectSchema = (node: unknown): node is Record<string, unknown> => {
+  if (!isRecord(node)) return false;
+  const type = node.type;
   return type === 'object' || (Array.isArray(type) && type.includes('object'));
 };
 
 const walk = (node: unknown, path: string, visit: (schema: Record<string, unknown>, path: string) => void): void => {
-  if (typeof node !== 'object' || node === null) return;
-  if (isObjectSchema(node)) visit(node as Record<string, unknown>, path);
+  if (!isRecord(node)) return;
+  if (isObjectSchema(node)) visit(node, path);
 
-  const properties = (node as { properties?: Record<string, unknown> }).properties;
-  if (properties) for (const [key, child] of Object.entries(properties)) walk(child, `${path}.${key}`, visit);
+  const properties = node.properties;
+  if (properties)
+    for (const [key, child] of Object.entries(requireRecord(properties))) walk(child, `${path}.${key}`, visit);
 
-  const items = (node as { items?: unknown }).items;
+  const items = node.items;
   if (items) walk(items, `${path}[]`, visit);
 };
 
@@ -35,8 +38,8 @@ describe('OEMS_PLAN_SCHEMA', () => {
 
   it('lists every property in required on every object', () => {
     walk(OEMS_PLAN_SCHEMA, 'root', (schema, path) => {
-      const keys = Object.keys((schema.properties ?? {}) as Record<string, unknown>).sort();
-      const required = [...((schema.required ?? []) as string[])].sort();
+      const keys = Object.keys(requireRecord(schema.properties ?? {})).sort();
+      const required = [...requireArray(schema.required ?? [])].sort();
       expect(`${path}: ${required.join(',')}`).toBe(`${path}: ${keys.join(',')}`);
     });
   });

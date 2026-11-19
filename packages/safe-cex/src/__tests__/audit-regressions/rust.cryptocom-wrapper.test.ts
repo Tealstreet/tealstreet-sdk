@@ -4,14 +4,14 @@ import type { ExchangeOptions } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
-vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
-
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { consumerFrame } from '../cutover/consumerFrame';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
+
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
 
 const SENTINEL = 'fixture-unused-secondary-material';
 const setup = (options: Partial<ExchangeOptions>) => {
@@ -25,16 +25,19 @@ const setup = (options: Partial<ExchangeOptions>) => {
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noActions,
     wsMessage: noActions,
-    wsClose: noActions, wsRouteExhausted: noActions,
+    wsClose: noActions,
+    wsRouteExhausted: noActions,
     httpStart: noActions,
     httpChunk: noActions,
     httpEnd: noActions,
     httpFailed: noActions,
     timer: noActions,
   };
-  const construct = vi.fn(function (_venue: string, _options: string, _setup?: string) { return engine; });
+  const construct = vi.fn(function (_venue: string, _options: string, _setup?: string) {
+    return engine;
+  });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
-  const store = new DefaultStore();
+  const store = new FrameStore();
   installNativeStartupFrames(engine, store, () => ({ loaded }));
   const input = { key: 'fixture-primary-key', secret: 'fixture-primary-material', ...options };
   const exchange = new RustEngineExchange('cryptocom', input, store);
@@ -45,25 +48,30 @@ describe('Crypto.com trusted provider construction', () => {
   const exchanges: RustEngineExchange[] = [];
   afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
-  it.each([false, true])('consumes an unused read key without transmitting it (publicOnly=%s)', async (publicDataOnly) => {
-    const { construct, exchange, input } = setup({
-      publicDataOnly, secondary_key: 'fixture-unused-secondary-key', secondary_secret: SENTINEL,
-    });
-    exchanges.push(exchange);
-    expect(JSON.stringify(exchange.options)).not.toContain(SENTINEL);
-    for (const field of ['key', 'secret', 'secondary_key', 'secondary_secret'])
-      expect(exchange.options).not.toHaveProperty(field);
-    await exchange.start();
-    expect(construct).toHaveBeenCalledOnce();
-    const [venue, json, capsule] = construct.mock.calls[0];
-    expect(venue).toBe('cryptocom');
-    expect(JSON.parse(json)).toMatchObject({ readCredentialsValid: true, publicDataOnly });
-    for (const field of ['key', 'secret', 'readCredentials']) expect(JSON.parse(json)).not.toHaveProperty(field);
-    expect(JSON.parse(capsule!)).toEqual({ primary: { key: input.key, secret: input.secret } });
-    expect(json + capsule).not.toContain(SENTINEL);
-    expect(json + capsule).not.toContain('fixture-unused-secondary-key');
-    expect(input.secondary_secret).toBe(SENTINEL);
-  });
+  it.each([false, true])(
+    'consumes an unused read key without transmitting it (publicOnly=%s)',
+    async (publicDataOnly) => {
+      const { construct, exchange, input } = setup({
+        publicDataOnly,
+        secondary_key: 'fixture-unused-secondary-key',
+        secondary_secret: SENTINEL,
+      });
+      exchanges.push(exchange);
+      expect(JSON.stringify(exchange.options)).not.toContain(SENTINEL);
+      for (const field of ['key', 'secret', 'secondary_key', 'secondary_secret'])
+        expect(exchange.options).not.toHaveProperty(field);
+      await exchange.start();
+      expect(construct).toHaveBeenCalledOnce();
+      const [venue, json, capsule] = construct.mock.calls[0];
+      expect(venue).toBe('cryptocom');
+      expect(JSON.parse(json)).toMatchObject({ readCredentialsValid: true, publicDataOnly });
+      for (const field of ['key', 'secret', 'readCredentials']) expect(JSON.parse(json)).not.toHaveProperty(field);
+      expect(JSON.parse(capsule!)).toEqual({ primary: { key: input.key, secret: input.secret } });
+      expect(json + capsule).not.toContain(SENTINEL);
+      expect(json + capsule).not.toContain('fixture-unused-secondary-key');
+      expect(input.secondary_secret).toBe(SENTINEL);
+    },
+  );
 
   it('carries a bad read key as false for native construction refusal without leaking its material', async () => {
     const { construct, exchange } = setup({ secondary_key: SENTINEL, secondary_secret: '' });

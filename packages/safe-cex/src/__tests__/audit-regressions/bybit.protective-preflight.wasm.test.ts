@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { prepareRecordedHttp } from '../support/managedHttp';
 
@@ -19,7 +19,12 @@ type ReadFault = 'none' | 'target' | 'live' | 'history' | 'afterCancel' | 'netwo
 const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
 
-async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) {
+async function account(
+  kind: Kind,
+  scope: Scope = 'Partial',
+  localPage = false,
+  catalogue?: { entered(): void; resume: Promise<void> },
+) {
   const calls: Array<{ role: string; method: string; path: string; query: string; body?: string }> = [];
   let cancelled = false;
   let fault: ReadFault = 'none';
@@ -125,6 +130,10 @@ async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) 
       let retExtInfo: unknown = {};
       switch (path) {
         case '/v5/market/instruments-info':
+          if (role === 'page' && catalogue) {
+            catalogue.entered();
+            await catalogue.resume;
+          }
           result = list(
             parsed.searchParams.has('status')
               ? []
@@ -265,7 +274,7 @@ async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) 
   const source = new RustEngineExchange(
     'bybit',
     { key: 'fixture-key', secret: '', remoteSigner: signer },
-    new DefaultStore(),
+    new FrameStore(),
   );
   cleanup.push(() => source.dispose());
   await source.start();
@@ -284,7 +293,7 @@ async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) 
       workerMirror: true,
       publicDataOnly: false,
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   cleanup.push(() => {
     source.onFrame = undefined;
@@ -361,12 +370,47 @@ async function account(kind: Kind, scope: Scope = 'Partial', localPage = false) 
         expect(page.store.orders.find((row) => row.id === original.orderId)?.price).not.toBe(oldPrice);
       });
     },
-    pageCalls: () => calls.filter((call) => call.role === 'page'),
+    // Public catalogue startup is independent of the private proof/write path.
+    pageCalls: () => calls.filter((call) => call.role === 'page' && !call.path.startsWith('/v5/market/')),
     writes: () => calls.filter((call) => call.role === 'page' && call.method === 'POST'),
   };
 }
 
 describe('Bybit frame-fed COSIGNED protective edit preflight (real WASM)', () => {
+  it('waits for the page catalogue even when source markets and orders are loaded', async () => {
+    let entered = () => {};
+    let release = () => {};
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const resume = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fixture = await account('StopLoss', 'Partial', true, { entered, resume });
+    await started;
+    let settled = false;
+    const result = fixture.edit().then(
+      () => {
+        settled = true;
+        return 'applied';
+      },
+      (error: unknown) => {
+        settled = true;
+        return error;
+      },
+    );
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(fixture.page.store.loaded.markets).toBe(true);
+      expect(settled).toBe(false);
+      expect(fixture.writes()).toEqual([]);
+    } finally {
+      release();
+    }
+    await expect(result).resolves.toBe('applied');
+    expect(fixture.writes().map((call) => call.path)).toEqual(['/v5/order/cancel-batch', '/v5/position/trading-stop']);
+  }, 15_000);
+
   for (const localPage of [false, true]) {
     for (const axis of ['target', 'live', 'history'] as const) {
       for (const transition of ['B', 'ABA', 'unavailable', 'unchanged'] as const) {
@@ -511,24 +555,28 @@ describe('Bybit frame-fed COSIGNED protective edit preflight (real WASM)', () =>
       expect(fixture.rpc).toEqual([]);
     }, 15_000);
   }
-  for (const failure of ['proof', 'signer'] as const) {
-    it(`keeps Unknown and fences new placements if ${failure} is lost after cancellation`, async () => {
-      const fixture = await account('StopLoss');
-      if (failure === 'proof') fixture.fault('afterCancel');
-      else fixture.afterCancel(() => fixture.disableSigner());
-      await expect(fixture.edit()).rejects.toMatchObject({ outcome: 'unknown' });
-      await expect(
-        fixture.page.placeOrder({
-          symbol: 'BTCUSDT',
-          side: OrderSide.Buy,
-          type: OrderType.Limit,
-          amount: 1,
-          price: 100,
-        }),
-      ).rejects.toThrow('uncertain');
-      expect(fixture.writes().map((call) => call.path)).toEqual(['/v5/order/cancel-batch']);
-    }, 15_000);
-  }
+  // AGT-34: this pin was `keeps Unknown and fences new placements if ${failure} is lost
+  // after cancellation`; it moved to #3704's exactly-one-stop rule. Ending Unknown after a
+  // certain (retCode 0) cancel left the position with no stop. Unreadable proof now gets
+  // one final orderId read and then the replacement, and the command's own result says a
+  // second stop may exist; a lost signer cannot send anything, so the outcome is
+  // explicitly Unprotected. Neither leaves an uncertain write, so placements are not fenced.
+  it('places the replacement after a final read when proof is unreadable after cancellation', async () => {
+    const fixture = await account('StopLoss');
+    fixture.fault('afterCancel');
+    await expect(fixture.edit()).rejects.toThrow(/a second stop may exist; check Open Orders/);
+    expect(fixture.writes().map((call) => call.path)).toEqual([
+      '/v5/order/cancel-batch',
+      '/v5/position/trading-stop',
+    ]);
+    expect(fixture.writes()[1]?.body).toContain('"stopLoss":"95"');
+  }, 15_000);
+  it('ends explicitly Unprotected if the signer is lost after cancellation', async () => {
+    const fixture = await account('StopLoss');
+    fixture.afterCancel(() => fixture.disableSigner());
+    await expect(fixture.edit()).rejects.toMatchObject({ protection: 'unprotected' });
+    expect(fixture.writes().map((call) => call.path)).toEqual(['/v5/order/cancel-batch']);
+  }, 15_000);
   it('does not cancel after the captured order changes during a proof read', async () => {
     const fixture = await account('StopLoss');
     const gate = fixture.pauseProof();

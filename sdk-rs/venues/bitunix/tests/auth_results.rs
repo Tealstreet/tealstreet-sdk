@@ -569,7 +569,37 @@ fn host_pause_blocks_healthy_keys_initial_continuations_ticks_and_lost_read_repa
 #[test]
 fn retries_back_off_per_key_to_the_cap_and_only_current_success_resets_them() {
     let (mut e, initial) = started(true);
-    let mut r = http(&initial, "get_pending_positions");
+    // Settle startup before opening: an in-flight overlap would correctly arm
+    // a separate dirty-read repair, which is not this key's refusal backoff.
+    let initial_positions = http(&initial, "get_pending_positions");
+    answer(
+        &mut e,
+        &initial_positions,
+        0.0,
+        200,
+        "",
+        r#"{"code":0,"data":{"positionList":[]}}"#,
+    );
+    // A live private session: opened promptly, then silent until its first pong.
+    let socket = initial
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.contains("/private/") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(0.0, Event::WsOpened { socket });
+    e.handle(
+        0.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"op":"login","data":{"result":true}}"#,
+        },
+    );
+    let opened: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
+    let mut r = http(&opened, "get_pending_positions");
     let mut now = 100.0;
     for nominal in [1000.0, 2000.0, 4000.0, 8000.0, 16000.0, 30000.0, 30000.0] {
         let failure = answer(&mut e, &r, now, 200, "", r#"{"code":10004}"#);
@@ -600,14 +630,50 @@ fn retries_back_off_per_key_to_the_cap_and_only_current_success_resets_them() {
         r#"{"code":0,"data":{"positionList":[]}}"#,
     );
     assert_eq!(auth(&recovered).last().unwrap().2, AuthOutcome::Accepted);
+    // Acceptance itself resets the read backoff, before any socket close can
+    // contribute. Drive another read on this same authenticated connection.
+    e.handle(
+        now + 1.0,
+        Event::Command(safe_cex_engine::Command::Venue {
+            command: 9901,
+            action: safe_cex_engine::VenueAction::ReadPositions,
+        }),
+    );
+    let actions = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect::<Vec<_>>();
+    let next = http(&actions, "get_pending_positions");
+    let failure = answer(&mut e, &next, now + 2.0, 200, "", r#"{"code":10004}"#);
+    let (timer, timer_at) = retry(&failure, now + 2.0);
+    let actions = fired(&mut e, timer, timer_at);
+    let next = http(&actions, "get_pending_positions");
+    let now = timer_at + 1.0;
+    answer(
+        &mut e,
+        &next,
+        now,
+        200,
+        "",
+        r#"{"code":0,"data":{"positionList":[]}}"#,
+    );
     // Opening the private socket starts a fresh read, without resetting failures itself.
-    let socket = initial
-        .iter()
+    // The live session closes and the engine reconnects; the test follows the new socket.
+    e.handle(now + 1.0, Event::WsClosed { socket, code: 1006 });
+    let (timer, at) = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
         .find_map(|a| match a {
-            Action::WsConnect { socket, url, .. } if url.contains("/private/") => Some(*socket),
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
         })
-        .unwrap();
+        .expect("the private reconnect backoff");
+    let socket = fired(&mut e, timer, at)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.contains("/private/") => Some(socket),
+            _ => None,
+        })
+        .expect("the private reconnect");
+    let now = at;
     e.handle(now + 1.0, Event::WsOpened { socket });
     let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
         .into_iter()
@@ -615,6 +681,122 @@ fn retries_back_off_per_key_to_the_cap_and_only_current_success_resets_them() {
     let r = http(&actions, "get_pending_positions");
     let failed = answer(&mut e, &r, now + 2.0, 200, "", r#"{"code":10004}"#);
     retry(&failed, now + 2.0);
+}
+
+#[test]
+fn private_reconnect_preserves_elevated_positions_read_backoff() {
+    let (mut e, initial) = started(true);
+    answer(
+        &mut e,
+        &http(&initial, "get_pending_positions"),
+        0.0,
+        200,
+        "",
+        r#"{"code":0,"data":{"positionList":[]}}"#,
+    );
+    let socket = initial
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.contains("/private/") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(0.0, Event::WsOpened { socket });
+    e.handle(
+        0.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"op":"login","data":{"result":true}}"#,
+        },
+    );
+    let opened = safe_cex_engine::test_support::prepared_now(&mut e);
+    let failed = answer(
+        &mut e,
+        &http(&opened, "get_pending_positions"),
+        100.0,
+        200,
+        "",
+        r#"{"code":10004}"#,
+    );
+    let (timer, at) = retry(&failed, 100.0);
+    let actions = fired(&mut e, timer, at);
+    let now = at + 1.0;
+    let failed = answer(
+        &mut e,
+        &http(&actions, "get_pending_positions"),
+        now,
+        200,
+        "",
+        r#"{"code":10004}"#,
+    );
+    let (read_timer, eligible) = failed
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (1500.0..=2000.0).contains(&(*at_ms - now)) => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("positions backoff is elevated before close");
+    e.handle(now + 1.0, Event::WsClosed { socket, code: 1006 });
+    let actions = safe_cex_engine::test_support::prepared_now(&mut e);
+    let (timer, at) = retry(&actions, now + 1.0);
+    let actions = fired(&mut e, timer, at);
+    let replacement = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect {
+                socket,
+                url,
+                context: Some(context),
+                ..
+            } if url.contains("/private/") => {
+                assert!(
+                    !context.recover,
+                    "a close retains ordinary reconnect routing"
+                );
+                Some(*socket)
+            }
+            _ => None,
+        })
+        .expect("replacement private socket");
+    e.handle(
+        at,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    e.handle(
+        at,
+        Event::WsMessage {
+            socket: replacement,
+            text: r#"{"op":"login","data":{"result":true}}"#,
+        },
+    );
+    let actions = safe_cex_engine::test_support::prepared_now(&mut e);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("get_pending_positions"))),
+        "opening does not bypass the elevated read delay"
+    );
+    let actions = fired(&mut e, read_timer, eligible);
+    let now = eligible + 1.0;
+    let failed = answer(
+        &mut e,
+        &http(&actions, "get_pending_positions"),
+        now,
+        200,
+        "",
+        r#"{"code":10004}"#,
+    );
+    assert!(
+        failed
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. }
+        if (3000.0..=4000.0).contains(&(*at_ms-now)))),
+        "third refusal retains the elevated 4s step across reconnect: {failed:?}"
+    );
 }
 
 #[test]

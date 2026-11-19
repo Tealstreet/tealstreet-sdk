@@ -1382,7 +1382,7 @@ mod product_semantics {
             &mut e,
             &request,
             &envelope(
-                r#"{"instId":"BTC-USD-SWAP","ordId":"9","side":"buy","ordType":"limit","state":"canceled","px":"40000","avgPx":"50000","sz":"10","accFillSz":"5","cTime":"1700000000000","uTime":"1700000000001"}"#,
+                r#"{"instId":"BTC-USD-SWAP","ordId":"9","side":"buy","ordType":"limit","state":"canceled","px":"40000","avgPx":"50000","sz":"10","accFillSz":"5","cTime":"1700000000000","uTime":"1700000000001","fee":"-0.00001","feeCcy":"BTC","pnl":"0.0002"}"#,
             ),
             5.0,
         );
@@ -1390,6 +1390,10 @@ mod product_semantics {
         assert_eq!(rows[0]["amount"], 0.02);
         assert_eq!(rows[0]["filled"], 0.01);
         assert_eq!(rows[0]["status"], "canceled");
+        // Monetary amounts stay in the native settlement currency, not contract/base units.
+        assert_eq!(rows[0]["fees"], 0.00001);
+        assert_eq!(rows[0]["feeAsset"], "BTC");
+        assert_eq!(rows[0]["realizedPnl"], 0.0002);
         e.handle(
             6.0,
             Event::Command(Command::Query {

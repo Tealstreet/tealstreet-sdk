@@ -58,7 +58,9 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
   remain authoritative; it does not invent a cancellation or fill event.
 - Protective-edit proof pages can contain ordinary orders without a trigger
   source. The edited/cancelled stop still requires its exact known `triggerBy`;
-  missing/changed target evidence refuses, and peer lineage remains mandatory.
+  missing/changed target evidence fails the proof. A live or executed old stop
+  ends the edit without a replacement, and other failures get one final orderId
+  read before the replacement (exactly one stop; see `write-plan.md`).
 - Private reconnects require the existing correlated auth/subscription handshake
   and REST snapshots. A timeout/transport failure is not proof of a rejected
   order; retain the existing identity-based reconciliation before retrying.
@@ -85,6 +87,18 @@ a known rejection nor Unknown grants a resend. Contradictory rows/IDs, malformed
 replies, ambiguous HTTP statuses, native `429`/`10018`, and protective edits that
 may already have cancelled a stop retain Unknown and Open Orders guidance.
 This per-engine budget cannot account for another app or engine using the same UID.
+
+Create-batch may acknowledge a reduce-only peer resize alongside the new order.
+Immediately before dispatch, the native plan snapshots bounded open, nonvirtual,
+same-symbol/same-side reduce-only peer IDs, only for an entirely reduce-only batch.
+Aligned response/status rows may subtract those known peers; requested echoes
+match their targets, and a single remaining unnamed identity is unambiguous.
+Multiple unnamed new identities, foreign/duplicate IDs, conflicting echoes,
+misaligned arrays or a rejected peer remain Unknown without resending. The peer
+is never a caller result or algo-owned order; its private stream owns its state.
+Scope decoding shares the acknowledgement field codec, and duplicate checks
+borrow identities before moving caller results. Membership checks copy no ID strings.
+This follows Bybit's documented [reduce-only resizing](https://www.bybit.com/en/help-center/article/Reduce-Only-Order?category=5f2fb74e9c8b771130).
 
 ## Browser reachability and beta gates
 
@@ -146,9 +160,39 @@ and prevents an unavailable terminal slice from refusing the default history.
 Terminal bounds use the shared integer wire-timestamp conversion after clipping;
 fractional calibration, default query bounds and scheduling clocks are unchanged.
 Caller deadlines, read-key selection, pacing, cursors and partial-row markers
-remain shared with the original walk. This does not recover terminal rows the
-venue no longer retains.
+remain shared with the original walk.
 
+A successful order-history result whose effective start precedes that 24-hour
+boundary at completion (including time spent fetching pages) carries
+`incompleteReason: "retentionLimit"`, including an empty result.
+The diagnostic names the unfilled `Cancelled`/`Rejected`/`Deactivated` population;
+older filled orders still return. Omitted starts use V5's seven-day default before
+the supplied end (or now). Ranges still inside retention at completion retain
+their usual completeness.
+A failed later page preserves its more specific incomplete reason.
+Frequent reads while an authenticated engine exists can collect those terminal
+rows before expiry. This does not recover expired rows or provide durable capture
+while no engine is running; deeper backfill cannot close that retention gap.
+
+
+## Later-page history failure diagnostics
+
+Closed-PnL and query history capture their closed native operation when binding
+an owned read. If a later page fails after accepted rows, the original result
+remains incomplete with reason `laterPageFailed`. Its existing command-attributed
+marker also carries `historyOperation`, `historyFailureKind`, and an optional
+allowlisted `historyVenueCode`; unlisted native codes become `other`. Messages,
+URLs, cursor tokens, credentials and row values are not diagnostic metadata.
+The non-default engine feature `history-page-diagnostics` is enabled by Bybit;
+other families do not opt into these additional native fields.
+
+The browser host and SDK completeness helpers retain those facts as optional
+`failure: { operation, kind, venueCode? }` beside the positive incomplete marker,
+through mapping and worker/hosted JSON. This distinguishes a closed-PnL failure
+from an auxiliary order-history failure without treating a retained prefix as
+complete coverage. An earlier missing-coverage reason remains authoritative;
+first-page failures and serialization failures still reject. These diagnostics
+do not change requests, deadlines, retry policy, pacing or writes.
 ## HyroTrader auth refusal during admission
 
 A current, correlated `auth` acknowledgement with explicit `success:false` and
@@ -158,3 +202,10 @@ credential, changing resident ownership, or authorizing any write. The numeric
 code is retained without interpreting its cause; raw reply text is not copied.
 Missing/null success, other codes, subscription responses, stale request IDs and
 transport/handshake timeouts retain their existing uncertainty and retry behavior.
+
+## Execution-history fees
+
+Historical fills preserve the signed `execFee`: positive is a cost and negative
+is a maker rebate. The transaction-log income row uses the opposite cash-flow
+sign. Missing, empty or invalid execution fees stay absent; an explicitly
+reported zero remains zero. Timestamps, pagination and order identity are unchanged.

@@ -1,4 +1,7 @@
 //! Real installed identities, physical preparation and original Read custody.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::request_context::{Claim, HttpAction, Preparation, Prepared};
 use safe_cex_engine::signing::{CredentialSetupPolicy, IdentitySetupPolicy, SigningPolicy};
@@ -279,7 +282,7 @@ fn installed_primary_literal_signature_and_identity_are_store_inert() {
         done(&reply(&mut e, &request, NOW), 42),
         [r#"{"userId":"mexc:64a04c6ee432d0c9370920d0"}"#]
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     assert!(reply(&mut e, &request, NOW).is_empty());
 }
 #[test]
@@ -403,7 +406,7 @@ fn private_history_retains_primary_with_a_secondary_installed() {
         "7aab839b166e3a062398132a47634cced8ff9e1f5a7e31028e986e33c04549e4"
     );
     assert_eq!(done(&reply(&mut e, &request, NOW), 44), ["[]"]);
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     assert!(reply(&mut e, &request, NOW).is_empty());
 }
 #[test]
@@ -551,7 +554,7 @@ fn nonfinite_owned_identity_delivery_settles_without_leaking_the_original_root()
                 | Action::WsSend { .. }
                 | Action::Notice(Notice::AccountAuth { .. })
         )));
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [0, 0, 0, 1, 0]);
         let next = ask_at(&mut e, 42, NOW + 1.);
         assert!(e.http_preparation_pending(next.0));
     }

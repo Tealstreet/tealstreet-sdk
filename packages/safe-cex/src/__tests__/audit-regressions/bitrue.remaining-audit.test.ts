@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
 import { ENDPOINTS } from '../reference/bitrue/bitrue.types';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
 
 const createExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   return { exchange: new BitrueExchange('bitrue', { key: 'test-key', secret: 'test-secret' }, store), store };
 };
 
@@ -28,9 +29,14 @@ const storedOrder = (id: string, symbol: string) => ({
 describe('audit regression: Bitrue remaining reconciliation and market limits', () => {
   it('keeps a failed per-symbol order read scoped to that symbol and uses the helper-wired read client', async () => {
     const { exchange, store } = createExchange();
-    store.update({
-      orders: [storedOrder('btc-order', 'E-BTC-USDT'), storedOrder('eth-order', 'E-ETH-USDT')],
-    });
+    store.apply(
+      nativeFixture(
+        {
+          orders: [storedOrder('btc-order', 'E-BTC-USDT'), storedOrder('eth-order', 'E-ETH-USDT')],
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     const get = vi.fn().mockRejectedValue(new Error('temporary order read failure'));
     exchange.xhr = { get } as any;

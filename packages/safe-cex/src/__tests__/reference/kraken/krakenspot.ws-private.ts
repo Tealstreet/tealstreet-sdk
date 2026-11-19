@@ -1,7 +1,9 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { KrakenSpotExchange } from './krakenspot.exchange';
 
-import { LogSeverity, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../../types';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { LogSeverity, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../../types';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, ORDER_TYPE } from './krakenspot.types';
 
 // Kraken Spot WS v2 private channels use token-based auth:
@@ -144,7 +146,14 @@ export class KrakenSpotPrivateWebsocket extends BaseWebSocket<KrakenSpotExchange
         const order = this.parseOrder(item);
         if (order) orders.push(order);
       }
-      this.store.addOrUpdateOrdersFull(orders);
+      (() => {
+        const incoming: StoreData['orders'] = orders;
+        return applyReferenceFixture(
+          this.store,
+          { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
       return;
     }
 
@@ -157,10 +166,27 @@ export class KrakenSpotPrivateWebsocket extends BaseWebSocket<KrakenSpotExchange
         if (orderId) {
           const existingOrder = this.store.orders.find((o) => o.id === orderId);
           if (existingOrder) {
-            this.store.addOrUpdateOrder({
-              ...existingOrder,
-              status: OrderStatus.Canceled,
-            });
+            (() => {
+              const incoming: StoreData['orders'] = [
+                {
+                  ...existingOrder,
+                  status: OrderStatus.Canceled,
+                },
+              ];
+              return applyReferenceFixture(
+                this.store,
+                {
+                  orders: [
+                    ...this.store.orders.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
+              );
+            })();
           }
         }
         this.throttledFetchOrders();
@@ -177,12 +203,29 @@ export class KrakenSpotPrivateWebsocket extends BaseWebSocket<KrakenSpotExchange
             const orderQty = parseFloat(item.order_qty || existingOrder.amount.toString());
             const remaining = Math.max(0, orderQty - cumQty);
 
-            this.store.addOrUpdateOrder({
-              ...existingOrder,
-              filled: cumQty,
-              remaining: remaining,
-              status: remaining === 0 ? OrderStatus.Closed : OrderStatus.Open,
-            });
+            (() => {
+              const incoming: StoreData['orders'] = [
+                {
+                  ...existingOrder,
+                  filled: cumQty,
+                  remaining: remaining,
+                  status: remaining === 0 ? OrderStatus.Closed : OrderStatus.Open,
+                },
+              ];
+              return applyReferenceFixture(
+                this.store,
+                {
+                  orders: [
+                    ...this.store.orders.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
+              );
+            })();
 
             // Emit fill event
             this.parent.emitter.emit('fill', {
@@ -200,7 +243,22 @@ export class KrakenSpotPrivateWebsocket extends BaseWebSocket<KrakenSpotExchange
       // New order or update (pending_new, new, etc.)
       const order = this.parseOrder(item);
       if (order) {
-        this.store.addOrUpdateOrder(order);
+        (() => {
+          const incoming: StoreData['orders'] = [order];
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     }
   };
@@ -238,8 +296,8 @@ export class KrakenSpotPrivateWebsocket extends BaseWebSocket<KrakenSpotExchange
       timeInForce = OrderTimeInForce.PostOnly;
     }
 
-    const trigger = item.triggers?.actual_price ??
-      (item.triggers?.price_type === 'static' ? item.triggers?.price : undefined);
+    const trigger =
+      item.triggers?.actual_price ?? (item.triggers?.price_type === 'static' ? item.triggers?.price : undefined);
     const price = parseFloat(trigger ?? item.limit_price ?? item.stop_price ?? item.trigger_price ?? '0');
     const timestamp = item.timestamp ? new Date(item.timestamp).getTime() : Date.now();
 

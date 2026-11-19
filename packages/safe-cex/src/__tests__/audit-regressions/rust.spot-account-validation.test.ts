@@ -4,8 +4,9 @@ import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
@@ -42,10 +43,15 @@ const setup = (reject = true) => {
     return engine;
   });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
-  const store = new DefaultStore();
+  const store = new FrameStore();
   installNativeStartupFrames(engine, store);
   // A reused account store must not turn old loaded flags into validation.
-  store.update({ loaded: { markets: true, tickers: true, orders: true, positions: true, balance: true } });
+  store.apply(
+    nativeFixture(
+      { loaded: { markets: true, tickers: true, orders: true, positions: true, balance: true } },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new RustEngineExchange('hyperliquidspot', { key: 'wallet', secret: 'invalid' }, store);
   exchange.emitter.on('error', () => {});
   exchanges.push(exchange);

@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
-import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType } from '../../types';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
+import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 
 const createVariants = () => [
-  new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new DefaultStore()),
-  new BybitInverseExchange('bybitinverse', { key: 'key', secret: 'secret' }, new DefaultStore()),
+  new BybitExchange('bybit', { key: 'key', secret: 'secret' }, new FrameStore()),
+  new BybitInverseExchange('bybitinverse', { key: 'key', secret: 'secret' }, new FrameStore()),
 ];
 
 describe('Bybit UTA account-wide margin mode', () => {

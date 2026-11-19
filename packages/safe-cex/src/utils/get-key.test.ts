@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
+
 import { v, vn } from './get-key';
 
 describe('get-key', () => {
@@ -27,11 +28,11 @@ describe('get-key', () => {
     });
 
     it('should return undefined for null object', () => {
-      expect(v(null as any, 'key')).toBeUndefined();
+      expect(v(null, 'key')).toBeUndefined();
     });
 
     it('should return undefined for undefined object', () => {
-      expect(v(undefined as any, 'key')).toBeUndefined();
+      expect(v(undefined, 'key')).toBeUndefined();
     });
 
     it('should handle falsy values in object', () => {

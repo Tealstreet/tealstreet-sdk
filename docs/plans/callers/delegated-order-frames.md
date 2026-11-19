@@ -134,7 +134,14 @@ Every `d` includes `accountName`, optional `instanceId`, `intentId`, and `seq`.
 | `order.cancelQueued` | `fingerprint` |
 
 Outcome ID and error fields are always present and nullable. Error objects use
-`message` and optional `outcome: "notSent" | "unknown"`. Receipts echo the input
+`message` and optional `outcome: "notSent" | "rejected" | "unknown"`. The box sends
+`refused` only with `notSent`, or with `rejected` when the engine classified the
+whole order as definitively refused by the venue (no accepted leg, element or
+protective side effect); `message` is then the venue's reason. `rejected` is not
+not-sent proof: the SDK keeps the intent unknown and never resends it. Any other
+native failure, including a partially accepted split or multi-leg placement, is
+`unknown` with `error.outcome: "unknown"`. The router must record and replay
+`refused`/`rejected` like any other box outcome. Receipts echo the input
 `seq`. `outcomeSeq` is a positive JS-safe transport delivery counter, not part
 of a business result or its fingerprint. The box numbers its registration output;
 the router may replace that number on **every** live or replayed outcome with its
@@ -174,7 +181,8 @@ admitted account, after checking the original payload fingerprint and any caller
 | Bitget, Bitget inverse, Bitget USDC; OKX, OKX demo, OKX EU, OKX EU demo; BloFin; Binance PM | The UUID's 32 lowercase hex digits, without hyphens |
 | Bybit variants/HyroTrader; Binance USD-M, Spot, Options; BingX; Bitunix; KuCoin Futures/Spot; Coinbase Futures/Spot; Crypto.com; ApeX Omni; Paradex; Phemex | Original UUID |
 | Lighter, Lighter Robinhood; Binance inverse; AsterDEX; Kraken Futures; MEXC | No caller venue ID: those native adapters do not support one |
-| Backpack; WOO; GRVT | Numeric mapping is a separate follow-up; current native refusal is retained |
+| WOO | No caller venue ID: its positive JS-safe integer rule cannot carry the UUID losslessly, and router and outbox accept only lossless forms |
+| Backpack; GRVT | Numeric mapping is a separate follow-up; current native refusal is retained |
 
 Text/hex encodings preserve all 128 intent bits. They do not change the intent,
 request ID, fingerprint, age or durable router claim. SDK receipts retain the

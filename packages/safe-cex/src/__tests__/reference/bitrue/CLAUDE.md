@@ -694,7 +694,6 @@ The Rust candle-history reader rejects a malformed timestamp anywhere in a
 response before applying the requested time window. It never reports a partial
 or empty successful history by silently dropping malformed rows.
 
-
 ## Rust public discovery resilience
 
 Rust catalogue/ticker reads retry through the shared engine capped exponential
@@ -724,3 +723,13 @@ REST: explicit conditional1/2 selects SL/TP before execution MARKET/LIMIT.
 Cached authoritative protective children still retain kind, side, parent and
 trigger reference; classification never invents reduce-only or closing provenance.
 Absent/false conditions and unknown trigger kinds retain ordinary type mapping.
+
+## Native retained-reference publication
+
+The retained TypeScript replay oracle publishes complete per-symbol REST order
+censuses through SCXF, replacing that symbol's prior rows (including terminal
+orders) and retaining other symbols. Failed reads preserve the previous scope.
+Protective placement refreshes and the paced full-account sweep use this same
+producer. Successful cancel acknowledgements remove their targets through a
+frame; failed cancels and disposed instances preserve their published state.
+These test producers do not dispatch deleted mutable-store worker methods.

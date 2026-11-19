@@ -1,5 +1,74 @@
 use super::*;
 
+#[test]
+fn reduce_only_scope_matches_the_original_serde_decoder() {
+    fn original(body: &str) -> Option<Vec<(String, String)>> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Target {
+            symbol: String,
+            side: String,
+            reduce_only: Option<bool>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Batch {
+            #[serde(rename = "request")]
+            orders: Vec<Target>,
+        }
+        let batch: Batch = serde_json::from_str(body).ok()?;
+        if batch.orders.is_empty() || batch.orders.iter().any(|row| row.reduce_only != Some(true)) {
+            return None;
+        }
+        Some(
+            batch
+                .orders
+                .into_iter()
+                .map(|row| (row.symbol, row.side))
+                .collect(),
+        )
+    }
+    let row = r#"{"symbol":"BTCUSDT","side":"Sell","reduceOnly":true}"#;
+    let mut bodies = vec![
+        format!(r#"{{"request":[{row}]}}"#),
+        format!(r#"{{"request":[{row},{row}],"ignored":{{"request":null}}}}"#),
+        format!(r#"{{"ignored":1,"ignored":2,"request":[{row}]}}"#),
+        r#"{"request":[{"symbol":"BTC\u0055SDT","side":"S\u0065ll","reduceOnly":true}]}"#.into(),
+        format!(r#"{{"re\u0071uest":[{row}]}}"#),
+        format!("[[{row}]]"),
+        r#"{"request":[["BTCUSDT","Sell",true]]}"#.into(),
+        r#"[[["BTCUSDT","Sell",true]]]"#.into(),
+        r#"{"request":[]}"#.into(),
+        r#"{"request":null}"#.into(),
+        r#"{"request":[["BTCUSDT","Sell"]]}"#.into(),
+        r#"{"request":[["BTCUSDT","Sell",true,0]]}"#.into(),
+        format!(r#"{{"request":[{row}],"request":[{row}]}}"#),
+        r#"{"request":[{"symbol":"BTCUSDT","symbol":"ETHUSDT","side":"Sell","reduceOnly":true}]}"#.into(),
+        r#"{"request":[{"symbol":"BTCUSDT","side":"Sell","reduceOnly":null,"reduceOnly":true}]}"#.into(),
+        r#"{"request":[{"symbol":"BTCUSDT","side":"Sell","reduceOnly":true,"reduce\u004fnly":true}]}"#.into(),
+        "null".into(), "{}".into(), "{".into(),
+    ];
+    for value in ["false", "null", "1", r#""true""#, "{}", "[]"] {
+        bodies.push(format!(
+            r#"{{"request":[{{"symbol":"BTCUSDT","side":"Sell","reduceOnly":{value}}}]}}"#
+        ));
+    }
+    for field in ["symbol", "side"] {
+        for value in ["null", "1", "true", "[]", "{}"] {
+            bodies.push(format!(r#"{{"request":[{row}]}}"#).replace(
+                &format!(
+                    r#""{field}":"{}""#,
+                    if field == "symbol" { "BTCUSDT" } else { "Sell" }
+                ),
+                &format!(r#""{field}":{value}"#),
+            ));
+        }
+    }
+    bodies.push(format!(r#"{{"request":[{}]}}"#, vec![row; 501].join(",")));
+    for body in bodies {
+        assert_eq!(reduce_only_batch_targets(&body), original(&body), "{body}");
+    }
+}
+
 fn refused(body: &str) -> Option<(i64, String)> {
     match answer(body) {
         Ok(Answer::Refused { code, message, .. }) => Some((code, message)),
@@ -11,6 +80,50 @@ fn success(body: &str) -> (Option<&RawValue>, Option<&RawValue>) {
     match answer(body).unwrap() {
         Answer::Success { result, ext } => (result, ext),
         refused => panic!("expected success, got {refused:?}"),
+    }
+}
+
+#[test]
+fn create_peer_cascade_matches_requested_echoes_without_guessing_among_new_rows() {
+    let body = r#"{"retCode":0,"result":{"list":[
+        {"orderId":"new-b","orderLinkId":"caller-b"},
+        {"orderId":"peer","orderLinkId":"old-peer"},
+        {"orderId":"new-a","orderLinkId":"caller-a"}]},
+        "retExtInfo":{"list":[{"code":0},{"code":0},{"code":0}]}}"#;
+    let (result, ext) = success(body);
+    assert_eq!(
+        created_rows(
+            result,
+            ext,
+            &[Some("caller-a"), Some("caller-b")],
+            &["peer"]
+        ),
+        Ok(vec![
+            Row::Accepted("new-a".into()),
+            Row::Accepted("new-b".into())
+        ])
+    );
+    assert_eq!(
+        created_rows(result, ext, &[None, None], &["peer"]),
+        Err(Malformed)
+    );
+    for response in [
+        body.replace("old-peer", "caller-a"),
+        body.replace("new-b", "new-a"),
+        body.replace("\"code\":0", "\"code\":110007"),
+        body.replace("\"orderId\":\"peer\"", "\"orderId\":\"foreign\""),
+    ] {
+        let (result, ext) = success(&response);
+        assert_eq!(
+            created_rows(
+                result,
+                ext,
+                &[Some("caller-a"), Some("caller-b")],
+                &["peer"]
+            ),
+            Err(Malformed),
+            "{response}"
+        );
     }
 }
 
@@ -83,7 +196,7 @@ fn created_rows_match_by_count_echo_and_unique_ids() {
         "retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110007,"msg":"no balance"}]}}"#;
     let (result, ext) = success(body);
     assert_eq!(
-        created_rows(result, ext, &[Some("c1"), Some("c2")]),
+        created_rows(result, ext, &[Some("c1"), Some("c2")], &[]),
         Ok(vec![
             Row::Accepted("n1".into()),
             Row::Refused {
@@ -94,27 +207,30 @@ fn created_rows_match_by_count_echo_and_unique_ids() {
     );
     // Swapped echoes prove nothing about which request was accepted.
     assert_eq!(
-        created_rows(result, ext, &[Some("c2"), Some("c1")]),
+        created_rows(result, ext, &[Some("c2"), Some("c1")], &[]),
         Err(Malformed)
     );
     // Wrong counts, missing statuses and positional rows are malformed.
-    assert_eq!(created_rows(result, ext, &[Some("c1")]), Err(Malformed));
     assert_eq!(
-        created_rows(result, None, &[Some("c1"), Some("c2")]),
+        created_rows(result, ext, &[Some("c1")], &[]),
+        Err(Malformed)
+    );
+    assert_eq!(
+        created_rows(result, None, &[Some("c1"), Some("c2")], &[]),
         Err(Malformed)
     );
     let (twice, twice_ext) = success(
         r#"{"retCode":0,"result":{"list":[{"orderId":"n1"},{"orderId":"n1"}]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#,
     );
     assert_eq!(
-        created_rows(twice, twice_ext, &[None, None]),
+        created_rows(twice, twice_ext, &[None, None], &[]),
         Err(Malformed)
     );
     // A refused row that names an order may have placed it.
     let (named, named_ext) = success(
         r#"{"retCode":0,"result":{"list":[{"orderId":"n1"}]},"retExtInfo":{"list":[{"code":110007,"msg":"no balance"}]}}"#,
     );
-    assert_eq!(created_rows(named, named_ext, &[None]), Err(Malformed));
+    assert_eq!(created_rows(named, named_ext, &[None], &[]), Err(Malformed));
     for body in [
         r#"{"retCode":0,"result":{"list":[["n1","c1"]]},"retExtInfo":{"list":[{"code":0}]}}"#,
         r#"{"retCode":0,"result":{"list":[{"orderId":"n1","orderLinkId":"c1"}]},"retExtInfo":{"list":[[0,"OK"]]}}"#,
@@ -124,7 +240,7 @@ fn created_rows_match_by_count_echo_and_unique_ids() {
     ] {
         let (result, ext) = success(body);
         assert_eq!(
-            created_rows(result, ext, &[Some("c1")]),
+            created_rows(result, ext, &[Some("c1")], &[]),
             Err(Malformed),
             "{body}"
         );
@@ -139,7 +255,7 @@ fn create_batch_unrequested_server_echoes_do_not_contradict_accepted_children() 
         );
         let (result, ext) = success(&body);
         assert_eq!(
-            created_rows(result, ext, &[None, None]),
+            created_rows(result, ext, &[None, None], &[]),
             Ok(vec![
                 Row::Accepted("first".into()),
                 Row::Accepted("second".into())
@@ -154,7 +270,7 @@ fn assert_create_echo_conflict(first: &str, second: &str, links: &[Option<&str>]
     ]},"retExtInfo":{"list":[{"code":0},{"code":0}]}})
     .to_string();
     let (result, ext) = success(&body);
-    assert_eq!(created_rows(result, ext, links), Err(Malformed));
+    assert_eq!(created_rows(result, ext, links, &[]), Err(Malformed));
     let diagnostic = create_diagnostic(result, ext, links);
     assert!(diagnostic.contains(if links.contains(&Some(first)) {
         "echo=requested-elsewhere"
@@ -184,7 +300,10 @@ fn create_batch_unsolicited_echo_cannot_duplicate_a_refused_rows_echo() {
     let (result, ext) = success(
         r#"{"retCode":0,"result":{"list":[{"orderId":"first","orderLinkId":"server-link"},{"orderId":"","orderLinkId":"server-link"}]},"retExtInfo":{"list":[{"code":0},{"code":110007}]}}"#,
     );
-    assert_eq!(created_rows(result, ext, &[None, None]), Err(Malformed));
+    assert_eq!(
+        created_rows(result, ext, &[None, None], &[]),
+        Err(Malformed)
+    );
 }
 
 #[test]
@@ -193,7 +312,7 @@ fn create_batch_keeps_distinct_unrequested_echoes_separate_from_requested_ids() 
         r#"{"retCode":0,"result":{"list":[{"orderId":"first","orderLinkId":"server-first"},{"orderId":"second","orderLinkId":"caller-b"}]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#,
     );
     assert_eq!(
-        created_rows(result, ext, &[None, Some("caller-b")]),
+        created_rows(result, ext, &[None, Some("caller-b")], &[]),
         Ok(vec![
             Row::Accepted("first".into()),
             Row::Accepted("second".into())
@@ -212,7 +331,7 @@ fn create_batch_requested_echo_status_count_and_identity_guards_remain_strict() 
     ] {
         let (result, ext) = success(body);
         assert_eq!(
-            created_rows(result, ext, &[Some("caller-a"), Some("caller-b")]),
+            created_rows(result, ext, &[Some("caller-a"), Some("caller-b")], &[]),
             Err(Malformed)
         );
     }

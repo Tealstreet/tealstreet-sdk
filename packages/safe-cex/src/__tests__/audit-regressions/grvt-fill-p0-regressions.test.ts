@@ -1,17 +1,19 @@
-import { describe, expect, it, vi } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { describe, expect, it, vi } from 'vitest';
+
+import { BaseWebSocket } from '../../exchanges/base.ws';
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide } from '../../types';
+import { ChaserOrderInstance } from '../../webworker/chaserOrder/ChaserOrderInstance';
+import { nativeMarket } from '../cutover/nativeMarket';
 import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 import { GrvtPrivateWebSocket } from '../reference/grvt/grvt.ws-private';
 import { GrvtPublicWebSocket } from '../reference/grvt/grvt.ws-public';
-import { BaseWebSocket } from '../../exchanges/base.ws';
-import { DefaultStore } from '../../store/store.base';
-import { ChaserOrderInstance } from '../../webworker/chaserOrder/ChaserOrderInstance';
-import { OrderSide } from '../../types';
 
 const makeExchange = () => {
-  const exchange = new GrvtExchange('grvt' as any, {} as any, new DefaultStore());
+  const exchange = new GrvtExchange('grvt' as any, {} as any, new FrameStore());
   exchange.grvtTradingAccountId = '7';
   return exchange;
 };
@@ -76,7 +78,7 @@ describe('GRVT fill-verification P0 regression', () => {
       options: {},
       store: {
         marketsById: { BTC_USDT_Perp: { id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' } },
-        markets: [{ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' }],
+        markets: [nativeMarket({ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' })],
       },
       emitter: { emit: vi.fn() },
       log: vi.fn(),
@@ -106,8 +108,8 @@ describe('GRVT fill-verification P0 regression', () => {
       options: {},
       store: {
         markets: [
-          { id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' },
-          { id: 'ETH_USDT_Perp', symbol: 'ETH_USDT_PERP' },
+          nativeMarket({ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' }),
+          nativeMarket({ id: 'ETH_USDT_Perp', symbol: 'ETH_USDT_PERP' }),
         ],
       },
       emitter: { on: vi.fn(), off: vi.fn() },
@@ -160,7 +162,10 @@ describe('GRVT fill-verification P0 regression', () => {
 
     expect((websocket as any).subscriptions.has(subscriptionId)).toBe(false);
     expect((websocket as any).tickerSubscriptions.has('BTC_USDT_Perp')).toBe(false);
-    expect(JSON.parse(send.mock.calls[1][0])).toMatchObject({ method: 'unsubscribe', params: { subscription_id: subscriptionId } });
+    expect(JSON.parse(send.mock.calls[1][0])).toMatchObject({
+      method: 'unsubscribe',
+      params: { subscription_id: subscriptionId },
+    });
   });
 
   it('cancels public ticker batches before disposal so delayed work cannot recreate subscriptions', async () => {
@@ -215,7 +220,9 @@ describe('GRVT fill-verification P0 regression', () => {
     await vi.runAllTimersAsync();
 
     expect((websocket as any).tickerSubscriptions.size).toBe(21);
-    expect(send.mock.calls.filter(([message]) => JSON.parse(message).params?.selectors?.[0] === 'MARKET_20@500')).toHaveLength(1);
+    expect(
+      send.mock.calls.filter(([message]) => JSON.parse(message).params?.selectors?.[0] === 'MARKET_20@500'),
+    ).toHaveLength(1);
 
     vi.useRealTimers();
   });
@@ -252,11 +259,11 @@ describe('GRVT fill-verification P0 regression', () => {
     Object.defineProperty(exchange, 'canSign', { value: true });
     exchange.grvtTradingAccountId = undefined;
     const markets = [
-      {
+      nativeMarket({
         id: 'BTC_USDT_Perp',
         symbol: 'BTC_USDT_PERP',
         limits: { leverage: { min: 1, max: 100 } },
-      },
+      }),
     ];
     const fetchMarkets = vi.fn().mockResolvedValue(markets);
     const updateLimits = vi.fn().mockImplementation(async (currentMarkets) =>
@@ -333,7 +340,9 @@ describe('GRVT fill-verification P0 regression', () => {
     websocket.trackLastReceived = vi.fn();
     websocket.reconnect = vi.fn().mockResolvedValue(undefined);
 
-    websocket.onMessage({ data: JSON.stringify({ error: { code: 1000, message: 'authenticate first' } }) } as MessageEvent);
+    websocket.onMessage({
+      data: JSON.stringify({ error: { code: 1000, message: 'authenticate first' } }),
+    } as MessageEvent);
     await vi.waitFor(() => expect(authenticate).toHaveBeenCalledOnce());
 
     expect(websocket.reconnect).toHaveBeenCalledOnce();
@@ -412,8 +421,9 @@ describe('GRVT fill-verification P0 regression', () => {
     },
   );
 
-  it.each(['-0.25', '0', 'Infinity', 'NaN', '0.25junk', ' 0.25'])
-    ('rejects malformed private WS fill size %j before it can reach a chaser', (size) => {
+  it.each(['-0.25', '0', 'Infinity', 'NaN', '0.25junk', ' 0.25'])(
+    'rejects malformed private WS fill size %j before it can reach a chaser',
+    (size) => {
       const instance = new ChaserOrderInstance({} as any, { size: 1, side: OrderSide.Buy } as any);
       const emit = vi.fn((event: string, fill: any) => {
         if (event === 'fill') instance.addFillAmount(fill.orderId, fill.amount);
@@ -425,7 +435,7 @@ describe('GRVT fill-verification P0 regression', () => {
           marketsById: {
             BTC_USDT_Perp: { id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' },
           },
-          markets: [{ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' }],
+          markets: [nativeMarket({ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' })],
         },
         emitter: { emit },
         log: vi.fn(),
@@ -443,7 +453,8 @@ describe('GRVT fill-verification P0 regression', () => {
 
       expect(emit).not.toHaveBeenCalledWith('fill', expect.anything());
       expect(instance.remainingSize).toBe(1);
-    });
+    },
+  );
 
   it('emits valid private WS fills exactly once with the positive full-string amount', () => {
     const instance = new ChaserOrderInstance({} as any, { size: 1, side: OrderSide.Buy } as any);
@@ -455,7 +466,7 @@ describe('GRVT fill-verification P0 regression', () => {
       options: {},
       store: {
         marketsById: { BTC_USDT_Perp: { id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' } },
-        markets: [{ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' }],
+        markets: [nativeMarket({ id: 'BTC_USDT_Perp', symbol: 'BTC_USDT_PERP' })],
       },
       emitter: { emit },
       log: vi.fn(),
@@ -465,7 +476,10 @@ describe('GRVT fill-verification P0 regression', () => {
     websocket.trackLastReceived = vi.fn();
 
     websocket.onMessage({
-      data: JSON.stringify({ s: 'v1.fill', f: { i: 'BTC_USDT_Perp', ib: true, s: '0.25', p: '100', co: '101', ti: 'ok' } }),
+      data: JSON.stringify({
+        s: 'v1.fill',
+        f: { i: 'BTC_USDT_Perp', ib: true, s: '0.25', p: '100', co: '101', ti: 'ok' },
+      }),
     } as MessageEvent);
 
     expect(emit).toHaveBeenCalledWith('fill', expect.objectContaining({ orderId: '101', amount: 0.25 }));
@@ -561,7 +575,12 @@ describe('GRVT fill-verification P0 regression', () => {
   });
 
   it.each([
-    { pages: [{ r: [], n: 'repeat' }, { r: [], n: 'repeat' }] },
+    {
+      pages: [
+        { r: [], n: 'repeat' },
+        { r: [], n: 'repeat' },
+      ],
+    },
     { pages: [{ r: [], n: 42 }] },
     { pages: [{ r: [] }] },
     { pages: [{ r: 'not-an-array' }] },

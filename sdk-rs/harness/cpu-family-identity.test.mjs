@@ -4,6 +4,7 @@ import test from 'node:test';
 import { collectFamilyIdentity, familyComparisonAuthority, readFamilyIdentity, readFamilyIdentityDirectory } from './cpu-family-identity.mjs';
 import { classifyInitialCase } from './cpu-ci.mjs';
 import { expectedGateCases } from './ci-gate-suites.mjs';
+import { venueFamily } from '../hosts/wasm/js/venues.mjs';
 import { verifyGateSuite } from './verify-gates.mjs';
 import { PUBLIC_REPLAY_PAIRS, performanceFailures, performanceOrder } from './performance-policy.mjs';
 
@@ -23,7 +24,7 @@ async function fixture(suite = 'txflow') {
   for (const arm of ['baseline', 'candidate']) {
     const bytes = { 'safe_cex_wasm_bg.wasm': Buffer.from('real independent WASM bytes'),
       'safe_cex_wasm.js': Buffer.from('real independent glue bytes'), 'package.json': Buffer.from('{"type":"commonjs"}') };
-    const metadata = { schema: 1, sourceHead: authority[arm], runId: '10', family: suite, venue: suite,
+    const metadata = { schema: 1, sourceHead: authority[arm], runId: '10', family: venueFamily(suite), venue: suite,
       target: 'nodejs', profile: 'release', tools: { rustc: 'pinned' }, buildFlags: { wasmOptLevel: '-Oz' },
       hashes: Object.fromEntries(Object.entries(bytes).map(([name, value]) => [name, sha(value)])) };
     for (const [name, value] of Object.entries(bytes)) put(arm, name, value);
@@ -298,7 +299,7 @@ esac
     RUNNER_TEMP: resolve(root, 'runner'), GITHUB_ACTIONS: 'true', GITHUB_RUN_ATTEMPT: '1', GITHUB_RUN_ID: '10' };
   for (const step of steps) {
     const command = step.split('        run: ')[1].trim().replace(/^\|\n/, '')
-      .replaceAll('${{ matrix.venue }}', 'bingx').replaceAll('${{ inputs.replay_artifact }}', 'family');
+      .replaceAll('${{ matrix.family || matrix.venue }}', 'bingx').replaceAll('${{ matrix.venue }}', 'bingx').replaceAll('${{ inputs.replay_artifact }}', 'family');
     const child = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', command], { cwd: root, encoding: 'utf8', env });
     assert.equal(child.status, 0, child.stderr);
   }
@@ -345,6 +346,8 @@ test('the production base collector builds a clean separate parent with a dirty 
   put('.gitignore', 'sdk-rs/hosts/wasm/pkg/\nsdk-rs/harness/out/\nsdk-rs/target/\n');
   put('sdk-rs/harness/build.sh', `set -eu
 if [ "\u0024{FAIL_FAMILY_BUILD:-}" = true ]; then exit 17; fi
+test "$1" = --venue
+test "$2" = binance
 test ! -e candidate.txt
 test ! -e generated.json
 test ! -e sdk-rs/target/candidate-cache
@@ -366,7 +369,7 @@ writeFileSync(out+'/build.json',JSON.stringify({sourceHead:execFileSync('git',['
 `);
   git('add', '.'); git('commit', '-qm', 'base'); const baseline = git('rev-parse', 'HEAD');
   put('candidate.txt', 'candidate'); git('add', '.'); git('commit', '-qm', 'candidate'); const candidate = git('rev-parse', 'HEAD');
-  const authority = { candidate, baseline, candidateTree: git('rev-parse', 'HEAD^{tree}'), runId: '10', suite: 'txflow' };
+  const authority = { candidate, baseline, candidateTree: git('rev-parse', 'HEAD^{tree}'), runId: '10', suite: 'binancepm', family: 'binance' };
   put('candidate.txt', 'generated tracked change');
   put('generated.json', '{"replayGenerated":true}');
   put('sdk-rs/target/candidate-cache', 'original target cache');
@@ -435,4 +438,15 @@ test('a stale accepted difference with a CPU miss still fails the measurement', 
     rationale: 'Previously accepted market limit difference', evidence: 'Pinned old limits' }] }] };
   const result = verifyGateSuite(options);
   assert.ok(result.errors.some(error => error.includes('stale accepted difference')), JSON.stringify(result.errors));
+});
+
+test('isolated Binance product claims compare the same family without borrowing another suite', async () => {
+  for (const suite of ['binance', 'binancespot', 'binanceinverse', 'binancepm', 'binanceoptions']) {
+    const f = await fixture(suite);
+    assert.equal(f.authority.family, 'binance');
+    assert.equal(f.authority.suite, suite);
+    assert.equal(readFamilyIdentity(f).disposition, 'unchanged bytes, not measured');
+    f.state.suite = 'bybit';
+    assert.throws(() => readFamilyIdentity(f), /proof differs/);
+  }
 });

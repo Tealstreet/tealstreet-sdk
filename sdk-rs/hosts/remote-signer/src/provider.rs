@@ -488,6 +488,7 @@ impl Inner {
         let request = Value::Object(request);
         // A declared fixed id (binanceSpot user data) waits for the previous
         // request with that id to settle rather than refusing.
+        let diagnostic_started = tokio::time::Instant::now();
         let deadline = Instant::now() + crate::link::SIGN_TIMEOUT;
         let response = loop {
             match self.link.round_trip(&id, &request).await {
@@ -502,7 +503,11 @@ impl Inner {
             Err(Failure::Suspended | Failure::Aborted) => return Err(SignError::Unavailable),
             // Silence is a slow page, not a failed signer: the socket's worker
             // answers echoes while the page's thread is too busy to sign.
-            Err(Failure::Duplicate | Failure::TimedOut) => {
+            Err(failure @ (Failure::Duplicate | Failure::TimedOut)) => {
+                if failure == Failure::Duplicate {
+                    self.link
+                        .note_timeout(&id, diagnostic_started, None, failure);
+                }
                 self.warn_sign("sign request timed out after 15s");
                 return Err(SignError::TimedOut);
             }

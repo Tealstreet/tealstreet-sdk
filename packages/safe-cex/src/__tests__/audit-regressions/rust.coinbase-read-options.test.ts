@@ -1,8 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 // @vitest-environment node
 import type { Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
@@ -11,18 +6,23 @@ import type { ExchangeOptions } from '../../types';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
-// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
-vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
-
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { directTransport } from '../../transport/direct';
 import { LogSeverity } from '../../types';
 import { consumerFrame } from '../cutover/consumerFrame';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { nativeReadyFrame } from './rust.native-startup.fixtures';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
 
 const accounts: RustEngineExchange[] = [];
 const aliases = ['coinbase', 'coinbasespot'] as const;
@@ -77,7 +77,8 @@ function fixture(name: (typeof aliases)[number], saved: Partial<ExchangeOptions>
     snapshotFrame: () => new Uint8Array(consumerFrame({ markets: [], tickers: [] })),
     wsOpen: idle,
     wsMessage: idle,
-    wsClose: idle, wsRouteExhausted: idle,
+    wsClose: idle,
+    wsRouteExhausted: idle,
     httpStart: idle,
     httpChunk: idle,
     httpEnd: idle,
@@ -100,7 +101,7 @@ function fixture(name: (typeof aliases)[number], saved: Partial<ExchangeOptions>
     ...saved,
     transport: { ...directTransport, rest: route, wsRouting },
   });
-  const exchange = new RustEngineExchange(name, options, new DefaultStore());
+  const exchange = new RustEngineExchange(name, options, new FrameStore());
   accounts.push(exchange);
   const logs = vi.fn();
   exchange.on('log', logs);

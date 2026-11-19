@@ -60,7 +60,8 @@ export type BybitPositionAdapterDeps = {
    * Required as a dependency rather than read off the row because bybit does not put the
    * leg on the closed-PnL row OR on the fill — it exists only on the order axis, so a
    * hedged account is a two-axis join on `orderId`. Returning `undefined` means the join
-   * was unavailable, and the record falls back to `'both'`.
+   * was unavailable. The range stays incomplete until every closing order is joined;
+   * only an explicit `'both'` proves one-way mode.
    */
   resolveLeg?: (orderId: string) => PositionSide | 'both' | undefined;
   /**
@@ -110,19 +111,25 @@ export const aggregateBybitClosedPnl = (
   // previously seen row is wrong the moment two symbols or two hedge legs close
   // interleaved: DOGE@t1, BTC@t2, DOGE@t3 reads as three runs and puts bybit straight
   // back onto per-partial grain, which is the single thing this fold exists to prevent.
-  const buckets = new Map<string, Array<Record<string, any>>>();
+  const buckets = new Map<string, { leg: PositionSide | 'both'; rows: Array<Record<string, any>> }>();
   for (const row of rows) {
-    const leg = deps.resolveLeg?.(String(row.orderId ?? '')) ?? 'both';
+    const orderId = String(row.orderId ?? '');
+    const leg = orderId ? deps.resolveLeg?.(orderId) : undefined;
+    if (leg !== PositionSide.Long && leg !== PositionSide.Short && leg !== 'both') {
+      // Do not publish partial aggregates with keys/counts that change when the
+      // missing order later joins. Leave raw close rows untouched for that retry.
+      return withHistoryCompleteness([], { incomplete: true, reason: 'unresolvedHedgeLeg' });
+    }
     // Compare the entry price NUMERICALLY: bybit returns decimal strings, so "0.07088"
     // and "0.070880" are the same price and must not split a round trip.
     const key = `${row.symbol}|${leg}|${row.side}|${num(row.avgEntryPrice)}`;
     const bucket = buckets.get(key);
-    if (bucket) bucket.push(row);
-    else buckets.set(key, [row]);
+    if (bucket) bucket.rows.push(row);
+    else buckets.set(key, { leg, rows: [row] });
   }
 
   const records: PositionRecord[] = [];
-  for (const bucket of buckets.values()) {
+  for (const { rows: bucket, leg } of buckets.values()) {
     const ordered = [...bucket].sort((a, b) => num(a.updatedTime) - num(b.updatedTime));
     // Within a bucket every row shares symbol, leg, side and entry price, so the only
     // thing separating two round trips is a re-open at the identical average price.
@@ -150,7 +157,7 @@ export const aggregateBybitClosedPnl = (
     // verification pass, and this was found by the ground-truth grader
     // (`yarn history-audit --ground-truth`), which can now prove the fix rather than
     // assume it.
-    const record = foldRun(ordered, deps);
+    const record = foldRun(ordered, deps, leg);
     if (record) records.push(record);
   }
 
@@ -232,7 +239,7 @@ export const aggregateBybitClosedLifecycles = (
     for (const id of lifecycle.closingOrderIds) assigned.add(id);
     // Partial closes belong to a still-open lifecycle, not a closed round trip.
     if (interval.closedAt === undefined || !lifecycle.closingId) continue;
-    const record = foldRun(run, deps);
+    const record = foldRun(run, deps, leg);
     if (
       !record ||
       record.closedAt === undefined ||
@@ -259,14 +266,13 @@ export const aggregateBybitClosedLifecycles = (
   return unresolved ? withHistoryCompleteness(records, { incomplete: true, reason: 'unresolvedLifecycle' }) : records;
 };
 
-const foldRun = (run: Array<Record<string, any>>, deps: BybitPositionAdapterDeps): PositionRecord | null => {
+const foldRun = (run: Array<Record<string, any>>, deps: BybitPositionAdapterDeps, leg: PositionSide | 'both'): PositionRecord | null => {
   const first = run[0];
   const symbol = String(first.symbol ?? '');
   if (!symbol) return null;
 
   // `side` is the closing side, so it inverts to give the position's direction.
   const side = first.side === 'Sell' ? PositionSide.Long : PositionSide.Short;
-  const leg = deps.resolveLeg?.(String(first.orderId ?? '')) ?? ('both' as const);
 
   let closedSize = 0;
   let fees = 0;
@@ -336,7 +342,7 @@ const foldRun = (run: Array<Record<string, any>>, deps: BybitPositionAdapterDeps
     // Closed-PnL joined to ORDERS for the leg — never fills. The distinction is
     // load-bearing: consumers treat a fills fold as path-dependent and unverifiable,
     // while this stays venue-reported and error-local.
-    sourceAxis: deps.resolveLeg ? 'closed-positions+orders' : 'closed-positions',
+    sourceAxis: 'closed-positions+orders',
     closeCount: run.length,
   };
 };

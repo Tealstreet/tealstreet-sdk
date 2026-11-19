@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { ExchangeOptions, OrderSide, OrderTimeInForce, OrderType, PlaceOrderOpts } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { collectAuthParams, getInstruction } from '../reference/backpack/backpack.api';
 import { BackpackExchange } from '../reference/backpack/backpack.exchange';
 import { buildSigningPayload } from '../reference/backpack/backpack.signing';
 import { BackpackOrderRequest, ENDPOINTS, INSTRUCTIONS } from '../reference/backpack/backpack.types';
-import { DefaultStore } from '../../store/store.base';
-import { ExchangeOptions, OrderSide, OrderTimeInForce, OrderType, PlaceOrderOpts } from '../../types';
 
 const btcSymbol = 'BTC_USDC_PERP';
 const solSymbol = 'SOL_USDC_PERP';
@@ -34,21 +35,26 @@ describe('Backpack conservative native order batching', () => {
   let post: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [btcSymbol, solSymbol].map((symbol) => ({
-        id: symbol,
-        symbol,
-        base: symbol.slice(0, 3),
-        quote: 'USDC',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
-        contractSize: 1,
-        takerFee: 0,
-        makerFee: 0,
-      })),
-    });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        {
+          markets: [btcSymbol, solSymbol].map((symbol) => ({
+            id: symbol,
+            symbol,
+            base: symbol.slice(0, 3),
+            quote: 'USDC',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+            contractSize: 1,
+            takerFee: 0,
+            makerFee: 0,
+          })),
+        },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     exchange = new BackpackExchange('backpack', { key: '', secret: '', testnet: false } as ExchangeOptions, store);
     post = vi.fn();

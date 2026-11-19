@@ -131,7 +131,7 @@ const deepFreeze = <T>(value: T): T => {
   if (value === null || typeof value !== 'object') return value;
   if (Object.isFrozen(value)) return value;
   Object.freeze(value);
-  for (const key of Object.keys(value as object) as (keyof T)[]) {
+  for (const key of Object.keys(value) as (keyof T)[]) {
     deepFreeze(value[key]);
   }
   return value;

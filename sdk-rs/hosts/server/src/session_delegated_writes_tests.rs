@@ -31,6 +31,7 @@ struct Tape {
     two_orders: bool,
     closing_limit: bool,
     close_unknown: bool,
+    full_stop: bool,
     closed_positions: Arc<std::sync::atomic::AtomicBool>,
     defer_positions: Arc<std::sync::atomic::AtomicBool>,
     held_positions: Arc<Mutex<Vec<(RequestId, Events)>>>,
@@ -224,6 +225,20 @@ impl Transport for Tape {
             if self.closing_limit {
                 result["result"]["list"][0]["side"] = "Sell".into();
                 result["result"]["list"][0]["reduceOnly"] = true.into();
+            }
+            if self.full_stop {
+                // Bybit's Full position stop: a position setting with no own order quantity.
+                result["result"]["list"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!({
+                    "orderId":"full-stop","orderLinkId":"","symbol":"BTCUSDT",
+                    "orderType":"Market","stopOrderType":"StopLoss","tpslMode":"Full",
+                    "createType":"CreateByStopLoss","side":"Sell","orderStatus":"Untriggered",
+                    "price":"0","qty":"0","cumExecQty":"0","leavesQty":"0",
+                    "triggerPrice":"49000","triggerBy":"MarkPrice","reduceOnly":true,
+                    "closeOnTrigger":true,"timeInForce":"IOC","positionIdx":0,
+                    "createdTime":"1000","updatedTime":"1000"}));
             }
             if self.two_orders {
                 let mut second = result["result"]["list"][0].clone();

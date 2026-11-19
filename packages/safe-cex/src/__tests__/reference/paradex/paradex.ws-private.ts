@@ -1,9 +1,23 @@
-import { Balance, LogSeverity, MarginType, Order, OrderStatus, Position, PositionMode, PositionSide } from '../../../types';
-import { createPositionId } from '../../../utils/createPositionId';
+import type { StoreData } from '../../../generated/StoreData';
+
 import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { FrameStore } from '../../../store/frameStore';
+import {
+  Balance,
+  LogSeverity,
+  MarginType,
+  Order,
+  OrderStatus,
+  Position,
+  PositionMode,
+  PositionSide,
+} from '../../../types';
+import { createPositionId } from '../../../utils/createPositionId';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { ParadexExchange } from './paradex.exchange';
-import { BASE_WS_URL, isParadexTriggerOrderType, ORDER_SIDE, paradexTimeInForce } from './paradex.types';
 import { decodeParadexMessage } from './paradex.sbe';
+import { BASE_WS_URL, isParadexTriggerOrderType, ORDER_SIDE, paradexTimeInForce } from './paradex.types';
 
 type Data = Record<string, any>;
 type MessageHandlers = {
@@ -31,11 +45,11 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
     // Initialize message handlers
     // Note: Use channel prefix matching to handle channels like "orders.ALL", "orders.BTC-USD-PERP", etc.
     this.messageHandlers = {
-      'ping': [() => this.handlePongEvent()],
-      'pong': [() => this.handlePongEvent()],
+      ping: [() => this.handlePongEvent()],
+      pong: [() => this.handlePongEvent()],
       'orders.ALL': [(data: Data) => this.handleOrderUpdate(data)],
-      'positions': [(data: Data) => this.handlePositionUpdate(data)],
-      'balance_events': [(data: Data) => this.handleBalanceUpdate(data)],
+      positions: [(data: Data) => this.handlePositionUpdate(data)],
+      balance_events: [(data: Data) => this.handleBalanceUpdate(data)],
       'fills.ALL': [(data: Data) => this.handleFillUpdate(data)],
     };
   }
@@ -97,9 +111,14 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
           // The documented result is {node_id}; older servers returned {}.
           if (this.authRequestId !== undefined && data.id === this.authRequestId && !this.authenticated) {
             const result = data.result;
-            if (!result || typeof result !== 'object' || Array.isArray(result) ||
+            if (
+              !result ||
+              typeof result !== 'object' ||
+              Array.isArray(result) ||
               Object.keys(result).some((key) => key !== 'node_id') ||
-              ('node_id' in result && (typeof result.node_id !== 'string' || !result.node_id))) return;
+              ('node_id' in result && (typeof result.node_id !== 'string' || !result.node_id))
+            )
+              return;
             this.authenticated = true;
             this.parent.log('Paradex private WebSocket authenticated', LogSeverity.Info);
 
@@ -141,13 +160,26 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
     }
   };
 
+  private terminalOrderIds = new Set<string>();
+  filterSnapshotOrders = (orders: Order[]) => orders.filter((order) => !this.terminalOrderIds.has(order.id));
+
   private handleOrderUpdate = (data: any) => {
     try {
       const order = data.data;
       const side = ORDER_SIDE[order.side];
-      const status = order.status === 'CLOSED'
-        ? order.cancel_reason || Number(order.remaining_size) > 0 ? OrderStatus.Canceled : OrderStatus.Closed
-        : this.mapOrderStatus(order.status);
+      const status =
+        order.status === 'CLOSED'
+          ? order.cancel_reason || Number(order.remaining_size) > 0
+            ? OrderStatus.Canceled
+            : OrderStatus.Closed
+          : this.mapOrderStatus(order.status);
+      if (status === OrderStatus.Closed || status === OrderStatus.Canceled) {
+        this.terminalOrderIds.add(order.id);
+        if (this.terminalOrderIds.size > 8192) {
+          const oldest = this.terminalOrderIds.values().next().value;
+          if (oldest !== undefined) this.terminalOrderIds.delete(oldest);
+        }
+      } else if (this.terminalOrderIds.has(order.id)) return;
       const reduceOnly =
         typeof order.reduce_only === 'boolean'
           ? order.reduce_only
@@ -158,7 +190,12 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
 
       // For stop orders, use trigger_price as the price (since _MARKET types have no limit price)
       const isStopOrder = isParadexTriggerOrderType(order.type);
-      const displayPrice = isStopOrder && order.trigger_price ? parseFloat(order.trigger_price) : (order.price ? parseFloat(order.price) : 0);
+      const displayPrice =
+        isStopOrder && order.trigger_price
+          ? parseFloat(order.trigger_price)
+          : order.price
+            ? parseFloat(order.price)
+            : 0;
 
       const update: Order = {
         id: order.id,
@@ -174,7 +211,7 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
         clientOrderId: order.client_id || order.client_order_id || undefined,
         timeInForce: paradexTimeInForce(order),
         lastUpdate: Date.now(),
-        info: order, // Store all raw data from WebSocket
+        info: order, // FrameStore all raw data from WebSocket
       };
 
       // Check for cancel reason and emit error notification
@@ -183,24 +220,45 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
         const cancelReason = this.formatCancelReason(order.cancel_reason);
         const errorMessage = `Order ${order.market} ${order.side} rejected: ${cancelReason}`;
         this.parent.emitAndLogError(errorMessage);
-        this.parent.log(
-          `Order ${order.id} cancel reason: ${order.cancel_reason}`,
-          LogSeverity.Warning
-        );
+        this.parent.log(`Order ${order.id} cancel reason: ${order.cancel_reason}`, LogSeverity.Warning);
       }
 
       // Always update the order in the store with the current status
       // This includes Canceled status, which allows UI to display canceled orders
       // The store will handle removing old orders automatically
-      this.parent.store.addOrUpdateOrder(update);
+      (() => {
+        const incoming: StoreData['orders'] = [update];
+        return applyReferenceFixture(
+          this.parent.store,
+          {
+            orders: [
+              ...this.parent.store.orders.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.parent.store.orders.some((old) => old.id === row.id)),
+            ],
+          },
+          this.parent.store.markets.map((row) => row.symbol),
+        );
+      })();
       if (status === OrderStatus.Closed || status === OrderStatus.Canceled) {
-        this.parent.store.markOrdersTerminal([update], status);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [update];
+          const nativeStatus: StoreData['orders'][number]['status'] = status;
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              orders: this.parent.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status: nativeStatus } : row,
+              ),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
 
-      this.parent.log(
-        `Order ${order.id} status updated to ${status} (raw: ${order.status})`,
-        LogSeverity.Info
-      );
+      this.parent.log(`Order ${order.id} status updated to ${status} (raw: ${order.status})`, LogSeverity.Info);
 
       // Refresh orders after any order event processing (similar to Binance)
       this.throttledFetchOrders();
@@ -214,16 +272,16 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
    */
   private formatCancelReason = (reason: string): string => {
     const reasonMap: Record<string, string> = {
-      'ORDER_SIZE_BELOW_MIN': 'Order size below minimum required',
-      'INSUFFICIENT_MARGIN': 'Insufficient margin/balance',
-      'PRICE_OUT_OF_RANGE': 'Price outside allowed range',
-      'MARKET_CLOSED': 'Market is closed',
-      'POST_ONLY_WOULD_CROSS': 'Post-only order would execute immediately',
-      'INVALID_PRICE': 'Invalid order price',
-      'INVALID_SIZE': 'Invalid order size',
-      'MAX_OPEN_ORDERS': 'Maximum open orders reached',
-      'SELF_TRADE_PREVENTION': 'Self-trade prevention triggered',
-      'USER_CANCELED': 'Canceled by user',
+      ORDER_SIZE_BELOW_MIN: 'Order size below minimum required',
+      INSUFFICIENT_MARGIN: 'Insufficient margin/balance',
+      PRICE_OUT_OF_RANGE: 'Price outside allowed range',
+      MARKET_CLOSED: 'Market is closed',
+      POST_ONLY_WOULD_CROSS: 'Post-only order would execute immediately',
+      INVALID_PRICE: 'Invalid order price',
+      INVALID_SIZE: 'Invalid order size',
+      MAX_OPEN_ORDERS: 'Maximum open orders reached',
+      SELF_TRADE_PREVENTION: 'Self-trade prevention triggered',
+      USER_CANCELED: 'Canceled by user',
     };
 
     return reasonMap[reason] || reason.replace(/_/g, ' ').toLowerCase();
@@ -236,8 +294,16 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
       const side = ORDER_SIDE[fill.side];
       const price = Number(fill.price);
       const amount = Number(fill.size);
-      if (!side || !fill.order_id || !fill.market || !Number.isFinite(price) || price <= 0 ||
-          !Number.isFinite(amount) || amount <= 0) continue;
+      if (
+        !side ||
+        !fill.order_id ||
+        !fill.market ||
+        !Number.isFinite(price) ||
+        price <= 0 ||
+        !Number.isFinite(amount) ||
+        amount <= 0
+      )
+        continue;
       this.seenFills.add(fill.id);
       if (this.seenFills.size > 8192) this.seenFills.delete(this.seenFills.values().next().value!);
       this.parent.emitter.emit('fill', { id: String(fill.order_id), symbol: fill.market, side, price, amount });
@@ -255,8 +321,25 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
       }
 
       if (position.status === 'CLOSED' || parseFloat(position.size) === 0) {
-        const id = createPositionId(position.market, position.side === 'LONG' ? PositionSide.Long : PositionSide.Short, PositionMode.OneWay);
-        this.parent.store.updatePositions([[{ id }, { contracts: 0, notional: 0, unrealizedPnl: 0 }]]);
+        const id = createPositionId(
+          position.market,
+          position.side === 'LONG' ? PositionSide.Long : PositionSide.Short,
+          PositionMode.OneWay,
+        );
+        (() => {
+          const updates: Array<[Pick<StoreData['positions'][number], 'id'>, Partial<StoreData['positions'][number]>]> =
+            [[{ id }, { contracts: 0, notional: 0, unrealizedPnl: 0 }]];
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              positions: this.parent.store.positions.map((row) => {
+                const change = updates.find(([target]) => target.id === row.id);
+                return change ? { ...row, ...change[1] } : row;
+              }),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
+          );
+        })();
         this.hasPendingPositionEvents = true;
         this.throttledFetchPositions();
         return;
@@ -273,7 +356,7 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
         id: createPositionId(
           position.market,
           position.side === 'LONG' ? PositionSide.Long : PositionSide.Short,
-          PositionMode.OneWay
+          PositionMode.OneWay,
         ),
         symbol: position.market,
         side: position.side === 'LONG' ? PositionSide.Long : PositionSide.Short,
@@ -283,19 +366,34 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
         realizedPnl: parseFloat(position.realized_positional_pnl || '0'),
         leverage: parseFloat(position.leverage || '0'),
         entryPrice,
-        liquidationPrice: parseFloat(position.liquidation_price || '0'),
+        liquidationPrice: nativeLiquidationPrice(parseFloat(position.liquidation_price || '0')),
         marginType: MarginType.Cross,
         positionMode: PositionMode.OneWay,
         lastUpdate: position.last_updated_at || position.created_at,
-        info: position, // Store all raw data from WebSocket
+        info: position, // FrameStore all raw data from WebSocket
       };
 
       this.parent.log(
         `Position update: ${update.symbol} ${update.side} ${update.contracts} @ ${update.entryPrice}`,
-        LogSeverity.Debug
+        LogSeverity.Debug,
       );
 
-      this.parent.store.addOrUpdatePosition(update);
+      (() => {
+        const incoming: StoreData['positions'] = [update];
+        return applyReferenceFixture(
+          this.parent.store,
+          {
+            positions: [
+              ...this.parent.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.parent.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.parent.store.markets.map((row) => row.symbol),
+        );
+      })();
 
       // Refresh positions after any position event processing (similar to Binance)
       this.throttledFetchPositions();
@@ -307,12 +405,11 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
   private handleBalanceUpdate = (data: any) => {
     try {
       const payload = data?.data ?? data;
-      const account =
-        Array.isArray(payload)
-          ? payload.find((entry) => entry && typeof entry === 'object')
-          : payload?.data && typeof payload.data === 'object'
-            ? payload.data
-            : payload;
+      const account = Array.isArray(payload)
+        ? payload.find((entry) => entry && typeof entry === 'object')
+        : payload?.data && typeof payload.data === 'object'
+          ? payload.data
+          : payload;
 
       if (!account || typeof account !== 'object') {
         this.parent.log(`Invalid balance payload: ${JSON.stringify(data)}`, LogSeverity.Warning);
@@ -367,7 +464,11 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
         // upnl will be calculated elsewhere as it's readonly
       }
 
-      this.parent.store.update({ balance });
+      applyReferenceFixture(
+        this.parent.store,
+        { balance },
+        this.parent.store.markets.map((row) => row.symbol),
+      );
 
       // Balance update stored
     } catch (err) {
@@ -414,7 +515,19 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
       this.hasPendingPositionEvents = false;
       const positions = await this.parent.fetchPositions();
       if (this.isDisposed || this.parent.isDisposed) return;
-      this.parent.store.addOrUpdatePositionsFull(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.parent.store,
+          {
+            positions: incoming.map((row) => ({
+              ...this.parent.store.positions.find((old) => old.id === row.id),
+              ...row,
+            })),
+          },
+          this.parent.store.markets.map((row) => row.symbol),
+        );
+      })();
     } catch {
       // Silent failure, will retry on next event
     }
@@ -434,12 +547,14 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
         this.authRequestId = requestId;
 
         // Send authentication message using JSON-RPC 2.0 format
-        this.send(JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'auth',
-          params: { bearer: token },
-          id: requestId,
-        }));
+        this.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'auth',
+            params: { bearer: token },
+            id: requestId,
+          }),
+        );
 
         // this.parent.log('Paradex WebSocket authentication sent', LogSeverity.Debug);
       } else {
@@ -451,42 +566,58 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
   };
 
   private subscribeToPrivateChannels = () => {
-    this.send(JSON.stringify({
-      jsonrpc: '2.0', method: 'subscribe', params: { channel: 'account' }, id: this.messageId++,
-    }));
+    this.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'subscribe',
+        params: { channel: 'account' },
+        id: this.messageId++,
+      }),
+    );
     // Subscribe to orders for ALL markets using JSON-RPC 2.0 format
     // Channel format: "orders.ALL" subscribes to all order updates across all markets
-    this.send(JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'subscribe',
-      params: { channel: 'orders.ALL' },
-      id: this.messageId++,
-    }));
+    this.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'subscribe',
+        params: { channel: 'orders.ALL' },
+        id: this.messageId++,
+      }),
+    );
 
     // this.parent.log('Subscribed to orders.ALL for order updates', LogSeverity.Debug);
 
-    this.send(JSON.stringify({
-      jsonrpc: '2.0', method: 'subscribe', params: { channel: 'fills.ALL' }, id: this.messageId++,
-    }));
+    this.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'subscribe',
+        params: { channel: 'fills.ALL' },
+        id: this.messageId++,
+      }),
+    );
 
     // Subscribe to positions
-    this.send(JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'subscribe',
-      params: { channel: 'positions' },
-      id: this.messageId++,
-    }));
+    this.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'subscribe',
+        params: { channel: 'positions' },
+        id: this.messageId++,
+      }),
+    );
 
     // this.parent.log('Subscribed to positions for position updates', LogSeverity.Debug);
 
     // Subscribe to balance events
     // Note: Using balance_events instead of balances for account updates
-    this.send(JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'subscribe',
-      params: { channel: 'balance_events' },
-      id: this.messageId++,
-    }));
+    this.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'subscribe',
+        params: { channel: 'balance_events' },
+        id: this.messageId++,
+      }),
+    );
   };
 
   private mapOrderStatus = (status: string): OrderStatus => {
@@ -527,13 +658,14 @@ export class ParadexPrivateWebSocket extends BaseWebSocket<ParadexExchange> {
     if (!this.isDisposed) {
       try {
         const orders = await this.parent.fetchOrders();
-        this.parent.store.update({
-          orders,
-          loaded: {
-            ...this.parent.store.loaded,
-            orders: true,
+        applyReferenceFixture(
+          this.parent.store,
+          {
+            orders,
+            loaded: { orders: true },
           },
-        });
+          this.parent.store.markets.map((row) => row.symbol),
+        );
       } catch {
         // Silent failure, will retry on next event
       }

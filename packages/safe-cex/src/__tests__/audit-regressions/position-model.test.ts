@@ -100,6 +100,8 @@ describe('bybit position adapter', () => {
   // response mixes settlement currencies and the row itself carries none.
   const deps = {
     account: 'test',
+    // This measured ladder is explicitly one-way; missing joins are covered separately.
+    resolveLeg: () => 'both' as const,
     resolveSettleCurrency: (symbol: string) => (symbol.endsWith('USDC') ? 'USDC' : 'USDT'),
   };
 
@@ -313,7 +315,7 @@ describe('cross-venue equivalence', () => {
           execType: 'Trade',
         },
       ],
-      { account: 'test', resolveSettleCurrency: () => 'USDT' },
+      { account: 'test', resolveSettleCurrency: () => 'USDT', resolveLeg: () => 'both' },
     )[0];
 
     expect(okx.side).toBe(bybit.side);

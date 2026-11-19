@@ -1,10 +1,10 @@
 import type { Execution } from '../types';
-import type { PositionInterval } from './position-intervals';
+import type { FundingRow, PositionInterval } from './position-intervals';
 import type { PositionRecord } from './position.types';
 
 import { classifiedError } from '../commandOutcome';
 import { mapFoldedInterval } from './fold.position-adapter';
-import { attributeFunding, reconstructPositionIntervals } from './position-intervals';
+import { allocateFunding, reconstructPositionIntervals } from './position-intervals';
 
 /**
  * Folding a venue's fills into closed round trips.
@@ -41,6 +41,8 @@ export type BuildRecordsResult = {
   readonly records: PositionRecord[];
   readonly totalFills: number;
   readonly intervals: PositionInterval[];
+  /** Symbol ledger events with no unique complete, closed interval owner. Never duplicated per leg. */
+  readonly unattributedFunding: readonly FundingRow[];
 };
 
 type HistoricalRows<T> = T[] & { readonly incomplete?: boolean };
@@ -69,7 +71,7 @@ export const buildFoldedPositionRecords = async (
 ): Promise<BuildRecordsResult> => {
   const lookbackFrom = options.from - STRADDLE_LOOKBACK_MS;
 
-  const fundingRows: Array<{ symbol: string; timestamp: number; income: number }> = [];
+  const fundingRows: FundingRow[] = [];
   const symbols = new Set<string>();
 
   // Symbols come from what the account ACTUALLY traded. Guessing a list silently measures a
@@ -152,6 +154,7 @@ export const buildFoldedPositionRecords = async (
     for (const list of bySymbol.values()) intervals.push(...reconstructPositionIntervals(list));
   }
 
+  const funding = allocateFunding(intervals, fundingRows);
   const records: PositionRecord[] = [];
   for (const interval of intervals) {
     // Records that closed BEFORE the requested window are lookback artefacts — they exist so
@@ -161,10 +164,12 @@ export const buildFoldedPositionRecords = async (
     const record = mapFoldedInterval(interval, {
       account: options.account,
       resolveSettleCurrency: options.resolveSettleCurrency,
-      resolveFunding: fundingRows.length ? (i) => attributeFunding(i, fundingRows, { hedged: false }) : undefined,
+      resolveFunding: fundingRows.length
+        ? (i) => funding.byInterval.get(i) ?? { funding: 0, attributed: false }
+        : undefined,
     });
     if (record) records.push(record);
   }
 
-  return { records, totalFills, intervals };
+  return { records, totalFills, intervals, unattributedFunding: funding.unattributedFunding };
 };

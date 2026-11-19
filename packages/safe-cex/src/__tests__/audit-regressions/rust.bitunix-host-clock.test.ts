@@ -2,13 +2,14 @@
 import type { Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 
-import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { afterEach, expect, it, vi } from 'vitest';
 
+import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { virtualClock } from '../../utils/virtualClock';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
@@ -36,9 +37,13 @@ it.each([true, false])('preserves the explicit Bitunix clock despite legacy host
       return JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://clock.invalid/private', channel: 'private' }]);
     },
     command: idle,
-    wsOpen: (_socket, now) => { loginTimes.push(now); return '[]'; },
+    wsOpen: (_socket, now) => {
+      loginTimes.push(now);
+      return '[]';
+    },
     wsMessage: idle,
-    wsClose: idle, wsRouteExhausted: idle,
+    wsClose: idle,
+    wsRouteExhausted: idle,
     httpStart: idle,
     httpChunk: idle,
     httpEnd: idle,
@@ -47,13 +52,25 @@ it.each([true, false])('preserves the explicit Bitunix clock despite legacy host
     takeFrame: () => undefined,
     snapshotFrame: () => new Uint8Array(),
   };
-  const store = new DefaultStore();
-  store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   installNativeStartupFrames(engine, store);
-  setWasmEngineLoader(async () => ({ WasmEngine: function () { return engine; } as unknown as WasmEngineModule['WasmEngine'] }));
+  setWasmEngineLoader(async () => ({
+    WasmEngine: function () {
+      return engine;
+    } as unknown as WasmEngineModule['WasmEngine'],
+  }));
   setRustEngineTransport(() => ({
     now: () => Date.now(),
-    connect: (_url, callbacks) => { handlers = callbacks; return { send: () => {}, close: () => {} }; },
+    connect: (_url, callbacks) => {
+      handlers = callbacks;
+      return { send: () => {}, close: () => {} };
+    },
     request: () => new Promise(() => {}),
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),

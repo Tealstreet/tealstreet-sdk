@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { BybitExchange } from './__tests__/reference/bybit/bybit.exchange';
-import { DefaultStore } from './store/store.base';
+import { FrameStore } from './store/frameStore';
 import { reportEvent, reportException, setTelemetrySink } from './telemetry';
 import { directTransport } from './transport/direct';
 
@@ -40,7 +40,7 @@ describe('telemetry sink', () => {
     const exchange = new BybitExchange(
       'bybit',
       { key: '', secret: '', publicDataOnly: true, transport: directTransport },
-      new DefaultStore(),
+      new FrameStore(),
     );
     try {
       exchange.emitAndLogError(new Error('venue said no'));

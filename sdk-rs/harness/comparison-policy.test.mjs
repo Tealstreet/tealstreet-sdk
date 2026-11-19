@@ -66,3 +66,21 @@ test('normalization preserves reported base numeric strings and enums and does n
   const zeroOrder = structuredClone(unavailable); zeroOrder.orders[0].price = 0;
   assert.ok(compareSnapshots(snapshot(unavailable), snapshot(zeroOrder)).some((error) => error.includes('orders[0].price')));
 });
+
+test('optional TIF absence is explicit for every order type without hiding reported values', () => {
+  for (const type of ['limit', 'market', 'stop_market']) {
+    const account = source();
+    account.orders = [{ id: 'order', symbol: 'BTC', type }];
+    assert.equal(normalize(account, { compareAllOrderTimeInForce: true }).orders[0].timeInForce, null);
+    account.orders[0].timeInForce = 'PostOnly';
+    assert.equal(normalize(account, { compareAllOrderTimeInForce: true }).orders[0].timeInForce, 'PostOnly');
+  }
+});
+
+test('venues without full-order TIF comparison retain their existing limit-only scope', () => {
+  const account = source();
+  account.orders = [{ id: 'order', symbol: 'BTC', type: 'stop_market', timeInForce: 'GoodTillCancel' }];
+  assert.equal(normalize(account).orders[0].timeInForce, undefined);
+  account.orders[0].type = 'limit';
+  assert.equal(normalize(account).orders[0].timeInForce, 'GoodTillCancel');
+});

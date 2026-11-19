@@ -1,3 +1,5 @@
+import { requireArray, requireRecord } from './typeChecks.testHelpers';
+
 import { describe, expect, it } from 'vitest';
 
 import type { OemsReadResult } from './prompt';
@@ -22,7 +24,7 @@ describe('boundReadResult', () => {
 
   it('keeps the MOST RECENT candles, not the oldest', () => {
     const { data, truncated } = boundReadResult('getCandles', candles(500));
-    const kept = data as { timestamp: number }[];
+    const kept = requireArray(data).map(requireRecord);
     expect(kept).toHaveLength(OEMS_READ_RESULT_LIMITS.candles);
     expect(kept[kept.length - 1].timestamp).toBe(499);
     expect(truncated).toBe(true);
@@ -38,14 +40,17 @@ describe('boundReadResult', () => {
   it('keeps the levels NEAREST the touch on an order book', () => {
     const side = Array.from({ length: 100 }, (_, i) => ({ price: i, amount: 1, total: 1 }));
     const { data, truncated } = boundReadResult('getOrderbook', { bids: side, asks: side });
-    const book = data as { bids: { price: number }[]; asks: { price: number }[] };
+    const book = requireRecord(data);
     expect(book.bids).toHaveLength(OEMS_READ_RESULT_LIMITS.orderbookLevels);
-    expect(book.bids[0].price).toBe(0);
+    expect(requireRecord(requireArray(book.bids)[0]).price).toBe(0);
     expect(truncated).toBe(true);
   });
 
   it('caps an ordinary row list', () => {
-    const { data } = boundReadResult('getMarkets', Array.from({ length: 500 }, (_, i) => ({ symbol: `S${i}` })));
+    const { data } = boundReadResult(
+      'getMarkets',
+      Array.from({ length: 500 }, (_, i) => ({ symbol: `S${i}` })),
+    );
     expect(data).toHaveLength(OEMS_READ_RESULT_LIMITS.rows);
   });
 
@@ -148,7 +153,7 @@ describe('boundReadResults', () => {
         Array.from({ length: 900 }, (_, i) => ({ timestamp: i, open: 1, high: 1, low: 1, close: 1, volume: 1 })),
       ),
     ]);
-    expect((only.data as unknown[]).length).toBeLessThanOrEqual(OEMS_READ_RESULT_LIMITS.candles);
+    expect(requireArray(only.data).length).toBeLessThanOrEqual(OEMS_READ_RESULT_LIMITS.candles);
   });
 
   it('leaves a failed result alone', () => {
@@ -159,13 +164,10 @@ describe('boundReadResults', () => {
 
 describe('a failed read is bounded too', () => {
   it('clips a venue error string', () => {
-    const [only] = boundReadResults([
-      { tool: 'getCandles', args: {}, ok: false, error: 'e'.repeat(5_000) },
-    ]);
+    const [only] = boundReadResults([{ tool: 'getCandles', args: {}, ok: false, error: 'e'.repeat(5_000) }]);
     expect(only.error?.length).toBeLessThanOrEqual(OEMS_READ_RESULT_LIMITS.errorChars);
   });
 });
-
 
 /**
  * The counts, and the merge that keeps them alive across the second pass.
@@ -231,15 +233,13 @@ describe('caps come from the manifest, not from string matching', () => {
 
   it('caps a book by the shape the manifest declares', () => {
     const { data } = boundReadResult('getOrderbook', book(500));
-    expect((data as { bids: unknown[] }).bids).toHaveLength(OEMS_READ_RESULT_LIMITS.orderbookLevels);
+    expect(requireArray(requireRecord(data).bids)).toHaveLength(OEMS_READ_RESULT_LIMITS.orderbookLevels);
   });
 
   it('gives candles the candle allowance and every other list the row one', () => {
-    expect((boundReadResult('getCandles', candles(900)).data as unknown[]).length).toBe(
-      OEMS_READ_RESULT_LIMITS.candles,
-    );
+    expect(requireArray(boundReadResult('getCandles', candles(900)).data).length).toBe(OEMS_READ_RESULT_LIMITS.candles);
     const rows = Array.from({ length: 900 }, (_, index) => ({ symbol: `S${index}` }));
-    expect((boundReadResult('getMarkets', rows).data as unknown[]).length).toBe(OEMS_READ_RESULT_LIMITS.rows);
+    expect(requireArray(boundReadResult('getMarkets', rows).data).length).toBe(OEMS_READ_RESULT_LIMITS.rows);
   });
 
   /**
@@ -250,12 +250,12 @@ describe('caps come from the manifest, not from string matching', () => {
   it('still caps a book sent under a tool name it does not know', () => {
     const { data, truncated } = boundReadResult('not-a-read', book(500));
     expect(truncated).toBe(true);
-    expect((data as { bids: unknown[] }).bids).toHaveLength(OEMS_READ_RESULT_LIMITS.orderbookLevels);
+    expect(requireArray(requireRecord(data).bids)).toHaveLength(OEMS_READ_RESULT_LIMITS.orderbookLevels);
   });
 
   it('treats an unknown tool returning a list as rows, the tighter cap', () => {
     const rows = Array.from({ length: 900 }, (_, index) => ({ symbol: `S${index}` }));
-    expect((boundReadResult('not-a-read', rows).data as unknown[]).length).toBe(OEMS_READ_RESULT_LIMITS.rows);
+    expect(requireArray(boundReadResult('not-a-read', rows).data).length).toBe(OEMS_READ_RESULT_LIMITS.rows);
   });
 });
 

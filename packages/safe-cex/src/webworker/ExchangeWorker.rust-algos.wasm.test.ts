@@ -1,11 +1,15 @@
+import type { TwapLockManager } from './twap/twapLock';
+
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { binanceVenue } from '../../../../sdk-rs/hosts/wasm/js/binance-venue-fixture.mjs';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
+import { FrameStore } from '../store/frameStore';
 import { virtualClock } from '../utils/virtualClock';
 import { ExchangeWorker } from './ExchangeWorker';
-import { setTwapLockManager, type TwapLockManager } from './twap/twapLock';
+import { setTwapLockManager } from './twap/twapLock';
 
 // The local worker on a real `algos` build of the Binance engine (built with
 // `bash sdk-rs/harness/build.sh --venue binance`): chaser and TWAP ops run in
@@ -13,7 +17,7 @@ import { setTwapLockManager, type TwapLockManager } from './twap/twapLock';
 const engine = await loadNodeEngine().catch(() => undefined);
 const algos = typeof (engine?.WasmEngine.prototype as { algoStart?: unknown } | undefined)?.algoStart === 'function';
 
-type Message = { op: string; data?: any };
+type Message = { op: string; data?: any; snapshot?: boolean };
 type Venue = ReturnType<typeof binanceVenue>;
 const workers: ExchangeWorker[] = [];
 
@@ -37,8 +41,14 @@ const startWorker = async () => {
   expect((worker.exchange as RustEngineExchange).runsRustAlgos).toBe(true);
   return { worker, venue, messages };
 };
-const lastStore = (messages: Message[], field: 'activeChasers' | 'activeTWAPs') =>
-  messages.filter((message) => message.op === 'store' && message.data?.[field]).at(-1)?.data[field];
+const lastStore = (messages: Message[], field: 'activeChasers' | 'activeTWAPs') => {
+  const store = new FrameStore();
+  for (const message of messages) {
+    if (message.op === 'frame' && message.data instanceof ArrayBuffer)
+      store.ingest(new Frame(message.data), { snapshot: message.snapshot });
+  }
+  return store.data[field];
+};
 
 beforeEach(() => {
   setTwapLockManager(null);
@@ -148,7 +158,8 @@ const locksFor = (tab: string): TwapLockManager => ({
 });
 const errorsIn = (messages: Message[]) =>
   messages.filter((message) => message.op === 'error').map((message) => JSON.stringify(message.data));
-const lastPersisted = (messages: Message[]) => messages.filter((message) => message.op === 'twap:stateUpdate').at(-1)?.data;
+const lastPersisted = (messages: Message[]) =>
+  messages.filter((message) => message.op === 'twap:stateUpdate').at(-1)?.data;
 const restoredRow = (inFlight: Record<string, unknown>) => ({
   id: 'restored-twap',
   options: TWAP_OPTIONS,
@@ -179,20 +190,23 @@ it.skipIf(!algos)('a started Rust TWAP holds its cross-tab lock until it complet
   expect(heldLocks.size).toBe(0);
 });
 
-it.skipIf(!algos)('a restored Rust TWAP re-places an in-flight slice the venue never received, under its lock', async () => {
-  heldLocks.clear();
-  setTwapLockManager(locksFor('this-tab'));
-  const { worker, venue, messages } = await startWorker();
-  const clientOrderId = 'x-s3vFFRQp0123456789abcdef01234567';
-  worker.handlePayload({ op: 'twap:state', data: [restoredRow({ size: 0.002, clientOrderId })] });
-  await vi.advanceTimersByTimeAsync(300);
-  expect(venue.lookups).toEqual([clientOrderId]);
-  expect(venue.placements.map((order: { origQty: string }) => order.origQty)).toEqual(['0.002']);
-  expect(heldLocks.get('tealstreet-twap:acct:restored-twap')).toBe('this-tab');
-  expect(lastPersisted(messages)['restored-twap'].state).toMatchObject({ ordersSizes: [0.002], ordersExecuted: 1 });
-  await vi.advanceTimersByTimeAsync(31_000);
-  expect(venue.placements).toHaveLength(2);
-});
+it.skipIf(!algos)(
+  'a restored Rust TWAP re-places an in-flight slice the venue never received, under its lock',
+  async () => {
+    heldLocks.clear();
+    setTwapLockManager(locksFor('this-tab'));
+    const { worker, venue, messages } = await startWorker();
+    const clientOrderId = 'x-s3vFFRQp0123456789abcdef01234567';
+    worker.handlePayload({ op: 'twap:state', data: [restoredRow({ size: 0.002, clientOrderId })] });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(venue.lookups).toEqual([clientOrderId]);
+    expect(venue.placements.map((order: { origQty: string }) => order.origQty)).toEqual(['0.002']);
+    expect(heldLocks.get('tealstreet-twap:acct:restored-twap')).toBe('this-tab');
+    expect(lastPersisted(messages)['restored-twap'].state).toMatchObject({ ordersSizes: [0.002], ordersExecuted: 1 });
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(venue.placements).toHaveLength(2);
+  },
+);
 
 it.skipIf(!algos)('a Rust TWAP another tab runs is not restored', async () => {
   heldLocks.clear();
@@ -201,7 +215,9 @@ it.skipIf(!algos)('a Rust TWAP another tab runs is not restored', async () => {
   const { worker, venue, messages } = await startWorker();
   worker.handlePayload({ op: 'twap:state', data: [restoredRow({ size: 0.002, clientOrderId: 'x-s3vFFRQp0' })] });
   await vi.advanceTimersByTimeAsync(6_000);
-  expect(errorsIn(messages)).toContainEqual(expect.stringContaining('TWAP BTCUSDT not restored: it is running in another tab'));
+  expect(errorsIn(messages)).toContainEqual(
+    expect.stringContaining('TWAP BTCUSDT not restored: it is running in another tab'),
+  );
   expect(venue.placements).toEqual([]);
   expect(venue.lookups).toEqual([]);
   expect(lastPersisted(messages)).toEqual({});

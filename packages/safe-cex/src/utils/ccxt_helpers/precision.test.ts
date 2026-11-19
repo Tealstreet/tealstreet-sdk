@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
+
 import {
-  integerPrecisionToAmount,
   countDecimals,
   decimalToPrecision,
+  integerPrecisionToAmount,
   parsePrecision,
   precisionToString,
 } from './precision';
@@ -27,7 +28,7 @@ describe('ccxt_helpers/precision', () => {
 
     it('should return undefined for undefined/null', () => {
       expect(integerPrecisionToAmount(undefined)).toBeUndefined();
-      expect(integerPrecisionToAmount(null as any)).toBeUndefined();
+      expect(integerPrecisionToAmount(null)).toBeUndefined();
     });
 
     it('should handle precision of 1', () => {
@@ -63,7 +64,7 @@ describe('ccxt_helpers/precision', () => {
 
     it('should return 0 for undefined/null', () => {
       expect(countDecimals(undefined)).toBe(0);
-      expect(countDecimals(null as any)).toBe(0);
+      expect(countDecimals(null)).toBe(0);
     });
 
     it('should handle scientific notation', () => {
@@ -92,7 +93,7 @@ describe('ccxt_helpers/precision', () => {
 
     it('should return 0 for undefined/null', () => {
       expect(decimalToPrecision(undefined)).toBe(0);
-      expect(decimalToPrecision(null as any)).toBe(0);
+      expect(decimalToPrecision(null)).toBe(0);
     });
 
     it('should handle number input', () => {
@@ -111,7 +112,7 @@ describe('ccxt_helpers/precision', () => {
 
       it('should return 0 for undefined/null', () => {
         expect(parsePrecision(undefined)).toBe(0);
-        expect(parsePrecision(null as any)).toBe(0);
+        expect(parsePrecision(null)).toBe(0);
       });
     });
 

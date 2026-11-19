@@ -1,6 +1,5 @@
 import { evaluateLiveVarSource } from '../../preprocess/reactiveVars';
 import type { PreprocessContext, PreprocessStore } from '../../preprocess/types';
-import type { ExchangeLike } from '../../types';
 import { BaseCommand } from '../BaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
 
@@ -155,7 +154,7 @@ function formatLiveVarLine(
   ctx: CommandContext,
 ): string {
   const pctx: PreprocessContext = {
-    exchange: ctx.exchange as ExchangeLike | null,
+    exchange: ctx.exchange,
     symbol: ctx.symbol,
     store: ctx.preprocessStore as PreprocessStore,
     accountName: ctx.accountName,

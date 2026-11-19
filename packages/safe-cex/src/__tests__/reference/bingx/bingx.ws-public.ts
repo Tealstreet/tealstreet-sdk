@@ -1,14 +1,16 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook } from '../../../types';
 import type { BingxExchange } from './bingx.exchange';
 
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { v } from '../../../utils/get-key';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { readBlob } from '../../../utils/readBlob';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL } from './bingx.types';
 
 type Data = Array<Record<string, any>>;
@@ -142,18 +144,26 @@ export class BingxPublicWebsocket extends BaseWebSocket<BingxExchange> {
             const market = this.parent.store.marketsBySymbol[ticker.symbol];
             const touchPrices = last && market ? this.parent.deriveTickerBidAsk(market, last) : undefined;
 
-            this.store.updateTicker(ticker, {
-              last: last ?? ticker.last,
-              bid: touchPrices?.bid ?? ticker.bid,
-              ask: touchPrices?.ask ?? ticker.ask,
-              percentage: parseFloat(v(contract, 'changePercentage')),
-              volume: parseFloat(v(contract, 'volumeF')),
-              quoteVolume: parseFloat(v(contract, 'valueF')),
-              mark: parseFloat(v(contract, 'fairPrice')),
-              index: parseFloat(v(contract, 'indexPrice')),
-              fundingRate: parseFloat(v(contract, 'fundingRate')) / 100,
-              fundingTime: 0,
-            });
+            (() => {
+              const target = ticker;
+              const changes: Partial<StoreData['tickers'][number]> = {
+                last: last ?? ticker.last,
+                bid: touchPrices?.bid ?? ticker.bid,
+                ask: touchPrices?.ask ?? ticker.ask,
+                percentage: parseFloat(v(contract, 'changePercentage')),
+                volume: parseFloat(v(contract, 'volumeF')),
+                quoteVolume: parseFloat(v(contract, 'valueF')),
+                mark: parseFloat(v(contract, 'fairPrice')),
+                index: parseFloat(v(contract, 'indexPrice')),
+                fundingRate: parseFloat(v(contract, 'fundingRate')) / 100,
+                fundingTime: 0,
+              };
+              return applyReferenceFixture(
+                this.store,
+                { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+                this.store.markets.map((row) => row.symbol),
+              );
+            })();
           }
         }
       } else {

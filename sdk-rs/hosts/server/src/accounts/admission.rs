@@ -286,7 +286,10 @@ impl Registry {
                 return Ok(None);
             };
             if account.is_public() || !same_handover_settings(&account.fingerprint, fingerprint) {
-                return Err(ProbeRefusal::INVALID);
+                return Err(ProbeRefusal::settings(SettingsConflict::between(
+                    &account.fingerprint,
+                    fingerprint,
+                )));
             }
             if account.handle.disposal_cause().is_some() || !account.running.io_allowed() {
                 return Err(ProbeRefusal::TRANSIENT);
@@ -631,11 +634,30 @@ impl Registry {
             && (account.is_public()
                 || !same_handover_settings(&account.fingerprint, &proof.fingerprint))
         {
-            return Err(ProbeRefusal::INVALID);
+            return Err(ProbeRefusal::settings(SettingsConflict::between(
+                &account.fingerprint,
+                &proof.fingerprint,
+            )));
         }
+        let registry_name = proof.registry_name.clone();
         self.obtain_with_pair(user, init, false, holder, token, outbox, pair, Some(proof))
             .await
             .map_err(|error| {
+                if error == settings::VERIFIED_SETTINGS_DIFFER {
+                    let conflict = self
+                        .accounts
+                        .lock()
+                        .unwrap()
+                        .get(&(user.into(), registry_name))
+                        .map(|account| {
+                            SettingsConflict::between(
+                                &account.fingerprint,
+                                &admission_fingerprint(init),
+                            )
+                        })
+                        .unwrap_or_default();
+                    return ProbeRefusal::settings(conflict);
+                }
                 for reason in [
                     crate::envelope::ModeTransitionRefusal::Busy,
                     crate::envelope::ModeTransitionRefusal::Unavailable,

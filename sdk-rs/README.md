@@ -4,6 +4,23 @@ One exchange engine for the browser worker and Cloudflare Workers
 (WebAssembly) and for servers (native). The design, the gates and the banned
 patterns are in [`docs/plans/RUST_REWRITE.md`](../docs/plans/RUST_REWRITE.md).
 
+The WASM host declarations import shared native capability types from
+`hosts/wasm/js/capabilities.d.mts`. The wire reader re-exports those same types.
+Keep the host's declaration graph independent of the wire reader's SDK store
+projections so standalone Workers consumers do not inherit browser SDK sources.
+`hosts/wasm/js/write-plan-contract.test.mjs` checks that boundary with strict
+NodeNext declarations and no skipped library checks.
+
+Completed market and ticker snapshots release unused parser growth capacity
+before the store builds lookup tables and native UI frames. Live recovery can
+still append an omitted ticker. Keeping the unused catalogue slots through frame
+projection raises the WASM memory high-water mark, which cannot shrink afterward.
+
+Venue-reported positive position leverage is authoritative. Market settings,
+including successful settings writes, only fill unknown position leverage;
+they cannot confirm a new leverage for an existing position. Fills retain each
+hedged side's leverage and the selected margin-mode boundary.
+
 ## Crates
 
 ### Host ownership observation and teardown
@@ -91,6 +108,17 @@ REST seeds and other symbols' traffic cannot supply it. The protective-amend
 freshness limit remains five seconds without confirmation; unknown prices stay
 unknown. Spot, options and Hyro retain their existing snapshot/observation rules.
 
+## Ticker reference seen-times across table replacement
+
+`Store::reference_seen_at` dates a symbol's last, mark and index price on the
+engine host clock; protective-edit freshness gates read it. `Store::set_tickers`
+replaces the table but keeps a surviving symbol's seen and observed times for each
+of those prices whose value is bitwise unchanged (AGT-55). Market rediscovery
+carries existing rows, so re-dating them passed a stale mark as fresh. New symbols
+and changed values are stamped now. A REST refresh that returns an identical
+price is therefore not a new observation; a venue that genuinely re-read it
+reports that with `observe_ticker_fields`.
+
 ## Browser request-failure diagnostics
 
 The JS host emits `http.request_failed` at Debug for failed managed HTTP work,
@@ -102,6 +130,11 @@ fixed API vocabulary survives, all other segments become `:segment`, at most eig
 segments plus `:more`. Origins, queries, fragments, bodies and headers are excluded.
 The SDK adds the actual venue; consumers may retain a bounded recent breadcrumb.
 These diagnostics neither retry requests nor add a second user-facing error.
+The same event carries closed preparation-stage and route-kind labels, an encoded
+standard/tunnel error class (`syntax_error` denotes SyntaxError), and prepare versus
+budget-wait durations capped at one hour. The routing adapter reports actual await
+stages; missing provider observations stay unknown. Wire time is excluded. No raw
+error name, input, account identity, credential or URL enters these fields.
 
 Post-release JS HTTP failures retain a closed cause label in the existing engine
 error string (timeout, disconnect, direct-fetch, response-decode, aborted, disposed,

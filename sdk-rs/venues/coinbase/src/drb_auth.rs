@@ -27,16 +27,91 @@ impl std::fmt::Debug for Session {
 }
 #[derive(Deserialize)]
 struct AuthResult {
+    /// Absent from a connection-scoped WebSocket session (see `connection_session`).
+    #[serde(default)]
     access_token: String,
     expires_in: u32,
-    #[serde(rename = "scope")]
-    _scope: String,
-    token_type: String,
 }
 impl Drop for AuthResult {
     fn drop(&mut self) {
         self.access_token.zeroize();
     }
+}
+/// Names the first rejected public/auth field without echoing any value, so an
+/// operator can diagnose a live refusal without exposing the bearer token.
+fn auth_result_defect(result: &Value, connection_session: bool) -> Option<&'static str> {
+    let Some(fields) = result.as_object() else {
+        return Some("result is not an object");
+    };
+    let token = match fields.get("access_token") {
+        None if connection_session => "",
+        None => return Some("access_token missing"),
+        Some(Value::String(token)) => token,
+        Some(_) => return Some("access_token is not a string"),
+    };
+    if token.is_empty() && !connection_session {
+        return Some("access_token empty");
+    }
+    if token.len() > 16_384 {
+        return Some("access_token too long");
+    }
+    if token
+        .bytes()
+        .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
+    {
+        return Some("access_token contains whitespace or control bytes");
+    }
+    match fields.get("expires_in") {
+        None => return Some("expires_in missing"),
+        Some(v) => match v.as_u64() {
+            None => return Some("expires_in is not a whole number"),
+            Some(0) => return Some("expires_in is zero"),
+            Some(n) if n > u64::from(u32::MAX) => return Some("expires_in out of range"),
+            Some(_) => {}
+        },
+    }
+    match fields.get("scope") {
+        None => return Some("scope missing"),
+        Some(Value::String(_)) => {}
+        Some(_) => return Some("scope is not a string"),
+    }
+    match fields.get("token_type") {
+        None => Some("token_type missing"),
+        Some(Value::String(t)) if t == "bearer" => None,
+        Some(Value::String(_)) => Some("token_type is not bearer"),
+        Some(_) => Some("token_type is not a string"),
+    }
+}
+/// Lists a reply's field names (never values) for diagnostics. Names are
+/// reduced to a safe charset and bounded so a hostile reply cannot smuggle data.
+fn field_names(result: &Value) -> String {
+    let Some(fields) = result.as_object() else {
+        return "non-object".into();
+    };
+    if fields.is_empty() {
+        return "none".into();
+    }
+    let mut names: Vec<String> = fields
+        .keys()
+        .take(16)
+        .map(|k| {
+            k.chars()
+                .take(32)
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        c
+                    } else {
+                        '?'
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    names.sort();
+    if fields.len() > 16 {
+        names.push("...".into());
+    }
+    names.join(",")
 }
 impl Session {
     pub fn new(channel: Channel) -> Self {
@@ -108,19 +183,22 @@ impl Session {
         }
         self.started_ms = started_ms;
         self.clear_token();
+        // The Coinbase gateway authenticates a WebSocket connection itself: its
+        // public/auth reply carries a session id (`sid`) and no bearer token.
+        // WS sessions never emit Authorization, so only their lifetime matters.
+        let connection_session = matches!(self.channel, Channel::WebSocket(_))
+            && result.get("access_token").is_none()
+            && result
+                .get("sid")
+                .is_some_and(|sid| sid.as_str().is_some_and(|s| !s.is_empty()) || sid.is_u64());
+        if let Some(reason) = auth_result_defect(&result, connection_session) {
+            return Err(format!(
+                "drb invalid public/auth result: {reason} (fields: {})",
+                field_names(&result)
+            ));
+        }
         let mut result: AuthResult =
             serde_json::from_value(result).map_err(|_| "drb invalid public/auth result")?;
-        if result.access_token.is_empty()
-            || result.access_token.len() > 16_384
-            || result
-                .access_token
-                .bytes()
-                .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
-            || result.expires_in == 0
-            || result.token_type != "bearer"
-        {
-            return Err("drb invalid public/auth result".into());
-        }
         // Scope must be a string, but an empty scope can be a valid read session.
         let policy_ms: f64 = match self.channel {
             Channel::Http => 15. * 60. * 1000.,
@@ -131,7 +209,9 @@ impl Session {
         if !refresh_ms.is_finite() || refresh_ms <= started_ms {
             return Err("drb invalid authentication expiry".into());
         }
-        self.token = Some(Zeroizing::new(std::mem::take(&mut result.access_token)));
+        if !connection_session {
+            self.token = Some(Zeroizing::new(std::mem::take(&mut result.access_token)));
+        }
         self.refresh_ms = Some(refresh_ms);
         Ok(())
     }

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { FrameStore } from '@tealstreet/safe-cex/src/store/frameStore';
+import { nativeFixture } from '@tealstreet/safe-cex/src/__tests__/cutover/nativeFixture';
 import { OrderSide, OrderType, PositionSide } from '@tealstreet/safe-cex/src/types';
 import { tools, supportedTools } from './tools';
 
@@ -12,18 +14,25 @@ const fixture = (side: PositionSide, unknown = false) => {
     base: 'DOGE',
     quote: 'USDT',
     contractSize: 100,
+    active: true,
     precision: { amount: 100, price: 0.00001 },
-    limits: { amount: { min: 100, max: 44500000 } },
+    limits: { amount: { min: 100, max: 44500000 }, leverage: { min: 1, max: 100 } },
   };
-  const position = { symbol: market.symbol, side, contracts: 26100, extra: { contractsNative: unknown ? 260 : 261 } };
+  const position = {
+    id: `DOGEUSDT:${side}`, symbol: market.symbol, side, contracts: 26100,
+    entryPrice: 0.1, notional: 2610, leverage: 1, unrealizedPnl: 0, liquidationPrice: null,
+    extra: { contractsNative: unknown ? 260 : 261 },
+  };
+  const store = new FrameStore();
+  store.ingest(nativeFixture({ markets: [market], positions: [position] }), { snapshot: true });
   const order = { id: 'close', symbol: market.symbol, type: OrderType.Limit, reduceOnly: true };
   const exchange = {
     name: 'mexc',
     capabilities: { trading: true, positions: true },
     placeOrder,
     updateOrder,
-    store: { markets: [market], positions: [position], orders: [order], tickers: [] },
-    fetchPositions: vi.fn(async () => [position]),
+    store,
+    fetchPositions: vi.fn(async () => store.positions),
     fetchOrders: vi.fn(async () => [order]),
     fetchTickers: vi.fn(async () => [{ symbol: market.symbol, last: 0.1 }]),
   } as never;

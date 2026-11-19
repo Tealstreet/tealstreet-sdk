@@ -3,7 +3,7 @@ import type { ExchangeOptions, RemoteSignerRequest } from '../types';
 import { describe, expect, it } from 'vitest';
 
 import { BaseExchange } from '../exchanges/base';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 
 // Hosted mode signs WS auth on the client and ships the signature to a server
 // that holds no secret. Each signature below must match the venue's LOCAL
@@ -20,7 +20,7 @@ const SECRET = 'test-secret-value';
 
 class TestExchange extends BaseExchange {
   constructor(options: ExchangeOptions) {
-    super('binance', options, new DefaultStore());
+    super('binance', options, new FrameStore());
   }
 }
 

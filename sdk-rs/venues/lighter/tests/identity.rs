@@ -1,4 +1,7 @@
 //! Public identity lookup never initializes signer, private sockets or account state.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
 use safe_cex_venue_lighter::{Lighter, Options};
 
@@ -128,7 +131,7 @@ fn identity_unsigned_public_only_supports_zero_and_deployment_hosts_without_life
             result(respond(&mut e, &r, 200, body), false).unwrap(),
             r#"{"userId":"0","affiliateId":"9007199254740993"}"#
         );
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
         assert!(respond(&mut e, &r, 200, body).is_empty());
     }
 }
@@ -182,7 +185,7 @@ fn identity_fallback_order_and_same_row_referrer_survive_failed_candidates() {
             .ends_with(&format!("accountsByL1Address?l1_address={addr}"))
     );
     assert_eq!(result(respond(&mut e,&r,200,r#"{"sub_accounts":[{"index":"12"}],"accounts":[{"index":"13","referrer":"wrong-row"}]}"#),false).unwrap(),r#"{"userId":"12"}"#);
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [3, 0, 0, 0, 0]);
 }
 #[test]
 fn identity_l1_fallback_accepts_nested_account_arrays_and_their_own_referrer() {
@@ -241,7 +244,15 @@ fn identity_malformed_missing_false_negative_fractional_and_rejected_rows_fail_o
         let before = e.account_snapshot_frame(NOW).to_vec();
         let r = take(ask(&mut e));
         result(respond(&mut e, &r, status, body), true).unwrap_err();
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(
+            &before,
+            e.account_snapshot_frame(NOW),
+            if status == 200 {
+                [1, 0, 0, 0, 0]
+            } else {
+                [0, 0, 0, 0, 1]
+            },
+        );
     }
 }
 #[test]

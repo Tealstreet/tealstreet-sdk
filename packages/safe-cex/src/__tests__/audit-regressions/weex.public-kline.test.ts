@@ -1,15 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { WeexExchange } from '../reference/weex/weex.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { LogSeverity } from '../../types';
+import { WeexExchange } from '../reference/weex/weex.exchange';
 
 const createExchange = () =>
-  new WeexExchange(
-    'weex' as any,
-    { key: 'key', secret: 'secret', passphrase: 'passphrase' } as any,
-    new DefaultStore(),
-  );
+  new WeexExchange('weex' as any, { key: 'key', secret: 'secret', passphrase: 'passphrase' } as any, new FrameStore());
 
 describe('audit regression: WEEX public kline subscriptions', () => {
   it('rejects unsupported websocket intervals before sending a subscription', () => {

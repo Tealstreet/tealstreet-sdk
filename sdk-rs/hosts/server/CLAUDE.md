@@ -5,6 +5,27 @@ changing server behavior. Validate scoped Rust changes with
 `cargo test -p safe-cex-exchange-server` and
 `cargo clippy -p safe-cex-exchange-server --all-targets` from `sdk-rs/`.
 
+## Bybit acknowledgement audit
+
+Order audits decode the native legacy error wrapper before their unchanged
+160-character message cap, including algo dispatch failures. The closed
+`bybitBatchAcknowledgement` field retains list shapes/counts and at most eight
+child summaries, plus at most eight bounded native IDs as reconciliation evidence.
+It accepts only the native diagnostic grammar, never arbitrary JSON metadata,
+client echoes or raw responses. This journal field changes no outcome, algo
+ownership, retry or resend authority; it is not forwarded to Sentry.
+
+## History reply completeness
+
+Command-owned `history.incomplete` notices retain a closed reason and optional
+later-page failure record in that command's pending reply. Successful hosted
+history rows carry it in `data.completeness`; unknown metadata falls back to the
+positive incomplete marker. No venue text or response values enter this record.
+Native floating-point and integer JSON command IDs must both name an exact u32;
+malformed or unrelated owners cannot mark another reply or become command zero.
+Replacement assertions clear previous failure detail. Read results, rejection,
+paging, retries, deadlines and write behavior retain their existing contracts.
+
 ## Connection-local public pacing
 
 The optional `publishIntervalMs` init field and `set-publish-interval` account op
@@ -340,8 +361,11 @@ Hyperliquid/Spot client order IDs are `0x` plus its 32 lowercase hex digits;
 Bitget, OKX, BloFin and Binance PM use the bare 32 hex digits. Bybit and other
 compatible text adapters retain the UUID. Lighter/Robinhood, Binance inverse,
 AsterDEX, Kraken and MEXC receive no caller venue ID, per the spec's supported-ID
-condition; receipts keep `clientOrderId: null`. The router UUID/fingerprint ledger
-remains primary dedupe in every case. Numeric adapters retain their current
+condition; receipts keep `clientOrderId: null`. WOO also receives none: until
+2026-11-19 it got the UUID, which WOO refuses, so every plain market submit failed
+before the venue. A numeric WOO ID needs NX router and SDK outbox outcome checks
+to accept it before the box emits one. The router UUID/fingerprint ledger
+remains primary dedupe in every case. Backpack and GRVT retain their current
 refusal pending their separate bounded-hash mapping. Bybit protection also omits
 its unsupported caller ID and reports null. HyroTrader retains its native
 caller-ID refusal. Other modes keep `callMethod` unchanged. Pending joins
@@ -351,6 +375,13 @@ record submits before forwarding and expose acknowledgements only after commit;
 the server supplies no dedupe ledger or queued-order storage. `order.cancelQueued`
 is a router operation and never becomes a venue cancellation. The interception
 contract is documented in `docs/plans/callers/delegated-order-frames.md`.
+
+Placement completions (`settle_intent`) send `refused` with `error.outcome:
+"rejected"` and the venue's message only when the engine marked the whole order
+`rejected` and its detail carries no partial IDs/count, non-`notSent` element or
+`protection`. Every other failure without `notSent` proof, including a partially
+accepted split/multi-leg placement, is `unknown`/`unknown`. NX shows `rejected`
+as the venue's refusal; the SDK still keeps the intent unknown and never resends.
 
 Whole-action guards before any native command return their real `notSent`
 reason; guards after possible effects remain unknown. Typed completion audits add
@@ -413,6 +444,10 @@ reduce-only LIMIT price amendments use the ordinary native amend path.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
+An amend whose engine-store target is a stop/take-profit/trailing row, read
+before dispatch, settles an authoritative ID-less completion as applied with
+`protectionApplied` (Bybit Full stops edit via trading-stop; AGT-40 reported
+9/9 such edits as unknown). Ordinary ID-less amends stay unknown.
 Every raw typed-action payload checks recursive key uniqueness before `Value`
 conversion: placement arrays, close orders, scheduling values and algo data.
 Schema rejection follows binding/hash checks and precedes ACK or native work.
@@ -431,6 +466,14 @@ Rejecting that frame uses the ordinary error envelope: it supplies no proof
 about an earlier action and cannot fabricate an action refusal or negative ACK.
 See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
 `tests/data/delegated-actions-v1.json` contract.
+
+## Algo outcome notices
+
+`warning` and `chaser:complete` reach every live tab/device holding the account,
+as algo errors do, not only the signing socket: a non-signing tab that missed a
+chase end reported it as lost ("Hosted server stopped reporting it"). The unheard
+record lists every socket told, so a rejoining page still gets its replay.
+Correlated `callMethod:done` replies stay on the signing socket.
 
 ## Classified admission refusals
 

@@ -95,7 +95,8 @@ fabricate an ACK or a not-sent proof.
 
 applied: result is exactly {kind:"amend",orderIds:["venue-order-1"]},
 {kind:"cancel"}, {kind:"cancelAll"}, or {kind:"nuke"}; error is null.
-Amend IDs: 1–32 nonempty strings, each at most 256 UTF-8 bytes.
+Amend IDs: 1–32 nonempty strings, each at most 256 UTF-8 bytes, except the
+ID-less protective amend `{kind:"amend",orderIds:[],protectionApplied:true}` below.
 The result kind must match the original action. Applied means all requested legs
 completed successfully; it does not promise a venue fill or an empty future store.
 
@@ -270,6 +271,16 @@ must be native unit completions. Malformed results remain unknown. Any partial
 native effects prevent a whole-action `notSent` proof, even if a later leg refused.
 The generic command-group completion waits for all leverage/cancel-all legs.
 
+**Hyperliquid caller IDs (AGT-42).** On `hyperliquid`/`hyperliquidspot`, a
+`place`/`close` order's `clientOrderId` is mapped to the native cloid after the
+fingerprint and schema checks (`order_contract::hyperliquid_cloid`): a lowercase
+`0x` + 32-hex value is sent verbatim; any other text becomes `0x` + the first 32
+hex characters of SHA-256 over its UTF-8 bytes. The caller recomputes that cloid
+to look up an uncertain placement. An absent ID stays absent and the venue mints
+a random cloid. Results keep `{kind,orderIds}`. Parity: the TS adapter and the
+Rust venue still reject a non-cloid caller ID (`hyperliquidClientOrderIdRule`,
+`valid_cloid`); the mapping is host-only and LOCAL is unchanged.
+
 `DelegatedOrderParams` is a closed native placement shape: symbol, type, side,
 amount and the existing optional price/trigger/protection, time-in-force,
 reduce-only, caller-ID, slippage, STP, Bybit BBO and implied-volatility fields.
@@ -353,6 +364,13 @@ from the captured protective command shape plus native completion, never from an
 ACK or a missing reply. The SDK accepts it only for a protection-only request;
 ordinary empty placement results and interrupted protection writes stay unknown.
 No venue order ID is invented.
+
+An amend of a protective stop/take-profit/trailing row follows the same rule:
+Bybit edits a Full position stop through trading-stop, which names no order. The
+server captures whether the engine store's target row is protective before
+dispatch, and an authoritative ID-less completion of that amend returns
+`{kind:"amend",orderIds:[],protectionApplied:true}`. An ordinary amend that
+completes without an ID, or any protective amend lost after handoff, stays unknown.
 
 ## Existing algo lifecycle and deferred parameter changes
 

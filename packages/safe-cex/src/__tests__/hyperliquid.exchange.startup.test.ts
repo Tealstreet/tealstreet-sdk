@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../store/frameStore';
+import { ExchangeOptions, PositionSide } from '../types';
+import { applyReferenceFixture } from './cutover/referenceFixture';
 import { HyperliquidExchange } from './reference/hyperliquid/hyperliquid.exchange';
-import { DefaultStore } from '../store/store.base';
-import { ExchangeOptions } from '../types';
-import { PositionSide } from '../types';
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -27,7 +27,7 @@ const createExchange = (): HyperliquidExchange => {
     tuning: { consoleLogging: false },
   };
 
-  return new HyperliquidExchange('hyperliquid', options, new DefaultStore());
+  return new HyperliquidExchange('hyperliquid', options, new FrameStore());
 };
 
 const coreMarkets = [
@@ -305,10 +305,14 @@ describe('HyperliquidExchange startup sequencing', () => {
   it('uses aggregate spot collateral as the unified USDC margin slice', () => {
     const exchange = createExchange();
 
-    exchange.store.update({
-      markets: coreMarkets as any,
-      tickers: coreTickers as any,
-    });
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: coreMarkets as any,
+        tickers: coreTickers as any,
+      },
+      exchange.store.markets.map((row) => row.symbol),
+    );
 
     (exchange as any).userAbstractionMode = 'unifiedAccount';
     exchange.handleSpotClearinghouseStateUpdate({
@@ -645,23 +649,27 @@ describe('HyperliquidExchange startup sequencing', () => {
 
   it('parses irregular HIP-3 orderbook gaps without deriving grouping levels', () => {
     const exchange = createExchange();
-    exchange.store.update({
-      markets: [
-        {
-          id: 'xyz:BRENTOIL',
-          symbol: 'XYZ|BRENTOIL-PERP',
-          base: 'BRENTOIL',
-          quote: 'USDC',
-          active: true,
-          precision: { amount: 0.01, price: 0.01 },
-          limits: {
-            amount: { min: 0.01, max: 1_000_000 },
-            leverage: { min: 1, max: 20 },
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: [
+          {
+            id: 'xyz:BRENTOIL',
+            symbol: 'XYZ|BRENTOIL-PERP',
+            base: 'BRENTOIL',
+            quote: 'USDC',
+            active: true,
+            precision: { amount: 0.01, price: 0.01 },
+            limits: {
+              amount: { min: 0.01, max: 1_000_000 },
+              leverage: { min: 1, max: 20 },
+            },
+            info: { hyperliquidId: 110049, hip3Dex: 'xyz' },
           },
-          info: { hyperliquidId: 110049, hip3Dex: 'xyz' },
-        },
-      ] as any,
-    });
+        ] as any,
+      },
+      exchange.store.markets.map((row) => row.symbol),
+    );
 
     const callback = vi.fn();
     const errorSpy = vi.spyOn(exchange, 'emitAndLogError');

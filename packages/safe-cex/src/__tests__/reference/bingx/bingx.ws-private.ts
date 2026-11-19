@@ -1,10 +1,13 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { BingxExchange } from './bingx.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { LogSeverity, MarginType, OrderStatus, OrderType, Position, PositionMode, PositionSide } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
 import { readBlob } from '../../../utils/readBlob';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_TRADE_UPDATE, POSITION_SIDE } from './bingx.types';
 
 export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
@@ -165,15 +168,54 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
 
       const order = this.parent.mapOrder(data);
       if (order?.status === OrderStatus.Open && order.type !== OrderType.Market) {
-        this.store.addOrUpdateOrder(order);
+        (() => {
+          const incoming: StoreData['orders'] = [order];
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
 
       if (status === 'CANCELED' || status === 'EXPIRED') {
-        this.store.updateOrderStatus({ id: data.i }, OrderStatus.Canceled);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: data.i }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
         this.emittedFillQtyByOrderId.delete(String(data.i));
       }
       if (status === 'FILLED') {
-        this.store.updateOrderStatus({ id: data.i }, OrderStatus.Closed);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: data.i }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
         this.emittedFillQtyByOrderId.delete(String(data.i));
       }
     });
@@ -262,11 +304,26 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
           positionMode: nextPositionMode,
           unrealizedPnl: normalizedUpnl,
           contracts,
-          liquidationPrice: normalizedLiqPrice,
+          liquidationPrice: nativeLiquidationPrice(normalizedLiqPrice),
           info: positionUpdate,
         };
 
-        this.store.addOrUpdatePosition(nextPosition);
+        (() => {
+          const incoming: StoreData['positions'] = [nextPosition];
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       });
     });
   };
@@ -330,13 +387,23 @@ export class BingxPrivateWebsocket extends BaseWebSocket<BingxExchange> {
       const positions = await this.parent.fetchPositions();
       if (this.isDisposed) return;
 
-      this.store.addOrUpdatePositionsFull(positions);
-      this.store.update({
-        loaded: {
-          ...this.store.loaded,
-          positions: true,
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { positions: true },
         },
-      });
+        this.store.markets.map((row) => row.symbol),
+      );
     } catch {
       // Will retry on the next fill/account event.
     }

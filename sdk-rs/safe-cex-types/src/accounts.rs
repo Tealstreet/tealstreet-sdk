@@ -250,8 +250,7 @@ pub fn normalize_exchange_account_config(
         get(account, "tealstreetProxy").is_some_and(truthy)
     };
     let mut result = account.as_object().cloned().unwrap_or_default();
-    let region = result
-        .shift_remove("proxyRegion")
+    let region = crate::remove_json_member(&mut result, "proxyRegion")
         .filter(truthy)
         .or_else(|| proxy.then(|| p["defaultProxyRegion"].clone()));
     result.insert("tealstreetProxy".into(), Value::Bool(proxy));
@@ -307,7 +306,7 @@ pub fn build_exchange_account_config(
         .unwrap_or_default();
     let mut result = input.as_object().cloned().unwrap_or_default();
     for field in ["privateKey", "walletAddress", "secret"] {
-        result.shift_remove(field);
+        crate::remove_json_member(&mut result, field);
     }
     result.insert("exchange".into(), json!(exchange));
     result.insert("name".into(), json!(name));
@@ -353,7 +352,7 @@ pub fn build_exchange_account_config(
                 result.insert(field.to_owned(), value);
             }
             None => {
-                result.shift_remove(field);
+                crate::remove_json_member(&mut result, field);
             }
         }
     }
@@ -363,7 +362,7 @@ pub fn build_exchange_account_config(
     {
         result.insert("bybitSiteId".into(), json!("BRA_BTL"));
     } else {
-        result.shift_remove("bybitSiteId");
+        crate::remove_json_member(&mut result, "bybitSiteId");
     }
     let schema = get_exchange_account_credential_schema(&exchange).unwrap();
     let mut required = vec!["name".to_owned()];

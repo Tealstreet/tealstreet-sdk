@@ -57,3 +57,15 @@ contracts authorize subscription interests and HTTP batch handoffs respectively,
 and supply no socket mutation handoff. Explicit HTTP egress is also refused because
 an existing socket cannot inherit an HTTP route. No venue currently adopts this API;
 venue transport behavior is unchanged.
+
+# Serial plan continuation after a write refused before release
+
+A serial Plan normally continues only from a delivered call; a released write
+whose transport failed stays fenced (`serial_uncertain`), and a failed read may
+only be followed by a read (`failed_read_cannot_continue_as_mutation`). One
+narrow addition (AGT-34): a write whose attempt was never released and whose
+journal result is `Failed` with `NotSent` (a `http_release_veto`, signing or
+pacing refusal) may be followed by one immediate Mutation through
+`continue_serial_plan`. Nothing reached the venue, so this is a decision, not a
+retry. Bybit uses it to put a cancelled partial stop back when its replacement is
+vetoed at release. The journal compacts that attempt as a NotSent refusal.

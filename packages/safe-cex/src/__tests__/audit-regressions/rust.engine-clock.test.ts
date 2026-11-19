@@ -1,3 +1,23 @@
+import type { HttpResponse, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
+import type { ExchangeName } from '../../types';
+
+import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
+
+import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
+import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
+import {
+  RUST_VENUES,
+  RustEngineExchange,
+  setRustEngineTransport,
+  setWasmEngineLoader,
+} from '../../exchanges/rust/rust.exchange';
+import { FrameStore } from '../../store/frameStore';
+import { virtualClock } from '../../utils/virtualClock';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
+
 vi.mock('../../exchanges/bybit/bybit.types', async (importOriginal) => {
   const { configuredHyrotraderEndpoints } = await import('../fixtures/configuredHyrotraderEndpoints');
   return {
@@ -11,25 +31,13 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
 });
 
-import type { HttpResponse, Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
-import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
-import type { ExchangeName } from '../../types';
-
-import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
-import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
-
-import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
-import { RUST_VENUES, RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { virtualClock } from '../../utils/virtualClock';
-import { engineCapabilities } from '../fixtures/engineCapabilities';
-import { installNativeStartupFrames } from './rust.native-startup.fixtures';
-
 vi.mock('@tealstreet/safe-cex-wasm/host', async (original) => ({
-  ...await original<typeof import('@tealstreet/safe-cex-wasm/host')>(), nativeTransport: vi.fn(),
+  ...(await original<typeof import('@tealstreet/safe-cex-wasm/host')>()),
+  nativeTransport: vi.fn(),
 }));
 vi.mock('../../utils/runtime', async (original) => ({
-  ...await original<typeof import('../../utils/runtime')>(), isNodeOrBunRuntime: () => false,
+  ...(await original<typeof import('../../utils/runtime')>()),
+  isNodeOrBunRuntime: () => false,
 }));
 
 const EPOCH = 1_760_000_000_000;
@@ -60,20 +68,42 @@ function fixture(name: ExchangeName, now: () => number, legacyClock?: boolean, h
   let socket!: Parameters<Transport['connect']>[1];
   let completeHttp: ((response: HttpResponse) => void) | undefined;
   const timers: Array<{ fn: () => void; ms: number }> = [];
-  const record = (event: string, time: number) => { seen.push([event, time]); return '[]'; };
+  const record = (event: string, time: number) => {
+    seen.push([event, time]);
+    return '[]';
+  };
   const engine: WasmEngineLike = {
-    capabilities: () => JSON.stringify({ ...JSON.parse(engineCapabilities(name)), ...(legacyClock === undefined ? {} : { hostClock: legacyClock }) }),
+    capabilities: () =>
+      JSON.stringify({
+        ...JSON.parse(engineCapabilities(name)),
+        ...(legacyClock === undefined ? {} : { hostClock: legacyClock }),
+      }),
     start: (time) => {
       record('start', time);
-      return JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://clock.invalid/private', channel: 'private' },
+      return JSON.stringify([
+        { op: 'wsConnect', socket: 1, url: 'wss://clock.invalid/private', channel: 'private' },
         { op: 'setTimer', timer: 7, at: time + 1500 },
-        ...(http ? [{ op: 'http', request: 3, method: 'GET', url: 'https://clock.invalid/probe', route: 'direct', headers: [] }] : [])]);
+        ...(http
+          ? [
+              {
+                op: 'http',
+                request: 3,
+                method: 'GET',
+                url: 'https://clock.invalid/probe',
+                route: 'direct',
+                headers: [],
+              },
+            ]
+          : []),
+      ]);
     },
     command: (json, time) => {
       const command = JSON.parse(json);
       commands.push(command);
       record('command', time);
-      return command.command === undefined ? '[]' : JSON.stringify([{ op: 'done', command: command.command, result: '[]' }]);
+      return command.command === undefined
+        ? '[]'
+        : JSON.stringify([{ op: 'done', command: command.command, result: '[]' }]);
     },
     wsOpen: (_id, time) => record('open', time),
     wsMessage: (_id, _text, time) => record('message', time),
@@ -89,47 +119,90 @@ function fixture(name: ExchangeName, now: () => number, legacyClock?: boolean, h
   };
   const transport: Transport = {
     now,
-    connect: (_url, callbacks) => { socket = callbacks; return { send: () => {}, close: () => {} }; },
-    request: () => new Promise((done) => { completeHttp = done; }),
-    setTimeout: (fn, ms) => { const timer = { fn, ms }; timers.push(timer); return timer; },
+    connect: (_url, callbacks) => {
+      socket = callbacks;
+      return { send: () => {}, close: () => {} };
+    },
+    request: () =>
+      new Promise((done) => {
+        completeHttp = done;
+      }),
+    setTimeout: (fn, ms) => {
+      const timer = { fn, ms };
+      timers.push(timer);
+      return timer;
+    },
     clearTimeout: () => {},
   };
   vi.mocked(nativeTransport).mockImplementation(() => transport);
-  const constructed = vi.fn(function () { return engine; });
+  const constructed = vi.fn(function () {
+    return engine;
+  });
   setWasmEngineLoader(async () => ({ WasmEngine: constructed as unknown as WasmEngineModule['WasmEngine'] }));
-  const store = new DefaultStore();
-  store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+    store.markets.map((row) => row.symbol),
+  );
   installNativeStartupFrames(engine, store);
   const frame = engine.takeFrame!;
-  engine.takeFrame = (time, marketOnly) => { record('frame', time); return frame(time, marketOnly); };
-  const exchange = new RustEngineExchange(name, { key: privateAccount ? 'replay-key' : '', secret: privateAccount ? 'replay-secret' : '', publicDataOnly: !privateAccount }, store);
+  engine.takeFrame = (time, marketOnly) => {
+    record('frame', time);
+    return frame(time, marketOnly);
+  };
+  const exchange = new RustEngineExchange(
+    name,
+    {
+      key: privateAccount ? 'replay-key' : '',
+      secret: privateAccount ? 'replay-secret' : '',
+      publicDataOnly: !privateAccount,
+    },
+    store,
+  );
   running.push(exchange);
-  return { exchange, engine, constructed, transport, seen, commands, timers, socket: () => socket, hasHttp: () => Boolean(completeHttp),
-    completeHttp: (response: HttpResponse) => completeHttp!(response) };
+  return {
+    exchange,
+    engine,
+    constructed,
+    transport,
+    seen,
+    commands,
+    timers,
+    socket: () => socket,
+    hasHttp: () => Boolean(completeHttp),
+    completeHttp: (response: HttpResponse) => completeHttp!(response),
+  };
 }
 
-it.each([...RUST_VENUES])('keeps the production scheduling clock monotonic for %s after synchronization', async (name) => {
-  let synced = EPOCH;
-  vi.spyOn(Date, 'now').mockReturnValue(EPOCH + 600_000);
-  vi.spyOn(virtualClock, 'getCurrentTimeMs').mockImplementation(() => synced);
-  const f = fixture(name, () => EPOCH + 900_000);
-  await f.exchange.start();
-  expect(f.seen.find(([event]) => event === 'start')).toEqual(['start', EPOCH]);
-  expect(f.timers.some(({ ms }) => ms === 1500)).toBe(true);
-  synced += 2345;
-  monotonic += 2345;
-  await f.exchange.setLeverage('BTCUSDT', 2);
-  expect(f.seen.filter(([event]) => event === 'command').at(-1)).toEqual(['command', synced]);
-  expect(f.seen.filter(([event]) => event === 'frame').at(-1)).toEqual(['frame', synced]);
-  f.socket().onOpen();
-  f.socket().onMessage('native-auth-frame');
-  expect(f.seen.filter(([event]) => ['open', 'message'].includes(event))).toEqual([['open', synced], ['message', synced]]);
-  synced -= 3456;
-  f.timers.find(({ ms }) => ms === 1500)!.fn();
-  f.socket().onClose(1006);
-  expect(f.seen.find(([event]) => event === 'timer')).toEqual(['timer', EPOCH + monotonic]);
-  expect(f.seen.find(([event]) => event === 'close')).toEqual(['close', EPOCH + monotonic]);
-});
+it.each([...RUST_VENUES])(
+  'keeps the production scheduling clock monotonic for %s after synchronization',
+  async (name) => {
+    let synced = EPOCH;
+    vi.spyOn(Date, 'now').mockReturnValue(EPOCH + 600_000);
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockImplementation(() => synced);
+    const f = fixture(name, () => EPOCH + 900_000);
+    await f.exchange.start();
+    expect(f.seen.find(([event]) => event === 'start')).toEqual(['start', EPOCH]);
+    expect(f.timers.some(({ ms }) => ms === 1500)).toBe(true);
+    synced += 2345;
+    monotonic += 2345;
+    await f.exchange.setLeverage('BTCUSDT', 2);
+    expect(f.seen.filter(([event]) => event === 'command').at(-1)).toEqual(['command', synced]);
+    expect(f.seen.filter(([event]) => event === 'frame').at(-1)).toEqual(['frame', synced]);
+    f.socket().onOpen();
+    f.socket().onMessage('native-auth-frame');
+    expect(f.seen.filter(([event]) => ['open', 'message'].includes(event))).toEqual([
+      ['open', synced],
+      ['message', synced],
+    ]);
+    synced -= 3456;
+    f.timers.find(({ ms }) => ms === 1500)!.fn();
+    f.socket().onClose(1006);
+    expect(f.seen.find(([event]) => event === 'timer')).toEqual(['timer', EPOCH + monotonic]);
+    expect(f.seen.find(([event]) => event === 'close')).toEqual(['close', EPOCH + monotonic]);
+  },
+);
 
 it('uses the stable scheduling clock for every streamed HTTP completion callback', async () => {
   let synced = EPOCH;
@@ -142,13 +215,20 @@ it('uses the stable scheduling clock for every streamed HTTP completion callback
   f.completeHttp({ status: 200, headers: '', body: new TextEncoder().encode('{}') });
   await vi.waitFor(() => expect(f.seen).toContainEqual(['httpEnd', synced]));
   expect(f.seen.filter(([event]) => event.startsWith('http'))).toEqual([
-    ['httpStart', synced], ['httpChunk', synced], ['httpEnd', synced],
+    ['httpStart', synced],
+    ['httpChunk', synced],
+    ['httpEnd', synced],
   ]);
 });
 
 it('holds simultaneous default engines behind the same initial clock synchronization', async () => {
   let resolve!: (time: number) => void;
-  const source = vi.fn(() => new Promise<number>((done) => { resolve = done; }));
+  const source = vi.fn(
+    () =>
+      new Promise<number>((done) => {
+        resolve = done;
+      }),
+  );
   virtualClock.setServerTimeSource(source);
   vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(EPOCH);
   const first = fixture('mexc', () => EPOCH + 600_000);
@@ -173,12 +253,24 @@ it('holds simultaneous default engines behind the same initial clock synchroniza
 
 it('settles a disposed account while other accounts keep waiting for shared clock initialization', async () => {
   let resolve!: (time: number) => void;
-  const source = vi.fn(() => new Promise<number>((done) => { resolve = done; }));
+  const source = vi.fn(
+    () =>
+      new Promise<number>((done) => {
+        resolve = done;
+      }),
+  );
   virtualClock.setServerTimeSource(source);
   vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(EPOCH);
   const first = fixture('mexc', () => EPOCH + 600_000);
   let outcome = 'pending';
-  const a = first.exchange.start().then(() => { outcome = 'started'; }, () => { outcome = 'disposed'; });
+  const a = first.exchange.start().then(
+    () => {
+      outcome = 'started';
+    },
+    () => {
+      outcome = 'disposed';
+    },
+  );
   await vi.waitFor(() => expect(source).toHaveBeenCalledOnce());
   const second = fixture('phemex', () => EPOCH + 600_000);
   const b = second.exchange.start();
@@ -227,7 +319,9 @@ it.each(['woo', 'bybit'] as const)('defaults %s journal bounds to its explicit e
   setRustEngineTransport(() => f.transport);
   await f.exchange.start();
   await f.exchange.fetchHistoricalPositions({ account: 'clock-audit' });
-  const queries = f.commands.filter((command) => ['fetchOrderHistory', 'fetchClosedPositions'].includes(String(command.op)));
+  const queries = f.commands.filter((command) =>
+    ['fetchOrderHistory', 'fetchClosedPositions'].includes(String(command.op)),
+  );
   expect(queries.length).toBeGreaterThan(0);
   expect(queries.every((command) => command.to === EPOCH)).toBe(true);
 });
@@ -249,15 +343,25 @@ it.each([
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(EPOCH - jump);
   let finishSync!: (utc: number) => void;
-  const source = vi.fn()
+  const source = vi
+    .fn()
     .mockResolvedValueOnce(EPOCH)
-    .mockImplementation(() => new Promise<number>((resolve) => { finishSync = resolve; }));
+    .mockImplementation(
+      () =>
+        new Promise<number>((resolve) => {
+          finishSync = resolve;
+        }),
+    );
   virtualClock.setServerTimeSource(source);
   setRustEngineTransport();
   const f = fixture('binance', () => EPOCH);
   let protocolRaw = EPOCH;
   let protocolUtc = EPOCH;
-  const syncHostTime = vi.fn((now: number, utc: number) => { protocolRaw = now; protocolUtc = utc; return true; });
+  const syncHostTime = vi.fn((now: number, utc: number) => {
+    protocolRaw = now;
+    protocolUtc = utc;
+    return true;
+  });
   f.engine.syncHostTime = syncHostTime;
   // Model the signing clock at the engine boundary; real timestamp/HMAC
   // coverage lives in the native engine's clock regressions.
@@ -314,7 +418,11 @@ it.each([
   const f = fixture('binance', () => EPOCH);
   let protocolRaw = EPOCH;
   let protocolUtc = EPOCH;
-  f.engine.syncHostTime = (now, utc) => { protocolRaw = now; protocolUtc = utc; return true; };
+  f.engine.syncHostTime = (now, utc) => {
+    protocolRaw = now;
+    protocolUtc = utc;
+    return true;
+  };
   const signingTimes: number[] = [];
   const command = f.engine.command;
   f.engine.command = (json, now) => {
@@ -346,9 +454,11 @@ it.each([
   monotonic = 15_000;
   await vi.advanceTimersByTimeAsync(1);
   expect(source).toHaveBeenCalledTimes(3);
-  expect(virtualClock.getCurrentTimeMs()).toBe(EPOCH + monotonic);
+  // Fake Date can advance one timer tick after the async server sample.
+  const syncedTime = virtualClock.getCurrentTimeMs();
+  expect(Math.abs(syncedTime - (EPOCH + monotonic))).toBeLessThanOrEqual(1);
   await f.exchange.setLeverage('BTCUSDT', 2);
-  expect(signingTimes.at(-1)).toBe(EPOCH + monotonic);
+  expect(signingTimes.at(-1)).toBe(syncedTime);
   expect(transport.now()).toBe(EPOCH + monotonic);
 });
 

@@ -15,6 +15,8 @@ Native hosted diagnostic owner attribution is documented in
 
 Bybit's sparse ticker freshness contract lives in
 [`sdk-rs/README.md`](sdk-rs/README.md#bybit-ticker-reference-freshness).
+Ticker seen-times survive `Store::set_tickers` for unchanged prices; see
+[`sdk-rs/README.md`](sdk-rs/README.md#ticker-reference-seen-times-across-table-replacement).
 
 Bitget login-only timestamp-expiry recovery samples a bounded public clock and
 re-signs on the current socket at dispatch. See `sdk-rs/venues/bitget/README.md`.
@@ -47,6 +49,10 @@ Closed join-proof v1 payloads and canonical public identity facts are documented
 in `docs/plans/callers/public-key-admission.md`. The pure crypto helpers do not
 enable Session admission or venue readiness. The separate SDK/WASM device dispatch
 retains the original signing host and owner; it does not activate any server venue.
+
+Lighter placements complete only on venue proof (an `accountOrders` row or a
+failed `tx`), never on the `sendTx` ACK alone; plain limit amends are one native
+modify. See `sdk-rs/venues/lighter/README.md` (AGT-45).
 
 ## Shared artifact census
 
@@ -100,5 +106,20 @@ Hyperliquid pre-send `/info` admission diagnostics retain timeout/NotSent with t
 closed `info_admission` cause. The relay/post-handoff boundary is documented in
 `sdk-rs/README.md` under Browser request-failure diagnostics.
 
+Bybit's closed later-page read diagnostics and owning-result completeness bridge
+are documented in `sdk-rs/venues/bybit/README.md` under Later-page history failure
+diagnostics. They add no pagination, retry or write authority.
+
 BingX sent cancel/amend invalid-input diagnostics carry only closed request shape;
 its bounds and replacement-provenance semantics live in `sdk-rs/venues/bingx/README.md`.
+
+OKX ordinary historical orders retain native gross close PnL and signed aggregate
+fee/credit totals with their currencies. Unknown money remains absent; this does
+not promote the orders axis grade. The projection and limits are documented in
+[`sdk-rs/venues/okx/README.md`](sdk-rs/venues/okx/README.md#order-history-financial-projection).
+
+## Native server image PR checks
+
+`docker-native-server-pr.yml` builds both production Dockerfiles from the repo root on PRs.
+It imports the master image caches with a read-only automatic token; it never publishes images or caches.
+The existing master-only workflows remain the sole image publishers and signers.

@@ -1,5 +1,6 @@
-import type { Store } from '../../../store/store.interface';
 import type { ExchangeName, ExchangeOptions } from '../../../types';
+
+import { FrameStore } from '../../../store/frameStore';
 import { BitgetExchange } from './bitget.exchange';
 
 /**
@@ -9,7 +10,7 @@ import { BitgetExchange } from './bitget.exchange';
  * Uses usdc-futures (or susdc-futures for testnet) as the product type.
  */
 export class BitgetUSDCExchange extends BitgetExchange {
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
   }
 

@@ -1,8 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { KucoinSpotExchange } from './reference/kucoin/kucoinspot.exchange';
-import { KUCOIN_SPOT_ENDPOINTS } from './reference/kucoin/kucoinspot.types';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import {
   ExchangeOptions,
   MarginType,
@@ -15,6 +13,9 @@ import {
   PositionSide,
   Ticker,
 } from '../types';
+import { applyReferenceFixture } from './cutover/referenceFixture';
+import { KucoinSpotExchange } from './reference/kucoin/kucoinspot.exchange';
+import { KUCOIN_SPOT_ENDPOINTS } from './reference/kucoin/kucoinspot.types';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -65,7 +66,7 @@ const btcTicker: Ticker = {
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new KucoinSpotExchange('kucoinspot', options, store);
 
   return { exchange, store };
@@ -73,7 +74,7 @@ const createExchange = () => {
 
 describe('KucoinSpotExchange', () => {
   let exchange: KucoinSpotExchange;
-  let store: DefaultStore;
+  let store: FrameStore;
 
   beforeEach(() => {
     ({ exchange, store } = createExchange());
@@ -132,7 +133,11 @@ describe('KucoinSpotExchange', () => {
   });
 
   it('maps KuCoin all-ticker rows into spot tickers', async () => {
-    store.update({ markets: [btcMarket] });
+    applyReferenceFixture(
+      store,
+      { markets: [btcMarket] },
+      store.markets.map((row) => row.symbol),
+    );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({
         data: {
@@ -181,8 +186,16 @@ describe('KucoinSpotExchange', () => {
 
   it('applies /market/ticker:all updates by resolving the symbol from json.subject', () => {
     // Clone: updateTicker mutates the ticker in place, so don't taint the shared fixture.
-    store.update({ tickers: [{ ...btcTicker }] });
-    const updateTicker = vi.spyOn(store, 'updateTicker');
+    applyReferenceFixture(
+      store,
+      { tickers: [{ ...btcTicker }] },
+      store.markets.map((row) => row.symbol),
+    );
+    const updateTicker = (() => {
+      const observed = vi.fn<(value: typeof store.tickers) => void>();
+      store.subscribe('tickers', (value) => observed(value));
+      return observed;
+    })();
 
     // The all-symbols feed puts the symbol in `subject`; `data` has none and the
     // topic is literally ":all". Without subject the update is dropped.
@@ -192,17 +205,20 @@ describe('KucoinSpotExchange', () => {
       data: { bestBid: '51000', bestAsk: '51001', price: '51000.5' },
     });
 
-    expect(updateTicker).toHaveBeenCalledWith(
-      expect.objectContaining({ symbol: 'BTC-USDT' }),
-      expect.objectContaining({ bid: 51_000, ask: 51_001, last: 51_000.5 }),
-    );
+    expect(updateTicker).toHaveBeenCalledWith([
+      expect.objectContaining({ symbol: 'BTC-USDT', bid: 51_000, ask: 51_001, last: 51_000.5 }),
+    ]);
   });
 
   it('aggregates trade account balances with ticker-derived USD values', async () => {
-    store.update({
-      markets: [btcMarket],
-      tickers: [btcTicker],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [btcMarket],
+        tickers: [btcTicker],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({
         data: {
@@ -366,7 +382,11 @@ describe('KucoinSpotExchange', () => {
   });
 
   it('formats KuCoin HF limit order placement payloads', async () => {
-    store.update({ markets: [btcMarket] });
+    applyReferenceFixture(
+      store,
+      { markets: [btcMarket] },
+      store.markets.map((row) => row.symbol),
+    );
     exchange.unlimitedXHR = {
       post: vi.fn().mockResolvedValue({
         data: {
@@ -405,12 +425,24 @@ describe('KucoinSpotExchange', () => {
   });
 
   it('branches spot order WS events on the event type, not the collapsed status', () => {
-    store.update({ markets: [btcMarket] });
+    applyReferenceFixture(
+      store,
+      { markets: [btcMarket] },
+      store.markets.map((row) => row.symbol),
+    );
     // any background refetch is a harmless mock
     exchange.xhr = { get: vi.fn().mockResolvedValue({ data: { code: '200000', data: { symbols: [] } } }) } as any;
     const ws = exchange.privateWebsocket;
-    const updateStatus = vi.spyOn(store, 'updateOrderStatus');
-    const addOrUpdate = vi.spyOn(store, 'addOrUpdateOrder');
+    const updateStatus = (() => {
+      const observed = vi.fn<(value: typeof store.orders) => void>();
+      store.subscribe('orders', (value) => observed(value));
+      return observed;
+    })();
+    const addOrUpdate = (() => {
+      const observed = vi.fn<(value: typeof store.orders) => void>();
+      store.subscribe('orders', (value) => observed(value));
+      return observed;
+    })();
     const fills: any[] = [];
     exchange.emitter.on('fill', (f: any) => fills.push(f));
 
@@ -425,11 +457,11 @@ describe('KucoinSpotExchange', () => {
     };
 
     ws.handleOrderTopic({ data: { ...base, type: 'open', status: 'open' } });
-    expect(addOrUpdate).toHaveBeenCalledWith(expect.objectContaining({ id: 'o1', status: OrderStatus.Open }));
+    expect(addOrUpdate).toHaveBeenCalledWith([expect.objectContaining({ id: 'o1', status: OrderStatus.Open })]);
 
     // Cancel arrives as type:canceled, status:done — MUST be Canceled, not Closed.
     ws.handleOrderTopic({ data: { ...base, type: 'canceled', status: 'done' } });
-    expect(updateStatus).toHaveBeenCalledWith(expect.objectContaining({ id: 'o1' }), OrderStatus.Canceled);
+    expect(updateStatus).toHaveBeenCalledWith([expect.objectContaining({ id: 'o1', status: OrderStatus.Canceled })]);
 
     // Match → one fill in base units.
     ws.handleOrderTopic({ data: { ...base, type: 'match', status: 'match', matchSize: '0.04', matchPrice: '50001' } });
@@ -437,11 +469,15 @@ describe('KucoinSpotExchange', () => {
 
     // Terminal filled arrives as type:filled, status:done → Closed.
     ws.handleOrderTopic({ data: { ...base, type: 'filled', status: 'done', filledSize: '0.1' } });
-    expect(updateStatus).toHaveBeenCalledWith(expect.objectContaining({ id: 'o1' }), OrderStatus.Closed);
+    expect(updateStatus).toHaveBeenCalledWith([expect.objectContaining({ id: 'o1', status: OrderStatus.Closed })]);
   });
 
   it('emits before throwing on unsupported spot orders (TP/SL)', async () => {
-    store.update({ markets: [btcMarket] });
+    applyReferenceFixture(
+      store,
+      { markets: [btcMarket] },
+      store.markets.map((row) => row.symbol),
+    );
     const emitSpy = vi.spyOn(exchange, 'emitAndLogError');
     await expect(
       exchange.placeOrder({
@@ -536,18 +572,22 @@ describe('KucoinSpotExchange', () => {
   });
 
   it('generates zero-size one-way positions for active spot markets', async () => {
-    store.update({
-      markets: [
-        btcMarket,
-        {
-          ...btcMarket,
-          id: 'ETH-USDT',
-          symbol: 'ETH-USDT',
-          base: 'ETH',
-          active: false,
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          btcMarket,
+          {
+            ...btcMarket,
+            id: 'ETH-USDT',
+            symbol: 'ETH-USDT',
+            base: 'ETH',
+            active: false,
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
 
     const positions = await exchange.fetchPositions();
 
@@ -561,7 +601,7 @@ describe('KucoinSpotExchange', () => {
       leverage: 1,
       unrealizedPnl: 0,
       contracts: 0,
-      liquidationPrice: 0,
+      liquidationPrice: null,
       marginType: MarginType.Isolated,
       positionMode: PositionMode.OneWay,
       info: { spot: true },

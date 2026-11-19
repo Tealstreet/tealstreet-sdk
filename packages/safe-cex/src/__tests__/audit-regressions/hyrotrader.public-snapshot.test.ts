@@ -3,9 +3,9 @@ import type { Timeframe } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
+import { FrameStore } from '../../store/frameStore';
 import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 class TestHyroExchange extends HyrotraderExchange {
   getBybitRestBaseUrl() {
@@ -15,8 +15,8 @@ class TestHyroExchange extends HyrotraderExchange {
 const exchanges: BybitExchange[] = [];
 const setup = (hyro = true) => {
   const exchange = hyro
-    ? new TestHyroExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore())
-    : new BybitExchange('bybit', { key: '', secret: '' }, new DefaultStore());
+    ? new TestHyroExchange('hyrotrader', { key: '', secret: '' }, new FrameStore())
+    : new BybitExchange('bybit', { key: '', secret: '' }, new FrameStore());
   exchanges.push(exchange);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
   const socket = exchange.publicWebsocket;

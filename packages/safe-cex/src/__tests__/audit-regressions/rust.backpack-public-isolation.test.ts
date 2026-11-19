@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest';
 
 import { DelegatedSignerSetup } from '../../exchanges/rust/delegatedSignerSetup';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 it('backpack_public_init_never_installs_signer_or_opens_private_ws', () => {
   const sign = vi.fn<RemoteSigner['sign']>();
@@ -18,7 +18,6 @@ it('backpack_public_init_never_installs_signer_or_opens_private_ws', () => {
 
     { key: '', secret: '', publicDataOnly: false, remoteSigner },
     { key: '', secret: '', payloadSigner },
-
   ];
   for (const field of ['remoteSigner', 'payloadSigner']) {
     for (const callback of [null, false, 'unused-invalid-callback']) {
@@ -33,18 +32,26 @@ it('backpack_public_init_never_installs_signer_or_opens_private_ws', () => {
   for (const options of inputs) {
     const setup = new DelegatedSignerSetup('backpack', options);
     try {
-      expect(setup.intent).toEqual({ remoteSigner: options.remoteSigner !== undefined, payloadSigner: options.payloadSigner !== undefined });
+      expect(setup.intent).toEqual({
+        remoteSigner: options.remoteSigner !== undefined,
+        payloadSigner: options.payloadSigner !== undefined,
+      });
       expect(setup.primaryComplete).toBe(false);
       expect(setup.hasSecondary).toBe(false);
       expect(setup.credentialPresence).toEqual({ key: false, secret: false });
       expect(setup.signerAlgorithms).toEqual([]);
-    } finally { setup.dispose(); }
-    const exchange = new RustEngineExchange('backpack', options, new DefaultStore());
+    } finally {
+      setup.dispose();
+    }
+    const exchange = new RustEngineExchange('backpack', options, new FrameStore());
     try {
       expect(exchange.isPublicDataOnly).toBe(true);
       expect(exchange.privateWebsocket).toBeUndefined();
-      for (const field of ['key', 'secret', 'remoteSigner', 'payloadSigner']) expect(exchange.options).not.toHaveProperty(field);
-    } finally { exchange.dispose(); }
+      for (const field of ['key', 'secret', 'remoteSigner', 'payloadSigner'])
+        expect(exchange.options).not.toHaveProperty(field);
+    } finally {
+      exchange.dispose();
+    }
   }
   expect(sign).not.toHaveBeenCalled();
   expect(available).not.toHaveBeenCalled();
@@ -55,12 +62,20 @@ it('backpack_public_init_never_installs_signer_or_opens_private_ws', () => {
 it('backpack_private_payload_and_undeclared_venue_stay_refused', () => {
   const venues: ExchangeName[] = ['backpack', 'weex', 'krakenspot'];
   for (const name of venues) {
-    const create = () => new RustEngineExchange(name, { key: 'fixture-key', secret: '', payloadSigner: vi.fn() }, new DefaultStore());
+    const create = () =>
+      new RustEngineExchange(name, { key: 'fixture-key', secret: '', payloadSigner: vi.fn() }, new FrameStore());
     expect(create).toThrow();
-    try { create(); } catch (error) {
+    try {
+      create();
+    } catch (error) {
       expect(error).toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
-      if (name === 'backpack') expect(error).toHaveProperty('message', 'Backpack requires RemoteSigner Ed25519 custody');
-      if (name === 'krakenspot') expect(error).toHaveProperty('message', expect.stringContaining('delegated signing is unsupported in this build'));
+      if (name === 'backpack')
+        expect(error).toHaveProperty('message', 'Backpack requires RemoteSigner Ed25519 custody');
+      if (name === 'krakenspot')
+        expect(error).toHaveProperty(
+          'message',
+          expect.stringContaining('delegated signing is unsupported in this build'),
+        );
     }
   }
 });

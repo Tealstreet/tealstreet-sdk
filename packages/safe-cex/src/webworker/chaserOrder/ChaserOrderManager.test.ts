@@ -4,8 +4,7 @@ import type { Market, Order, StoreData, Ticker } from '../../types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Frame, SECTION } from '@tealstreet/safe-cex-wasm/wire';
-import { FrameApplier } from '../../store/frameApplier';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderTimeInForce, OrderType, PositionSide } from '../../types';
 import { ChaserOrderInstance } from './ChaserOrderInstance';
 import { ChaserOrderManager } from './ChaserOrderManager';
@@ -136,6 +135,8 @@ const createMockExchange = () => {
   const order = createOrder('order-1', 100);
   const handlers: Record<string, Set<Handler>> = {};
   const store = {
+    observationIds: { orders: 0, positions: 0 },
+    subscribeAccountObservations: () => () => {},
     orders: [order],
     tickers: [ticker],
     markets: [market],
@@ -214,7 +215,7 @@ describe('ChaserOrderManager', () => {
       reduceOnly: false,
       delay: 5000,
     });
-    const applier = new FrameApplier(new DefaultStore());
+    const applier = new FrameStore();
     const deliver = async (fills: Parameters<typeof createFillFrame>[0]) => {
       const frame = createFillFrame(fills);
       applier.apply(frame);
@@ -768,15 +769,36 @@ describe('ChaserOrderManager', () => {
     expect(manager.instances).not.toContain(instance);
   });
 
-  it.each([{ notional: null, mode: 'direct' }, { notional: NaN, mode: 'direct' }, { notional: null, mode: 'update' }, { notional: NaN, mode: 'update' }])('uses flat quantity with unknown notional $notional via $mode', async ({notional, mode}) => {
+  it.each([
+    { notional: null, mode: 'direct' },
+    { notional: NaN, mode: 'direct' },
+    { notional: null, mode: 'update' },
+    { notional: NaN, mode: 'update' },
+  ])('uses flat quantity with unknown notional $notional via $mode', async ({ notional, mode }) => {
     const { emit, exchange, store } = createMockExchange();
-    Object.assign(store, { positions: [{
-      id: 'p', symbol: 'BTCUSDT', side: PositionSide.Short, contracts: 1,
-      entryPrice: 100, notional, leverage: 1, unrealizedPnl: 0, liquidationPrice: null,
-    }] });
+    Object.assign(store, {
+      positions: [
+        {
+          id: 'p',
+          symbol: 'BTCUSDT',
+          side: PositionSide.Short,
+          contracts: 1,
+          entryPrice: 100,
+          notional,
+          leverage: 1,
+          unrealizedPnl: 0,
+          liquidationPrice: null,
+        },
+      ],
+    });
     const manager = new ChaserOrderManager();
     const instance = new ChaserOrderInstance(exchange, {
-      symbol: 'BTCUSDT', size: 1, side: OrderSide.Buy, reduceOnly: true, maxAttempts: 10, delay: 250,
+      symbol: 'BTCUSDT',
+      size: 1,
+      side: OrderSide.Buy,
+      reduceOnly: true,
+      maxAttempts: 10,
+      delay: 250,
     });
     manager.add(instance);
     await vi.advanceTimersByTimeAsync(1000);

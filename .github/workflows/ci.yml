@@ -37,13 +37,19 @@ jobs:
       - name: Install pinned Rust toolchain for generated type contracts
         working-directory: sdk-rs
         run: rustup show
-      - run: corepack yarn typecheck
-      - run: corepack yarn lint
+      # Fail-complete: Turbo keeps going past a failed package and later gates still
+      # run after an earlier one fails, so one run reports every failure.
+      - if: ${{ !cancelled() }}
+        run: corepack yarn typecheck --continue=always
+      - if: ${{ !cancelled() }}
+        run: corepack yarn lint --continue=always
       - name: Install pinned Bun for standalone CLI tests
+        if: ${{ !cancelled() }}
         run: |
           corepack yarn -s global add bun@1.4.3
           corepack yarn -s global bin >> "$GITHUB_PATH"
-      - run: corepack yarn test
+      - if: ${{ !cancelled() }}
+        run: corepack yarn test --continue=always
 
 
   # Open source (MIT): scan every new commit for secrets. Known test fixtures

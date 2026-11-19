@@ -101,6 +101,14 @@ export function createLighterVerifier(options, oracle = crypto, exchangeName = '
       if (info.MarketIndex === 255) return false;
       if (integer(info.Index, (1n << 60n) - 1n) === 0n) return false;
       preimage += words(info.MarketIndex,info.Index);
+    } else if (type === 17) {
+      // ModifyOrder: a plain limit edit carries the nil trigger price 0.
+      integer(info.MarketIndex,32767n);
+      if (info.MarketIndex === 255) return false;
+      if (integer(info.Index, (1n << 60n) - 1n) === 0n) return false;
+      if (!integer(info.BaseAmount, (1n << 48n) - 1n) || !uint32(info.Price)) return false;
+      uint32(info.TriggerPrice);
+      preimage += words(info.MarketIndex,info.Index,info.BaseAmount,info.Price,info.TriggerPrice);
     } else if (type === 20) {
       integer(info.MarketIndex,32767n);
       if (info.MarketIndex === 255) return false; integer(info.InitialMarginFraction,10_000n); integer(info.MarginMode,1n);
@@ -147,8 +155,20 @@ export function createLighterVerifier(options, oracle = crypto, exchangeName = '
       if (channel.startsWith('account_all/')) return channel === `account_all/${account}`;
       return true;
     },
-    matched(record,{body,commandIndex=1}) {
-      if (!/\/sendTx(?:Batch)?$/.test(new URL(record.url).pathname) || Number(JSON.parse(record.body).code) !== 200) return;
+    matched(record,{url,body,commandIndex=1}) {
+      const taped = new URL(record.url);
+      // A proof read must name exactly the indexes its command created, in order.
+      if (taped.pathname.endsWith('/accountOrders') && taped.searchParams.has('client_order_indexes')) {
+        const expected = taped.searchParams.get('client_order_indexes').replace(/<created:(\d+):(\d+)>/g, (_, command, order) => {
+          const id = commandIds.get(Number(command))?.[Number(order)];
+          if (id === undefined) throw new Error(`Lighter tape quotes order ${order} that command ${command} never created`);
+          return id;
+        });
+        const sent = new URL(url).searchParams.get('client_order_indexes');
+        if (sent !== expected) throw new Error(`Lighter proof read named ${sent}, expected ${expected}`);
+        return;
+      }
+      if (!/\/sendTx(?:Batch)?$/.test(taped.pathname) || Number(JSON.parse(record.body).code) !== 200) return;
       const transactions = decodeLighterTransactions(body);
       const payload = JSON.parse(record.body);
       const hashes = payload.tx_hash ?? payload.txHash;
@@ -176,6 +196,8 @@ export function createLighterVerifier(options, oracle = crypto, exchangeName = '
     },
     commandResult(result, command, commandIndex=1) {
       if (!['placeOrders','amendOrder'].includes(command?.op) || !result?.ok) return result;
+      // A native ModifyOrder creates nothing and returns the order's own index.
+      if (command.op === 'amendOrder' && !(commandIds.get(commandIndex) ?? []).length) return result;
       const normalize = (ids) => {
         const expected = commandIds.get(commandIndex) ?? [];
         if (!Array.isArray(ids) || ids.length !== expected.length || ids.some((id,index) => String(id) !== expected[index]))

@@ -792,6 +792,7 @@ fn fire_read_retry(e: &mut TestEngine, now: f64) -> safe_cex_engine::RequestId {
 fn older_replaced_balance_and_pre_mode_ack_reads_cannot_restore_old_state() {
     use safe_cex_engine::{Command, Response};
     let (mut e, s) = startup();
+    event(&mut e, s, r#"{"op":"login","data":{"result":true}}"#);
     let a = balance_request(&mut e, s, 100.0);
     let b = balance_request(&mut e, s, 10100.0);
     let body = r#"{"code":0,"data":{"data":[{"marginCoin":"USDT","available":"700","margin":"10","crossUnrealizedPNL":"0","isolationUnrealizedPNL":"0","unrealizedPNL":"999"}]}}"#;

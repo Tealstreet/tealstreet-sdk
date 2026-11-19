@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BackpackExchange } from '../reference/backpack/backpack.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { Balance, ExchangeOptions, MarginType, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BackpackExchange } from '../reference/backpack/backpack.exchange';
 
 const position = {
   id: createPositionId('BTC_USDC_PERP', PositionSide.Long, PositionMode.Hedged),
@@ -23,27 +24,32 @@ const position = {
 const balance: Balance = { free: 120, used: 30, total: 150, upnl: 2 };
 
 describe('Backpack fill reconciliation audit regression', () => {
-  let store: DefaultStore;
+  let store: FrameStore;
   let exchange: BackpackExchange;
 
   beforeEach(() => {
-    store = new DefaultStore();
-    store.update({
-      markets: [
+    store = new FrameStore();
+    store.apply(
+      nativeFixture(
         {
-          id: 'BTC_USDC_PERP',
-          symbol: 'BTC_USDC_PERP',
-          base: 'BTC',
-          quote: 'USDC',
-          active: true,
-          precision: { amount: 0.001, price: 0.1 },
-          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
-          contractSize: 1,
-          takerFee: 0,
-          makerFee: 0,
+          markets: [
+            {
+              id: 'BTC_USDC_PERP',
+              symbol: 'BTC_USDC_PERP',
+              base: 'BTC',
+              quote: 'USDC',
+              active: true,
+              precision: { amount: 0.001, price: 0.1 },
+              limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+              contractSize: 1,
+              takerFee: 0,
+              makerFee: 0,
+            },
+          ],
         },
-      ],
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange = new BackpackExchange('backpack', { key: '', secret: '', testnet: false } as ExchangeOptions, store);
   });
 
@@ -64,7 +70,12 @@ describe('Backpack fill reconciliation audit regression', () => {
   });
 
   it('preserves the current store when a post-fill refresh fails', async () => {
-    store.update({ positions: [position], balance });
+    store.apply(
+      nativeFixture(
+        { positions: [position], balance },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.fetchPositions = vi.fn().mockRejectedValue(new Error('temporary position outage'));
     exchange.fetchBalance = vi.fn().mockRejectedValue(new Error('temporary balance outage'));
 
@@ -76,7 +87,12 @@ describe('Backpack fill reconciliation audit regression', () => {
   });
 
   it('rejects transient order and position reads instead of returning clearing snapshots', async () => {
-    store.update({ positions: [position] });
+    store.apply(
+      nativeFixture(
+        { positions: [position] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.xhr = {
       get: vi.fn().mockRejectedValue(new Error('temporary proxy outage')),
     } as any;
@@ -87,7 +103,12 @@ describe('Backpack fill reconciliation audit regression', () => {
   });
 
   it('evicts the stale side when a signed net position flips direction', async () => {
-    store.update({ positions: [position] });
+    store.apply(
+      nativeFixture(
+        { positions: [position] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await (exchange.privateWebsocket as any).handlePositionUpdate({
       i: 1,
@@ -119,7 +140,12 @@ describe('Backpack fill reconciliation audit regression', () => {
       id: createPositionId('BTC_USDC_PERP', PositionSide.Short, PositionMode.Hedged),
       side: PositionSide.Short,
     };
-    store.update({ positions: [position, shortPosition] });
+    store.apply(
+      nativeFixture(
+        { positions: [position, shortPosition] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
 
     await (exchange.privateWebsocket as any).handlePositionUpdate({
       i: 1,

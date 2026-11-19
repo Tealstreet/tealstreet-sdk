@@ -156,7 +156,19 @@ fn seed_nonce(e: &mut Engine<Lighter>, timers: &mut Timers) -> Vec<Action> {
 
 fn ack(e: &mut Engine<Lighter>, timers: &mut Timers, r: &HttpRequest) -> Vec<Action> {
     reply(e, r, 200, r#"{"code":200,"tx_hash":"transaction-hash"}"#);
-    run(e, timers, NOW)
+    let actions = run(e, timers, NOW);
+    if !creates(r) {
+        return actions;
+    }
+    // A frame-fed placement is proven by its own accountOrders read too.
+    let proofs = http(&actions)
+        .iter()
+        .filter(|p| p.url.contains("/api/v1/accountOrders?"))
+        .count();
+    assert_eq!(proofs, 1, "{actions:?}");
+    let mut out = answer_proofs(e, NOW, actions, "open");
+    out.extend(run(e, timers, NOW));
+    out
 }
 
 #[test]
