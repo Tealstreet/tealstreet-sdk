@@ -161,17 +161,13 @@ fn create_peer_ids(planned: &Planned, store: &safe_cex_engine::Store) -> Vec<Str
     }
     #[derive(serde::Deserialize)]
     struct Batch {
-        request: Vec<Target>,
+        #[serde(rename = "request")]
+        orders: Vec<Target>,
     }
     let Ok(batch) = serde_json::from_str::<Batch>(&planned.body) else {
         return Vec::new();
     };
-    if batch.request.is_empty()
-        || batch
-            .request
-            .iter()
-            .any(|row| row.reduce_only != Some(true))
-    {
+    if batch.orders.is_empty() || batch.orders.iter().any(|row| row.reduce_only != Some(true)) {
         return Vec::new();
     }
     store
@@ -182,7 +178,7 @@ fn create_peer_ids(planned: &Planned, store: &safe_cex_engine::Store) -> Vec<Str
                 && order.reduce_only
                 && !is_virtual(&order.id)
                 && order.remaining > 0.0
-                && batch.request.iter().any(|row| {
+                && batch.orders.iter().any(|row| {
                     row.symbol == order.symbol && row.side == super::side_text(order.side)
                 })
         })
