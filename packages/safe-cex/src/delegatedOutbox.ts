@@ -827,6 +827,33 @@ export class DelegatedOutbox {
     );
   }
 
+  /**
+   * Removes an entry the host has settled (applied, not sent or venue-rejected)
+   * instead of retaining it as completed history or 24 h unknown work. In-flight,
+   * cancel-pending and caller-reserved intents stay. Resolves whether it was removed.
+   */
+  retire(intentId: string): Promise<boolean> {
+    return this.serial(async () => {
+      const row = this.intents.get(intentId);
+      if (
+        !this.active ||
+        !row ||
+        row.cancelPending ||
+        row.callerSuppliedIntentId ||
+        ['queued', 'sending', 'acknowledged'].includes(row.state)
+      )
+        return false;
+      // Memory first: a failed delete keeps the stored row, which restores as before.
+      this.removeIntent(row);
+      await this.options.storage.compact(this.scope, {
+        version: 1,
+        sequence: this.sequence,
+        retiredIntentIds: [intentId],
+      });
+      return true;
+    });
+  }
+
   cancel(intentId: string): Promise<void> {
     const row = this.intents.get(intentId);
     const handedOff =

@@ -2145,3 +2145,131 @@ describe('lossless venue receipt identities', () => {
     },
   );
 });
+
+describe('DELEGATED outbox retirement of host-settled entries', () => {
+  const rejected = (id: string) =>
+    response(id, 'order.outcome', {
+      outcome: 'refused',
+      venueOrderId: null,
+      clientOrderId: id,
+      error: { message: 'requires enabling the settlement asset as collateral', outcome: 'rejected' },
+    });
+
+  it('accepts a venue rejection as unknown, then forgets it once the host settles it', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const ticket = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    await box.receive(ticket, rejected(id));
+    expect(box.entries()[0]).toMatchObject({
+      state: 'unknown',
+      error: { message: 'requires enabling the settlement asset as collateral' },
+    });
+    expect(await box.retire(id)).toBe(true);
+    expect(box.entries()).toEqual([]);
+    expect(f.rows.size).toBe(0);
+    // A late receipt names no entry and creates none.
+    await box.receive(ticket, { ...rejected(id), d: { ...rejected(id).d, outcomeSeq: 2 } });
+    expect(box.entries()).toEqual([]);
+    box.close();
+    const restored = await DelegatedOutbox.open(f.options);
+    expect(restored.entries()).toEqual([]);
+    // The durable sequence still advances past the retired intent.
+    const next = await restored.enqueue(params);
+    expect(restored.entries().find((row) => row.intentId === next)?.seq).toBe(2);
+    restored.close();
+  });
+
+  it.each(['placed', 'notSent'] as const)('retires a settled %s entry', async (settled) => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const ticket = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    await box.receive(
+      ticket,
+      settled === 'placed'
+        ? response(id, 'order.outcome', { outcome: 'placed', venueOrderId: 'v1', clientOrderId: id, error: null })
+        : response(id, 'order.ack', { received: false }),
+    );
+    expect(box.entries()[0].state).toBe(settled);
+    expect(await box.retire(id)).toBe(true);
+    expect(box.entries()).toEqual([]);
+    expect(f.rows.size).toBe(0);
+    box.close();
+  });
+
+  it('retires an applied action', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const connection = f.connection();
+    connection.capabilities = {
+      ...connection.capabilities,
+      delegatedOrderActionsV1: true,
+      delegatedOrderActionLedgerV1: true,
+    };
+    const ticket = box.connect(connection);
+    const id = await box.enqueueAction({ kind: 'cancel', order: { id: 'venue-order-1', symbol: 'BTCUSDT' } });
+    await box.receive(ticket, {
+      t: 'order.actionOutcome',
+      d: {
+        version: 1,
+        accountName: 'main',
+        instanceId: 'registration',
+        intentId: id,
+        seq: 1,
+        outcomeSeq: 1,
+        outcome: 'applied',
+        result: { kind: 'cancel' },
+        error: null,
+      },
+    });
+    expect(box.entries()[0].state).toBe('applied');
+    expect(await box.retire(id)).toBe(true);
+    expect(box.entries()).toEqual([]);
+    box.close();
+  });
+
+  it('keeps in-flight, cancel-pending and caller-reserved intents', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const queued = await box.enqueue(params);
+    expect(box.entries()[0].state).toBe('queued');
+    expect(await box.retire(queued)).toBe(false);
+    const ticket = box.connect(f.connection());
+    await box.flush(ticket);
+    expect(box.entries()[0].state).toBe('sending');
+    expect(await box.retire(queued)).toBe(false);
+    await box.cancel(queued);
+    expect(box.entries()[0]).toMatchObject({ state: 'unknown', cancelPending: true });
+    expect(await box.retire(queued)).toBe(false);
+    const reserved = await box.enqueue(
+      { ...params, price: 50_001 },
+      { intentId: '018bcfe5-6800-7000-8000-000000000009' },
+    );
+    await box.receive(ticket, { ...rejected(reserved), d: { ...rejected(reserved).d, seq: 2 } });
+    expect(box.entries().find((row) => row.intentId === reserved)?.state).toBe('unknown');
+    expect(await box.retire(reserved)).toBe(false);
+    expect(await box.retire('018bcfe5-6800-7000-8000-00000000000a')).toBe(false);
+    expect(box.entries()).toHaveLength(2);
+    expect(f.rows.size).toBe(2);
+    box.close();
+    expect(await box.retire(queued)).toBe(false);
+  });
+
+  it('keeps the stored entry when the delete fails, so it restores as before', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const ticket = box.connect(f.connection());
+    const id = await box.enqueue(params);
+    await box.receive(ticket, rejected(id));
+    f.options.storage.compact = async () => {
+      throw new Error('storage unavailable');
+    };
+    await expect(box.retire(id)).rejects.toThrow('storage unavailable');
+    expect(box.entries()).toEqual([]);
+    box.close();
+    const restored = await DelegatedOutbox.open(fixture('alice', f.rows).options);
+    expect(restored.entries()).toMatchObject([{ intentId: id, state: 'unknown' }]);
+    restored.close();
+  });
+});
