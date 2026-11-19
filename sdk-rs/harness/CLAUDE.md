@@ -179,7 +179,10 @@ Native CI is fail-complete. Every `Rust / native <check>` row runs its matrix
 each line runs even after an earlier failure, every `cargo test` carries
 `--no-fail-fast`, and the step ends with a per-crate list of failing tests in the
 log and step summary while still failing the job. `test-http-plan-feature-modes.py`
-likewise runs every engine mode before failing. #3640 needed four runs to surface
+likewise runs every engine mode in its shard before failing. CI splits the modes
+round-robin over three `engine-feature-modes (i/3)` jobs (`--shard i/3`; one serial
+job took 30-38 min and set the Rust critical path); every shard sorts the same list,
+so together they run each mode exactly once. #3640 needed four runs to surface
 ~124 failures because the first failing target stopped the job;
 `affected-ci-workflow.test.mjs` pins this shape.
 

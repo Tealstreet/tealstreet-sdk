@@ -97,7 +97,11 @@ def modes():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--list', action='store_true', help='Resolve and print modes without compiling')
+    parser.add_argument('--shard', default='1/1', help='Run every Nth sorted mode, as INDEX/COUNT (CI matrix)')
     args = parser.parse_args()
+    index, count = (int(part) for part in args.shard.split('/'))
+    if not 1 <= index <= count:
+        raise SystemExit(f'--shard {args.shard}: expected INDEX/COUNT with 1 <= INDEX <= COUNT')
     closures, grouped = modes()
     print(json.dumps({'family_features': closures,
                       'engine_feature_modes': [{'features': flags, 'families': names}
@@ -110,7 +114,11 @@ def main():
     started = time.monotonic()
     # Fail-complete: run every mode and report all failures once (PR #3640 needed four runs).
     failures = []
-    for features, families in sorted(grouped.items()):
+    # Round-robin over the sorted modes: every shard resolves the same list, so the
+    # COUNT shards together run each mode exactly once.
+    selected = sorted(grouped.items())[index - 1::count]
+    print(f'Shard {index}/{count}: {len(selected)} of {len(grouped)} engine modes', flush=True)
+    for features, families in selected:
         mode_started = time.monotonic()
         flags = ['--features', ','.join(features)] if features else []
         print(f'Engine feature mode: {features or "empty"}; families={families}', flush=True)
@@ -124,7 +132,7 @@ def main():
             if subprocess.run(command, cwd=ROOT, env=env).returncode != 0:
                 failures.append(f'{check} {features or "empty"} (families={families})')
         print(f'Mode completed in {time.monotonic() - mode_started:.1f}s', flush=True)
-    print(f'All {len(grouped)} engine modes ran in {time.monotonic() - started:.1f}s',
+    print(f'Shard {index}/{count}: {len(selected)} engine modes ran in {time.monotonic() - started:.1f}s',
           flush=True)
     if failures:
         print(f'{len(failures)} engine mode check(s) failed:', *failures, sep='\n  ', flush=True)
