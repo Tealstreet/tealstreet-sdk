@@ -273,15 +273,26 @@ pub(crate) fn targeted(result: Option<&RawValue>, order_id: &str) -> Result<(), 
     Ok(())
 }
 
-/// Create-batch: `result.list` and `retExtInfo.list` must each have exactly one
-/// row per request. Requested echoes must agree; unsolicited nonempty echoes
-/// must be unique and cannot name any requested link. Native IDs cannot repeat.
+/// Create-batch rows and statuses stay aligned. A surplus may name only captured
+/// reduce-only peers; every requested row must still be uniquely attributable.
+/// Native IDs and nonempty client echoes cannot repeat.
 pub(crate) fn created_rows(
     result: Option<&RawValue>,
     ext: Option<&RawValue>,
     order_link_ids: &[Option<&str>],
+    known_peers: &[&str],
 ) -> Result<Vec<Row>, Malformed> {
     let identities = rows_of(list(result.ok_or(Malformed)?)?, Identity::read)?;
+    if identities.len() != order_link_ids.len()
+        || identities.iter().any(|row| {
+            row.order_id
+                .as_deref()
+                .is_some_and(|id| known_peers.contains(&id))
+        })
+    {
+        let statuses = rows_of(list(ext.ok_or(Malformed)?)?, Status::read)?;
+        return created_with_peers(identities, statuses, order_link_ids, known_peers);
+    }
     for (index, row) in identities.iter().enumerate() {
         if order_link_ids.get(index) != Some(&None) {
             continue;
@@ -327,6 +338,80 @@ pub(crate) fn created_rows(
         return Err(Malformed);
     }
     Ok(rows)
+}
+
+fn created_with_peers(
+    identities: Vec<Identity>,
+    statuses: Vec<Status>,
+    links: &[Option<&str>],
+    peers: &[&str],
+) -> Result<Vec<Row>, Malformed> {
+    if links.is_empty() || peers.is_empty() || identities.len() != statuses.len() {
+        return Err(Malformed);
+    }
+    let mut native_ids = std::collections::HashSet::new();
+    let mut echoes = std::collections::HashSet::new();
+    let mut matched: Vec<Option<Row>> = links.iter().map(|_| None).collect();
+    let mut unnamed = Vec::new();
+    for (identity, status) in identities.into_iter().zip(statuses) {
+        let id = identity.order_id.as_deref().filter(|id| !id.is_empty());
+        if let Some(id) = id
+            && (id.len() > MAX_ID_BYTES || !native_ids.insert(id.to_owned()) || status.code != 0)
+        {
+            return Err(Malformed);
+        }
+        let echo = identity
+            .order_link_id
+            .as_deref()
+            .filter(|id| !id.is_empty());
+        if let Some(echo) = echo
+            && !echoes.insert(echo.to_owned())
+        {
+            return Err(Malformed);
+        }
+        if id.is_some_and(|id| peers.contains(&id)) {
+            if status.code != 0 || echo.is_some_and(|echo| links.contains(&Some(echo))) {
+                return Err(Malformed);
+            }
+            continue;
+        }
+        let target = echo.and_then(|echo| links.iter().position(|link| *link == Some(echo)));
+        let row = if status.code == 0 {
+            Row::Accepted(native_id(identity.order_id)?)
+        } else {
+            Row::Refused {
+                code: status.code,
+                message: status.msg.unwrap_or_default(),
+            }
+        };
+        match target {
+            Some(target) if matched[target].is_none() => matched[target] = Some(row),
+            Some(_) => return Err(Malformed),
+            None => unnamed.push((identity.order_link_id, row)),
+        }
+    }
+    let remaining: Vec<_> = matched
+        .iter()
+        .enumerate()
+        .filter_map(|(i, row)| row.is_none().then_some(i))
+        .collect();
+    if !unnamed.is_empty() {
+        // Without a caller echo, only one new identity can be attributed after
+        // subtracting peers captured before dispatch. Never guess among rows.
+        if unnamed.len() != 1 || remaining.len() != 1 {
+            return Err(Malformed);
+        }
+        let (echo, row) = unnamed.pop().ok_or(Malformed)?;
+        let target = remaining[0];
+        if links[target].is_some() && !echo_matches(echo, links[target]) {
+            return Err(Malformed);
+        }
+        matched[target] = Some(row);
+    }
+    matched
+        .into_iter()
+        .map(|row| row.ok_or(Malformed))
+        .collect()
 }
 
 /// Bounded shape and native status codes, never identity/message values.

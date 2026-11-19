@@ -145,6 +145,50 @@ struct Active {
     leg: Leg,
     local: Option<LocalWrite>,
     results: Option<Vec<ElementResult>>,
+    create_peers: Vec<String>,
+}
+
+fn create_peer_ids(planned: &Planned, store: &safe_cex_engine::Store) -> Vec<String> {
+    if !matches!(planned.call, Call::PlaceBatch { .. }) {
+        return Vec::new();
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Target {
+        symbol: String,
+        side: String,
+        reduce_only: Option<bool>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Batch {
+        request: Vec<Target>,
+    }
+    let Ok(batch) = serde_json::from_str::<Batch>(&planned.body) else {
+        return Vec::new();
+    };
+    if batch.request.is_empty()
+        || batch
+            .request
+            .iter()
+            .any(|row| row.reduce_only != Some(true))
+    {
+        return Vec::new();
+    }
+    store
+        .orders()
+        .iter()
+        .filter(|order| {
+            order.status == OrderStatus::Open
+                && order.reduce_only
+                && !is_virtual(&order.id)
+                && order.remaining > 0.0
+                && batch.request.iter().any(|row| {
+                    row.symbol == order.symbol && row.side == super::side_text(order.side)
+                })
+        })
+        .take(500)
+        .map(|order| order.id.clone())
+        .collect()
 }
 
 fn unknown_outcome(mut error: VenueError) -> VenueError {
@@ -875,12 +919,14 @@ impl BybitLinear {
         if let (Some(report), Call::Cancel { ids }) = (&mut run.cancellations, &leg.planned.call) {
             report.begin(ids);
         }
+        let create_peers = create_peer_ids(&leg.planned, cx.store);
         run.active = Some(Active {
             slot,
             context: context.clone(),
             leg,
             local,
             results: None,
+            create_peers,
         });
         self.park(id, entry);
         if !self.send_ordinary(cx, id, context, method, path, body) {
@@ -2401,7 +2447,8 @@ impl BybitLinear {
                     .map(|item| item.order_link_id)
                     .collect();
                 let refs: Vec<Option<&str>> = links.iter().map(Option::as_deref).collect();
-                let Ok(rows) = ack::created_rows(result, ext, &refs) else {
+                let peers: Vec<_> = active.create_peers.iter().map(String::as_str).collect();
+                let Ok(rows) = ack::created_rows(result, ext, &refs, &peers) else {
                     let evidence = ack::evidence_ids(result);
                     return Self::unproven(
                         cx,

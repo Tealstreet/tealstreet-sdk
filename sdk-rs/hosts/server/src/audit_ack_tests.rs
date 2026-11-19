@@ -86,3 +86,28 @@ fn audit_create_ack_bounds_children_and_evidence_without_exposing_extra_json() {
     assert!(detail.to_string().len() < 8192);
     assert!(detail["message"].as_str().unwrap().chars().count() <= 160);
 }
+
+#[test]
+fn audit_create_ack_rejects_unknown_grammar_and_never_truncates_a_json_wrapper() {
+    for message in [
+        DIAGNOSTIC.replace("targets=1", "targets=501"),
+        DIAGNOSTIC.replace("echo=absent", "echo=private-canary"),
+        DIAGNOSTIC.replace("status=valid,code=0", "status=missing,code=0"),
+        DIAGNOSTIC.replace("omitted=0", "omitted=1"),
+    ] {
+        assert!(
+            algo_error(&message)
+                .get("bybitBatchAcknowledgement")
+                .is_none()
+        );
+    }
+    for message in [
+        "{broken".to_owned(),
+        json!({"unrecognized":"private-canary"}).to_string(),
+        json!({"message":"x".repeat(70_000)}).to_string(),
+    ] {
+        let detail = algo_error(&message);
+        assert_eq!(detail["message"], "Unparseable native error detail");
+        assert!(detail.get("bybitBatchAcknowledgement").is_none());
+    }
+}

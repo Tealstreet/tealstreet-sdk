@@ -154,3 +154,54 @@ fn create_batch_response_time_peer_does_not_supply_dispatch_time_proof() {
     assert!(h.unknown.contains(&6103));
     assert!(!h.has_request("/v5/order/create-batch"));
 }
+
+#[test]
+fn create_batch_peer_scope_is_symbol_side_reduce_only_and_open() {
+    for (field, value) in [
+        ("symbol", serde_json::json!("ETHUSDT")),
+        ("side", serde_json::json!("Buy")),
+        ("reduceOnly", serde_json::json!(false)),
+        ("orderStatus", serde_json::json!("Cancelled")),
+    ] {
+        let mut h = ready();
+        let mut peer = serde_json::json!({"category":"linear","symbol":"BTCUSDT",
+            "orderId":PEER,"side":"Sell","orderType":"Limit","orderStatus":"New",
+            "price":"64840.7","qty":"0.002","leavesQty":"0.002","cumExecQty":"0",
+            "reduceOnly":true,"positionIdx":0});
+        peer[field] = value;
+        h.message(
+            "/v5/private",
+            &serde_json::json!({"topic":"order","data":[peer]}).to_string(),
+        );
+        let request = slice(&mut h, 6104);
+        h.reply(request.id, 200, &answer(&[SLICE, PEER], &[0, 0]));
+        assert!(
+            matches!(h.result(6104), Some(Err(_))),
+            "{field} cannot prove a peer"
+        );
+        assert!(h.unknown.contains(&6104));
+        assert!(!h.has_request("/v5/order/create-batch"));
+    }
+}
+
+#[test]
+fn create_batch_dispatch_snapshot_survives_a_terminal_peer_stream_update() {
+    let mut h = protected_position(false);
+    let request = slice(&mut h, 6105);
+    h.message(
+        "/v5/private",
+        &serde_json::json!({"topic":"order","data":[{
+            "category":"linear","symbol":"BTCUSDT","orderId":PEER,"side":"Sell",
+            "orderType":"Limit","orderStatus":"Cancelled","price":"64840.7","qty":"0.002",
+            "leavesQty":"0","cumExecQty":"0","reduceOnly":true,"positionIdx":0
+        }]})
+        .to_string(),
+    );
+    h.reply(request.id, 200, &answer(&[PEER, SLICE], &[0, 0]));
+    let result = h.result(6105).unwrap().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Vec<String>>(&result).unwrap(),
+        [SLICE]
+    );
+    assert!(!h.has_request("/v5/order/create-batch"));
+}
