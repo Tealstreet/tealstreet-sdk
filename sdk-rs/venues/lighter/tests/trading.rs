@@ -509,6 +509,34 @@ fn a_refused_limit_modify_reports_the_venue_reason_and_keeps_the_order() {
     assert!(e.store().order("42").is_some());
 }
 
+#[test]
+fn a_limit_that_fills_before_its_modify_is_sent_is_not_modified() {
+    let (mut e, _) = ready_unattributed();
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 8,
+            id: "42".into(),
+            price: Some(92.0),
+            amount: None,
+        }),
+    );
+    let nonce = http(&mut e, "nextNonce");
+    e.store_mut().update_order("42", |o| {
+        o.filled = 1.0;
+        o.remaining = 1.0;
+    });
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("sendTx"))),
+        "{out:?}"
+    );
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. })
+        if error.outcome == Some(Outcome::NotSent) && error.message.contains("changed during amendment"))), "{out:?}");
+}
+
 // AGT-45: `a_limit_whose_replacement_is_refused_says_the_order_is_gone`,
 // `successful_amend_uses_fresh_generated_index`, `fill_overtaking_cancel_ack_aborts_amendment`
 // and `execution_after_cancel_ack_aborts_replacement_during_notification_suppression`

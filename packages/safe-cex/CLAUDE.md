@@ -2021,7 +2021,7 @@ keep payload-signed REST there. The native short-lived token
 or the `auth` query parameter only on that deployment's exact API origin and this
 explicit method/path allowlist:
 GET `/api/v1/trades`, `/api/v1/accountInactiveOrders`, `/api/v1/accountActiveOrders`,
-`/api/v1/positionFunding`, `/api/v1/accountLimits`; POST `/api/v1/changeAccountTier` (the existing user setting).
+`/api/v1/positionFunding`, `/api/v1/accountLimits`, `/api/v1/accountOrders` (placement and guarded-edit proofs); POST `/api/v1/changeAccountTier` (the existing user setting).
 Every other venue credential header and every `signature`/`sign` query parameter
 is refused, including on Lighter. Binding repeats the check on the signer's final
 URL, query tokens and venue headers before raw binding; refusal releases the

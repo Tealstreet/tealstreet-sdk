@@ -90,9 +90,9 @@ struct Job {
 // Field order preserves the sorted-key JSON used by the original journal.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct UnknownJournal<'a> {
+struct UnknownJournal {
     not_sent: Vec<String>,
-    placed: Vec<&'a String>,
+    placed: Vec<String>,
     unknown: Vec<String>,
 }
 
@@ -103,7 +103,7 @@ impl Job {
             .iter()
             .all(|id| self.group_seen.contains(id))
     }
-    fn unknown_journal(&self) -> UnknownJournal<'_> {
+    fn unknown_journal(&self) -> UnknownJournal {
         let mut unknown: Vec<_> = self
             .group_accepted
             .iter()
@@ -111,7 +111,8 @@ impl Job {
             .cloned()
             .collect();
         unknown.extend(self.proof.iter().flat_map(placement::Proof::unresolved));
-        let skip = if self.settled || self.steps.is_empty() {
+        // While a proof owns the acknowledged step, the queue head was never sent.
+        let skip = if self.settled || self.proof.is_some() || self.steps.is_empty() {
             0
         } else {
             unknown.extend(
@@ -122,7 +123,13 @@ impl Job {
             );
             1
         };
-        let placed: Vec<_> = self.ids.iter().filter(|id| !unknown.contains(id)).collect();
+        let placed: Vec<_> = self
+            .ids
+            .iter()
+            .cloned()
+            .chain(self.proof.iter().flat_map(placement::Proof::live))
+            .filter(|id| !unknown.contains(id))
+            .collect();
         let not_sent: Vec<_> = self
             .steps
             .iter()
@@ -1000,8 +1007,9 @@ impl Lighter {
             if present {
                 self.trading.active.as_mut().unwrap().steps.pop_front();
                 self.trade_kick(cx);
-            } else if *requested || cx.frame_fed() {
+            } else if *requested || cx.frame_fed() || job.handoff.is_some() {
                 // Frame-fed positions are the data source's; there is no read to wait for.
+                // A released proof has no call left to park a fresh read on either.
                 self.trade_finish(
                     cx,
                     not_sent("No open position available for this Lighter reduce-only order"),
@@ -1072,6 +1080,26 @@ impl Lighter {
                 cx,
                 not_sent(
                     "Lighter source order filled during amendment; replacement was not placed",
+                ),
+            );
+            return;
+        }
+        // A plain modify carries the size captured at preparation; a fill since
+        // then would make it send a size the caller never asked for.
+        if let Some(old) = job.amend.as_ref()
+            && job.protection.is_none()
+            && matches!(job.steps.front(), Some(Step::Modify(_)))
+            && (job.amend_filled
+                || cx.store.order(&old.id).is_some_and(|o| {
+                    o.filled > old.filled
+                        || o.status != OrderStatus::Open
+                        || o.remaining != old.remaining
+                }))
+        {
+            self.trade_finish(
+                cx,
+                not_sent(
+                    "Lighter order changed during amendment; it was not modified, retry the edit",
                 ),
             );
             return;
@@ -2854,16 +2882,18 @@ impl Lighter {
             return;
         };
         if let Some(outcome) = job.proof.as_mut().and_then(|proof| proof.outcome.take()) {
-            job.proof = None;
             job.condition = None;
             job.waiting_plan = false;
             if let Err(error) = outcome {
+                // The proof stays for the journal: its live and unresolved orders.
                 self.trade_finish(cx, error);
             } else if let Some(wait) = self.trading.position_wait.take()
                 && wait.confirmed != Some(true)
             {
+                self.trading.active.as_mut().unwrap().proof = None;
                 self.trade_finish(cx, not_sent("Lighter account snapshot could not confirm reduce-only exposure; order was not sent"));
             } else {
+                self.trading.active.as_mut().unwrap().proof = None;
                 self.trade_kick(cx);
             }
             return;

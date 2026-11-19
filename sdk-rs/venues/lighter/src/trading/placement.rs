@@ -82,6 +82,14 @@ impl Proof {
             outcome: None,
         }
     }
+    /// Orders already proven live, kept as evidence when the batch ends Unknown.
+    pub(super) fn live(&self) -> Vec<String> {
+        self.ids
+            .iter()
+            .filter(|id| matches!(self.verdicts.get(*id), Some(Verdict::Live)))
+            .cloned()
+            .collect()
+    }
     pub(super) fn unresolved(&self) -> Vec<String> {
         self.ids
             .iter()
@@ -243,7 +251,16 @@ impl Lighter {
         if proof.inflight {
             return;
         }
-        let ids: Vec<String> = proof.unresolved().into_iter().take(ROWS_PER_READ).collect();
+        // Rotate the window so a batch beyond one read's limit is read in turn.
+        let unresolved = proof.unresolved();
+        let start = (proof.polls * ROWS_PER_READ) % unresolved.len().max(1);
+        let ids: Vec<String> = unresolved
+            .iter()
+            .cycle()
+            .skip(start)
+            .take(ROWS_PER_READ.min(unresolved.len()))
+            .cloned()
+            .collect();
         let token = proof.token;
         proof.polls += 1;
         let (Some(account), Some(identity)) =
@@ -390,14 +407,17 @@ impl Lighter {
                 }
                 // A row that has not appeared may belong to a failed transaction.
                 let missing = reply.is_some().then(|| {
-                    proof
+                    let rowless: Vec<(String, String)> = proof
                         .unresolved()
                         .into_iter()
                         .filter(|id| !seen.contains(id))
-                        .find_map(|id| {
+                        .filter_map(|id| {
                             let index = proof.ids.iter().position(|own| *own == id)?;
                             Some((id, proof.hashes.get(index)?.clone()))
                         })
+                        .collect();
+                    // Rotate so one pending transaction cannot hide another's refusal.
+                    (!rowless.is_empty()).then(|| rowless[proof.polls % rowless.len()].clone())
                 });
                 if self.proof_conclude(cx, token) {
                     return;

@@ -155,8 +155,20 @@ export function createLighterVerifier(options, oracle = crypto, exchangeName = '
       if (channel.startsWith('account_all/')) return channel === `account_all/${account}`;
       return true;
     },
-    matched(record,{body,commandIndex=1}) {
-      if (!/\/sendTx(?:Batch)?$/.test(new URL(record.url).pathname) || Number(JSON.parse(record.body).code) !== 200) return;
+    matched(record,{url,body,commandIndex=1}) {
+      const taped = new URL(record.url);
+      // A proof read must name exactly the indexes its command created, in order.
+      if (taped.pathname.endsWith('/accountOrders') && taped.searchParams.has('client_order_indexes')) {
+        const expected = taped.searchParams.get('client_order_indexes').replace(/<created:(\d+):(\d+)>/g, (_, command, order) => {
+          const id = commandIds.get(Number(command))?.[Number(order)];
+          if (id === undefined) throw new Error(`Lighter tape quotes order ${order} that command ${command} never created`);
+          return id;
+        });
+        const sent = new URL(url).searchParams.get('client_order_indexes');
+        if (sent !== expected) throw new Error(`Lighter proof read named ${sent}, expected ${expected}`);
+        return;
+      }
+      if (!/\/sendTx(?:Batch)?$/.test(taped.pathname) || Number(JSON.parse(record.body).code) !== 200) return;
       const transactions = decodeLighterTransactions(body);
       const payload = JSON.parse(record.body);
       const hashes = payload.tx_hash ?? payload.txHash;

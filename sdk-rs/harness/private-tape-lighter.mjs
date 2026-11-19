@@ -34,7 +34,7 @@ const orderInfo=(price,amount,type=0,tif=1,ask=0,reduce=0,trigger=0)=>({AccountI
 const write=(type,info,nonce)=>http('POST','/api/v1/sendTx',{code:200,tx_hash:'offline-tx-'+nonce},new URLSearchParams({tx_type:String(type),tx_info:JSON.stringify({...info,Nonce:nonce})}).toString());
 const cancel=(id,nonce)=>write(15,{AccountIndex:42,ApiKeyIndex:3,MarketIndex:1,Index:id,ExpiredAt:1,Sig:'placeholder'},nonce);
 // Rust proves every ordinary placement by client index before reporting it (AGT-45).
-const proven=(command,count,status='open')=>http('GET','/api/v1/accountOrders?account_index=42&client_order_indexes=generated',{code:200,orders:Array.from({length:count},(_,i)=>({client_order_index:`<created:${command}:${i}>`,status,filled_base_amount:'0'}))},undefined,{afterCommand:command,impl:'rust'});
+const proven=(command,count,status='open')=>http('GET',`/api/v1/accountOrders?account_index=42&client_order_indexes=${Array.from({length:count},(_,i)=>`<created:${command}:${i}>`).join(',')}`,{code:200,orders:Array.from({length:count},(_,i)=>({client_order_index:`<created:${command}:${i}>`,status,filled_base_amount:'0'}))},undefined,{afterCommand:command,impl:'rust'});
 const only=(impl)=>{records.at(-1).impl=impl;};
 const setting=(fraction,mode,nonce)=>write(20,{AccountIndex:42,ApiKeyIndex:3,MarketIndex:1,InitialMarginFraction:fraction,MarginMode:mode,ExpiredAt:1,Sig:'placeholder'},nonce);
 ws(0,{type:'update/market_stats',channel:'market_stats:all',market_stats:Object.fromEntries(stats.map(s=>[s.market_id,s]))});
