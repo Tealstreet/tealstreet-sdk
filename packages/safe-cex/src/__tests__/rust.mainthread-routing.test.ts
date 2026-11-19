@@ -287,6 +287,8 @@ describe('main-thread Rust trading routing', () => {
         avgEntryPrice: '100',
         avgExitPrice: '110',
         closedPnl: '10',
+        openFee: '0',
+        closeFee: '0',
         createdTime: '1000',
         updatedTime: '1001',
       },
@@ -308,6 +310,7 @@ describe('main-thread Rust trading routing', () => {
         {
           tradeId: 'f1',
           positionAfter: '1',
+          tradeCashFlow: '0',
           executionQuantity: '1',
           income: 0,
           symbol: 'BTCUSDT',
@@ -320,6 +323,7 @@ describe('main-thread Rust trading routing', () => {
         {
           tradeId: 'f2',
           positionAfter: '0',
+          tradeCashFlow: '10',
           executionQuantity: '1',
           income: 10,
           symbol: 'BTCUSDT',
