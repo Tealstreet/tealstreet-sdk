@@ -1634,12 +1634,6 @@ impl Hyperliquid {
         self.pump_trades(cx);
     }
     fn expire_amend(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.protective_restoring()
-            && let Some(symbol) = self.protective_mark_reading()
-        {
-            self.settle_restore_mark(cx, &symbol, None);
-            return;
-        }
         let message = if self
             .trading
             .active
@@ -1775,10 +1769,6 @@ impl Hyperliquid {
             cx.clear_timer(timer);
         }
         let mark = read.ok().filter(|(mark, _)| mark.is_finite() && *mark > 0.);
-        if self.protective_restoring() {
-            self.settle_restore_mark(cx, symbol, mark);
-            return;
-        }
         match mark {
             Some((mark, issued_at)) => {
                 protective::apply_read_mark(cx, symbol, mark, issued_at);
