@@ -274,6 +274,16 @@ keeps records until a later flush retries. Unrelated retirement failure never
 rejects enqueue or hides its durable intent ID after handoff. Close the old
 outbox before replacing it with a new writer for the same scope.
 
+`retire(intentId)` lets a host drop an entry it has settled itself (applied,
+not sent, or venue-rejected per `error.outcome: "rejected"` / reconciled venue
+state) instead of keeping it as completed history or 24 h unknown work. It
+removes the row from memory, then deletes it through `compact` with the current
+sequence, so its seq is never reused; a failed delete leaves the stored row
+to restore as before. It refuses (resolves false) queued, sending, acknowledged
+and cancel-pending intents, and caller-supplied keys, whose reservation must
+survive. Retirement is the host's assertion, never evidence: the SDK still
+never resends, and a later receipt for that ID finds no entry.
+
 ## DELEGATED account actions
 
 `DelegatedOutbox.enqueueAction(action, options)` retains the separate typed

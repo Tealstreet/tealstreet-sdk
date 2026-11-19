@@ -4734,6 +4734,41 @@ mod tests {
         assert_eq!(Close::Moved.reason(), "draining: reconnect");
     }
 
+    /// A second tab's init takes signing; the first tab only holds the account.
+    /// A chase's end reaches both, not only the signing tab.
+    #[tokio::test(start_paused = true)]
+    async fn a_chase_end_reaches_a_tab_that_does_not_sign() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let (account, _first, mut first_sent) = chasing_session(&registry).await;
+                let (mut second, mut second_sent) = user_session(registry.clone(), "u");
+                assert!(second.init(acct_init()).await.is_ok());
+                let signer = crate::accounts::tests::signing(&account);
+                assert_eq!(signer, Some(second.socket), "the newest init signs");
+                let mut ended = registry.watch_algos_ended();
+                while first_sent.try_recv().is_ok() {}
+                while second_sent.try_recv().is_ok() {}
+                algo_op(&account, "chaser:terminateAll", "{}");
+                tokio::time::timeout(std::time::Duration::from_secs(60), ended.changed())
+                    .await
+                    .expect("the chase ends")
+                    .unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                let ends = |sent: &mut crate::out::Receiver| {
+                    let mut count = 0;
+                    while let Ok(frame) = sent.try_recv() {
+                        let frame: Value = serde_json::from_str(&frame).unwrap();
+                        count += usize::from(frame["d"]["op"] == "chaser:complete");
+                    }
+                    count
+                };
+                assert_eq!(ends(&mut second_sent), 1, "the signing tab");
+                assert_eq!(ends(&mut first_sent), 1, "the tab that does not sign");
+            })
+            .await;
+    }
+
     #[tokio::test(start_paused = true)]
     async fn a_drained_socket_running_a_chase_stays_until_the_chase_ends_then_moves() {
         tokio::task::LocalSet::new()

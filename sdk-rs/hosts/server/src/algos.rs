@@ -464,13 +464,10 @@ impl AccountPort for Port {
         }
         let retrying = retrying_of(op, &data);
         if owed_on_rejoin(op) {
+            // Every tab, as errors are: a non-signing tab that never hears a chase
+            // end reports it as lost ("Hosted server stopped reporting it").
             let replay = algo_msg(&self.name, op, replayed(op, &data));
-            let frame = algo_msg(&self.name, op, data);
-            let mut holding = (self.broadcast)(None);
-            if let Some(signer) = &self.signer {
-                holding.live = vec![signer.socket()];
-            }
-            (self.emit)(frame);
+            let holding = (self.broadcast)(Some(algo_msg(&self.name, op, data)));
             self.keep_unheard(None, replay, holding, retrying, op == "chaser:complete");
             return;
         }
