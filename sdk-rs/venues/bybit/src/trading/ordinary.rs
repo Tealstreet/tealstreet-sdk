@@ -1243,7 +1243,9 @@ impl BybitLinear {
                         axis,
                         partial::Axis::Target | partial::Axis::TargetHistory | partial::Axis::Final
                     ) {
-                        let target = run.partial.as_ref().unwrap().target_id().to_owned();
+                        let flow = run.partial.as_mut().unwrap();
+                        flow.retire(cx.store);
+                        let target = flow.target_id().to_owned();
                         self.note_partial_stop_canceled(&target);
                         mark_canceled(
                             cx,
