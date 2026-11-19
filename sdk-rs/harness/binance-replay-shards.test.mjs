@@ -38,8 +38,15 @@ test('five isolated Binance rows preserve the original eleven exact replay ident
 });
 
 test('combined consumer assertions run separately from serial, sealed measurement rows', () => {
-  const consumers = job('replay-consumers');
-  assert.match(consumers, /needs: selection\n    if: needs.selection.outputs.replayRequired == 'true'/);
+  const wasmConsumers = job('replay-consumers');
+  const nativeConsumers = job('replay-native-consumers');
+  for (const consumer of [wasmConsumers, nativeConsumers]) {
+    assert.match(consumer, /needs: selection\n    if: needs.selection.outputs.replayRequired == 'true'/);
+    assert.doesNotMatch(consumer, /needs:.*(?:replay-native-consumers|replay-consumers)/);
+  }
+  assert.doesNotMatch(wasmConsumers, /session-adapter-fixture|rust:test-server-adapter|rust:test-frame-wire/);
+  assert.doesNotMatch(nativeConsumers, /rust:build-wasm|test-wasm/);
+  const consumers = wasmConsumers + nativeConsumers;
   for (const command of [
     'rust:test-frame-wire',
     'cargo build --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-native --example session-adapter-fixture',

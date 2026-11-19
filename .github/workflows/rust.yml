@@ -1025,9 +1025,9 @@ jobs:
             sdk-rs/harness/out/
           retention-days: 14
 
-  # Lever 9: retain the measurement lane's combined-consumer proof in parallel.
-  replay-consumers:
-    name: Rust / replay combined consumers
+  # Lever 9: retain native and WASM consumer proofs on independent parallel runners.
+  replay-native-consumers:
+    name: Rust / replay native consumers
     needs: selection
     if: needs.selection.outputs.replayRequired == 'true'
     runs-on: ubuntu-latest
@@ -1078,6 +1078,53 @@ jobs:
         run: cargo build --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-native --example session-adapter-fixture
       - name: Native frame session adapter through real WebSockets
         run: corepack yarn rust:test-server-adapter
+
+  replay-consumers:
+    name: Rust / replay combined consumers
+    needs: selection
+    if: needs.selection.outputs.replayRequired == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      WASM_BINDGEN_VERSION: 0.2.129
+      SAFE_CEX_WASM_OPT: required
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/wasm-bindgen
+            sdk-rs/target
+          key: ${{ runner.os }}-cargo-gate-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-gate-
+      - name: Install pinned toolchain and wasm-bindgen
+        run: |
+          (cd sdk-rs && rustup show)
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
+            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+          fi
+      - uses: ./.github/actions/prefetch-cargo
+      - uses: ./.github/actions/install-binaryen
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - name: Build the combined wasm engine
         run: corepack yarn rust:build-wasm
       - name: Combined capability command conformance

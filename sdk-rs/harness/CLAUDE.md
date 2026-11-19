@@ -26,8 +26,9 @@ unchanged; each physical measurement row seals and verifies its complete subset.
 Every product still builds and compares the `binance` family against that same
 family at the authenticated baseline, including baselines predating this split.
 
-The measurement lane's combined build, budget and consumer assertions run in
-`Rust / replay combined consumers`, independently of those five rows. Nothing is
+The measurement lane's native wire/fixture assertions run in
+`Rust / replay native consumers`; its combined build, budget and WASM consumer
+assertions run in `Rust / replay combined consumers`, parallel to the five rows. Nothing is
 skipped or run concurrently inside a measured process. Truncated corpora, missing
 cases and mismatched family seals still fail; budgets and policy are unchanged.
 
