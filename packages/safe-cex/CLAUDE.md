@@ -1133,6 +1133,16 @@ enter it. The array's `historyFailure` property is non-enumerable. Replacing an
 assertion replaces its diagnostic too, so a different partial input cannot
 borrow the earlier input's error facts. Grouping is a caller concern.
 
+The journal fold refuses a derived position when any nonzero fee contribution uses a currency
+that differs from its settlement currency or has no reported currency: there is no
+historical FX conversion in this path. The interval carries an empty currency member
+for a nonzero unlabeled contribution so the same conversion guard refuses it.
+Zero fees require no conversion, including fees allocated across a position flip;
+nonzero foreign contributions still refuse even when their numeric sum is zero.
+The error propagates through `buildFoldedPositionRecords`; never silently drop the
+position or label BNB/mixed-currency fees as USDT. Raw fills retain their native
+fee amounts and currencies. Settlement-denominated fees and rebates are unchanged.
+
 The journal fold rejects flagged fills and symbol-scoped income; with complete
 account-wide fills it discards flagged income enrichment and leaves funding
 unattributed. NX ingestion must still inspect completeness before transforms
