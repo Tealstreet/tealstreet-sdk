@@ -52,7 +52,8 @@ retains the original signing host and owner; it does not activate any server ven
 
 Lighter placements complete only on venue proof (an `accountOrders` row or a
 failed `tx`), never on the `sendTx` ACK alone; plain limit amends are one native
-modify. See `sdk-rs/venues/lighter/README.md` (AGT-45).
+modify, completed only by its executed `tx`. A failed or unproven transaction
+resyncs the nonce. See `sdk-rs/venues/lighter/README.md` (AGT-45, AGT-77).
 
 Bitunix keeps one position TP/SL order per position, both legs under one id, and
 a placement without a leg replaces it. The REST pending list has no `type`, so
