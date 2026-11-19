@@ -165,6 +165,9 @@ pub(crate) const CODES: CodeTable = CodeTable {
         refusal(11042, ErrorKind::AuthPermission),
         refusal(11043, ErrorKind::InvalidInput),
         refusal(11044, ErrorKind::Rejected),
+        // post_only_reject: a post-only order that would take liquidity is refused
+        // whole, before it reaches the book (docs.deribit.com/articles/errors).
+        refusal(11054, ErrorKind::Rejected),
         refusal(13009, ErrorKind::AuthExpired),
     ],
     success: &[Key::Int(0)],
