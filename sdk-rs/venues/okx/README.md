@@ -93,6 +93,21 @@ KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. HTTP
 text; only their telemetry assertion is deferred. No shared engine code is
 changed to add this venue companion event.
 
+## Entire-position TP/SL (AGT-68)
+
+OKX keeps one entire-position (`closeFraction=1`) TP/SL algo per position and
+refuses a second with `51088`. A full-position SL or TP whose position already
+holds a single-leg full algo of the other kind joins it: one
+`/api/v5/trade/amend-algos` carrying only the new leg's trigger price and
+trigger type, with `cxlOnFail:false`. No size or execution price is sent
+(51523/51524), so a refusal leaves the existing leg in place and never cancels
+or re-places it. The command completes with that algo's native ID. A full SL and
+TP in one command become one `oco` algo. Partial-size legs, a position already
+carrying both legs, and other positions are placed as before. Legacy TS sends a
+second `closeFraction` algo and gets `51088`; this is a recorded deviation.
+Live acceptance of adding a leg through amend-algos is not yet verified; OKX
+documents leg deletion there, and a refusal is a definitive `Rejected`.
+
 ## Native write refusal diagnostics
 
 One ACK decoder borrows plain messages and owns escaped messages. Owned text
