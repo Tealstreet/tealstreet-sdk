@@ -99,8 +99,9 @@ async fn timeout_records_request_socket_age_and_last_heard_without_payload() {
     let (failure, id) = expired(true).await;
     assert_eq!(failure, SignError::TimedOut);
     let lines = capture.finish();
-    assert!(!lines.join("").contains("KEY_CANARY"));
-    assert!(!lines.join("").contains("BODY_CANARY"));
+    for canary in ["KEY_CANARY", "BODY_CANARY", "ACCOUNT_CANARY", "USER_CANARY"] {
+        assert!(!lines.join("").contains(canary));
+    }
     let rows = events(lines);
     assert_eq!(
         rows.len(),
@@ -299,12 +300,15 @@ async fn old_socket_late_reply_does_not_count_against_the_new_owner() {
     let (mut old, _old_sent) = user_session(registry.clone(), "USER_CANARY");
     let (mut new, _new_sent) = user_session(registry, "USER_CANARY");
     let (link, mut frames) = session_signer(&mut old);
+    let task = signing(link.clone());
+    let original = frames.recv().await.unwrap();
+    let frame: Value = serde_json::from_str(&original).unwrap();
     let (send, mut resumed) = tokio::sync::mpsc::unbounded_channel();
+    link.suspend();
     link.attach(new.socket, Arc::new(move |text| send.send(text).is_ok()));
     let pending = old.pending_verifications.remove("acct").unwrap();
     new.pending_verifications.insert("acct".into(), pending);
-    let task = signing(link);
-    let frame: Value = serde_json::from_str(&resumed.recv().await.unwrap()).unwrap();
+    assert_eq!(resumed.recv().await.unwrap(), original);
     let response =
         json!({"t":"sign-res","d":{"id":frame["d"]["id"],"wsAuthSignature":"00".repeat(32)}})
             .to_string();
