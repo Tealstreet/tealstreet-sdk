@@ -140,6 +140,9 @@ impl PartialStopGuard {
                 current.last_update = self.original.last_update;
                 if canceled && current.status == OrderStatus::Canceled {
                     current.status = self.original.status;
+                    // AGT-34 (M54): Bybit's terminal row for our own cancel carries
+                    // `leavesQty` "0". A fill still differs in `filled`, which compares.
+                    current.remaining = self.original.remaining;
                 }
                 current == self.original
             }
