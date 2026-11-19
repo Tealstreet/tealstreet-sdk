@@ -182,3 +182,10 @@ log and step summary while still failing the job. `test-http-plan-feature-modes.
 likewise runs every engine mode before failing. #3640 needed four runs to surface
 ~124 failures because the first failing target stopped the job;
 `affected-ci-workflow.test.mjs` pins this shape.
+
+Binance saturated-history paging preserves the existing request pacing and caller
+deadlines. The measured #3671 Binance floor and its historical CI provenance are
+retained in `wasm-caps-history.md` as historical evidence. AGT-23 supersedes that
+PR-local floor: the active cap follows master, and only the master artifact bot
+restores its reserve. Fresh artifacts must fit the byte ceiling; reserve warnings
+remain advisory. Native/combined consumers remain independent gates.
