@@ -109,6 +109,7 @@ pub struct Session {
     metrics: Arc<Metrics>,
     identity: Identity,
     pub socket: u64,
+    sign_responses: crate::signing_diagnostics::ReplyMisses,
     pub resume_id: String,
     out: Out,
     joined: HashMap<String, Joined>,
@@ -273,6 +274,7 @@ impl Session {
             metrics,
             identity,
             socket,
+            sign_responses: crate::signing_diagnostics::ReplyMisses::new(socket),
             resume_id: crate::accounts::resume_id(),
             out,
             joined: HashMap::new(),
@@ -1351,9 +1353,10 @@ impl Session {
                     if let Some(link) = &joined.account.link
                         && link.resolve(self.socket, response.clone())
                     {
-                        break;
+                        return Ok(());
                     }
                 }
+                self.sign_responses.unmatched(&response);
             }
             Inbound::Dispose { account_name } => {
                 if self.pending_verifications.contains_key(&account_name) {
