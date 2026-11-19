@@ -132,6 +132,40 @@ test('harness files that only gate or measure a release leave the fingerprint al
   }
 });
 
+test('only the exact harness guide is fingerprint-neutral; sibling build inputs and other guides still count', () => {
+  const root = tree();
+  const guide = 'sdk-rs/harness/CLAUDE.md';
+  writeFileSync(join(root, guide), '# Harness guidance');
+  const before = betaWasmInputs(root, TOOLCHAIN);
+  assert.ok(!betaWasmInputPaths(root).includes(guide));
+  writeFileSync(join(root, guide), '# Updated harness guidance');
+  assert.deepEqual(betaWasmInputs(root, TOOLCHAIN), before);
+  for (const path of [
+    'sdk-rs/harness/families.integration.mjs',
+    'sdk-rs/harness/README.md',
+    'sdk-rs/engine/CLAUDE.md',
+    'sdk-rs/harness/nested/CLAUDE.md',
+    'sdk-rs/harness/CLAUDE.md.mjs',
+  ]) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    const prior = betaWasmInputs(root, TOOLCHAIN);
+    writeFileSync(join(root, path), 'counted input');
+    assert.ok(betaWasmInputPaths(root).includes(path), path);
+    assert.notEqual(betaWasmInputs(root, TOOLCHAIN).fingerprint, prior.fingerprint, path);
+  }
+});
+
+test('the exact harness guide exclusion still refuses symlinks and traverses same-named directories', () => {
+  const root = tree();
+  const guide = join(root, 'sdk-rs/harness/CLAUDE.md');
+  symlinkSync(join(root, 'sdk-rs/engine/src/lib.rs'), guide);
+  assert.throws(() => betaWasmInputs(root, TOOLCHAIN), /symlink/);
+  rmSync(guide);
+  mkdirSync(guide);
+  writeFileSync(join(guide, 'input.rs'), 'pub fn counted() {}');
+  assert.ok(betaWasmInputPaths(root).includes('sdk-rs/harness/CLAUDE.md/input.rs'));
+});
+
 test('replay gate edits leave the fingerprint alone while fingerprint-definition edits still move it', () => {
   const root = tree();
   const gate = join(root, 'sdk-rs/harness/gate.mjs');
@@ -192,10 +226,11 @@ const HOST_ROOTS = [...new Set(exportFiles(JSON.parse(read('sdk-rs/hosts/wasm/pa
   .filter((path) => path.startsWith('./js/') && path.endsWith('.mjs'))
   .map((path) => `sdk-rs/hosts/wasm/${path.slice(2)}`))];
 
-test('the replay gate is unreachable from build, loader and shipped host imports', () => {
+test('the replay gate and exact harness guide are unreachable from build, loader and shipped host imports', () => {
   const reached = importGraph([...BUILD_ROOTS, ...HOST_ROOTS]);
   assert.ok(reached.has('sdk-rs/hosts/wasm/js/managed-http.mjs'), 'transitive host dependencies are followed');
   assert.ok(!reached.has('sdk-rs/harness/gate.mjs'), 'replay verdicts never shape a built or shipped module');
+  assert.ok(!reached.has('sdk-rs/harness/CLAUDE.md'), 'agent guidance never shapes a built or shipped module');
 });
 
 test('the build roots are the scripts the release actually runs', () => {
