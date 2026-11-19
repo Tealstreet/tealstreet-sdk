@@ -64,6 +64,12 @@ uses `PENDING`, `OPEN` (including partial fills), `UNTRIGGERED`, `FILLED`,
 `EXPIRED` and `CANCELED`. The mapper accepts those exact values in REST snapshots
 and private stream rows. Cancellation uses one `L`; no documented `CANCELLED`
 alias is assumed. Canceled and expired rows retain their reported fill quantities.
+
+`CANCELING` is undocumented but observed: the bounded diagnostic above captured
+`unknown order status: "CANCELING"` from apexomni-t on 2026-11-19 (exchange-01,
+11:16:55Z and 11:36:49Z) while a cancel was in flight. It maps to the
+non-terminal `Canceling`, so the order stays listed with its fills and cannot be
+amended; only a later `CANCELED` removes it.
 Unknown statuses produce `row.skipped` and preserve the existing live order;
 they cannot establish cancellation or another terminal outcome. A new mapping
 requires the actual venue value and evidence of its meaning.
