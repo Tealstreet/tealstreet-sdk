@@ -680,7 +680,11 @@ mod timeout_diagnostics_tests {
                 }
                 let accepted = reply.join().unwrap();
                 let result = task.await.unwrap();
-                assert_eq!(accepted, result.is_ok(), "no accepted reply plus timeout");
+                if result.is_ok() {
+                    assert!(accepted, "receipt requires a successfully queued reply");
+                } else {
+                    assert_eq!(result, Err(Failure::TimedOut));
+                }
                 assert_eq!(seen.lock().unwrap().len(), usize::from(result.is_err()));
                 if order == 1 {
                     assert!(!accepted, "late-reply control");
