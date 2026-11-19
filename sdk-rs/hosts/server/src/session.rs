@@ -768,6 +768,9 @@ impl Session {
     }
 
     fn open_probed_cosigned(&mut self, init: InitPayload) {
+        let diagnostic = self
+            .handovers
+            .refusal_context(&init.account_name, &init.exchange_name);
         let permit = self.registry.probe_permit(self.user(), &init);
         let out = self.handover_out(&init.account_name);
         let (signing_out, lifetime) = out.isolated();
@@ -793,7 +796,7 @@ impl Session {
                     Some(ProbedInit {
                         init,
                         permit,
-                        diagnostic: None,
+                        diagnostic: Some(diagnostic),
                     }),
                 )
             },
