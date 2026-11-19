@@ -2227,6 +2227,7 @@ pub fn build_with_signer_in_context<T: Visit>(
                     application_id: options.application_id.take(),
                     api_key_index: options.api_key_index.take(),
                     integrator_account_index: options.lighter_integrator_account_index.take(),
+                    builder_exemption: options.lighter_builder_exemption.take(),
                     stop_slippage_pct: options.lighter_stop_slippage_pct.take().unwrap_or(1.0),
                     ws_routed: options.lighter_ws_route,
                 }),
@@ -2919,6 +2920,11 @@ pub struct EngineOptions {
     #[serde(default)]
     #[serde(deserialize_with = "optional_lighter_index")]
     pub lighter_integrator_account_index: Option<u64>,
+    /// Tealstreet-signed builder-fee exemption (`lbx1.` token) for approved
+    /// internal accounts; Rust hosts only, not part of the public TS options.
+    #[cfg(feature = "lighter")]
+    #[serde(default)]
+    pub lighter_builder_exemption: Option<String>,
     #[cfg(feature = "lighter")]
     #[serde(default)]
     pub lighter_stop_slippage_pct: Option<f64>,

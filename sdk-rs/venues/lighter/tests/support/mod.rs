@@ -351,6 +351,7 @@ pub struct Options {
     pub application_id: Option<String>,
     pub api_key_index: Option<String>,
     pub integrator_account_index: Option<u64>,
+    pub builder_exemption: Option<String>,
     pub stop_slippage_pct: f64,
     pub ws_routed: bool,
 }
@@ -367,6 +368,7 @@ impl From<Options> for safe_cex_venue_lighter::Options {
             application_id: options.application_id,
             api_key_index: options.api_key_index,
             integrator_account_index: options.integrator_account_index,
+            builder_exemption: options.builder_exemption,
             stop_slippage_pct: options.stop_slippage_pct,
             ws_routed: options.ws_routed,
         }
@@ -388,6 +390,7 @@ impl Default for Options {
             application_id: None,
             api_key_index: None,
             integrator_account_index: None,
+            builder_exemption: None,
             stop_slippage_pct: 1.0,
             ws_routed: false,
         }
