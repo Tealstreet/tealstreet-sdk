@@ -8,6 +8,9 @@ mod proof_terminal;
 #[path = "partial_stops/proof_readiness.rs"]
 mod proof_readiness;
 
+#[path = "partial_stops/never_unprotected.rs"]
+mod never_unprotected;
+
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::{Command, Event, HttpRequest};
 use safe_cex_venue_bybit::{Endpoints, Variant};
