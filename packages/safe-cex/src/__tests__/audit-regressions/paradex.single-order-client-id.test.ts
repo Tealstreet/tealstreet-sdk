@@ -1,15 +1,16 @@
 import type { Axios } from 'axios';
+import type { Market, PlaceOrderOpts } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { uuidMock } = vi.hoisted(() => ({ uuidMock: vi.fn() }));
-vi.mock('../../utils/uuid', () => ({ uuid: uuidMock }));
-
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderType } from '../../types';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { ENDPOINTS } from '../reference/paradex/paradex.types';
-import { DefaultStore } from '../../store/store.base';
-import type { Market, PlaceOrderOpts } from '../../types';
-import { OrderSide, OrderType } from '../../types';
+
+const { uuidMock } = vi.hoisted(() => ({ uuidMock: vi.fn() }));
+vi.mock('../../utils/uuid', () => ({ uuid: uuidMock }));
 
 const MARKET: Market = {
   id: 'BTC-USD-PERP',
@@ -44,7 +45,7 @@ const createExchange = () => {
   const exchange = new ParadexExchange(
     'paradex',
     { publicDataOnly: true, tuning: { consoleLogging: false } } as any,
-    new DefaultStore(),
+    new FrameStore(),
   );
   const signOrder = vi.fn(async () => ({
     signature: '["r","s"]',
@@ -102,7 +103,11 @@ describe('Paradex single-order client identity', () => {
 
   it('turns slippage-bounded market orders into crossing IOC limits', async () => {
     const { exchange, signOrder } = createExchange();
-    exchange.store.update({ markets: [MARKET] });
+    applyReferenceFixture(
+      exchange.store,
+      { markets: [MARKET] },
+      exchange.store.markets.map((row) => row.symbol),
+    );
     vi.spyOn(exchange, 'fetchOrderBook').mockResolvedValue({
       bids: [{ price: 99, amount: 10, total: 990 }],
       asks: [{ price: 101, amount: 10, total: 1010 }],
@@ -134,26 +139,30 @@ describe('Paradex single-order client identity', () => {
 
   it('keeps slippage-bounded sell market orders inside Paradex price bands', async () => {
     const { exchange, signOrder } = createExchange();
-    exchange.store.update({
-      markets: [DOGE_MARKET],
-      tickers: [
-        {
-          id: 'DOGE-USD-PERP',
-          symbol: 'DOGE-USD-PERP',
-          bid: 0.087,
-          ask: 0.088,
-          last: 0.0875,
-          mark: 0.0875,
-          index: 0.0875,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-        } as any,
-      ],
-    });
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: [DOGE_MARKET],
+        tickers: [
+          {
+            id: 'DOGE-USD-PERP',
+            symbol: 'DOGE-USD-PERP',
+            bid: 0.087,
+            ask: 0.088,
+            last: 0.0875,
+            mark: 0.0875,
+            index: 0.0875,
+            percentage: 0,
+            openInterest: 0,
+            fundingRate: 0,
+            fundingTime: 0,
+            volume: 0,
+            quoteVolume: 0,
+          } as any,
+        ],
+      },
+      exchange.store.markets.map((row) => row.symbol),
+    );
     vi.spyOn(exchange, 'fetchOrderBook').mockResolvedValue({
       bids: [{ price: 0.076, amount: 1000, total: 76 }],
       asks: [{ price: 0.088, amount: 1000, total: 88 }],
@@ -189,26 +198,30 @@ describe('Paradex single-order client identity', () => {
 
   it('rounds sell-side band clamps up so Paradex IOC prices stay inside bands', async () => {
     const { exchange, signOrder } = createExchange();
-    exchange.store.update({
-      markets: [DOGE_MARKET],
-      tickers: [
-        {
-          id: 'DOGE-USD-PERP',
-          symbol: 'DOGE-USD-PERP',
-          bid: 0.0783,
-          ask: 0.089,
-          last: 0.08931,
-          mark: 0.0869682,
-          index: 0.0869682,
-          percentage: 0,
-          openInterest: 0,
-          fundingRate: 0,
-          fundingTime: 0,
-          volume: 0,
-          quoteVolume: 0,
-        } as any,
-      ],
-    });
+    applyReferenceFixture(
+      exchange.store,
+      {
+        markets: [DOGE_MARKET],
+        tickers: [
+          {
+            id: 'DOGE-USD-PERP',
+            symbol: 'DOGE-USD-PERP',
+            bid: 0.0783,
+            ask: 0.089,
+            last: 0.08931,
+            mark: 0.0869682,
+            index: 0.0869682,
+            percentage: 0,
+            openInterest: 0,
+            fundingRate: 0,
+            fundingTime: 0,
+            volume: 0,
+            quoteVolume: 0,
+          } as any,
+        ],
+      },
+      exchange.store.markets.map((row) => row.symbol),
+    );
     vi.spyOn(exchange, 'fetchOrderBook').mockResolvedValue({
       bids: [{ price: 0.0783, amount: 1000, total: 78.3 }],
       asks: [{ price: 0.089, amount: 1000, total: 89 }],
@@ -285,9 +298,7 @@ describe('Paradex single-order client identity', () => {
     } as unknown as Axios;
 
     await expect(
-      exchange.placeOrder(
-        marketOrder({ type: OrderType.Limit, price: 50_000, takeProfit: 52_000 }),
-      ),
+      exchange.placeOrder(marketOrder({ type: OrderType.Limit, price: 50_000, takeProfit: 52_000 })),
     ).resolves.toEqual(['main-order', 'take-profit-child']);
 
     expect(signOrder).toHaveBeenCalledTimes(2);

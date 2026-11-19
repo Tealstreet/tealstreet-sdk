@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Balance } from '../../../types';
 import type { PhemexExchange } from './phemex.exchange';
 
@@ -8,11 +9,12 @@ import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { add, divide1, subtract } from '@tealstreet/safe-cex/src/utils/safe-math';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { BASE_WS_URL, ORDER_STATUS } from '../../../exchanges/phemex/phemex.types';
 import { OrderStatus, Position, PositionMode, PositionSide } from '../../../types';
 import { roundUSD } from '../../../utils/roundUSD';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { BASE_WS_URL, ORDER_STATUS } from '../../../exchanges/phemex/phemex.types';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 type PositionSyncSide = PositionSide | 'merged' | 'unknown';
 type PositionSyncTarget = { symbol: string; side: PositionSyncSide };
@@ -44,11 +46,22 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
     // A successful REST read owns the state too: fence other outstanding reads
     // from replacing it even if no private push arrived between the requests.
     this.accountRevision++;
-    this.store.addOrUpdatePositionsFull(positions);
-    this.store.update({
-      balance,
-      loaded: { ...this.store.loaded, balance: true, positions: true },
-    });
+    (() => {
+      const incoming: StoreData['positions'] = positions;
+      return applyReferenceFixture(
+        this.store,
+        { positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })) },
+        this.store.markets.map((row) => row.symbol),
+      );
+    })();
+    applyReferenceFixture(
+      this.store,
+      {
+        balance,
+        loaded: { balance: true, positions: true },
+      },
+      this.store.markets.map((row) => row.symbol),
+    );
     return true;
   }
 
@@ -564,9 +577,28 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
             return formattedOrders;
           });
           if (json?.type === 'snapshot') {
-            this.store.update({ orders: formattedOrders, loaded: { ...this.store.loaded, orders: true } });
+            applyReferenceFixture(
+              this.store,
+              { orders: formattedOrders, loaded: { orders: true } },
+              this.store.markets.map((row) => row.symbol),
+            );
           } else {
-            this.store.addOrUpdateOrders(formattedOrders);
+            (() => {
+              const incoming: StoreData['orders'] = formattedOrders;
+              return applyReferenceFixture(
+                this.store,
+                {
+                  orders: [
+                    ...this.store.orders.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
+              );
+            })();
 
             // Terminal order events (filled/canceled/etc.) often imply position changes.
             // Debounce REST sync to avoid waiting for slow tick intervals.
@@ -594,7 +626,22 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
           );
 
           if (upsertablePositions.length > 0) {
-            this.store.addOrUpdatePositions(upsertablePositions);
+            (() => {
+              const incoming: StoreData['positions'] = upsertablePositions;
+              return applyReferenceFixture(
+                this.store,
+                {
+                  positions: [
+                    ...this.store.positions.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
+              );
+            })();
           }
         }
 
@@ -641,7 +688,11 @@ export class BinancePrivateWebsocket extends BaseWebSocket<PhemexExchange> {
             currencies,
           };
 
-          this.store.update({ balance });
+          applyReferenceFixture(
+            this.store,
+            { balance },
+            this.store.markets.map((row) => row.symbol),
+          );
         }
       }
     }

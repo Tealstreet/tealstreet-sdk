@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { consumerFrame } from './cutover/consumerFrame';
 import { engineCapabilities } from './fixtures/engineCapabilities';
 
@@ -74,7 +74,7 @@ const fixture = (health: Array<'ok' | 'late' | 'stuck' | 'fails'>) => {
   const exchange = new RustEngineExchange(
     'bybit',
     { key: 'k', secret: 's', workerMirror: true, testnet: true },
-    new DefaultStore(),
+    new FrameStore(),
   );
   exchanges.push(exchange);
   exchange.on('callMethod', vi.fn());

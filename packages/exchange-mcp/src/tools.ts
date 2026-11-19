@@ -95,7 +95,7 @@ const prepare = async (exchange: Exchange, opts: PlaceOrderOpts): Promise<PlaceO
     exchange.fetchOrders(),
     exchange.fetchTickers?.(),
   ]);
-  const like = exchange as unknown as ExchangeLike;
+  const like: ExchangeLike = exchange;
   return prepareCliOrder(
     { ...like, name: like.name, store: { markets: exchange.store.markets, positions, orders, tickers } },
     opts,
@@ -173,7 +173,8 @@ export const tools: Tool[] = [
   }),
   tool({
     name: 'get_order_history',
-    description: 'Past orders, including filled and cancelled ones. Known partial history includes rows and incompleteness metadata.',
+    description:
+      'Past orders, including filled and cancelled ones. Known partial history includes rows and incompleteness metadata.',
     method: 'fetchHistoricalOrders',
     input: { symbol: symbol.optional(), orderId: z.string().optional(), from, to, limit },
     run: async (exchange, args) =>
@@ -188,14 +189,16 @@ export const tools: Tool[] = [
   }),
   tool({
     name: 'get_closed_pnl',
-    description: 'Realised PnL of closed positions for one market. Known partial history includes rows and incompleteness metadata.',
+    description:
+      'Realised PnL of closed positions for one market. Known partial history includes rows and incompleteness metadata.',
     method: 'fetchClosedPnl',
     input: { symbol, from, to, limit },
     run: async (exchange, args) => withUtc(await exchange.fetchClosedPnl(args), { time: 'ms', closedTime: 'ms' }),
   }),
   tool({
     name: 'get_income',
-    description: 'Account income records: funding, fees, realised PnL and transfers. Known partial history includes rows and incompleteness metadata.',
+    description:
+      'Account income records: funding, fees, realised PnL and transfers. Known partial history includes rows and incompleteness metadata.',
     method: 'fetchIncomeHistory',
     input: {
       symbol: symbol.optional(),
@@ -309,7 +312,7 @@ export const tools: Tool[] = [
     },
     run: async (exchange, args) => {
       const positions = await exchange.fetchPositions();
-      const store = { ...exchange.store, markets: exchange.store.markets, positions };
+      const store = { ...exchange.store.data, positions };
       const account = 'mcp';
       const adapter = createCoreAdapter({
         getExchange: () => exchange,
@@ -337,7 +340,7 @@ export const tools: Tool[] = [
       const [order] = await openOrders(exchange, [orderId]);
       const update =
         price !== undefined
-          ? { price: prepareCliAmendPrice(exchange as unknown as ExchangeLike, order.symbol, price) }
+          ? { price: prepareCliAmendPrice(exchange, order.symbol, price) }
           : { amount: prepareAmendAmount(exchange, order, amount!) };
       return exchange.updateOrder({ order, update });
     },
@@ -400,12 +403,15 @@ const capabilityOf = new Map<string, keyof ExchangeCapabilities>(
   Object.entries(CAPABILITY_METHODS).map(([capability, method]) => [method, capability as keyof ExchangeCapabilities]),
 );
 
-export const supportedTools = (exchange: Exchange, { options = false }: { options?: boolean } = {}): Tool[] => {
+export const supportedTools = (
+  exchange: Exchange & { fetchBalance?: unknown },
+  { options = false }: { options?: boolean } = {},
+): Tool[] => {
   const { capabilities } = exchange;
   return tools.filter((t) => {
     if (t.requiresOptions && !options) return false;
     if (t.requiredCapabilities?.some((capability) => !capabilities[capability])) return false;
-    if (typeof (exchange as unknown as Record<string, unknown>)[t.method] !== 'function') return false;
+    if (typeof exchange[t.method] !== 'function') return false;
     const capability = capabilityOf.get(t.method);
     return capability === undefined || capabilities[capability];
   });

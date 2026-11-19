@@ -7,11 +7,11 @@ import { ReconnectingWebSocket } from '../../../../../thirdparty/reconnecting-we
 import { unitTransportGuard } from '../../../config/test/transportGuard';
 import { getExchangeMetadata } from '../../exchangeMetadata';
 import { BaseWebSocket } from '../../exchanges/base.ws';
+import { FrameStore } from '../../store/frameStore';
+import { virtualClock } from '../../utils/virtualClock';
 import { signWeexMessage } from '../reference/weex/weex.api';
 import { WeexExchange } from '../reference/weex/weex.exchange';
 import { BASE_WS_URL } from '../reference/weex/weex.types';
-import { DefaultStore } from '../../store/store.base';
-import { virtualClock } from '../../utils/virtualClock';
 
 class HeaderCapturingWebSocket {
   static CONNECTING = 0;
@@ -92,7 +92,7 @@ const createExchange = () =>
   new WeexExchange(
     'weex',
     { key: 'test-access-key', secret: 'test-secret', passphrase: 'test-passphrase' } as any,
-    new DefaultStore(),
+    new FrameStore(),
   );
 
 const nodeRequire = createRequire(import.meta.url);

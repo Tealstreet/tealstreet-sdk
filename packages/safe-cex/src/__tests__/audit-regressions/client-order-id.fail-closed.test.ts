@@ -1,19 +1,19 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { Market, PlaceOrderOpts } from '../../types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { BaseExchange } from '../../exchanges/base';
+import { RustEngineExchange as OrderlyExchange, RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
 import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 import { BackpackExchange } from '../reference/backpack/backpack.exchange';
-import { BaseExchange } from '../../exchanges/base';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
-import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 import { BinanceOptionsExchange } from '../reference/binance/binanceoptions.exchange';
+import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 import { BinanceSpotExchange } from '../reference/binance/binancespot.exchange';
 import { BingxExchange } from '../reference/bingx/bingx.exchange';
 import { BitgetExchange } from '../reference/bitget/bitget.exchange';
@@ -28,7 +28,6 @@ import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
 import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
-import { TxFlowExchange } from '../reference/txflow/txflow.exchange';
 import { HyperliquidSpotExchange } from '../reference/hyperliquid/hyperliquidspot.exchange';
 import { KrakenExchange } from '../reference/kraken/kraken.exchange';
 import { KrakenSpotExchange } from '../reference/kraken/krakenspot.exchange';
@@ -37,16 +36,17 @@ import { KucoinSpotExchange } from '../reference/kucoin/kucoinspot.exchange';
 import { LighterExchange } from '../reference/lighter/lighter.exchange';
 import { MexcExchange } from '../reference/mexc/mexc.exchange';
 import { OKXExchange } from '../reference/okx/okx.exchange';
-import { RustEngineExchange as OrderlyExchange } from '../../exchanges/rust/rust.exchange';
 import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 import { PolymarketExchange } from '../reference/polymarket/polymarket.exchange';
-import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
+import { TxFlowExchange } from '../reference/txflow/txflow.exchange';
 import { WeexExchange } from '../reference/weex/weex.exchange';
 import { WOOXExchange } from '../reference/woo/woo.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStatus, OrderType } from '../../types';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 // Contract: a caller clientOrderId is sent verbatim on one native order, or the
 // call rejects — emitting first — before ANY transport is touched.
@@ -62,7 +62,7 @@ const MARKET: Market = {
   info: {},
 };
 
-type ExchangeCtor = new (name: any, options: any, store: DefaultStore) => BaseExchange;
+type ExchangeCtor = new (name: any, options: any, store: FrameStore) => BaseExchange;
 
 const HONORING: Array<[string, ExchangeCtor]> = [
   ['txflow', TxFlowExchange],
@@ -137,8 +137,13 @@ const isTransport = (value: unknown): value is Record<string, unknown> =>
 
 // Replace every axios-like client on the instance with recorders, so any write is observable.
 const setup = (name: string, Ctor: ExchangeCtor) => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new Ctor(
     name,
     { key: 'key', secret: 'secret', passphrase: 'passphrase', tealstreetTunnel: false },
@@ -164,8 +169,13 @@ const setup = (name: string, Ctor: ExchangeCtor) => {
 
 describe('clientOrderId fails closed before any write', () => {
   it.each(['bitget', 'bitgetusdc'])('%s Rust wrapper honors caller IDs and finds their live orders', async (name) => {
-    const store = new DefaultStore();
-    store.update({ markets: [MARKET] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [MARKET] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new RustEngineExchange(
       name as any,
       { key: 'key', secret: 'secret', passphrase: 'passphrase' },
@@ -192,7 +202,12 @@ describe('clientOrderId fails closed before any write', () => {
       reduceOnly: false,
       lastUpdate: 1,
     };
-    exchange.store.update({ orders: [live] });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: [live] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     await expect(exchange.findOrderByClientOrderId(opts.symbol, opts.clientOrderId!)).resolves.toEqual({
       found: true,
       order: live,
@@ -358,7 +373,7 @@ describe('placeOrderWithClientOrderId', () => {
 
 describe('BaseExchange client order ID helpers', () => {
   it('rejectPreflight emits before it throws', () => {
-    const exchange = new BaseExchange('binance', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    const exchange = new BaseExchange('binance', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
     const events: string[] = [];
     vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {
       events.push('emit');
@@ -421,8 +436,13 @@ describe('mintClientOrderId', () => {
 describe('findOrderByClientOrderId answered from open orders', () => {
   // Bitunix writes a Creating row with the caller's ID while its send is in flight.
   it('never reads a Creating row as placed, from the store or a fetch', async () => {
-    const store = new DefaultStore();
-    store.update({ markets: [MARKET] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [MARKET] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new RustEngineExchange('bitunix' as any, { key: 'key', secret: 'secret' }, store);
     adoptEngineCapabilities(exchange);
     const opts = order({ clientOrderId: 'caller-1' });
@@ -436,14 +456,24 @@ describe('findOrderByClientOrderId answered from open orders', () => {
       reduceOnly: false,
       lastUpdate: 1,
     };
-    exchange.store.update({ orders: [row] });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: [row] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange, 'fetchOrders').mockResolvedValue([row]);
     await expect(exchange.findOrderByClientOrderId(opts.symbol, 'caller-1')).resolves.toEqual({
       found: false,
       definitive: false,
     });
     const acknowledged = { ...row, id: 'venue-9', status: OrderStatus.Open };
-    exchange.store.update({ orders: [acknowledged] });
+    exchange.store.apply(
+      nativeFixture(
+        { orders: [acknowledged] },
+        exchange.store.markets.map((row) => row.symbol),
+      ),
+    );
     await expect(exchange.findOrderByClientOrderId(opts.symbol, 'caller-1')).resolves.toEqual({
       found: true,
       order: acknowledged,

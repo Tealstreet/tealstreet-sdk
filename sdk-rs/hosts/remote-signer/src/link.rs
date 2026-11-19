@@ -17,6 +17,18 @@ pub type Outbox = Arc<dyn Fn(String) -> bool + Send + Sync>;
 /// The server's identity for one client socket. A `sign-res` resolves only a
 /// request sent on the same socket, whatever its id.
 pub type SocketId = u64;
+
+/// Metadata only; the host hashes the untrusted ID before journaling it.
+pub struct TimeoutDiagnostic {
+    pub request_id: String,
+    pub socket: SocketId,
+    pub sent_socket: Option<SocketId>,
+    pub request_age_ms: u64,
+    pub attachment_age_ms: u64,
+    pub last_heard_age_ms: u64,
+    pub failure: Failure,
+}
+pub type TimeoutObserver = Arc<dyn Fn(TimeoutDiagnostic) + Send + Sync>;
 /// Largest accepted `sign-res` text field: Lighter's 31 signatures are ~5 KB.
 pub const MAX_RESPONSE_FIELD: usize = 16 * 1024;
 
@@ -55,6 +67,7 @@ struct PendingWork {
 
 struct State {
     socket: SocketId,
+    attached_at: Instant,
     out: Outbox,
     available: bool,
     suspended: bool,
@@ -76,6 +89,7 @@ const HEARD_SOCKETS: usize = 16;
 
 pub struct SignerLink {
     state: Mutex<State>,
+    timeout_observer: Mutex<Option<TimeoutObserver>>,
     /// Wakes requests waiting out a suspension on `attach` or `mark_unavailable`.
     reattached: Notify,
 }
@@ -85,6 +99,7 @@ impl SignerLink {
         Arc::new(Self {
             state: Mutex::new(State {
                 socket,
+                attached_at: Instant::now(),
                 out,
                 available: true,
                 suspended: false,
@@ -98,8 +113,64 @@ impl SignerLink {
                 echo: None,
                 echo_seq: 0,
             }),
+            timeout_observer: Mutex::new(None),
             reattached: Notify::new(),
         })
+    }
+
+    /// Host journal hook; never invoked while the link state is locked.
+    pub fn observe_timeouts(&self, observer: TimeoutObserver) {
+        *self
+            .timeout_observer
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(observer);
+    }
+
+    pub(crate) fn note_timeout(
+        &self,
+        id: &str,
+        started: tokio::time::Instant,
+        sent_socket: Option<SocketId>,
+        failure: Failure,
+    ) {
+        let observer = self
+            .timeout_observer
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        let Some(observer) = observer else { return };
+        let diagnostic = self.timeout_snapshot(&self.state(), id, started, sent_socket, failure);
+        observer(diagnostic);
+    }
+
+    fn timeout_snapshot(
+        &self,
+        state: &State,
+        id: &str,
+        started: tokio::time::Instant,
+        sent_socket: Option<SocketId>,
+        failure: Failure,
+    ) -> TimeoutDiagnostic {
+        TimeoutDiagnostic {
+            request_id: id.to_owned(),
+            socket: state.socket,
+            sent_socket,
+            request_age_ms: millis(started.elapsed()),
+            attachment_age_ms: millis(state.attached_at.elapsed()),
+            last_heard_age_ms: millis(state.heard_at.elapsed()),
+            failure,
+        }
+    }
+
+    fn emit_timeout(&self, diagnostic: TimeoutDiagnostic) {
+        let observer = self
+            .timeout_observer
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        if let Some(observer) = observer {
+            observer(diagnostic);
+        }
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
@@ -191,7 +262,8 @@ impl SignerLink {
     }
 
     async fn request(&self, id: &str, request: &Value, pinned: bool) -> Result<Reply, Failure> {
-        let deadline = tokio::time::Instant::now() + SIGN_TIMEOUT;
+        let started = tokio::time::Instant::now();
+        let deadline = started + SIGN_TIMEOUT;
         loop {
             let reattached = self.reattached.notified();
             {
@@ -204,11 +276,12 @@ impl SignerLink {
                 }
             }
             if tokio::time::timeout_at(deadline, reattached).await.is_err() {
+                self.note_timeout(id, started, None, Failure::Suspended);
                 return Err(Failure::Suspended);
             }
         }
         let (sender, receiver) = oneshot::channel();
-        let (out, frame, token) = {
+        let (out, frame, token, sent_socket) = {
             let mut state = self.state();
             if state.available && state.suspended {
                 return Err(Failure::Suspended);
@@ -235,7 +308,7 @@ impl SignerLink {
                     pinned,
                 },
             );
-            (state.out.clone(), frame, token)
+            (state.out.clone(), frame, token, socket)
         };
         let guard = Pending {
             link: self,
@@ -246,21 +319,28 @@ impl SignerLink {
         if !out(frame) {
             return Err(Failure::SendFailed);
         }
-        let result = match tokio::time::timeout_at(deadline, receiver).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(Failure::Aborted),
+        let (result, diagnostic) = match tokio::time::timeout_at(deadline, receiver).await {
+            Ok(Ok(result)) => (result, None),
+            Ok(Err(_)) => (Err(Failure::Aborted), None),
             // No browser to answer (parked, or a dropped socket not yet seen,
             // silent since the send) is a suspension, not a slow signer.
             Err(_) => {
-                let state = self.state();
-                if state.suspended || state.heard_at < sent_at {
-                    Err(Failure::Suspended)
-                } else {
-                    Err(Failure::TimedOut)
-                }
+                let diagnostic = {
+                    let state = self.state();
+                    let failure = if state.suspended || state.heard_at < sent_at {
+                        Failure::Suspended
+                    } else {
+                        Failure::TimedOut
+                    };
+                    self.timeout_snapshot(&state, id, started, Some(sent_socket), failure)
+                };
+                (Err(diagnostic.failure), Some(diagnostic))
             }
         };
         drop(guard);
+        if let Some(diagnostic) = diagnostic {
+            self.emit_timeout(diagnostic);
+        }
         result
     }
 
@@ -356,6 +436,9 @@ impl SignerLink {
                 pending.socket = socket;
                 moved.push((id.clone(), pending.frame.clone()));
             }
+        }
+        if state.socket != socket {
+            state.attached_at = Instant::now();
         }
         state.socket = socket;
         state.out = out.clone();
@@ -506,5 +589,110 @@ mod server_owned_tests {
         link.mark_unavailable();
         assert!(!link.is_available());
         assert!(!link.promote_to_server_owned());
+    }
+}
+
+fn millis(duration: Duration) -> u64 {
+    duration.as_millis().try_into().unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod timeout_diagnostics_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test(start_paused = true)]
+    async fn success_timeout_and_cancel_remove_the_original_pending_state() {
+        let (send, mut frames) = tokio::sync::mpsc::unbounded_channel();
+        let link = SignerLink::new(7, Arc::new(move |frame| send.send(frame).is_ok()));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let record = seen.clone();
+        let weak = Arc::downgrade(&link);
+        link.observe_timeouts(Arc::new(move |event| {
+            assert!(
+                weak.upgrade().unwrap().state.try_lock().is_ok(),
+                "no host callback under the state lock"
+            );
+            assert!(weak.upgrade().unwrap().state().pending.is_empty());
+            record.lock().unwrap().push(event);
+        }));
+        for mode in ["success", "timeout", "cancel"] {
+            let running = link.clone();
+            let task =
+                tokio::spawn(async move { running.round_trip(mode, &json!({"id":mode})).await });
+            frames.recv().await.unwrap();
+            assert_eq!(link.state().pending.len(), 1);
+            match mode {
+                "success" => {
+                    assert!(link.resolve(7, json!({"id":mode})));
+                    assert!(task.await.unwrap().is_ok());
+                }
+                "timeout" => {
+                    link.heard(7);
+                    tokio::time::advance(SIGN_TIMEOUT).await;
+                    assert_eq!(task.await.unwrap(), Err(Failure::TimedOut));
+                }
+                _ => {
+                    task.abort();
+                    assert!(task.await.unwrap_err().is_cancelled());
+                }
+            }
+            assert!(link.state().pending.is_empty(), "cleanup after {mode}");
+        }
+        assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn deadline_and_late_reply_race_have_exactly_one_observed_outcome() {
+        for order in 0..34 {
+            let (send, mut frames) = tokio::sync::mpsc::unbounded_channel();
+            let link = SignerLink::new(7, Arc::new(move |frame| send.send(frame).is_ok()));
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let record = seen.clone();
+            link.observe_timeouts(Arc::new(move |event| record.lock().unwrap().push(event)));
+            let running = link.clone();
+            let task =
+                tokio::spawn(
+                    async move { running.round_trip("race", &json!({"id":"race"})).await },
+                );
+            frames.recv().await.unwrap();
+            link.heard(7);
+            let barrier = Arc::new(std::sync::Barrier::new(2));
+            let ready = barrier.clone();
+            let answering = link.clone();
+            let reply = std::thread::spawn(move || {
+                ready.wait();
+                answering.resolve(7, json!({"id":"race"}))
+            });
+            if order == 0 {
+                barrier.wait();
+                let accepted = reply.join().unwrap();
+                assert!(accepted);
+                assert!(task.await.unwrap().is_ok());
+            } else {
+                if order == 1 {
+                    tokio::time::advance(SIGN_TIMEOUT).await;
+                    let result = task.await.unwrap();
+                    barrier.wait();
+                    let accepted = reply.join().unwrap();
+                    assert_eq!(result, Err(Failure::TimedOut));
+                    assert!(!accepted, "late-reply control");
+                    assert_eq!(seen.lock().unwrap().len(), 1);
+                    assert!(link.state().pending.is_empty());
+                    continue;
+                }
+                barrier.wait();
+                tokio::time::advance(SIGN_TIMEOUT).await;
+                let accepted = reply.join().unwrap();
+                let result = task.await.unwrap();
+                if result.is_ok() {
+                    assert!(accepted, "receipt requires a successfully queued reply");
+                } else {
+                    assert_eq!(result, Err(Failure::TimedOut));
+                }
+                assert_eq!(seen.lock().unwrap().len(), usize::from(result.is_err()));
+            }
+            assert!(link.state().pending.is_empty());
+        }
     }
 }

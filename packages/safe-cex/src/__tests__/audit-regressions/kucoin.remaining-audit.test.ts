@@ -2,15 +2,15 @@ import type { Axios } from 'axios';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
 import { ENDPOINTS } from '../reference/kucoin/kucoin.types';
-import { DefaultStore } from '../../store/store.base';
 
 const createExchange = () =>
   new KucoinExchange(
     'kucoin',
     { key: 'key', secret: 'secret', passphrase: 'passphrase', tealstreetTunnel: false },
-    new DefaultStore(),
+    new FrameStore(),
   );
 
 const tokenResponse = (token: string) => ({
@@ -57,7 +57,10 @@ describe('KuCoin remaining audit regressions', () => {
     const exchange = createExchange();
     const firstSocket = socket();
     const secondSocket = socket();
-    const post = vi.fn().mockResolvedValueOnce(tokenResponse('first-token')).mockResolvedValueOnce(tokenResponse('second-token'));
+    const post = vi
+      .fn()
+      .mockResolvedValueOnce(tokenResponse('first-token'))
+      .mockResolvedValueOnce(tokenResponse('second-token'));
     exchange.xhr = { post } as unknown as Axios;
     const websocket = kind === 'private' ? exchange.privateWebsocket : exchange.publicWebsocket;
     const createWebsocket = vi

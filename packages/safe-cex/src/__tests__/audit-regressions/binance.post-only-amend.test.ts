@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { ENDPOINTS } from '../../exchanges/binance/binance.types';
-import { BinancePrivateWebsocket } from '../reference/binance/binance.ws-private';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderTimeInForce } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
+import { BinancePrivateWebsocket } from '../reference/binance/binance.ws-private';
 
 const native = {
   symbol: 'BTCUSDT',
@@ -21,20 +22,25 @@ const native = {
 };
 
 const subject = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTC/USDT:USDT',
-        symbol: 'BTCUSDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 125 } },
+        markets: [
+          {
+            id: 'BTC/USDT:USDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
       },
-    ],
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BinanceExchange('binance', { key: 'test-key', secret: 'test-secret' }, store);
   const cancel = vi.spyOn(exchange.xhr, 'delete').mockResolvedValue({ data: { ...native, status: 'CANCELED' } });
   const place = vi.spyOn(exchange.unlimitedXHR, 'post').mockResolvedValue({ data: { ...native, orderId: 42 } });
@@ -57,7 +63,12 @@ describe('Binance USD-M maker protection survives cancel and replace', () => {
         vi.spyOn(exchange.xhr, 'get').mockImplementation(async (url) => ({
           data: url === ENDPOINTS.OPEN_ORDERS ? [native] : [],
         }));
-        store.update({ orders: await exchange.fetchOrders() });
+        store.apply(
+          nativeFixture(
+            { orders: await exchange.fetchOrders() },
+            store.markets.map((row) => row.symbol),
+          ),
+        );
       } else {
         const socket = new BinancePrivateWebsocket(exchange);
         socket.handleOrderEvents([

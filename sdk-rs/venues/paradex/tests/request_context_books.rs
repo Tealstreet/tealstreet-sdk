@@ -1,4 +1,7 @@
 //! Explicit host readiness and claim controls for independent snapshot reads.
+#[path = "../../../engine/tests/support/request_stats_frame.rs"]
+mod request_stats_frame;
+use request_stats_frame::assert_request_stats_frame;
 use safe_cex_engine::request_context::{Claim, Error, HttpAction, Preparation, Prepared};
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Outcome, Response,
@@ -107,6 +110,7 @@ fn public_snapshot_parks_with_exact_wire_and_ignores_all_preclaim_callbacks() {
     ] {
         let mut e = engine(testnet);
         e.take_frame(NOW);
+        let before_stats = e.snapshot_frame(NOW).to_vec();
         let actions = ask(&mut e, NOW, 500);
         let (token, unsigned) = preparation(&actions);
         assert_eq!(unsigned.method, Method::Get);
@@ -148,9 +152,11 @@ fn public_snapshot_parks_with_exact_wire_and_ignores_all_preclaim_callbacks() {
             r#"{"bids":[{"price":2.0,"amount":3.0,"total":6.0}],"asks":[]}"#
         );
         assert!(e.store().markets().is_empty());
-        assert!(
-            e.take_frame(NOW + 3.).is_none(),
-            "REST snapshot does not publish a live book"
+        assert_request_stats_frame(
+            &before_stats,
+            e.take_frame(NOW + 3.),
+            NOW + 3.,
+            [1, 0, 0, 0, 0],
         );
         assert!(results(&reply(&mut e, NOW + 4., &request, BOOK), 500).is_empty());
     }

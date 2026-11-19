@@ -1975,6 +1975,33 @@ impl CommandWrites {
         self.attempts[index].pending_identity = false;
         Ok(())
     }
+    /// A pending placement the venue's authoritative order state proves never
+    /// rested or filled: a definite, effects-free refusal of that attempt.
+    pub(super) fn reject_placement(
+        &mut self,
+        id: RequestId,
+        error: VenueError,
+    ) -> Result<(), Error> {
+        if self.sealed || error.outcome != Some(Outcome::Rejected) || !effects_free(&error) {
+            return Err(Error::Invalid);
+        }
+        let index = self
+            .attempts
+            .iter()
+            .position(|a| a.id == id && a.pending_identity)
+            .ok_or(Error::Revoked)?;
+        if self.latest(self.attempts[index].leg) != Some(id) {
+            return Err(Error::Revoked);
+        }
+        let pending = self.attempts[index].result.take();
+        self.attempts[index].pending_identity = false;
+        if let Err(error) = self.result(id, WriteResult::Rejected(error)) {
+            self.attempts[index].result = pending;
+            self.attempts[index].pending_identity = true;
+            return Err(error);
+        }
+        Ok(())
+    }
 
     /// Mark a recorded effects-free refusal as resendable once. Only the
     /// engine classifier calls this, for a `RefusedResend` verdict.
@@ -2748,7 +2775,8 @@ impl CommandWrites {
     }
 
     /// Continuation custody: nothing uncertain, and (for a write) the leg's
-    /// latest attempt released with a definitive native answer.
+    /// latest attempt released with a definitive native answer, or never
+    /// released at all (refused before release: NotSent, nothing reached the venue).
     pub(crate) fn validate_serial_continuation(&self, leg: Option<u64>) -> Result<(), Error> {
         if self.sealed || self.serial_uncertain() {
             return Err(Error::State);
@@ -2760,16 +2788,16 @@ impl CommandWrites {
             .latest(leg)
             .and_then(|id| self.attempts.iter().find(|attempt| attempt.id == id))
             .ok_or(Error::State)?;
-        if !attempt.released
-            || !matches!(
+        let definitive = attempt.released
+            && matches!(
                 attempt.result,
                 Some(
                     WriteResult::Accepted { .. }
                         | WriteResult::Rejected(_)
                         | WriteResult::KnownPartial(_)
                 )
-            )
-        {
+            );
+        if !definitive && !unreleased_not_sent(attempt) {
             return Err(Error::State);
         }
         Ok(())
@@ -2785,8 +2813,14 @@ impl CommandWrites {
                 index += 1;
                 continue;
             }
-            let attempt = self.attempts.remove(index);
+            let mut attempt = self.attempts.remove(index);
             let terminal = Some(attempt.id) == latest;
+            // A never-released write settles as the refusal it is: nothing was sent.
+            if unreleased_not_sent(&attempt)
+                && let Some(WriteResult::Failed(error)) = attempt.result.take()
+            {
+                attempt.result = Some(WriteResult::Rejected(error));
+            }
             let stream = self.stream.as_mut().expect("streamed serial journal");
             let mut reports = attempt.reports;
             if let Some(result) = attempt.result {
@@ -2839,6 +2873,15 @@ impl CommandWrites {
 #[cfg(feature = "http-plans")]
 pub(crate) fn note_unprojected(error: &mut VenueError, note: &str) {
     evidence::note_unprojected(error, note);
+}
+
+#[cfg(feature = "serial-plans")]
+fn unreleased_not_sent(attempt: &WriteAttempt) -> bool {
+    !attempt.released
+        && matches!(
+            &attempt.result,
+            Some(WriteResult::Failed(error)) if error.outcome == Some(Outcome::NotSent)
+        )
 }
 
 fn effects_free(error: &VenueError) -> bool {

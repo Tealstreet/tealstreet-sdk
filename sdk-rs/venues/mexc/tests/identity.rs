@@ -1,5 +1,8 @@
 //! Private validation uses the selected read signer; persisted identity is Primary metadata.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
 mod support;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::{
     Action, Command, Event, HttpRequest, Method, Notice, ReadCredentials, Response,
 };
@@ -144,7 +147,7 @@ fn identity_primary_hmac_and_fixed_hash_vector_accept_valid_empty_assets_without
         result(respond(&mut e, &r, 200, body), false).unwrap(),
         r#"{"userId":"mexc:64a04c6ee432d0c9370920d0"}"#
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     assert!(respond(&mut e, &r, 200, body).is_empty());
 }
 #[test]
@@ -161,7 +164,7 @@ fn identity_secondary_get_signer_does_not_replace_primary_key_fingerprint() {
         "1504972030dc652723afa2f090b303172cdd621de85ab3f304bc291e467287ec"
     );
     assert_eq!(result(respond(&mut e,&r,200,r#"{"success":true,"code":0,"data":[{"currency":"USDT","availableBalance":"999","equity":"1000","unrealized":"2"}]}"#),false).unwrap(),r#"{"userId":"mexc:64a04c6ee432d0c9370920d0"}"#);
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
 }
 #[test]
 fn identity_hashes_raw_options_key_even_when_native_primary_signer_trims_it() {
@@ -254,7 +257,15 @@ fn identity_malformed_assets_and_business_http_errors_reject_once_without_financ
         let before = e.account_snapshot_frame(NOW).to_vec();
         let r = request(&mut e);
         result(respond(&mut e, &r, status, body), true).unwrap_err();
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(
+            &before,
+            e.account_snapshot_frame(NOW),
+            if status == 200 {
+                [1, 0, 0, 0, 0]
+            } else {
+                [0, 0, 0, 0, 1]
+            },
+        );
     }
 }
 #[test]
@@ -270,7 +281,7 @@ fn identity_network_failure_is_scoped_and_duplicate_completion_is_consumed_once(
         },
     );
     result(e.drain_actions().collect(), true).unwrap_err();
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [0, 0, 0, 1, 0]);
     assert!(respond(&mut e, &r, 200, r#"{"success":true,"code":0,"data":[]}"#).is_empty());
 }
 #[test]
@@ -288,5 +299,5 @@ fn identity_rate_rejection_preserves_shared_cooldown_without_starting_reconcilia
             .unwrap_err()
             .contains("rate limited")
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [0, 1, 0, 0, 0]);
 }

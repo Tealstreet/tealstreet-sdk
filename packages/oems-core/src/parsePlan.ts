@@ -34,7 +34,8 @@ export class OemsPlanError extends Error {
   }
 }
 
-const fail = (message: string): never => {
+// The declared function type lets TypeScript keep values narrowed after validation.
+const fail: (message: string) => never = (message) => {
   throw new OemsPlanError(message);
 };
 
@@ -48,14 +49,14 @@ const absent = (value: unknown): boolean => value === undefined || value === nul
 
 const str = (value: unknown, where: string): string => {
   if (typeof value !== 'string' || value.length === 0) fail(`${where} must be a non-empty string`);
-  const text = value as string;
+  const text = value;
   if (text.length > MAX_STRING_CHARS) fail(`${where} is longer than ${MAX_STRING_CHARS} characters`);
   return text;
 };
 
 const num = (value: unknown, where: string): number => {
   if (typeof value !== 'number' || !Number.isFinite(value)) fail(`${where} must be a finite number`);
-  return value as number;
+  return value;
 };
 
 const optionalNum = (value: unknown, where: string): number | undefined =>
@@ -64,13 +65,13 @@ const optionalNum = (value: unknown, where: string): number | undefined =>
 const optionalBool = (value: unknown, where: string): boolean | undefined => {
   if (absent(value)) return undefined;
   if (typeof value !== 'boolean') fail(`${where} must be true or false`);
-  return value as boolean;
+  return value;
 };
 
 const optionalStrings = (value: unknown, where: string): readonly string[] | undefined => {
   if (absent(value)) return undefined;
   if (!Array.isArray(value)) fail(`${where} must be an array of strings`);
-  const list = value as unknown[];
+  const list: unknown[] = value;
   if (list.length > MAX_SCOPE_ENTRIES) fail(`${where} carries more than ${MAX_SCOPE_ENTRIES} entries`);
   return list.map((entry, index) => str(entry, `${where}[${index}]`));
 };
@@ -200,7 +201,7 @@ const parseStep = (raw: unknown, where: string): OemsIntent => {
 const readsOf = (source: Record<string, unknown>): readonly unknown[] => {
   if (absent(source.reads)) return [];
   if (!Array.isArray(source.reads)) fail('plan.reads must be an array');
-  return source.reads as unknown[];
+  return source.reads;
 };
 
 export const parseOemsPlan = (raw: unknown): OemsPlan => {
@@ -218,7 +219,7 @@ export const parseOemsPlan = (raw: unknown): OemsPlan => {
   if (absent(source.steps)) return { reply, steps: [], reads };
   if (!Array.isArray(source.steps)) fail('plan.steps must be an array');
 
-  const steps = source.steps as unknown[];
+  const steps: unknown[] = source.steps;
   if (steps.length > MAX_STEPS) fail(`plan carries more than ${MAX_STEPS} steps`);
 
   return { reply, steps: steps.map((step, index) => parseStep(step, `plan.steps[${index}]`)), reads };

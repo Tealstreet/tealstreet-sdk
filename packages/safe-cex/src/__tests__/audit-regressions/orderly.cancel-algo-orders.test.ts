@@ -1,31 +1,33 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
 import { ENDPOINTS } from '../reference/orderly/orderly.types';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStatus, OrderType } from '../../types';
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    orders: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'take-profit-child',
-        parentId: 'positional-parent',
-        symbol: 'BTCUSDC',
-        type: OrderType.TakeProfit,
-        side: OrderSide.Sell,
-        status: OrderStatus.Open,
-        price: 110,
+        orders: [
+          {
+            id: 'take-profit-child',
+            parentId: 'positional-parent',
+            symbol: 'BTCUSDC',
+            type: OrderType.TakeProfit,
+            side: OrderSide.Sell,
+            status: OrderStatus.Open,
+            price: 110,
+          },
+        ] as any,
       },
-    ] as any,
-  });
-
-  return new OrderlyExchange(
-    'woofi',
-    { key: 'test-key', secret: 'test-secret', applicationId: 'test-account' },
-    store,
+      store.markets.map((row) => row.symbol),
+    ),
   );
+
+  return new OrderlyExchange('woofi', { key: 'test-key', secret: 'test-secret', applicationId: 'test-account' }, store);
 };
 
 describe('audit regression: Orderly bulk algo cancellation', () => {
@@ -64,8 +66,12 @@ describe('audit regression: Orderly bulk algo cancellation', () => {
     const exchange = createExchange();
     const deleteRequest = vi
       .fn()
-      .mockImplementationOnce(() => (firstResult instanceof Error ? Promise.reject(firstResult) : Promise.resolve(firstResult)))
-      .mockImplementationOnce(() => (secondResult instanceof Error ? Promise.reject(secondResult) : Promise.resolve(secondResult)));
+      .mockImplementationOnce(() =>
+        firstResult instanceof Error ? Promise.reject(firstResult) : Promise.resolve(firstResult),
+      )
+      .mockImplementationOnce(() =>
+        secondResult instanceof Error ? Promise.reject(secondResult) : Promise.resolve(secondResult),
+      );
     const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
     exchange.xhr = { delete: deleteRequest } as any;
 

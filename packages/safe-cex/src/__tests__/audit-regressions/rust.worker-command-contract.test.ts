@@ -1,51 +1,78 @@
-import type { ExchangeOptions, Order } from '../../types';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
+import type { ExchangeOptions, Order } from '../../types';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { BaseExchange } from '../../exchanges/base';
-import { decodeWorkerOrderIds, encodeWorkerOrderIds, replacementClientOrderIdOf, withReplacementClientOrderId } from '../../exchanges/clientOrderId';
+import {
+  decodeWorkerOrderIds,
+  encodeWorkerOrderIds,
+  replacementClientOrderIdOf,
+  withReplacementClientOrderId,
+} from '../../exchanges/clientOrderId';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
-import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
 
 const accounts: BaseExchange[] = [];
 const amendmentOrder: Order = {
-  id: 'original', symbol: 'BTCUSDT', status: OrderStatus.Open, type: OrderType.Limit,
-  side: OrderSide.Buy, price: 100, amount: 1, filled: 0, remaining: 1, reduceOnly: false, lastUpdate: 0,
+  id: 'original',
+  symbol: 'BTCUSDT',
+  status: OrderStatus.Open,
+  type: OrderType.Limit,
+  side: OrderSide.Buy,
+  price: 100,
+  amount: 1,
+  filled: 0,
+  remaining: 1,
+  reduceOnly: false,
+  lastUpdate: 0,
 };
 
-it.each([{ ids: [] }, { ids: ['accepted', 'accepted', ''] }])('keeps replacement IDs and client attribution through clone boundaries ($ids)', ({ ids }) => {
-  const envelope = encodeWorkerOrderIds(withReplacementClientOrderId([...ids], 'replacement-client'));
-  for (const copy of [structuredClone(envelope), JSON.parse(JSON.stringify(envelope))]) {
-    const decoded = decodeWorkerOrderIds(copy);
-    expect([...decoded]).toEqual(ids);
-    expect(replacementClientOrderIdOf(decoded)).toBe('replacement-client');
-    expect(decoded).not.toBe(copy.orderIds);
-  }
-  expect(envelope).toEqual({ orderIds: ids, clientOrderId: 'replacement-client' });
-});
+it.each([{ ids: [] }, { ids: ['accepted', 'accepted', ''] }])(
+  'keeps replacement IDs and client attribution through clone boundaries ($ids)',
+  ({ ids }) => {
+    const envelope = encodeWorkerOrderIds(withReplacementClientOrderId([...ids], 'replacement-client'));
+    for (const copy of [structuredClone(envelope), JSON.parse(JSON.stringify(envelope))]) {
+      const decoded = decodeWorkerOrderIds(copy);
+      expect([...decoded]).toEqual(ids);
+      expect(replacementClientOrderIdOf(decoded)).toBe('replacement-client');
+      expect(decoded).not.toBe(copy.orderIds);
+    }
+    expect(envelope).toEqual({ orderIds: ids, clientOrderId: 'replacement-client' });
+  },
+);
 
 it.each([
-  { result: undefined }, { result: null }, { result: {} }, { result: [] },
-  { result: { orderIds: null } }, { result: { orderIds: 'accepted' } },
-  { result: { orderIds: [null, 123] } }, { result: { orderIds: Array(1) } },
+  { result: undefined },
+  { result: null },
+  { result: {} },
+  { result: [] },
+  { result: { orderIds: null } },
+  { result: { orderIds: 'accepted' } },
+  { result: { orderIds: [null, 123] } },
+  { result: { orderIds: Array(1) } },
 ])('keeps a malformed amendment reply uncertain ($result)', ({ result }) => {
   expect(() => decodeWorkerOrderIds(result)).toThrow(/reconcile/i);
-  try { decodeWorkerOrderIds(result); } catch (error) {
+  try {
+    decodeWorkerOrderIds(result);
+  } catch (error) {
     expect(error).toMatchObject({ kind: 'internal', outcome: 'unknown', command: 'updateOrder' });
   }
 });
 
-it.each([{ orderIds: ['accepted'] }, { orderIds: [], clientOrderId: '' }])('preserves amendment replies without client attribution (%j)', (result) => {
-  const decoded = decodeWorkerOrderIds(result);
-  expect(decoded).toEqual(result.orderIds);
-  expect(replacementClientOrderIdOf(decoded)).toBeUndefined();
-});
+it.each([{ orderIds: ['accepted'] }, { orderIds: [], clientOrderId: '' }])(
+  'preserves amendment replies without client attribution (%j)',
+  (result) => {
+    const decoded = decodeWorkerOrderIds(result);
+    expect(decoded).toEqual(result.orderIds);
+    expect(replacementClientOrderIdOf(decoded)).toBeUndefined();
+  },
+);
 
 it.each([
   { orderIds: ['accepted', 123, 'other'], clientOrderId: 'replacement-client' },
@@ -66,13 +93,18 @@ it('rejects a malformed worker amendment success without replaying the write', a
   const exchange = account(true, { publicDataOnly: true });
   const bridge = vi.fn(({ requestId }: { requestId: string }) => {
     exchange.emitter.emit('callMethod:done', {
-      requestId, success: true, result: { orderIds: ['accepted', 123], clientOrderId: 'replacement-client' },
+      requestId,
+      success: true,
+      result: { orderIds: ['accepted', 123], clientOrderId: 'replacement-client' },
     });
   });
   exchange.on('callMethod', bridge);
   await expect(exchange.updateOrder({ order: amendmentOrder, update: { price: 105 } })).rejects.toMatchObject({
-    command: 'updateOrder', kind: 'internal', outcome: 'unknown',
-    partialOrderIds: ['accepted'], clientOrderId: 'replacement-client',
+    command: 'updateOrder',
+    kind: 'internal',
+    outcome: 'unknown',
+    partialOrderIds: ['accepted'],
+    clientOrderId: 'replacement-client',
   });
   expect(bridge).toHaveBeenCalledOnce();
 });
@@ -90,26 +122,38 @@ it('preserves a valid worker amendment replacement ID after structured cloning',
   expect(bridge).toHaveBeenCalledOnce();
 });
 
-it.each(['unknown', 'rejected', 'notSent'])('preserves an amendment rejection outcome and partial IDs (%s)', async (outcome) => {
-  const exchange = account(true, { publicDataOnly: true });
-  vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
-  const bridge = vi.fn(({ requestId }: { requestId: string }) => {
-    exchange.emitter.emit('callMethod:done', {
-      requestId, success: false,
-      result: { message: 'Original worker failure', outcome, partialOrderIds: ['accepted'], clientOrderId: 'replacement-client' },
+it.each(['unknown', 'rejected', 'notSent'])(
+  'preserves an amendment rejection outcome and partial IDs (%s)',
+  async (outcome) => {
+    const exchange = account(true, { publicDataOnly: true });
+    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
+    const bridge = vi.fn(({ requestId }: { requestId: string }) => {
+      exchange.emitter.emit('callMethod:done', {
+        requestId,
+        success: false,
+        result: {
+          message: 'Original worker failure',
+          outcome,
+          partialOrderIds: ['accepted'],
+          clientOrderId: 'replacement-client',
+        },
+      });
     });
-  });
-  exchange.on('callMethod', bridge);
-  await expect(exchange.updateOrder({ order: amendmentOrder, update: { price: 105 } })).rejects.toMatchObject({
-    message: 'Original worker failure', outcome, partialOrderIds: ['accepted'], clientOrderId: 'replacement-client',
-  });
-  expect(bridge).toHaveBeenCalledOnce();
-});
+    exchange.on('callMethod', bridge);
+    await expect(exchange.updateOrder({ order: amendmentOrder, update: { price: 105 } })).rejects.toMatchObject({
+      message: 'Original worker failure',
+      outcome,
+      partialOrderIds: ['accepted'],
+      clientOrderId: 'replacement-client',
+    });
+    expect(bridge).toHaveBeenCalledOnce();
+  },
+);
 const account = (rust = true, options: Partial<ExchangeOptions> = { publicDataOnly: true }): BaseExchange => {
   const config = { key: '', secret: '', ...options };
   const exchange = rust
-    ? new RustEngineExchange('bybit', config, new DefaultStore())
-    : new BaseExchange('bybit', config, new DefaultStore());
+    ? new RustEngineExchange('bybit', config, new FrameStore())
+    : new BaseExchange('bybit', config, new FrameStore());
   accounts.push(exchange);
   return exchange;
 };
@@ -148,8 +192,12 @@ it('reconstructs unknown outcomes and client attribution at the main-thread cons
   });
   const failure = await exchange.callMethodInWorker('setLeverage', 'BTCUSDT', 3).catch((error: unknown) => error);
   expect(failure).toMatchObject({
-    message: 'Reconcile before retrying', code: 'ENGINE_DISPOSED', command: 'setLeverage', outcome: 'unknown',
-    clientOrderId: 'actual-client', clientOrderIds: ['actual-client', 'child-client'],
+    message: 'Reconcile before retrying',
+    code: 'ENGINE_DISPOSED',
+    command: 'setLeverage',
+    outcome: 'unknown',
+    clientOrderId: 'actual-client',
+    clientOrderIds: ['actual-client', 'child-client'],
   });
   expect(failure).not.toHaveProperty('cause');
 });
@@ -158,18 +206,27 @@ it('retains known partial rejections without converting them to unknown outcomes
   const exchange = account();
   exchange.emitter.on('callMethod', ({ requestId }: { requestId: string }) => {
     exchange.emitter.emit('callMethod:done', {
-      requestId, success: false,
+      requestId,
+      success: false,
       result: {
-        message: 'Second order rejected', code: 400,
-        partialOrderIds: ['accepted-id'], partialOrderCount: 1, totalOrderCount: 2, failedOrderIndex: 1,
+        message: 'Second order rejected',
+        code: 400,
+        partialOrderIds: ['accepted-id'],
+        partialOrderCount: 1,
+        totalOrderCount: 2,
+        failedOrderIndex: 1,
         clientOrderIds: ['valid', 123],
       },
     });
   });
   const failure = await exchange.callMethodInWorker('fetchOrders').catch((error: unknown) => error);
   expect(failure).toMatchObject({
-    message: 'Second order rejected', code: 400,
-    partialOrderIds: ['accepted-id'], partialOrderCount: 1, totalOrderCount: 2, failedOrderIndex: 1,
+    message: 'Second order rejected',
+    code: 400,
+    partialOrderIds: ['accepted-id'],
+    partialOrderCount: 1,
+    totalOrderCount: 2,
+    failedOrderIndex: 1,
   });
   expect(failure).not.toHaveProperty('outcome');
   expect(failure).not.toHaveProperty('clientOrderIds');
@@ -222,29 +279,57 @@ it('applies the configured deadline to the live SDK host while preserving caller
   const native: WasmEngineLike = {
     syncHostTime: () => true,
     capabilities: () => engineCapabilities('bybit'),
-    start: idle, wsOpen: idle, wsMessage: idle, wsClose: idle, wsRouteExhausted: idle,
-    httpStart: idle, httpChunk: idle, httpEnd: idle, httpFailed: idle, timer: idle,
-    command: (json) => { requests.push(JSON.parse(json)); return '[]'; },
+    start: idle,
+    wsOpen: idle,
+    wsMessage: idle,
+    wsClose: idle,
+    wsRouteExhausted: idle,
+    httpStart: idle,
+    httpChunk: idle,
+    httpEnd: idle,
+    httpFailed: idle,
+    timer: idle,
+    command: (json) => {
+      requests.push(JSON.parse(json));
+      return '[]';
+    },
     snapshotFrame: () => new Uint8Array(),
     // Public-only readiness needs decoded market and ticker sections as well as STATUS flags.
-    takeFrame: () => new Uint8Array(consumerFrame({
-      markets: [], tickers: [],
-      loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
-    })),
+    takeFrame: () =>
+      new Uint8Array(
+        consumerFrame({
+          markets: [],
+          tickers: [],
+          loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+        }),
+      ),
   };
-  const construct = function () { return native; };
+  const construct = function () {
+    return native;
+  };
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
   const exchange = account(true, { publicDataOnly: true, extra: { rustCommandTimeoutMs: 25 } });
   const startup = exchange.start();
   await vi.advanceTimersByTimeAsync(250);
   await startup;
-  const failure = exchange.placeOrders([{
-    symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, price: 100,
-    clientOrderId: 'caller-one',
-  }]).catch((error: unknown) => error);
+  const failure = exchange
+    .placeOrders([
+      {
+        symbol: 'BTCUSDT',
+        side: OrderSide.Buy,
+        type: OrderType.Limit,
+        amount: 1,
+        price: 100,
+        clientOrderId: 'caller-one',
+      },
+    ])
+    .catch((error: unknown) => error);
   await vi.advanceTimersByTimeAsync(25);
   await expect(failure).resolves.toMatchObject({
-    code: 'COMMAND_TIMEOUT', command: 'placeOrders', outcome: 'unknown', clientOrderId: 'caller-one',
+    code: 'COMMAND_TIMEOUT',
+    command: 'placeOrders',
+    outcome: 'unknown',
+    clientOrderId: 'caller-one',
   });
   expect(requests.filter(({ op }) => op === 'placeOrders')).toHaveLength(1);
   expect(exchange.isDisposed).toBe(false);
@@ -254,17 +339,20 @@ it('releases the listener and timer when dispatch itself throws', async () => {
   vi.useFakeTimers();
   const exchange = account();
   const off = vi.spyOn(exchange.emitter, 'off');
-  exchange.emitter.on('callMethod', () => { throw new Error('Worker transport unavailable'); });
+  exchange.emitter.on('callMethod', () => {
+    throw new Error('Worker transport unavailable');
+  });
   await expect(exchange.callMethodInWorker('fetchOrders')).rejects.toThrow('Worker transport unavailable');
   expect(off).toHaveBeenCalledWith('callMethod:done', expect.any(Function));
   expect(vi.getTimerCount()).toBe(0);
 });
 
 it.each([0, -1, NaN, Infinity, 0.5, 2_147_482_648])('rejects an invalid Rust deadline %s', (rustCommandTimeoutMs) => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const subscribe = vi.spyOn(store, 'subscribe');
-  expect(() => new RustEngineExchange('bybit', { key: '', secret: '', extra: { rustCommandTimeoutMs } }, store))
-    .toThrow('rustCommandTimeoutMs must be a positive integer');
+  expect(
+    () => new RustEngineExchange('bybit', { key: '', secret: '', extra: { rustCommandTimeoutMs } }, store),
+  ).toThrow('rustCommandTimeoutMs must be a positive integer');
   expect(subscribe).not.toHaveBeenCalled();
 });
 
@@ -296,9 +384,12 @@ it('dispatches a read unchanged when its ready worker bridge stays attached', as
   });
   exchange.on('callMethod', ownerA);
   await expect(exchange.refreshMarkets()).resolves.toBe('owner-A');
-  expect(ownerA).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-    method: 'refreshMarkets', args: [],
-  }));
+  expect(ownerA).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      method: 'refreshMarkets',
+      args: [],
+    }),
+  );
 });
 
 it.each(['exchange', 'emitter'] as const)(
@@ -323,9 +414,12 @@ it.each(['exchange', 'emitter'] as const)(
     expect(ownerB).not.toHaveBeenCalled();
 
     await expect(exchange.refreshMarkets()).resolves.toBe('owner-B');
-    expect(ownerB).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      method: 'refreshMarkets', args: [],
-    }));
+    expect(ownerB).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        method: 'refreshMarkets',
+        args: [],
+      }),
+    );
   },
 );
 
@@ -350,26 +444,32 @@ it('drops a read when a ready bridge callback is reattached for another owner', 
   expect(ownerB.reads).toHaveBeenCalledOnce();
 });
 
-it.each(['never-wired', 'detached'] as const)('preserves master bootstrap without an owner hook (%s)', async (phase) => {
-  vi.useFakeTimers();
-  const exchange = account(true, { publicDataOnly: true, workerMirror: true });
-  const previous = vi.fn();
-  const attached = vi.fn(({ requestId }: { requestId: string }) => {
-    exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-A' });
-  });
-  if (phase === 'detached') {
-    exchange.on('callMethod', previous);
-    exchange.off('callMethod', previous);
-  }
-  const pending = exchange.refreshMarkets().catch((error: unknown) => error);
-  exchange.on('callMethod', attached);
-  await vi.advanceTimersByTimeAsync(25);
-  expect(await pending).toBe('owner-A');
-  expect(previous).not.toHaveBeenCalled();
-  expect(attached).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-    method: 'refreshMarkets', args: [],
-  }));
-});
+it.each(['never-wired', 'detached'] as const)(
+  'preserves master bootstrap without an owner hook (%s)',
+  async (phase) => {
+    vi.useFakeTimers();
+    const exchange = account(true, { publicDataOnly: true, workerMirror: true });
+    const previous = vi.fn();
+    const attached = vi.fn(({ requestId }: { requestId: string }) => {
+      exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-A' });
+    });
+    if (phase === 'detached') {
+      exchange.on('callMethod', previous);
+      exchange.off('callMethod', previous);
+    }
+    const pending = exchange.refreshMarkets().catch((error: unknown) => error);
+    exchange.on('callMethod', attached);
+    await vi.advanceTimersByTimeAsync(25);
+    expect(await pending).toBe('owner-A');
+    expect(previous).not.toHaveBeenCalled();
+    expect(attached).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        method: 'refreshMarkets',
+        args: [],
+      }),
+    );
+  },
+);
 
 it.each([false, true])('preserves ready bridge dispatch compatibility (hooked=%s)', async (hooked) => {
   const exchange = account(true, { publicDataOnly: true, workerMirror: true }) as RustEngineExchange;
@@ -398,24 +498,32 @@ it('refuses unwired calls when the installed owner hook has no current owner', a
   const exchange = account(true, { publicDataOnly: true, workerMirror: true }) as RustEngineExchange;
   exchange.setWorkerOwner(() => undefined);
   await expect(exchange.refreshMarkets()).rejects.toMatchObject({
-    command: 'refreshMarkets', code: 'WORKER_STOPPED',
+    command: 'refreshMarkets',
+    code: 'WORKER_STOPPED',
   });
 });
 
 it.each([
-  { hooked: false, transition: 'same-owner' }, { hooked: false, transition: 'ready-switch' },
-  { hooked: false, transition: 'unwired-switch' }, { hooked: true, transition: 'same-owner' },
-  { hooked: true, transition: 'ready-switch' }, { hooked: true, transition: 'unwired-switch' },
+  { hooked: false, transition: 'same-owner' },
+  { hooked: false, transition: 'ready-switch' },
+  { hooked: false, transition: 'unwired-switch' },
+  { hooked: true, transition: 'same-owner' },
+  { hooked: true, transition: 'ready-switch' },
+  { hooked: true, transition: 'unwired-switch' },
 ])('fences capability-adopted keyed closed PnL (hooked=$hooked, $transition)', async ({ hooked, transition }) => {
   vi.useFakeTimers();
   const exchange = account(true, {
-    key: 'fixture', secret: 'fixture', publicDataOnly: false, workerMirror: true,
+    key: 'fixture',
+    secret: 'fixture',
+    publicDataOnly: false,
+    workerMirror: true,
   }) as RustEngineExchange;
   let owner = { ownerId: 'A', generation: 1 };
   if (hooked) exchange.setWorkerOwner(() => owner);
   const first = vi.fn(({ requestId, method }: { requestId: string; method: string }) => {
     exchange.emitter.emit('callMethod:done', {
-      requestId, success: true,
+      requestId,
+      success: true,
       result: method === 'fetchEngineCapabilities' ? JSON.parse(engineCapabilities('bybit')) : ['owner-A-row'],
     });
   });
@@ -454,7 +562,8 @@ it.each([
 });
 
 it.each(['same-owner', 'other-owner', 'new-generation', 'logout', 'new-provider'] as const)(
-  'checks a bound owner while the initial bridge attaches (%s)', async (transition) => {
+  'checks a bound owner while the initial bridge attaches (%s)',
+  async (transition) => {
     vi.useFakeTimers();
     const exchange = account(true, { publicDataOnly: true, workerMirror: true }) as RustEngineExchange;
     let owner: { ownerId: string; generation: number } | undefined = { ownerId: 'A', generation: 1 };
@@ -471,9 +580,12 @@ it.each(['same-owner', 'other-owner', 'new-generation', 'logout', 'new-provider'
     await vi.advanceTimersByTimeAsync(25);
     if (transition === 'same-owner') {
       expect(await pending).toBe('current-owner');
-      expect(current).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-        method: 'refreshMarkets', args: [],
-      }));
+      expect(current).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          method: 'refreshMarkets',
+          args: [],
+        }),
+      );
     } else {
       expect(await pending).toMatchObject({ command: 'refreshMarkets', code: 'WORKER_STOPPED' });
       expect(current).not.toHaveBeenCalled();
@@ -512,9 +624,12 @@ it('drops a retired bound call at the next poll before the replacement bridge ex
   const pending = exchange.refreshMarkets().then(settled, settled);
   owner = { ownerId: 'B', generation: 2 };
   await vi.advanceTimersByTimeAsync(25);
-  expect(settled).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-    command: 'refreshMarkets', code: 'WORKER_STOPPED',
-  }));
+  expect(settled).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      command: 'refreshMarkets',
+      code: 'WORKER_STOPPED',
+    }),
+  );
   await pending;
   const current = vi.fn(({ requestId }: { requestId: string }) => {
     exchange.emitter.emit('callMethod:done', { requestId, success: true, result: 'owner-B' });
@@ -525,40 +640,60 @@ it('drops a retired bound call at the next poll before the replacement bridge ex
 });
 
 it.each([
-  { keyed: false, hooked: false }, { keyed: true, hooked: false },
-  { keyed: false, hooked: true }, { keyed: true, hooked: true },
-])('refuses unsupported placement startup without any server fallback (keyed=$keyed, hooked=$hooked)', async ({ keyed, hooked }) => {
-  for (const switchOwner of [false, true]) {
-    let rejectStartup!: (error: Error) => void;
-    setWasmEngineLoader(() => new Promise<WasmEngineModule>((_resolve, reject) => { rejectStartup = reject; }));
-    const exchange = account(true, {
-      key: keyed ? 'fixture' : '', secret: keyed ? 'fixture' : '',
-      publicDataOnly: !keyed, workerMirror: true,
-    });
-    if (hooked) (exchange as RustEngineExchange).setWorkerOwner(() => ({ ownerId: 'A', generation: 1 }));
-    const ownerA = vi.fn(({ requestId }: { requestId: string }) => {
-      exchange.emitter.emit('callMethod:done', { requestId, success: true, result: ['owner-A-order'] });
-    });
-    const ownerB = vi.fn(({ requestId }: { requestId: string }) => {
-      exchange.emitter.emit('callMethod:done', { requestId, success: true, result: ['owner-B-order'] });
-    });
-    exchange.on('callMethod', ownerA);
-    const pending = exchange.placeOrders([{
-      symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, price: 100,
-      clientOrderId: 'admitted-A',
-    }]).catch((error: unknown) => error);
-    expect(ownerA).not.toHaveBeenCalled();
-    if (switchOwner) {
-      exchange.off('callMethod', ownerA);
-      exchange.on('callMethod', ownerB);
+  { keyed: false, hooked: false },
+  { keyed: true, hooked: false },
+  { keyed: false, hooked: true },
+  { keyed: true, hooked: true },
+])(
+  'refuses unsupported placement startup without any server fallback (keyed=$keyed, hooked=$hooked)',
+  async ({ keyed, hooked }) => {
+    for (const switchOwner of [false, true]) {
+      let rejectStartup!: (error: Error) => void;
+      setWasmEngineLoader(
+        () =>
+          new Promise<WasmEngineModule>((_resolve, reject) => {
+            rejectStartup = reject;
+          }),
+      );
+      const exchange = account(true, {
+        key: keyed ? 'fixture' : '',
+        secret: keyed ? 'fixture' : '',
+        publicDataOnly: !keyed,
+        workerMirror: true,
+      });
+      if (hooked) (exchange as RustEngineExchange).setWorkerOwner(() => ({ ownerId: 'A', generation: 1 }));
+      const ownerA = vi.fn(({ requestId }: { requestId: string }) => {
+        exchange.emitter.emit('callMethod:done', { requestId, success: true, result: ['owner-A-order'] });
+      });
+      const ownerB = vi.fn(({ requestId }: { requestId: string }) => {
+        exchange.emitter.emit('callMethod:done', { requestId, success: true, result: ['owner-B-order'] });
+      });
+      exchange.on('callMethod', ownerA);
+      const pending = exchange
+        .placeOrders([
+          {
+            symbol: 'BTCUSDT',
+            side: OrderSide.Buy,
+            type: OrderType.Limit,
+            amount: 1,
+            price: 100,
+            clientOrderId: 'admitted-A',
+          },
+        ])
+        .catch((error: unknown) => error);
+      expect(ownerA).not.toHaveBeenCalled();
+      if (switchOwner) {
+        exchange.off('callMethod', ownerA);
+        exchange.on('callMethod', ownerB);
+      }
+      if (keyed) rejectStartup(new Error('controlled page-engine fallback'));
+      expect(await pending).toMatchObject({ outcome: 'notSent' });
+      expect(ownerA).not.toHaveBeenCalled();
+      expect(ownerB).not.toHaveBeenCalled();
+      exchange.dispose();
     }
-    if (keyed) rejectStartup(new Error('controlled page-engine fallback'));
-    expect(await pending).toMatchObject({ outcome: 'notSent' });
-    expect(ownerA).not.toHaveBeenCalled();
-    expect(ownerB).not.toHaveBeenCalled();
-    exchange.dispose();
-  }
-});
+  },
+);
 
 it.each([false, true])('keeps source order refresh compatibility (hooked=%s)', async (hooked) => {
   for (const switchOwner of [false, true]) {
@@ -572,8 +707,10 @@ it.each([false, true])('keeps source order refresh compatibility (hooked=%s)', a
     });
     exchange.on('callMethod', ownerA);
     const args = [['BTCUSDT'], [{ id: 'synthetic-A-order', symbol: 'BTCUSDT' }]] as const;
-    const pending = exchange.refreshAccountOrders([...args[0]], [...args[1]])
-      .then(() => 'dispatched', () => 'dropped');
+    const pending = exchange.refreshAccountOrders([...args[0]], [...args[1]]).then(
+      () => 'dispatched',
+      () => 'dropped',
+    );
     if (switchOwner) {
       exchange.off('callMethod', ownerA);
       exchange.on('callMethod', ownerB);
@@ -584,9 +721,12 @@ it.each([false, true])('keeps source order refresh compatibility (hooked=%s)', a
       expect(ownerB).not.toHaveBeenCalled();
     } else {
       expect(await pending).toBe('dispatched');
-      expect(switchOwner ? ownerB : ownerA).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-        method: 'refreshAccountOrders', args,
-      }));
+      expect(switchOwner ? ownerB : ownerA).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          method: 'refreshAccountOrders',
+          args,
+        }),
+      );
       expect(switchOwner ? ownerA : ownerB).not.toHaveBeenCalled();
     }
   }
@@ -598,7 +738,7 @@ it('retries a worker candle read once on the replacement bridge and ignores the 
   const lighter = new RustEngineExchange(
     'lighter',
     { key: '', secret: '', publicDataOnly: true, workerMirror: true },
-    new DefaultStore(),
+    new FrameStore(),
   );
   accounts.push(lighter);
   const first = vi.fn();
@@ -628,7 +768,7 @@ it('bounds the replacement bridge wait and never replays an interrupted write', 
   const exchange = new RustEngineExchange(
     'lighter',
     { key: '', secret: '', publicDataOnly: true, workerMirror: true },
-    new DefaultStore(),
+    new FrameStore(),
   );
   accounts.push(exchange);
   const first = vi.fn();
@@ -651,7 +791,7 @@ it('does not retry a second interrupted worker candle read', async () => {
   const exchange = new RustEngineExchange(
     'lighter',
     { key: '', secret: '', publicDataOnly: true, workerMirror: true },
-    new DefaultStore(),
+    new FrameStore(),
   );
   accounts.push(exchange);
   const first = vi.fn();
@@ -671,7 +811,7 @@ it('does not retry a worker candle refusal', async () => {
   const exchange = new RustEngineExchange(
     'lighter',
     { key: '', secret: '', publicDataOnly: true, workerMirror: true },
-    new DefaultStore(),
+    new FrameStore(),
   );
   accounts.push(exchange);
   const bridge = vi.fn(({ requestId }: { requestId: string }) => {

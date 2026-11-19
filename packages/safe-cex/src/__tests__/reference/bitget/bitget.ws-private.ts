@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Position } from '../../../types';
 import type { BitgetExchange } from './bitget.exchange';
 
@@ -5,15 +6,16 @@ import createHmac from 'create-hmac';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
-import { resolveTransportRouting } from '../../../transport/registry';
 import { ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
-import { WsDirectFallback } from '../../../utils/wsDirectFallback';
+import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { BASE_WS_PRIVATE_URL, BASE_WS_PRIVATE_UTA_URL, ORDER_STATUS } from '../../../exchanges/bitget/bitget.types';
+import { resolveTransportRouting } from '../../../transport/registry';
 import { LogSeverity, OrderStatus, OrderType } from '../../../types';
 import { subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { BASE_WS_PRIVATE_URL, BASE_WS_PRIVATE_UTA_URL, ORDER_STATUS } from '../../../exchanges/bitget/bitget.types';
+import { WsDirectFallback } from '../../../utils/wsDirectFallback';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 /** Login refusals about where the connection comes from: 40018 key bound to other IPs, 40024 restricted location. */
 const BITGET_EGRESS_REFUSAL_CODES = new Set(['40018', '40024']);
@@ -321,7 +323,6 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         this.handlePongEvent();
         return;
       }
-
     }
     this.directFallback.onMessage();
 
@@ -411,7 +412,9 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         this.hasReportedErrorEvent = true;
         const detail = [json.code, json.msg].filter((part) => part !== undefined && part !== '').join(' ');
         const scope = this.routeHasTealstreetEgress ? "none of Tealstreet's WebSocket egress IPs" : 'this IP';
-        this.emitAndLogError(`Bitget private WS login rejected: ${detail} — the API key's IP whitelist allows ${scope}`);
+        this.emitAndLogError(
+          `Bitget private WS login rejected: ${detail} — the API key's IP whitelist allows ${scope}`,
+        );
       }
       return;
     }
@@ -471,7 +474,19 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
 
       if (mappedStatus === OrderStatus.Canceled) {
         orders.forEach((order) => {
-          this.store.updateOrderStatus(order, OrderStatus.Canceled);
+          (() => {
+            const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [order];
+            const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
           this.markOrderAsTerminal(order.id);
         });
       }
@@ -481,14 +496,41 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
         // ambiguous closed statuses (e.g. `success` / `executed`); only the
         // explicit fill statuses above emit fills and refetch.
         orders.forEach((order) => {
-          this.store.updateOrderStatus(order, OrderStatus.Closed);
+          (() => {
+            const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [order];
+            const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
           this.markOrderAsTerminal(order.id);
         });
       }
 
       if (mappedStatus === OrderStatus.Open) {
         orders.forEach((order) => {
-          this.store.addOrUpdateOrder(order);
+          (() => {
+            const incoming: StoreData['orders'] = [order];
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: [
+                  ...this.store.orders.map((row) => {
+                    const change = incoming.find((item) => item.id === row.id);
+                    return change ? { ...row, ...change } : row;
+                  }),
+                  ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                ],
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
           this.markOrderAsOpenFromWs(order.id);
         });
       }
@@ -528,13 +570,52 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       const isTerminalFill = this.isTerminalFillStatus(normalizedStatus);
 
       if (mappedStatus === OrderStatus.Open) {
-        this.store.addOrUpdateOrder(parentOrder);
+        (() => {
+          const incoming: StoreData['orders'] = [parentOrder];
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
         this.markOrderAsOpenFromWs(parentOrder.id);
       } else if (mappedStatus === OrderStatus.Canceled) {
-        this.store.updateOrderStatus(parentOrder, OrderStatus.Canceled);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [parentOrder];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
         this.markOrderAsTerminal(parentOrder.id);
       } else if (mappedStatus === OrderStatus.Closed) {
-        this.store.updateOrderStatus(parentOrder, OrderStatus.Closed);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [parentOrder];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
         this.markOrderAsTerminal(parentOrder.id);
       }
 
@@ -573,7 +654,19 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       // Apply immediately so UI does not wait on periodic tick reconciliation.
       if (action === 'snapshot') {
         this.markWsPositions([], action);
-        this.store.addOrUpdatePositionsFull([]);
+        (() => {
+          const incoming: StoreData['positions'] = [];
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
       this.hasPendingPositionEvents = true;
       this.throttledFetchPositions();
@@ -586,10 +679,34 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
 
     // Snapshot should be treated as full state to clear stale positions that are omitted.
     if (action === 'snapshot') {
-      this.store.addOrUpdatePositionsFull(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     } else {
       for (const position of positions) {
-        this.store.addOrUpdatePosition(position);
+        (() => {
+          const incoming: StoreData['positions'] = [position];
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     }
 
@@ -607,7 +724,19 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     if (validItems.length === 0) {
       if (action === 'snapshot') {
         this.markWsPositions([], action);
-        this.store.addOrUpdatePositionsFull([]);
+        (() => {
+          const incoming: StoreData['positions'] = [];
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
       this.hasPendingPositionEvents = true;
       this.throttledFetchPositions();
@@ -618,10 +747,34 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     const positions = validItems.map((rawPosition) => this.parent.mapUtaPosition(rawPosition));
     this.markWsPositions(positions, action);
     if (action === 'snapshot') {
-      this.store.addOrUpdatePositionsFull(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     } else {
       for (const position of positions) {
-        this.store.addOrUpdatePosition(position);
+        (() => {
+          const incoming: StoreData['positions'] = [position];
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     }
 
@@ -648,15 +801,19 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     // Bitget account WS unrealizedPL can be stale/empty; derive from positions + last price when possible.
     const upnl = this.parent.calculateAccountUpnl(apiUpnl);
 
-    this.store.update({
-      balance: {
-        used: subtract(unionTotalMargin, unionAvailable),
-        free: unionAvailable,
-        total: subtract(unionTotalMargin, upnl),
-        upnl,
-        info: acct,
+    applyReferenceFixture(
+      this.store,
+      {
+        balance: {
+          used: subtract(unionTotalMargin, unionAvailable),
+          free: unionAvailable,
+          total: subtract(unionTotalMargin, upnl),
+          upnl,
+          info: acct,
+        },
       },
-    });
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   handleUtaAccountTopic = (data: Record<string, any>) => {
@@ -677,15 +834,19 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
     }
 
     const upnl = this.parent.calculateAccountUpnl(apiUpnl);
-    this.store.update({
-      balance: {
-        used: subtract(accountEquity, available),
-        free: available,
-        total: subtract(accountEquity, upnl),
-        upnl,
-        info: raw,
+    applyReferenceFixture(
+      this.store,
+      {
+        balance: {
+          used: subtract(accountEquity, available),
+          free: available,
+          total: subtract(accountEquity, upnl),
+          upnl,
+          info: raw,
+        },
       },
-    });
+      this.store.markets.map((row) => row.symbol),
+    );
     this.hasPendingBalanceEvents = true;
     this.throttledFetchBalance();
   };
@@ -730,7 +891,19 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       this.hasPendingPositionEvents = false;
       const positions = await this.parent.fetchPositions();
       if (!this.isDisposed) {
-        this.store.addOrUpdatePositionsFull(this.mergeRestPositionsWithFreshWsState(positions, requestStartedAt));
+        (() => {
+          const incoming: StoreData['positions'] = this.mergeRestPositionsWithFreshWsState(positions, requestStartedAt);
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     } catch {
       // Silent failure, will retry on next event
@@ -770,13 +943,14 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
       this.hasPendingBalanceEvents = false;
       const balance = await this.parent.fetchBalance({ preferFast: true });
       if (!this.isDisposed) {
-        this.store.update({
-          balance,
-          loaded: {
-            ...this.store.loaded,
-            balance: true,
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: { balance: true },
           },
-        });
+          this.store.markets.map((row) => row.symbol),
+        );
       }
     } catch {
       // Silent failure, will retry on next event
@@ -867,7 +1041,14 @@ export class BitgetPrivateWebsocket extends BaseWebSocket<BitgetExchange> {
             (this.recentWsOpenOrders.get(o.id) ?? 0) > now),
       );
 
-      this.store.addOrUpdateOrdersFull([...reconciledFetchedOrders, ...preservedOrders]);
+      (() => {
+        const incoming: StoreData['orders'] = [...reconciledFetchedOrders, ...preservedOrders];
+        return applyReferenceFixture(
+          this.store,
+          { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     } catch {
       // Silent failure, will retry on next event
     }

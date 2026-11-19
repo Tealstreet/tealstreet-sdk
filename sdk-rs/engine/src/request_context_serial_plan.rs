@@ -332,6 +332,8 @@ impl<P> Cx<'_, P> {
     /// As `continue_serial_plan`, but the next call is issued from the Plan
     /// timer's `on_http_plan_ready` after `delay_ms`. It is also the one Read
     /// failure retry: from the current Read call's own failure, Read next only.
+    /// (`continue_serial_plan` may follow a write the journal holds as never
+    /// released, refused before release, with an immediate Mutation.)
     pub fn continue_serial_plan_after(
         &mut self,
         plan: &Plan,
@@ -517,6 +519,12 @@ impl crate::engine::CoreCx<'_> {
                     return Err(Error::Invalid);
                 }
             }
+            // A write refused before release (e.g. a venue veto) sent nothing: the
+            // journal below admits it only when its attempt is unreleased and NotSent.
+            Stage::Active { failed: true }
+                if context.operation() == Operation::Mutation
+                    && next.operation == Operation::Mutation
+                    && wake == Next::Now => {}
             _ => return Err(Error::Revoked),
         }
         let leg = (context.operation() == Operation::Mutation).then(|| context.leg());

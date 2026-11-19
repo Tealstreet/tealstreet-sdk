@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { prepareRecordedHttp } from '../support/managedHttp';
 
@@ -20,7 +20,11 @@ type TapeRow = { type: string; method?: string; url?: string; body?: string };
 const TAPE: TapeRow[] = (() => {
   const dir = mkdtempSync(join(tmpdir(), 'bybit-tape-'));
   const out = join(dir, 'bybit-private.jsonl');
-  execFileSync(process.execPath, [resolve(__dirname, '../../../../../sdk-rs/harness/private-tape-bybit.mjs'), '--out', out]);
+  execFileSync(process.execPath, [
+    resolve(__dirname, '../../../../../sdk-rs/harness/private-tape-bybit.mjs'),
+    '--out',
+    out,
+  ]);
   const rows = readFileSync(out, 'utf8')
     .split('\n')
     .filter(Boolean)
@@ -29,8 +33,7 @@ const TAPE: TapeRow[] = (() => {
   return rows;
 })();
 
-const tapeBody = (url: string) =>
-  TAPE.find((row) => row.type === 'http' && row.url === url)?.body;
+const tapeBody = (url: string) => TAPE.find((row) => row.type === 'http' && row.url === url)?.body;
 
 const LONG_ROW = JSON.parse(
   tapeBody('https://api.bybit.com/v5/position/list?category=linear&settleCoin=USDT&limit=200&cursor=')!,
@@ -47,12 +50,16 @@ const positionsBody = (size: string) =>
     },
   });
 const EMPTY_ORDERS = '{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":"","category":"linear"}}';
-const CANCEL_ALL = '{"retCode":0,"retMsg":"OK","result":{"list":[],"success":"1"},"retExtInfo":{},"time":1760880000000}';
+const CANCEL_ALL =
+  '{"retCode":0,"retMsg":"OK","result":{"list":[],"success":"1"},"retExtInfo":{},"time":1760880000000}';
 const created = (id: number) =>
   `{"retCode":0,"retMsg":"OK","result":{"orderId":"${id}","orderLinkId":""},"retExtInfo":{},"time":1760880000000}`;
 
 /** Bybit USDT perp whose private stream carries auth acks and nothing else once frames are withheld. */
-const venue = (positions: (msSinceClose: number | undefined) => string, onClose?: (push: (frame: string) => void, at: 'close' | 'read') => void) => {
+const venue = (
+  positions: (msSinceClose: number | undefined) => string,
+  onClose?: (push: (frame: string) => void, at: 'close' | 'read') => void,
+) => {
   let pushPrivate: (frame: string) => void = () => {};
   const trace: { at: number; line: string }[] = [];
   let closedAt: number | undefined;
@@ -80,11 +87,10 @@ const venue = (positions: (msSinceClose: number | undefined) => string, onClose?
       if (pathname === '/v5/position/list') {
         const settle = new URL(url).searchParams.get('settleCoin');
         reply =
-          settle === 'USDT'
-            ? positions(closedAt === undefined ? undefined : Date.now() - closedAt)
-            : tapeBody(url);
+          settle === 'USDT' ? positions(closedAt === undefined ? undefined : Date.now() - closedAt) : tapeBody(url);
         if (settle === 'USDT' && closedAt !== undefined) onClose?.(pushPrivate, 'read');
-        if (settle === 'USDT') trace.push({ at: Date.now(), line: `GET ${pathname} -> size ${JSON.parse(reply!).result.list[0].size}` });
+        if (settle === 'USDT')
+          trace.push({ at: Date.now(), line: `GET ${pathname} -> size ${JSON.parse(reply!).result.list[0].size}` });
       } else if (pathname === '/v5/order/realtime') reply = EMPTY_ORDERS;
       else if (pathname === '/v5/order/cancel-all') {
         reply = CANCEL_ALL;
@@ -119,7 +125,7 @@ describe('Nuke with the private stream withheld (Bybit USDT perp)', () => {
     const tape = venue(positions, onClose);
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    exchange = new RustEngineExchange('bybit', { key: 'k', secret: 's' }, new DefaultStore());
+    exchange = new RustEngineExchange('bybit', { key: 'k', secret: 's' }, new FrameStore());
     await exchange.start();
     await vi.waitFor(() => expect(exchange!.store.loaded.positions).toBe(true));
     return tape;
@@ -143,7 +149,13 @@ describe('Nuke with the private stream withheld (Bybit USDT perp)', () => {
       return positionsBody(sinceClose === undefined ? '13.8' : '0');
     });
     bought = true;
-    await exchange!.placeOrder({ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 13.8, price: 90000 });
+    await exchange!.placeOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 13.8,
+      price: 90000,
+    });
     expect(exchange!.store.orders).toEqual([]);
     expect((await exchange!.fetchPositions()).filter((p) => p.contracts !== 0)).toEqual([]);
     const { result, lines } = await run(tape);

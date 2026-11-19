@@ -36,8 +36,8 @@ describe('safe-math', () => {
     });
 
     it('should return 2 for null/undefined-like values', () => {
-      expect(afterDecimal(null as unknown as number)).toBe(2);
-      expect(afterDecimal(undefined as unknown as number)).toBe(2);
+      expect(afterDecimal(null)).toBe(2);
+      expect(afterDecimal(undefined)).toBe(2);
     });
 
     it('should handle negative decimals', () => {

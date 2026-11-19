@@ -76,7 +76,7 @@ impl Session {
             return;
         };
         let action = decoded.action;
-        let (method, args) = match action.call() {
+        let (method, mut args) = match action.call() {
             Ok(call) => call,
             Err(message) => {
                 self.audit_order_refusal(&name, action.kind(), message);
@@ -84,6 +84,13 @@ impl Session {
                 return;
             }
         };
+        // After the fingerprint and schema checks: both bind the caller's own ID.
+        if matches!(
+            action,
+            order_actions::Action::Place { .. } | order_actions::Action::Close { .. }
+        ) {
+            crate::order_contract::venue_caller_ids(&self.joined[&name].account.venue, &mut args);
+        }
         let Some(deadline) =
             order_actions::ActionDeadline::new(&request.intent_id, request.age_ms, arrived)
         else {

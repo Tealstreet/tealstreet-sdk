@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 import { ENDPOINTS } from '../../exchanges/binance/binancepm.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 
 const malformedResponse = { code: -1003, msg: 'Too many requests' };
 
 const createExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new BinancePMExchange('binancepm', { key: 'test-key', secret: 'test-secret' }, store);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
   return { exchange, store };
@@ -60,7 +61,12 @@ describe('Binance PM malformed REST response guards', () => {
   it('preserves positions when position risk returns a non-array envelope', async () => {
     const { exchange, store } = createExchange();
     const preservedPositions = [createPosition()];
-    store.update({ positions: preservedPositions as any });
+    store.apply(
+      nativeFixture(
+        { positions: preservedPositions as any },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange.papiXhr, 'get').mockResolvedValue({ data: malformedResponse } as any);
 
     await expect(exchange.fetchPositions()).resolves.toBe(store.positions);
@@ -76,7 +82,12 @@ describe('Binance PM malformed REST response guards', () => {
   ])('preserves orders when %s returns a non-array envelope', async (_name, responses) => {
     const { exchange, store } = createExchange();
     const preservedOrders = [createOrder()];
-    store.update({ orders: preservedOrders as any });
+    store.apply(
+      nativeFixture(
+        { orders: preservedOrders as any },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const get = vi.spyOn(exchange.papiXhr, 'get');
     responses.forEach((response) => get.mockResolvedValueOnce(response as any));
 
@@ -88,7 +99,12 @@ describe('Binance PM malformed REST response guards', () => {
   it('preserves markets when leverage brackets return a non-array envelope', async () => {
     const { exchange, store } = createExchange();
     const preservedMarkets = [createMarket()];
-    store.update({ markets: preservedMarkets as any });
+    store.apply(
+      nativeFixture(
+        { markets: preservedMarkets as any },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange.publicXhr, 'get').mockResolvedValue({
       data: {
         symbols: [
@@ -120,7 +136,12 @@ describe('Binance PM malformed REST response guards', () => {
   it('preserves tickers when public ticker arrays return a non-array envelope', async () => {
     const { exchange, store } = createExchange();
     const preservedTickers = [{ id: 'BTC/USDT:USDT', symbol: 'BTCUSDT', last: 50_000 }];
-    store.update({ tickers: preservedTickers as any });
+    store.apply(
+      nativeFixture(
+        { tickers: preservedTickers as any },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     vi.spyOn(exchange.publicXhr, 'get').mockResolvedValue({ data: malformedResponse } as any);
 
     await expect(exchange.fetchTickers()).resolves.toBe(store.tickers);

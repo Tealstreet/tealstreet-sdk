@@ -67,6 +67,8 @@ export const GRAFANA_ENDPOINTS_PERIODIC = [
 ];
 
 export const ORDER_TYPE: Record<string, OrderType> = {
+  // Rule 5 / #3640: decode maker limits; keep LIMIT last for inverse write mapping.
+  POST_ONLY: OrderType.Limit,
   LIMIT: OrderType.Limit,
   MARKET: OrderType.Market,
   TAKE_PROFIT: OrderType.TakeProfit,

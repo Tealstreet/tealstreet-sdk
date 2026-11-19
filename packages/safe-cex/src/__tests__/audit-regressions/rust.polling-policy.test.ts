@@ -1,8 +1,3 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, ExchangeOptions, Market, Ticker } from '../../types';
@@ -11,10 +6,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
 import { RUST_VENUES, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { setTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { consumerFrame } from '../cutover/consumerFrame';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 vi.mock('../../exchanges/bybit/bybit.types', async (original) => ({
   ...(await original<typeof import('../../exchanges/bybit/bybit.types')>()),
@@ -46,8 +46,19 @@ const market: Market = {
   limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
 };
 const ticker: Ticker = {
-  id: 'BTCUSDT', symbol: 'BTCUSDT', bid: 99, ask: 101, last: 100, mark: 100, index: 100,
-  percentage: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0, openInterest: 0,
+  id: 'BTCUSDT',
+  symbol: 'BTCUSDT',
+  bid: 99,
+  ask: 101,
+  last: 100,
+  mark: 100,
+  index: 100,
+  percentage: 0,
+  fundingRate: 0,
+  fundingTime: 0,
+  volume: 0,
+  quoteVolume: 0,
+  openInterest: 0,
 };
 
 function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOptions> = {}) {
@@ -84,7 +95,8 @@ function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOption
     snapshotFrame: ready,
     wsOpen: idle,
     wsMessage: idle,
-    wsClose: idle, wsRouteExhausted: idle,
+    wsClose: idle,
+    wsRouteExhausted: idle,
     httpStart: idle,
     httpChunk: idle,
     httpEnd: idle,
@@ -109,7 +121,7 @@ function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOption
       publicDataOnly: true,
       ...options,
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   exchange.emitter.on('error', (error: unknown) => errors.push(error));
   accounts.push(exchange);
@@ -144,7 +156,9 @@ describe('Rust periodic polling policy propagation', () => {
       const r = fixture(name);
       await r.start();
       expect(r.events.slice(0, 2)).toEqual(['setPollScale', 'start']);
-      expect(r.controls()).toEqual([{ op: 'setPollScale', scale: 3, ceiling: 3 * getExchangeMetadata(name).tickInterval! }]);
+      expect(r.controls()).toEqual([
+        { op: 'setPollScale', scale: 3, ceiling: 3 * getExchangeMetadata(name).tickInterval! },
+      ]);
       expect(JSON.parse(r.construct.mock.calls[0][1])).not.toHaveProperty('tickInterval');
       expect(JSON.parse(r.construct.mock.calls[0][1])).not.toHaveProperty('pollingEnabled');
     },

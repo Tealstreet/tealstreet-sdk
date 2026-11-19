@@ -1,3 +1,25 @@
+# Native store cutover (2026-11-17)
+
+Account state has one native path: Rust SCXF -> pure-JS wire reader -> FrameStore
+-> generated StoreData. FrameStore supplies immutable section identities and
+typed versioned subscriptions. Native worker snapshots carry exact bytes;
+there is no mutable Store, DefaultStore, FrameApplier, serialized seed or
+worker op:store path. Page mirrors apply source frames directly, including
+native derived sections; their optional signing engine cannot republish state.
+Public-only mirrors need no page engine. Mobile is DELEGATED-only with no wasm
+loader. Read `src/store/CLAUDE.md` for current state/recovery/unit contracts;
+older store-bridge notes in this historical package guide are superseded.
+
+Retained TS protocol references are test producers: they explicitly encode SCXF
+from observed venue facts. Their completion flags belong to the producer and
+survive consumer readiness clamping until all account datasets arrive. Raw REST
+fixtures stay raw; generated native fixture builders seed only canonical rows.
+Terminal admission remains at the reference producer before it emits frames.
+No production mutable Store API or RPC-result publication is restored.
+High-volume ticker references emit SCXF section 4 deltas when the ordered identity
+catalogue and observation metadata stay unchanged; catalogue/freshness replacements
+retain full sections. This keeps unchanged row identities and bounded replay work.
+
 # CLAUDE.md - safe-cex Package
 
 The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
@@ -251,6 +273,16 @@ same complete account binding). `put` preserves checkpoint metadata. Compaction 
 keeps records until a later flush retries. Unrelated retirement failure never
 rejects enqueue or hides its durable intent ID after handoff. Close the old
 outbox before replacing it with a new writer for the same scope.
+
+`retire(intentId)` lets a host drop an entry it has settled itself (applied,
+not sent, or venue-rejected per `error.outcome: "rejected"` / reconciled venue
+state) instead of keeping it as completed history or 24 h unknown work. It
+removes the row from memory, then deletes it through `compact` with the current
+sequence, so its seq is never reused; a failed delete leaves the stored row
+to restore as before. It refuses (resolves false) queued, sending, acknowledged
+and cancel-pending intents, and caller-supplied keys, whose reservation must
+survive. Retirement is the host's assertion, never evidence: the SDK still
+never resends, and a later receipt for that ID finds no entry.
 
 ## DELEGATED account actions
 
@@ -617,7 +649,9 @@ See `docs/plans/callers/startup-incomplete-causes.md` for the field contract.
 
 Managed HTTP failures also emit the JS host's Debug `http.request_failed` event,
 with the actual SDK venue plus method, redacted path template, phase and closed
-failure kind. Queries, origins and request material are never diagnostic fields;
+failure kind. Closed preparation stage, route kind, encoded error class and capped
+prepare/budget-wait milliseconds remain passive observations of actual awaits.
+Queries, origins and request material are never diagnostic fields;
 this event does not emit another error or change retries/native deadlines.
 
 ## Rust public-feed ownership
@@ -770,32 +804,33 @@ epoch-shaped scheduling clock to `performance.now()`, and never moves its live
 deadlines on subsequent synchronization. Browser workers wait up to 30 s for
 an initial host time push before anchoring. Later syncs update only the engine's
 protocol UTC fallback; small corrections preserve venue calibration, while a
->1 s host-baseline discontinuity (including suspend) invalidates it. The default
-transport records wall-versus-monotonic divergence as pending UTC data;
-EngineHost drains it outside HTTP handoffs before the next Rust call. A detected
-step also defers a shared server-time resync to refresh the cached wall-clock
-offset. This permits a one-off request in browser workers; ordinary worker sync
-still uses page pushes. Resync notifications run after the current handoff. Journal
-UTC bounds and scheduled-cancel validation still use synchronized wall time.
-Explicit host/recording transports retain their own clock; native servers supply
-their OS clock and own its synchronization. See `docs/plans/callers/engine-monotonic-deadlines.md`. There is no per-venue
-`hostClock` capability (wire bit14 is reserved). `RustEngineExchange` routes from that record,
-never from venue names, and adopts it once the engine exists (`ensureHost` or
-`start`); `engineCapabilities` is undefined before then. `leverageQuery` decides
-`fetchLeverageForSymbol`: `onRead` asks the venue, `settings` answers from
-published rails, and `onMetadata` answers from those rails once a metadata
-refresh has loaded them but asks the venue for a symbol not yet refreshed (the
-worker only asks when the active symbol has no rails). `onReadAndMetadata`
-keeps explicit reads fresh and also refreshes a selected symbol through
-`updateSymbolMetadata`; it does not add metadata reads to ordinary `onRead`
-venues. WEEX uses `onReadAndMetadata` so selecting a flat symbol refreshes
-its signed configuration despite cached rails; public-only metadata stays inert.
-Missing history axes
-take the branded base fallbacks, so `exchange.capabilities` reports them absent
-once the engine exists. `account` also gates the engine: `FetchAccount` to a
-venue whose record says `unsupported` is refused before the venue runs, so a
-venue answering identity for only some products (Binance USD-M/PM, Bybit
-except HyroTrader) reports it per product.
+
+> 1 s host-baseline discontinuity (including suspend) invalidates it. The default
+> transport records wall-versus-monotonic divergence as pending UTC data;
+> EngineHost drains it outside HTTP handoffs before the next Rust call. A detected
+> step also defers a shared server-time resync to refresh the cached wall-clock
+> offset. This permits a one-off request in browser workers; ordinary worker sync
+> still uses page pushes. Resync notifications run after the current handoff. Journal
+> UTC bounds and scheduled-cancel validation still use synchronized wall time.
+> Explicit host/recording transports retain their own clock; native servers supply
+> their OS clock and own its synchronization. See `docs/plans/callers/engine-monotonic-deadlines.md`. There is no per-venue
+> `hostClock` capability (wire bit14 is reserved). `RustEngineExchange` routes from that record,
+> never from venue names, and adopts it once the engine exists (`ensureHost` or
+> `start`); `engineCapabilities` is undefined before then. `leverageQuery` decides
+> `fetchLeverageForSymbol`: `onRead` asks the venue, `settings` answers from
+> published rails, and `onMetadata` answers from those rails once a metadata
+> refresh has loaded them but asks the venue for a symbol not yet refreshed (the
+> worker only asks when the active symbol has no rails). `onReadAndMetadata`
+> keeps explicit reads fresh and also refreshes a selected symbol through
+> `updateSymbolMetadata`; it does not add metadata reads to ordinary `onRead`
+> venues. WEEX uses `onReadAndMetadata` so selecting a flat symbol refreshes
+> its signed configuration despite cached rails; public-only metadata stays inert.
+> Missing history axes
+> take the branded base fallbacks, so `exchange.capabilities` reports them absent
+> once the engine exists. `account` also gates the engine: `FetchAccount` to a
+> venue whose record says `unsupported` is refused before the venue runs, so a
+> venue answering identity for only some products (Binance USD-M/PM, Bybit
+> except HyroTrader) reports it per product.
 
 Journal adapters, closed-position formats, history-bound normalization, filter
 refusals, STP/execution controls, numeric validation and book callback isolation
@@ -1077,6 +1112,15 @@ value or raw parser text crosses this diagnostic boundary. Existing Bitget/Krake
 schema/reason objects retain their wire shape. NX history-window reporting needs
 the companion allowlisted forwarding change after the SDK mirror import.
 
+## Binance folded-position lookback
+
+Binance's 14-day straddle lookback uses one native fill-range request per
+symbol, under its original read root and deadline. The native adapter keeps
+its existing seven-day windows and subdivides only saturated pages. Sparse
+accounts incur no extra reads from unconditional daily subdivision. Any
+incomplete source still refuses the fold; a small target window cannot hide
+a saturated lookback. Other venues retain their existing read shape and limits.
+
 ## Rust incomplete history
 
 Canonical Bybit closed-position records group native closing orders only when the fills
@@ -1120,6 +1164,36 @@ and receiver together. Public `historyCompletenessOf`, `withHistoryCompleteness`
 and `copyHistoryCompleteness` helpers preserve it before row transformations;
 Rust derived position and reported closed-PnL mappings retain it even on empty
 results. Bybit's derived history combines both source axes' assertions.
+A Bybit closed-PnL range whose closing order cannot be joined to an explicit
+`long`, `short` or `both` leg returns no aggregates and carries
+`incompleteReason: unresolvedHedgeLeg`. An absent resolver, empty order response,
+missing order ID or missing order leg is not evidence of one-way mode. Native
+close rows are left untouched and can be re-read through the existing raw history
+path; only a complete join can publish the aggregate's stable key/count. This does
+not add persistent raw-event storage (the separate retention/rebuild decision).
+
+Optional `completeness.failure: { operation, kind, venueCode? }` retains a Bybit
+later-page failure through the same owning-result mapping and serialization.
+`historyFailureOf` allowlists every field; native messages and row values never
+enter it. The array's `historyFailure` property is non-enumerable. Replacing an
+assertion replaces its diagnostic too, so a different partial input cannot
+borrow the earlier input's error facts. Grouping is a caller concern.
+
+The journal fold refuses a derived position when any nonzero fee contribution uses a currency
+that differs from its settlement currency or has no reported currency: there is no
+historical FX conversion in this path. The interval carries an empty currency member
+for a nonzero unlabeled contribution so the same conversion guard refuses it.
+Zero fees require no conversion, including fees allocated across a position flip;
+nonzero foreign contributions still refuse even when their numeric sum is zero.
+The error propagates through `buildFoldedPositionRecords`; never silently drop the
+position or label BNB/mixed-currency fees as USDT. Raw fills retain their native
+fee amounts and currencies. Settlement-denominated fees and rebates are unchanged.
+
+OKX's position journal marks `coverageGap` when a raw historical instrument is
+absent from the current catalogue, including when no rows can be mapped. Raw
+closed-position reads retain those source rows and instrument IDs; normalized
+symbols and base sizes are never guessed. Known inverse markets remain explicitly
+outside this linear journal grade and do not alone add an incompleteness marker.
 
 The journal fold rejects flagged fills and symbol-scoped income; with complete
 account-wide fills it discards flagged income enrichment and leaves funding
@@ -1132,6 +1206,15 @@ The fatal symbol-scoped income wrapper retains shared engine classification
 (`kind`, `outcome`, `venueCode`) alongside its existing name and cause. Failed
 income still stops the fold before any fill reads; no empty account is invented.
 
+Fills-derived journal keys use `fold-v2` plus escaped account, symbol, leg and the
+native execution ID that finally flattened the leg. A flip's closing half retains
+that execution ID; its opening half belongs to the next lifecycle. Neither time
+precision nor a response ordinal is identity. The closing ID also stays stable
+when a wider lookback reveals earlier opening fills. A reportable close without
+that ID fails the fold instead of emitting a colliding key or silently dropping
+the record. Consumers must rebuild legacy timestamp-keyed derived projections
+before mixing them with `fold-v2`; this does not rekey venue-reported positions.
+
 ## Rust socket health
 
 Engine venues own their sockets and reconnect policy; the wasm host only
@@ -1143,9 +1226,12 @@ the one physical socket in both health channels. Hyperliquid and TxFlow use it
 only when their public topics are direct; separate sockets remain independent.
 `RustEngineExchange` exposes one `RustSocketHandle` per channel through the
 `BaseWebSocket` fields, so `getAllSockets`, `reconnect`, `recoverAfterOffline`,
-CLI `ConnectionMonitor` and the base `dispose` work unchanged. It writes
-`store.socketHealth` through the shared `summarizeSocketHealth`, on socket
-changes and every 5 s, never through the TS watchdog. Channel health uses a
+CLI `ConnectionMonitor` and the base `dispose` work unchanged. Native SCXF
+section 26 owns `store.socketHealth`. The host observes socket changes and
+checks recovery every 5 s through `summarizeSocketHealth`. Auth recovery tracks
+the transport's initialization transition independently of the last published
+health frame, so a reconnect followed by private traffic resets the rejection
+streak even before the native health publication arrives. Channel health uses a
 60 s silence threshold. Reconnecting closes only
 open sockets; a connect in flight is left alone, as in TS. `Deactivate` and
 `auth.rejected` events raise `authFailureStreak`; a private stream delivering
@@ -1972,7 +2058,7 @@ keep payload-signed REST there. The native short-lived token
 or the `auth` query parameter only on that deployment's exact API origin and this
 explicit method/path allowlist:
 GET `/api/v1/trades`, `/api/v1/accountInactiveOrders`, `/api/v1/accountActiveOrders`,
-`/api/v1/positionFunding`, `/api/v1/accountLimits`; POST `/api/v1/changeAccountTier` (the existing user setting).
+`/api/v1/positionFunding`, `/api/v1/accountLimits`, `/api/v1/accountOrders` (placement and guarded-edit proofs); POST `/api/v1/changeAccountTier` (the existing user setting).
 Every other venue credential header and every `signature`/`sign` query parameter
 is refused, including on Lighter. Binding repeats the check on the signer's final
 URL, query tokens and venue headers before raw binding; refusal releases the
@@ -2400,7 +2486,6 @@ explicit Primary stableId before provider trimming. JS/native setup reject a
 conflicting supplied mapping. Generic LocalSigner never derives stable IDs;
 MEXC venue execution reads only installed metadata, never hashes credentials.
 
-
 Chart consumers must honor `exchangeMetadata.supportsKlineSeconds` and optional
 `supportedCandleIntervals`. Hyperliquid and HyperliquidSpot share their native
 interval set, which excludes seconds and 6h; neither may reach a candle subscription.
@@ -2439,7 +2524,6 @@ failed streams cannot supply a native-code notice. HTTP 429 reports once at the
 response headers regardless of body content, size or stream completion, without
 consuming the body. Status-only notices carry HTTP 429 instead of a guessed
 native code.
-
 
 Hyperliquid `/info` admission shares a token bucket across account workers through
 IndexedDB. Prepare may wait but reserves no weight. Admission durably reserves
@@ -2586,3 +2670,15 @@ BingX cancel/amend `invalidInput` diagnostics preserve a validated, value-free
 `bingxWriteShape` through host errors, command cloning and typed telemetry tags.
 The closed schema and evidence bounds live in `sdk-rs/venues/bingx/README.md`;
 raw request/row fields are never copied into this diagnostic record.
+
+## Fills-derived journal funding ownership
+
+The journal fold assigns a symbol funding event only when exactly one visible,
+complete, closed interval can own it. Open legs also participate in that census;
+filtering them out before allocation would invent an owner. A shared hedge event
+is retained once in `BuildRecordsResult.unattributedFunding`, outside per-leg
+amounts. A leg affected by unresolved events has `fundingAttributed: false` and
+contains only the events that could be uniquely assigned (possibly zero).
+Source rows outside all reconstructed intervals remain in that separate list.
+This is an in-memory result, not a new durable income-ingestion axis or a repair
+of previously persisted rows. Reported-position PnL/fee conventions are unchanged.

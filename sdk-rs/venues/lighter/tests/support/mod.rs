@@ -393,3 +393,65 @@ impl Default for Options {
         }
     }
 }
+/// Answer every pending placement-proof read with one `status` row per client
+/// index; returns the other drained actions. Later actions stay queued.
+pub fn prove_with(e: &mut Engine<Lighter>, now: f64, status: &str) -> Vec<Action> {
+    let actions = safe_cex_engine::test_support::prepared_actions(e, now);
+    answer_proofs(e, now, actions, status)
+}
+/// Answer the placement-proof reads among `actions`; return the rest.
+pub fn answer_proofs(
+    e: &mut Engine<Lighter>,
+    now: f64,
+    actions: Vec<Action>,
+    status: &str,
+) -> Vec<Action> {
+    let mut rest = Vec::new();
+    for action in actions {
+        match &action {
+            Action::Http(r) if r.url.contains("/api/v1/accountOrders?") => {
+                let rows: Vec<serde_json::Value> = proof_ids(r)
+                    .iter()
+                    .map(|id| {
+                        serde_json::json!({"client_order_index": id.parse::<u64>().unwrap(),
+                            "order_index": id, "status": status, "filled_base_amount": "0"})
+                    })
+                    .collect();
+                let body = serde_json::json!({"code":200,"orders":rows}).to_string();
+                reply_at(e, now, r, 200, &body);
+            }
+            _ => rest.push(action),
+        }
+    }
+    rest
+}
+pub fn prove_open(e: &mut Engine<Lighter>, now: f64) -> Vec<Action> {
+    prove_with(e, now, "open")
+}
+/// The client order indexes a placement-proof read asks for.
+pub fn proof_ids(r: &HttpRequest) -> Vec<String> {
+    r.url
+        .split("client_order_indexes=")
+        .nth(1)
+        .unwrap_or_default()
+        .split('&')
+        .next()
+        .unwrap_or_default()
+        .split(',')
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+/// A sendTx/sendTxBatch carrying ordinary order creations (tx type 14).
+pub fn creates(r: &HttpRequest) -> bool {
+    let body = r.body.as_deref().unwrap_or_default();
+    body.split('&')
+        .any(|pair| pair == "tx_type=14" || (pair.starts_with("tx_types=") && pair.contains("14")))
+}
+/// `drain` with every placement-proof read answered open on the way.
+pub fn drain_proven(e: &mut Engine<Lighter>, timers: &mut Timers) -> Vec<Action> {
+    let actions = drain(e, timers);
+    let mut out = answer_proofs(e, NOW, actions, "open");
+    out.extend(drain(e, timers));
+    out
+}

@@ -1,23 +1,25 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
-import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, ExchangeOptions, OHLCVOptions, Order } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderType } from '../../types';
+import { consumerFrame } from '../cutover/consumerFrame';
+import { nativeOrder } from '../cutover/nativeOrder';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 // These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
 vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
-
-import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderType } from '../../types';
-import { engineCapabilities } from '../fixtures/engineCapabilities';
-import { consumerFrame } from '../cutover/consumerFrame';
 
 const USER = '0x1111111111111111111111111111111111111111';
 const SIGNER = '0x2222222222222222222222222222222222222222';
@@ -30,6 +32,7 @@ const fixture = (
   nativeVersion?: 'v1' | 'v3',
 ) => {
   const commands: Array<Record<string, unknown>> = [];
+  const nativeLeverage: FrameStore['fetchedLeverage'] = {};
   const nativeSettings = { isHedged: false };
   const noActions = () => '[]';
   const engine: WasmEngineLike = {
@@ -40,6 +43,7 @@ const fixture = (
       const command = JSON.parse(json);
       if (command.op === 'setTickerSymbols' || command.op === 'setPollScale') return '[]';
       commands.push(command);
+      if (command.op === 'fetchLeverage') nativeLeverage[command.symbol] = { buyLeverage: 10, sellLeverage: 10 };
       return JSON.stringify([
         {
           op: 'done',
@@ -58,14 +62,18 @@ const fixture = (
         },
       ]);
     },
-    takeFrame: () => new Uint8Array(consumerFrame({
-      loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
-      options: nativeSettings,
-    })),
+    takeFrame: () =>
+      new Uint8Array(
+        consumerFrame({
+          loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+          options: nativeSettings,
+        }),
+      ),
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noActions,
     wsMessage: noActions,
-    wsClose: noActions, wsRouteExhausted: noActions,
+    wsClose: noActions,
+    wsRouteExhausted: noActions,
     httpStart: noActions,
     httpChunk: noActions,
     httpEnd: noActions,
@@ -76,16 +84,22 @@ const fixture = (
     return engine;
   });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
-  const store = new DefaultStore();
-  installNativeStartupFrames(engine, store, () => ({ options: nativeSettings }));
-  store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+  const store = new FrameStore();
+  installNativeStartupFrames(engine, store, () => ({ options: nativeSettings, fetchedLeverage: nativeLeverage }));
+  applyReferenceFixture(
+    store,
+    { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+    store.markets.map((row) => row.symbol),
+  );
   const exchange = new RustEngineExchange(
     name,
     { key: SIGNER, secret: PRIVATE, applicationId: USER, ...options },
     store,
   );
   running.push(exchange);
-  const setNativeHedged = (isHedged: boolean) => { nativeSettings.isHedged = isHedged; };
+  const setNativeHedged = (isHedged: boolean) => {
+    nativeSettings.isHedged = isHedged;
+  };
   return { exchange, construct, commands, store, setNativeHedged, engine };
 };
 
@@ -168,12 +182,16 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
   });
 
   it('keeps valid auth-only V3 accounts public before and after host creation, as TS does', async () => {
-    const { exchange } = fixture({
-      key: '',
-      secret: '',
-      applicationId: undefined,
-      auth: { userAddress: USER, signerAddress: SIGNER, privateKey: PRIVATE },
-    }, 'asterdex', 'v3');
+    const { exchange } = fixture(
+      {
+        key: '',
+        secret: '',
+        applicationId: undefined,
+        auth: { userAddress: USER, signerAddress: SIGNER, privateKey: PRIVATE },
+      },
+      'asterdex',
+      'v3',
+    );
     expect(exchange.isPublicDataOnly).toBe(true);
     await exchange.start();
     expect(exchange.isPublicDataOnly).toBe(true);
@@ -216,14 +234,23 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
 
   it('validates every Aster per-order STP option before a mixed-batch engine command', async () => {
     const order = { symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, price: 100 };
-    const v1 = fixture({ key: 'legacy', secret: 'secret', applicationId: undefined, extra: { asterdexApiVersion: 'v1' } });
+    const v1 = fixture({
+      key: 'legacy',
+      secret: 'secret',
+      applicationId: undefined,
+      extra: { asterdexApiVersion: 'v1' },
+    });
     await v1.exchange.start();
-    await expect(v1.exchange.placeOrders([order, { ...order, stpMode: 'EXPIRE_BOTH' }])).rejects.toThrow(/requires API v3/);
+    await expect(v1.exchange.placeOrders([order, { ...order, stpMode: 'EXPIRE_BOTH' }])).rejects.toThrow(
+      /requires API v3/,
+    );
     expect(v1.commands).toEqual([]);
 
     const v3 = fixture();
     await v3.exchange.start();
-    await expect(v3.exchange.placeOrders([order, { ...order, stpMode: 'NONE' as 'EXPIRE_BOTH' }])).rejects.toThrow(/Invalid AsterDEX/);
+    await expect(v3.exchange.placeOrders([order, { ...order, stpMode: 'NONE' as 'EXPIRE_BOTH' }])).rejects.toThrow(
+      /Invalid AsterDEX/,
+    );
     expect(v3.commands).toEqual([]);
   });
 
@@ -264,19 +291,23 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
 
   it('serves engine-owned public metadata and the account alias query', async () => {
     const { exchange, store, commands, setNativeHedged, engine } = fixture();
-    store.update({
-      markets: [
-        {
-          id: 'BTCUSDT',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { price: 0.01, amount: 0.001 },
-          limits: { amount: { min: 0.001, max: 2 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'BTCUSDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { price: 0.01, amount: 0.001 },
+            limits: { amount: { min: 0.001, max: 2 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     setNativeHedged(true);
     await exchange.start();
     expect(await exchange.fetchMarkets()).toBe(store.markets);
@@ -287,29 +318,56 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
     expect(commands.at(-1)).toMatchObject({ op: 'fetchAccount' });
   });
 
-  it('preserves cancellation symbols before Store sees a placement and for external orders', async () => {
+  it('preserves cancellation symbols before FrameStore sees a placement and for external orders', async () => {
     const { exchange, store, commands } = fixture();
     await exchange.start();
-    const [id] = await exchange.placeOrder({ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 100 });
+    const [id] = await exchange.placeOrder({
+      symbol: 'BTCUSDT',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 1,
+      price: 100,
+    });
     expect(id).toBe('newly-acked');
     expect(store.orders).toEqual([]);
     await exchange.cancelOrders([{ id, symbol: 'BTCUSDT', type: OrderType.Limit } as Order]);
     await exchange.cancelOrders([{ id: 'external', symbol: 'ETHUSDT', type: OrderType.StopLoss } as Order]);
     expect(commands.slice(-2)).toMatchObject([
-      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'newly-acked', symbol: 'BTCUSDT', type: OrderType.Limit }] },
-      { op: 'cancelOrdersWithSymbols', orders: [{ id: 'external', symbol: 'ETHUSDT', type: OrderType.StopLoss }] },
+      {
+        op: 'cancelOrdersWithSymbols',
+        orders: [{ id: 'newly-acked', symbol: 'BTCUSDT', type: OrderType.Limit }],
+      },
+      {
+        op: 'cancelOrdersWithSymbols',
+        orders: [{ id: 'external', symbol: 'ETHUSDT', type: OrderType.StopLoss }],
+      },
     ]);
     expect(store.orders).toEqual([]);
   });
 
   it('loads account leverage 10 rather than the market maximum 125 into fetched leverage', async () => {
     const { exchange, store, commands } = fixture();
-    store.update({ markets: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', active: true,
-      precision: { price: 0.01, amount: 0.001 }, limits: { amount: { min: 0.001, max: 2 }, leverage: { min: 1, max: 125 } } }] });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'BTCUSDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { price: 0.01, amount: 0.001 },
+            limits: { amount: { min: 0.001, max: 2 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     await exchange.start();
     expect(await exchange.fetchSymbolMaxLeverage('BTCUSDT')).toBe(125);
     expect(await exchange.fetchLeverageForSymbol('BTCUSDT')).toEqual({ buyLeverage: 10, sellLeverage: 10 });
-    expect(store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 10, sellLeverage: 10 });
+    expect(store.fetchedLeverage.BTCUSDT).toEqual({ buyLeverage: 10, sellLeverage: 10, positionMode: 'oneway' });
     expect(commands.at(-1)).toMatchObject({ op: 'fetchLeverage', symbol: 'BTCUSDT' });
   });
 

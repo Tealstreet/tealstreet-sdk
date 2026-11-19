@@ -1,4 +1,7 @@
 //! Original GRVT public candle controls over real command and dispatch APIs.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{
@@ -383,7 +386,7 @@ fn native_wire_rows_and_empty_results_on_both_hosts() {
             } else {
                 assert_eq!(rows, serde_json::json!([]));
             }
-            assert_eq!(e.snapshot_frame(NOW), before);
+            assert_unchanged_account(&before, e.snapshot_frame(NOW), [1, 0, 0, 0, 0]);
             assert!(reply(&mut e, NOW + 2., &r, 200, ROWS).is_empty());
         }
     }

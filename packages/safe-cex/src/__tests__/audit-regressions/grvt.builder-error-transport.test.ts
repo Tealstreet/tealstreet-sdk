@@ -1,20 +1,18 @@
-import { vi } from 'vitest';
+import type { Exchange } from '../../exchanges/base';
+import type { StoreWorkerPayload } from '../../webworker/StoreWorkerPayload';
+
+import { afterEach, expect, it, vi } from 'vitest';
+
+import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
+import { deserializeCommandError, serializeCommandError } from '../../commandOutcome';
+import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { FrameStore } from '../../store/frameStore';
+import { CallMethodHandler } from '../../webworker/handlers/CallMethodHandler';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
   return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
 });
-
-import type { Exchange } from '../../exchanges/base';
-import type { StoreWorkerPayload } from '../../webworker/StoreWorkerPayload';
-
-import { afterEach, expect, it } from 'vitest';
-
-import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
-import { deserializeCommandError, serializeCommandError } from '../../commandOutcome';
-import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
-import { CallMethodHandler } from '../../webworker/handlers/CallMethodHandler';
 
 const exchanges: RustEngineExchange[] = [];
 const handlers: CallMethodHandler[] = [];
@@ -28,56 +26,56 @@ for (const [name, clone] of [
   ['structured clone', (value: StoreWorkerPayload) => structuredClone(value)],
   ['hosted JSON', (value: StoreWorkerPayload) => JSON.parse(JSON.stringify(value)) as StoreWorkerPayload],
 ] as const) {
-  it.each([
-    approval,
-    { code: 'GRVT_BUILDER_UNAUTHORIZED', reason: 'unauthorized', requiredRaw: 300 },
-  ])(`preserves $reason through worker sender and matching ${name} receiver`, async (approval) => {
-    const main = new RustEngineExchange('grvt', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
-    exchanges.push(main);
-    // Deliberately plain Error: worker protocol must not depend on a JS prototype.
-    const original = Object.assign(new Error('Re-authorize builder'), approval, {
-      kind: 'invalidInput',
-      outcome: 'notSent',
-      errorReported: true,
-      cause: { credentials: 'must not be copied' },
-    });
-    const worker = {
-      name: 'grvt',
-      placeOrders: async () => {
-        throw original;
-      },
-    } as unknown as Exchange;
-    const replies: StoreWorkerPayload[] = [];
-    const handler = new CallMethodHandler(
-      'account',
-      'grvt',
-      worker,
-      {
-        postMessage: (message: StoreWorkerPayload) => {
-          const copied = clone(message);
-          replies.push(copied);
-          main.emitter.emit('callMethod:done', { ...copied.data, requestId: 'unrelated' });
-          main.emitter.emit('callMethod:done', copied.data);
+  it.each([approval, { code: 'GRVT_BUILDER_UNAUTHORIZED', reason: 'unauthorized', requiredRaw: 300 }])(
+    `preserves $reason through worker sender and matching ${name} receiver`,
+    async (approval) => {
+      const main = new RustEngineExchange('grvt', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
+      exchanges.push(main);
+      // Deliberately plain Error: worker protocol must not depend on a JS prototype.
+      const original = Object.assign(new Error('Re-authorize builder'), approval, {
+        kind: 'invalidInput',
+        outcome: 'notSent',
+        errorReported: true,
+        cause: { credentials: 'must not be copied' },
+      });
+      const worker = {
+        name: 'grvt',
+        placeOrders: async () => {
+          throw original;
         },
-      } as unknown as Worker,
-      {} as never,
-      {} as never,
-    );
-    handlers.push(handler);
-    main.emitter.on(
-      'callMethod',
-      ({ requestId, method, args }: { requestId: string; method: never; args: unknown[] }) => {
-        void handler.handleCallMethod(requestId, method, args);
-      },
-    );
-    const error = await main.callMethodInWorker('placeOrders', []).catch((error: unknown) => error);
-    expect(error).toBeInstanceOf(Error);
-    expect(error).toMatchObject({ ...approval, kind: 'invalidInput', outcome: 'notSent', errorReported: true });
-    expect(error).not.toHaveProperty('cause');
-    if (approval.reason === 'unauthorized') expect(error).not.toHaveProperty('authorizedRaw');
-    expect(replies).toHaveLength(1);
-    expect(replies[0].data).toMatchObject({ requestId: expect.any(String), success: false, result: approval });
-  });
+      } as unknown as Exchange;
+      const replies: StoreWorkerPayload[] = [];
+      const handler = new CallMethodHandler(
+        'account',
+        'grvt',
+        worker,
+        {
+          postMessage: (message: StoreWorkerPayload) => {
+            const copied = clone(message);
+            replies.push(copied);
+            main.emitter.emit('callMethod:done', { ...copied.data, requestId: 'unrelated' });
+            main.emitter.emit('callMethod:done', copied.data);
+          },
+        } as unknown as Worker,
+        {} as never,
+        {} as never,
+      );
+      handlers.push(handler);
+      main.emitter.on(
+        'callMethod',
+        ({ requestId, method, args }: { requestId: string; method: never; args: unknown[] }) => {
+          void handler.handleCallMethod(requestId, method, args);
+        },
+      );
+      const error = await main.callMethodInWorker('placeOrders', []).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).toMatchObject({ ...approval, kind: 'invalidInput', outcome: 'notSent', errorReported: true });
+      expect(error).not.toHaveProperty('cause');
+      if (approval.reason === 'unauthorized') expect(error).not.toHaveProperty('authorizedRaw');
+      expect(replies).toHaveLength(1);
+      expect(replies[0].data).toMatchObject({ requestId: expect.any(String), success: false, result: approval });
+    },
+  );
 }
 
 it('retains valid host builder metadata without reconstructing the old venue class', () => {

@@ -1,6 +1,7 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../../store/store.interface';
+import type { ClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import type { StoreData } from '../../../generated/StoreData';
 
 import rateLimit from 'axios-rate-limit';
 import dayjs from 'dayjs';
@@ -11,6 +12,8 @@ import omit from 'lodash/omit';
 import times from 'lodash/times';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
+import { BaseExchange } from '../../../exchanges/base';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -45,8 +48,8 @@ import { omitUndefined } from '../../../utils/omitUndefined';
 import { add, adjust, subtract } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import type { ClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createAPI, FETCH_POSITIONS_RESPONSE } from './bingx.api';
 import {
   BINGX_BALANCE,
@@ -126,14 +129,15 @@ export class BingxExchange extends BaseExchange {
     if (!Number.isFinite(last) || last <= 0) {
       return { bid: 0, ask: 0 };
     }
-    const priceStep = Number.isFinite(market.precision?.price) && market.precision.price > 0 ? market.precision.price : 0;
+    const priceStep =
+      Number.isFinite(market.precision?.price) && market.precision.price > 0 ? market.precision.price : 0;
     return {
       bid: Math.max(subtract(last, priceStep), 0),
       ask: add(last, priceStep),
     };
   };
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, { rateLimit: (xhr) => rateLimit(xhr, { maxRPS: 3 }) });
@@ -196,10 +200,14 @@ export class BingxExchange extends BaseExchange {
       const [markets, rawTickers] = await Promise.all([
         this.fetchMarkets().then((markets) => {
           if (this.isDisposed) return [];
-          this.store.update({
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          });
+          applyReferenceFixture(
+            this.store,
+            {
+              markets,
+              loaded: { markets: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
 
           // start public websocket streams as soon as markets loaded.
           this.publicWebsocket.connectAndSubscribe();
@@ -212,18 +220,26 @@ export class BingxExchange extends BaseExchange {
       if (this.isDisposed) return;
 
       const tickers = this.formatTickers(rawTickers);
-      this.store.update({
-        tickers,
-        loaded: { ...this.store.loaded, tickers: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} Bingx markets`);
     }
 
     if (publicDataOnly) {
-      this.store.update({
-        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
       return;
     }
 
@@ -235,26 +251,50 @@ export class BingxExchange extends BaseExchange {
     await Promise.all([
       this.fetchOrders().then((orders) => {
         if (this.isDisposed) return [];
-        this.store.update({
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            orders,
+            loaded: { orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
         return orders;
       }),
       this.fetchPositions().then((positions) => {
         if (this.isDisposed) return [];
-        this.store.addOrUpdatePositionsFull(positions);
-        this.store.update({
-          loaded: { ...this.store.loaded, positions: true },
-        });
+        (() => {
+          const incoming: StoreData['positions'] = positions;
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
+        applyReferenceFixture(
+          this.store,
+          {
+            loaded: { positions: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
         return positions;
       }),
       this.fetchBalance().then((balance) => {
         if (this.isDisposed) return;
-        this.store.update({
-          balance,
-          loaded: { ...this.store.loaded, balance: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: { balance: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
         return balance;
       }),
     ]);
@@ -273,30 +313,44 @@ export class BingxExchange extends BaseExchange {
         if ((count + 2) % 4 === 0) {
           orders = await this.fetchOrders();
           if (this.isDisposed) return;
-          this.store.update({
-            orders,
-            loaded: {
-              ...this.store.loaded,
-              orders: true,
+          applyReferenceFixture(
+            this.store,
+            {
+              orders,
+              loaded: { orders: true },
             },
-          });
+            this.store.markets.map((row) => row.symbol),
+          );
         }
         let balance: Balance | undefined;
         if (count % 4 === 0) {
           balance = await this.fetchBalance();
           if (this.isDisposed) return;
-          this.store.update({
-            balance,
-            loaded: {
-              ...this.store.loaded,
-              balance: true,
+          applyReferenceFixture(
+            this.store,
+            {
+              balance,
+              loaded: { balance: true },
             },
-          });
+            this.store.markets.map((row) => row.symbol),
+          );
         }
 
         const positions = await this.fetchPositions();
         if (this.isDisposed) return;
-        this.store.addOrUpdatePositionsFull(positions);
+        (() => {
+          const incoming: StoreData['positions'] = positions;
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       } catch (err: any) {
         this.emitAndLogError(err?.message);
       }
@@ -424,7 +478,11 @@ export class BingxExchange extends BaseExchange {
     const { dailys, prices } = await this.fetchTickersRaw();
     if (this.isDisposed) return [];
     const tickers = this.formatTickers({ dailys, prices });
-    this.store.update({ tickers });
+    applyReferenceFixture(
+      this.store,
+      { tickers },
+      this.store.markets.map((row) => row.symbol),
+    );
     return tickers;
   };
 
@@ -442,7 +500,7 @@ export class BingxExchange extends BaseExchange {
         notional: 0,
         unrealizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
       };
     });
     return [...openPositionsForSymbols, ...fakePositions];
@@ -494,7 +552,7 @@ export class BingxExchange extends BaseExchange {
           leverage,
           unrealizedPnl: upnl,
           contracts: Math.abs(contracts),
-          liquidationPrice: parseFloat(v(p, 'liquidationPrice')),
+          liquidationPrice: nativeLiquidationPrice(parseFloat(v(p, 'liquidationPrice'))),
           marginSize,
           marginType,
           positionMode,
@@ -519,11 +577,7 @@ export class BingxExchange extends BaseExchange {
       return this.store.orders;
     }
 
-    const rawOrders = Array.isArray(data.data?.orders)
-      ? data.data.orders
-      : Array.isArray(data.data)
-        ? data.data
-        : [];
+    const rawOrders = Array.isArray(data.data?.orders) ? data.data.orders : Array.isArray(data.data) ? data.data : [];
 
     const orders: Order[] = rawOrders.flatMap((o) => {
       const order = this.mapOrder(o);
@@ -557,7 +611,7 @@ export class BingxExchange extends BaseExchange {
     const orderSide = ORDER_SIDE[String(rawSide).toUpperCase()];
     const symbol = typeof rawSymbol === 'string' ? rawSymbol.replace(/-/g, '') : undefined;
     const status =
-      rawStatus === undefined ? OrderStatus.Open : ORDER_STATUS[rawStatus as keyof typeof ORDER_STATUS] ?? undefined;
+      rawStatus === undefined ? OrderStatus.Open : (ORDER_STATUS[rawStatus as keyof typeof ORDER_STATUS] ?? undefined);
 
     if (id === undefined || !symbol || !orderType || !orderSide || !status) {
       return undefined;
@@ -580,8 +634,8 @@ export class BingxExchange extends BaseExchange {
     const timeInForce =
       postOnlyValue === true || postOnlyValue === 'true'
         ? OrderTimeInForce.PostOnly
-        : TIME_IN_FORCE[rawTimeInForce] ??
-          (rawTimeInForce === undefined ? existingOrder?.timeInForce : OrderTimeInForce.GoodTillCancel);
+        : (TIME_IN_FORCE[rawTimeInForce] ??
+          (rawTimeInForce === undefined ? existingOrder?.timeInForce : OrderTimeInForce.GoodTillCancel));
 
     return {
       id: String(id),
@@ -690,12 +744,16 @@ export class BingxExchange extends BaseExchange {
         sellLeverage: data.data.shortLeverage,
       };
 
-      this.store.update({
-        fetchedLeverage: {
-          ...this.store.fetchedLeverage,
-          [symbol]: leverageObj,
+      applyReferenceFixture(
+        this.store,
+        {
+          fetchedLeverage: {
+            ...this.store.fetchedLeverage,
+            [symbol]: leverageObj,
+          },
         },
-      });
+        this.store.markets.map((row) => row.symbol),
+      );
 
       return leverageObj;
     } catch (err: any) {
@@ -844,7 +902,11 @@ export class BingxExchange extends BaseExchange {
       }
       await this.getOrFetchPositionMode(true);
       const positions = await this.fetchPositions();
-      this.store.update({ positions });
+      applyReferenceFixture(
+        this.store,
+        { positions },
+        this.store.markets.map((row) => row.symbol),
+      );
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;
@@ -871,7 +933,22 @@ export class BingxExchange extends BaseExchange {
       }
       await this.getOrFetchPositionMode(true);
       const positions = await this.fetchPositions([symbol]);
-      this.store.addOrUpdatePositions(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;
@@ -909,7 +986,22 @@ export class BingxExchange extends BaseExchange {
       }
 
       const positions = await this.fetchPositions([symbol]);
-      this.store.addOrUpdatePositions(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     } catch (err: any) {
       let errorMessage: string;
       if (err?.response?.data?.msg) {
@@ -963,10 +1055,19 @@ export class BingxExchange extends BaseExchange {
         }
 
         if (canceledOrderIds.length) {
-          this.store.updateOrdersStatus(
-            canceledOrderIds.map((id) => ({ id })),
-            OrderStatus.Canceled,
-          );
+          (() => {
+            const targets: Array<Pick<StoreData['orders'][number], 'id'>> = canceledOrderIds.map((id) => ({ id }));
+            const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+            return applyReferenceFixture(
+              this.store,
+              {
+                orders: this.store.orders.map((row) =>
+                  targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+                ),
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
       });
     } catch (err: any) {
@@ -994,10 +1095,21 @@ export class BingxExchange extends BaseExchange {
         params: { symbol: this.toBingxSymbol(symbol) },
       });
 
-      this.store.updateOrdersStatus(
-        this.store.orders.filter((o) => o.symbol === symbol),
-        OrderStatus.Canceled,
-      );
+      (() => {
+        const targets: Array<Pick<StoreData['orders'][number], 'id'>> = this.store.orders.filter(
+          (o) => o.symbol === symbol,
+        );
+        const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       throw err;
@@ -1028,10 +1140,7 @@ export class BingxExchange extends BaseExchange {
     if (!('amount' in update)) {
       return rejectPreflight('BingX native amendment requires an amount update');
     }
-    if (
-      order.timeInForce !== OrderTimeInForce.GoodTillCancel &&
-      order.timeInForce !== OrderTimeInForce.PostOnly
-    ) {
+    if (order.timeInForce !== OrderTimeInForce.GoodTillCancel && order.timeInForce !== OrderTimeInForce.PostOnly) {
       return rejectPreflight('BingX native amendment requires a reconciled GTC or PostOnly time in force');
     }
     if (order.close) {
@@ -1085,11 +1194,7 @@ export class BingxExchange extends BaseExchange {
     const rawTimeInForceValue = String(info?.timeInForce ?? info?.f ?? '');
     const parsedRawTimeInForce = TIME_IN_FORCE[rawTimeInForceValue];
     const rawTimeInForce = rawPostOnly === true ? OrderTimeInForce.PostOnly : parsedRawTimeInForce;
-    if (
-      parsedRawTimeInForce === undefined ||
-      rawTimeInForce === undefined ||
-      rawTimeInForce !== order.timeInForce
-    ) {
+    if (parsedRawTimeInForce === undefined || rawTimeInForce === undefined || rawTimeInForce !== order.timeInForce) {
       return rejectPreflight(`BingX cannot safely amend ${order.id}: time in force is not reconciled`);
     }
 
@@ -1331,7 +1436,9 @@ export class BingxExchange extends BaseExchange {
     const adjustedOrderAmount = adjust(orderToReplace.amount, market.precision.amount);
     const adjustedRemaining = adjust(orderToReplace.remaining, market.precision.amount);
     const resolvedRawQuantity = Number.isFinite(rawQuantity) ? rawQuantity : orderToReplace.amount;
-    const resolvedRawExecutedQuantity = Number.isFinite(rawExecutedQuantity) ? rawExecutedQuantity : orderToReplace.filled;
+    const resolvedRawExecutedQuantity = Number.isFinite(rawExecutedQuantity)
+      ? rawExecutedQuantity
+      : orderToReplace.filled;
     const adjustedRawQuantity = adjust(resolvedRawQuantity, market.precision.amount);
     if (
       (rawStatus && !['NEW', 'OPEN', 'PENDING', 'WORKING'].includes(rawStatus)) ||
@@ -1373,12 +1480,7 @@ export class BingxExchange extends BaseExchange {
       return rejectPreflight(`BingX cannot safely replace ${order.id}: client order id is not reconciled`);
     }
 
-    const cancelRestrictions =
-      rawStatus === 'PENDING'
-        ? 'ONLY_PENDING'
-        : rawStatus === 'NEW'
-          ? 'ONLY_NEW'
-          : undefined;
+    const cancelRestrictions = rawStatus === 'PENDING' ? 'ONLY_PENDING' : rawStatus === 'NEW' ? 'ONLY_NEW' : undefined;
     const payload = omitUndefined({
       symbol: market.id,
       cancelClientOrderId: rawClientOrderId,
@@ -1401,7 +1503,8 @@ export class BingxExchange extends BaseExchange {
       }
 
       const result = data?.data || {};
-      const isSuccessfulResult = (value: unknown) => value === true || ['SUCCESS', 'TRUE'].includes(String(value).toUpperCase());
+      const isSuccessfulResult = (value: unknown) =>
+        value === true || ['SUCCESS', 'TRUE'].includes(String(value).toUpperCase());
       const cancelResult = result.cancelResult;
       const replaceResult = result.newOrderResult ?? result.replaceResult;
       if (!isSuccessfulResult(cancelResult) || !isSuccessfulResult(replaceResult)) {
@@ -1411,7 +1514,8 @@ export class BingxExchange extends BaseExchange {
       }
 
       const newOrderResponse = result.newOrderResponse || {};
-      const newOrderId = result.newOrderId ?? newOrderResponse.orderId ?? newOrderResponse.orderID ?? result.orderId ?? result.orderID;
+      const newOrderId =
+        result.newOrderId ?? newOrderResponse.orderId ?? newOrderResponse.orderID ?? result.orderId ?? result.orderID;
       if (newOrderId === undefined) {
         throw new Error(`BingX cancel-replace response did not include a replacement order id`);
       }
@@ -1426,9 +1530,36 @@ export class BingxExchange extends BaseExchange {
         origQty: String(adjustedOrderAmount),
         executedQty: '0',
       });
-      this.store.updateOrderStatus({ id: orderToReplace.id }, OrderStatus.Canceled);
+      (() => {
+        const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderToReplace.id }];
+        const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+        return applyReferenceFixture(
+          this.store,
+          {
+            orders: this.store.orders.map((row) =>
+              targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+            ),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
       if (replacementOrder) {
-        this.store.addOrUpdateOrder(replacementOrder);
+        (() => {
+          const incoming: StoreData['orders'] = [replacementOrder];
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
 
       return [String(newOrderId)];
@@ -1863,7 +1994,22 @@ export class BingxExchange extends BaseExchange {
         } else {
           const acceptedOrder = this.mapOrder(data?.data?.order || {});
           if (acceptedOrder?.status === OrderStatus.Open && acceptedOrder.type !== OrderType.Market) {
-            this.store.addOrUpdateOrder(acceptedOrder);
+            (() => {
+              const incoming: StoreData['orders'] = [acceptedOrder];
+              return applyReferenceFixture(
+                this.store,
+                {
+                  orders: [
+                    ...this.store.orders.map((row) => {
+                      const change = incoming.find((item) => item.id === row.id);
+                      return change ? { ...row, ...change } : row;
+                    }),
+                    ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+                  ],
+                },
+                this.store.markets.map((row) => row.symbol),
+              );
+            })();
           }
           orderIds.push(data?.data?.order?.orderID || data?.data?.order?.orderId);
         }

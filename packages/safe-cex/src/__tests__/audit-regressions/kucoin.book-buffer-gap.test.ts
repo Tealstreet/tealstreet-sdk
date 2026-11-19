@@ -2,8 +2,8 @@ import type { Axios } from 'axios';
 
 import { expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 // KuCoin's documented procedure replays every cached delta after the snapshot.
 // https://www.kucoin.com/docs-new/3470082w0
@@ -11,7 +11,7 @@ it('retains the entire buffered suffix when a stale snapshot leaves a gap', asyn
   const exchange = new KucoinExchange(
     'kucoin',
     { key: '', secret: '', publicDataOnly: true, tealstreetTunnel: false },
-    new DefaultStore(),
+    new FrameStore(),
   );
   const websocket = exchange.publicWebsocket;
   vi.spyOn(websocket, 'isConnected', 'get').mockReturnValue(true);

@@ -806,14 +806,15 @@ impl Blofin {
         if opts.kind == OrderType::TrailingStopLoss {
             return Err("BloFin trailing stops are unsupported".into());
         }
+        // A reduce-only trigger is the same order-algo row with `reduceOnly`;
+        // close-only has no trigger shape.
         if conditional
-            && (opts.reduce_only.unwrap_or(false)
-                || opts.close.unwrap_or(false)
+            && (opts.close.unwrap_or(false)
                 || opts
                     .time_in_force
                     .is_some_and(|v| v != TimeInForce::GoodTillCancel))
         {
-            return Err("Invalid BloFin opening trigger shape".into());
+            return Err("Invalid BloFin trigger shape".into());
         }
         if !opts.amount.is_finite() || opts.amount < 0.0 || (!protective && opts.amount == 0.0) {
             return Err("BloFin amount must be positive".into());
@@ -935,7 +936,8 @@ impl Blofin {
             } else {
                 None
             },
-            reduce_only: if protective {
+            // order-algo and order-tpsl document `reduceOnly` as a string.
+            reduce_only: if protective || (conditional && reduce) {
                 Some(Reduce::Text("true"))
             } else if reduce {
                 Some(Reduce::Boolean(true))

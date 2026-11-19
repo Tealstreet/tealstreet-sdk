@@ -3,7 +3,6 @@
   "sourceRoots": {
     "bitget": "venues/bitget/src/",
     "bitrue": "venues/bitrue/src/",
-    "bitunix": "venues/bitunix/src/",
     "coinbase": "venues/coinbase/src/",
     "cryptocom": "venues/cryptocom/src/",
     "grvt": "venues/grvt/src/",

@@ -254,7 +254,6 @@ pub struct AccountState {
     pub reduces: HashMap<String, bool>,
     pub filled: HashMap<String, (f64, f64)>,
     pub pending_executions: HashMap<String, f64>,
-    pub login_retry: Option<(TimerId, safe_cex_engine::SocketId)>,
     pub login_answered: bool,
     /// The private socket's login succeeded since it last opened.
     pub private_live: bool,
@@ -361,7 +360,7 @@ impl BitunixFutures {
             })
             .collect();
         cx.store.set_settings(settings);
-        self.connect(cx, Feed::Private);
+        self.connect_feed(cx, Feed::Private);
         self.read_axis(cx, Axis::Balance);
         self.read_axis(cx, Axis::Positions);
         self.read_axis(cx, Axis::Orders);
@@ -833,6 +832,22 @@ impl BitunixFutures {
             _ => cx.retried_failure("bitunix.account:2", error),
         }
     }
+    /// Login evidence the engine rejected or could not read (`sockets::control`).
+    pub(crate) fn login_failed(&self, cx: &mut Cx<'_, Pending>, rejected: bool) {
+        if rejected {
+            cx.notice(
+                Level::Error,
+                code::AUTH_REJECTED,
+                "Bitunix private ws login failed, double check your key and secret",
+            );
+        } else {
+            cx.notice(
+                Level::Warn,
+                code::STREAM_MALFORMED,
+                "Malformed Bitunix private login response",
+            );
+        }
+    }
     pub(crate) fn login(&self, cx: &mut Cx<'_, Pending>, socket: safe_cex_engine::SocketId) {
         if let Ok((_, identity)) = self.slots.select(CredentialRole::SessionAuth) {
             cx.send_signed(
@@ -958,19 +973,6 @@ impl BitunixFutures {
             }
             return true;
         }
-        if let Some((owned_timer, socket)) = self.account.login_retry
-            && owned_timer == timer
-        {
-            self.account.login_retry = None;
-            if self
-                .sockets
-                .iter()
-                .any(|s| s.active && s.id == socket && matches!(s.feed, Feed::Private) && s.opened)
-            {
-                self.login(cx, socket);
-            }
-            return true;
-        }
         if self.account.tick == Some(timer) {
             self.restore_retired(cx);
             self.account
@@ -990,7 +992,7 @@ impl BitunixFutures {
                 && self
                     .sockets
                     .iter()
-                    .any(|s| s.active && s.opened && matches!(s.feed, Feed::Private));
+                    .any(|s| matches!(s.feed, Feed::Private) && cx.socket_epoch(s.id).is_some());
             let due = !live
                 || self.account.balance_due
                 || self.account.count.is_multiple_of(LIVE_BALANCE_TICKS);
@@ -1739,66 +1741,13 @@ impl BitunixFutures {
         }
         (orders, natives)
     }
-    pub(crate) fn private_message(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        socket: safe_cex_engine::SocketId,
-        m: &Message<'_>,
-    ) {
+    /// Login results and pongs are engine control evidence (`sockets::control`).
+    pub(crate) fn private_message(&mut self, cx: &mut Cx<'_, Pending>, m: &Message<'_>) {
         let operation = if m.op.is_empty() {
             m.ch.as_ref()
         } else {
             m.op.as_ref()
         };
-        if operation == "login" {
-            self.account.login_answered = true;
-            #[derive(serde::Deserialize)]
-            struct Login {
-                result: bool,
-            }
-            let result = m
-                .data
-                .and_then(|raw| serde_json::from_str::<Login>(raw.get()).ok())
-                .map(|login| login.result);
-            if result == Some(true) {
-                self.account.private_live = true;
-                if let Some(socket) = self.sockets.iter_mut().find(|s| s.id == socket) {
-                    socket.supervisor.authenticated(cx);
-                }
-                if let Some((timer, owner)) = self.account.login_retry
-                    && owner == socket
-                {
-                    self.account.login_retry = None;
-                    cx.clear_timer(timer);
-                }
-                return;
-            }
-            if result == Some(false) {
-                cx.notice(
-                    Level::Error,
-                    code::AUTH_REJECTED,
-                    "Bitunix private ws login failed, double check your key and secret",
-                );
-            } else {
-                cx.notice(
-                    Level::Warn,
-                    code::STREAM_MALFORMED,
-                    "Malformed Bitunix private login response",
-                );
-            }
-            if self
-                .account
-                .login_retry
-                .is_some_and(|(_, owner)| owner == socket)
-            {
-                return;
-            }
-            if let Some((timer, _)) = self.account.login_retry.take() {
-                cx.clear_timer(timer);
-            }
-            self.account.login_retry = Some((cx.set_timer(2000.0), socket));
-            return;
-        }
         let Some(raw) = m.data else {
             if matches!(operation, "order" | "tpsl") {
                 self.observe_order(cx, m.ch == "tpsl", None, false);

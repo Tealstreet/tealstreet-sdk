@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { BackpackExchange } from '../reference/backpack/backpack.exchange';
 import { BackpackPublicWebSocket } from '../reference/backpack/backpack.ws-public';
-import { DefaultStore } from '../../store/store.base';
 
 const symbol = 'BTC_USDC_PERP';
 
@@ -54,7 +54,7 @@ const flushPromises = async () => {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 };
 
-const deferred = <T,>() => {
+const deferred = <T>() => {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((nextResolve) => {
     resolve = nextResolve;
@@ -70,11 +70,7 @@ describe('Backpack depth audit regression', () => {
 
   it('keeps startup market coverage on lightweight streams without opening every depth feed', async () => {
     vi.useFakeTimers();
-    const exchange = new BackpackExchange(
-      'backpack',
-      { key: '', secret: '', testnet: false } as any,
-      new DefaultStore(),
-    );
+    const exchange = new BackpackExchange('backpack', { key: '', secret: '', testnet: false } as any, new FrameStore());
     const publicWebsocket = {
       subscribeToTicker: vi.spyOn(exchange.publicWebsocket, 'subscribeToTicker').mockImplementation(() => {}),
       subscribeToTrades: vi.spyOn(exchange.publicWebsocket, 'subscribeToTrades').mockImplementation(() => {}),
@@ -151,7 +147,10 @@ describe('Backpack depth audit regression', () => {
     websocket.onMessage({
       data: JSON.stringify({
         ...depth(99, 102, '101'),
-        b: [['100', '2'], ['101', '1']],
+        b: [
+          ['100', '2'],
+          ['101', '1'],
+        ],
         a: [['105', '0']],
       }),
     } as MessageEvent);
@@ -163,7 +162,13 @@ describe('Backpack depth audit regression', () => {
     } as MessageEvent);
 
     expect(callback).toHaveBeenCalledTimes(3);
-    expect(books[0]).toMatchObject({ bids: [{ price: 101, amount: 1 }, { price: 100, amount: 2 }], asks: [] });
+    expect(books[0]).toMatchObject({
+      bids: [
+        { price: 101, amount: 1 },
+        { price: 100, amount: 2 },
+      ],
+      asks: [],
+    });
     expect(books[2]).toMatchObject({ bids: [{ price: 100, amount: 2 }], asks: [] });
     expect((websocket as any).orderBookState[symbol].lastUpdateId).toBe(104);
   });

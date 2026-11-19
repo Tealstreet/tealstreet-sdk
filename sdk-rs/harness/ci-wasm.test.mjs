@@ -320,3 +320,24 @@ test('paired source cannot be selected outside the dedicated fixed-budget Bitget
     assert.match(result.stderr, /Paired source|Paired module selection/);
   }
 });
+
+for (const input of [
+  'sdk-rs/hosts/store-frames/src/lib.rs',
+  'sdk-rs/algos/chaser/src/lib.rs',
+  'packages/safe-cex/src/exchange-display-policy.json',
+]) {
+  test(`native display input is fingerprinted and refuses dirty reuse: ${input}`, t => {
+    const f = fixture(t);
+    const path = join(f.root, input);
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, 'original');
+    f.git('add', input);
+    f.git('commit', '--quiet', '-m', 'native input');
+    const before = buildInputFingerprint(f.root);
+    writeFileSync(path, 'changed');
+    assert.throws(() => buildInputFingerprint(f.root), /dirty or untracked/);
+    f.git('add', input);
+    f.git('commit', '--quiet', '-m', 'changed native input');
+    assert.notEqual(buildInputFingerprint(f.root), before);
+  });
+}

@@ -2,38 +2,44 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { ENDPOINTS } from '../../exchanges/binance/binance.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
 
 const createSubject = () => {
-  const store = new DefaultStore();
-  store.update({
-    orders: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'regular-order',
-        symbol: 'BTCUSDT',
-        type: OrderType.Limit,
-        side: OrderSide.Buy,
-        status: OrderStatus.Open,
+        orders: [
+          {
+            id: 'regular-order',
+            symbol: 'BTCUSDT',
+            type: OrderType.Limit,
+            side: OrderSide.Buy,
+            status: OrderStatus.Open,
+          },
+          {
+            id: 'algo-order',
+            symbol: 'BTCUSDT',
+            type: OrderType.StopLoss,
+            side: OrderSide.Sell,
+            status: OrderStatus.Open,
+          },
+          {
+            id: 'other-symbol-order',
+            symbol: 'ETHUSDT',
+            type: OrderType.TakeProfit,
+            side: OrderSide.Sell,
+            status: OrderStatus.Open,
+          },
+        ] as any,
       },
-      {
-        id: 'algo-order',
-        symbol: 'BTCUSDT',
-        type: OrderType.StopLoss,
-        side: OrderSide.Sell,
-        status: OrderStatus.Open,
-      },
-      {
-        id: 'other-symbol-order',
-        symbol: 'ETHUSDT',
-        type: OrderType.TakeProfit,
-        side: OrderSide.Sell,
-        status: OrderStatus.Open,
-      },
-    ] as any,
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BinanceExchange('binance', { key: 'key', secret: 'secret' }, store);
   return { exchange, store };
 };

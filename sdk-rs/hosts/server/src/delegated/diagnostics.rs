@@ -22,7 +22,7 @@ impl Handovers {
 
 impl RefusalContext {
     pub(crate) fn fields(&self, refusal: ProbeRefusal) -> Value {
-        json!({
+        let mut fields = json!({
             "event": "hosted.admission_refused",
             "attempt_id": self.attempt_id,
             "venue": self.venue,
@@ -31,7 +31,12 @@ impl RefusalContext {
             "transient": refusal.transient,
             "error_kind": refusal.error_kind.map(|kind| kind.as_str()),
             "venue_code": refusal.venue_code,
-        })
+        });
+        if let Some(conflict) = refusal.settings {
+            fields["kind"] = "settings-conflict".into();
+            fields["differing_fields"] = serde_json::json!(conflict.names());
+        }
+        fields
     }
 
     pub(crate) fn signing_mode_refused(&self, reason: crate::accounts::SigningModeRefusalReason) {
@@ -70,6 +75,7 @@ mod tests {
             transient: false,
             unavailable: false,
             transition: None,
+            settings: None,
             stage: RefusalStage::PrivateRead,
             error_kind: Some(safe_cex_engine::ErrorKind::AuthPermission),
             venue_code: Some(10010),

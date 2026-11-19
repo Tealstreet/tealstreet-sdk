@@ -5,7 +5,12 @@ import { describe, expect, it } from 'vitest';
 
 import golden from '../../../../sdk-rs/hosts/server/tests/data/delegated-actions-v1.json';
 import fullWrites from '../../../../sdk-rs/hosts/server/tests/data/delegated-full-writes-v1.json';
-import { delegatedActionFingerprint, isDelegatedAction, isDelegatedFullWriteAction } from '../delegatedActions';
+import {
+  delegatedActionFingerprint,
+  isDelegatedAction,
+  isDelegatedActionResult,
+  isDelegatedFullWriteAction,
+} from '../delegatedActions';
 import { DelegatedOutbox } from '../delegatedOutbox';
 import { OrderSide, OrderType } from '../types';
 
@@ -162,6 +167,30 @@ describe('DELEGATED versioned actions', () => {
       expect(box.entries()[0].state).toBe(protection ? 'applied' : 'sending');
       box.close();
     }
+  });
+
+  it('accepts an ID-less applied amend of a protective position setting', async () => {
+    const f = setup();
+    const box = await DelegatedOutbox.open(f.options);
+    const c = box.connect(f.connection);
+    const action: DelegatedAction = {
+      kind: 'amend',
+      order: { id: 'full-stop', symbol: 'BTCUSDT' },
+      update: { price: 48000 },
+    };
+    const id = await box.enqueueAction(action);
+    const reply = outcome(id, action);
+    await box.receive(c, {
+      ...reply,
+      d: { ...reply.d, result: { kind: 'amend', orderIds: [], protectionApplied: true } },
+    });
+    expect(box.entries()[0].state).toBe('applied');
+    box.close();
+    expect(isDelegatedActionResult({ kind: 'amend', orderIds: [] }, 'amend', action)).toBe(false);
+    expect(isDelegatedActionResult({ kind: 'amend', orderIds: ['x'], protectionApplied: true }, 'amend', action)).toBe(
+      false,
+    );
+    expect(isDelegatedActionResult({ kind: 'close', orderIds: [], protectionApplied: true }, 'close')).toBe(false);
   });
 
   it.each(fullWrites)('pins full-write canonical hash for $method', ({ action, fingerprint }) => {

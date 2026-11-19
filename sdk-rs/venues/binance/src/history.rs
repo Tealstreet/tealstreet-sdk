@@ -16,7 +16,7 @@ use safe_cex_engine::{CommandId, CommandWait, Cx, Method, Outcome, Query as Read
 use safe_cex_engine::{TimerId, VenueError, json, num};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const PAGE_LIMIT: u32 = 1000;
 /// `/fapi/v1/userTrades` and `/fapi/v1/income` reject wider windows.
@@ -88,12 +88,14 @@ enum InFlight {
         symbol: String,
         order_id: Option<String>,
         limit: u32,
-        windows: VecDeque<(Option<f64>, Option<f64>)>,
+        windows: WindowPages,
         history: ReadHistoryRows<Execution>,
     },
     Orders {
         history: ReadHistoryRows<HistoricalOrder>,
+        symbol: String,
         limit: u32,
+        windows: WindowPages,
     },
     Income {
         symbol: Option<String>,
@@ -106,6 +108,56 @@ enum InFlight {
         symbol: String,
         history: ReadHistoryRows<Trade>,
     },
+}
+
+/// Bounded pages split only when saturated. Inclusive child windows are
+/// disjoint at millisecond precision; parents remain useful partial evidence.
+struct WindowPages {
+    pending: VecDeque<(Option<f64>, Option<f64>, bool)>,
+    current: (Option<f64>, Option<f64>),
+    seen: HashSet<String>,
+}
+impl WindowPages {
+    fn new(pending: VecDeque<(Option<f64>, Option<f64>)>) -> Self {
+        Self {
+            pending: pending
+                .into_iter()
+                .map(|(from, to)| (from, to, false))
+                .collect(),
+            current: (None, None),
+            seen: HashSet::new(),
+        }
+    }
+    fn next(&mut self) -> Option<(Option<f64>, Option<f64>)> {
+        let (from, to, child) = self.pending.pop_front()?;
+        // Deduplicate subdivision overlap only, not separate native windows.
+        if !child {
+            self.seen.clear();
+        }
+        self.current = (from, to);
+        Some(self.current)
+    }
+    fn gap(&mut self, native: usize, limit: u32, what: &str) -> Option<String> {
+        let gap = saturated(native, limit, what)?;
+        if let (Some(from), Some(to)) = self.current {
+            let middle = (from + (to - from) / 2.0).floor();
+            if from.is_finite()
+                && to.is_finite()
+                && from.fract() == 0.0
+                && to.fract() == 0.0
+                && middle >= from
+                && middle < to
+                && middle + 1.0 > middle
+            {
+                self.pending
+                    .push_front((Some(middle + 1.0), Some(to), true));
+                self.pending.push_front((Some(from), Some(middle), true));
+                return None;
+            }
+        }
+        // An unbounded or indivisible full page still cannot prove absence.
+        Some(gap)
+    }
 }
 
 fn encode<T: Serialize>(rows: &[T]) -> Result<String, VenueError> {
@@ -505,10 +557,10 @@ impl BinanceFutures {
                     symbol,
                     order_id,
                     limit: limit.unwrap_or(PAGE_LIMIT).clamp(1, PAGE_LIMIT),
-                    windows,
+                    windows: WindowPages::new(windows),
                     history: owned(completion),
                 }) {
-                    self.next_fills_window(cx, command);
+                    self.next_history_window(cx, command);
                 }
             }
             Read::OrderHistory {
@@ -522,18 +574,18 @@ impl BinanceFutures {
                     return;
                 };
                 let limit = limit.unwrap_or(PAGE_LIMIT).min(PAGE_LIMIT);
-                if !self.begin(cx, command, signed, |completion| InFlight::Orders {
+                let windows = match (from_ms, to_ms) {
+                    (Some(from), Some(to)) => split(from, to),
+                    _ => VecDeque::from([(from_ms, to_ms)]),
+                };
+                if self.begin(cx, command, signed, |completion| InFlight::Orders {
                     history: owned(completion),
+                    symbol,
                     limit,
+                    windows: WindowPages::new(windows),
                 }) {
-                    return;
+                    self.next_history_window(cx, command);
                 }
-                let query = Query::new()
-                    .str("symbol", &symbol)
-                    .opt_num("startTime", from_ms)
-                    .opt_num("endTime", to_ms)
-                    .num("limit", f64::from(limit));
-                self.history_request(cx, command, self.paths.all_orders, query);
             }
             Read::Income {
                 symbol,
@@ -942,34 +994,50 @@ impl BinanceFutures {
             .retain(|_, owned| owned.root.context().owner() != owner);
     }
 
-    fn next_fills_window(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        let Some(Owned {
-            read:
-                InFlight::Fills {
-                    symbol,
-                    order_id,
-                    limit,
-                    windows,
-                    ..
-                },
-            ..
-        }) = self.history.reads.get_mut(&command)
-        else {
+    fn next_history_window(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+        let Some(owned) = self.history.reads.get_mut(&command) else {
             return;
         };
-        let Some((from, to)) = windows.pop_front() else {
-            if let Some(owned) = self.history.reads.remove(&command) {
-                owned.read.end(cx, Ok(()), false);
-            }
-            return;
+        let request = match &mut owned.read {
+            InFlight::Fills {
+                symbol,
+                order_id,
+                limit,
+                windows,
+                ..
+            } => windows.next().map(|(from, to)| {
+                (
+                    self.paths.user_trades,
+                    Query::new()
+                        .str("symbol", symbol)
+                        .num("limit", f64::from(*limit))
+                        .opt_str("orderId", order_id.as_deref())
+                        .opt_num("startTime", from)
+                        .opt_num("endTime", to),
+                )
+            }),
+            InFlight::Orders {
+                symbol,
+                limit,
+                windows,
+                ..
+            } => windows.next().map(|(from, to)| {
+                (
+                    self.paths.all_orders,
+                    Query::new()
+                        .str("symbol", symbol)
+                        .num("limit", f64::from(*limit))
+                        .opt_num("startTime", from)
+                        .opt_num("endTime", to),
+                )
+            }),
+            _ => return,
         };
-        let query = Query::new()
-            .str("symbol", symbol)
-            .num("limit", f64::from(*limit))
-            .opt_str("orderId", order_id.as_deref())
-            .opt_num("startTime", from)
-            .opt_num("endTime", to);
-        self.history_request(cx, command, self.paths.user_trades, query);
+        if let Some((path, query)) = request {
+            self.history_request(cx, command, path, query);
+        } else if let Some(owned) = self.history.reads.remove(&command) {
+            owned.read.end(cx, Ok(()), false);
+        }
     }
 
     fn income_request(
@@ -1140,8 +1208,13 @@ impl BinanceFutures {
         .and_then(|body| {
             Ok(match &mut read {
                 InFlight::Lookup { .. } => unreachable!(),
-                InFlight::Fills { history, limit, .. } => {
-                    let (rows, native) = rows::<UserTrade, _>(body, |t| {
+                InFlight::Fills {
+                    history,
+                    limit,
+                    windows,
+                    ..
+                } => {
+                    let (mut rows, native) = rows::<UserTrade, _>(body, |t| {
                         Some(Execution {
                             id: t.id.to_string(),
                             timestamp: t.time / 1000.0,
@@ -1157,10 +1230,18 @@ impl BinanceFutures {
                             maker: t.maker,
                         })
                     })?;
-                    accept(history, cx, leg, rows, saturated(native, *limit, "fill"))
+                    let gap = windows.gap(native, *limit, "fill");
+                    rows.retain(|row| !windows.seen.contains(&row.id));
+                    windows.seen.extend(rows.iter().map(|row| row.id.clone()));
+                    accept(history, cx, leg, rows, gap)
                 }
-                InFlight::Orders { history, limit } => {
-                    let (rows, native) = rows::<HistoricalOrderRow, _>(body, |o| {
+                InFlight::Orders {
+                    history,
+                    limit,
+                    windows,
+                    ..
+                } => {
+                    let (mut rows, native) = rows::<HistoricalOrderRow, _>(body, |o| {
                         if o.time == 0.0 || !matches!(o.side.as_ref(), "BUY" | "SELL") {
                             return None;
                         }
@@ -1193,7 +1274,10 @@ impl BinanceFutures {
                             updated_time: (o.update_time > 0.0).then_some(o.update_time),
                         })
                     })?;
-                    accept(history, cx, leg, rows, saturated(native, *limit, "order"))
+                    let gap = windows.gap(native, *limit, "order");
+                    rows.retain(|row| !windows.seen.contains(&row.id));
+                    windows.seen.extend(rows.iter().map(|row| row.id.clone()));
+                    accept(history, cx, leg, rows, gap)
                 }
                 InFlight::Income { history, .. } => {
                     let (rows, _) = rows::<IncomeRow, _>(body, |r| {
@@ -1239,14 +1323,14 @@ impl BinanceFutures {
                     &read,
                     InFlight::Income { history, .. } if matches!(**history, IncomeHistory::Range(_))
                 );
-                if !ranged && !matches!(read, InFlight::Fills { .. }) {
+                if !ranged && !matches!(read, InFlight::Fills { .. } | InFlight::Orders { .. }) {
                     return read.end(cx, Ok(()), false);
                 }
                 self.history.reads.insert(command, Owned { root, read });
                 if ranged {
                     self.next_income_page(cx, command);
                 } else {
-                    self.next_fills_window(cx, command);
+                    self.next_history_window(cx, command);
                 }
             }
         }

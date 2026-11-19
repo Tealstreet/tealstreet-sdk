@@ -1,3 +1,4 @@
+import { FrameStore } from '../../safe-cex/src/store/frameStore';
 import type { Exchange } from '@tealstreet/safe-cex/src/exchanges/base';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -5,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { exchangeRegistry } from '@tealstreet/safe-cex/src/exchanges/registry';
 import { RustEngineExchange } from '@tealstreet/safe-cex/src/exchanges/rust/rust.exchange';
 import { adoptEngineCapabilities } from '@tealstreet/safe-cex/src/__tests__/fixtures/engineCapabilities';
-import { DefaultStore } from '@tealstreet/safe-cex/src/store/store.base';
 
 import { supportedTools, tools } from './tools';
 
@@ -14,7 +14,7 @@ afterEach(() => live.splice(0).forEach((e) => e.dispose?.()));
 
 const construct = async (name: 'bybit' | 'binancepm', options = false) => {
   const Exchange = await exchangeRegistry[name]();
-  const exchange = new Exchange(name, { key: 'k', secret: 's', publicDataOnly: true }, new DefaultStore());
+  const exchange = new Exchange(name, { key: 'k', secret: 's', publicDataOnly: true }, new FrameStore());
   live.push(exchange);
   // Server tool discovery runs after loading the engine capability record.
   adoptEngineCapabilities(exchange as RustEngineExchange, { options });
@@ -54,7 +54,7 @@ describe('option tools', () => {
   });
 
   it('does not advertise cold Rust option methods without native support', async () => {
-    const cold = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    const cold = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
     live.push(cold);
     for (const name of OPTION_TOOLS) expect(names(cold, true)).not.toContain(name);
   });

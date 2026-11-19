@@ -2,15 +2,15 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../store/frameStore';
 import { ParadexExchange } from './reference/paradex/paradex.exchange';
-import { DefaultStore } from '../store/store.base';
 
 describe('Paradex error logging', () => {
   it('rethrows the venue error when it is circular, not a JSON.stringify failure', async () => {
     const exchange = new ParadexExchange(
       'paradex',
       { publicDataOnly: true, tuning: { consoleLogging: false } } as any,
-      new DefaultStore(),
+      new FrameStore(),
     );
     const venueError: Error & { originalError?: unknown } = new Error('auth not ready');
     venueError.originalError = venueError;

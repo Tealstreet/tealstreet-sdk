@@ -188,7 +188,7 @@ const start = (ctx: Worker, shared = false) => {
   let hasLoggedInstanceMismatch = false;
   const _originalPostMessage = !shared
     ? ctx.postMessage.bind(ctx)
-    : (msg: any) => {
+    : (msg: unknown) => {
         // For shared workers, postMessage is handled differently
         if (portKey) {
           broadcastWithThrottle(portKey, msg);
@@ -277,9 +277,9 @@ const start = (ctx: Worker, shared = false) => {
     let ctxWrapper = new Proxy(ctx, {
       get(target, prop, receiver) {
         if (prop === 'postMessage') {
-          return function (msg: any, transfer?: Transferable[]) {
+          return function (msg: unknown, transfer?: Transferable[]) {
             recordOutboundFrame(msg);
-            return transfer ? (target as any).postMessage(msg, transfer) : (target as any).postMessage(msg);
+            return transfer ? target.postMessage(msg, transfer) : target.postMessage(msg);
           };
         }
         return Reflect.get(target, prop, receiver);
@@ -370,16 +370,6 @@ const start = (ctx: Worker, shared = false) => {
     } else {
       anonymousExchangeWorkers[exchangeName] = exchangeWorker;
     }
-
-    // Seed the worker store with the main-thread's serialized state BEFORE
-    // starting the exchange. The exchange's fetchMarkets() will then populate
-    // markets/tickers on top. Seeding AFTER start() would race and could wipe
-    // freshly-loaded markets when the main-thread store is empty (cold load,
-    // no IndexedDB cache, default-demo, etc.).
-    // A fresh worker runs no algos: chase and TWAP rows in the seed belong to
-    // algos that died with the worker before it, and would show as running.
-    const { activeChasers: _deadChasers, activeTWAPs: _deadTwaps, ...seed } = payload.data.store ?? {};
-    exchangeWorker.store.update(seed);
 
     failedWorker = undefined;
     const started = await exchangeWorker.start();
@@ -600,7 +590,6 @@ const start = (ctx: Worker, shared = false) => {
         }
         break;
       default:
-        // case 'store':
         // case 'dispose':
         // case 'subscribeOHLCV':
         // case 'subscribeOrderBook':
@@ -650,7 +639,7 @@ if (typeof self !== 'undefined' && !self.document) {
             : 'unknown context';
 
       // Extract additional context from enhanced errors
-      const extra: any = {
+      const extra: Record<string, unknown> = {
         originalMessage: message,
         errorType: serializedError.name,
         context: context,
@@ -725,7 +714,7 @@ if (typeof self !== 'undefined' && !self.document) {
             ? `exchange: ${exchangeNames.join(',')}`
             : 'unknown context';
 
-      const extra: any = {
+      const extra: Record<string, unknown> = {
         originalMessage: message,
         errorType: reason?.name || 'UnhandledRejection',
         context,

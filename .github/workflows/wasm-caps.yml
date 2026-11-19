@@ -1,0 +1,100 @@
+# Generated WASM caps (rule 17). After each master Rust SDK run, measure every
+# sealed family artifact and the combined package of that run and raise any cap
+# whose reserve fell under 10 KiB: cap = max(cap, ceil((measured + 10 KiB) / KiB)).
+# Caps are never lowered. Since 2026-11-19 a master family over its cap stays red
+# and uploads no artifact, so this bot only restores reserve and never absorbs an
+# overrun; a PR that outgrows its cap raises it itself in a separate commit with a
+# wasm-caps-history.md line and a CLEAR naming the growth. Raised caps go to the bot-owned branch bot/wasm-caps and
+# the job summary; this workflow calls no PR API. Actions may not create or approve
+# PRs here (coordinator decision on #3686), so Sam's fleet-watch opens the PR with
+# a user token, which also lets CI run on it normally.
+#
+# Keep every step GitHub-owned: this repo's Actions policy allows only
+# GitHub-owned actions.
+name: WASM caps
+
+on:
+  workflow_run:
+    workflows: [Rust SDK]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: wasm-caps
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Restore rule-17 reserve
+    # Only master pushes measure every family; a failed run uploads only the families that fit.
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MEASURED_SHA: ${{ github.event.workflow_run.head_sha }}
+      MEASURED_RUN: ${{ github.event.workflow_run.id }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
+      BOT_BRANCH: bot/wasm-caps
+    steps:
+      - name: Check out current master (the caps to rewrite)
+        uses: actions/checkout@v7
+        with:
+          ref: master
+      - name: Check out the measured source (validates each artifact's build-input fingerprint)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: measured
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Download that run's sealed family artifacts
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          pattern: wasm-family-*
+          path: ${{ runner.temp }}/wasm-caps
+      - name: Download that run's combined package
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          # A by-name download extracts flat, so name the directory the caps script expects.
+          name: replay-combined-package
+          path: ${{ runner.temp }}/wasm-caps/replay-combined-package
+      - name: Keep raises already proposed on the bot branch
+        run: |
+          if git fetch --depth=1 origin "$BOT_BRANCH" 2>/dev/null; then
+            git show "FETCH_HEAD:sdk-rs/harness/wasm-caps.json" > "$RUNNER_TEMP/bot-wasm-caps.json"
+            echo "BOT_LEASE=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_ENV"
+          fi
+      - name: Apply rule 17 to the measured modules
+        run: |
+          node sdk-rs/harness/update-wasm-caps.mjs \
+            --artifacts "$RUNNER_TEMP/wasm-caps" --root measured \
+            --source-head "$MEASURED_SHA" --run-id "$MEASURED_RUN" \
+            --merge "$RUNNER_TEMP/bot-wasm-caps.json" --report "$RUNNER_TEMP/wasm-caps.md"
+          cat "$RUNNER_TEMP/wasm-caps.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Push raised caps to the bot branch
+        run: |
+          if git diff --quiet -- sdk-rs/harness/wasm-caps.json; then
+            echo "Every measured module keeps its rule-17 reserve; \`$BOT_BRANCH\` unchanged." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$BOT_BRANCH"
+          git commit -m "chore(wasm): restore rule-17 reserve" \
+            -m "Measured by Rust SDK run $RUN_URL at $MEASURED_SHA." -- sdk-rs/harness/wasm-caps.json
+          # Bot-owned branch, recreated from master each run; the lease refuses if it moved since the fetch.
+          git push --force-with-lease="refs/heads/$BOT_BRANCH:${BOT_LEASE:-}" origin "HEAD:refs/heads/$BOT_BRANCH"
+          {
+            echo "Pushed raised caps to \`$BOT_BRANCH\` from [Rust SDK run $MEASURED_RUN]($RUN_URL) at \`$MEASURED_SHA\`."
+            echo "fleet-watch opens the PR \"chore(wasm): restore rule-17 reserve\" with a user token."
+          } >> "$GITHUB_STEP_SUMMARY"

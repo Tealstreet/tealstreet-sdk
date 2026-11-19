@@ -1,27 +1,33 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderStopTriggerType, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { WeexExchange } from '../reference/weex/weex.exchange';
 import { ENDPOINTS } from '../reference/weex/weex.types';
 import { normalizeAlgoOrder } from '../reference/weex/weex.utils';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStopTriggerType, OrderType } from '../../types';
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTCUSDT',
-        symbol: 'BTCUSDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+        markets: [
+          {
+            id: 'BTCUSDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+          },
+        ] as any,
       },
-    ] as any,
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new WeexExchange(
     'weex' as any,
     { key: 'key', secret: 'secret', passphrase: 'passphrase' } as any,
@@ -98,22 +104,25 @@ describe('audit regression: WEEX opening conditional orders', () => {
     );
   });
 
-  it.each([undefined, 0, -1, Number.NaN])('emits and rejects invalid opening trigger price %s', async (triggerPrice) => {
-    const { exchange, post } = createExchange();
-    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+  it.each([undefined, 0, -1, Number.NaN])(
+    'emits and rejects invalid opening trigger price %s',
+    async (triggerPrice) => {
+      const { exchange, post } = createExchange();
+      const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
 
-    await expect(
-      exchange.placeOrder({
-        symbol: 'BTCUSDT',
-        type: OrderType.Conditional,
-        side: OrderSide.Buy,
-        amount: 1,
-        triggerPrice,
-      }),
-    ).rejects.toThrow('Trigger price is required for WEEX opening conditional orders');
-    expect(emitAndLogError).toHaveBeenCalledWith('Trigger price is required for WEEX opening conditional orders');
-    expect(post).not.toHaveBeenCalled();
-  });
+      await expect(
+        exchange.placeOrder({
+          symbol: 'BTCUSDT',
+          type: OrderType.Conditional,
+          side: OrderSide.Buy,
+          amount: 1,
+          triggerPrice,
+        }),
+      ).rejects.toThrow('Trigger price is required for WEEX opening conditional orders');
+      expect(emitAndLogError).toHaveBeenCalledWith('Trigger price is required for WEEX opening conditional orders');
+      expect(post).not.toHaveBeenCalled();
+    },
+  );
 
   it('maps REST and websocket opening trigger shapes as conditionals while keeping TP/SL protective', () => {
     const opening = {

@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type {
   CryptocomWsBalanceUpdate,
   CryptocomWsOrderUpdate,
@@ -6,6 +7,7 @@ import type {
 } from './cryptocom.types';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import {
   Balance,
   MarginType,
@@ -19,7 +21,8 @@ import {
 } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { CryptocomExchange } from './cryptocom.exchange';
 import { generateWsAuthMessage } from './cryptocom.signing';
 import {
@@ -241,7 +244,22 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
           timeInForce: this.mapTimeInForce(orderData.time_in_force),
         };
 
-        this.store.addOrUpdateOrder(order);
+        (() => {
+          const incoming: StoreData['orders'] = [order];
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     } catch (error) {
       this.parent.emitAndLogError(`Error handling order update: ${error}`);
@@ -263,7 +281,12 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
         if (quantity === 0) {
           const before = this.store.positions.length;
           const updatedPositions = this.store.positions.filter((p) => p.symbol !== market.symbol);
-          if (updatedPositions.length !== before) this.store.update({ positions: updatedPositions });
+          if (updatedPositions.length !== before)
+            applyReferenceFixture(
+              this.store,
+              { positions: updatedPositions },
+              this.store.markets.map((row) => row.symbol),
+            );
           continue;
         }
 
@@ -285,12 +308,27 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
           positionMode,
           unrealizedPnl: parseFloat(positionData.open_position_pnl) || 0,
           contracts,
-          liquidationPrice,
+          liquidationPrice: nativeLiquidationPrice(liquidationPrice),
           info: { markPrice, isolationId: positionData.isolation_id },
           lastUpdate: positionData.update_timestamp_ms || virtualClock.getCurrentTimeMs(),
         };
 
-        this.store.addOrUpdatePosition(position);
+        (() => {
+          const incoming: StoreData['positions'] = [position];
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     } catch (error) {
       this.parent.emitAndLogError(`Error handling position update: ${error}`);
@@ -314,16 +352,20 @@ export class CryptocomPrivateWebSocket extends BaseWebSocket<CryptocomExchange> 
       };
     }
 
-    this.store.update({
-      balance: {
-        total: parseFloat(summary.total_margin_balance) || 0,
-        free: parseFloat(summary.total_available_balance) || 0,
-        used: parseFloat(summary.total_initial_margin) || 0,
-        upnl: parseFloat(summary.total_session_unrealized_pnl) || 0,
-        currencies,
+    applyReferenceFixture(
+      this.store,
+      {
+        balance: {
+          total: parseFloat(summary.total_margin_balance) || 0,
+          free: parseFloat(summary.total_available_balance) || 0,
+          used: parseFloat(summary.total_initial_margin) || 0,
+          upnl: parseFloat(summary.total_session_unrealized_pnl) || 0,
+          currencies,
+        },
+        loaded: { balance: true },
       },
-      loaded: { ...this.store.loaded, balance: true },
-    });
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   private mapOrderType = (cryptocomType: string): OrderType => {

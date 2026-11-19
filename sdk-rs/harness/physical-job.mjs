@@ -1,7 +1,10 @@
 // GitHub can list a started job before it records runner_id, or list it late.
 // Only those two states are re-listed, a bounded number of times; callers keep
 // their own identity checks, so anything still missing after the bound fails.
-export const PHYSICAL_JOB_RELISTS = 6;
+// #3640 / CI44248450357: multiple started measurements still listed runner_id=0
+// after 60 seconds; their terminal API records contain the assigned positive ID.
+// Allow five minutes for metadata propagation, retaining every identity refusal.
+export const PHYSICAL_JOB_RELISTS = 30;
 export const PHYSICAL_JOB_RELIST_MS = 10_000;
 
 const awaitingIdentity = selected => selected.length === 0 ||

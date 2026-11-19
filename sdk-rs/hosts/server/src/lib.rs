@@ -23,6 +23,7 @@ pub mod public_topics;
 mod publication;
 pub mod router_lease;
 pub mod session;
+mod signing_diagnostics;
 pub mod state;
 pub mod telemetry;
 pub mod threads;

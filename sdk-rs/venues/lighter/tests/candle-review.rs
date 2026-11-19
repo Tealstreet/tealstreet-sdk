@@ -1,4 +1,7 @@
 //! Adversarial source ordering: a recovered stream overtakes its fallback read.
+#[path = "../../../engine/tests/support/request_stats_frame.rs"]
+mod request_stats_frame;
+use request_stats_frame::assert_request_stats_frame;
 mod support;
 use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{Action, Command, Engine, Event};
@@ -80,14 +83,17 @@ fn stale_fallback_candle_cannot_overwrite_same_bar_from_recovered_stream() {
         "recovered stream emitted its current candle"
     );
 
+    let before_stats = e.snapshot_frame(NOW).to_vec();
     let old = format!(
         r#"{{"code":200,"c":[{{"t":{},"o":"100","h":"101","l":"99","c":"100","v":"1"}}]}}"#,
         NOW as u64 + 120_000
     );
     reply_at(&mut e, NOW + 120_020.0, &fallback, 200, &old);
-    assert!(
-        e.take_frame(NOW + 120_020.0).is_none(),
-        "older HTTP data must not emit a rollback of close or volume"
+    assert_request_stats_frame(
+        &before_stats,
+        e.take_frame(NOW + 120_020.0),
+        NOW + 120_020.0,
+        [1, 0, 0, 0, 0],
     );
     e.handle(
         NOW + 120_030.0,
@@ -177,6 +183,7 @@ fn prior_subscription_candle_response_or_failure_cannot_touch_new_fallback() {
             })
             .unwrap();
         e.take_frame(NOW + 240_003.0);
+        let before_stats = e.snapshot_frame(NOW).to_vec();
         if failed {
             e.handle(
                 NOW + 240_004.0,
@@ -191,9 +198,12 @@ fn prior_subscription_candle_response_or_failure_cannot_touch_new_fallback() {
                 NOW as u64 + 240_000
             );
             reply_at(&mut e, NOW + 240_004.0, &old, 200, &body);
-            assert!(
-                e.take_frame(NOW + 240_004.0).is_none(),
-                "prior subscription emitted a candle"
+            // Its physical deadline elapsed: the late 200 settles as one timeout.
+            assert_request_stats_frame(
+                &before_stats,
+                e.take_frame(NOW + 240_004.0),
+                NOW + 240_004.0,
+                [0, 0, 0, 1, 0],
             );
         }
         e.handle(NOW + 250_000.0, Event::TimerFired { timer: next_poll });

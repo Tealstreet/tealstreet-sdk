@@ -1,23 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 import { ENDPOINTS } from '../reference/coinbase/coinbase.types';
-import { DefaultStore } from '../../store/store.base';
 
 describe('Coinbase OHLCV stats cleanup audit regression', () => {
   it('cleans the USD-normalized stats keys used by USDC subscriptions', () => {
     const exchange = new CoinbaseExchange(
       'coinbase' as any,
       { key: 'test', secret: 'test', tealstreetTunnel: false } as any,
-      new DefaultStore(),
+      new FrameStore(),
     );
     const send = vi.fn();
     (exchange.publicWebsocket as any).ws = { readyState: WebSocket.OPEN, send };
 
-    const unsubscribe = exchange.publicWebsocket.listenOHLCV(
-      { symbol: 'ETH-USDC', interval: '5m' } as any,
-      vi.fn(),
-    );
+    const unsubscribe = exchange.publicWebsocket.listenOHLCV({ symbol: 'ETH-USDC', interval: '5m' } as any, vi.fn());
     exchange.publicWebsocket.messageHandlersStats['candles.ETH-USD'] = {} as any;
     exchange.publicWebsocket.messageHandlersStats['market_trades.ETH-USD'] = {} as any;
 
@@ -37,7 +34,7 @@ describe('Coinbase OHLCV stats cleanup audit regression', () => {
     const exchange = new CoinbaseExchange(
       'coinbase' as any,
       { key: 'test', secret: 'test', tealstreetTunnel: false } as any,
-      new DefaultStore(),
+      new FrameStore(),
     );
     const get = vi.fn().mockResolvedValue({
       data: {

@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { prepareRecordedHttp } from '../support/managedHttp';
 
@@ -16,7 +16,8 @@ const ACCOUNT = { apiKeyIndex: '0', applicationId: '718895', testnet: true } as 
 const live: { dispose(): void }[] = [];
 afterEach(() => {
   live.splice(0).forEach((item) => item.dispose());
-  setWasmEngineLoader(loadNodeEngine); setRustEngineTransport();
+  setWasmEngineLoader(loadNodeEngine);
+  setRustEngineTransport();
 });
 
 type Sent = Parameters<Transport['request']>[0];
@@ -25,25 +26,73 @@ const json = (data: unknown) => ({ status: 200, headers: '', body: new TextEncod
 const tape = (sent: Sent[]): Transport => ({
   now: () => NOW,
   prepareHttp: prepareRecordedHttp,
-  connect: (_url, handlers) => { queueMicrotask(() => handlers.onOpen()); return { send: () => {}, close() {} }; },
+  connect: (_url, handlers) => {
+    queueMicrotask(() => handlers.onOpen());
+    return { send: () => {}, close() {} };
+  },
   request: async (request) => {
     sent.push(request);
     const { pathname } = new URL(request.url);
-    if (pathname.endsWith('/orderBookDetails')) return json({ code: 200, order_book_details: [{ market_id: 1, symbol: 'ETH',
-      status: 'active', market_type: 'perp', supported_size_decimals: 3, supported_price_decimals: 2, min_base_amount: '0.001',
-      min_quote_amount: '1', min_initial_margin_fraction: 500, maintenance_margin_fraction: 250 }] });
+    if (pathname.endsWith('/orderBookDetails'))
+      return json({
+        code: 200,
+        order_book_details: [
+          {
+            market_id: 1,
+            symbol: 'ETH',
+            status: 'active',
+            market_type: 'perp',
+            supported_size_decimals: 3,
+            supported_price_decimals: 2,
+            min_base_amount: '0.001',
+            min_quote_amount: '1',
+            min_initial_margin_fraction: 500,
+            maintenance_margin_fraction: 250,
+          },
+        ],
+      });
     if (pathname.endsWith('/exchangeStats'))
-      return json({ code: 200, order_book_stats: [{ market_id: 1, last_trade_price: '100', mark_price: '100', index_price: '100' }] });
-    if (pathname.endsWith('/account')) return json({ code: 200, accounts: [{ index: 718895, collateral: '1000', total_asset_value: '1000',
-      available_balance: '900', approved_integrators: [{ account_index: 158385, approval_expiry: NOW + 86400000,
-        max_perps_maker_fee: 0, max_perps_taker_fee: 250 }], positions: [] }] });
+      return json({
+        code: 200,
+        order_book_stats: [{ market_id: 1, last_trade_price: '100', mark_price: '100', index_price: '100' }],
+      });
+    if (pathname.endsWith('/account'))
+      return json({
+        code: 200,
+        accounts: [
+          {
+            index: 718895,
+            collateral: '1000',
+            total_asset_value: '1000',
+            available_balance: '900',
+            approved_integrators: [
+              {
+                account_index: 158385,
+                approval_expiry: NOW + 86400000,
+                max_perps_maker_fee: 0,
+                max_perps_taker_fee: 250,
+              },
+            ],
+            positions: [],
+          },
+        ],
+      });
     if (pathname.endsWith('/accountLimits')) return json({ code: 200, user_tier_name: 'premium' });
     if (pathname.endsWith('/accountActiveOrders')) return json({ code: 200, orders: [] });
+    // AGT-45: a placement completes only once accountOrders shows its row.
+    if (pathname.endsWith('/accountOrders')) {
+      const ids = (new URL(request.url).searchParams.get('client_order_indexes') ?? '').split(',').filter(Boolean);
+      return json({
+        code: 200,
+        orders: ids.map((id) => ({ client_order_index: Number(id), status: 'open', filled_base_amount: '0' })),
+      });
+    }
     if (pathname.endsWith('/nextNonce')) return json({ code: 200, nonce: 10 });
     if (pathname.endsWith('/sendTx')) return json({ code: 200, tx_hash: 'documented-transaction-hash' });
     throw new Error(`Unexpected Lighter request ${request.method} ${request.url}`);
   },
-  setTimeout, clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+  setTimeout,
+  clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
 });
 
 /** Start one account and place one limit order; returns its sendTx form. */
@@ -51,22 +100,29 @@ const place = async (options: ExchangeOptions) => {
   const sent: Sent[] = [];
   setWasmEngineLoader(loadNodeEngine);
   setRustEngineTransport(() => tape(sent));
-  const exchange = new RustEngineExchange('lighter', options, new DefaultStore());
+  const exchange = new RustEngineExchange('lighter', options, new FrameStore());
   live.push(exchange);
   await exchange.start();
   await exchange.placeOrders([{ symbol: 'ETH', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.5, price: 100 }]);
   const tx = sent.find(({ url }) => new URL(url).pathname.endsWith('/sendTx'));
-  const form = new URLSearchParams(typeof tx?.body === 'string' ? tx.body : new TextDecoder().decode(tx?.body as unknown as Uint8Array));
+  const form = new URLSearchParams(
+    typeof tx?.body === 'string' ? tx.body : new TextDecoder().decode(tx?.body as unknown as Uint8Array),
+  );
   return { type: form.get('tx_type'), info: JSON.parse(form.get('tx_info')!) };
 };
 
 it('a keyless Lighter account signs through the browser and sends the local-key transaction', async () => {
   const local = await place({ key: '', secret: SCALAR, ...ACCOUNT });
   // The keyed browser: an actual WASM engine answering through its hosted capture.
-  const keyed = new RustEngineExchange('lighter', { key: '', secret: SCALAR, ...ACCOUNT }, new DefaultStore());
+  const keyed = new RustEngineExchange('lighter', { key: '', secret: SCALAR, ...ACCOUNT }, new FrameStore());
   live.push(keyed);
   const sign = vi.fn((request: RemoteSignerRequest) => keyed.signWsAuth(request));
-  const remoteSigner: RemoteSigner = { accountName: 'hosted-account', sign, isAvailable: () => true, onAvailabilityChange: () => () => {} };
+  const remoteSigner: RemoteSigner = {
+    accountName: 'hosted-account',
+    sign,
+    isAvailable: () => true,
+    onAvailabilityChange: () => () => {},
+  };
   const remote = await place({ key: 'lighter-public-key', secret: '', remoteSigner, privateOnly: true, ...ACCOUNT });
 
   expect(remote.type).toBe('14');
@@ -79,28 +135,62 @@ it('a keyless Lighter account signs through the browser and sends the local-key 
   expect(Buffer.from(remoteSig, 'base64')).toHaveLength(80);
   expect(localSig).toBeTruthy();
   const calls = sign.mock.calls.map(([request]) => request);
-  expect(calls.every((request) => request.type === 'ws-auth' && request.exchangeName === 'lighter'
-    && request.wsAuth?.outputFormat === 'lighter-tx')).toBe(true);
+  expect(
+    calls.every(
+      (request) =>
+        request.type === 'ws-auth' &&
+        request.exchangeName === 'lighter' &&
+        request.wsAuth?.outputFormat === 'lighter-tx',
+    ),
+  ).toBe(true);
   const statement = calls.map((request) => JSON.parse(request.wsAuth!.toSign)).find((item) => item.kind === 'txs');
-  expect(statement).toMatchObject({ chainId: 300, accountIndex: 718895, apiKeyIndex: 0,
-    txs: [{ txType: 14, nonce: localFields.Nonce, expiredAt: localFields.ExpiredAt,
-      order: { ClientOrderIndex: remoteIndex, BaseAmount: localFields.BaseAmount, Price: localFields.Price } }] });
+  expect(statement).toMatchObject({
+    chainId: 300,
+    accountIndex: 718895,
+    apiKeyIndex: 0,
+    txs: [
+      {
+        txType: 14,
+        nonce: localFields.Nonce,
+        expiredAt: localFields.ExpiredAt,
+        order: { ClientOrderIndex: remoteIndex, BaseAmount: localFields.BaseAmount, Price: localFields.Price },
+      },
+    ],
+  });
   expect(keyed.hasStarted).toBe(false);
 });
 
 it('the keyed Lighter browser refuses a statement for another account', async () => {
-  const keyed = new RustEngineExchange('lighter', { key: '', secret: SCALAR, ...ACCOUNT }, new DefaultStore());
+  const keyed = new RustEngineExchange('lighter', { key: '', secret: SCALAR, ...ACCOUNT }, new FrameStore());
   live.push(keyed);
   // A deadline 60 seconds ahead of the device clock, as Lighter auth tokens carry.
   const deadline = Math.floor(Date.now() / 1000) + 60;
   const toSign = `{"kind":"auth","chainId":300,"accountIndex":1,"apiKeyIndex":0,"deadline":${deadline}}`;
-  await expect(keyed.signWsAuth({ id: 'other', type: 'ws-auth', exchangeName: 'lighter', wsAuth: { toSign, outputFormat: 'lighter-tx' } }))
-    .resolves.toMatchObject({ error: expect.any(String) });
+  await expect(
+    keyed.signWsAuth({
+      id: 'other',
+      type: 'ws-auth',
+      exchangeName: 'lighter',
+      wsAuth: { toSign, outputFormat: 'lighter-tx' },
+    }),
+  ).resolves.toMatchObject({ error: expect.any(String) });
   const own = toSign.replace('"accountIndex":1', '"accountIndex":718895');
-  await expect(keyed.signWsAuth({ id: 'own', type: 'ws-auth', exchangeName: 'lighter', wsAuth: { toSign: own, outputFormat: 'lighter-tx' } }))
-    .resolves.toMatchObject({ wsAuthSignature: expect.stringMatching(/^0x[0-9a-f]{160}$/) });
+  await expect(
+    keyed.signWsAuth({
+      id: 'own',
+      type: 'ws-auth',
+      exchangeName: 'lighter',
+      wsAuth: { toSign: own, outputFormat: 'lighter-tx' },
+    }),
+  ).resolves.toMatchObject({ wsAuthSignature: expect.stringMatching(/^0x[0-9a-f]{160}$/) });
   // The device clock refuses a statement that has already expired.
   const expired = own.replace(`"deadline":${deadline}`, `"deadline":${deadline - 120}`);
-  await expect(keyed.signWsAuth({ id: 'old', type: 'ws-auth', exchangeName: 'lighter', wsAuth: { toSign: expired, outputFormat: 'lighter-tx' } }))
-    .resolves.toMatchObject({ error: expect.any(String) });
+  await expect(
+    keyed.signWsAuth({
+      id: 'old',
+      type: 'ws-auth',
+      exchangeName: 'lighter',
+      wsAuth: { toSign: expired, outputFormat: 'lighter-tx' },
+    }),
+  ).resolves.toMatchObject({ error: expect.any(String) });
 });

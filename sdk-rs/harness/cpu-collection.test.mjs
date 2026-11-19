@@ -65,29 +65,34 @@ function reportFixture(state, claim, { exitCode = 0 } = {}) {
 async function pause() { await new Promise(resolve => setTimeout(resolve, 2)); }
 
 test('premeasurement claim bundle seals exact public roster, actual module, dependencies and shallow package roots', t => {
-  const options = fixture(t), state = prepareCollection(options);
-  assert.equal(state.claims.length, 5);
-  assert.equal(state.claims.filter(claim => claim.case.venue === 'binanceoptions').length, 1);
-  const bundle = JSON.parse(fs.readFileSync(path.join(options.root, 'sdk-rs/harness/out/cpu-collection/cohort/cohort.json')));
-  assert.deepEqual(bundle.claims, state.claims);
-  assert.equal(bundle.claims[0].measuredCheckoutSha, options.run.head_sha);
-  assert.ok(bundle.claims.every(claim => claim.case.private === false && claim.case.runs === PUBLIC_REPLAY_PAIRS && claim.case.correctnessRuns === 1));
-  const manifest = JSON.parse(fs.readFileSync(path.join(options.destination, 'manifest.json')));
-  assert.deepEqual(fs.readdirSync(path.join(options.root, 'sdk-rs/harness/out/cpu-collection/cohort')).sort(), ['cohort.json', 'manifest.json']);
-  assert.deepEqual(manifest.directoryAnchors, ['apps/cli', 'packages/fixture', 'sdk-rs/hosts/wasm']);
-  assert.ok(manifest.entries.some(entry => entry.path === 'node_modules/dependency/index.js'));
-  assert.ok(manifest.entries.some(entry => entry.path === 'packages/fixture/node_modules/local/index.js'));
-  assert.ok(!manifest.entries.some(entry => entry.path.includes('.turbo')));
-  for (const name of ['safe_cex_wasm.js', 'safe_cex_wasm_bg.wasm', 'package.json']) {
-    const entry = manifest.entries.find(entry => entry.path === `sdk-rs/hosts/wasm/pkg/node/${name}`);
-    assert.equal(entry.sha256, sha(fs.readFileSync(path.join(options.root, entry.path))));
+  const claims = [];
+  for (const suite of ['binance', 'binancespot', 'binanceinverse', 'binancepm', 'binanceoptions']) {
+    const options = fixture(t, suite), state = prepareCollection(options);
+    assert.equal(state.claims.length, 1, suite);
+    claims.push(...state.claims);
+    const bundle = JSON.parse(fs.readFileSync(path.join(options.root, 'sdk-rs/harness/out/cpu-collection/cohort/cohort.json')));
+    assert.deepEqual(bundle.claims, state.claims);
+    assert.equal(bundle.claims[0].measuredCheckoutSha, options.run.head_sha);
+    assert.ok(bundle.claims.every(claim => claim.case.private === false && claim.case.runs === PUBLIC_REPLAY_PAIRS && claim.case.correctnessRuns === 1));
+    const manifest = JSON.parse(fs.readFileSync(path.join(options.destination, 'manifest.json')));
+    assert.deepEqual(fs.readdirSync(path.join(options.root, 'sdk-rs/harness/out/cpu-collection/cohort')).sort(), ['cohort.json', 'manifest.json']);
+    assert.deepEqual(manifest.directoryAnchors, ['apps/cli', 'packages/fixture', 'sdk-rs/hosts/wasm']);
+    assert.ok(manifest.entries.some(entry => entry.path === 'node_modules/dependency/index.js'));
+    assert.ok(manifest.entries.some(entry => entry.path === 'packages/fixture/node_modules/local/index.js'));
+    assert.ok(!manifest.entries.some(entry => entry.path.includes('.turbo')));
+    for (const name of ['safe_cex_wasm.js', 'safe_cex_wasm_bg.wasm', 'package.json']) {
+      const entry = manifest.entries.find(entry => entry.path === `sdk-rs/hosts/wasm/pkg/node/${name}`);
+      assert.equal(entry.sha256, sha(fs.readFileSync(path.join(options.root, entry.path))));
+    }
+    assert.ok(state.destination.startsWith(path.dirname(options.root)) && !state.destination.startsWith(`${options.root}/`));
+    assert.throws(() => prepareCollection(options), /output collision/);
   }
-  assert.ok(state.destination.startsWith(path.dirname(options.root)) && !state.destination.startsWith(`${options.root}/`));
-  assert.throws(() => prepareCollection(options), /output collision/);
+  assert.equal(claims.length, 5);
+  assert.equal(claims.filter(claim => claim.case.venue === 'binanceoptions').length, 1);
 });
 
 test('each public case starts empty, records immediate final cache, exact reports/raw and consumes one marker', async t => {
-  const options = fixture(t), state = prepareCollection(options), first = state.claims[0], second = state.claims[1];
+  const options = fixture(t, 'bybit'), state = prepareCollection(options), first = state.claims[0], second = state.claims[1];
   const before = beforeCpuCase({ state, args: args(first), root: options.root });
   assert.equal(before.nodePath, path.join(options.root, '.cpu-runtime/node'));
   assert.deepEqual(fs.readdirSync(before.env.TMPDIR), []);
@@ -120,7 +125,7 @@ test('private invocation remains unchanged and cannot clear a public cache or co
 });
 
 test('public preflight rejects unknown/mutated case, active duplicate, runtime drift and CI module substitution', t => {
-  const options = fixture(t), state = prepareCollection(options), claim = state.claims[0];
+  const options = fixture(t, 'bybit'), state = prepareCollection(options), claim = state.claims[0];
   for (const values of [{ ...claim.case, runs: 7 }, { ...claim.case, books: 'wrong' }, { ...claim.case, runs: PUBLIC_REPLAY_PAIRS, 'ci-wasm': 'family-archive' }, { ...claim.case, runs: PUBLIC_REPLAY_PAIRS, 'recorded-evidence': 'prior.json' }])
     assert.throws(() => beforeCpuCase({ state, args: values }));
   const originalTape = fs.readFileSync(path.join(options.root, claim.case.tape)); fs.appendFileSync(path.join(options.root, claim.case.tape), 'tamper');
@@ -273,7 +278,8 @@ test('actual post-merge workflow invocation enters and completes the real collec
   const workflow = fs.readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
   const measured = /^  gate:\n([\s\S]*?)(?=^  result:)/m.exec(workflow)[1];
   const publicCommands = measured.split('\n').filter(line => line.includes('rust:gate:record') && line.includes('-public.jsonl.gz'));
-  assert.equal(publicCommands.length, 12);
+  // Spot and inverse now use the generic per-row command; the exact expanded census is pinned separately.
+  assert.equal(publicCommands.length, 10);
   for (const command of publicCommands) assert.match(command, / --runs 16$/);
   const options = fixture(t, 'bitget');
   const gate = `const PUBLIC_REPLAY_PAIRS = ${PUBLIC_REPLAY_PAIRS}; import fs from 'node:fs'; import path from 'node:path';
@@ -320,5 +326,7 @@ test('Binance Options public input is generated before CPU measurement inputs ar
   const sealing = measurement.indexOf('node sdk-rs/harness/cpu-ci.mjs --command prepare');
   assert.ok(generation >= 0 && generation < sealing, 'Options public tape must exist before the exact CPU roster is sealed');
   assert.equal(measurement.match(/corepack yarn rust:private-tape-binanceoptions --public/g).length, 1);
-  assert.ok(measurement.indexOf('corepack yarn rust:private-tape-binanceoptions\n') > sealing);
+  assert.match(measurement, /private_script: rust:private-tape-binanceoptions/);
+  assert.ok(measurement.indexOf('corepack yarn ${{ matrix.private_script }}') > sealing);
+  assert.match(measurement, /Generate Binance Options public CPU input before sealing\n        if: matrix.venue == 'binanceoptions'/);
 });

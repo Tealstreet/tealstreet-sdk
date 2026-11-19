@@ -10287,6 +10287,9 @@ every accepted order ID and the scope stays fenced. It is never Done without
 proof, and nothing is replayed. No existing venue changes behaviour; Lighter's
 grouped TP/SL is the first adopter ([RUST_CONDITION_WAIT.md](RUST_CONDITION_WAIT.md)).
 
+### Bitunix managed sockets (#2301)
+
+Bitunix's futures, public-shard and private sockets now run on the engine's managed sockets ([RUST_BITUNIX_MANAGED_SOCKETS.md](RUST_BITUNIX_MANAGED_SOCKETS.md)). URLs, feed identities, routing, subscription frames and their 250 ms shard pacing, the private ping-then-login bootstrap and the 2 s login retry are unchanged. One tightening: on an open socket, a frame arriving at or past its idle or unanswered-login deadline is refused before publication or reduction, and the socket retires even before timer delivery. Frames before open are always discarded; a connecting socket retires on its connect timer or a late open, rather than on that pre-open frame. The refresh retains master's ten-second login-answer bound, current protocol-clock private ping, first-pong idle gate and successful-login balance pacing; Observe still permits pre-answer account data within that bound. Callers need no change.
 ### BingX managed public and private sockets
 
 BingX registers both feeds with engine-owned epochs, deadlines, liveness and

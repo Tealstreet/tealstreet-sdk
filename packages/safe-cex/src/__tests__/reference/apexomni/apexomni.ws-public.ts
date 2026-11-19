@@ -1,16 +1,19 @@
+import type { StoreData } from '../../../generated/StoreData';
+
 import chunk from 'lodash/chunk';
 import flatten from 'lodash/flatten';
 import { nanoid } from 'nanoid';
 
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { Candle, OHLCVOptions, OrderBook, PositionSide, Ticker, Writable } from '../../../types';
 import { getCandleStartTime } from '../../../utils/getCandleStartTime';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { add, divide } from '../../../utils/safe-math';
 import { updateOrderBook } from '../../../utils/updateOrderBook';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { ApexOmniExchange } from './apexomni.exchange';
 import { BASE_WS_URL, INTERVAL } from './apexomni.types';
 
@@ -188,7 +191,17 @@ export class ApexOmniPublicWebsocket extends BaseWebSocket<ApexOmniExchange> {
           update.quoteVolume = parseFloat(d.to);
         }
 
-        this.parent.store.updateTicker(ticker, update);
+        (() => {
+          const target = ticker;
+          const changes: Partial<StoreData['tickers'][number]> = update;
+          return applyReferenceFixture(
+            this.parent.store,
+            {
+              tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+            },
+            this.parent.store.markets.map((row) => row.symbol),
+          );
+        })();
 
         // position pnl updates are slow. we can try and calculate it here
         const referencePrice = update.mark || update.last;
@@ -203,7 +216,17 @@ export class ApexOmniPublicWebsocket extends BaseWebSocket<ApexOmniExchange> {
             const currentValue = position.contracts * referencePrice;
             const directionMult = position.side === PositionSide.Long ? 1 : -1;
             const unrealizedPnl = directionMult * (currentValue - entryValue);
-            this.store.updatePosition(position, { unrealizedPnl });
+            (() => {
+              const target = position;
+              const changes: Partial<StoreData['positions'][number]> = { unrealizedPnl };
+              return applyReferenceFixture(
+                this.store,
+                {
+                  positions: this.store.positions.map((row) => (row.id === target.id ? { ...row, ...changes } : row)),
+                },
+                this.store.markets.map((row) => row.symbol),
+              );
+            })();
           }
         }
       }

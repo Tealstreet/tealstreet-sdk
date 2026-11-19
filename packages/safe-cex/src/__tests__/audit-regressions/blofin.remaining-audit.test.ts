@@ -3,11 +3,12 @@ import type { Market } from '../../types';
 import { describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
-import { BlofinExchange } from '../reference/blofin/blofin.exchange';
 import { BASE_URL, BASE_WS_URL, ENDPOINTS } from '../../exchanges/blofin/blofin.types';
-import { BLOFIN_MAX_SUBSCRIBE_FRAME_BYTES, buildBlofinSubscribeFrames } from '../reference/blofin/blofin.ws-public';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionMode } from '../../types';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { BlofinExchange } from '../reference/blofin/blofin.exchange';
+import { BLOFIN_MAX_SUBSCRIBE_FRAME_BYTES, buildBlofinSubscribeFrames } from '../reference/blofin/blofin.ws-public';
 
 const MARKET: Market = {
   id: 'BTC-USDT',
@@ -22,8 +23,12 @@ const MARKET: Market = {
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET], loaded: { ...store.loaded, markets: true } });
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    { markets: [MARKET], loaded: { ...store.loaded, markets: true } },
+    store.markets.map((row) => row.symbol),
+  );
   return new BlofinExchange('blofin', { key: 'key', secret: 'secret', passphrase: 'pass' }, store);
 };
 
@@ -199,7 +204,11 @@ describe('BloFin remaining audit regressions', () => {
         triggerPrice: '49000',
       },
     ])[0];
-    exchange.store.update({ orders: [existingOrder] });
+    applyReferenceFixture(
+      exchange.store,
+      { orders: [existingOrder] },
+      exchange.store.markets.map((row) => row.symbol),
+    );
     const get = vi.fn().mockImplementation((endpoint: string) => {
       if (endpoint === ENDPOINTS.UNFILLED_TRIGGER_ORDERS) {
         return Promise.reject(new Error('trigger snapshot unavailable'));
@@ -237,7 +246,11 @@ describe('BloFin remaining audit regressions', () => {
         triggerPrice: '49000',
       },
     ])[0];
-    exchange.store.update({ orders: [existingOrder] });
+    applyReferenceFixture(
+      exchange.store,
+      { orders: [existingOrder] },
+      exchange.store.markets.map((row) => row.symbol),
+    );
     const partialTrigger = {
       algoId: 'partial-trigger',
       instId: MARKET.id,

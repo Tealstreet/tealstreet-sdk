@@ -4,6 +4,14 @@ use crate::wire::OrderRow;
 use safe_cex_engine::Store;
 use safe_cex_engine::error::Protection;
 
+pub(crate) const STALE_MARK: &str =
+    "Hyperliquid requires a fresh mark price before editing protection; order unchanged";
+/// A mark that would not stay fresh this long past sizing (or until the amend bound,
+/// the latest possible cancel release) is re-read before the cancel is released.
+const MARK_HEADROOM_MS: f64 = 1_000.0;
+/// A put-back waits at most this long for a mark while the position is unprotected.
+const RESTORE_MARK_READ_MS: f64 = 1_500.0;
+
 pub(super) struct Amend {
     before: Order,
     original: OrderWire,
@@ -11,6 +19,9 @@ pub(super) struct Amend {
     target_kind: OrderType,
     target: f64,
     restoring: bool,
+    /// The put-back went out without a fresh mark to check it against; the
+    /// release veto (`&self`) records it, so it is a `Cell`.
+    mark_unverified: std::cell::Cell<bool>,
     refusal: Option<VenueError>,
     peers: Vec<String>,
 }
@@ -133,6 +144,7 @@ impl Hyperliquid {
                 .parse()
                 .map_err(|_| "Invalid trigger")?,
             restoring: false,
+            mark_unverified: Default::default(),
             refusal: None,
             peers: cx
                 .store
@@ -145,6 +157,72 @@ impl Hyperliquid {
         let job = self.trading.active.as_mut().unwrap();
         job.protection = Some(Box::new(captured));
         Ok(())
+    }
+    /// The protected symbol, when its mark must be re-read before the cancel.
+    pub(super) fn protective_mark_unfresh(
+        &self,
+        cx: &Cx<'_, Pending>,
+        deadline: f64,
+    ) -> Option<String> {
+        let symbol = &self
+            .trading
+            .active
+            .as_ref()?
+            .protection
+            .as_ref()?
+            .before
+            .symbol;
+        let fresh = cx
+            .store
+            .reference_seen_at(symbol, StopTriggerType::MarkPrice)
+            .is_some_and(|seen| seen <= cx.now)
+            && safe_cex_engine::protective_amend::fresh_reference(
+                cx.store,
+                symbol,
+                StopTriggerType::MarkPrice,
+                (cx.now + MARK_HEADROOM_MS).min(deadline),
+            )
+            .is_some();
+        (!fresh).then(|| symbol.clone())
+    }
+    pub(super) fn protective_restoring(&self) -> bool {
+        self.trading
+            .active
+            .as_ref()
+            .and_then(|job| job.protection.as_ref())
+            .is_some_and(|p| p.restoring)
+    }
+    /// The protected symbol while its on-demand mark read is outstanding.
+    pub(super) fn protective_mark_reading(&self) -> Option<String> {
+        let job = self
+            .trading
+            .active
+            .as_ref()
+            .filter(|job| job.amend_mark_read)?;
+        Some(job.protection.as_ref()?.before.symbol.clone())
+    }
+    /// The put-back's mark read ended; the original is re-placed either way.
+    pub(super) fn settle_restore_mark(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        mark: Option<(f64, f64)>,
+    ) {
+        if let Some((timer, _)) = self.trading.amend_wait.take() {
+            cx.clear_timer(timer);
+        }
+        if let Some((timer, _, _)) = self.trading.amend_retry.take() {
+            cx.clear_timer(timer);
+        }
+        if let Some((mark, issued_at)) = mark {
+            apply_read_mark(cx, symbol, mark, issued_at);
+        }
+        let Some(job) = self.trading.active.as_mut() else {
+            return;
+        };
+        job.amend_mark_read = false;
+        job.steps.push_back(Step::Restore);
+        self.release_trade_builder(cx);
     }
     pub(super) fn prepare_protective_replace(
         &self,
@@ -279,10 +357,25 @@ impl Hyperliquid {
             }
             source
         };
-        let mark = store.reference_seen_at(&source.symbol, StopTriggerType::MarkPrice)
+        let mark = store
+            .reference_seen_at(&source.symbol, StopTriggerType::MarkPrice)
             .filter(|seen| now.is_finite() && *seen <= now)
-            .and_then(|_| safe_cex_engine::protective_amend::fresh_reference(store, &source.symbol, StopTriggerType::MarkPrice, now))
-            .ok_or_else(|| not_sent("Hyperliquid requires a fresh mark price before editing protection; order unchanged"))?;
+            .and_then(|_| {
+                safe_cex_engine::protective_amend::fresh_reference(
+                    store,
+                    &source.symbol,
+                    StopTriggerType::MarkPrice,
+                    now,
+                )
+            });
+        let Some(mark) = mark else {
+            // The original trigger was already accepted: being protected beats freshness.
+            if restoring {
+                protected.mark_unverified.set(true);
+                return Ok(());
+            }
+            return Err(not_sent(STALE_MARK));
+        };
         let (kind, trigger) = if restoring {
             (source.kind, source.price)
         } else {
@@ -340,12 +433,17 @@ impl Amend {
             return None;
         }
         let refusal = self.refusal.as_ref()?;
+        let unverified = if self.mark_unverified.get() {
+            " (no fresh mark was available to check it against)"
+        } else {
+            ""
+        };
         Some(VenueError {
             kind: Some(ErrorKind::Rejected),
             outcome: Some(Outcome::Rejected),
             protection: Some(Protection::Restored),
             ..VenueError::new(format!(
-                "Hyperliquid replacement refused; original {} protection restored unchanged as a new order: {}",
+                "Hyperliquid replacement refused; original {} protection restored unchanged as a new order{unverified}: {}",
                 self.before.symbol, refusal.message
             ))
         })
@@ -422,10 +520,42 @@ impl Hyperliquid {
         p.refusal = Some(error);
         p.restoring = true;
         job.steps.clear();
+        let source = job.amend_source.clone();
+        // A stale mark is re-read once, bounded, before the put-back; it never blocks it.
+        let deadline = cx.now + RESTORE_MARK_READ_MS;
+        // The serial plan is held across the read, as for the sizing read.
+        if let Some(symbol) = self.protective_mark_unfresh(cx, deadline)
+            && let Some(id) = source
+            && self.park_trade_builder(cx).is_ok()
+        {
+            let job = self.trading.active.as_mut().unwrap();
+            job.amend_deadline = Some(deadline);
+            if let Some(amend) = job.amend_owner() {
+                job.amend_mark_read = true;
+                self.trading.amend_wait = Some((cx.set_timer(RESTORE_MARK_READ_MS), amend));
+                self.read_amend_mark(cx, &id, amend, &symbol);
+                return None;
+            }
+        }
+        let job = self.trading.active.as_mut().unwrap();
         job.steps.push_back(Step::Restore);
         self.pump_trades(cx);
         None
     }
+}
+
+/// A read mark answers as of some moment after `issued_at`; a mark the stream observed
+/// since then may be newer, so it is kept and the snapshot discarded.
+pub(super) fn apply_read_mark(cx: &mut Cx<'_, Pending>, symbol: &str, mark: f64, issued_at: f64) {
+    if cx
+        .store
+        .reference_seen_at(symbol, StopTriggerType::MarkPrice)
+        .is_some_and(|seen| seen >= issued_at)
+    {
+        return;
+    }
+    cx.store.update_ticker(symbol, |t| t.mark = mark);
+    cx.store.observe_ticker_fields(symbol, 1 << 3);
 }
 
 fn has_position(store: &Store, order: &Order) -> bool {

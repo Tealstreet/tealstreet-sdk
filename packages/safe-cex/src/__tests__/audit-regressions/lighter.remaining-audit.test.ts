@@ -1,19 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { LighterExchange } from '../reference/lighter/lighter.exchange';
-import {
-  ENDPOINTS,
-  GRAFANA_ENDPOINTS_EVERY,
-  GRAFANA_ENDPOINTS_PERIODIC,
-} from '../../exchanges/lighter/lighter.types';
-import { DefaultStore } from '../../store/store.base';
+import { ENDPOINTS, GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC } from '../../exchanges/lighter/lighter.types';
+import { FrameStore } from '../../store/frameStore';
 import { LogSeverity } from '../../types';
+import { LighterExchange } from '../reference/lighter/lighter.exchange';
 
 const createExchange = () =>
   new LighterExchange(
     'lighter',
     { key: 'test-key', secret: 'test-secret', apiKeyIndex: '1', publicDataOnly: true },
-    new DefaultStore(),
+    new FrameStore(),
   );
 
 describe('audit regression: Lighter observability and endpoint inventory', () => {
@@ -35,11 +31,7 @@ describe('audit regression: Lighter observability and endpoint inventory', () =>
 
   it('tracks real transaction writes and only exercised periodic reads', () => {
     expect(GRAFANA_ENDPOINTS_EVERY).toEqual([ENDPOINTS.SEND_TX, ENDPOINTS.SEND_TX_BATCH]);
-    expect(GRAFANA_ENDPOINTS_PERIODIC).toEqual([
-      ENDPOINTS.ACCOUNT,
-      ENDPOINTS.ACCOUNT_LIMITS,
-      ENDPOINTS.OPEN_ORDERS,
-    ]);
+    expect(GRAFANA_ENDPOINTS_PERIODIC).toEqual([ENDPOINTS.ACCOUNT, ENDPOINTS.ACCOUNT_LIMITS, ENDPOINTS.OPEN_ORDERS]);
   });
 
   it('does not retain the dead fictitious route constants', () => {

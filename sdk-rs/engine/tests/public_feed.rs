@@ -462,6 +462,20 @@ fn ingress_rejects_private_metadata_payloads_invalid_books_and_unshared_engines(
         );
     }
     let mut engine = shared();
+    for row in [
+        r#"{"group":3,"topic":"private-orders","subscribed":true,"active":true,"ageMs":1}"#,
+        r#"{"group":0,"topic":"ticker","subscribed":true,"active":true,"ageMs":-1}"#,
+        r#"{"group":0,"topic":"ticker","subscribed":false,"active":true,"ageMs":1}"#,
+    ] {
+        let input = format!(
+            r#"{{"op":"publicFeedUpdate","tickers":[{{"symbol":"A","bid":1}}],"messageHandlerStats":{{"replace":true,"rows":[{row}]}}}}"#
+        );
+        assert!(engine.apply_public_feed(1000., update(&input)).is_err());
+        assert!(
+            engine.store().tickers().is_empty(),
+            "rejected diagnostics must not partially change prices"
+        );
+    }
     assert!(engine.apply_public_feed(1000., update(r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"A","bid":1}],"books":[{"symbol":"A","bids":[[-1,2]],"asks":[]}]}"#)).is_err());
     assert!(
         engine.store().tickers().is_empty(),
@@ -743,4 +757,34 @@ fn shared_book_snapshots_and_clears_do_not_depend_on_a_venue_native_book() {
             102.
         );
     }
+}
+
+#[test]
+fn shared_diagnostics_survive_native_frames_and_late_snapshots() {
+    let mut engine = shared();
+    let diagnostics = update(
+        r#"{"op":"publicFeedUpdate","messageHandlerStats":{"replace":true,"rows":[{"group":0,"topic":"provider-ticker","subscribed":true,"active":true,"ageMs":5}]}}"#,
+    );
+    engine.apply_public_feed(1000., diagnostics).unwrap();
+    for frame in [
+        engine.take_frame(1010.).unwrap().to_vec(),
+        engine.snapshot_frame(1020.).to_vec(),
+    ] {
+        let payload = sections(&frame)
+            .find(|(kind, _)| *kind == 34)
+            .expect("shared diagnostic section")
+            .1;
+        assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(payload[4..8].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(payload[8..12].try_into().unwrap()), 0);
+        assert!(f64::from_le_bytes(payload[24..32].try_into().unwrap()) >= 15.);
+    }
+    let clear =
+        update(r#"{"op":"publicFeedUpdate","messageHandlerStats":{"replace":true,"rows":[]}}"#);
+    engine.apply_public_feed(1030., clear).unwrap();
+    let snapshot = engine.snapshot_frame(1040.);
+    assert_eq!(
+        sections(snapshot).find(|(kind, _)| *kind == 34).unwrap().1,
+        &[0, 0, 0, 0, 1, 0, 0, 0]
+    );
 }

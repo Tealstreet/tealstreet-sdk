@@ -1,5 +1,26 @@
 # OKX legacy execution parity
 
+## Missing public subscriptions
+
+Native public WS `60018` refusals retire only an exact currently desired topic,
+bound by returned `arg` or the native `<channel> subscribe for <instId> doesn't
+exist` message. The adapter refreshes instruments once for each newly retired
+topic and excludes that topic from reconnect replay for this engine's lifetime.
+Cached market identities remain available to financial state; a refreshed
+catalogue can omit the refused instrument without deleting those cached rows.
+Private/business errors, unbound refusals and other public topics are unchanged.
+
+## Historical fill fees
+
+OKX v5 `fee` / `fillFee` is negative for a charge and positive for a maker
+rebate. Historical fills negate that signed value into cost-positive
+`commission`, matching the position journal's fee convention. Recent and archive
+reads retain the same fee-field precedence, currency and missing-value handling.
+`tests/history.rs` covers charges, rebates, zero and missing fees through both
+endpoints. See the [OKX v5 fee definitions](https://www.okx.com/docs-v5/en/).
+
+## Execution parity
+
 The retained TypeScript adapter is the authority for trading rules. This change
 adds outcome reporting without introducing whole-plan minimum, native cap or
 wire-grid validation. Existing formatters and native execution owners decide
@@ -116,3 +137,54 @@ assessment as list-bearing replies: non-authentication errors reset the streak;
 genuine signature answers still receive only one retry before permanent refusal.
 Public/frame-fed, non-EEA and already-configured refresh paths retain their
 existing behavior. No startup step places or replays a trading write.
+
+## Ordinary-order history coverage
+
+An explicit range older than seven days reads ordinary recent history first,
+then the three-month archive under the same read root, deadline and 100 ms
+continuation pacing. Merge identity is native `ordId`; recent rows win duplicate
+archive deliveries. Recent-only requests retain their existing request count.
+
+OKX retains unfilled canceled orders for only two hours, and the archive omits
+that population. Queries whose lower bound reaches the two-hour boundary by completion, or has
+no lower bound, emit the existing owned `retentionLimit` marker, including empty
+results. The check includes time spent fetching pages. A later
+page failure retains its more specific incomplete reason and accepted prefix.
+See the [recent](https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-order-history-last-7-days)
+and [archive](https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-order-history-last-3-months)
+source contracts. `tests/history_order_retention.rs` exercises their combined read.
+
+The scope remains ordinary orders. Algo/protective history is a separate source;
+position-scoped rows with no native size need an explicit nullable-size model
+before they can be included. No size is fabricated and no archive is represented
+as a complete census of all order populations.
+
+## Unresolved historical order markets
+
+An order can outlive its instrument's current catalogue entry. An in-window row
+that cannot be normalized marks the owning history command `coverageGap`, even
+when no orders can be mapped; it cannot prove completed coverage. Available
+mapped orders retain their sizing and identity. An unrelated instrument or a row
+outside the requested time window does not mark that window incomplete.
+Symbol-scoped order history with no market metadata refuses locally rather than
+returning a successful empty result. No symbol or contract size is guessed.
+
+## Order-history financial projection
+
+Ordinary derivative order history retains the native `pnl`, `fee` and `feeCcy`
+from [OKX orders-history](https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-order-history-last-7-days).
+`realizedPnl` is the venue's gross order close PnL, excluding its fee. It is not
+the position-history net `realizedPnl`; no fee or funding is added to it.
+
+For SWAP and supported EEA FUTURES, native `fee` is an accumulated signed
+fee/rebate total: a negative charge becomes positive-cost `fees`, and a positive
+credit becomes separate positive `rebate`. `feeAsset` preserves `feeCcy`; a
+credit also carries that currency in `rebateAsset`. The reported aggregate
+cannot reconstruct separate gross fees and rebates across the order's fills,
+so the projection does not invent the unreported counterpart. No monetary
+amount is converted with contract size or price, including BTC-settled orders.
+
+Missing, null, blank, malformed and non-finite monetary strings remain absent;
+a reported zero remains zero. Non-financial order fields, query scope, paging
+and write behavior are unchanged. Adding these fields does not promote the
+orders axis from unmeasured: an independent financial check is still required.

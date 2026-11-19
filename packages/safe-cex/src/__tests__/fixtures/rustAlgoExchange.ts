@@ -29,7 +29,7 @@ export const rustAlgoExchange = (route: 'rust' | 'refuse' = 'rust') => {
 /** An exchange that is not a Rust engine account (no `routeAlgoOp`). */
 export const plainExchange = () => ({ name: 'bybit', emitter: { emit: vi.fn() } }) as unknown as Exchange;
 
-export const handlerArgs = (exchange: Exchange, ctx: Worker = { postMessage: vi.fn() } as unknown as Worker) =>
+export const handlerArgs = (exchange: Exchange, ctx: Pick<Worker, 'postMessage'> = { postMessage: vi.fn() }) =>
   [
     'test-account',
     'bybit',

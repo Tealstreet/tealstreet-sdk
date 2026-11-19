@@ -980,16 +980,28 @@ BOUNDARY, i.e. within a few window-edge fees rather than a mapping defect.
 
 ## Order history (`/api/v5/trade/orders-history`)
 
-`fetchHistoricalOrders` reads the **7-day** route. Mapper: `okx.order-history.ts`, pure and
-exported. Measured live over 7 days: 255 orders, **58 of which never filled (22.7%)** —
-invisible to fills, executions and closed positions alike.
+The native reader keeps `/api/v5/trade/orders-history` as its first source. For an
+explicit lower bound older than seven days, it then reads
+`/api/v5/trade/orders-history-archive` with the same bounds and merges by native
+`ordId`; a duplicate archive row cannot overwrite the recent source's state.
+Both sources retain the original caller deadline, credential selection and
+100 ms page pacing. Requests without a lower bound retain the recent-only read.
 
-**Do not "improve" this by paging into `/api/v5/trade/orders-history-archive`.** The
-3-month archive returns **filled orders only**, so reaching further back silently drops
-every cancellation — the one population this axis holds that the fills axis does not.
-Verified live on row 13: `state=canceled` returned **0 rows** from the archive and **58**
-from the 7-day route, and a matched 2-day window returned 100/0 filled/canceled from the
-archive against 80/20 from this route. Depth on this axis costs the axis.
+[OKX's recent-order documentation](https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-order-history-last-7-days)
+limits unfilled cancellations to two hours.
+[Its three-month archive](https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-order-history-last-3-months)
+excludes canceled orders without fills. A range starting at or before the two-hour
+boundary when the read completes, or without a lower bound, returns its available
+ordinary orders with an owned `retentionLimit` marker, including empty results.
+Later page failures retain their existing, more specific incomplete reason.
+No archive fallback can reconstruct an expired cancellation or extend the
+three-month source retention.
+
+The retained TypeScript reference mapper is `okx.order-history.ts`. Historical
+measurement over seven days found 255 orders, 58 never filled (22.7%); preserving
+the recent source is necessary to retain that population. The native tests in
+`history_order_retention.rs` cover recent cancellations alongside older archived
+fills, duplicate identity, empty retention gaps and the original read deadline.
 
 Two more details that produce silently wrong data if assumed:
 

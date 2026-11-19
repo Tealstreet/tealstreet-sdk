@@ -14,7 +14,7 @@ const pow10 = (n: number): number => {
   return 10 ** n;
 };
 
-export const afterDecimal = (num: number | string) => {
+export const afterDecimal = (num: number | string | null | undefined) => {
   // Fast path for integers
   if (typeof num === 'number') {
     if (Number.isInteger(num)) return 0;

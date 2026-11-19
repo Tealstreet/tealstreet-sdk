@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { exchangeMetadata } from '../exchangeMetadata';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { consumerFrame } from './cutover/consumerFrame';
 import { engineCapabilities } from './fixtures/engineCapabilities';
 
@@ -70,7 +70,7 @@ const fixture = (privateAccount = true) => {
       testnet: true,
       bybitSiteId: 'BRA_BTL',
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   exchanges.push(exchange);
   const bridge = vi.fn();

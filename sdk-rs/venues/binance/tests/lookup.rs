@@ -1,4 +1,7 @@
 //! Native query-order identity and authoritative absence; deterministic API schemas.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use support::Options;
 mod support;
 use safe_cex_engine::{Command, Event, Method, Query};
@@ -154,7 +157,16 @@ fn secondary_account_cache_never_answers_primary_lookup() {
             }
             assert!(h.requests.is_empty());
             assert!(h.sent.is_empty());
-            assert_eq!(before, h.engine.snapshot_frame(42.0));
+            assert_unchanged_account(
+                &before,
+                h.engine.snapshot_frame(42.0),
+                match outcome {
+                    "found" => [1, 0, 0, 0, 0],
+                    "absent" => [0, 0, 0, 0, 1],
+                    "auth" => [0, 0, 1, 0, 0],
+                    _ => [0, 0, 0, 1, 0],
+                },
+            );
         }
     }
 }
@@ -239,7 +251,7 @@ fn lookup_routes_signed_primary_usdm_and_pm_and_keeps_native_identity() {
         assert_eq!(o.info.position_side, "BOTH");
         assert!(h.requests.is_empty());
         assert!(h.sent.is_empty());
-        assert_eq!(before, h.engine.snapshot_frame(42.0));
+        assert_unchanged_account(&before, h.engine.snapshot_frame(42.0), [1, 0, 0, 0, 0]);
     }
 }
 #[test]
@@ -352,7 +364,7 @@ fn network_failure_is_an_error_and_never_retries_or_mutates_state() {
     });
     assert!(result(&mut h).is_err());
     assert!(h.requests.is_empty());
-    assert_eq!(before, h.engine.snapshot_frame(42.0));
+    assert_unchanged_account(&before, h.engine.snapshot_frame(42.0), [0, 0, 0, 1, 0]);
 }
 
 #[test]

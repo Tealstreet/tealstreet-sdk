@@ -7,7 +7,6 @@ import { RustEngineExchange } from '@tealstreet/safe-cex/src/exchanges/rust/rust
 import type { ExchangeName, Market, PublicExchangeOptions } from '@tealstreet/safe-cex/src/types';
 
 import { DEFAULT_PUBLIC_EXCHANGE_CACHE_NAMESPACE, getMarketCacheKeys, getUtcHourMarketBucket } from './buckets';
-import { hydrateMarketStore } from './hydrateStore';
 import { InProcessFallbackMarketLock } from './lock';
 import {
   readLatestMarketCacheSnapshot,
@@ -352,7 +351,7 @@ export class PublicExchangeFactory {
     refreshedAt: number,
   ): void {
     this.assertOpen(handle);
-    hydrateMarketStore(handle.exchange.store, markets);
+    // Cached catalogue metadata does not establish native engine readiness.
     handle.markets = markets;
     handle.marketsBucket = marketsBucket;
     handle.refreshedAt = refreshedAt;

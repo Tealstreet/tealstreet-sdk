@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { BitgetExchange } from '../reference/bitget/bitget.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 const createExchange = () =>
   new BitgetExchange(
     'bitget',
     { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase' },
-    new DefaultStore(),
+    new FrameStore(),
   );
 
 describe('audit regression: Bitget private order fills', () => {

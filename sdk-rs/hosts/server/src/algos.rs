@@ -464,13 +464,10 @@ impl AccountPort for Port {
         }
         let retrying = retrying_of(op, &data);
         if owed_on_rejoin(op) {
+            // Every tab, as errors are: a non-signing tab that never hears a chase
+            // end reports it as lost ("Hosted server stopped reporting it").
             let replay = algo_msg(&self.name, op, replayed(op, &data));
-            let frame = algo_msg(&self.name, op, data);
-            let mut holding = (self.broadcast)(None);
-            if let Some(signer) = &self.signer {
-                holding.live = vec![signer.socket()];
-            }
-            (self.emit)(frame);
+            let holding = (self.broadcast)(Some(algo_msg(&self.name, op, data)));
             self.keep_unheard(None, replay, holding, retrying, op == "chaser:complete");
             return;
         }
@@ -856,7 +853,7 @@ pub fn balance_info(payload: Option<&Value>, tier: Option<&Value>) -> Option<Val
 /// the account, since nobody would receive the result.
 async fn sync_balance_info(
     port: Rc<Port>,
-    name: String,
+    _name: String,
     held: std::sync::Arc<std::sync::atomic::AtomicBool>,
     payload: bool,
     tier: bool,
@@ -889,8 +886,7 @@ async fn sync_balance_info(
             continue;
         };
         if sent.as_ref() != Some(&info) || tick.is_multiple_of(BALANCE_INFO_RESEND_TICKS) {
-            let rows = serde_json::json!({ "balance": { "info": info } });
-            (port.broadcast)(Some(crate::envelope::msg(&name, "store", rows)));
+            port.handle.store_balance_info(&info);
             sent = Some(info);
         }
     }
@@ -952,6 +948,7 @@ pub(crate) async fn run_with_identity(
         return;
     };
     let name = who.account.clone();
+    handle.configure_store_frames(&name, &who.venue);
     let port = Rc::new(Port {
         handle: handle.clone(),
         client: Cell::new(client),
@@ -1015,7 +1012,6 @@ pub(crate) async fn run_with_identity(
         Box::new(twap.clone()),
         Box::new(exec.clone()),
     ]);
-    let mut published = String::new();
     // On its own task, since `feed.next()` must not be cancelled by a timer. Stopped
     // chases count until their cleanup ends: it may still need a signature.
     {
@@ -1034,17 +1030,9 @@ pub(crate) async fn run_with_identity(
             }
         });
     }
-    // `store` rows the frames do not carry (`activeChasers`, `activeTWAPs`).
-    let publish = |published: &mut String| {
-        let rows = serde_json::json!({
-            "activeChasers": book.active_chasers(),
-            "activeTWAPs": twap.active_twaps(&name),
-        });
-        let text = rows.to_string();
-        if *published != text {
-            (port.broadcast)(Some(crate::envelope::msg(&name, "store", rows)));
-            *published = text;
-        }
+    // The account actor emits native algo sections on the same ordered frame stream.
+    let publish = || {
+        handle.store_algos(&book.active_chasers(), &twap.active_twaps(&name));
     };
     let capabilities = handle.capabilities();
     if capabilities.balance_info || capabilities.account_tier {
@@ -1081,7 +1069,7 @@ pub(crate) async fn run_with_identity(
                 {
                     let change = port.apply(snapshot, batch.fills, batch.rejoined);
                     port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
-                    publish(&mut published);
+                    publish();
                 }
             }
             input = inbox.recv() => match input {
@@ -1096,9 +1084,8 @@ pub(crate) async fn run_with_identity(
                     scope.dispose();
                     let kept: Kept = "Router ownership expired: chases stopped and TWAPs paused. Resting orders were kept; an in-flight order may still fill. Check Open Orders, then explicitly resume TWAPs or start a new chase after reconnecting.".into();
                     for frame in kept.frames(&name) { (port.broadcast)(Some(frame)); }
-                    (port.broadcast)(Some(crate::envelope::msg(&name, "store", serde_json::json!({
-                        "activeChasers": [], "activeTWAPs": paused,
-                    }))));
+                    handle.store_algos(&Vec::<safe_cex_chaser::ActiveChaser>::new(), &paused);
+                    handle.flush_store_frames().await;
                     stopped(kept);
                     running.refresh(&[], &paused, 0);
                     handle.dispose();
@@ -1208,7 +1195,7 @@ pub(crate) async fn run_with_identity(
                     let result = match &dispatched {
                         Some(Ok(())) => Value::from("ok"),
                         Some(Err(error)) => {
-                            serde_json::json!({"message": error.chars().take(160).collect::<String>()})
+                            crate::audit::algo_error(error)
                         }
                         None => serde_json::json!({"message": "unhandled op"}),
                     };
@@ -1216,7 +1203,7 @@ pub(crate) async fn run_with_identity(
                     if let Some(Err(error)) = dispatched {
                         port.emit("error", Value::String(error).to_string());
                     }
-                    publish(&mut published);
+                    publish();
                     if let Some(receipt) = action {
                         // Dispatch admission is not proof that an asynchronous job or
                         // its venue writes completed. Ordinary algo events reconcile it.
@@ -1350,8 +1337,7 @@ pub(crate) async fn run_with_identity(
                 // Chases and TWAPs run on through a socket drop, until the
                 // resume window expires (Dispose) or the browser is back.
                 Some(AlgoInput::Joined) => {
-                    published.clear();
-                    publish(&mut published);
+                    publish();
                     // What it stopped for while the browser was gone, once.
                     for frame in port.take_for_join() {
                         crate::state::Log::info(&format!("algo notice replayed {name}: {frame}"));

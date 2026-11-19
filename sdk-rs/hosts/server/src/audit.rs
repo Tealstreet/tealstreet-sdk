@@ -90,6 +90,46 @@ const ERROR_FIELDS: [&str; 5] = ["name", "kind", "message", "outcome", "venueCod
 
 const MAX_TEXT: usize = 160;
 
+#[path = "audit_ack.rs"]
+mod acknowledgement;
+
+#[cfg(test)]
+#[path = "audit_ack_tests.rs"]
+mod ack_tests;
+
+pub(crate) fn algo_error(error: &str) -> Value {
+    Value::Object(error_fields(&json!({"message": error})))
+}
+
+fn error_fields(detail: &Value) -> Map<String, Value> {
+    let mut fields = pick(detail, &ERROR_FIELDS);
+    if let Some(raw) = detail["message"].as_str() {
+        // Decode the native legacy wrapper before either 160-character cap.
+        // Only the closed acknowledgement projector may retain extra fields.
+        let decoded = (raw.len() <= 65_536)
+            .then(|| serde_json::from_str::<Value>(raw).ok())
+            .flatten();
+        let message = decoded
+            .as_ref()
+            .and_then(|value| value["message"].as_str())
+            .unwrap_or_else(|| {
+                if raw.trim_start().starts_with('{') {
+                    "Unparseable native error detail"
+                } else {
+                    raw
+                }
+            });
+        fields.insert(
+            "message".into(),
+            message.chars().take(MAX_TEXT).collect::<String>().into(),
+        );
+        if let Some(ack) = acknowledgement::project(message, decoded.as_ref()) {
+            fields.insert("bybitBatchAcknowledgement".into(), ack);
+        }
+    }
+    fields
+}
+
 fn scalar(value: &Value) -> Option<Value> {
     match value {
         Value::String(text) => Some(Value::String(text.chars().take(MAX_TEXT).collect())),
@@ -349,7 +389,7 @@ pub fn result_shape(result: &Value) -> &'static str {
 pub fn result(outcome: &Result<Value, Value>) -> Value {
     match outcome {
         Ok(_) => "ok".into(),
-        Err(detail) => Value::Object(pick(detail, &ERROR_FIELDS)),
+        Err(detail) => Value::Object(error_fields(detail)),
     }
 }
 
@@ -358,7 +398,7 @@ pub fn venue_result<T>(outcome: &Result<T, VenueError>) -> Value {
         Ok(_) => "ok".into(),
         Err(error) => {
             let detail = serde_json::to_value(error).unwrap_or_default();
-            Value::Object(pick(&detail, &ERROR_FIELDS))
+            Value::Object(error_fields(&detail))
         }
     }
 }

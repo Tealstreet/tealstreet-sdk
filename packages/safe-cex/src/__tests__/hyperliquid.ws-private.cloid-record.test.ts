@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { HyperliquidPrivateWebSocket } from './reference/hyperliquid/hyperliquid.ws-private';
 import { OrderSide, OrderTimeInForce, OrderType } from '../types';
+import { nativeMarket } from './cutover/nativeMarket';
+import { referenceStore } from './cutover/referenceFixture';
+import { HyperliquidPrivateWebSocket } from './reference/hyperliquid/hyperliquid.ws-private';
 
 vi.mock('./reference/hyperliquid/hyperliquid.cross-cache', () => ({
   hasSeenFill: vi.fn(),
@@ -16,16 +18,10 @@ vi.mock('./reference/hyperliquid/hyperliquid.cross-cache', () => ({
 const CLOID = '0x0123456789abcdef0123456789abcdef';
 
 const createHarness = (records: Record<string, unknown> = {}) => {
-  const core = { id: 'BTC', symbol: 'BTC-PERP', info: {} };
-  const hip3 = { id: 'xyz:TSLA', symbol: 'XYZ|TSLA-PERP', info: { hip3Dex: 'xyz' } };
-  const store = {
-    marketsById: { BTC: core, 'xyz:TSLA': hip3 },
-    marketsBySymbol: { 'BTC-PERP': core, 'XYZ|TSLA-PERP': hip3 },
-    orders: [],
-    positions: [],
-    addOrUpdateOrder: vi.fn(),
-    removeOrder: vi.fn(),
-  };
+  const core = nativeMarket({ id: 'BTC', symbol: 'BTC-PERP', info: {} });
+  const hip3 = nativeMarket({ id: 'xyz:TSLA', symbol: 'XYZ|TSLA-PERP', info: { hip3Dex: 'xyz' } });
+  const store = referenceStore({ markets: [core, hip3] });
+  vi.spyOn(store, 'apply');
   const parent = {
     name: 'hyperliquid',
     isDisposed: false,
@@ -94,17 +90,17 @@ describe('hyperliquid orderUpdates: a recorded cloid identifies the order exactl
     ws.handleOrderUpdates([frame({ reduceOnly: true })]);
 
     expectNoHeuristics(parent);
-    expect(store.addOrUpdateOrder).toHaveBeenCalledTimes(1);
-    expect(store.addOrUpdateOrder.mock.calls[0][0]).toMatchObject({
+    expect(store.apply).toHaveBeenCalledTimes(1);
+    expect(store.orders[0]).toMatchObject({
       id: '42',
       type: OrderType.StopLoss,
       price: 95000,
       reduceOnly: true,
-      timeInForce: undefined,
       amount: 0.5,
       remaining: 0.5,
       clientOrderId: CLOID,
     });
+    expect(store.orders[0]).not.toHaveProperty('timeInForce');
     expect(parent.forgetPrePlacement).toHaveBeenCalledWith('BTC', OrderSide.Sell, CLOID);
   });
 
@@ -115,7 +111,7 @@ describe('hyperliquid orderUpdates: a recorded cloid identifies the order exactl
     ws.handleOrderUpdates([frame({ reduceOnly: true, sz: '0.0', origSz: '0.0' })]);
 
     expectNoHeuristics(parent);
-    expect(store.addOrUpdateOrder.mock.calls[0][0]).toMatchObject({ type: OrderType.TakeProfit, price: 110000 });
+    expect(store.orders[0]).toMatchObject({ type: OrderType.TakeProfit, price: 110000 });
   });
 
   it('takes reduce-only and time-in-force from the record when the frame carries neither', () => {
@@ -130,7 +126,7 @@ describe('hyperliquid orderUpdates: a recorded cloid identifies the order exactl
     ws.handleOrderUpdates([frame({ side: 'B' })]);
 
     expectNoHeuristics(parent);
-    expect(store.addOrUpdateOrder.mock.calls[0][0]).toMatchObject({
+    expect(store.orders[0]).toMatchObject({
       type: OrderType.Limit,
       price: 100000,
       reduceOnly: false,
@@ -146,7 +142,7 @@ describe('hyperliquid orderUpdates: a recorded cloid identifies the order exactl
     ws.handleOrderUpdates([frame({ side: 'B', limitPx: '110250' })]);
 
     expectNoHeuristics(parent);
-    expect(store.addOrUpdateOrder.mock.calls[0][0]).toMatchObject({
+    expect(store.orders[0]).toMatchObject({
       type: OrderType.StopLoss,
       price: 105000,
       reduceOnly: false,
@@ -160,7 +156,7 @@ describe('hyperliquid orderUpdates: a recorded cloid identifies the order exactl
     ws.handleOrderUpdates([frame({ coin: 'xyz:TSLA', side: 'B', limitPx: '400' })]);
 
     expectNoHeuristics(parent);
-    expect(store.addOrUpdateOrder.mock.calls[0][0]).toMatchObject({
+    expect(store.orders[0]).toMatchObject({
       symbol: 'XYZ|TSLA-PERP',
       type: OrderType.Limit,
       price: 400,
@@ -172,7 +168,7 @@ describe('hyperliquid orderUpdates: a recorded cloid identifies the order exactl
     const { ws, store, parent } = createHarness({ [CLOID]: record({}) });
     ws.handleOrderUpdates([frame({}, 'filled'), frame({ oid: 43, cloid: '0x' + 'a'.repeat(32) }, 'canceled')]);
 
-    expect(store.removeOrder).toHaveBeenCalledTimes(2);
+    expect(store.apply).toHaveBeenCalledTimes(2);
     expect(parent.forgetPlacementRecord.mock.calls).toEqual([[CLOID], ['0x' + 'a'.repeat(32)]]);
   });
 });
@@ -183,7 +179,7 @@ describe('hyperliquid orderUpdates: frames without a record keep the fallback ch
     ws.handleOrderUpdates([frame({ reduceOnly: true })]);
 
     expect(parent.getPlacementRecord).toHaveBeenCalledWith(CLOID);
-    expect(store.addOrUpdateOrder).not.toHaveBeenCalled();
+    expect(store.apply).not.toHaveBeenCalled();
     expect(parent.scheduleOrderRefresh).toHaveBeenCalledTimes(1);
   });
 
@@ -193,7 +189,7 @@ describe('hyperliquid orderUpdates: frames without a record keep the fallback ch
     ws.handleOrderUpdates([frame({ side: 'B', limitPx: '110250' })]);
 
     expect(parent.matchPrePlacementTrigger).toHaveBeenCalledWith('BTC', OrderSide.Buy, 0.5);
-    expect(store.addOrUpdateOrder.mock.calls[0][0]).toMatchObject({
+    expect(store.orders[0]).toMatchObject({
       type: OrderType.StopLoss,
       price: 105000,
       clientOrderId: CLOID,
@@ -205,6 +201,6 @@ describe('hyperliquid orderUpdates: frames without a record keep the fallback ch
     ws.handleOrderUpdates([frame({ cloid: undefined })]);
 
     expect(parent.getPlacementRecord).not.toHaveBeenCalled();
-    expect(store.addOrUpdateOrder.mock.calls[0][0]).not.toHaveProperty('clientOrderId');
+    expect(store.orders[0]).not.toHaveProperty('clientOrderId');
   });
 });

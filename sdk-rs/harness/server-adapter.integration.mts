@@ -7,8 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { NativeFrameSession, type NativeFrameSessionSink, type NativeFrameSocketFactory } from '../../packages/safe-cex-server/src/frameSession/NativeFrameSession.ts';
 import { ServerSessionFactory } from '../../packages/safe-cex-server/src/frameSession/ServerSessionFactory.ts';
-import { FrameApplier, type FrameBook } from '../../packages/safe-cex/src/store/frameApplier.ts';
-import { DefaultStore } from '../../packages/safe-cex/src/store/store.base.ts';
+import { FrameStore, type FrameBook } from '../../packages/safe-cex/src/store/frameStore.ts';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 
 type Received = { frame: Frame; snapshot: boolean; books: FrameBook[] };
@@ -16,8 +15,7 @@ type Notice = { type: string; command?: number; result?: string; error?: string 
 
 function consumer() {
   const changed = new EventEmitter();
-  const store = new DefaultStore();
-  const applier = new FrameApplier(store);
+  const store = new FrameStore();
   const frames: Received[] = [];
   const notices: Notice[] = [];
   const wireFrames: Uint8Array[] = [];
@@ -27,8 +25,8 @@ function consumer() {
       // Capture at the real socket boundary and compare after adapter forwarding.
       assert.deepEqual(new Uint8Array(buffer), wireFrames.shift());
       const frame = new Frame(buffer);
-      applier.apply(frame);
-      frames.push({ frame, snapshot, books: applier.books(frame) });
+      store.ingest(frame, { snapshot });
+      frames.push({ frame, snapshot, books: store.books(frame) });
       changed.emit('change');
     },
     onNotice(text) { notices.push(JSON.parse(text) as Notice); changed.emit('change'); },

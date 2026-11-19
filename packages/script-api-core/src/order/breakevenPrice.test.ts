@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
-import { breakevenPrice } from './breakevenPrice';
+import { breakevenPrice, type BreakevenInputs } from './breakevenPrice';
 
-const input = (over: Record<string, unknown> = {}) =>
-  ({ entryPrice: 100, size: 10, side: PositionSide.Long, ...over }) as never;
+const input = (over: Partial<BreakevenInputs> = {}): BreakevenInputs => ({
+  entryPrice: 100,
+  size: 10,
+  side: PositionSide.Long,
+  ...over,
+});
 
 describe('breakevenPrice', () => {
   it('is the entry price when nothing is banked and nothing paid', () => {
@@ -77,7 +81,8 @@ describe('breakevenPrice', () => {
    * so it passed no matter what the implementation did.
    */
   it('ignores an isInverse flag a caller invents, rather than branching on it', () => {
-    const withFlag = breakevenPrice({ ...input({ bankedPnl: 50 }), isInverse: true } as never);
+    const withInverse = { ...input({ bankedPnl: 50 }), isInverse: true };
+    const withFlag = breakevenPrice(withInverse);
     expect(withFlag).toBe(breakevenPrice(input({ bankedPnl: 50 })));
     expect(withFlag).toBe(95);
   });

@@ -81,9 +81,9 @@ test('A/A diagnostics are explicit dispatch-only and cannot supply certification
   assert.match(scope, /else\n\s+node sdk-rs\/harness\/ci-scope\.mjs/);
 });
 
-test('Binance replay measurement has 45 minutes while other matrix venues retain 30', () => {
+test('isolated replay measurements retain the standard 30-minute safety timeout', () => {
   const first = job(source, 'gate');
-  assert.match(first, /^    timeout-minutes: \$\{\{ matrix\.venue == 'binance' && 45 \|\| 30 \}\}$/m);
+  assert.match(first, /^    timeout-minutes: 30$/m);
 });
 
 function measurementNodeCheck(text) {
@@ -127,8 +127,8 @@ for (const version of ['v22.23.4', 'v24.22.2', '']) {
   });
 }
 
-test('Bun PATH export preserves setup Node for the actual sealing assertion', t => {
-  const first = job(source, 'gate');
+test('Bun PATH export preserves setup Node in the isolated combined-consumer job', t => {
+  const first = job(source, 'replay-consumers');
   const start = first.indexOf('      - name: Install pinned Bun for standalone CLI loader proof\n');
   assert(start >= 0);
   const end = first.indexOf('      - name:', start + 1);
@@ -172,4 +172,14 @@ esac
   const withoutPin = check(paths.filter(path => path !== pinned));
   assert.equal(withoutPin.status, 1, withoutPin.stdout + withoutPin.stderr);
   assert.match(withoutPin.stdout, /requires Node v22; found v24\.22\.2/);
+});
+
+test('both native consumer jobs execute the wasm-free mobile suite through an existing script', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../../packages/safe-cex-react-native/package.json', import.meta.url)));
+  const commands = [...source.matchAll(/corepack yarn workspace @tealstreet\/safe-cex-react-native (\S+)/g)];
+  assert.equal(commands.length, 2, 'retain mobile verification in both consumer jobs');
+  for (const [, command] of commands) {
+    assert.equal(command, 'test-unit', 'mobile consumes delegated frames with WebAssembly unavailable');
+    assert.ok(Object.hasOwn(pkg.scripts, command), `missing mobile test script ${command}`);
+  }
 });

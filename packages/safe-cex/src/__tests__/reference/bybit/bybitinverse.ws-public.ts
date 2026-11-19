@@ -1,3 +1,4 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { BybitInverseExchange } from './bybitinverse.exchange';
 
 import chunk from 'lodash/chunk';
@@ -7,25 +8,17 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import { getBybitWebSocketOptions } from '../../../exchanges/bybit/bybit.site';
+import { BASE_WS_URL, INTERVAL } from '../../../exchanges/bybit/bybit.types';
 import { resolveTransportRouting } from '../../../transport/registry';
-import { WsDirectFallback } from '../../../utils/wsDirectFallback';
-import {
-  Candle,
-  OHLCVOptions,
-  OHLCVSOptions,
-  OrderBook,
-  OrderSide,
-  Ticker,
-  Timeframe,
-  Writable,
-} from '../../../types';
+import { Candle, OHLCVOptions, OHLCVSOptions, OrderBook, OrderSide, Ticker, Timeframe, Writable } from '../../../types';
 import { createLiveCandleStart } from '../../../utils/calendarCandles';
 import { inverseObj } from '../../../utils/inverseObj';
 import { calcOrderBookTotal } from '../../../utils/orderbook';
 import { updateOrderBookByPrice } from '../../../utils/updateOrderBook';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { getBybitWebSocketOptions } from '../../../exchanges/bybit/bybit.site';
-import { BASE_WS_URL, INTERVAL } from '../../../exchanges/bybit/bybit.types';
+import { WsDirectFallback } from '../../../utils/wsDirectFallback';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 // Module-level cache. `inverseObj` runs `Object.entries` + a quadratic
 // spread-reduce; doing it per kline frame inside the listenOHLCVs
@@ -93,18 +86,17 @@ export class BybitInversePublicWebsocket extends BaseWebSocket<BybitInverseExcha
     if (!this.isDisposed) {
       const route = resolveTransportRouting(this.parent.name, this.parent.options).wsPublic;
       const directUrl = BASE_WS_URL.public['inverse'][this.parent.options.testnet ? 'testnet' : 'livenet'];
-      const baseUrl = this.directFallback.resolveUrl(route.tunnelled && route.host ? route.host : directUrl, route.fallback);
+      const baseUrl = this.directFallback.resolveUrl(
+        route.tunnelled && route.host ? route.host : directUrl,
+        route.fallback,
+      );
       if (baseUrl === route.fallback) {
         try {
           this.parent.emitter.emit('grafana-info', 'Using tealstreet bybit public inverse proxy');
         } catch (_e) {}
       }
       const webSocketOptions = this.parent.isDemo ? undefined : getBybitWebSocketOptions(this.parent.options);
-      this.ws = this.createWebsocket(
-        baseUrl + '?requestId=' + nanoid(),
-        undefined,
-        webSocketOptions,
-      );
+      this.ws = this.createWebsocket(baseUrl + '?requestId=' + nanoid(), undefined, webSocketOptions);
 
       this.ws.addEventListener('open', this.onOpen);
       this.ws.addEventListener('message', this.onMessage);
@@ -263,7 +255,15 @@ export class BybitInversePublicWebsocket extends BaseWebSocket<BybitInverseExcha
       update.quoteVolume = parseFloat(d.turnover24h);
     }
 
-    this.parent.store.updateTicker(ticker, update);
+    (() => {
+      const target = ticker;
+      const changes: Partial<StoreData['tickers'][number]> = update;
+      return applyReferenceFixture(
+        this.parent.store,
+        { tickers: this.parent.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+        this.parent.store.markets.map((row) => row.symbol),
+      );
+    })();
   };
 
   listenOHLCVs = (

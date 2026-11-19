@@ -1296,3 +1296,134 @@ test('observation sections preserve format 1 and are ignorable by the legacy sec
   assert.equal(numericFrame([tickerTable(100)]).tickerObservations(), undefined);
   assert.throws(() => numericFrame([{ ...observation, length: 24, write() {} }]).tickerObservations(), /observation length/);
 });
+
+// Independent encoder for the documented native section tags. Rust's encoder
+// has byte assertions and runs this reader over its own emitted frames too.
+function nativePayload(value) {
+  const bytes = [];
+  const u32 = (n) => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, n, true); bytes.push(...b); };
+  const text = (s) => { u32(s.length); for (let i = 0; i < s.length; i++) bytes.push(s.charCodeAt(i) & 255, s.charCodeAt(i) >>> 8); };
+  const write = (v) => {
+    if (v === undefined) bytes.push(0);
+    else if (v === null) bytes.push(1);
+    else if (v === false) bytes.push(2);
+    else if (v === true) bytes.push(3);
+    else if (typeof v === 'number') { bytes.push(4); const b = new Uint8Array(8); new DataView(b.buffer).setFloat64(0, v, true); bytes.push(...b); }
+    else if (typeof v === 'string') { bytes.push(5); text(v); }
+    else if (Array.isArray(v)) { bytes.push(6); u32(v.length); v.forEach(write); }
+    else { bytes.push(7); const keys = Object.keys(v); u32(keys.length); for (const k of keys) { text(k); write(v[k]); } }
+  };
+  write(value);
+  const payload = new Uint8Array(Math.ceil((bytes.length + 4) / 8) * 8);
+  new DataView(payload.buffer).setUint32(0, bytes.length, true);
+  payload.set(bytes, 4);
+  return payload;
+}
+function nativeSection(kind, value) {
+  const payload = nativePayload(value);
+  return { kind, length: payload.length, write(view, offset) { new Uint8Array(view.buffer, offset, payload.length).set(payload); } };
+}
+
+test('all native store sections survive transfer with explicit empty replacements', () => {
+  const values = [
+    ['SOCKET_HEALTH', 'socketHealth', { publicHealthy: true, privateHealthy: false, publicInitialized: true, privateInitialized: true, privateCloseCode: 1006 }],
+    ['ACTIVE_CHASERS', 'activeChasers', [{ id: 'chase-1', symbol: 'BTCUSDT', size: 3, side: 'buy', currentOrderIds: ['o-1'] }]],
+    ['ACTIVE_TWAPS', 'activeTWAPs', [{ id: 'twap-1', accountName: '账户', status: 'paused' }]],
+    ['ORDERS_RISK', 'ordersRisk', { 'o-1': [{ orderPnl: -12.5, orderLineText: 'UPnL: -12.50', fee: 0.25 }] }],
+    ['DISPLAYED_POSITIONS', 'displayedPositions', [{ id: 'p-1', account: '账户', ticker: { last: 100 }, oneMinUpnl: 8, fiveMinUpnl: -3 }]],
+    ['DISPLAYED_MARGIN', 'displayedMargin', { longExposure: null, shortExposure: 120, totalNotional: null }],
+    ['BALANCE_INFO', 'balanceInfo', { lighterAccountLimits: { user_tier_name: 'premium' }, raw: [null, false, 'é'] }],
+  ];
+  const frame = numericFrame(values.map(([key, , value]) => nativeSection(SECTION[key], value)));
+  for (const [, accessor, value] of values) assert.deepEqual(frame[accessor](), value);
+  const absent = numericFrame([]);
+  for (const [, accessor] of values) assert.equal(absent[accessor](), undefined);
+  const cleared = numericFrame([
+    nativeSection(SECTION.ACTIVE_CHASERS, []), nativeSection(SECTION.ACTIVE_TWAPS, []),
+    nativeSection(SECTION.ORDERS_RISK, {}), nativeSection(SECTION.DISPLAYED_POSITIONS, []), nativeSection(SECTION.BALANCE_INFO, null),
+  ]);
+  assert.deepEqual(cleared.activeChasers(), []);
+  assert.deepEqual(cleared.activeTWAPs(), []);
+  assert.deepEqual(cleared.ordersRisk(), {});
+  assert.deepEqual(cleared.displayedPositions(), []);
+  assert.equal(cleared.balanceInfo(), null);
+});
+
+test('native venue info preserves UTF16, nonfinite numbers, signed zero and own undefined safely', () => {
+  const info = { text: '\ud800\udc00\ud800', zero: -0, nan: NaN, inf: Infinity, missing: undefined };
+  Object.defineProperty(info, '__proto__', { value: { polluted: true }, enumerable: true });
+  const frame = numericFrame([nativeSection(SECTION.BALANCE_INFO, info)]);
+  const read = frame.balanceInfo();
+  assert.deepEqual(read, info);
+  assert.equal(Object.getPrototypeOf(read), Object.prototype);
+  assert.equal(Object.prototype.polluted, undefined);
+  assert.ok(Object.hasOwn(read, 'missing'));
+  assert.ok(Object.is(read.zero, -0));
+});
+
+test('native store sections reject malformed lengths, tags, counts, padding and duplicates', () => {
+  const kind = SECTION.ACTIVE_CHASERS;
+  const fixture = () => numericFrame([nativeSection(kind, [])]);
+  const invalid = (mutate, pattern) => {
+    const frame = fixture(); mutate(frame.view); assert.throws(() => frame.activeChasers(), pattern);
+  };
+  invalid((v) => v.setUint32(24, 500, true), /truncated section/);
+  invalid((v) => v.setUint8(28, 99), /invalid native store tag/);
+  invalid((v) => v.setUint32(29, 0xffffffff, true), /array length/);
+  invalid((v) => v.setUint32(24, 1, true), /invalid native store section length/);
+  invalid((v) => v.setUint8(39, 1), /padding/);
+  assert.throws(() => numericFrame([nativeSection(kind, []), nativeSection(kind, [])]).activeChasers(), /duplicate native store section/);
+  const badRevision = nativeSection(kind, []); badRevision.revision = 2;
+  assert.throws(() => numericFrame([badRevision]), /unsupported section/);
+  const section = nativeSection(SECTION.BALANCE_INFO, 'x');
+  const frame = numericFrame([section]); frame.view.setUint32(29, 100, true);
+  assert.throws(() => frame.balanceInfo(), /truncated native store value/);
+});
+
+test('native message-handler statistics carry snapshot and topic-update semantics without wasm', () => {
+  const strings = new Uint8Array(stringFrame(['ticker.BTC', 'orders']).buffer).slice(24);
+  const stringSection = { kind: SECTION.STRINGS, length: Math.ceil(strings.length / 8) * 8,
+    write(view, offset) { new Uint8Array(view.buffer, offset, strings.length).set(strings); } };
+  const statsSection = (replace, rows) => ({ kind: SECTION.MESSAGE_HANDLER_STATS, length: 8 + rows.length * 24,
+    write(view, offset) {
+      view.setUint32(offset, rows.length, true); view.setUint32(offset + 4, replace ? 1 : 0, true);
+      rows.forEach(([group, topic, flags, age], i) => {
+        const at = offset + 8 + i * 24;
+        view.setUint32(at, group, true); view.setUint32(at + 4, topic, true);
+        view.setUint32(at + 8, flags, true); view.setFloat64(at + 16, age, true);
+      });
+    } });
+  const table = numericFrame([stringSection, statsSection(true, [[0, 0, 3, 5.5], [3, 1, 1, NaN]])]).messageHandlerStats();
+  assert.equal(table.replace, true); assert.equal(table.count, 2);
+  assert.equal(table.topic(0), 'ticker.BTC'); assert.equal(table.group(0), 0);
+  assert.equal(table.subscribed(0), true); assert.equal(table.active(0), true); assert.equal(table.ageMs(0), 5.5);
+  assert.equal(table.topic(1), 'orders'); assert.equal(table.group(1), 3);
+  assert.equal(table.subscribed(1), true); assert.equal(table.active(1), false); assert.ok(Number.isNaN(table.ageMs(1)));
+  const removal = numericFrame([stringSection, statsSection(false, [[3, 1, 0, NaN]])]).messageHandlerStats();
+  assert.equal(removal.replace, false); assert.equal(removal.subscribed(0), false);
+  assert.equal(numericFrame([]).messageHandlerStats(), undefined);
+  const shared = statsSection(true, [[0, 0, 3, 12]]);
+  shared.kind = SECTION.PUBLIC_MESSAGE_HANDLER_STATS;
+  const publicTable = numericFrame([stringSection, shared]).publicMessageHandlerStats();
+  assert.equal(publicTable.topic(0), 'ticker.BTC');
+  assert.equal(publicTable.ageMs(0), 12);
+  const privateShared = statsSection(true, [[3, 1, 3, 12]]);
+  privateShared.kind = SECTION.PUBLIC_MESSAGE_HANDLER_STATS;
+  assert.throws(() => numericFrame([stringSection, privateShared]).publicMessageHandlerStats(), /invalid message handler stats row/);
+  for (const row of [[4, 0, 1, NaN], [0, 0, 2, 1], [0, 0, 3, -1]]) {
+    assert.throws(() => numericFrame([stringSection, statsSection(false, [row])]).messageHandlerStats(), /invalid message handler stats row/);
+  }
+});
+
+test('native UTF-8 revision decodes scalar text and rejects invalid bytes', () => {
+  const bytes = new TextEncoder().encode('账户🌊');
+  const section = { kind: SECTION.BALANCE_INFO, revision: 1, length: Math.ceil((9 + bytes.length) / 8) * 8,
+    write(view, at) {
+      view.setUint32(at, 5 + bytes.length, true); view.setUint8(at + 4, 5);
+      view.setUint32(at + 5, bytes.length, true); new Uint8Array(view.buffer, at + 9, bytes.length).set(bytes);
+    } };
+  const frame = numericFrame([section]);
+  assert.equal(frame.balanceInfo(), '账户🌊');
+  frame.view.setUint8(33, 0xff);
+  assert.throws(() => frame.balanceInfo(), /encoded data|encoding|UTF-8/);
+});
