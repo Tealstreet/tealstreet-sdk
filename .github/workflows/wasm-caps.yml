@@ -1,6 +1,8 @@
-# Generated WASM caps (rule 17). After each master Rust SDK run, measure every
-# sealed family artifact and the combined package of that run and raise any cap
+# Generated WASM caps (rule 17). After each master Rust SDK run, measure the
+# artifacts from successful family jobs and the combined package and raise any cap
 # whose reserve fell under 10 KiB: cap = max(cap, ceil((measured + 10 KiB) / KiB)).
+# Master overruns stay red and upload no family artifact for this bot to absorb;
+# failed non-master builds may retain sealed artifacts for diagnosis only.
 # Caps are never lowered. Raised caps go to the bot-owned branch bot/wasm-caps and
 # the job summary; this workflow calls no PR API. Actions may not create or approve
 # PRs here (coordinator decision on #3686), so Sam's fleet-watch opens the PR with
