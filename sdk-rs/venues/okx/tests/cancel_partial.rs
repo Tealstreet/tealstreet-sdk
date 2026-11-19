@@ -173,6 +173,16 @@ fn an_already_gone_row_in_a_partial_batch_still_cancels_the_algo_orders() {
         Some(Ok("[]")),
         "every target is cancelled or already gone: {out:?}"
     );
+    // As on master, completion restores the optimistic status; only the order
+    // stream or census publishes Canceled (`replay correctness (okx)` pins this).
+    assert!(
+        e.store()
+            .orders()
+            .iter()
+            .all(|o| o.status == OrderStatus::Open),
+        "{:?}",
+        e.store().orders()
+    );
 }
 
 #[test]

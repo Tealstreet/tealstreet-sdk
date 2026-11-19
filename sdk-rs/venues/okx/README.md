@@ -129,8 +129,10 @@ whenever one limit row answered `51400`. A cancel job now settles such rows
 individually: `0` is cancelled, `51400` is already gone, and other definitive
 codes are refused. Then the next batch goes. Once every batch has run, a job with
 refused rows fails with `OKX left N of M orders open: <id>: <reason> (code X); ...`
-and per-order `elements` across all batches. Only refused rows revert their
-optimistic status. With no refused rows the command completes. Rows that are
+and per-order `elements` across all batches. Optimistic `Canceling` rows revert
+on completion exactly as before; the order stream publishes the final state.
+Only `0`/`1`/`2` envelopes settle per row; any other nonzero envelope stops.
+With no refused rows the command completes. Rows that are
 unproven, identity-mismatched or timed out (`51412`, etc.) still stop as Unknown,
 and nothing is retried. Pins: `tests/cancel_partial.rs`.
 

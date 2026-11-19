@@ -2053,6 +2053,7 @@ impl Okx {
         // per row, whatever the envelope code: OKX answers a partial batch `2`,
         // and stopping there left every later algo cancel unsent (AGT-69).
         let cancel_rows = continue_cancel_errors
+            && matches!(envelope.code, "0" | "1" | "2")
             && matches!(
                 step.path,
                 "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
@@ -2128,16 +2129,6 @@ impl Okx {
                 &requested,
             );
             job.effective |= acks.iter().any(|a| matches!(a.s_code, "" | "0"));
-            // An accepted cancel keeps Canceling; refused and already-gone (51400,
-            // possibly filled) rows revert and reconcile from the read.
-            let settled: HashSet<&str> = acks
-                .iter()
-                .zip(&requested)
-                .filter(|(ack, _)| matches!(ack.s_code, "" | "0"))
-                .map(|(_, target)| target.id())
-                .collect();
-            job.optimistic
-                .retain(|(id, _)| !settled.contains(native_id(id)));
         } else {
             job.effective = true;
         }

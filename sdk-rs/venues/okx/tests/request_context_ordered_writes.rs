@@ -592,10 +592,10 @@ fn native_code_zero_all_absent_cancels_continue_then_finish_empty_without_errors
 }
 
 #[test]
-fn native_code_one_all_refused_cancel_continues_and_restores_refused_status() {
+fn native_code_one_all_refused_cancel_continues_and_restores_optimistic_status() {
     // AGT-69 (fix/agt-69-okx-partial-cancel): was "..._stops_...". A refused code-1
-    // batch no longer withholds the next batch; order 21 is still cancelled and
-    // only the refused rows return to Open.
+    // batch no longer withholds the next batch, so order 21 is still cancelled.
+    // Every row returns to Open until the stream confirms, as before.
     let mut engine = trading_engine();
     let ids: Vec<_> = (1..=21).map(|i| i.to_string()).collect();
     for id in &ids {
@@ -636,15 +636,9 @@ fn native_code_one_all_refused_cancel_continues_and_restores_refused_status() {
     );
     let output = prepared(&mut engine, 7.);
     assert!(
-        ids[..20]
-            .iter()
+        ids.iter()
             .all(|id| engine.store().order(id).unwrap().status == OrderStatus::Open),
-        "refused rows return to Open"
-    );
-    assert_eq!(
-        engine.store().order("21").unwrap().status,
-        OrderStatus::Canceling,
-        "an accepted cancel is not reverted"
+        "optimistic status is restored; the stream publishes the final state"
     );
     assert!(
         !output
@@ -665,6 +659,11 @@ fn native_code_one_all_refused_cancel_continues_and_restores_refused_status() {
     assert!(
         errors[0].message.contains("OKX left 20 of 21 orders open"),
         "{errors:?}"
+    );
+    assert_ne!(
+        errors[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected),
+        "order 21 was cancelled: a mixed result is never a whole rejection"
     );
     assert!(!output.iter().any(|a| matches!(
         a,
@@ -927,6 +926,11 @@ fn a_managed_code_one_cancel_settles_rows_then_continues() {
     assert!(
         errors[0].message.contains("OKX left 20 of 21 orders open"),
         "{errors:?}"
+    );
+    assert_ne!(
+        errors[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected),
+        "order 21 was cancelled: a mixed result is never a whole rejection"
     );
 }
 
