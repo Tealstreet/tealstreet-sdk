@@ -262,23 +262,32 @@ fn unrelated_orders_trigger_source_is_not_required_for_proven_standalone_put_bac
     assert_applied_restored_partial_failure(&h);
 }
 
+/// AGT-34: was `missing_unrelated_trigger_source_does_not_waive_peer_lineage`, which
+/// pinned NO put-back without lineage and so left no stop. Lineage now only words it.
 #[test]
-fn missing_unrelated_trigger_source_does_not_waive_peer_lineage() {
+fn missing_peer_lineage_still_puts_the_old_stop_back_as_standalone() {
     let mut h = replacement_after_peer_census(true);
     h.respond(
         "/v5/position/trading-stop",
         200,
         r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
     );
-    assert!(!h.has_request("/v5/position/trading-stop"));
+    h.advance(200.0);
+    let restore = h.take("/v5/position/trading-stop");
+    let payload: serde_json::Value = serde_json::from_str(body(&restore)).unwrap();
+    assert_eq!(payload["stopLoss"], "90");
+    h.reply(restore.id, 200, OK);
     assert!(h.notices.iter().any(|notice| matches!(notice,
         safe_cex_engine::Notice::CommandFailed { command:91, error }
-        if error.protection == Some(safe_cex_engine::error::Protection::Unprotected)
+        if error.protection == Some(safe_cex_engine::error::Protection::Restored)
+            && error.message.contains("standalone")
     )));
 }
 
+/// AGT-34: was `..._never_authorizes_replacement`. The missing source still fails the
+/// proof, but after the landed cancel the replacement goes out instead of no stop.
 #[test]
-fn cancelled_target_without_its_trigger_source_never_authorizes_replacement() {
+fn cancelled_target_without_its_trigger_source_fails_the_proof_but_sends_the_replacement() {
     let mut h = ready(PROFILES[0]);
     seed(
         &mut h,
@@ -295,10 +304,14 @@ fn cancelled_target_without_its_trigger_source_never_authorizes_replacement() {
     amend(&mut h, Some(95.0), None);
     h.respond(PROFILES[0].cancel_path(), 200, r#"{"retCode":0,"result":{"list":[{"orderId":"partial"}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
     page(&mut h, "&orderId=partial", vec![terminal]);
-    assert_eq!(h.unknown, vec![91]);
-    assert!(
-        !h.requests
-            .iter()
-            .any(|r| r.method == safe_cex_engine::Method::Post)
-    );
+    h.advance(200.0);
+    assert!(h.unknown.is_empty());
+    let posts: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.method == safe_cex_engine::Method::Post)
+        .map(|r| r.url.clone())
+        .collect();
+    assert_eq!(posts.len(), 1, "{posts:?}");
+    assert!(posts[0].contains("/v5/position/trading-stop"), "{posts:?}");
 }

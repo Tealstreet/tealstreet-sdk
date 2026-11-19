@@ -1,7 +1,7 @@
 //! Native cancellation and standalone provenance for a Partial protective edit.
 use super::{Call, Order, OrderType, PartialStopGuard, Planned, StopTriggerType};
 use crate::sign::Query;
-use safe_cex_engine::{ErrorKind, Outcome, Response, Store, VenueError};
+use safe_cex_engine::{Outcome, Response, Store, VenueError};
 use serde::Deserialize;
 
 mod readiness;
@@ -12,6 +12,8 @@ const TARGET_POLL_DELAY_MS: u32 = 100;
 /// The wait before each target history read: about 5 s in all for history to index the cancel.
 const HISTORY_POLL_DELAYS_MS: [u32; 6] = [250, 500, 750, 1_000, 1_250, 1_500];
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+/// Proof reads lost in transport that are read again before the plan gives up.
+const LOST_PROOF_READS: u8 = 3;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Axis {
@@ -249,6 +251,10 @@ pub(super) struct Flow {
     target_reads: u8,
     history_reads: u8,
     history_window: Option<(u64, u64)>,
+    /// A proof read failed after the cancel landed: the edit is placed anyway.
+    unproven: bool,
+    /// Lost proof reads already read again.
+    lost_reads: u8,
 }
 
 pub(super) enum Observation {
@@ -274,13 +280,12 @@ impl ProofFailure {
         }
     }
 
-    pub(super) fn error(&self) -> VenueError {
-        VenueError::new(format!(
-            "The protective cancel could not be confirmed from native orders; check Open Orders before retrying [proof: {}]",
+    /// Told to the user while the replacement still goes out.
+    pub(super) fn warning(&self, symbol: &str) -> String {
+        format!(
+            "Bybit did not confirm that the old {symbol} order was cancelled, so its replacement is placed anyway; check Open Orders for a duplicate [proof: {}]",
             self.reason
-        ))
-        .kind(ErrorKind::Network)
-        .outcome(Outcome::Unknown)
+        )
     }
 }
 
@@ -314,10 +319,6 @@ impl Flow {
         self.complete = false;
     }
 
-    pub(super) fn history_done(&self) -> bool {
-        self.history_done
-    }
-
     pub(super) fn proof(&self, axis: Axis) -> Planned {
         proof(&self.guard.category, &self.guard.original, axis)
     }
@@ -330,6 +331,9 @@ impl Flow {
             }
             _ => TARGET_POLL_DELAY_MS,
         }
+    }
+    pub(super) fn symbol(&self) -> &str {
+        &self.guard.symbol
     }
     pub(super) fn target_id(&self) -> &str {
         &self.guard.original.id
@@ -345,7 +349,23 @@ impl Flow {
             target_reads: 0,
             history_reads: 0,
             history_window: None,
+            unproven: false,
+            lost_reads: 0,
         }
+    }
+
+    /// Never leave the position with neither stop: once the cancel has landed, a
+    /// failed proof stops proving and lets the replacement (or put-back) go out.
+    pub(super) fn abandon_proof(&mut self) {
+        self.unproven = true;
+        self.history_done = true;
+        self.complete = false;
+    }
+
+    /// Whether a proof read lost in transport may be read again.
+    pub(super) fn read_lost_proof_again(&mut self) -> bool {
+        self.lost_reads += 1;
+        self.lost_reads <= LOST_PROOF_READS
     }
 
     pub(super) fn observe(
@@ -373,7 +393,10 @@ impl Flow {
             } else {
                 Axis::TargetHistory
             };
-            if page.list.is_empty() && page.next_page_cursor.is_empty() {
+            // AGT-34: this read is filtered by orderId, which names at most one order, so
+            // `nextPageCursor` is only a page token. Bybit returns one beside the single
+            // row; the former `target-cursor` refusal left a live position unprotected.
+            if page.list.is_empty() {
                 if axis == Axis::Target {
                     return Ok(Observation::Retry(retry));
                 }
@@ -385,9 +408,6 @@ impl Flow {
             }
             if page.list.len() != 1 {
                 return Err(failed(&format!("target-len={}", page.list.len())));
-            }
-            if !page.next_page_cursor.is_empty() {
-                return Err(failed("target-cursor"));
             }
             let row = page.list.pop().unwrap();
             if axis == Axis::Target
@@ -441,14 +461,28 @@ impl Flow {
             })
     }
 
+    /// Why the replacement would be refused at release; checked before it is sent.
+    pub(super) fn replacement_refusal(&self, store: &Store, now: f64) -> Option<String> {
+        self.validate(store, now, false).err()?;
+        let raw = self
+            .guard
+            .validate_order(store, true)
+            .and_then(|()| self.guard.validate(store, now));
+        Some(raw.err().map_or_else(
+            || "the replacement could not be placed".to_owned(),
+            |error| error.message,
+        ))
+    }
+
     pub(super) fn validate(
         &self,
         store: &Store,
         now: f64,
         restoring: bool,
     ) -> Result<(), VenueError> {
-        if self.terminal.is_none() || !self.history_done || (restoring && !self.restorable()) {
-            return Err(VenueError::new("Protection cannot be re-placed without native cancellation and lineage proof; check Open Orders").outcome(Outcome::NotSent));
+        // AGT-34: lineage no longer gates the put-back; a cancelled stop always goes back.
+        if !self.unproven && (self.terminal.is_none() || !self.history_done) {
+            return Err(VenueError::new("Protection cannot be re-placed without native cancellation proof; check Open Orders").outcome(Outcome::NotSent));
         }
         let validation = self.guard.validate_order(store, true).and_then(|()| {
             if restoring {

@@ -1226,16 +1226,6 @@ impl BybitLinear {
                             run.queue.pop_front();
                         }
                     }
-                    if matches!(axis, partial::Axis::Live | partial::Axis::History)
-                        && !run.partial.as_ref().unwrap().restorable()
-                        && run.partial.as_ref().unwrap().history_done()
-                    {
-                        for leg in &mut run.queue {
-                            if let Call::PartialStop { restore, .. } = &mut leg.planned.call {
-                                *restore = None;
-                            }
-                        }
-                    }
                     Decision::Next(Vec::new())
                 }
                 Err(failure) => {
@@ -1245,8 +1235,14 @@ impl BybitLinear {
                         "partial.proof_failed",
                         format!("[proof-diag] {}", failure.reason),
                     );
-                    let _ = cx.inherit_plan_uncertainty(&run.plan);
-                    Decision::Failed(failure.error())
+                    // AGT-34: the cancel has landed, so stopping here leaves neither stop.
+                    // Skip the remaining proof and send the replacement (put-back on refusal).
+                    let flow = run.partial.as_mut().unwrap();
+                    flow.abandon_proof();
+                    cx.command_error(id, failure.warning(flow.symbol()));
+                    run.queue
+                        .retain(|leg| !matches!(leg.planned.call, Call::PartialProof(_)));
+                    Decision::Next(Vec::new())
                 }
             }
         } else {
@@ -1274,7 +1270,7 @@ impl BybitLinear {
         // open), so the already-gone mark has served.
         if !matches!(decision, Decision::Resend(_))
             && let Call::PartialStop {
-                restore: Some((replaced, _)),
+                restore: (replaced, _),
                 ..
             } = &active.leg.planned.call
         {
@@ -1383,12 +1379,19 @@ impl BybitLinear {
                     } else {
                         "stop"
                     };
+                    // Without native lineage the put-back may have lost a TP/SL pairing.
+                    let lineage = run.partial.as_ref().is_some_and(|flow| flow.restorable());
+                    let put_back = if lineage {
+                        "put back as a new order"
+                    } else {
+                        "put back as a new standalone order; check Open Orders"
+                    };
                     let presented = VenueError {
                         kind: Some(safe_cex_engine::error::ErrorKind::Rejected),
                         outcome: Some(Outcome::Rejected),
                         protection: Some(safe_cex_engine::error::Protection::Restored),
                         ..VenueError::new(format!(
-                            "Your {symbol} {what} is unchanged: its replacement was refused, so the old {what} was put back as a new order: {refusal}"
+                            "Your {symbol} {what} is unchanged: its replacement was refused, so the old {what} was {put_back}: {refusal}"
                         ))
                     };
                     let _ = cx.finish_plan_call(&plan, &active.slot, &active.context);
@@ -1397,6 +1400,7 @@ impl BybitLinear {
                     return;
                 }
                 run.ids.extend(ids);
+                self.put_back_instead_of_a_refused_replacement(cx, id, run);
                 let continued = if run.partial.is_some() && !run.queue.is_empty() {
                     let next = &run.queue.front().unwrap().planned.call;
                     let operation = if matches!(next, Call::PartialProof(_)) {
@@ -1622,8 +1626,7 @@ impl BybitLinear {
                 };
                 let body = match &active.leg.planned.call {
                     Call::PartialStop {
-                        restore: Some((_, body)),
-                        ..
+                        restore: (_, body), ..
                     } => body.clone(),
                     _ => unreachable!("only a Partial stop restores"),
                 };
@@ -1661,6 +1664,65 @@ impl BybitLinear {
             }
         }
         self.continue_ordinary(cx, id, entry);
+    }
+
+    /// AGT-34: a replacement the release guard would refuse leaves the position with
+    /// neither stop, and a vetoed call cannot continue the plan. Decide before sending:
+    /// the old stop goes back instead when its own guard passes.
+    fn put_back_instead_of_a_refused_replacement(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        id: CommandId,
+        run: &mut Run,
+    ) {
+        let (Some(flow), Some(leg)) = (run.partial.as_ref(), run.queue.front()) else {
+            return;
+        };
+        let Call::PartialStop {
+            stop,
+            restore: (replaced, body),
+        } = &leg.planned.call
+        else {
+            return;
+        };
+        let Some(refusal) = flow.replacement_refusal(cx.store, cx.now) else {
+            return;
+        };
+        if self.trading.gone_before_cancel.contains(replaced)
+            || flow.validate(cx.store, cx.now, true).is_err()
+        {
+            return;
+        }
+        let call = Call::RestorePartialStop {
+            stop: stop.clone(),
+            refusal: refusal.clone(),
+        };
+        let body = body.clone();
+        let replaced_leg = run.queue.pop_front().expect("checked front");
+        let mut elements = Vec::new();
+        if let Some(journal) = run.writes.as_mut() {
+            let refused = VenueError::new(refusal).outcome(Outcome::NotSent);
+            let recorded = write_plan::record_failure(journal, &replaced_leg.elements, refused)
+                .and_then(|()| write_plan::append_restore(journal));
+            match recorded {
+                Ok(index) => elements.push(index),
+                Err(error) => {
+                    cx.command_error(id, format!("Bybit restore reporting unavailable: {error}"))
+                }
+            }
+        }
+        run.queue.push_front(Leg {
+            planned: Planned {
+                receipts: Vec::new(),
+                path: "/v5/position/trading-stop",
+                body,
+                call,
+            },
+            intent: LegIntent::Setting,
+            lot: None,
+            elements,
+            effects: replaced_leg.effects,
+        });
     }
 
     /// This category's order read has landed. A plan cannot seal inside another
@@ -1812,6 +1874,37 @@ impl BybitLinear {
             self.park(request.command, entry);
             return;
         };
+        // AGT-34: a proof read lost after the cancel landed is read again, so the
+        // edit still reaches its replacement or put-back.
+        if let Call::PartialProof(axis) = active.leg.planned.call
+            && let Some(flow) = run.partial.as_mut()
+            && flow.read_lost_proof_again()
+        {
+            let planned = flow.proof(axis);
+            let delay_ms = flow.poll_delay_ms(axis);
+            let (slot, context) = (active.slot.clone(), active.context.clone());
+            if cx
+                .continue_serial_plan_after(
+                    &run.plan,
+                    &slot,
+                    &context,
+                    delay_ms,
+                    partial_call(Operation::Read, 1),
+                )
+                .is_ok()
+            {
+                run.active = None;
+                run.queue.push_front(Leg {
+                    planned,
+                    intent: LegIntent::Command,
+                    lot: None,
+                    elements: Vec::new(),
+                    effects: Vec::new(),
+                });
+                self.park(request.command, entry);
+                return;
+            }
+        }
         if let Some(report) = &mut run.cancellations {
             let mut error = error;
             // Signing refusals retain NotSent; released transport failures are Unknown.
@@ -2200,7 +2293,7 @@ impl BybitLinear {
                 Verdict::Refused(_) | Verdict::RefusedResend(_),
                 Call::PartialStop {
                     stop,
-                    restore: Some((replaced, _)),
+                    restore: (replaced, _),
                 },
             ) if !self.trading.gone_before_cancel.contains(replaced) => Decision::Restore(
                 Call::RestorePartialStop {
@@ -2209,22 +2302,6 @@ impl BybitLinear {
                 },
                 error,
             ),
-            (
-                Verdict::Refused(_) | Verdict::RefusedResend(_),
-                Call::PartialStop {
-                    stop: (symbol, side, kind),
-                    restore: None,
-                },
-            ) => {
-                let mut error = error;
-                error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
-                error.message = format!(
-                    "{}: the replacement was refused and standalone provenance is unproven; re-place protection on Bybit. {}",
-                    safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, false),
-                    error.message
-                );
-                Decision::Failed(error)
-            }
             (Verdict::Refused(_), Call::PlaceBatch { fallback })
                 if code == 10001 && !fallback.is_empty() =>
             {

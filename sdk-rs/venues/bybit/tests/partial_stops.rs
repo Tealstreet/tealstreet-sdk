@@ -2096,6 +2096,8 @@ fn partial_cancel_ack_waits_for_a_target_terminal_read_before_any_create() {
     assert!(proof.url.contains("orderId=partial"), "{}", proof.url);
 }
 
+/// AGT-34: these rows still never PROVE the cancellation (the store keeps the order
+/// open), but the pin no longer requires stopping with no stop: the replacement goes out.
 #[test]
 fn partial_absent_live_filled_or_mismatched_native_rows_never_prove_cancellation() {
     for refusal in [
@@ -2148,15 +2150,30 @@ fn partial_absent_live_filled_or_mismatched_native_rows_never_prove_cancellation
         h.respond("&orderId=partial", 200, &answer);
         // Three realtime reads, then the bounded history polls for an absent stop.
         for _ in 0..8 {
-            if h.result(91).is_some() {
+            h.advance(1_500.0);
+            if !h.has_request("&orderId=partial") {
                 break;
             }
-            assert!(!h.has_request("/v5/position/trading-stop"));
-            h.advance(1_500.0);
+            set_reference_prices(&mut h, 100.0, 100.0);
             h.respond("&orderId=partial", 200, &answer);
         }
-        assert!(!h.has_request("/v5/position/trading-stop"), "{refusal}");
-        assert!(h.unknown.contains(&91), "{refusal}: {:?}", h.notices);
+        h.advance(200.0);
+        assert!(
+            h.has_request("/v5/position/trading-stop"),
+            "{refusal}: {:?}",
+            h.result(91)
+        );
+        assert_ne!(
+            h.engine.store().order("partial").unwrap().status,
+            OrderStatus::Canceled,
+            "{refusal}"
+        );
+        h.respond("/v5/position/trading-stop", 200, OK);
+        assert!(
+            h.result(91).is_some_and(Result::is_ok),
+            "{refusal}: {:?}",
+            h.notices
+        );
     }
 }
 
@@ -2200,6 +2217,8 @@ fn partial_cancellation_poll_waits_for_native_terminal_evidence() {
     assert!(h.result(91).is_some_and(|result| result.is_ok()));
 }
 
+/// AGT-34: a lost proof read is now read again (three times); only when every read is
+/// lost does the edit end Unknown, still without claiming protection either way.
 #[test]
 fn partial_proof_transport_loss_never_creates_or_claims_protection() {
     let profile = PROFILES[0];
@@ -2215,11 +2234,18 @@ fn partial_proof_transport_loss_never_creates_or_claims_protection() {
     );
     amend(&mut h, Some(95.0), None);
     h.respond(profile.cancel_path(), 200, r#"{"retCode":0,"result":{"orderId":"partial"},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
-    let request = h.take("&orderId=partial");
-    h.event(Event::HttpFailed {
-        request: request.id,
-        error: "lost native cancellation proof",
-    });
+    for lost in 0..4 {
+        if lost > 0 {
+            h.advance(200.0);
+        }
+        let request = h.take("&orderId=partial");
+        h.event(Event::HttpFailed {
+            request: request.id,
+            error: "lost native cancellation proof",
+        });
+    }
+    h.advance(200.0);
+    assert!(!h.has_request("&orderId=partial"));
     assert!(!h.has_request("/v5/position/trading-stop"));
     let error = h
         .notices
@@ -2262,10 +2288,12 @@ fn partial_edits_refuse_filled_or_unprotected_orders_before_cancel() {
     }
 }
 
+/// AGT-34: this pin required positive standalone provenance for ANY put-back, so a
+/// refused replacement of an attached or paired stop left no stop at all. Every shape
+/// now goes back; unproven lineage is worded as a standalone put-back.
 #[test]
 fn pinfix_partial_restore_requires_positive_standalone_provenance() {
     // TS cancel/replace context: reference/bybit/bybit.exchange.ts:3221-3224.
-    // Lead preservation rule keeps master's native-lineage guarded put-back beyond this TS flow.
     for shape in [
         "standalone",
         "attached",
@@ -2314,13 +2342,9 @@ fn pinfix_partial_restore_requires_positive_standalone_provenance() {
             200,
             r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
         );
-        if shape == "standalone" {
-            h.advance(200.0);
-            assert!(h.has_request("/v5/position/trading-stop"));
-            h.respond("/v5/position/trading-stop", 200, OK);
-        } else {
-            assert!(!h.has_request("/v5/position/trading-stop"), "{shape}");
-        }
+        h.advance(200.0);
+        assert!(h.has_request("/v5/position/trading-stop"), "{shape}");
+        h.respond("/v5/position/trading-stop", 200, OK);
         let error = h
             .notices
             .iter()
@@ -2331,16 +2355,14 @@ fn pinfix_partial_restore_requires_positive_standalone_provenance() {
             .unwrap();
         assert_eq!(
             error.protection,
-            Some(if shape == "standalone" {
-                safe_cex_engine::error::Protection::Restored
-            } else {
-                safe_cex_engine::error::Protection::Unprotected
-            }),
+            Some(safe_cex_engine::error::Protection::Restored),
             "{shape}: {error:?}"
         );
-        if shape != "standalone" {
-            assert!(error.message.contains("re-place"), "{error:?}");
-        }
+        assert_eq!(
+            error.message.contains("standalone"),
+            shape != "standalone",
+            "{shape}: {error:?}"
+        );
     }
 }
 
@@ -2373,6 +2395,8 @@ fn partial_put_back_never_rounds_the_original_native_size_to_current_precision()
     assert_eq!(payload["slSize"], "7.0004");
 }
 
+/// AGT-34: the census no longer gates the put-back (an unproven lineage withheld it and
+/// left no stop); it only words the put-back as standalone when lineage is unproven.
 #[test]
 fn partial_history_census_uses_proved_creation_time_and_keeps_incomplete_or_paired_rows_unproven() {
     for profile in PROFILES {
@@ -2447,14 +2471,11 @@ fn partial_history_census_uses_proved_creation_time_and_keeps_incomplete_or_pair
                 r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
             );
             h.advance(200.0);
-            assert_eq!(
+            assert!(
                 h.has_request("/v5/position/trading-stop"),
-                census == "complete",
-                "{profile:?}/{census}: only proved standalone lineage may put back"
+                "{profile:?}/{census}: a cancelled stop always goes back"
             );
-            if census == "complete" && h.has_request("/v5/position/trading-stop") {
-                h.respond("/v5/position/trading-stop", 200, OK);
-            }
+            h.respond("/v5/position/trading-stop", 200, OK);
             let error = h
                 .notices
                 .iter()
@@ -2463,14 +2484,14 @@ fn partial_history_census_uses_proved_creation_time_and_keeps_incomplete_or_pair
                     _ => None,
                 })
                 .unwrap();
-            let expected = if census == "complete" {
-                safe_cex_engine::error::Protection::Restored
-            } else {
-                safe_cex_engine::error::Protection::Unprotected
-            };
             assert_eq!(
                 error.protection,
-                Some(expected),
+                Some(safe_cex_engine::error::Protection::Restored),
+                "{profile:?}/{census}: {error:?}"
+            );
+            assert_eq!(
+                error.message.contains("standalone"),
+                census != "complete",
                 "{profile:?}/{census}: {error:?}"
             );
             assert!(
@@ -2626,8 +2647,10 @@ fn partial_initial_cancel_preparation_timeout_does_not_claim_an_unknown_write() 
     assert!(!h.has_request("/v5/position/trading-stop"));
 }
 
+/// AGT-34: was `..._without_history_or_put_back`; an unproved creation time still skips
+/// the history census, but a refused replacement now puts the old stop back (standalone).
 #[test]
-fn partial_unproved_creation_time_allows_replacement_without_history_or_put_back() {
+fn partial_unproved_creation_time_allows_replacement_without_history() {
     for profile in PROFILES {
         for (created, succeeds) in [
             "missing",
@@ -2679,8 +2702,8 @@ fn partial_unproved_creation_time_allows_replacement_without_history_or_put_back
                 },
             );
             assert!(!h.has_request("/v5/order/history"), "{created}");
-            assert!(!h.has_request("/v5/position/trading-stop"), "{created}");
             if succeeds {
+                assert!(!h.has_request("/v5/position/trading-stop"), "{created}");
                 assert!(
                     !h.notices.iter().any(|notice| matches!(
                         notice,
@@ -2697,6 +2720,12 @@ fn partial_unproved_creation_time_allows_replacement_without_history_or_put_back
                 );
                 continue;
             }
+            h.advance(200.0);
+            let restore = h.take("/v5/position/trading-stop");
+            let body: serde_json::Value =
+                serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+            assert_eq!(body["stopLoss"], "90", "{created}");
+            h.reply(restore.id, 200, OK);
             let error = h
                 .notices
                 .iter()
@@ -2707,11 +2736,12 @@ fn partial_unproved_creation_time_allows_replacement_without_history_or_put_back
                 .unwrap();
             assert_eq!(
                 error.protection,
-                Some(safe_cex_engine::error::Protection::Unprotected),
+                Some(safe_cex_engine::error::Protection::Restored),
                 "{created}: {error:?}"
             );
             assert!(
-                error.message.contains("replacement refused") && error.message.contains("re-place"),
+                error.message.contains("replacement refused")
+                    && error.message.contains("standalone"),
                 "{created}: {error:?}"
             );
         }

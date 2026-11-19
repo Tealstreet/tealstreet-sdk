@@ -187,14 +187,14 @@ fn first_read_field_matrix_preserves_real_identity_and_economic_mismatches() {
         let (mut h, mut row) = first_proof("StopLoss");
         row[field] = replacement;
         answer(&mut h, vec![row], "");
-        assert!(
-            h.unknown.contains(&91),
-            "changed {field} unexpectedly accepted"
-        );
+        // AGT-34: a mismatch still fails the proof (named in the diagnostic), but the
+        // cancel has landed, so the replacement goes out instead of leaving no stop.
+        assert!(proof_failed(&h), "changed {field} unexpectedly accepted");
+        assert!(!h.unknown.contains(&91), "{field}");
+        assert!(!h.has_request("&openOnly=0&limit=50"), "{field}");
+        assert!(!h.has_request("/v5/order/history"), "{field}");
         h.advance(200.0);
-        assert!(!advanced(&h));
-        assert!(!h.has_request("/v5/position/trading-stop"));
-        assert!(!h.has_request("/v5/order/history"));
+        assert!(h.has_request("/v5/position/trading-stop"), "{field}");
     }
 }
 
@@ -220,11 +220,13 @@ fn first_read_missing_or_empty_fields_are_not_assumed_safe() {
                 row[field] = "".into();
             }
             answer(&mut h, vec![row], "");
+            // AGT-34: still a failed proof, but never a stop-less position.
             assert!(
-                h.unknown.contains(&91),
+                proof_failed(&h),
                 "{field}/missing={missing} unexpectedly accepted"
             );
-            assert!(!h.has_request("/v5/position/trading-stop"));
+            h.advance(200.0);
+            assert!(h.has_request("/v5/position/trading-stop"));
         }
     }
 }
@@ -233,17 +235,23 @@ fn first_read_missing_or_empty_fields_are_not_assumed_safe() {
 fn first_read_two_rows_fail_closed_without_a_second_read() {
     let (mut h, row) = first_proof("StopLoss");
     answer(&mut h, vec![row.clone(), row], "");
-    assert!(h.unknown.contains(&91));
+    assert!(proof_failed(&h));
     assert!(!h.has_request("&orderId=partial"));
     assert!(!h.has_request("/v5/order/history"));
+    h.advance(200.0);
+    assert!(h.has_request("/v5/position/trading-stop"));
 }
 
+/// AGT-34: this pin was `first_read_cursor_with_single_row_fails_closed`. An orderId
+/// read names at most one order, so its cursor is a page token; live Bybit sends one
+/// beside the single row, and failing on it left a live position with no stop.
 #[test]
-fn first_read_cursor_with_single_row_fails_closed() {
+fn first_read_cursor_with_single_row_is_proven() {
     let (mut h, row) = first_proof("StopLoss");
     answer(&mut h, vec![row], "another-page");
-    assert!(h.unknown.contains(&91));
-    assert!(!h.has_request("&orderId=partial"));
+    assert!(advanced(&h), "{:?}", h.result(91));
+    assert!(!proof_failed(&h));
+    complete_census_and_restore(&mut h);
 }
 
 #[test]
@@ -256,11 +264,16 @@ fn first_read_zero_rows_without_cursor_retries_instead_of_failing_immediately() 
     assert!(h.has_request("/v5/order/realtime"));
 }
 
+/// AGT-34: was `first_read_zero_rows_with_cursor_fails_closed`; the cursor of an
+/// orderId read is a page token, so an empty page polls like any other.
 #[test]
-fn first_read_zero_rows_with_cursor_fails_closed() {
+fn first_read_zero_rows_with_cursor_retries_like_an_empty_page() {
     let (mut h, _) = first_proof("StopLoss");
     answer(&mut h, vec![], "another-page");
-    assert!(h.unknown.contains(&91));
+    assert!(!h.unknown.contains(&91));
+    assert!(h.result(91).is_none());
+    h.advance(100.0);
+    assert!(h.has_request("&orderId=partial"));
 }
 
 #[test]
@@ -274,9 +287,18 @@ fn first_read_canonical_cancelled_control_advances_without_unknown() {
     );
 }
 
-/// The command error and the `[proof-diag]` warning both name the failed check.
-fn assert_proof_diag(h: &Harness, reason: &str) {
-    assert!(h.unknown.contains(&91));
+fn proof_failed(h: &Harness) -> bool {
+    h.notices.iter().any(|notice| {
+        matches!(notice, safe_cex_engine::Notice::Event(event) if event.code == "partial.proof_failed")
+    })
+}
+
+/// The command error and the `[proof-diag]` warning both name the failed check, and
+/// (AGT-34) the replacement is still sent rather than ending the edit as Unknown.
+fn assert_proof_diag(h: &mut Harness, reason: &str) {
+    h.advance(200.0);
+    assert!(!h.unknown.contains(&91), "{reason}");
+    assert!(h.has_request("/v5/position/trading-stop"), "{reason}");
     let errors: Vec<_> = h
         .command_errors
         .iter()
@@ -286,7 +308,7 @@ fn assert_proof_diag(h: &Harness, reason: &str) {
     assert_eq!(
         errors,
         vec![format!(
-            "The protective cancel could not be confirmed from native orders; check Open Orders before retrying [proof: {reason}]"
+            "Bybit did not confirm that the old BTCUSDT order was cancelled, so its replacement is placed anyway; check Open Orders for a duplicate [proof: {reason}]"
         )]
     );
     let warnings: Vec<_> = h
@@ -313,7 +335,7 @@ fn proof_diag_names_a_non_terminal_first_read_status() {
     let (mut h, mut row) = first_proof("StopLoss");
     row["orderStatus"] = "Triggered".into();
     answer(&mut h, vec![row], "");
-    assert_proof_diag(&h, "axis=target target-status=Triggered");
+    assert_proof_diag(&mut h, "axis=target target-status=Triggered");
 }
 
 #[test]
@@ -321,11 +343,14 @@ fn proof_diag_names_the_first_mismatched_field() {
     let (mut h, mut row) = first_proof("StopLoss");
     row["triggerBy"] = "LastPrice".into();
     answer(&mut h, vec![row], "");
-    assert_proof_diag(&h, "axis=target target-field=triggerBy");
+    assert_proof_diag(&mut h, "axis=target target-field=triggerBy");
 }
 
+/// AGT-34: was `..._without_mutation_telemetry_or_resend`, which pinned that a failed
+/// proof sends nothing more. After a landed cancel that left no stop; the replacement
+/// now goes out, while the cancel is still never resent and no mutation is claimed Unknown.
 #[test]
-fn failed_proof_preserves_its_read_diagnostic_without_mutation_telemetry_or_resend() {
+fn failed_proof_preserves_its_read_diagnostic_and_still_sends_the_replacement() {
     for kind in ["StopLoss", "TakeProfit"] {
         let (mut control, row) = first_proof(kind);
         answer(&mut control, vec![row], "");
@@ -334,15 +359,15 @@ fn failed_proof_preserves_its_read_diagnostic_without_mutation_telemetry_or_rese
         let (mut h, mut row) = first_proof(kind);
         row["triggerBy"] = "LastPrice".into();
         answer(&mut h, vec![row], "");
-        assert_proof_diag(&h, "axis=target target-field=triggerBy");
-        h.advance(60_000.0);
-        assert!(h.unknown.contains(&91));
-        assert!(
-            !h.requests
-                .iter()
-                .any(|request| request.method == safe_cex_engine::Method::Post),
-            "a failed proof must never release replacement, restore or resend"
-        );
+        assert_proof_diag(&mut h, "axis=target target-field=triggerBy");
+        let posts: Vec<_> = h
+            .requests
+            .iter()
+            .filter(|request| request.method == safe_cex_engine::Method::Post)
+            .map(|request| request.url.clone())
+            .collect();
+        assert_eq!(posts.len(), 1, "{posts:?}");
+        assert!(posts[0].contains("/v5/position/trading-stop"), "{posts:?}");
         assert!(
             !h.notices.iter().any(|notice| matches!(
                 notice,
@@ -360,7 +385,7 @@ fn proof_diag_names_status_and_field_together() {
     row["cumExecQty"] = "1".into();
     answer(&mut h, vec![row], "");
     assert_proof_diag(
-        &h,
+        &mut h,
         "axis=target target-status=Filled target-field=cumExecQty",
     );
 }
@@ -371,7 +396,7 @@ fn proof_diag_carries_kind_enums_only() {
     row["tpslMode"] = "Full".into();
     answer(&mut h, vec![row], "");
     assert_proof_diag(
-        &h,
+        &mut h,
         "axis=target target-field=kind tpslMode=Full stopOrderType=StopLoss",
     );
 }
@@ -382,7 +407,7 @@ fn proof_diag_never_echoes_a_non_enum_value() {
         let (mut h, mut row) = first_proof("StopLoss");
         row["orderStatus"] = status.into();
         answer(&mut h, vec![row], "");
-        assert_proof_diag(&h, "axis=target target-status=other");
+        assert_proof_diag(&mut h, "axis=target target-status=other");
     }
 }
 
@@ -390,11 +415,10 @@ fn proof_diag_never_echoes_a_non_enum_value() {
 fn proof_diag_names_page_shape_failures() {
     let (mut h, row) = first_proof("StopLoss");
     answer(&mut h, vec![row.clone(), row], "");
-    assert_proof_diag(&h, "axis=target target-len=2");
+    assert_proof_diag(&mut h, "axis=target target-len=2");
 
-    let (mut h, row) = first_proof("StopLoss");
-    answer(&mut h, vec![row], "another-page");
-    assert_proof_diag(&h, "axis=target target-cursor");
+    // AGT-34: the `target-cursor` case left this pin; a cursor beside the single row
+    // is now proven (`first_read_cursor_with_single_row_is_proven`).
 
     let (mut h, row) = first_proof("StopLoss");
     h.respond(
@@ -405,11 +429,11 @@ fn proof_diag_names_page_shape_failures() {
         })
         .to_string(),
     );
-    assert_proof_diag(&h, "axis=target category");
+    assert_proof_diag(&mut h, "axis=target category");
 
     let (mut h, _) = first_proof("StopLoss");
     h.respond("&orderId=partial", 503, "");
-    assert_proof_diag(&h, "axis=target http=503");
+    assert_proof_diag(&mut h, "axis=target http=503");
 }
 
 #[test]
@@ -427,7 +451,7 @@ fn proof_diag_names_a_census_row_for_the_target() {
         })
         .to_string(),
     );
-    assert_proof_diag(&h, "axis=live peer-target-status=New");
+    assert_proof_diag(&mut h, "axis=live peer-target-status=New");
 }
 
 /// A unified account's realtime read omits the cancelled stop: three empty target reads.
@@ -472,8 +496,10 @@ fn lagging_history_is_polled_until_it_shows_the_cancelled_stop() {
     complete_census_and_restore(&mut h);
 }
 
+/// AGT-34: was `history_that_never_shows_the_stop_still_ends_unknown`; ending there
+/// left no stop after a landed cancel, so the replacement now goes out.
 #[test]
-fn history_that_never_shows_the_stop_still_ends_unknown() {
+fn history_that_never_shows_the_stop_still_sends_the_replacement() {
     let (mut h, _) = first_proof("StopLoss");
     exhaust_realtime_reads(&mut h);
     for delay in [250.0, 500.0, 750.0, 1_000.0, 1_250.0] {
@@ -482,8 +508,10 @@ fn history_that_never_shows_the_stop_still_ends_unknown() {
         assert!(!h.unknown.contains(&91));
     }
     h.advance(1_500.0);
+    // A live ticker keeps the reference fresh through the ~5 s of history polls.
+    set_reference_prices(&mut h, 100.0, 100.0);
     answer_history(&mut h, vec![]);
-    assert_proof_diag(&h, "axis=target-history target-len=0");
+    assert_proof_diag(&mut h, "axis=target-history target-len=0");
     assert!(!h.has_request("/v5/order/history?category=linear&symbol=BTCUSDT&orderId=partial"));
 }
 
