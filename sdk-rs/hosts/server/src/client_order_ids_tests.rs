@@ -251,14 +251,39 @@ fn client_id_phemex() {
     assert_eq!(actual, json!(INTENT), "phemex: native uuid contract");
 }
 
+/// WOO's native rule, as `safe-cex-venue-woo` and the TS reference enforce it.
+fn woo_accepts(id: &str) -> bool {
+    !id.starts_with('0')
+        && !id.is_empty()
+        && id.bytes().all(|b| b.is_ascii_digit())
+        && id.parse::<u64>().is_ok_and(|n| n <= 9_007_199_254_740_991)
+}
+
+// Was `json!(INTENT)` until the 2026-11-19 woo-t report: WOO refused the UUID
+// before the venue, so every DELEGATED `order.submit` (plain market) failed.
 #[test]
 fn client_id_woo() {
     let actual = serde_json::to_value(client_order_id("woo", INTENT)).unwrap();
     assert_eq!(
         actual,
-        json!(INTENT),
-        "woo: native numeric-follow-up contract"
+        json!("6505713728492029"),
+        "woo: native bounded-hash contract"
     );
+    let other = client_order_id("woo", "018bcfe5-6801-7abc-bdef-fedcba987654").unwrap();
+    assert_eq!(other, "6002263340041347");
+    for minute in 0..512u64 {
+        let epoch = 0x018b_cfe5_6800 + minute * 60_000;
+        let hex = format!("{epoch:012x}");
+        let intent = format!(
+            "{}-{}-7{:03x}-8101-010101010101",
+            &hex[..8],
+            &hex[8..],
+            minute
+        );
+        let id = client_order_id("woo", &intent).unwrap();
+        assert!(woo_accepts(&id), "{intent} -> {id}");
+        assert_eq!(client_order_id("woo", &intent).unwrap(), id);
+    }
 }
 
 #[test]

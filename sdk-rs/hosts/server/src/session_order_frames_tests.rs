@@ -87,6 +87,7 @@ async fn order_frames_use_the_existing_native_call_and_registration() {
                 ("bybit", Some("current-registration")),
                 ("hyperliquid", None),
                 ("hyperliquidspot", Some("spot-registration")),
+                ("woo", None),
             ] {
                 let registry = crate::accounts::tests::registry();
                 let tape = Tape::default();
@@ -96,11 +97,15 @@ async fn order_frames_use_the_existing_native_call_and_registration() {
                     session.out.with_instance_id(id);
                 assert!(session.resnapshot("synthetic-main", None).await);
                 let key = submit(&mut session, 0, id).await;
-                let client_id = if venue == "bybit" {
-                    key.clone()
-                } else {
-                    format!("0x{}", key.replace('-', ""))
+                let client_id = match venue {
+                    "bybit" => key.clone(),
+                    // A WOO-valid positive safe integer, never the UUID.
+                    "woo" => crate::order_contract::client_order_id(venue, &key).unwrap(),
+                    _ => format!("0x{}", key.replace('-', "")),
                 };
+                if venue == "woo" {
+                    assert!(client_id.bytes().all(|b| b.is_ascii_digit()), "{client_id}");
+                }
                 {
                     let pending = session.joined["synthetic-main"]
                         .client
@@ -712,6 +717,48 @@ async fn order_frames_without_caller_id_keep_null_receipt_and_original_intent() 
                     registry.dispose(&account, Disposal::PageDisposed);
                 }
             }
+        })
+        .await;
+}
+
+// 2026-11-19 woo-t: a plain market submit carried the intent UUID as WOO's
+// clientOrderId, which WOO refuses before the venue. It must carry WOO's integer.
+#[tokio::test]
+async fn woo_market_submit_carries_a_woo_valid_numeric_client_id() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "woo", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let key = intent(0);
+            let params = json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":0.001});
+            let fingerprint =
+                crate::order_contract::fingerprint("synthetic-main", &key, &params, 1).unwrap();
+            session
+                .handle(
+                    &json!({"t":"order.submit","d":{"accountName":"synthetic-main",
+            "intentId":key,"params":params,"seq":1,"ageMs":0,"fingerprint":fingerprint}})
+                    .to_string(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                order_frame(&mut sent, "order.ack").await["d"]["received"],
+                true
+            );
+            let outcome = order_frame(&mut sent, "order.outcome").await;
+            let client_id = outcome["d"]["clientOrderId"].as_str().unwrap().to_owned();
+            assert!(
+                !client_id.starts_with('0')
+                    && client_id.bytes().all(|b| b.is_ascii_digit())
+                    && client_id.parse::<u64>().unwrap() <= 9_007_199_254_740_991,
+                "{outcome}"
+            );
+            assert_eq!(outcome["d"]["intentId"], key);
+            assert_eq!(*tape.client_order_ids.lock().unwrap(), vec![client_id]);
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
         })
         .await;
 }

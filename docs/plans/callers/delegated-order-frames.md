@@ -174,9 +174,12 @@ admitted account, after checking the original payload fingerprint and any caller
 | Bitget, Bitget inverse, Bitget USDC; OKX, OKX demo, OKX EU, OKX EU demo; BloFin; Binance PM | The UUID's 32 lowercase hex digits, without hyphens |
 | Bybit variants/HyroTrader; Binance USD-M, Spot, Options; BingX; Bitunix; KuCoin Futures/Spot; Coinbase Futures/Spot; Crypto.com; ApeX Omni; Paradex; Phemex | Original UUID |
 | Lighter, Lighter Robinhood; Binance inverse; AsterDEX; Kraken Futures; MEXC | No caller venue ID: those native adapters do not support one |
-| Backpack; WOO; GRVT | Numeric mapping is a separate follow-up; current native refusal is retained |
+| WOO | Positive JS-safe integer: the first 8 bytes of SHA-256 over the UUID's 36 ASCII bytes, big-endian, shifted right 11 bits, minimum 1 |
+| Backpack; GRVT | Numeric mapping is a separate follow-up; current native refusal is retained |
 
-Text/hex encodings preserve all 128 intent bits. They do not change the intent,
+Text/hex encodings preserve all 128 intent bits. WOO's numeric rule cannot, so its
+bounded hash is deterministic per intent rather than lossless; the router ledger
+remains the dedupe authority. They do not change the intent,
 request ID, fingerprint, age or durable router claim. SDK receipts retain the
 actual caller venue ID, including unknown outcomes; it is null when none was
 supplied. Native adapters may generate their own internal IDs in that case, but

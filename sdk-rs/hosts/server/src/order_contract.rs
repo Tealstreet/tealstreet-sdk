@@ -158,7 +158,7 @@ pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
 
 /// #3630 audits native formats: keep all validated UUID bits in supported text
 /// IDs. Adapters without caller-ID support omit it; the router ledger still
-/// owns dedupe. Numeric-ID adapters retain their refusal pending a follow-up.
+/// owns dedupe. Backpack and GRVT retain their numeric refusal pending a follow-up.
 pub(crate) fn client_order_id(venue: &str, intent: &str) -> Option<String> {
     let hex = || intent.replace('-', "");
     match venue {
@@ -166,8 +166,18 @@ pub(crate) fn client_order_id(venue: &str, intent: &str) -> Option<String> {
         "bitget" | "bitgetusdc" | "bitgetinverse" | "okx" | "okxdemo" | "okxeu" | "okxeudemo"
         | "blofin" | "binancepm" => Some(hex()),
         "lighter" | "lighter-robinhood" | "binanceinverse" | "asterdex" | "kraken" | "mexc" => None,
+        "woo" => Some(safe_integer_id(intent)),
         _ => Some(intent.to_owned()),
     }
+}
+
+/// WOO accepts only a canonical positive JS-safe integer, so no encoding keeps
+/// all 128 intent bits: a bounded SHA-256 hash stays deterministic per intent,
+/// which every receipt for that intent recomputes.
+fn safe_integer_id(intent: &str) -> String {
+    let digest = safe_cex_crypto::sha256(intent.as_bytes());
+    let high = u64::from_be_bytes(digest[..8].try_into().expect("SHA-256 has 32 bytes"));
+    (high >> 11).max(1).to_string()
 }
 
 // 116aeae12: protected Session controls pin Bybit's no-caller-ID protection path.
