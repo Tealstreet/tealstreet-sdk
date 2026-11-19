@@ -58,8 +58,9 @@ const clamp = (exchangeName: ExchangeName, held = restingOrders) =>
   } as never);
 
 describe('the scripts/OEMS reduce-only clamp on a venue whose close orders lock position size', () => {
+  // AGT-44: was 0.197, TP + SL summed; the pair are alternatives, so only the larger (0.1451) is held.
   it('caps a Bitget close to the part its sized TP/SL plans leave free', () => {
-    expect(clamp('bitget' as ExchangeName).amount).toBeCloseTo(0.197, 9);
+    expect(clamp('bitget' as ExchangeName).amount).toBeCloseTo(0.3421, 9);
   });
 
   it('refuses a Bitget close the plans hold entirely', () => {
