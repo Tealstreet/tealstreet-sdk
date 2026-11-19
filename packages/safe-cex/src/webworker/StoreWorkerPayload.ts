@@ -67,6 +67,8 @@ export type StoreWorkerOutgoingOp =
   | 'callMethod:done'
   | 'twap:stateUpdate'
   | 'chaser:complete'
+  // A Hosted TWAP's own end: `{id, end, ordersExecuted, ordersCount}`.
+  | 'twap:complete'
   // Native order attribution, independent of RPC settlement and store frames.
   | 'command-progress'
   // Lifecycle

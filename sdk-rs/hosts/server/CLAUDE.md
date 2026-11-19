@@ -469,11 +469,18 @@ See `docs/plans/callers/delegated-action-frames.md` and the shared synthetic
 
 ## Algo outcome notices
 
-`warning` and `chaser:complete` reach every live tab/device holding the account,
-as algo errors do, not only the signing socket: a non-signing tab that missed a
-chase end reported it as lost ("Hosted server stopped reporting it"). The unheard
-record lists every socket told, so a rejoining page still gets its replay.
-Correlated `callMethod:done` replies stay on the signing socket.
+`warning`, `chaser:complete` and `twap:complete` reach every live tab/device
+holding the account, as algo errors do, not only the signing socket: a
+non-signing tab that missed an algo's end reported it as lost. Both ends are
+kept as unheard, replayed with `replayed: true`, and survive a dispose like
+chase ends. Correlated `callMethod:done` replies stay on the signing socket.
+
+`twap:complete` (`{id, end: "completed" | "stopped", ordersExecuted,
+ordersCount}`) is `TwapEffect::Ended`: every slice handed off, or the user's
+`twap:stop`. No completed TWAP is ever listed in `activeTWAPs`, so without it a
+page reads a normal finish as a lost TWAP (AGT-58). A halt on an unknown outcome
+(`twap:outcome` tells it) and an account disposal (`terminate_all`) send none:
+a disposal must never read as a normal end.
 
 ## Classified admission refusals
 

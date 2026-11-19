@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use safe_cex_algo_twap::SliceFailure;
 use safe_cex_algo_twap::{
-    ChaserProgress, OrderKind, OrderSide, TickerQuote, TwapBook, TwapEffect, TwapEnv,
+    ChaserProgress, OrderKind, OrderSide, TickerQuote, TwapBook, TwapEffect, TwapEnd, TwapEnv,
     TwapMarketView, TwapStatus,
 };
 use serde_json::{Value, json};
@@ -450,6 +450,51 @@ fn a_user_stop_during_a_refused_placement_reports_no_shortfall() {
     book.handle("twap:stop", &json!(id), &mut env, &view);
     let settled = settle_all(&mut book, &mut env, &id, &effects, refused("no"));
     assert_eq!(logs(&settled), ["TWAP BTCUSDT slice failed: no"]);
+}
+
+fn ends(effects: &[TwapEffect]) -> Vec<(&str, TwapEnd, u32, u32)> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            TwapEffect::Ended {
+                twap_id,
+                end,
+                orders_executed,
+                orders_count,
+            } => Some((twap_id.as_str(), *end, *orders_executed, *orders_count)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_twap_that_hands_off_every_slice_says_it_completed() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = owned_book();
+    let (id, effects) = start(&mut book, &mut env, &view, json!({ "ordersCount": 2 }));
+    assert!(ends(&effects).is_empty());
+    let first = settle_all(&mut book, &mut env, &id, &effects, Ok(vec!["a".into()]));
+    assert!(ends(&first).is_empty(), "a slice remains");
+    env.advance(300_000.0);
+    let woke = book.wake(&mut env, &view);
+    let last = settle_all(&mut book, &mut env, &id, &woke, Ok(vec!["b".into()]));
+    assert_eq!(ends(&last), [(id.as_str(), TwapEnd::Completed, 2, 2)]);
+    assert!(book.active_twaps("test-account").is_empty());
+}
+
+#[test]
+fn a_user_stop_says_it_stopped_and_a_disposal_says_nothing() {
+    let (mut env, view) = (Env::new(), View::default());
+    let mut book = owned_book();
+    let (stopped, _) = start(&mut book, &mut env, &view, json!({ "ordersCount": 3 }));
+    let (disposed, _) = start(&mut book, &mut env, &view, json!({ "ordersCount": 3 }));
+    let effects = book.handle("twap:stop", &json!(stopped), &mut env, &view);
+    assert_eq!(ends(&effects), [(stopped.as_str(), TwapEnd::Stopped, 0, 3)]);
+    let effects = book.terminate_all();
+    assert!(
+        ends(&effects).is_empty(),
+        "{disposed} was not ended by itself"
+    );
 }
 
 #[test]
