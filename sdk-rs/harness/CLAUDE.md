@@ -245,3 +245,14 @@ exact caps. Combined measures 18,087,936 − 206,989 B and stays at its ceiling.
 Managed HTTP preparation observations change shipped host JS, so they move the
 beta input fingerprint and require a new release/pin. They do not change Rust
 sources or waive fresh combined-consumer/size evidence or any retained floor.
+
+#2301's post-#3640 ordinary merge69e878301580 preserves native store contracts and
+retired TS store deletions. Fresh PR44440728793 sealed 26 families with matching
+optimized web/Node hashes and >=10KiB reserves. Bitunix's inherited cap refused
+2,118,250B before artifact upload; paired diagnostic44441640567/artifact14491204173
+retains its raw optimized modules, pinned tools and identical-tree merge provenance.
+The vetoable rule17 follow-up sets only Bitunix to2,128,896B (10,646B reserve),
+retaining every parent floor and all27 measured rows/hashes in the budget tests.
+Runtime/build inputs and all other caps remain unchanged. Fresh final-head PR gates,
+actually-executed combined/native and artifacts remain mandatory; a measurement
+diagnostic never substitutes for a failed PR context. Release-batch hold remains.
