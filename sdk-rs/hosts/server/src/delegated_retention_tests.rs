@@ -161,13 +161,56 @@ async fn delegated_retention_also_covers_nonresumable_disconnects() {
         .await;
 }
 
+// AGT-79 replaced `delegated_removal_is_immediate_even_with_another_live_holder`:
+// a page dispose (or orphan) now detaches only its own holder, and the account stops
+// with the last live holder. The hard stops below still stop every holder.
 #[tokio::test(start_paused = true)]
-async fn delegated_removal_is_immediate_even_with_another_live_holder() {
+async fn a_page_dispose_detaches_only_its_holder_until_the_last_live_holder_leaves() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for disposal in [Disposal::PageDisposed, Disposal::Orphaned] {
+                let registry = tests::registry();
+                let (account, mut inbox) = resident(&registry, "A");
+                hold(&account, 8);
+                let provider = account.delegated().as_ref().unwrap().provider();
+                let key = KeyRef("primary.signing".into());
+                registry.release(&account, 7, disposal);
+                assert_eq!(registry.account_count(), 1, "{disposal:?}");
+                assert!(inbox.try_recv().is_err(), "{disposal:?}: algos keep running");
+                assert!(account.handle.disposal_cause().is_none());
+                assert_eq!(
+                    provider.can_sign(&key, Algorithm::HmacSha256),
+                    Capability::Supported,
+                    "{disposal:?}: the resident signer stays for the other holder"
+                );
+                assert!(!registry.holds(&account, 7));
+                assert!(registry.holds(&account, 8));
+                assert!(account.holders.lock().unwrap().retention.is_none());
+
+                registry.release(&account, 8, disposal);
+                assert_eq!(registry.account_count(), 0, "{disposal:?}");
+                assert!(matches!(
+                    inbox.try_recv(),
+                    Ok(crate::algos::AlgoInput::Dispose { .. })
+                ));
+                assert_eq!(
+                    provider.can_sign(&key, Algorithm::HmacSha256),
+                    Capability::Unsupported,
+                    "{disposal:?}: the last holder's dispose erases the key"
+                );
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_parked_holder_never_keeps_a_disposed_account_resident() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = tests::registry();
             let (account, mut inbox) = resident(&registry, "A");
             hold(&account, 8);
+            registry.park("stale-socket".into(), "A", vec![(account.clone(), 8)]);
             let provider = account.delegated().as_ref().unwrap().provider();
             registry.release(&account, 7, Disposal::PageDisposed);
             assert_eq!(registry.account_count(), 0);
@@ -179,7 +222,61 @@ async fn delegated_removal_is_immediate_even_with_another_live_holder() {
                 provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
                 Capability::Unsupported
             );
-            assert!(!registry.holds(&account, 8));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn hard_stops_still_stop_every_holder() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for hard_stop in ["dispose", "signer"] {
+                let registry = tests::registry();
+                let (account, mut inbox) = resident(&registry, "A");
+                hold(&account, 8);
+                let provider = account.delegated().as_ref().unwrap().provider();
+                match hard_stop {
+                    "dispose" => registry.dispose(&account, Disposal::PageDisposed),
+                    _ => registry.signer_failed(&account),
+                }
+                assert_eq!(registry.account_count(), 0, "{hard_stop}");
+                assert!(matches!(
+                    inbox.try_recv(),
+                    Ok(crate::algos::AlgoInput::Dispose { .. })
+                ));
+                assert_eq!(
+                    provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                    Capability::Unsupported,
+                    "{hard_stop}"
+                );
+                assert!(!registry.holds(&account, 7));
+                assert!(!registry.holds(&account, 8));
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unjoined_dispose_never_stops_an_account_another_live_holder_holds() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, mut inbox) = resident(&registry, "A");
+            let provider = account.delegated().as_ref().unwrap().provider();
+            registry.dispose_delegated("A", "synthetic-main");
+            assert_eq!(registry.account_count(), 1);
+            assert!(inbox.try_recv().is_err());
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Supported
+            );
+            registry.release(&account, 7, Disposal::SocketClosed);
+            registry.dispose_delegated("A", "synthetic-main");
+            assert_eq!(registry.account_count(), 0, "a retained account is still removable");
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
         })
         .await;
 }
