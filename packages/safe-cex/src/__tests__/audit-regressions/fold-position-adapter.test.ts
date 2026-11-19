@@ -122,3 +122,104 @@ describe('folded-interval position adapter (binance / hyperliquid)', () => {
     expect(record.fees).toBeCloseTo(0.042, 10);
   });
 });
+
+describe('folded fees retain their currency boundary', () => {
+  it.each([0.01, -0.01])('refuses an unlabeled nonzero fee or rebate (%s)', (commission) => {
+    const [folded] = reconstructPositionIntervals([
+      { id: 'unlabeled-open', symbol: 'BTCUSDT', timestamp: 1_000, price: 100, qty: 1,
+        side: OrderSide.Buy, commission, realizedPnl: 0 },
+      { id: 'labeled-close', symbol: 'BTCUSDT', timestamp: 2_000, price: 110, qty: 1,
+        side: OrderSide.Sell, commission: 0.01, commissionAsset: 'USDT', realizedPnl: 10 },
+    ]);
+    expect(() => mapFoldedInterval(folded, deps)).toThrow(/fee currency conversion/);
+  });
+
+  it('refuses both intervals sharing an unlabeled nonzero flip fee', () => {
+    const folded = reconstructPositionIntervals([
+      { id: 'open', timestamp: 1_000, side: OrderSide.Buy, qty: 1, commission: 0.1, commissionAsset: 'USDT' },
+      { id: 'flip', timestamp: 2_000, side: OrderSide.Sell, qty: 2, commission: 0.2 },
+      { id: 'close', timestamp: 3_000, side: OrderSide.Buy, qty: 1, commission: 0.1, commissionAsset: 'USDT' },
+    ].map((fill) => ({ ...fill, symbol: 'BTCUSDT', price: 100, realizedPnl: 0 })));
+    expect(folded).toHaveLength(2);
+    for (const interval of folded) {
+      expect(() => mapFoldedInterval(interval, deps)).toThrow(/fee currency conversion/);
+    }
+  });
+
+  const roundTrip = (openingAsset: string, closingAsset: string, openingFee = 0.01, closingFee = 0.01) =>
+    reconstructPositionIntervals([
+      {
+        id: 'fee-open',
+        symbol: 'BTCUSDT',
+        timestamp: 1_000,
+        price: 100,
+        qty: 1,
+        side: OrderSide.Buy,
+        commission: openingFee,
+        commissionAsset: openingAsset,
+        realizedPnl: 0,
+      },
+      {
+        id: 'fee-close',
+        symbol: 'BTCUSDT',
+        timestamp: 2_000,
+        price: 110,
+        qty: 1,
+        side: OrderSide.Sell,
+        commission: closingFee,
+        commissionAsset: closingAsset,
+        realizedPnl: 10,
+      },
+    ])[0];
+
+  it.each([
+    ['BNB', 'BNB'],
+    ['BNB', 'USDT'],
+    ['USDT', 'BNB'],
+  ])('refuses %s/%s fees instead of labeling the sum as USDT', (openingAsset, closingAsset) => {
+    const folded = roundTrip(openingAsset, closingAsset);
+    expect(folded.realizedPnl).toBe(10);
+    expect(folded.feeCurrencies).toEqual([...new Set([openingAsset, closingAsset])]);
+    expect(() => mapFoldedInterval(folded, deps)).toThrow(/fee currency conversion/);
+  });
+
+  it.each([
+    ['BNB', 'USDT', 0, 0.1],
+    ['USDT', 'BNB', 0.1, 0],
+    ['BNB', 'BNB', 0, 0],
+  ])('accepts zero foreign contributions in %s/%s', (openingAsset, closingAsset, openingFee, closingFee) => {
+    const folded = roundTrip(openingAsset, closingAsset, openingFee, closingFee);
+    expect(mapFoldedInterval(folded, deps)?.fees).toBeCloseTo(openingFee + closingFee);
+  });
+
+  it('still refuses nonzero foreign fees when the numeric total cancels', () => {
+    const folded = roundTrip('BNB', 'USDT', -0.1, 0.1);
+    expect(folded.fees).toBe(0);
+    expect(() => mapFoldedInterval(folded, deps)).toThrow(/fee currency conversion/);
+  });
+
+  it.each([undefined, 0])('accepts absent/zero foreign fees on both sides of a position flip (%s)', (commission) => {
+    const fills = [
+      { id: 'open', timestamp: 1_000, side: OrderSide.Buy, qty: 1, commission: 0.1, commissionAsset: 'USDT' },
+      { id: 'flip', timestamp: 2_000, side: OrderSide.Sell, qty: 2, commission, commissionAsset: 'BNB' },
+      { id: 'close', timestamp: 3_000, side: OrderSide.Buy, qty: 1, commission: 0.1, commissionAsset: 'USDT' },
+    ].map((fill) => ({ symbol: 'BTCUSDT', price: 100, realizedPnl: 0, ...fill }));
+    const folded = reconstructPositionIntervals(fills);
+    expect(folded).toHaveLength(2);
+    for (const interval of folded) {
+      expect(interval.feeCurrencies).toEqual(['USDT']);
+      expect(mapFoldedInterval(interval, deps)?.fees).toBeCloseTo(0.1);
+    }
+  });
+
+  it('keeps settlement-denominated costs and rebates without changing gross PnL', () => {
+    const folded = roundTrip('USDT', 'USDT');
+    const record = mapFoldedInterval(folded, deps);
+    expect(record?.settleCurrency).toBe('USDT');
+    expect(record?.fees).toBeCloseTo(0.02);
+    expect(record?.realizedPnl).toBe(10);
+    const rebate = mapFoldedInterval({ ...folded, fees: -0.02 }, deps);
+    expect(rebate?.fees).toBeCloseTo(-0.02);
+    expect(rebate?.realizedPnl).toBe(10);
+  });
+});

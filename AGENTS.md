@@ -89,6 +89,19 @@ and binary patches remain exact. Conflicts, manual merge edits, additional commi
 changed patches, shallow/ambiguous history, unavailable evidence and a moving PR
 head fail closed. A failed proof requires normal independent review at the new head.
 
+`MERGE-PROOF PASS <newsha> (CLEARs at <oldsha> carry)` carries those existing
+CLEARs to exactly that new SHA: no manual re-review, and no reviewer test reinstall
+or rerun, is required solely for that merge. It does not withdraw or override
+FINDINGS. A later push needs its own proof from the last CLEARed or carried head,
+or fresh reviews.
+
+To keep a carry possible, bring a CLEARed PR up to date with ONE plain
+`git merge origin/master` commit and no other edits, push that merge by itself
+(the proof reads the live PR head), run the proof with `--post`, and only then
+push any follow-up fix, which needs its own review. A fix folded into the merge,
+or pushed before the proof, voids the carry and costs both reviewers a full
+re-review.
+
 A proof PASS does not waive new-head required CI checks. For write paths,
 `Rust / combined consumers` must actually RUN and conclude SUCCESS at the new
 head; SKIPPED/selected-out jobs and a green aggregate alone are insufficient.

@@ -108,6 +108,8 @@ def main():
     env = dict(os.environ)
     env['RUSTFLAGS'] = (env.get('RUSTFLAGS', '') + ' -Dwarnings').strip()
     started = time.monotonic()
+    # Fail-complete: run every mode and report all failures once (PR #3640 needed four runs).
+    failures = []
     for features, families in sorted(grouped.items()):
         mode_started = time.monotonic()
         flags = ['--features', ','.join(features)] if features else []
@@ -117,10 +119,16 @@ def main():
                        '--no-default-features', *flags]
             if check == 'clippy':
                 command += ['--', '-D', 'warnings']
-            subprocess.run(command, cwd=ROOT, env=env, check=True)
+            else:
+                command.insert(3, '--no-fail-fast')
+            if subprocess.run(command, cwd=ROOT, env=env).returncode != 0:
+                failures.append(f'{check} {features or "empty"} (families={families})')
         print(f'Mode completed in {time.monotonic() - mode_started:.1f}s', flush=True)
-    print(f'All {len(grouped)} engine modes completed in {time.monotonic() - started:.1f}s',
+    print(f'All {len(grouped)} engine modes ran in {time.monotonic() - started:.1f}s',
           flush=True)
+    if failures:
+        print(f'{len(failures)} engine mode check(s) failed:', *failures, sep='\n  ', flush=True)
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':
