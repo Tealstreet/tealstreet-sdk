@@ -147,7 +147,7 @@ it('actual WASM V1 keyless origin matches local HTTP signing at fixed and correc
   }
 });
 
-it('actual WASM wallet device matches independent ethers golden bytes for EIP-191 and Code EIP-712', async () => {
+it('actual WASM wallet device matches independent ethers golden bytes for every V3 EIP-712 method', async () => {
   for (const vector of corpus) {
     stamp = vector.nowMs;
     const browser = device({
@@ -186,9 +186,9 @@ it('actual WASM wallet device matches independent ethers golden bytes for EIP-19
         stampMs: stamp,
         testnet: vector.testnet,
       });
-      const digest = method === 'POST' ? vector.codeHash : vector.hash;
+      const digest = vector.codeHash;
       const work: SignRequest = {
-        receipt: { nonce: vector.nonce, ...(method === 'GET' ? { stampMs: stamp } : {}) },
+        receipt: { nonce: vector.nonce },
         context: { venue: 'asterdex', method, host: '', path: '/fapi/v3/order' },
         operations: [
           { kind: 'present', key: primary.credential },

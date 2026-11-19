@@ -91,6 +91,17 @@ enum ModeLoad {
     Unrequested,
     Loading,
     Known,
+    SignatureRejected,
+}
+
+const SIGNATURE_REJECTED: &str = "Aster API key signature rejected: re-create the key (V3)";
+
+fn signature_rejected(code: i64, message: &str) -> bool {
+    code == -1022
+        || code == -1000
+            && message
+                .trim()
+                .eq_ignore_ascii_case("Signature check failed")
 }
 
 impl AccountState {
@@ -423,6 +434,9 @@ impl AsterDex {
         self.account.tick = Some(cx.set_poll_timer(3_000.0));
     }
     fn request_mode(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.mode == ModeLoad::SignatureRejected {
+            return;
+        }
         let path = self.path("positionSide/dual");
         self.signed(
             cx,
@@ -437,7 +451,10 @@ impl AsterDex {
     }
     /// Placements are refused until the startup position-mode read lands.
     pub(crate) fn position_mode_pending(&self) -> bool {
-        self.account.mode == ModeLoad::Loading
+        matches!(
+            self.account.mode,
+            ModeLoad::Loading | ModeLoad::SignatureRejected
+        )
     }
     fn remember_protection(
         &mut self,
@@ -866,8 +883,25 @@ impl AsterDex {
         request: Request,
         response: Result<Response<'_>, &str>,
     ) {
+        let mut terminal_signature = false;
+        let mut signature_reported = false;
         let error = match &response {
             Ok(r) => venue_error(r).map(|(code, m)| {
+                if signature_rejected(code, &m) {
+                    terminal_signature = true;
+                    if !matches!(
+                        &request,
+                        Request::ListenKey { .. } | Request::Keepalive { .. }
+                    ) {
+                        signature_reported = cx.startup_read_refused(
+                            &VenueError::new(SIGNATURE_REJECTED)
+                                .kind(ErrorKind::AuthInvalid)
+                                .venue_code(code.to_string())
+                                .venue_message(m),
+                        );
+                    }
+                    return SIGNATURE_REJECTED.into();
+                }
                 // Aster's whitelist refusal does not always carry a key code; its words do.
                 if matches!(code, -2014 | -2015)
                     || safe_cex_engine::error::ip_whitelist_text(&m, None)
@@ -987,7 +1021,9 @@ impl AsterDex {
                 }
             }
             Request::Mode { version } => {
-                if version != self.account.mode_version {
+                if version != self.account.mode_version
+                    || self.account.mode == ModeLoad::SignatureRejected
+                {
                     return;
                 }
                 if valid
@@ -996,6 +1032,18 @@ impl AsterDex {
                 {
                     cx.store.set_hedged(value);
                     self.mode_known(cx);
+                } else if terminal_signature {
+                    self.account.mode = ModeLoad::SignatureRejected;
+                    if let Some(timer) = self.account.mode_timer.take() {
+                        cx.clear_timer(timer);
+                    }
+                    if !signature_reported {
+                        cx.notice_error(
+                            Level::Error,
+                            code::REQUEST_FAILED,
+                            &VenueError::new(SIGNATURE_REJECTED).kind(ErrorKind::AuthInvalid),
+                        );
+                    }
                 } else {
                     let delay = cx.jittered(
                         Backoff::new(1_000.0, 5, f64::INFINITY).delay(self.account.mode_failures),

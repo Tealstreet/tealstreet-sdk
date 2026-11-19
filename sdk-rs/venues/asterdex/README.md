@@ -28,8 +28,8 @@ and return the public credential plus signature atomically. Opaque refs and
 private keys never cross this wire. V3 statements bind method/path, ordered
 business parameters, main wallet, API wallet, nonce, network and clock. The
 device rejects foreign accounts/networks, unsupported endpoints, unknown fields
-and clock differences over 30 seconds, then derives EIP-191 or Code EIP-712
-digests itself. Native apply verifies the statement commitment and recovered
+and clock differences over 30 seconds, then derives EIP-712 `Message.msg`
+digests itself for every V3 request. Native apply verifies the statement commitment and recovered
 signer before releasing the exact local wire signature.
 
 PayloadSigner supports V1 canonical HMAC payloads with REST-only lifecycle.
@@ -53,9 +53,12 @@ authenticates the private socket. A generic WS HMAC login remains refused.
 | V3 controls | GET/POST `stpMode`; GET `builder`, `agent` |
 | Private WS session | POST/PUT `listenKey` |
 
-Amend uses cancel, order proof and replacement placement. Standard requests
-sign a fixed 20,000 ms receive window; Code requests sign a network-specific
-EIP-712 message with nonce and no timestamp field. Clock recovery rebuilds and
+Amend uses cancel, order proof and replacement placement. V1 requests sign a
+fixed 20,000 ms receive window. Every authenticated V3 request signs the exact
+query as a network-specific EIP-712 `Message.msg`, with a microsecond nonce and
+no timestamp/recvWindow fields. The old endpoint-specific EIP-191 branch is retired.
+The current API permits nonce times within 60 seconds of server time; engine
+nonce custody and the stricter device clock guard remain unchanged. Clock recovery rebuilds and
 re-signs a request once with a fresh stamp/nonce. Ambiguous released writes
 remain Unknown without replay; callback refusal before release is NotSent.
 
@@ -63,15 +66,19 @@ V1 private startup GET reads retain their existing single re-signed resend for
 `-1022`. During unfinished primary-key startup, a final numeric or string-coded
 rejection reports `AuthInvalid` through the existing startup guard, matching
 legacy credential validation. A successful resend can finish
-the read. Timestamp recovery, trading-write retries and V3 behavior retain their
-existing rules. Listen-key POST/PUT failures retain their independent socket
+the read. Timestamp recovery and trading-write retries retain their existing rules.
+A V3 account signature refusal terminates unfinished credential validation.
+Known signature refusals (`-1022`, or `-1000` with `Signature check failed`)
+report `Aster API key signature rejected: re-create the key (V3)`. Position-mode
+refusal is terminal for that account configuration: no retry timer is armed,
+and placement remains held because its mode is still unknown. Listen-key POST/PUT failures retain their independent socket
 recovery and do not terminate pending credential validation.
 
 Native fixture custody compares every real signing graph with the device codec,
 covering reads, ordinary/protective writes, cancel/amend, listen-key lifecycle,
 clock recovery, refusal and Unknown. The reducer's synthetic `/probe` is outside
 the device endpoint allowlist and retains its local control. Independent ethers
-vectors pin all 16 V3 signatures; actual WASM fixtures exercise V1 HTTP parity,
+vectors pin V3 EIP-712 signatures on both networks; actual WASM fixtures exercise V1 HTTP parity,
 V3 vectors, keyless startup/WS, secondary custody and redacted failure paths.
 
 # Legacy write parity
