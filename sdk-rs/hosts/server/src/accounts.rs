@@ -497,6 +497,34 @@ impl Account {
                 .is_some_and(|retention| retention.labels.contains(name))
     }
 
+    /// Labels a park holder keeps; an unlabeled park holder holds the account name.
+    fn parked_labels(&self, park_holder: u64) -> Vec<String> {
+        let holders = self.holders.lock().unwrap();
+        if !holders.by_id.get(&park_holder).is_some_and(Option::is_none) {
+            return Vec::new();
+        }
+        match holders.labels.get(&park_holder) {
+            Some(labels) if !labels.is_empty() => labels.keys().cloned().collect(),
+            _ => vec![self.name.clone()],
+        }
+    }
+
+    /// Moves `label` off its park holder; true when that holder is now gone.
+    fn release_parked_label(&self, park_holder: u64, label: &str) -> bool {
+        let mut holders = self.holders.lock().unwrap();
+        let remaining = holders.labels.get_mut(&park_holder).map(|labels| {
+            labels.remove(label);
+            labels.len()
+        });
+        if remaining.unwrap_or(0) > 0 {
+            return false;
+        }
+        holders.remove(park_holder);
+        holders.labels.remove(&park_holder);
+        self.hand_over(&mut holders, park_holder);
+        true
+    }
+
     pub(crate) fn labels(&self, id: u64) -> Vec<String> {
         self.holders
             .lock()
@@ -617,6 +645,8 @@ struct Parked {
     user: String,
     accounts: Vec<(Arc<Account>, u64)>,
     alias_until: Option<u64>,
+    /// The one socket whose resume consumed this id; only it may claim DELEGATED labels.
+    resumed_by: Option<u64>,
 }
 
 type AccountEntries = HashMap<(String, String), Arc<Account>>;
@@ -2822,6 +2852,7 @@ impl Registry {
                 user: user.to_owned(),
                 accounts: parked,
                 alias_until: None,
+                resumed_by: None,
             },
         );
         let registry = self.clone();
@@ -2910,8 +2941,9 @@ impl Registry {
     }
 
     /// Takes back parked COSIGNED accounts for the same user. DELEGATED
-    /// accounts retain their parked holder until their original expiry and use
-    /// fresh admission. Unknown, expired and foreign ids return no accounts.
+    /// accounts retain their parked holder until their original expiry; only
+    /// this socket may claim them, one label at a time, with `resume_delegated`.
+    /// Unknown, expired and foreign ids return no accounts.
     pub fn resume(
         &self,
         resume_id: &str,
@@ -2935,6 +2967,7 @@ impl Registry {
             .extract_if(.., |(account, _)| account.delegated().is_none())
             .collect::<Vec<_>>();
         entry.alias_until = Some(now_ms() + 2 * self.resume_grace.as_millis() as u64);
+        entry.resumed_by = Some(holder);
         drop(parked);
         accounts
             .into_iter()
@@ -2971,6 +3004,86 @@ impl Registry {
                 account
             })
             .collect()
+    }
+}
+
+impl Registry {
+    /// DELEGATED labels still parked under `resume_id` that `socket` may claim.
+    pub fn delegated_resumable(&self, resume_id: &str, user: &str, socket: u64) -> Vec<String> {
+        let parked = self.parked.lock().unwrap();
+        let Some(entry) = parked
+            .get(resume_id)
+            .filter(|entry| entry.user == user && entry.resumed_by == Some(socket))
+        else {
+            return Vec::new();
+        };
+        let mut labels: Vec<String> = entry
+            .accounts
+            .iter()
+            .filter(|(account, _)| account.delegated().is_some())
+            .flat_map(|(account, park_holder)| account.parked_labels(*park_holder))
+            .collect();
+        labels.sort();
+        labels.dedup();
+        labels
+    }
+
+    /// AGT-54: re-attaches one parked DELEGATED label to the socket that resumed
+    /// its session, keeping the resident signer. Owner, label, venue, identity
+    /// digest and settings must all match; anything else needs a fresh handover.
+    pub fn resume_delegated(
+        &self,
+        resume_id: &str,
+        user: &str,
+        socket: u64,
+        token: (String, u64),
+        init: &InitPayload,
+        outbox: Outbox,
+    ) -> Option<Arc<Account>> {
+        if crate::auth::Verifier::check_expiry(Some(token.1), now_ms()).is_err() {
+            return None;
+        }
+        let label = init.account_name.as_str();
+        let fingerprint = init.fingerprint();
+        let account = {
+            let mut parked = self.parked.lock().unwrap();
+            let entry = parked
+                .get_mut(resume_id)
+                .filter(|entry| entry.user == user && entry.resumed_by == Some(socket))?;
+            let index = entry.accounts.iter().position(|(account, park_holder)| {
+                account.delegated().is_some()
+                    && account.venue == init.exchange_name
+                    && account.matches_init(user, init)
+                    && same_handover_settings(&account.fingerprint, &fingerprint)
+                    && account
+                        .parked_labels(*park_holder)
+                        .iter()
+                        .any(|parked| parked == label)
+            })?;
+            let (account, park_holder) = entry.accounts[index].clone();
+            // Lock order parked -> holders; nothing takes them in reverse.
+            if account.release_parked_label(park_holder, label) {
+                entry.accounts.remove(index);
+            }
+            account
+        };
+        let current = self
+            .accounts
+            .lock()
+            .unwrap()
+            .get(&(user.to_owned(), account.registry_name().to_owned()))
+            .is_some_and(|current| Arc::ptr_eq(current, &account));
+        // A disposed, replaced or expired account is never revived by a resume.
+        (current
+            && account.hold_label(
+                socket,
+                Live {
+                    outbox,
+                    token: Some(token),
+                },
+                label,
+            ))
+        .then_some(account)
     }
 }
 
@@ -3117,10 +3230,19 @@ pub mod testing {
         user: &str,
         venue: crate::delegated_e2e_io::MockVenue,
     ) -> Arc<Registry> {
+        e2e_registry_with_grace(user, venue, Duration::from_secs(60))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn e2e_registry_with_grace(
+        user: &str,
+        venue: crate::delegated_e2e_io::MockVenue,
+        resume_grace: Duration,
+    ) -> Arc<Registry> {
         let mut registry = Registry::new(
             EngineThreads::start(1).unwrap(),
             Duration::from_millis(1),
-            Duration::from_secs(60),
+            resume_grace,
         );
         registry.e2e_venue = Some(venue);
         // A missing override must fail locally rather than reach a venue.

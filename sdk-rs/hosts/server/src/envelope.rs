@@ -20,6 +20,10 @@ pub struct InitPayload {
     /// Consumed on this connection; never included in serialized settings.
     #[serde(default, skip_serializing)]
     pub sealed: Option<crate::delegated::Sealed>,
+    /// AGT-54: claim this session's parked DELEGATED account without a handover.
+    /// Connection-local, like `sealed`; never a setting or fingerprint field.
+    #[serde(default, skip_serializing)]
+    pub resume: Option<bool>,
     /// Reply provenance only; never an engine option or account fingerprint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instance_id: Option<String>,
@@ -627,9 +631,29 @@ pub fn init_unsupported(account_name: &str, venue: &str) -> String {
 }
 
 pub fn session(resume_id: &str, resumed: bool) -> String {
-    envelope(
-        "session",
-        json!({"resumeId": resume_id, "resumed": resumed}),
+    session_with_delegated(resume_id, resumed, &[])
+}
+
+/// `delegatedResume` names the labels this socket may claim with a `resume` init.
+/// Omitted when empty, so clients only send that init to a server that offers it.
+pub fn session_with_delegated(resume_id: &str, resumed: bool, delegated: &[String]) -> String {
+    let mut data = json!({"resumeId": resume_id, "resumed": resumed});
+    if !delegated.is_empty() {
+        data["delegatedResume"] = json!(delegated);
+    }
+    envelope("session", data)
+}
+
+/// The `resume` init found nothing to claim; the client falls back to a handover.
+pub fn init_resume_unavailable(account_name: &str) -> String {
+    msg(
+        account_name,
+        "error",
+        json!([
+            "Session resume is unavailable; a fresh key handover is required",
+            {"initRefused": true, "kind": "admission", "reason": "resume_unavailable",
+             "transient": true, "attached": false, "outcome": "notSent"}
+        ]),
     )
 }
 

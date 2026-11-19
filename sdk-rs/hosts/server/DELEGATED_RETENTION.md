@@ -2,7 +2,9 @@
 
 Hosted-supported DELEGATED accounts retain their protected provider for up to
 48 hours after their last admitted client disconnects. The session resume ID still has its normal 60-second
-grace. After that grace a client uses a fresh verified handover to join the same
+grace. Within it, the socket that resumed the id may claim the parked label with a
+`resume` init (DESIGN.md, Sessions and resume); the key stays memory-only and is never
+re-sent. After that grace a client uses a fresh verified handover to join the same
 running account. Pending or refused handovers do not renew retention.
 
 Any admitted client cancels the account's outstanding retention deadline. When

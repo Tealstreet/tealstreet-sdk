@@ -1108,10 +1108,91 @@ impl Session {
                 }
             }
         }
+        let delegated = match (&self.identity.resume_from, &self.identity.user) {
+            (Some(from), Some(user)) if self.admission_token_valid() => {
+                self.registry.delegated_resumable(from, user, self.socket)
+            }
+            _ => Vec::new(),
+        };
         if let Some(user) = &self.identity.user {
             self.taken_over = self.registry.open_session(&self.resume_id, user);
         }
-        self.send(envelope::session(&self.resume_id, resumed));
+        self.send(envelope::session_with_delegated(
+            &self.resume_id,
+            resumed,
+            &delegated,
+        ));
+    }
+
+    /// AGT-54: a `resume` init claims this socket's parked DELEGATED label and
+    /// its resident signer without a handover or probe. Any refusal is
+    /// transient and tells the client to fall back to the ordinary handover.
+    async fn resume_delegated(&mut self, init: InitPayload, out: Out, interval: u16) {
+        let name = init.account_name.clone();
+        self.handovers.forget(&name);
+        let claimed = match (&self.identity.resume_from, &self.identity.token) {
+            (Some(from), Some(token))
+                if self.admission_token_valid()
+                    && !self.router_fenced()
+                    && !self.joined.contains_key(&name)
+                    && init.sealed.is_none()
+                    && crate::delegated::enabled(&init.exchange_name) =>
+            {
+                let out = out.account(&name);
+                self.registry.resume_delegated(
+                    from,
+                    self.user(),
+                    self.socket,
+                    token.clone(),
+                    &init,
+                    out.outbox(),
+                )
+            }
+            _ => None,
+        };
+        let Some(account) = claimed else {
+            Log::info(&format!(
+                "delegated resume {name} socket {}: unavailable, handover required",
+                self.socket
+            ));
+            self.drop_early(&name, "delegated resume unavailable");
+            out.account(&name)
+                .send(envelope::init_resume_unavailable(&name));
+            return;
+        };
+        Log::info(&format!(
+            "delegated resume {name} socket {}: resident signer kept",
+            self.socket
+        ));
+        self.metrics.note_init();
+        self.out.retire_account(&name);
+        let out = out.account(&name);
+        let mode = envelope::AccountSigningMode::Delegated;
+        self.join(account, out.clone(), mode, interval).await;
+        let Some(joined) = self.joined.get(&name) else {
+            return;
+        };
+        let account = joined.account.clone();
+        account.confirm_signing_mode(self.socket, &name, mode, out.outbox());
+        self.registry.interruptions.delegated_status(
+            self.user(),
+            &name,
+            &out,
+            crate::interruption::DelegatedKeyStatus::KeyAvailable,
+        );
+        self.registry
+            .interruptions
+            .deliver(self.user(), &name, &out);
+        if let Some(kept) = self.registry.take_notice(
+            self.user(),
+            account.registry_name(),
+            &account.fingerprint,
+            self.identity.resume_from.as_deref(),
+        ) {
+            for frame in kept.frames(&name) {
+                out.send(frame);
+            }
+        }
     }
 
     pub async fn handle(&mut self, text: &str) -> Result<(), Close> {
@@ -1493,7 +1574,11 @@ impl Session {
             return Ok(());
         }
         if init.signing_mode.as_deref() == Some("delegated") {
-            self.admission_init(init);
+            if init.resume == Some(true) {
+                self.resume_delegated(init, out, interval).await;
+            } else {
+                self.admission_init(init);
+            }
             return Ok(());
         }
         self.handovers.forget(&init.account_name);
@@ -6764,3 +6849,7 @@ mod delegated_writes_tests;
 #[cfg(test)]
 #[path = "session/tests/delegated_e2e.rs"]
 mod delegated_e2e;
+
+#[cfg(test)]
+#[path = "session/tests/delegated_resume.rs"]
+mod delegated_resume;
