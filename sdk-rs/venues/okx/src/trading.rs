@@ -192,8 +192,59 @@ struct Job {
     finish: Finish,
     optimistic: Vec<(String, OrderStatus)>,
     continue_cancel_errors: bool,
+    /// Every settled cancel row across this job's batches (AGT-69).
+    cancel_report: CancelReport,
     /// A step took effect, so a later rejection cannot mean nothing happened.
     effective: bool,
+}
+/// A cancellation's per-row results across its batches, so a partial batch
+/// never hides the later algo batch and the terminal names what is still open.
+#[derive(Default)]
+struct CancelReport {
+    outcomes: Vec<ElementOutcome>,
+    left: Vec<String>,
+    first_code: Option<String>,
+    /// The terminal's "still open" summary, appended to the projected message.
+    note: Option<String>,
+}
+impl CancelReport {
+    fn record(&mut self, mut outcomes: ElementOutcomes, acks: &[Ack<'_>], requested: &[Requested]) {
+        let offset = self.outcomes.len();
+        for outcome in &mut outcomes.0 {
+            outcome.element.index += offset;
+        }
+        self.outcomes.extend(outcomes.0);
+        for (ack, target) in acks.iter().zip(requested) {
+            if matches!(ack.s_code, "" | "0" | "51400") {
+                continue;
+            }
+            self.first_code.get_or_insert_with(|| ack.s_code.to_owned());
+            self.left.push(format!(
+                "{}: {} (code {})",
+                target.id(),
+                ack.s_msg,
+                ack.s_code
+            ));
+        }
+    }
+    /// The terminal refusal when any target was definitively refused.
+    fn refusal(&mut self, status: u16) -> Option<VenueError> {
+        if self.left.is_empty() {
+            return None;
+        }
+        let message = format!(
+            "OKX left {} of {} orders open: {}",
+            self.left.len(),
+            self.outcomes.len(),
+            self.left.join_with("; ")
+        );
+        self.note = Some(message.clone());
+        let mut error = rejection(message, self.first_code.as_deref(), status);
+        error.elements = Some(Box::new(ElementOutcomes(std::mem::take(
+            &mut self.outcomes,
+        ))));
+        Some(error)
+    }
 }
 #[derive(Clone, Copy, PartialEq)]
 enum LookupStage {
@@ -1998,8 +2049,16 @@ impl Okx {
         }
         let read_after =
             continue_cancel_errors && acks.iter().any(|a| !matches!(a.s_code, "" | "0"));
+        // A cancellation whose rows are all identity-validated and proven settles
+        // per row, whatever the envelope code: OKX answers a partial batch `2`,
+        // and stopping there left every later algo cancel unsent (AGT-69).
+        let cancel_rows = continue_cancel_errors
+            && matches!(
+                step.path,
+                "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+            );
         // Legacy TS's response interceptor throws on every nonzero envelope.
-        if envelope.code != "0" {
+        if envelope.code != "0" && !cancel_rows {
             let mut error = if errors.is_empty() {
                 // A satisfied cancel row stays quiet unless the empty envelope
                 // would otherwise erase its only available native diagnostic.
@@ -2062,8 +2121,34 @@ impl Okx {
         {
             trailing.phase = TrailingPhase::Replace;
         }
-        job.effective = true;
-        if job.steps.is_empty() {
+        if cancel_rows {
+            job.cancel_report.record(
+                cancel_outcomes(&response, &acks, &requested),
+                &acks,
+                &requested,
+            );
+            job.effective |= acks.iter().any(|a| matches!(a.s_code, "" | "0"));
+            // An accepted cancel keeps Canceling; refused and already-gone (51400,
+            // possibly filled) rows revert and reconcile from the read.
+            let settled: HashSet<&str> = acks
+                .iter()
+                .zip(&requested)
+                .filter(|(ack, _)| matches!(ack.s_code, "" | "0"))
+                .map(|(_, target)| target.id())
+                .collect();
+            job.optimistic
+                .retain(|(id, _)| !settled.contains(native_id(id)));
+        } else {
+            job.effective = true;
+        }
+        let cancel_refusal = if job.steps.is_empty() {
+            job.cancel_report.refusal(response.status)
+        } else {
+            None
+        };
+        if let Some(refusal) = cancel_refusal {
+            self.end(cx, request.command, Some(&request), refusal, false);
+        } else if job.steps.is_empty() {
             let restored = job
                 .trailing
                 .as_mut()
@@ -2304,6 +2389,12 @@ impl Okx {
                 safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, uncertain)
             });
         let stop_gone = note.is_some();
+        if let Some(left) = job.cancel_report.note.take() {
+            note = Some(match note {
+                Some(note) => format!("{note}; {left}"),
+                None => left,
+            });
+        }
         if uncertain && let Some(step) = job.steps.front().filter(|step| step.query.is_none()) {
             cx.command_error(command, UNKNOWN_OUTCOME_TEXT);
             let unknown = format!("{UNKNOWN_OUTCOME_TEXT}; unconfirmed request {}", step.body);
@@ -2761,6 +2852,7 @@ fn job(steps: Vec<Step>, finish: Finish) -> Job {
         finish,
         optimistic: Vec::new(),
         continue_cancel_errors: false,
+        cancel_report: CancelReport::default(),
         effective: false,
         replacing_stop: None,
         trailing: None,
