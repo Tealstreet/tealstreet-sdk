@@ -71,6 +71,9 @@ overlapping filled identity and a recent unfilled cancellation. The test-only
 TS adapter reuses the frozen mapper/pager for both sources, keeping recent rows
 before deduplication and applying the caller limit after the union. Strict
 request matching and existing diagnostic allowlists remain required.
+The archive-reference control seeds a complete market through `nativeFixture`
+into `FrameStore` and publishes through `applyReferenceFixture`, matching the
+neighboring balance reference; it never restores the removed mutable store API.
 
 MEXC's HTTP 425 read labels are diagnostics only; typed refusals, backoff,
 signing and write outcomes retain their existing controls.
