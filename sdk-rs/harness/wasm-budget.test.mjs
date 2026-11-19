@@ -4761,7 +4761,9 @@ for (const [family, measured, parentCap, sha256, artifact] of bitunixMergedReser
     assert.ok(Number.isSafeInteger(artifact) && artifact > 0);
     const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
     const cap = WASM_VENUE_OVERRIDES[family];
-    assert.equal(cap, Math.max(parentCap, required));
+    // The scoped review fix supersedes Bitunix's measurement; retain this prior floor.
+    if (family === 'bitunix') assert.ok(cap >= Math.max(parentCap, required));
+    else assert.equal(cap, Math.max(parentCap, required));
     assert.ok(cap - measured >= 10 * 1024);
     assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
@@ -4769,4 +4771,17 @@ for (const [family, measured, parentCap, sha256, artifact] of bitunixMergedReser
 }
 test('#2301 merged reserve census covers every canonical family', () => {
   assert.deepEqual(bitunixMergedReserveCensus.map(([family]) => family), [...venueFamilies].sort());
+});
+
+// #2301 review fix05427522bc0a27bb656345e9b4cb25e31693b294; PR44444577344.
+// Identical-tree built merge0cd4327943dfbac4c4aa60ce2589c52f8f6fb816, artifact14492118639.
+// Optimized web/Node/replay SHA256 e13e8e2e27327fe7c9e51d034f6c8ee8d315c906d331571a03af3226864c6baf.
+test('#2301 direct-intent and frame-fed fix retains fresh Bitunix reserve', () => {
+  const measured = 2_119_780;
+  const previousFloor = 2_128_896;
+  const cap = WASM_VENUE_OVERRIDES.bitunix;
+  assert.equal(cap, Math.max(previousFloor, Math.ceil((measured + 10 * 1024) / 1024) * 1024));
+  assert.ok(cap - measured >= 10 * 1024);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bitunix'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bitunix'), /exceeds/);
 });

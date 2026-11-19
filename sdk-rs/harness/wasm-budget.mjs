@@ -481,7 +481,11 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Rust1.99.0 / bindgen0.2.129 / Binaryen132, required two -Oz passes.
   // Optimized web/Node 2,118,250 B, SHA256 6b5270d93a83bd84da5d5e6a5cfc0e5508c019633555a43c83a2240d5bfd1c55.
   // Rule17: measured +10 KiB rounded up, retaining every historical floor; 10,646 B reserve.
-  bitunix: 2_128_896,
+  // #2301 scoped review fix05427522bc0a: PR44444577344/job135294362778, artifact14492118639.
+  // Built source0cd4327943df has identical tree; pinned tools/required two -Oz passes unchanged.
+  // Optimized web/Node/replay 2,119,780 B, SHA256 e13e8e2e27327fe7c9e51d034f6c8ee8d315c906d331571a03af3226864c6baf.
+  // Vetoable rule17 proposal: measured +10 KiB rounded up; retain prior2,128,896B floor, 11,164B reserve.
+  bitunix: 2_130_944,
   // Nullable history output: local optimized web/node 2,070,435 B.
   // SAFE_CEX_WASM_OPT=required build.sh --venue blofin; Rust 1.99.0, bindgen 0.2.129, Binaryen 132.
   // Current measured size + 10 KiB, rounded up to KiB (rule 17).

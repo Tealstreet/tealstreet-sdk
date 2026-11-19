@@ -256,3 +256,14 @@ retaining every parent floor and all27 measured rows/hashes in the budget tests.
 Runtime/build inputs and all other caps remain unchanged. Fresh final-head PR gates,
 actually-executed combined/native and artifacts remain mandatory; a measurement
 diagnostic never substitutes for a failed PR context. Release-batch hold remains.
+
+#2301 scoped review fix05427522bc0a bounds direct intent before mutation across
+epoch states and suppresses every frame-fed managed feed. Fresh PR44444577344
+artifact14492118639 (identical-tree built merge0cd4327943df) measures paired
+optimized web/Node/replay2,119,780B, SHA256
+e13e8e2e27327fe7c9e51d034f6c8ee8d315c906d331571a03af3226864c6baf.
+The previous cap leaves only9,116B. A separate vetoable rule17 budget commit
+proposes only Bitunix2,130,944B, retaining every floor and11,164B reserve.
+The coordinator's explicit cap disposition and fresh final-head PR gates, all27
+family artifacts/reserves, actually-executed combined/native and both original
+reviewers remain required. Budget/tests/docs change no runtime build inputs.
