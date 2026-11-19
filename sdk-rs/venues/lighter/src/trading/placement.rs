@@ -460,7 +460,9 @@ impl Lighter {
         if let Some(timer) = self.trading.proof_timer.take() {
             cx.clear_timer(timer);
         }
-        self.refresh_orders(cx);
+        if outcome.is_err() {
+            self.refresh_orders(cx);
+        }
         let job = self.trading.active.as_mut().unwrap();
         let paced = outcome.is_ok() && !job.steps.is_empty();
         job.proof.as_mut().unwrap().outcome = Some(outcome);
