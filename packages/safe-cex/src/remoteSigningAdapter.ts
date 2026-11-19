@@ -150,10 +150,10 @@ export const createRemoteSigningAdapter = (
     return (executeAdapter as AxiosAdapter)(finalConfig);
   };
 
-  return async (config: InternalAxiosRequestConfig): Promise<AxiosResponse> => {
+  return async (config: InternalAxiosRequestConfig & { [SKIP_REMOTE_SIGNING]?: unknown }): Promise<AxiosResponse> => {
     // Public endpoint — the interceptor already established there is nothing to
     // sign, so go straight to the wire instead of round-tripping to the client.
-    if ((config as unknown as Record<string, unknown>)[SKIP_REMOTE_SIGNING]) {
+    if (config[SKIP_REMOTE_SIGNING]) {
       return execute(config);
     }
 
