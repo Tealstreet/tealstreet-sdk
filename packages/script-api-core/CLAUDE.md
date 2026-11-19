@@ -32,6 +32,8 @@ favourable move, stops and trailing stops on an adverse one; a close order of
 unknown direction (`Conditional`, an in-flight market) is added outright.
 Summing them refused closing the unprotected half of a position whose TP and
 SL each covered the other half (AGT-44).
+A whole-position TP/SL reaches here with amount 0 (the Bitget venue maps it so)
+and holds nothing; keep `unfilled(o) > 0` in the holding filter (AGT-70).
 
 **`oems-core` consumes this package, never the reverse.** `rounding.ts` started
 in `oems-core`; moving the policy here would have closed a cycle

@@ -744,3 +744,31 @@ describe('a take profit and a stop loss on the same slice are alternatives, not 
     });
   });
 });
+
+// AGT-70 (bitget-t, 2026-11-19): a whole-position SL refused every partial close as "0.02 ... reserved
+// by 1 open close order". The Bitget venue maps a whole-position plan (pos_loss/pos_profit) with amount
+// 0, because it closes whatever is open when it triggers; this pins that amount 0 holds nothing.
+describe('a whole-position TP/SL holds no size', () => {
+  const market = { ...mockMarket, id: 'ETHUSDT', symbol: 'ETHUSDT', precision: { amount: 0.01, price: 0.01 } };
+  const long = createPosition({ symbol: 'ETHUSDT', side: PositionSide.Long, contracts: 0.02 });
+  const wholeSl = createOpenOrder({
+    id: 'sl',
+    symbol: 'ETHUSDT',
+    side: OrderSide.Sell,
+    type: OrderType.StopLoss,
+    price: 1605.69,
+    amount: 0,
+    remaining: 0,
+  });
+
+  it('closes part of the position while a whole-position SL rests', () => {
+    const onLocked = vi.fn();
+    const close = createOrder({ symbol: 'ETHUSDT', side: OrderSide.Sell, type: OrderType.Market, amount: 0.01 });
+    const result = downSizeReduceOrder(market, { ...close, price: undefined }, [long], [wholeSl], 1700, {
+      locksPositionSize: true,
+      onLocked,
+    });
+    expect(result.amount).toBeCloseTo(0.01, 12);
+    expect(onLocked).not.toHaveBeenCalled();
+  });
+});
