@@ -10,9 +10,9 @@ Definitive native amendment refusals retain the typed venue error and explicitly
 say "your stop is unchanged by this edit"; unknown outcomes make no such claim.
 Close-all TP/SL edits omit size and execution-price fields: OKX permits their
 trigger edits but refuses quantity or execution-price edits (51523/51524).
-Placing a full-position leg beside an existing single-leg full algo uses the same
-trigger-only amend to add that leg, because OKX allows one entire-position algo
-(51088); see the venue README's "Entire-position TP/SL" section.
+Placing a full-position leg beside an existing full algo is refused before any
+write, because OKX allows one entire-position algo (51088) and adding a leg via
+amend-algos is unverified; see the venue README's "Entire-position TP/SL" section.
 
 The [official amend-algos contract](https://www.okx.com/docs-v5/en/#order-book-trading-algo-trading-post-amend-algo-order)
 explicitly supports stop and trigger orders, excludes trailing stops, and makes

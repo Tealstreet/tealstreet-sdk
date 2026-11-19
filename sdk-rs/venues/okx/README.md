@@ -96,17 +96,17 @@ changed to add this venue companion event.
 ## Entire-position TP/SL (AGT-68)
 
 OKX keeps one entire-position (`closeFraction=1`) TP/SL algo per position and
-refuses a second with `51088`. A full-position SL or TP whose position already
-holds a single-leg full algo of the other kind joins it: one
-`/api/v5/trade/amend-algos` carrying only the new leg's trigger price and
-trigger type, with `cxlOnFail:false`. No size or execution price is sent
-(51523/51524), so a refusal leaves the existing leg in place and never cancels
-or re-places it. The command completes with that algo's native ID. A full SL and
-TP in one command become one `oco` algo. Partial-size legs, a position already
-carrying both legs, and other positions are placed as before. Legacy TS sends a
-second `closeFraction` algo and gets `51088`; this is a recorded deviation.
-Live acceptance of adding a leg through amend-algos is not yet verified; OKX
-documents leg deletion there, and a refusal is a definitive `Rejected`.
+refuses a second with `51088`. A full SL and TP placed in one command become
+one `oco` algo, as OKX documents and ccxt places them. A full-position SL or TP
+for a position that already holds an open full algo, of either kind, is refused
+before any write as not sent: "OKX allows one full-position TP/SL. Edit the
+existing order or remove it first." This also covers a command carrying both
+legs while one is held, so one leg is never sent with 51088 on the other.
+Adding a leg to a held algo through `amend-algos` is deliberately not done: it
+is undocumented, ccxt warns that a two-leg `conditional` applies only its SL,
+and a protective leg falsely reported as placed is worse than a refusal.
+Partial-size legs and other positions are unaffected. Legacy TS sends the
+second algo and gets `51088`; this is a recorded deviation.
 
 ## Native write refusal diagnostics
 

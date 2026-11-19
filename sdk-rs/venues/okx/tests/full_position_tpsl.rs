@@ -1,5 +1,6 @@
-//! AGT-68: OKX holds one entire-position TP/SL algo per position (51088), so a
-//! second full-position leg joins the existing algo instead of placing another.
+//! AGT-68: OKX holds one entire-position TP/SL algo per position (51088). A full
+//! SL and TP placed together become one `oco`; a full leg beside a held full
+//! algo is refused before any write.
 #![allow(dead_code)]
 mod support;
 
@@ -73,106 +74,56 @@ const FULL_TP: &str =
 const FULL_SL: &str =
     r#"{"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":0,"price":36000}"#;
 
-#[test]
-fn a_full_take_profit_joins_the_existing_full_stop_algo() {
-    let mut e = trading_engine();
-    e.store_mut()
-        .upsert_order(full_leg("77_sl", OrderType::StopLoss, OrderSide::Sell));
-    let out = place(&mut e, &[FULL_TP]);
-    let sent = writes(&out);
-    assert_eq!(sent.len(), 1, "{out:?}");
-    assert!(
-        path(sent[0]).ends_with("/api/v5/trade/amend-algos"),
-        "{out:?}"
-    );
-    let b = body(sent[0]);
-    assert_eq!(b["instId"], "BTC-USDT-SWAP");
-    assert_eq!(b["algoId"], "77");
-    assert_eq!(b["cxlOnFail"], false);
-    assert_eq!(b["newTpTriggerPx"], "42000");
-    assert_eq!(b["newTpTriggerPxType"], "last");
-    // The existing stop leg and the close-all sentinel are untouched (51523/51524).
-    for absent in [
-        "newSlTriggerPx",
-        "newSlTriggerPxType",
-        "newTpOrdPx",
-        "newSz",
-    ] {
-        assert!(b.get(absent).is_none(), "{absent}: {b}");
-    }
-    reply(
-        &mut e,
-        sent[0],
-        r#"{"code":"0","msg":"","data":[{"algoId":"77","algoClOrdId":"","reqId":"","sCode":"0","sMsg":""}]}"#,
-        6.,
-    );
-    let out = prepared(&mut e, 6.);
-    assert!(writes(&out).is_empty(), "{out:?}");
-    assert!(
-        out.iter().any(|a| matches!(a,
-            Action::Notice(Notice::CommandDone { command: 1, result }) if result == "[\"77\"]")),
-        "{out:?}"
-    );
-}
-
-#[test]
-fn a_full_stop_joins_the_existing_full_take_profit_algo() {
-    let mut e = trading_engine();
-    e.store_mut()
-        .upsert_order(full_leg("78_tp", OrderType::TakeProfit, OrderSide::Sell));
-    let out = place(&mut e, &[FULL_SL]);
-    let sent = writes(&out);
-    assert_eq!(sent.len(), 1, "{out:?}");
-    assert!(
-        path(sent[0]).ends_with("/api/v5/trade/amend-algos"),
-        "{out:?}"
-    );
-    let b = body(sent[0]);
-    assert_eq!(b["algoId"], "78");
-    assert_eq!(b["newSlTriggerPx"], "36000");
-    assert_eq!(b["newSlTriggerPxType"], "mark");
-    for absent in [
-        "newTpTriggerPx",
-        "newTpTriggerPxType",
-        "newSlOrdPx",
-        "newSz",
-    ] {
-        assert!(b.get(absent).is_none(), "{absent}: {b}");
-    }
-}
-
-#[test]
-fn a_refused_join_reports_a_rejection_and_leaves_the_existing_stop() {
-    let mut e = trading_engine();
-    let stop = full_leg("77_sl", OrderType::StopLoss, OrderSide::Sell);
-    e.store_mut().upsert_order(stop.clone());
-    let out = place(&mut e, &[FULL_TP]);
-    let sent = writes(&out);
-    reply(
-        &mut e,
-        sent[0],
-        r#"{"code":"1","msg":"","data":[{"algoId":"77","sCode":"51279","sMsg":"TP trigger price cannot be lower than the last price."}]}"#,
-        6.,
-    );
-    let out = prepared(&mut e, 6.);
-    assert!(
-        writes(&out).is_empty(),
-        "never cancels or re-places: {out:?}"
-    );
-    let error = out
-        .iter()
+fn refusal(out: &[Action]) -> &safe_cex_engine::VenueError {
+    out.iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandFailed { command: 1, error }) => Some(error),
             _ => None,
         })
-        .expect("refusal reaches the caller");
-    assert_eq!(error.outcome, Some(Outcome::Rejected), "{error:?}");
-    assert_eq!(error.venue_code.as_deref(), Some("51279"));
-    assert_eq!(e.store().order("77_sl"), Some(&stop));
+        .unwrap_or_else(|| panic!("refusal reaches the caller: {out:?}"))
+}
+
+const HELD: &str =
+    "OKX allows one full-position TP/SL. Edit the existing order or remove it first.";
+
+/// Adding a leg to an existing close-all algo through amend-algos is
+/// undocumented, and ccxt warns a two-leg `conditional` applies only its SL. A
+/// false "applied" protective leg is worse than a visible refusal, so a full leg
+/// beside a held full algo is refused before any write.
+#[test]
+fn a_full_leg_beside_a_held_full_algo_is_refused_before_any_write() {
+    let held_stop = full_leg("77_sl", OrderType::StopLoss, OrderSide::Sell);
+    let held_take_profit = full_leg("78_tp", OrderType::TakeProfit, OrderSide::Sell);
+    let cases: [(&Order, &[&str]); 6] = [
+        (&held_stop, &[FULL_TP]),
+        (&held_take_profit, &[FULL_SL]),
+        (&held_stop, &[FULL_SL]),
+        // Both legs in one command while one is held: never send one leg and
+        // collect 51088 on the other.
+        (&held_stop, &[FULL_SL, FULL_TP]),
+        (&held_take_profit, &[FULL_TP, FULL_SL]),
+        (
+            &held_stop,
+            &[
+                r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":38000}"#,
+                FULL_TP,
+            ],
+        ),
+    ];
+    for (held, orders) in cases {
+        let mut e = trading_engine();
+        e.store_mut().upsert_order(held.clone());
+        let out = place(&mut e, orders);
+        assert!(writes(&out).is_empty(), "{orders:?}: {out:?}");
+        let error = refusal(&out);
+        assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
+        assert_eq!(error.message, HELD, "{error:?}");
+        assert_eq!(e.store().order(&held.id), Some(held));
+    }
 }
 
 #[test]
-fn a_full_leg_is_placed_when_no_compatible_full_algo_exists() {
+fn a_full_leg_is_placed_when_the_position_holds_no_full_algo() {
     let partial = {
         let mut o = full_leg("70_sl", OrderType::StopLoss, OrderSide::Sell);
         o.amount = 1.;
@@ -180,22 +131,12 @@ fn a_full_leg_is_placed_when_no_compatible_full_algo_exists() {
         o
     };
     let other_position = full_leg("71_sl", OrderType::StopLoss, OrderSide::Buy);
-    let both_legs = [
-        full_leg("72_sl", OrderType::StopLoss, OrderSide::Sell),
-        full_leg("72_tp", OrderType::TakeProfit, OrderSide::Sell),
-    ];
     let canceled = {
         let mut o = full_leg("73_sl", OrderType::StopLoss, OrderSide::Sell);
         o.status = OrderStatus::Canceled;
         o
     };
-    for store in [
-        vec![],
-        vec![partial],
-        vec![other_position],
-        both_legs.to_vec(),
-        vec![canceled],
-    ] {
+    for store in [vec![], vec![partial], vec![other_position], vec![canceled]] {
         let mut e = trading_engine();
         for o in &store {
             e.store_mut().upsert_order(o.clone());

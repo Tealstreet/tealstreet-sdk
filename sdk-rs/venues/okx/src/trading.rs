@@ -377,28 +377,8 @@ struct OrderPayload {
     callback_spread: Option<String>,
 }
 
-enum AlgoWrite {
-    Place(Box<OrderPayload>),
-    Join(FullPositionJoin),
-}
-
-/// Adds the missing leg to an existing entire-position algo. Close-all stops
-/// take trigger edits only, never size or execution price (51523/51524).
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct FullPositionJoin {
-    inst_id: String,
-    algo_id: String,
-    cxl_on_fail: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    new_sl_trigger_px: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    new_sl_trigger_px_type: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    new_tp_trigger_px: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    new_tp_trigger_px_type: Option<&'static str>,
-}
+const FULL_POSITION_HELD: &str =
+    "OKX allows one full-position TP/SL. Edit the existing order or remove it first.";
 
 /// `Some(true)` for a lone full-position SL, `Some(false)` for a lone full TP.
 fn single_full_leg(payload: &OrderPayload) -> Option<bool> {
@@ -791,7 +771,7 @@ impl Okx {
             .into_iter()
             .map(|o| self.order_payload(cx, &o, o.amount))
             .collect::<Result<Vec<_>, _>>()?;
-        let algos = self.full_position_algos(cx, algos);
+        let algos = self.full_position_algos(cx, algos)?;
         let mut steps = Vec::new();
         for batch in regular.chunks(20) {
             steps.push(placement_step(
@@ -801,104 +781,68 @@ impl Okx {
                 true,
             )?);
         }
-        for write in algos {
-            steps.push(match write {
-                AlgoWrite::Place(payload) => {
-                    placement_step("/api/v5/trade/order-algo", &*payload, 1, true)?
-                }
-                AlgoWrite::Join(join) => step("/api/v5/trade/amend-algos", &join, 1, true)?,
-            });
+        for payload in algos {
+            steps.push(placement_step(
+                "/api/v5/trade/order-algo",
+                &payload,
+                1,
+                true,
+            )?);
         }
         Ok(job(steps, Finish::Ids))
     }
 
     /// OKX keeps ONE entire-position TP/SL algo per position and refuses a
-    /// second with 51088. A full-position leg therefore joins the position's
-    /// existing single-leg full algo through amend-algos (cxlOnFail:false keeps
-    /// it on refusal), and a full SL and TP placed together become one `oco`.
+    /// second with 51088. A full SL and TP placed together become one `oco`
+    /// algo (as ccxt places them). A full leg for a position that already holds
+    /// a full algo is refused before any write: adding a leg to an existing
+    /// close-all algo through amend-algos is undocumented and unverified.
     fn full_position_algos(
         &self,
         cx: &Cx<'_, Pending>,
         payloads: Vec<OrderPayload>,
-    ) -> Vec<AlgoWrite> {
-        let mut writes: Vec<AlgoWrite> = Vec::new();
+    ) -> Result<Vec<OrderPayload>, String> {
+        let mut placed: Vec<OrderPayload> = Vec::new();
         for payload in payloads {
-            if let Some(join) = self.join_existing_full_algo(cx, &payload) {
-                writes.push(AlgoWrite::Join(join));
-                continue;
-            }
-            let partner = writes.iter_mut().find_map(|write| match write {
-                AlgoWrite::Place(placed) if complements(placed, &payload) => Some(placed),
-                _ => None,
-            });
-            if let Some(placed) = partner {
-                placed.ord_type = "oco";
+            if let Some(partner) = placed.iter_mut().find(|p| complements(p, &payload)) {
+                partner.ord_type = "oco";
                 if payload.sl_trigger_px.is_some() {
-                    placed.sl_trigger_px = payload.sl_trigger_px;
-                    placed.sl_ord_px = payload.sl_ord_px;
-                    placed.sl_trigger_px_type = payload.sl_trigger_px_type;
+                    partner.sl_trigger_px = payload.sl_trigger_px;
+                    partner.sl_ord_px = payload.sl_ord_px;
+                    partner.sl_trigger_px_type = payload.sl_trigger_px_type;
                 } else {
-                    placed.tp_trigger_px = payload.tp_trigger_px;
-                    placed.tp_ord_px = payload.tp_ord_px;
-                    placed.tp_trigger_px_type = payload.tp_trigger_px_type;
+                    partner.tp_trigger_px = payload.tp_trigger_px;
+                    partner.tp_ord_px = payload.tp_ord_px;
+                    partner.tp_trigger_px_type = payload.tp_trigger_px_type;
                 }
                 continue;
             }
-            writes.push(AlgoWrite::Place(Box::new(payload)));
+            placed.push(payload);
         }
-        writes
+        if placed
+            .iter()
+            .any(|p| p.close_fraction == Some("1") && self.holds_full_position_algo(cx, p))
+        {
+            return Err(FULL_POSITION_HELD.into());
+        }
+        Ok(placed)
     }
 
-    fn join_existing_full_algo(
-        &self,
-        cx: &Cx<'_, Pending>,
-        payload: &OrderPayload,
-    ) -> Option<FullPositionJoin> {
-        let stop = single_full_leg(payload)?;
-        let (wanted, held, held_suffix) = if stop {
-            (OrderType::StopLoss, OrderType::TakeProfit, "_tp")
-        } else {
-            (OrderType::TakeProfit, OrderType::StopLoss, "_sl")
-        };
-        let orders = cx.store.orders();
-        // Full rows carry the zero-size sentinel; trigger rows always have a size.
-        let existing = orders.iter().find(|o| {
+    /// The position already has an open entire-position TP or SL. Full rows
+    /// carry the zero-size sentinel; trigger rows always have a size.
+    fn holds_full_position_algo(&self, cx: &Cx<'_, Pending>, payload: &OrderPayload) -> bool {
+        cx.store.orders().iter().any(|o| {
             o.symbol == payload.symbol
                 && o.side == payload.side
-                && o.kind == held
+                && matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
                 && o.amount == 0.0
                 && matches!(o.status, OrderStatus::Open | OrderStatus::Updating)
-                && o.id.ends_with(held_suffix)
                 && !self
                     .trading
                     .algo_orders
                     .get(&o.id)
                     .is_some_and(|observed| observed.trigger)
-        })?;
-        let algo_id = native_id(&existing.id);
-        if orders
-            .iter()
-            .any(|o| o.kind == wanted && native_id(&o.id) == algo_id)
-        {
-            return None;
-        }
-        let mut join = FullPositionJoin {
-            inst_id: payload.inst_id.clone(),
-            algo_id: algo_id.to_owned(),
-            cxl_on_fail: false,
-            new_sl_trigger_px: None,
-            new_sl_trigger_px_type: None,
-            new_tp_trigger_px: None,
-            new_tp_trigger_px_type: None,
-        };
-        if stop {
-            join.new_sl_trigger_px = payload.sl_trigger_px.clone();
-            join.new_sl_trigger_px_type = payload.sl_trigger_px_type;
-        } else {
-            join.new_tp_trigger_px = payload.tp_trigger_px.clone();
-            join.new_tp_trigger_px_type = payload.tp_trigger_px_type;
-        }
-        Some(join)
+        })
     }
 
     fn order_payload(
