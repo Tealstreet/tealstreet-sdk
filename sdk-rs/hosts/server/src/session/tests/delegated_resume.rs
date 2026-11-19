@@ -181,6 +181,11 @@ async fn delegated_resume_skips_handover_and_probe_on_reconnect() {
     );
     assert!(resumed < rehandover, "{resumed:?} >= {rehandover:?}");
 
+    // Account-originated notices (algo errors, stop replay) reach the resumed socket.
+    held.notify(json!({"t":"msg","d":{"op":"agt54-notice","accountName":ACCOUNT}}).to_string());
+    let notice = next(&mut sent, "agt54-notice").await;
+    assert_eq!(notice["d"]["accountName"], ACCOUNT);
+
     // The resident signer still writes after the resume.
     wire(&mut third, json!({"t":"msg","d":{"op":"callMethod","accountName":ACCOUNT,"data":{"requestId":"after-resume","method":"placeOrder","args":[{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":50000}]}}})).await;
     let reply = next(&mut sent, "callMethod:done").await;
