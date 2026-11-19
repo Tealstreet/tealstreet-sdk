@@ -1383,6 +1383,9 @@ its captured output, never another owner's registration.
 
 Typed action outcomes are `applied`, `refused` with a proven `notSent`, or
 `unknown`. Multi-leg failures and errors lacking no-dispatch proof are unknown.
+An engine `rejected` error (every released leg definitively refused by the venue)
+with no partial IDs/counts, protection change or non-`notSent` element is that
+proof and settles `refused`/`notSent`, as placement intents already do (AGT-68).
 Every cancel-all leg settles through its shared completion group, including
 pre-dispatch lease, capacity and command-ID refusals. A locally unsent leg
 cannot refuse the whole action after another leg may have crossed physical IO.
