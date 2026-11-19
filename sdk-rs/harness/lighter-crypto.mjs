@@ -101,6 +101,14 @@ export function createLighterVerifier(options, oracle = crypto, exchangeName = '
       if (info.MarketIndex === 255) return false;
       if (integer(info.Index, (1n << 60n) - 1n) === 0n) return false;
       preimage += words(info.MarketIndex,info.Index);
+    } else if (type === 17) {
+      // ModifyOrder: a plain limit edit carries the nil trigger price 0.
+      integer(info.MarketIndex,32767n);
+      if (info.MarketIndex === 255) return false;
+      if (integer(info.Index, (1n << 60n) - 1n) === 0n) return false;
+      if (!integer(info.BaseAmount, (1n << 48n) - 1n) || !uint32(info.Price)) return false;
+      uint32(info.TriggerPrice);
+      preimage += words(info.MarketIndex,info.Index,info.BaseAmount,info.Price,info.TriggerPrice);
     } else if (type === 20) {
       integer(info.MarketIndex,32767n);
       if (info.MarketIndex === 255) return false; integer(info.InitialMarginFraction,10_000n); integer(info.MarginMode,1n);
@@ -176,6 +184,8 @@ export function createLighterVerifier(options, oracle = crypto, exchangeName = '
     },
     commandResult(result, command, commandIndex=1) {
       if (!['placeOrders','amendOrder'].includes(command?.op) || !result?.ok) return result;
+      // A native ModifyOrder creates nothing and returns the order's own index.
+      if (command.op === 'amendOrder' && !(commandIds.get(commandIndex) ?? []).length) return result;
       const normalize = (ids) => {
         const expected = commandIds.get(commandIndex) ?? [];
         if (!Array.isArray(ids) || ids.length !== expected.length || ids.some((id,index) => String(id) !== expected[index]))
