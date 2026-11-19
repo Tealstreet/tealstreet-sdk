@@ -429,6 +429,21 @@ impl Inner {
                     cx.port.emit("twap:stateUpdate", data.to_string())
                 }
                 TwapEffect::Diagnostic { message } => eprintln!("[TWAP] {message}"),
+                TwapEffect::Ended {
+                    twap_id,
+                    end,
+                    orders_executed,
+                    orders_count,
+                } => cx.port.emit(
+                    "twap:complete",
+                    json!({
+                        "id": twap_id,
+                        "end": end,
+                        "ordersExecuted": orders_executed,
+                        "ordersCount": orders_count,
+                    })
+                    .to_string(),
+                ),
             }
         }
         dispatched

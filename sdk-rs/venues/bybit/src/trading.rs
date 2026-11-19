@@ -134,12 +134,32 @@ impl PartialStopGuard {
         store: &safe_cex_engine::Store,
         canceled: bool,
     ) -> Result<(), VenueError> {
-        let unchanged = match store.order(&self.original.id) {
+        self.validate_order_row(store.order(&self.original.id), store, canceled)
+    }
+
+    /// `current` is the old stop's latest known row, which may be one the proof retired.
+    fn validate_order_row(
+        &self,
+        current: Option<&Order>,
+        store: &safe_cex_engine::Store,
+        canceled: bool,
+    ) -> Result<(), VenueError> {
+        let unchanged = match current {
             Some(current) => {
                 let mut current = current.clone();
                 current.last_update = self.original.last_update;
                 if canceled && current.status == OrderStatus::Canceled {
                     current.status = self.original.status;
+                    // AGT-34 (M54): Bybit's terminal row for our own cancel carries
+                    // `leavesQty` "0". A fill still differs in `filled`, which compares.
+                    current.remaining = self.original.remaining;
+                    // Inverse rows mirror leavesQty into these two as well (map_order).
+                    if let (Some(extra), Some(original)) =
+                        (current.extra.as_mut(), self.original.extra.as_ref())
+                    {
+                        extra.remaining_native = original.remaining_native;
+                        extra.remaining_notional = original.remaining_notional;
+                    }
                 }
                 current == self.original
             }

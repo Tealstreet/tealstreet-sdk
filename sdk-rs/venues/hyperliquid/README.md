@@ -67,11 +67,11 @@ with the order unchanged; a 429 retries within the same bound, as the sizing rea
 A read's mark is discarded when the stream observed the mark after the read was
 queued, so a delayed snapshot never replaces a newer mark.
 
-The put-back after a refused replacement never waits on freshness: the position is
-unprotected until it lands, and the original trigger was already accepted. A stale
-mark is re-read once (1.5 s bound, plan held); if no fresh mark results, the original
-is re-placed anyway and the Restored outcome says no fresh mark was available. A
-fresh mark still refuses a put-back that would fire immediately.
+The put-back after a refused replacement never consults the mark: the position is
+unprotected until it lands, and the original trigger was already accepted. It is
+re-placed as-is even when the mark has already crossed its trigger, and the venue
+fires it; it is never converted to a market close (AGT-47, Sam 2026-11-20). Only a
+closed position, newer protection or a fill since the cancel stops it.
 
 Rediscovering the market list (a HIP-3 catalogue retry) carries existing ticker
 rows without re-dating their marks (AGT-55), so it neither passes a stale mark nor

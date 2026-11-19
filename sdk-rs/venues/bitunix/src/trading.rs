@@ -2523,6 +2523,11 @@ impl BitunixFutures {
             Ok((_, true)) => Err("Malformed Bitunix order acknowledgement".to_owned()),
             Err(error) => Err(error),
         };
+        if let Ok(id) = &accepted
+            && request.step.path == FULL_TPSL
+        {
+            self.account.full_position_ids.insert(id.clone());
+        }
         if let (Ok(id), Some(live)) = (&accepted, self.trading.live.get_mut(&request.command)) {
             live.job.ids.push(id.clone());
         }

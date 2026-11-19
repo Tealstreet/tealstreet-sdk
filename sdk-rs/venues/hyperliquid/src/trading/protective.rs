@@ -9,8 +9,6 @@ pub(crate) const STALE_MARK: &str =
 /// A mark that would not stay fresh this long past sizing (or until the amend bound,
 /// the latest possible cancel release) is re-read before the cancel is released.
 const MARK_HEADROOM_MS: f64 = 1_000.0;
-/// A put-back waits at most this long for a mark while the position is unprotected.
-const RESTORE_MARK_READ_MS: f64 = 1_500.0;
 
 pub(super) struct Amend {
     before: Order,
@@ -19,9 +17,6 @@ pub(super) struct Amend {
     target_kind: OrderType,
     target: f64,
     restoring: bool,
-    /// The put-back went out without a fresh mark to check it against; the
-    /// release veto (`&self`) records it, so it is a `Cell`.
-    mark_unverified: std::cell::Cell<bool>,
     refusal: Option<VenueError>,
     peers: Vec<String>,
 }
@@ -144,7 +139,6 @@ impl Hyperliquid {
                 .parse()
                 .map_err(|_| "Invalid trigger")?,
             restoring: false,
-            mark_unverified: Default::default(),
             refusal: None,
             peers: cx
                 .store
@@ -185,13 +179,6 @@ impl Hyperliquid {
             .is_some();
         (!fresh).then(|| symbol.clone())
     }
-    pub(super) fn protective_restoring(&self) -> bool {
-        self.trading
-            .active
-            .as_ref()
-            .and_then(|job| job.protection.as_ref())
-            .is_some_and(|p| p.restoring)
-    }
     /// The protected symbol while its on-demand mark read is outstanding.
     pub(super) fn protective_mark_reading(&self) -> Option<String> {
         let job = self
@@ -200,29 +187,6 @@ impl Hyperliquid {
             .as_ref()
             .filter(|job| job.amend_mark_read)?;
         Some(job.protection.as_ref()?.before.symbol.clone())
-    }
-    /// The put-back's mark read ended; the original is re-placed either way.
-    pub(super) fn settle_restore_mark(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        symbol: &str,
-        mark: Option<(f64, f64)>,
-    ) {
-        if let Some((timer, _)) = self.trading.amend_wait.take() {
-            cx.clear_timer(timer);
-        }
-        if let Some((timer, _, _)) = self.trading.amend_retry.take() {
-            cx.clear_timer(timer);
-        }
-        if let Some((mark, issued_at)) = mark {
-            apply_read_mark(cx, symbol, mark, issued_at);
-        }
-        let Some(job) = self.trading.active.as_mut() else {
-            return;
-        };
-        job.amend_mark_read = false;
-        job.steps.push_back(Step::Restore);
-        self.release_trade_builder(cx);
     }
     pub(super) fn prepare_protective_replace(
         &self,
@@ -323,40 +287,40 @@ impl Hyperliquid {
         if !restoring && !matches!(trade.effect, Effect::Cancel(_)) {
             return Ok(());
         }
-        let now = release.time.raw_ms;
-        let source = if restoring {
+        if restoring {
             if job.amend_filled || restore_obsolete(store, protected) {
                 return Err(not_sent(
                     "Hyperliquid original protection is obsolete; restoration not sent",
                 ));
             }
-            &protected.before
-        } else {
-            if !store.loaded().positions || !has_position(store, &protected.before) {
-                return Err(not_sent(
-                    "Hyperliquid position closed or is not loaded; original protection unchanged",
-                ));
-            }
-            let source = store.order(&protected.before.id).ok_or_else(|| {
-                not_sent("Hyperliquid original protection is no longer open; amendment not sent")
-            })?;
-            if source.symbol != protected.before.symbol
-                || source.side != protected.before.side
-                || source.kind != protected.before.kind
-                || source.price != protected.before.price
-                || source.filled != protected.before.filled
-                || source.client_order_id != protected.before.client_order_id
-                || !matches!(
-                    source.status,
-                    OrderStatus::Open | OrderStatus::Creating | OrderStatus::Canceling
-                )
-            {
-                return Err(not_sent(
-                    "Hyperliquid protection changed after sizing; order unchanged, retry the edit",
-                ));
-            }
-            source
-        };
+            // The original trigger goes back as-is, even through the mark: the venue
+            // fires it, which is the user's own stop (AGT-47, Sam 2026-11-20).
+            return Ok(());
+        }
+        let now = release.time.raw_ms;
+        if !store.loaded().positions || !has_position(store, &protected.before) {
+            return Err(not_sent(
+                "Hyperliquid position closed or is not loaded; original protection unchanged",
+            ));
+        }
+        let source = store.order(&protected.before.id).ok_or_else(|| {
+            not_sent("Hyperliquid original protection is no longer open; amendment not sent")
+        })?;
+        if source.symbol != protected.before.symbol
+            || source.side != protected.before.side
+            || source.kind != protected.before.kind
+            || source.price != protected.before.price
+            || source.filled != protected.before.filled
+            || source.client_order_id != protected.before.client_order_id
+            || !matches!(
+                source.status,
+                OrderStatus::Open | OrderStatus::Creating | OrderStatus::Canceling
+            )
+        {
+            return Err(not_sent(
+                "Hyperliquid protection changed after sizing; order unchanged, retry the edit",
+            ));
+        }
         let mark = store
             .reference_seen_at(&source.symbol, StopTriggerType::MarkPrice)
             .filter(|seen| now.is_finite() && *seen <= now)
@@ -369,18 +333,9 @@ impl Hyperliquid {
                 )
             });
         let Some(mark) = mark else {
-            // The original trigger was already accepted: being protected beats freshness.
-            if restoring {
-                protected.mark_unverified.set(true);
-                return Ok(());
-            }
             return Err(not_sent(STALE_MARK));
         };
-        let (kind, trigger) = if restoring {
-            (source.kind, source.price)
-        } else {
-            (protected.target_kind, protected.target)
-        };
+        let (kind, trigger) = (protected.target_kind, protected.target);
         let fires = match (source.side, kind) {
             (OrderSide::Sell, OrderType::StopLoss) | (OrderSide::Buy, OrderType::TakeProfit) => {
                 trigger >= mark
@@ -433,17 +388,12 @@ impl Amend {
             return None;
         }
         let refusal = self.refusal.as_ref()?;
-        let unverified = if self.mark_unverified.get() {
-            " (no fresh mark was available to check it against)"
-        } else {
-            ""
-        };
         Some(VenueError {
             kind: Some(ErrorKind::Rejected),
             outcome: Some(Outcome::Rejected),
             protection: Some(Protection::Restored),
             ..VenueError::new(format!(
-                "Hyperliquid replacement refused; original {} protection restored unchanged as a new order{unverified}: {}",
+                "Hyperliquid replacement refused; original {} protection restored unchanged as a new order: {}",
                 self.before.symbol, refusal.message
             ))
         })
@@ -520,24 +470,6 @@ impl Hyperliquid {
         p.refusal = Some(error);
         p.restoring = true;
         job.steps.clear();
-        let source = job.amend_source.clone();
-        // A stale mark is re-read once, bounded, before the put-back; it never blocks it.
-        let deadline = cx.now + RESTORE_MARK_READ_MS;
-        // The serial plan is held across the read, as for the sizing read.
-        if let Some(symbol) = self.protective_mark_unfresh(cx, deadline)
-            && let Some(id) = source
-            && self.park_trade_builder(cx).is_ok()
-        {
-            let job = self.trading.active.as_mut().unwrap();
-            job.amend_deadline = Some(deadline);
-            if let Some(amend) = job.amend_owner() {
-                job.amend_mark_read = true;
-                self.trading.amend_wait = Some((cx.set_timer(RESTORE_MARK_READ_MS), amend));
-                self.read_amend_mark(cx, &id, amend, &symbol);
-                return None;
-            }
-        }
-        let job = self.trading.active.as_mut().unwrap();
         job.steps.push_back(Step::Restore);
         self.pump_trades(cx);
         None

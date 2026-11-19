@@ -421,7 +421,7 @@ fn a_timestamp_rejection_resyncs_then_resends_each_write_method_once() {
 }
 
 #[test]
-fn v3_clock_recovery_resigns_code_and_standard_requests_then_preserves_unknown_on_loss() {
+fn v3_clock_recovery_resigns_each_method_then_preserves_unknown_on_loss() {
     for (command_of, method, path) in [
         (place as fn() -> Command, Method::Post, "/order"),
         (cancel as fn() -> Command, Method::Delete, "/order"),
@@ -437,12 +437,10 @@ fn v3_clock_recovery_resigns_code_and_standard_requests_then_preserves_unknown_o
         let second = write(&resent, method, path).clone();
         assert_ne!(query(&first.url, "nonce"), query(&second.url, "nonce"));
         assert_ne!(signature(&first.url), signature(&second.url));
-        if method == Method::Post && path == "/order" {
-            assert!(stamp(&first.url).is_none());
-            assert!(stamp(&second.url).is_none());
-        } else {
-            assert_ne!(stamp(&first.url), stamp(&second.url));
-        }
+        assert!(stamp(&first.url).is_none());
+        assert!(stamp(&second.url).is_none());
+        assert!(query(&first.url, "recvWindow").is_none());
+        assert!(query(&second.url, "recvWindow").is_none());
         let failed = lost(&mut engine, &second);
         assert_eq!(
             terminal(&failed).unwrap().unwrap_err().outcome,

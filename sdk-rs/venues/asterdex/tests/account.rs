@@ -1025,6 +1025,60 @@ fn position_mode_read_retries_are_jittered_below_their_nominal_backoff() {
     }
     assert!(delays.iter().any(|(delay, nominal)| delay < nominal));
 }
+
+fn signature_refusal_stops_mode_retries(options: Options) {
+    let mut h = H::options_with_orders(options, "[]");
+    h.reply(
+        "/positionSide/dual",
+        r#"{"code":-1000,"msg":"Signature check failed"}"#,
+    );
+    assert_eq!(
+        h.errors
+            .iter()
+            .filter(|message| message
+                .contains("Aster API key signature rejected: re-create the key (V3)"))
+            .count(),
+        1,
+        "one actionable credential error: {:?}",
+        h.errors
+    );
+    assert!(!h.logs.iter().any(|message| message.contains("retrying in")));
+    h.fire_after(120_000.0);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.url.contains("/positionSide/dual?")),
+        "a terminal signature rejection must not poll again"
+    );
+    place(
+        &mut h,
+        303,
+        json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":1,"reduceOnly":true}),
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.url.contains("/order?"))
+    );
+    assert!(
+        result(&h, 303).is_err(),
+        "unknown position mode must still hold placement"
+    );
+}
+
+#[test]
+fn v1_position_mode_signature_refusal_stops_retrying() {
+    signature_refusal_stops_mode_retries(Options {
+        key: Some("documented-key".into()),
+        secret: Some("synthetic-secret".into()),
+        ..Default::default()
+    });
+}
+
+#[test]
+fn v3_position_mode_signature_refusal_stops_retrying() {
+    signature_refusal_stops_mode_retries(Options::v3_wallet());
+}
 #[test]
 fn unmapped_liquidation_order_type_still_delivers_its_fill() {
     let mut h = H::new();

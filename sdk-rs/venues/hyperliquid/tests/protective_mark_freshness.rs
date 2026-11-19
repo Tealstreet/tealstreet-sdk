@@ -265,7 +265,7 @@ fn refuse_replacement(refused_at: f64) -> (Engine<Hyperliquid>, SocketId) {
     (e, s)
 }
 /// The put-back's outcome once it is acknowledged.
-fn restored(e: &mut Engine<Hyperliquid>, actions: Vec<Action>, until: f64) -> String {
+fn restored(e: &mut Engine<Hyperliquid>, actions: Vec<Action>, until: f64) {
     let restore = if sends(&actions) {
         write(&actions)
     } else {
@@ -291,56 +291,23 @@ fn restored(e: &mut Engine<Hyperliquid>, actions: Vec<Action>, until: f64) -> St
         .collect();
     assert_eq!(errors.len(), 1);
     assert_eq!(errors[0].protection, Some(Protection::Restored));
-    errors[0].message.clone()
 }
 fn action_of(r: &HttpRequest) -> Value {
     serde_json::from_str::<Value>(r.body.as_deref().unwrap()).unwrap()["action"].clone()
 }
 use safe_cex_engine::error::Protection;
-const UNVERIFIED: &str = "no fresh mark was available";
 
+// The put-back no longer reads the mark (AGT-47, Sam 2026-11-20): it is placed as-is
+// whatever the mark says, so a read would only lengthen the unprotected window.
 #[test]
-fn refused_replacement_with_a_stale_mark_reads_it_then_restores_the_original() {
+fn refused_replacement_with_a_stale_mark_restores_the_original_without_a_read() {
     let (mut e, _) = refuse_replacement(7_500.);
     let actions = prepared_now(&mut e);
     assert!(
-        !sends(&actions),
-        "the put-back waits for its bounded mark read"
+        info(&actions, "activeAssetData").is_none(),
+        "no put-back mark read"
     );
-    let read = info(&actions, "activeAssetData").expect("restore mark read");
-    answer(
-        &mut e,
-        7_600.,
-        &read,
-        200,
-        r#"{"coin":"BTC","markPx":"100"}"#,
-    );
-    let actions = prepared_now(&mut e);
-    let message = restored(&mut e, actions, 7_600. + 1_000.);
-    assert!(!message.contains(UNVERIFIED), "{message}");
-}
-
-#[test]
-fn a_failed_restore_mark_read_still_restores_the_original_with_an_explicit_outcome() {
-    for failure in ["unreadable", "http", "unanswered"] {
-        let (mut e, _) = refuse_replacement(7_500.);
-        let actions = prepared_now(&mut e);
-        let read = info(&actions, "activeAssetData").expect("restore mark read");
-        let actions = match failure {
-            "unreadable" => {
-                answer(&mut e, 7_600., &read, 200, r#"{"coin":"ETH","markPx":"1"}"#);
-                prepared_now(&mut e)
-            }
-            "http" => {
-                answer(&mut e, 7_600., &read, 500, "");
-                prepared_now(&mut e)
-            }
-            _ => actions,
-        };
-        // Bounded: the unanswered read ends at its own 1.5 s timer.
-        let message = restored(&mut e, actions, 7_500. + 3_000.);
-        assert!(message.contains(UNVERIFIED), "{failure}: {message}");
-    }
+    restored(&mut e, actions, 7_500. + 1_000.);
 }
 
 /// The next signed write, prepared and bound but not yet claimed.
@@ -385,7 +352,7 @@ fn held_write(
 }
 
 #[test]
-fn stale_held_restore_is_released_with_an_unverified_outcome() {
+fn stale_held_restore_is_released() {
     // Fresh when the replacement is refused, so no read; stale by the put-back's release.
     let (mut e, _) = refuse_replacement(2_400.);
     let (r, permit) = held_write(&mut e, 2_668.);
@@ -405,7 +372,6 @@ fn stale_held_restore_is_released_with_an_unverified_outcome() {
     });
     let outcome = outcome.expect("one explicit terminal");
     assert_eq!(outcome.protection, Some(Protection::Restored));
-    assert!(outcome.message.contains(UNVERIFIED), "{}", outcome.message);
 }
 
 #[test]
@@ -427,25 +393,6 @@ fn a_delayed_mark_read_never_overwrites_a_newer_streamed_mark() {
     assert_eq!(
         e.store().reference_seen_at("BTC-PERP", MarkPrice),
         Some(9_050.)
-    );
-
-    // Put-back read: a newer streamed mark crossing the original trigger still refuses
-    // it, rather than an older snapshot letting an immediately firing stop through.
-    let (mut e, s) = refuse_replacement(7_500.);
-    let read = info(&prepared_now(&mut e), "activeAssetData").unwrap();
-    contexts(&mut e, s, 7_550., json!({"markPx":"125"}));
-    answer(
-        &mut e,
-        7_600.,
-        &read,
-        200,
-        r#"{"coin":"BTC","markPx":"100"}"#,
-    );
-    assert_eq!(e.store().ticker("BTC-PERP").unwrap().mark, 125.);
-    let (_, permit) = held_write(&mut e, 7_600.);
-    assert!(
-        e.claim_http(7_600., permit).is_err(),
-        "a put-back that would fire at once is not released"
     );
 }
 

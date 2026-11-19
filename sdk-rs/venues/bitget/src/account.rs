@@ -3421,7 +3421,11 @@ impl BitgetFutures {
                 (raw.side.as_ref(), protected),
                 ("sell", "long") | ("buy", "short")
             );
-        let amount = if raw.tpsl_mode == "full" {
+        // A whole-position TP/SL closes whatever is open when it triggers: it holds no size, even
+        // when its row reports the current position size (AGT-70).
+        let amount = if raw.tpsl_mode == "full"
+            || matches!(plan_type(&raw.plan_type), Some("pos_loss" | "pos_profit"))
+        {
             0.0
         } else {
             first(&[raw.size, raw.sz, raw.qty, raw.amount]).unwrap_or(0.0)

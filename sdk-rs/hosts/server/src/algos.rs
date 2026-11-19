@@ -473,7 +473,7 @@ impl AccountPort for Port {
             // end reports it as lost ("Hosted server stopped reporting it").
             let replay = algo_msg(&self.name, op, replayed(op, &data));
             let holding = (self.broadcast)(Some(algo_msg(&self.name, op, data)));
-            self.keep_unheard(None, replay, holding, retrying, op == "chaser:complete");
+            self.keep_unheard(None, replay, holding, retrying, is_algo_end(op));
             return;
         }
         // Every tab on the account, not only the one that signs.
@@ -1607,7 +1607,7 @@ fn completion(notice: &Value) -> Result<String, VenueError> {
 /// once, since the fill toast it would have shown went with the page.
 fn replayed(op: &str, data: &str) -> String {
     match serde_json::from_str::<Value>(data) {
-        Ok(Value::Object(mut end)) if op == "chaser:complete" => {
+        Ok(Value::Object(mut end)) if is_algo_end(op) => {
             end.insert("replayed".into(), Value::Bool(true));
             Value::Object(end).to_string()
         }
@@ -1615,9 +1615,14 @@ fn replayed(op: &str, data: &str) -> String {
     }
 }
 
-/// A chase's end and its outcome warnings are owed to a page that was away, as errors are.
+/// An algo's end and its outcome warnings are owed to a page that was away, as errors are.
 fn owed_on_rejoin(op: &str) -> bool {
-    matches!(op, "warning" | "chaser:complete")
+    op == "warning" || is_algo_end(op)
+}
+
+/// A chase's or TWAP's own end: without it a page reads the vanished row as lost.
+fn is_algo_end(op: &str) -> bool {
+    matches!(op, "chaser:complete" | "twap:complete")
 }
 
 fn error_kind(kind: &str) -> Option<ErrorKind> {
@@ -1689,6 +1694,12 @@ mod tests {
         let replay: Value = serde_json::from_str(&replayed("chaser:complete", end)).unwrap();
         assert_eq!(replay["replayed"], true);
         assert_eq!(replay["filled"], 0.001);
+        let twap: Value = serde_json::from_str(&replayed(
+            "twap:complete",
+            r#"{"id":"t1","end":"completed"}"#,
+        ))
+        .unwrap();
+        assert_eq!(twap["replayed"], true);
         assert_eq!(
             replayed("warning", "\"Chaser stopped: x\""),
             "\"Chaser stopped: x\""
@@ -1698,6 +1709,7 @@ mod tests {
     #[test]
     fn a_chase_end_and_its_warnings_are_replayed_to_a_page_that_was_away() {
         assert!(owed_on_rejoin("chaser:complete"));
+        assert!(owed_on_rejoin("twap:complete"));
         assert!(owed_on_rejoin("warning"));
         assert!(!owed_on_rejoin("log"));
         assert!(!owed_on_rejoin("twap:stateUpdate"));

@@ -388,6 +388,8 @@ pub(crate) fn map_order(
         "PENDING" | "OPEN" | "UNTRIGGERED" => OrderStatus::Open,
         "FILLED" | "EXPIRED" => OrderStatus::Closed,
         "CANCELED" => OrderStatus::Canceled,
+        // Seen live 2026-11-19 on a cancel in flight: not terminal until CANCELED arrives.
+        "CANCELING" => OrderStatus::Canceling,
         _ => return Err(unknown_order_status(&raw.status)),
     };
     let kind = match raw.kind.as_ref() {
@@ -1678,7 +1680,13 @@ impl ApexOmni {
                             .is_some_and(|price| price >= 0.0)
                         && matches!(
                             row.status.as_ref(),
-                            "PENDING" | "OPEN" | "UNTRIGGERED" | "FILLED" | "EXPIRED" | "CANCELED"
+                            "PENDING"
+                                | "OPEN"
+                                | "UNTRIGGERED"
+                                | "CANCELING"
+                                | "FILLED"
+                                | "EXPIRED"
+                                | "CANCELED"
                         )
                         && matches!(
                             row.kind.as_ref(),

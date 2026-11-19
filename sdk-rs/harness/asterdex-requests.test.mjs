@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { AbiCoder, getBytes, hashMessage, keccak256, SigningKey } from 'ethers';
+import { AbiCoder, getBytes, hashMessage, keccak256, SigningKey, TypedDataEncoder } from 'ethers';
 import {
   asterRequestUrl,
   asterSocketAudit,
@@ -12,6 +12,8 @@ import {
   createAsterRequestValidator,
 } from './asterdex-requests.mjs';
 import { requestKey } from './requests.mjs';
+import { buildAsterTape, ASTER_EPOCH, ASTER_READ_PRIVATE_KEY } from './private-tape-asterdex.mjs';
+import { createTape } from './tape.mjs';
 
 const vectors = JSON.parse(
   readFileSync(new URL('../venues/asterdex/tests/fixtures/signing.json', import.meta.url)),
@@ -31,6 +33,33 @@ const legacy = (params = {}, patch = {}) => {
   };
 };
 const options = { key: ASTER_SIGNER, secret: ASTER_PRIVATE_KEY, applicationId: ASTER_USER };
+
+for (const secondary of [false, true]) {
+  for (const endpoint of ['account', 'positionSide/dual']) {
+    test(`Aster V3 tape matches current ${endpoint} signing${secondary ? ' with a read agent' : ''}`, (t) => {
+      t.mock.method(Date, 'now', () => ASTER_EPOCH);
+      const records = buildAsterTape({ v3: true, secondary });
+      const row = records.find((record) => record.type === 'http' && record.method === 'GET'
+        && new URL(record.url).pathname === `/fapi/v3/${endpoint}`);
+      const parsed = new URL(row.url);
+      parsed.searchParams.set('asterChain', 'Mainnet');
+      parsed.searchParams.set('nonce', String(ASTER_EPOCH * 1000));
+      const query = parsed.searchParams.toString();
+      const digest = TypedDataEncoder.hash(
+        { name: 'AsterSignTransaction', version: '1', chainId: 1666, verifyingContract: '0x0000000000000000000000000000000000000000' },
+        { Message: [{ name: 'msg', type: 'string' }] }, { msg: query },
+      );
+      const signature = new SigningKey(secondary ? ASTER_READ_PRIVATE_KEY : ASTER_PRIVATE_KEY).sign(digest).serialized;
+      const tape = createTape(records, { requestUrl: asterRequestUrl, createRequestValidator: createAsterRequestValidator },
+        true, { credentials: records.find((record) => record.type === 'config').options });
+      const response = tape.respond('GET', `${parsed.origin}${parsed.pathname}?${query}&signature=${signature}`,
+        undefined, { 'X-MBX-APIKEY': parsed.searchParams.get('signer') });
+      assert.equal(response.status, 200);
+      assert.equal(response.body, row.body);
+      assert.equal(tape.invalidSignatures, 0);
+    });
+  }
+}
 
 test('Aster V1 independent oracle binds key, business payload, clock, window and body', () => {
   const valid = legacy();
@@ -68,20 +97,11 @@ test('Aster V1 timing uses recvWindow and the strict one-second future bound', (
   }
 });
 
-test('Aster V3 standard request verifies independent ethers vectors and nonce reuse', () => {
-  const vector = vectors.find((row) => row.name === 'decimal-spelling-mainnet');
-  const fields = {
-    ...vector.params,
-    recvWindow: '20000',
-    timestamp: String(vector.nowMs),
-    user: vector.user,
-    signer: vector.signer,
-    nonce: vector.nonce,
-    signature: vector.signature,
-  };
+test('Aster V3 account request verifies independent EIP-712 vectors and nonce reuse', () => {
+  const vector = vectors.find((row) => row.name === 'documented-order-mainnet');
   const request = {
     method: 'GET',
-    url: `https://fapi.asterdex.com/fapi/v3/account?${new URLSearchParams(fields)}`,
+    url: `https://fapi.asterdex.com/fapi/v3/account?${vector.codeQuery}&signature=${vector.codeSignature}`,
     headers: { 'X-MBX-APIKEY': ASTER_SIGNER },
     now: vector.nowMs,
   };
@@ -89,13 +109,60 @@ test('Aster V3 standard request verifies independent ethers vectors and nonce re
   assert.doesNotThrow(() => validator(request));
   assert.throws(() => validator(request), /nonce/);
   for (const [from, to] of [
-    ['quantity=0.00010000', 'quantity=0.00010001'],
+    ['quantity=20', 'quantity=21'],
     [`user=${encodeURIComponent(ASTER_USER)}`, `user=${encodeURIComponent(ASTER_SIGNER)}`],
     ['nonce=' + vector.nonce, 'nonce=0'],
   ]) {
     assert.throws(() => createAsterRequestValidator(options)({ ...request, url: request.url.replace(from, to) }));
   }
 });
+
+for (const testnet of [false, true]) {
+  for (const [method, endpoint] of [
+    ['GET', 'account'],
+    ['GET', 'positionSide/dual'],
+    ['GET', 'positionRisk'],
+    ['GET', 'openOrders'],
+    ['GET', 'order'],
+    ['DELETE', 'order'],
+    ['DELETE', 'allOpenOrders'],
+    ['POST', 'listenKey'],
+    ['PUT', 'listenKey'],
+    ['POST', 'leverage'],
+    ['POST', 'marginType'],
+    ['POST', 'positionSide/dual'],
+    ['GET', 'stpMode'],
+    ['POST', 'stpMode'],
+    ['GET', 'allOrders'],
+    ['GET', 'userTrades'],
+    ['GET', 'income'],
+    ['GET', 'leverageBracket'],
+  ]) {
+    test(`Aster V3 EIP-712 ${method} ${endpoint} ${testnet ? 'testnet' : 'mainnet'}`, () => {
+      const vector = vectors.find((row) => row.name === `empty-${testnet ? 'testnet' : 'mainnet'}`);
+      const origin = testnet ? 'https://fapi.asterdex-testnet.com' : 'https://fapi.asterdex.com';
+      const request = {
+        method,
+        url: `${origin}/fapi/v3/${endpoint}?${vector.codeQuery}&signature=${vector.codeSignature}`,
+        headers: { 'X-MBX-APIKEY': ASTER_SIGNER },
+        now: vector.nowMs,
+      };
+      const validate = createAsterRequestValidator(options);
+      assert.doesNotThrow(() => validate(request));
+      assert.throws(() => validate(request), /nonce was reused/);
+      for (const [from, to, error] of [
+        ['asterChain=' + (testnet ? 'Testnet' : 'Mainnet'), 'asterChain=wrong', /fields\/domain/],
+        ['nonce=' + vector.nonce, 'nonce=0', /nonce/],
+        ['&signature=', '&timestamp=' + vector.nowMs + '&signature=', /fields\/domain/],
+        ['&signature=', '&recvWindow=20000&signature=', /fields\/domain/],
+      ]) {
+        assert.throws(() => createAsterRequestValidator(options)({
+          ...request, url: request.url.replace(from, to),
+        }), error);
+      }
+    });
+  }
+}
 
 for (const testnet of [false, true])
   test(`Aster Code exact-query signature and ${testnet ? 'testnet' : 'mainnet'} domain`, () => {
@@ -148,21 +215,17 @@ test('Aster request identity drops only validated nonce and common transport sig
 
 test('Aster V3 rejects a different declared signer even when the supplied secret verifies its signature', () => {
   const vector = vectors.find((row) => row.name === 'documented-order-mainnet');
-  const payload = { ...vector.params, recvWindow: '20000', timestamp: String(vector.nowMs) };
-  const sorted = Object.fromEntries(
-    Object.keys(payload)
-      .sort()
-      .map((key) => [key, String(payload[key])]),
+  const fields = { ...vector.params, asterChain: 'Mainnet', user: ASTER_USER, signer: ASTER_USER, nonce: vector.nonce };
+  const query = Object.entries(fields).map(([key, value]) => `${key}=${value}`).join('&');
+  const digest = TypedDataEncoder.hash(
+    { name: 'AsterSignTransaction', version: '1', chainId: 1666, verifyingContract: '0x0000000000000000000000000000000000000000' },
+    { Message: [{ name: 'msg', type: 'string' }] },
+    { msg: query },
   );
-  const encoded = AbiCoder.defaultAbiCoder().encode(
-    ['string', 'address', 'address', 'uint256'],
-    [JSON.stringify(sorted), ASTER_USER, ASTER_USER, BigInt(vector.nonce)],
-  );
-  const signature = new SigningKey(ASTER_PRIVATE_KEY).sign(hashMessage(getBytes(keccak256(encoded)))).serialized;
-  const fields = { ...payload, user: ASTER_USER, signer: ASTER_USER, nonce: vector.nonce, signature };
+  const signature = new SigningKey(ASTER_PRIVATE_KEY).sign(digest).serialized;
   const request = {
     method: 'GET',
-    url: `https://fapi.asterdex.com/fapi/v3/account?${new URLSearchParams(fields)}`,
+    url: `https://fapi.asterdex.com/fapi/v3/account?${query}&signature=${signature}`,
     headers: { 'X-MBX-APIKEY': ASTER_USER },
     now: vector.nowMs,
   };
@@ -170,6 +233,27 @@ test('Aster V3 rejects a different declared signer even when the supplied secret
     () => createAsterRequestValidator({ ...options, key: ASTER_USER })(request),
     /recoverable signature mismatch/,
   );
+});
+
+test('Aster V3 rejects obsolete EIP-191 requests without consuming the signer nonce', () => {
+  const vector = vectors.find((row) => row.name === 'documented-order-mainnet');
+  const payload = { ...vector.params, recvWindow: '20000', timestamp: String(vector.nowMs) };
+  const sorted = Object.fromEntries(Object.entries(payload).sort(([a], [b]) => a.localeCompare(b)));
+  const encoded = AbiCoder.defaultAbiCoder().encode(
+    ['string', 'address', 'address', 'uint256'],
+    [JSON.stringify(sorted), ASTER_USER, ASTER_SIGNER, BigInt(vector.nonce)],
+  );
+  const signature = new SigningKey(ASTER_PRIVATE_KEY).sign(hashMessage(getBytes(keccak256(encoded)))).serialized;
+  const fields = { ...payload, user: ASTER_USER, signer: ASTER_SIGNER, nonce: vector.nonce, signature };
+  const request = {
+    method: 'GET', url: `https://fapi.asterdex.com/fapi/v3/account?${new URLSearchParams(fields)}`,
+    headers: { 'X-MBX-APIKEY': ASTER_SIGNER }, now: vector.nowMs,
+  };
+  const validate = createAsterRequestValidator(options);
+  assert.throws(() => validate(request), /fields\/domain/);
+  assert.doesNotThrow(() => validate({ ...request,
+    url: `https://fapi.asterdex.com/fapi/v3/account?${vector.codeQuery}&signature=${vector.codeSignature}`,
+  }));
 });
 
 test('Aster protocol audit requires aggregate/partial subscriptions and reserved ping identities', () => {

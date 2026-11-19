@@ -152,24 +152,9 @@ fn create_peer_ids(planned: &Planned, store: &safe_cex_engine::Store) -> Vec<Str
     if !matches!(planned.call, Call::PlaceBatch { .. }) {
         return Vec::new();
     }
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Target {
-        symbol: String,
-        side: String,
-        reduce_only: Option<bool>,
-    }
-    #[derive(serde::Deserialize)]
-    struct Batch {
-        #[serde(rename = "request")]
-        orders: Vec<Target>,
-    }
-    let Ok(batch) = serde_json::from_str::<Batch>(&planned.body) else {
+    let Some(targets) = ack::reduce_only_batch_targets(&planned.body) else {
         return Vec::new();
     };
-    if batch.orders.is_empty() || batch.orders.iter().any(|row| row.reduce_only != Some(true)) {
-        return Vec::new();
-    }
     store
         .orders()
         .iter()
@@ -178,8 +163,8 @@ fn create_peer_ids(planned: &Planned, store: &safe_cex_engine::Store) -> Vec<Str
                 && order.reduce_only
                 && !is_virtual(&order.id)
                 && order.remaining > 0.0
-                && batch.orders.iter().any(|row| {
-                    row.symbol == order.symbol && row.side == super::side_text(order.side)
+                && targets.iter().any(|(symbol, side)| {
+                    *symbol == order.symbol && *side == super::side_text(order.side)
                 })
         })
         .take(500)
@@ -1258,7 +1243,9 @@ impl BybitLinear {
                         axis,
                         partial::Axis::Target | partial::Axis::TargetHistory | partial::Axis::Final
                     ) {
-                        let target = run.partial.as_ref().unwrap().target_id().to_owned();
+                        let flow = run.partial.as_mut().unwrap();
+                        flow.retire(cx.store);
+                        let target = flow.target_id().to_owned();
                         self.note_partial_stop_canceled(&target);
                         mark_canceled(
                             cx,

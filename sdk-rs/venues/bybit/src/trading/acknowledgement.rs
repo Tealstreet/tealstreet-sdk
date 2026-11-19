@@ -1,7 +1,7 @@
-//! Strict Bybit V5 write acknowledgements. Every level must be a JSON object,
-//! codes are exact integers, IDs are bounded non-empty strings, and rows are
-//! matched to the request by echo, never by position alone. A shape this module
-//! rejects is a malformed acknowledgement: the engine records it as unproven.
+// Strict Bybit V5 write acknowledgements. Every level must be a JSON object,
+// codes are exact integers, IDs are bounded non-empty strings, and rows are
+// matched to the request by echo, never by position alone. A shape this module
+// rejects is a malformed acknowledgement: the engine records it as unproven.
 use safe_cex_engine::classify::decode_int;
 use safe_cex_engine::text::JoinWith;
 use serde_json::value::RawValue;
@@ -202,6 +202,43 @@ fn list(raw: &RawValue) -> Result<&RawValue, Malformed> {
     object(raw)?.required("list")
 }
 
+/// Reuse the strict object decoder for owned create-batch scope, preserving
+/// the map and positional sequence forms accepted by the former serde structs.
+pub(crate) fn reduce_only_batch_targets(body: &str) -> Option<Vec<(String, String)>> {
+    let raw: &RawValue = serde_json::from_str(body).ok()?;
+    let requests = if is_object(raw) {
+        object(raw).ok()?.required("request").ok()?
+    } else {
+        let fields = elements(raw).ok()?;
+        if fields.len() != 1 {
+            return None;
+        }
+        fields[0]
+    };
+    let rows: Vec<&RawValue> = serde_json::from_str(requests.get()).ok()?;
+    if rows.is_empty() {
+        return None;
+    }
+    let mut targets = Vec::with_capacity(rows.len());
+    for row in rows {
+        let target = if is_object(row) {
+            let fields = object(row).ok()?;
+            if fields.required("reduceOnly").ok()?.get().trim() != "true" {
+                return None;
+            }
+            (fields.text("symbol").ok()??, fields.text("side").ok()??)
+        } else {
+            let fields = elements(row).ok()?;
+            if fields.len() != 3 || fields[2].get().trim() != "true" {
+                return None;
+            }
+            (string(fields[0]).ok()?, string(fields[1]).ok()?)
+        };
+        targets.push(target);
+    }
+    Some(targets)
+}
+
 fn code(raw: &RawValue) -> Result<i64, Malformed> {
     decode_int(raw.get()).ok_or(Malformed)
 }
@@ -349,14 +386,34 @@ fn created_with_peers(
     if links.is_empty() || peers.is_empty() || identities.len() != statuses.len() {
         return Err(Malformed);
     }
-    let mut native_ids = std::collections::HashSet::new();
-    let mut echoes = std::collections::HashSet::new();
+    {
+        let mut native_ids = Vec::with_capacity(identities.len());
+        let mut echoes = Vec::with_capacity(identities.len());
+        for identity in &identities {
+            if let Some(id) = identity.order_id.as_deref().filter(|id| !id.is_empty()) {
+                native_ids.push(id);
+            }
+            if let Some(echo) = identity
+                .order_link_id
+                .as_deref()
+                .filter(|id| !id.is_empty())
+            {
+                echoes.push(echo);
+            }
+        }
+        for values in [&mut native_ids, &mut echoes] {
+            values.sort_unstable();
+            if values.windows(2).any(|pair| pair[0] == pair[1]) {
+                return Err(Malformed);
+            }
+        }
+    }
     let mut matched: Vec<Option<Row>> = links.iter().map(|_| None).collect();
     let mut unnamed = Vec::new();
     for (identity, status) in identities.into_iter().zip(statuses) {
         let id = identity.order_id.as_deref().filter(|id| !id.is_empty());
         if let Some(id) = id
-            && (id.len() > MAX_ID_BYTES || !native_ids.insert(id.to_owned()) || status.code != 0)
+            && (id.len() > MAX_ID_BYTES || status.code != 0)
         {
             return Err(Malformed);
         }
@@ -364,11 +421,6 @@ fn created_with_peers(
             .order_link_id
             .as_deref()
             .filter(|id| !id.is_empty());
-        if let Some(echo) = echo
-            && !echoes.insert(echo.to_owned())
-        {
-            return Err(Malformed);
-        }
         if id.is_some_and(|id| peers.contains(&id)) {
             if status.code != 0 || echo.is_some_and(|echo| links.contains(&Some(echo))) {
                 return Err(Malformed);

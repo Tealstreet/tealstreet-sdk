@@ -1466,7 +1466,23 @@ mod tests {
                 }
             }
             assert_eq!(h.requests.len(), 1);
-            assert!(h.requests[0].url.contains("timestamp=1700000015000"));
+            if v3 {
+                let url = &h.requests[0].url;
+                let nonce: u64 = url
+                    .split("nonce=")
+                    .nth(1)
+                    .unwrap()
+                    .split('&')
+                    .next()
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                assert!(nonce >= 1_700_000_015_000_000);
+                assert!(!url.contains("timestamp="));
+                assert!(!url.contains("recvWindow="));
+            } else {
+                assert!(h.requests[0].url.contains("timestamp=1700000015000"));
+            }
         }
     }
 

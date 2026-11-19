@@ -1,5 +1,74 @@
 use super::*;
 
+#[test]
+fn reduce_only_scope_matches_the_original_serde_decoder() {
+    fn original(body: &str) -> Option<Vec<(String, String)>> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Target {
+            symbol: String,
+            side: String,
+            reduce_only: Option<bool>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Batch {
+            #[serde(rename = "request")]
+            orders: Vec<Target>,
+        }
+        let batch: Batch = serde_json::from_str(body).ok()?;
+        if batch.orders.is_empty() || batch.orders.iter().any(|row| row.reduce_only != Some(true)) {
+            return None;
+        }
+        Some(
+            batch
+                .orders
+                .into_iter()
+                .map(|row| (row.symbol, row.side))
+                .collect(),
+        )
+    }
+    let row = r#"{"symbol":"BTCUSDT","side":"Sell","reduceOnly":true}"#;
+    let mut bodies = vec![
+        format!(r#"{{"request":[{row}]}}"#),
+        format!(r#"{{"request":[{row},{row}],"ignored":{{"request":null}}}}"#),
+        format!(r#"{{"ignored":1,"ignored":2,"request":[{row}]}}"#),
+        r#"{"request":[{"symbol":"BTC\u0055SDT","side":"S\u0065ll","reduceOnly":true}]}"#.into(),
+        format!(r#"{{"re\u0071uest":[{row}]}}"#),
+        format!("[[{row}]]"),
+        r#"{"request":[["BTCUSDT","Sell",true]]}"#.into(),
+        r#"[[["BTCUSDT","Sell",true]]]"#.into(),
+        r#"{"request":[]}"#.into(),
+        r#"{"request":null}"#.into(),
+        r#"{"request":[["BTCUSDT","Sell"]]}"#.into(),
+        r#"{"request":[["BTCUSDT","Sell",true,0]]}"#.into(),
+        format!(r#"{{"request":[{row}],"request":[{row}]}}"#),
+        r#"{"request":[{"symbol":"BTCUSDT","symbol":"ETHUSDT","side":"Sell","reduceOnly":true}]}"#.into(),
+        r#"{"request":[{"symbol":"BTCUSDT","side":"Sell","reduceOnly":null,"reduceOnly":true}]}"#.into(),
+        r#"{"request":[{"symbol":"BTCUSDT","side":"Sell","reduceOnly":true,"reduce\u004fnly":true}]}"#.into(),
+        "null".into(), "{}".into(), "{".into(),
+    ];
+    for value in ["false", "null", "1", r#""true""#, "{}", "[]"] {
+        bodies.push(format!(
+            r#"{{"request":[{{"symbol":"BTCUSDT","side":"Sell","reduceOnly":{value}}}]}}"#
+        ));
+    }
+    for field in ["symbol", "side"] {
+        for value in ["null", "1", "true", "[]", "{}"] {
+            bodies.push(format!(r#"{{"request":[{row}]}}"#).replace(
+                &format!(
+                    r#""{field}":"{}""#,
+                    if field == "symbol" { "BTCUSDT" } else { "Sell" }
+                ),
+                &format!(r#""{field}":{value}"#),
+            ));
+        }
+    }
+    bodies.push(format!(r#"{{"request":[{}]}}"#, vec![row; 501].join(",")));
+    for body in bodies {
+        assert_eq!(reduce_only_batch_targets(&body), original(&body), "{body}");
+    }
+}
+
 fn refused(body: &str) -> Option<(i64, String)> {
     match answer(body) {
         Ok(Answer::Refused { code, message, .. }) => Some((code, message)),

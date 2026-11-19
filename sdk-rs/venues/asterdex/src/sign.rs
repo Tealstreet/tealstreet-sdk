@@ -1,6 +1,4 @@
 //! Aster's legacy HMAC and API-wallet signing. Exact payload policy stays here.
-use std::collections::BTreeMap;
-
 use safe_cex_crypto::{eip712, ethereum};
 use safe_cex_engine::signing::{
     Algorithm, Context, Identity, Operation, PayloadPart, SignError, SignReceipt, SignRequest,
@@ -111,14 +109,7 @@ impl Query {
 
     /// Canonical signing input for one attempt. Every mode first removes the
     /// fields a retry regenerates from its unsigned business params.
-    fn prepared(
-        mut self,
-        mode: &Mode,
-        method: Method,
-        path: &str,
-        stamp_ms: f64,
-        testnet: bool,
-    ) -> Result<Prepared, String> {
+    fn prepared(mut self, mode: &Mode, stamp_ms: f64, testnet: bool) -> Result<Prepared, String> {
         self.0.retain(|(key, _)| {
             !matches!(
                 key.as_str(),
@@ -139,35 +130,15 @@ impl Query {
                 statement: None,
             });
         };
-        if code_endpoint(method, path) {
-            self = self
-                .str("asterChain", if testnet { "Testnet" } else { "Mainnet" })
-                .str("user", user)
-                .str("signer", signer)
-                .str("nonce", &nonce.to_string());
-            return Ok(Prepared {
-                preimage: Preimage::Digest(code_digest(&self.as_str(), testnet)),
-                query: self,
-                encoded: false,
-                statement: None,
-            });
-        }
-        self = self.num("recvWindow", 20_000.0).num("timestamp", stamp_ms);
-        let sorted: BTreeMap<_, _> = self
-            .0
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
-        let payload = serde_json::to_string(&sorted).map_err(|e| e.to_string())?;
-        let encoded = encode_standard_payload(&payload, user, signer, *nonce)?;
-        let digest = ethereum::ethereum_message_hash(&ethereum::keccak256(&encoded));
+        self = self
+            .str("asterChain", if testnet { "Testnet" } else { "Mainnet" })
+            .str("user", user)
+            .str("signer", signer)
+            .str("nonce", &nonce.to_string());
         Ok(Prepared {
-            preimage: Preimage::Digest(digest),
-            query: self
-                .str("user", user)
-                .str("signer", signer)
-                .str("nonce", &nonce.to_string()),
-            encoded: true,
+            preimage: Preimage::Digest(code_digest(&self.as_str(), testnet)),
+            query: self,
+            encoded: false,
             statement: None,
         })
     }
@@ -186,14 +157,14 @@ enum Mode {
 enum Preimage {
     /// HMAC-SHA256 over the raw (unencoded) query; hex signature.
     Mac(String),
-    /// secp256k1 over an EIP-191 or Code EIP-712 digest; 0x r||s||v(27/28).
+    /// secp256k1 over the V3 EIP-712 digest; 0x r||s||v(27/28).
     Digest([u8; 32]),
 }
 
 struct Prepared {
     preimage: Preimage,
     query: Query,
-    /// Code endpoints keep the signed raw query; others use client encoding.
+    /// V3 keeps its signed raw query; V1 uses client encoding.
     encoded: bool,
     statement: Option<String>,
 }
@@ -203,52 +174,10 @@ impl Prepared {
     }
 }
 
-fn code_endpoint(method: Method, path: &str) -> bool {
-    let path = path.split('?').next().unwrap_or(path);
-    (method == Method::Post && path.ends_with("/fapi/v3/order"))
-        || (method == Method::Get
-            && (path.ends_with("/fapi/v3/builder") || path.ends_with("/fapi/v3/agent")))
-}
-
 fn word(value: u64) -> [u8; 32] {
     let mut word = [0; 32];
     word[24..].copy_from_slice(&value.to_be_bytes());
     word
-}
-
-fn address_word(address: &str) -> Result<[u8; 32], String> {
-    let address = ethereum::get_address(address)?;
-    let mut word = [0; 32];
-    for (i, pair) in address.as_bytes()[2..]
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .enumerate()
-    {
-        word[12 + i] = u8::from_str_radix(
-            std::str::from_utf8(pair).map_err(|_| "Invalid Aster address")?,
-            16,
-        )
-        .map_err(|_| "Invalid Aster address")?;
-    }
-    Ok(word)
-}
-
-fn encode_standard_payload(
-    payload: &str,
-    user: &str,
-    signer: &str,
-    nonce: u64,
-) -> Result<Vec<u8>, String> {
-    let mut encoded = Vec::with_capacity(160 + payload.len().div_ceil(32) * 32);
-    encoded.extend(word(128));
-    encoded.extend(address_word(user)?);
-    encoded.extend(address_word(signer)?);
-    encoded.extend(word(nonce));
-    encoded.extend(word(payload.len() as u64));
-    encoded.extend(payload.as_bytes());
-    encoded.resize(160 + payload.len().div_ceil(32) * 32, 0);
-    Ok(encoded)
 }
 
 fn code_digest(query: &str, testnet: bool) -> [u8; 32] {
@@ -286,7 +215,7 @@ fn join(params: &[(String, String)], encoded: bool) -> String {
     result
 }
 
-/// Closed request statement; the device derives EIP-191/712 digests itself.
+/// Closed request statement; the device derives its V3 EIP-712 digest itself.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Statement {
@@ -385,8 +314,6 @@ pub fn hosted_digest(
                 signer: ethereum::get_address(signer).map_err(|_| bad())?,
                 nonce,
             },
-            method,
-            &input.path,
             input.stamp_ms as f64,
             testnet,
         )
@@ -403,7 +330,7 @@ pub fn hosted_digest(
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
 pub fn v3_wire_for_nonce(
-    method: Method,
+    _method: Method,
     origin: &str,
     path: &str,
     query: Query,
@@ -419,7 +346,7 @@ pub fn v3_wire_for_nonce(
         signer: ethereum::get_address(signer)?,
         nonce,
     };
-    let prepared = query.prepared(&mode, method, path, stamp_ms, testnet)?;
+    let prepared = query.prepared(&mode, stamp_ms, testnet)?;
     let Preimage::Digest(digest) = &prepared.preimage else {
         return Err("V3 preimage must be a digest".into());
     };
@@ -448,8 +375,8 @@ enum Resolved {
     },
 }
 
-/// Dispatch recipe for one private Aster request: V1 HMAC, V3 EIP-191 or
-/// Code EIP-712. It rebuilds the signed query at each preparation from the
+/// Dispatch recipe for one private Aster request: V1 HMAC or V3 EIP-712.
+/// It rebuilds the signed query at each preparation from the
 /// unsigned business params and writes the full signed URL at apply.
 pub struct Recipe {
     identity: Identity,
@@ -539,11 +466,11 @@ impl SignStep for Recipe {
             Mode::V3 { nonce, .. } => Some(*nonce),
             Mode::V1 => None,
         };
-        let code = matches!(mode, Mode::V3 { .. }) && code_endpoint(self.method, &self.path);
+        let wallet = matches!(mode, Mode::V3 { .. });
         let prepared = self
             .query
             .clone()
-            .prepared(&mode, self.method, &self.path, stamp, self.testnet)
+            .prepared(&mode, stamp, self.testnet)
             .map_err(|_| SignError::InvalidRequest)?;
         let (algorithm, message) = match &prepared.preimage {
             Preimage::Mac(message) => (Algorithm::HmacSha256, message.as_bytes().to_vec()),
@@ -612,7 +539,7 @@ impl SignStep for Recipe {
             // Code queries carry a nonce, not a signed timestamp.
             receipt: SignReceipt {
                 nonce,
-                stamp_ms: (!code).then_some(stamp),
+                stamp_ms: (!wallet).then_some(stamp),
                 expiry_ms: None,
             },
             operations,
@@ -686,13 +613,6 @@ mod tests {
     struct Case {
         name: String,
         private_key: String,
-        user: String,
-        signer: String,
-        nonce: String,
-        payload: String,
-        abi: String,
-        hash: String,
-        signature: String,
         code_query: String,
         code_hash: String,
         code_signature: String,
@@ -713,30 +633,13 @@ mod tests {
     #[test]
     fn independent_ethers_and_http_serializer_vectors() {
         for case in corpus() {
-            let encoded = encode_standard_payload(
-                &case.payload,
-                &case.user,
-                &case.signer,
-                case.nonce.parse().unwrap(),
-            )
-            .unwrap();
             assert_eq!(
-                format!("0x{}", safe_cex_crypto::hex(&encoded)),
-                case.abi,
-                "ABI {}",
-                case.name
-            );
-            let digest = ethereum::ethereum_message_hash(&ethereum::keccak256(&encoded));
-            assert_eq!(
-                format!("0x{}", safe_cex_crypto::hex(&digest)),
-                case.hash,
-                "digest {}",
-                case.name
-            );
-            assert_eq!(
-                ethereum::sign_digest(&digest, &case.private_key).unwrap(),
-                case.signature,
-                "signature {}",
+                format!(
+                    "0x{}",
+                    safe_cex_crypto::hex(&code_digest(&case.code_query, case.testnet))
+                ),
+                case.code_hash,
+                "EIP-712 digest {}",
                 case.name
             );
             assert_eq!(
@@ -749,37 +652,7 @@ mod tests {
                 "Code {}",
                 case.name
             );
-            assert_ne!(case.code_hash, case.hash);
-            // The provider-signed V1, Code and standard V3 wires are pinned
-            // against these vectors in tests/dispatch_recipe.rs.
         }
-    }
-
-    #[test]
-    fn signing_mode_endpoint_method_boundaries() {
-        for endpoint in ["order", "builder", "agent"] {
-            for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
-                assert_eq!(
-                    code_endpoint(method, &format!("/fapi/v3/{endpoint}")),
-                    (endpoint == "order" && method == Method::Post)
-                        || (endpoint != "order" && method == Method::Get)
-                );
-            }
-        }
-        for endpoint in [
-            "account",
-            "listenKey",
-            "positionRisk",
-            "stpMode",
-            "userTrades",
-            "approveBuilder",
-        ] {
-            assert!(!code_endpoint(
-                Method::Post,
-                &format!("/fapi/v3/{endpoint}")
-            ));
-        }
-        assert!(!code_endpoint(Method::Post, "/fapi/v1/order"));
     }
 
     #[test]
