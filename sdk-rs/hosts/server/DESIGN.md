@@ -78,6 +78,7 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | `REDIS_URL` | unset | Optional. Not used in v1; it is accepted so that today's compose files keep working |
 | `TEALSTREET_ENGINE_THREADS` | number of CPUs | Account actor threads (see Runtime) |
 | `TEALSTREET_DIAGNOSTIC_BUILD` | `0` | `1` enables `diagnostic:server-health` frames for verbose clients |
+| `TEALSTREET_HOST_NOTIFY_URL`, `TEALSTREET_HOST_NOTIFY_TOKEN` | unset | AGT-37 host notification lane to the gateway; unset URL is off. The token is required with the URL, and `TEALSTREET_BOX` (else `TEALSTREET_ROUTER_BOX_ID`) names the box. See `DELEGATED_RETENTION.md` |
 | `TEALSTREET_DELEGATED_ORDER_FRAMES` | `0` | Startup opt-in for hosted venues' `order.*` frames: `0` disables, `1` enables only with compiled protocol support and hosted signing/origin support; other nonempty values refuse startup |
 | `EXCHANGE_ALERT_SLACK_WEBHOOK_URL`, `EXCHANGE_ALERT_CRITICAL_SLACK_WEBHOOK_URL` | unset | Deferred past cutover. Accepted and ignored |
 

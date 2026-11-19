@@ -392,6 +392,10 @@ impl Account {
         self.proxy_authority_required
     }
 
+    pub(crate) fn notify_scope(&self) -> crate::host_notify::Scope {
+        crate::host_notify::Scope::new(&self.user, &self.venue, self.registry_name())
+    }
+
     pub fn is_public(&self) -> bool {
         self.public_only
     }
@@ -808,6 +812,8 @@ pub struct Registry {
     presence: Arc<Mutex<HashMap<String, Presence>>>,
     /// The last forced-reset repair of each (user, account, topic) in this process.
     repairs: Mutex<HashMap<(String, String, String), std::time::Instant>>,
+    /// AGT-37 box -> gateway lane; `None` emits nothing and arms no timer.
+    host_notify: Option<crate::host_notify::HostNotifier>,
     /// Seeded test accounts can retain their pre-admission fixture setup.
     #[cfg(any(test, feature = "test-support"))]
     join_admission_override: Option<bool>,
@@ -1208,6 +1214,7 @@ impl Registry {
             notices: Arc::default(),
             presence: Arc::default(),
             repairs: Mutex::default(),
+            host_notify: None,
             #[cfg(any(test, feature = "test-support"))]
             join_admission_override: None,
             #[cfg(any(test, feature = "test-support"))]
@@ -1226,6 +1233,23 @@ impl Registry {
         ));
         self.router_leases = Arc::new(crate::router_lease::Users::new(config));
         self
+    }
+
+    pub fn with_host_notify(mut self, notifier: Option<crate::host_notify::HostNotifier>) -> Self {
+        self.host_notify = notifier;
+        self
+    }
+
+    /// Queues one notification scoped to `account`; callers decide DELEGATED.
+    pub(crate) fn host_notify(&self, account: &Account, draft: crate::host_notify::Draft) {
+        if let Some(notifier) = &self.host_notify {
+            notifier.push(crate::host_notify::HostNotification::build(
+                &account.notify_scope(),
+                draft,
+                account.held.load(Ordering::Relaxed),
+                now_ms(),
+            ));
+        }
     }
 
     pub fn user_lease_fenced(&self, user: &str) -> bool {
@@ -2644,6 +2668,9 @@ impl Registry {
         self.user_drains.box_draining(true);
         let accounts: Vec<Arc<Account>> = self.accounts.lock().unwrap().values().cloned().collect();
         for account in &accounts {
+            if account.delegated().is_some() {
+                self.host_notify(account, crate::host_notify::restart_shutdown());
+            }
             self.stop(
                 account,
                 "the server is restarting",
@@ -2652,13 +2679,22 @@ impl Registry {
             );
         }
         let until = tokio::time::Instant::now() + deadline;
-        while self.threads.accounts() > 0 {
-            if tokio::time::Instant::now() >= until {
-                return false;
+        let stopped = async {
+            while self.threads.accounts() > 0 {
+                if tokio::time::Instant::now() >= until {
+                    return false;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        true
+            true
+        };
+        // Best-effort and bounded; it runs beside, never after, the engine wait.
+        let flushed = async {
+            if let Some(notifier) = &self.host_notify {
+                notifier.flush(crate::host_notify::RESTART_FLUSH).await;
+            }
+        };
+        tokio::join!(stopped, flushed).0
     }
 
     /// The operator drains the box: sockets move as their algos end, and only
