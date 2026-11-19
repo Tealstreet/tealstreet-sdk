@@ -2187,11 +2187,20 @@ fn partial_absent_live_filled_or_mismatched_native_rows_never_prove_cancellation
             "{refusal}"
         );
         h.respond("/v5/position/trading-stop", 200, OK);
-        assert!(
-            h.result(91).is_some_and(Result::is_ok),
-            "{refusal}: {:?}",
-            h.notices
-        );
+        // Proven by the final read: done. Otherwise the result says a second stop may exist.
+        if matches!(refusal, "wrong-trigger" | "wrong-size") {
+            assert!(
+                h.result(91).is_some_and(Result::is_ok),
+                "{refusal}: {:?}",
+                h.notices
+            );
+        } else {
+            let result = h.result(91).unwrap().as_ref().unwrap_err();
+            assert!(
+                result.contains("a second stop may exist"),
+                "{refusal}: {result}"
+            );
+        }
     }
 }
 

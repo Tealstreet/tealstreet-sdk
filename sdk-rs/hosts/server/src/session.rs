@@ -6622,6 +6622,33 @@ mod tests {
         assert_eq!(reply["d"]["data"]["result"]["message"], "rejected");
     }
 
+    /// AGT-34: a Bybit partial-stop edit sent on unconfirmed evidence is a presented
+    /// CommandFailed (native `done` + `error`), so its "second stop may exist" text is in
+    /// the action result a DELEGATED client shows, not only in a side `commandError`.
+    #[test]
+    fn a_partial_stop_edit_warning_reaches_the_action_result() {
+        let (out, mut sent, _) = Out::channel(16);
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        pending.lock().unwrap().insert(
+            4,
+            Pending {
+                request_id: json!(11),
+                method: "amendOrder".into(),
+                reply: methods::Reply::Result,
+                group: None,
+                incomplete: None,
+                audit: None,
+            },
+        );
+        let message = "Your BTCUSDT edit was sent, but Bybit did not confirm that the old order was cancelled, so a second stop may exist; check Open Orders [proof: axis=target http=503; axis=final final-len=0]";
+        let notice =
+            json!({"type":"done","command":4,"error":message,"detail":{"kind":"rejected"}});
+        notice_to_msg(&out, "acct", &notice, &pending);
+        let reply: Value = serde_json::from_str(&sent.try_recv().unwrap()).unwrap();
+        assert_eq!(reply["d"]["data"]["success"], false);
+        assert_eq!(reply["d"]["data"]["result"]["message"], message);
+    }
+
     #[test]
     fn a_placement_with_client_order_id_returns_the_ids_and_the_client_order_id() {
         let (out, mut sent, _) = Out::channel(16);

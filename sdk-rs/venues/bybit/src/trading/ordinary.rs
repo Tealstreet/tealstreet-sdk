@@ -1263,6 +1263,10 @@ impl BybitLinear {
                                 id,
                                 failure.warning(flow.symbol(), flow.first_failure()),
                             );
+                            // The command's result itself says a second stop may exist.
+                            run.error = Some(
+                                failure.second_stop_may_exist(flow.symbol(), flow.first_failure()),
+                            );
                             run.queue
                                 .retain(|leg| !matches!(leg.planned.call, Call::PartialProof(_)));
                             Decision::Next(Vec::new())
@@ -1406,12 +1410,18 @@ impl BybitLinear {
                     } else {
                         "put back as a new standalone order; check Open Orders"
                     };
+                    // Unconfirmed cancel: the old order may still be live beside its put-back.
+                    let second = if run.error.is_some() {
+                        "; Bybit did not confirm the old order was cancelled, so a second stop may exist"
+                    } else {
+                        ""
+                    };
                     let presented = VenueError {
                         kind: Some(safe_cex_engine::error::ErrorKind::Rejected),
                         outcome: Some(Outcome::Rejected),
                         protection: Some(safe_cex_engine::error::Protection::Restored),
                         ..VenueError::new(format!(
-                            "Your {symbol} {what} is unchanged: its replacement was refused, so the old {what} was {put_back}: {refusal}"
+                            "Your {symbol} {what} is unchanged: its replacement was refused, so the old {what} was {put_back}: {refusal}{second}"
                         ))
                     };
                     let _ = cx.finish_plan_call(&plan, &active.slot, &active.context);

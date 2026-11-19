@@ -354,13 +354,30 @@ impl ProofFailure {
 
     /// Told to the user while the replacement still goes out.
     pub(super) fn warning(&self, symbol: &str, earlier: Option<&str>) -> String {
-        let reason = match earlier {
+        format!(
+            "Bybit did not confirm that the old {symbol} order was cancelled, so its replacement is placed anyway; check Open Orders for a duplicate [proof: {}]",
+            self.reasons(earlier)
+        )
+    }
+
+    fn reasons(&self, earlier: Option<&str>) -> String {
+        match earlier {
             Some(earlier) => format!("{earlier}; {}", self.reason),
             None => self.reason.clone(),
-        };
-        format!(
-            "Bybit did not confirm that the old {symbol} order was cancelled, so its replacement is placed anyway; check Open Orders for a duplicate [proof: {reason}]"
-        )
+        }
+    }
+
+    /// The command's own outcome when the edit went out on unconfirmed evidence: the
+    /// old stop may still be live beside it, so this is presented, never a silent success.
+    pub(super) fn second_stop_may_exist(&self, symbol: &str, earlier: Option<&str>) -> VenueError {
+        VenueError {
+            kind: Some(safe_cex_engine::ErrorKind::Rejected),
+            presents: true,
+            ..VenueError::new(format!(
+                "Your {symbol} edit was sent, but Bybit did not confirm that the old order was cancelled, so a second stop may exist; check Open Orders [proof: {}]",
+                self.reasons(earlier)
+            ))
+        }
     }
 }
 

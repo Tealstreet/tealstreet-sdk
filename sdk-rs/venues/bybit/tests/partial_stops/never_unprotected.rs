@@ -209,7 +209,12 @@ fn any_proof_failure_after_a_landed_cancel_still_places_the_replacement() {
         assert_eq!(writes.len(), 1, "{shape}: {:?}", h.result(91));
         assert_eq!(writes[0]["stopLoss"], "95", "{shape}");
         h.respond("/v5/position/trading-stop", 200, OK);
-        assert!(h.result(91).is_some_and(Result::is_ok), "{shape}");
+        // The command's own result (what a client shows) says a second stop may exist.
+        let result = h.result(91).unwrap().as_ref().unwrap_err();
+        assert!(
+            result.contains("a second stop may exist") && result.contains("Open Orders"),
+            "{shape}: {result}"
+        );
         assert!(
             h.command_errors
                 .iter()

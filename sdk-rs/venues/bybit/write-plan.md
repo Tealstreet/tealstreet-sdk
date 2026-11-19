@@ -61,7 +61,10 @@ classified. A row showing the old stop still live, or triggered/filled, ends the
 edit definitely with no replacement (two reduce-only stops could over-close).
 Missing or unreadable evidence gets one final orderId read on realtime. If that
 read shows the stop cancelled, the edit goes out. If it is still missing, the edit
-goes out with a warning naming both checks. A lost proof read is read again with
+goes out, and the command's own result (a presented failure, so it reaches the
+hosted action result as well as the browser) says that a second stop may exist
+and names both checks. This residual (a live old stop that both reads missed) is
+accepted until the atomic amend follow-up. A lost proof read is read again with
 backoff, because a failed read may only be followed by a read (engine guard
 `failed_read_cannot_continue_as_mutation`). If reads are lost for the whole
 backoff, the outcome is explicitly Unprotected. A definitive replacement refusal
