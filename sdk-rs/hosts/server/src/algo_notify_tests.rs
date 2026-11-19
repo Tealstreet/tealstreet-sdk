@@ -57,6 +57,14 @@ fn order(id: &str, amount: f64, filled: f64) -> Order {
     }
 }
 
+fn settled(id: &str, amount: f64, filled: f64, status: OrderStatus) -> Order {
+    Order {
+        status,
+        remaining: 0.0,
+        ..order(id, amount, filled)
+    }
+}
+
 fn store(orders: Vec<Order>) -> AlgoStore {
     AlgoStore {
         venue: "bybit".into(),
@@ -68,13 +76,21 @@ fn store(orders: Vec<Order>) -> AlgoStore {
 #[tokio::test(start_paused = true)]
 async fn fills_aggregate_per_order_after_a_quiet_window_and_report_final_state() {
     let (tap, notifier) = tap(true, false);
-    // Recorded after the frame applied: a fully filled order has left the store.
+    // Recorded after the frame applied; the venue kept the closed row.
     tap.record_fills(
         &[fill("order-secret-1", 0.4)],
         &store(vec![order("order-secret-1", 1.0, 0.4)]),
     );
     tokio::time::advance(Duration::from_millis(1500)).await;
-    tap.record_fills(&[fill("order-secret-1", 0.6)], &store(Vec::new()));
+    tap.record_fills(
+        &[fill("order-secret-1", 0.6)],
+        &store(vec![settled(
+            "order-secret-1",
+            1.0,
+            1.0,
+            OrderStatus::Closed,
+        )]),
+    );
     tap.record_fills(
         &[fill("order-2", 0.1)],
         &store(vec![order("order-2", 1.0, 0.1)]),
@@ -432,4 +448,64 @@ async fn twap_slice_chase_rejections_report_the_twap() {
     let queued = sent(&notifier);
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0]["fields"]["algo"], "twap");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_ioc_partial_cancelled_in_the_fill_batch_is_never_reported_filled() {
+    let (tap, notifier) = tap(true, false);
+    // Remainder cancelled in the same batch: removed, or kept as a canceled row.
+    tap.record_fills(&[fill("ioc-removed", 0.4)], &store(Vec::new()));
+    tap.record_fills(
+        &[fill("ioc-kept", 0.4)],
+        &store(vec![settled("ioc-kept", 1.0, 0.4, OrderStatus::Canceled)]),
+    );
+    tap.flush_fills(&store(Vec::new()), true);
+    let queued = sent(&notifier);
+    assert_eq!(queued.len(), 2);
+    assert!(
+        queued
+            .iter()
+            .all(|n| n["fields"]["verb"] == "partiallyFilled"),
+        "{queued:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn filled_needs_the_order_record_to_show_its_size_met() {
+    let (tap, notifier) = tap(true, false);
+    tap.record_fills(
+        &[fill("kept-closed", 1.0)],
+        &store(vec![settled("kept-closed", 1.0, 1.0, OrderStatus::Closed)]),
+    );
+    // Proof read at flush time from the current store also counts.
+    tap.record_fills(&[fill("seen-later", 1.0)], &store(Vec::new()));
+    // A full fill whose row vanished in its own batch is unproven: partial wording.
+    tap.record_fills(&[fill("vanished", 1.0)], &store(Vec::new()));
+    tap.flush_fills(
+        &store(vec![settled("seen-later", 2.0, 2.0, OrderStatus::Closed)]),
+        true,
+    );
+    let verbs: HashMap<String, String> = sent(&notifier)
+        .iter()
+        .map(|n| {
+            (
+                n["id"].as_str().unwrap().to_owned(),
+                n["fields"]["verb"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    let id = |order: &str, key: &str| {
+        crate::host_notify::notification_id(
+            "auth0|u1",
+            &Scope::new("auth0|u1", "bybit", "synthetic-main").account_digest,
+            Kind::Fill,
+            &format!("{order}\0{key}"),
+        )
+    };
+    assert_eq!(verbs[&id("kept-closed", "filled")], "filled");
+    assert_eq!(verbs[&id("seen-later", "filled")], "filled");
+    assert_eq!(
+        verbs[&id("vanished", "partiallyFilled\x001")],
+        "partiallyFilled"
+    );
 }

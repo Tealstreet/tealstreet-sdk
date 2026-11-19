@@ -76,10 +76,15 @@ struct PendingFill {
     symbol: String,
     side: OrderSide,
     filled: f64,
-    /// The order was still open right after its latest fill applied; leaving
-    /// the store later, without a fill, is a cancel. Unit-free by design.
-    open_after: bool,
+    /// The order row (amount, filled) right after its latest fill applied, if
+    /// the store still held it. Only the order's own fields share a unit.
+    row: Option<(f64, f64)>,
     due: Instant,
+}
+
+/// The order's own record proves its size was met; fill amounts never do.
+fn size_met((amount, filled): (f64, f64)) -> bool {
+    amount > 0.0 && filled >= amount - amount * 1e-9
 }
 
 /// The chaser book's live rows, read weakly; TWAP slices carry `twap_id`.
@@ -111,11 +116,12 @@ pub(crate) struct Tap {
     chases: RefCell<Option<ActiveChases>>,
 }
 
-fn open<'a>(store: &'a AlgoStore, order_id: &str) -> Option<&'a safe_cex_engine::model::Order> {
+fn row(store: &AlgoStore, order_id: &str) -> Option<(f64, f64)> {
     store
         .orders
         .iter()
-        .find(|order| order.id == order_id && order.remaining > 0.0)
+        .find(|order| order.id == order_id)
+        .map(|order| (order.amount, order.filled))
 }
 
 fn side(side: OrderSide) -> Side {
@@ -219,13 +225,13 @@ impl Tap {
                     symbol: fill.symbol.clone(),
                     side: fill.side,
                     filled: 0.0,
-                    open_after: false,
+                    row: None,
                     due,
                 });
             if fill.amount.is_finite() && fill.amount > 0.0 {
                 entry.filled += fill.amount;
             }
-            entry.open_after = open(store, &fill.order_id).is_some();
+            entry.row = row(store, &fill.order_id);
             entry.due = due;
         }
         drop(pending);
@@ -263,16 +269,18 @@ impl Tap {
         };
         ready.sort_by_key(|(_, fill)| fill.due);
         for (order_id, fill) in ready {
-            let (verb, natural_key) = match open(store, &order_id) {
-                Some(order) => (
+            // `filled` only on proof: an IOC/capped market order whose remainder
+            // was cancelled in the fill's own batch must not read as filled.
+            let (verb, natural_key) = match row(store, &order_id).or(fill.row) {
+                Some(row) if size_met(row) => (Verb::Filled, format!("{order_id}\0filled")),
+                Some((_, filled)) => (
                     Verb::PartiallyFilled,
-                    format!("{order_id}\0partiallyFilled\0{}", order.filled),
+                    format!("{order_id}\0partiallyFilled\0{filled}"),
                 ),
-                None if fill.open_after => (
+                None => (
                     Verb::PartiallyFilled,
                     format!("{order_id}\0partiallyFilled\0{}", fill.filled),
                 ),
-                None => (Verb::Filled, format!("{order_id}\0filled")),
             };
             self.notify.emit(Draft {
                 kind: Kind::Fill,

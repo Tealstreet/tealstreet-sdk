@@ -95,8 +95,12 @@ The algo host (`src/algo_notify.rs`) emits, for DELEGATED residents only and
 never from a snapshot or a rejoin replay:
 
 - `fill`: live fills from flush frames, aggregated per order until 2 seconds
-  pass without another fill. `filled` when the order has left the store with
-  its size met, otherwise `partiallyFilled`. It collapses per order through an
+  pass without another fill. `filled` only when the order's own record (its
+  current row, or the row right after its last fill) shows `filled` reaching
+  `amount`; fill amounts are never compared with the order, since lot venues
+  use different units. Anything unproven is `partiallyFilled`, including an
+  IOC or capped market order whose remainder was cancelled in the fill's own
+  batch, and a full fill whose row the venue removed in that batch. It collapses per order through an
   opaque hash; order ids, prices and sizes stay on the box.
 - `orderRejected`: a chase or TWAP placement the venue refused outright
   (`Outcome::Rejected`). Client writes, exec and nuke legs use the untapped
