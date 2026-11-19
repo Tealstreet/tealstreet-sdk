@@ -48,6 +48,10 @@ in `docs/plans/callers/public-key-admission.md`. The pure crypto helpers do not
 enable Session admission or venue readiness. The separate SDK/WASM device dispatch
 retains the original signing host and owner; it does not activate any server venue.
 
+Lighter placements complete only on venue proof (an `accountOrders` row or a
+failed `tx`), never on the `sendTx` ACK alone; plain limit amends are one native
+modify. See `sdk-rs/venues/lighter/README.md` (AGT-45).
+
 ## Shared artifact census
 
 Shared WASM budget and construction-policy memberships are checked against

@@ -116,6 +116,9 @@ mod condition_waits {
         resume_settle: bool,
         pending_settle: bool,
         resolve_on_release: bool,
+        /// Refuse the pending placement on release with this outcome.
+        reject_on_release: Option<crate::Outcome>,
+        rejections: Vec<Result<(), Error>>,
         resume_refuse_only: bool,
         pending_identity: Option<crate::request_context::PendingPlacement>,
         resume_foreign: Option<(Plan, Context)>,
@@ -246,6 +249,13 @@ mod condition_waits {
             if self.resolve_on_release && let Some(receipt) = self.pending_identity.take() {
                 cx.resolve_placement_identity(receipt, vec!["native-a".into()]).unwrap();
                 self.job_ids.push("native-a".into());
+            }
+            if let Some(outcome) = self.reject_on_release
+                && let Some(receipt) = self.pending_identity.take()
+            {
+                let mut error = VenueError::new("canceled: not enough margin");
+                error.outcome = Some(outcome);
+                self.rejections.push(cx.reject_pending_placement(receipt, error));
             }
             for wait in std::mem::take(&mut self.waits) {
                 self.releases.push(cx.release_condition_wait(&wait));
@@ -505,6 +515,14 @@ mod condition_waits {
                         self.issue(cx, id);
                     }
                     Err(_) => { let _ = cx.fail_plan(plan, "unresolved native identity"); }
+                }
+                return;
+            }
+            if self.reject_on_release.is_some() {
+                let done = cx.done_plan(plan, format!("[{}]", self.job_ids.join(",")));
+                self.settle_probes.push(("done after rejection", done));
+                if done.is_err() {
+                    let _ = cx.fail_plan(plan, "placement refused after its acknowledgement");
                 }
                 return;
             }
@@ -1542,6 +1560,32 @@ mod condition_waits {
         assert!(matches!(&result[..], [Err(error)] if error.outcome == Some(crate::Outcome::Unknown)), "{result:?}");
         assert_eq!(e.venue.resume_probes[1], ("resume", Err(Error::State), true));
         assert_eq!(e.venue.issued.len(), 1);
+    }
+
+    #[test]
+    fn a_pending_placement_proven_refused_seals_rejected_and_never_succeeds() {
+        let (mut e, _, now) = settled(Cond { settle: Some(10_000), pending_settle: true,
+            reject_on_release: Some(crate::Outcome::Rejected), ..Default::default() }, "ok:");
+        let actions = borrowed_read(&mut e, now + 100.);
+        assert_eq!(e.venue.rejections, [Ok(())]);
+        // An optimistic done seals the journal's own refusal, never a success.
+        assert_eq!(e.venue.settle_probes.last(), Some(&("done after rejection", Ok(()))));
+        let result = terminals(&actions, 7);
+        assert!(matches!(&result[..], [Err(error)]
+            if error.outcome == Some(crate::Outcome::Rejected) && error.message.contains("not enough margin")), "{result:?}");
+        assert_eq!(e.venue.issued.len(), 1);
+    }
+
+    #[test]
+    fn only_a_definite_refusal_can_resolve_a_pending_placement() {
+        for outcome in [crate::Outcome::Unknown, crate::Outcome::NotSent] {
+            let (mut e, _, now) = settled(Cond { settle: Some(10_000), pending_settle: true,
+                reject_on_release: Some(outcome), ..Default::default() }, "ok:");
+            let actions = borrowed_read(&mut e, now + 100.);
+            assert_eq!(e.venue.rejections, [Err(Error::Invalid)]);
+            let result = terminals(&actions, 7);
+            assert!(matches!(&result[..], [Err(error)] if error.outcome == Some(crate::Outcome::Unknown)), "{result:?}");
+        }
     }
 
     #[test]

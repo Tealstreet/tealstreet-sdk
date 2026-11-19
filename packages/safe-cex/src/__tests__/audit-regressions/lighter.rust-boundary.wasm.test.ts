@@ -103,6 +103,14 @@ const recorded = (accountLimits: unknown = { code: 200, user_tier_name: 'premium
         });
       if (pathname.endsWith('/accountLimits')) return response(accountLimits);
       if (pathname.endsWith('/accountActiveOrders')) return response({ code: 200, orders: [] });
+      // AGT-45: a placement completes only once accountOrders shows its row.
+      if (pathname.endsWith('/accountOrders')) {
+        const ids = (new URL(request.url).searchParams.get('client_order_indexes') ?? '').split(',').filter(Boolean);
+        return response({
+          code: 200,
+          orders: ids.map((id) => ({ client_order_index: Number(id), status: 'open', filled_base_amount: '0' })),
+        });
+      }
       if (pathname.endsWith('/nextNonce')) return response({ code: 200, nonce: 10 });
       if (pathname.endsWith('/sendTx')) {
         const params = new URLSearchParams(request.body);

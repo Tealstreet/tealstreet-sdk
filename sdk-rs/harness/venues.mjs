@@ -98,6 +98,10 @@ const lighter = (name) => {
     validateMatchedRequest: (record, request) => verifier?.matched(record, request),
     commandResult: (result, command, index) => verifier?.commandResult(result, command, index) ?? result,
     frameText: (text) => verifier?.echoCreated(text) ?? text,
+    // Placement proof reads name the client indexes this replay minted: the key
+    // omits them and validateMatchedRequest checks them against the command's creations.
+    responseText: (text) => verifier?.echoCreated(text) ?? text,
+    generatedQueryId: (name) => name === 'client_order_indexes',
     compareFillPrices: true,
     compareWriteOrder: true,
   };

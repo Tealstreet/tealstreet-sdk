@@ -1975,6 +1975,33 @@ impl CommandWrites {
         self.attempts[index].pending_identity = false;
         Ok(())
     }
+    /// A pending placement the venue's authoritative order state proves never
+    /// rested or filled: a definite, effects-free refusal of that attempt.
+    pub(super) fn reject_placement(
+        &mut self,
+        id: RequestId,
+        error: VenueError,
+    ) -> Result<(), Error> {
+        if self.sealed || error.outcome != Some(Outcome::Rejected) || !effects_free(&error) {
+            return Err(Error::Invalid);
+        }
+        let index = self
+            .attempts
+            .iter()
+            .position(|a| a.id == id && a.pending_identity)
+            .ok_or(Error::Revoked)?;
+        if self.latest(self.attempts[index].leg) != Some(id) {
+            return Err(Error::Revoked);
+        }
+        let pending = self.attempts[index].result.take();
+        self.attempts[index].pending_identity = false;
+        if let Err(error) = self.result(id, WriteResult::Rejected(error)) {
+            self.attempts[index].result = pending;
+            self.attempts[index].pending_identity = true;
+            return Err(error);
+        }
+        Ok(())
+    }
 
     /// Mark a recorded effects-free refusal as resendable once. Only the
     /// engine classifier calls this, for a `RefusedResend` verdict.

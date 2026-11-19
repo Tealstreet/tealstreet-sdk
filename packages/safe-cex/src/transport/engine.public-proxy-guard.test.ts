@@ -304,6 +304,7 @@ describe('a signed request is never sent toward the public proxy', () => {
     ['GET', '/api/v1/accountInactiveOrders'],
     ['GET', '/api/v1/positionFunding'],
     ['GET', '/api/v1/accountLimits'],
+    ['GET', '/api/v1/accountOrders'],
     ['POST', '/api/v1/changeAccountTier'],
   ])('preserves Lighter read-token Authorization for %s %s', async (method, path) => {
     const raw = makeRaw();
@@ -573,6 +574,7 @@ describe('review3092 query and legacy binding controls', () => {
     ['GET', '/api/v1/accountActiveOrders'],
     ['GET', '/api/v1/positionFunding'],
     ['GET', '/api/v1/accountLimits'],
+    ['GET', '/api/v1/accountOrders'],
     ['POST', '/api/v1/changeAccountTier'],
   ])('preserves the native query token for %s %s', async (method, path) => {
     const raw = makeRaw();

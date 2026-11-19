@@ -984,7 +984,7 @@ measurement tables, so new rows here are only needed for a hand-approved ceiling
     Optimized web/Node 2,669,596 B; SHA256 b34c4c82215750a4fc7031143cac366ed5d7cfc82399ddc96ab13deab4f520eb.
     Parent cap 2,679,808 B left 10,212 B; measured +10 KiB rounded up, retaining every historical floor.
 
-## lighter (cap 2354176)
+## lighter (cap 2383872)
 
     #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
     Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
@@ -1048,8 +1048,12 @@ measurement tables, so new rows here are only needed for a hand-approved ceiling
     Built source 1fdd2db8279b2d4ab697720f2169cd0b6941a078; same tree as PR head 7e9d5723fad5e8820242a18b205c068dd8eb851f.
     Optimized web/Node 2,343,161 B; SHA256 62df49b7977246384829fa61c649af35886b647bd6b15dad6bfa4bd17500f63b.
     Parent cap 2,353,152 B left 9,991 B; coordinator: measured + 10 KiB, rounded up to KiB.
+    #3713 AGT-45 placement proof + native limit modify: CI 44530015990, artifact 14532469032.
+    Built source 7ec330bd9148 (PR merge of head d50751f63f); optimized web/Node 2,372,656 B.
+    SHA256 d0b89d806bdeebf0a8530bc734e52c89e17b8ae0f439cbbbd126e5ef1537ed95; growth +29,495 B over 2,343,161 B.
+    Rule 17: measured + 10 KiB, rounded up to KiB = 2,383,872 B; shared by lighter-robinhood.
 
-## lighter-robinhood (cap 2354176)
+## lighter-robinhood (cap 2383872)
 
     #3438 merged-head local build.sh --venue lighter: web/node 2,133,346 B.
     Rust 1.99.0, bindgen 0.2.129, Binaryen 132; measured + 10 KiB rounded to KiB.
@@ -1090,6 +1094,10 @@ measurement tables, so new rows here are only needed for a hand-approved ceiling
     Built source 1fdd2db8279b2d4ab697720f2169cd0b6941a078; same tree as PR head 7e9d5723fad5e8820242a18b205c068dd8eb851f.
     Optimized web/Node 2,343,161 B; SHA256 62df49b7977246384829fa61c649af35886b647bd6b15dad6bfa4bd17500f63b.
     Parent cap 2,353,152 B left 9,991 B; coordinator: measured + 10 KiB, rounded up to KiB.
+    #3713 AGT-45 placement proof + native limit modify: CI 44530015990, artifact 14532469032.
+    Built source 7ec330bd9148 (PR merge of head d50751f63f); optimized web/Node 2,372,656 B.
+    SHA256 d0b89d806bdeebf0a8530bc734e52c89e17b8ae0f439cbbbd126e5ef1537ed95; growth +29,495 B over 2,343,161 B.
+    Rule 17: measured + 10 KiB, rounded up to KiB = 2,383,872 B; shared by lighter-robinhood.
 
 ## mexc (cap 2084864)
 

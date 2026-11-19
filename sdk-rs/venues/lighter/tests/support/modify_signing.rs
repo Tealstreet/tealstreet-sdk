@@ -98,7 +98,8 @@ fn remote_modify_statement_rejects_smuggled_fields_types_and_out_of_range_values
         ("\"Index\":42", "\"Index\":0"),
         ("\"BaseAmount\":2000", "\"BaseAmount\":0"),
         ("\"Price\":7900", "\"Price\":0"),
-        ("\"TriggerPrice\":8500", "\"TriggerPrice\":0"),
+        // AGT-45: TriggerPrice 0 is the venue's nil trigger, now valid for a
+        // plain limit modify; it no longer counts as an out-of-range smuggle.
         ("\"txType\":17", "\"txType\":15"),
         ("\"modify\":{", "\"modify\":{\"Type\":2,"),
         ("\"modify\":{", "\"marketIndex\":1,\"modify\":{"),

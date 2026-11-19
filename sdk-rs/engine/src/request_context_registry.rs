@@ -2123,6 +2123,27 @@ impl<P> Cx<'_, P> {
             .resolve_placement(receipt.attempt, ids)
     }
 
+    /// Refuse only this engine's still-live receipt after the codec proves, from
+    /// an authoritative read, that the acknowledged placement never took effect.
+    /// The error must be an effects-free `Rejected`; uncertainty stays pending.
+    pub fn reject_pending_placement(
+        &mut self,
+        receipt: crate::request_context::PendingPlacement,
+        error: VenueError,
+    ) -> Result<(), Error> {
+        let registry = &mut self.io.core.request_contexts;
+        if registry.latest_write(&receipt.context)? != Some(receipt.attempt) {
+            return Err(Error::Revoked);
+        }
+        registry
+            .owner_entry_mut(receipt.context.owner())
+            .ok_or(Error::Revoked)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .reject_placement(receipt.attempt, error)
+    }
+
     /// Check normalized native facts before synchronous codec-selected effects.
     /// This repeatable read-only check grants no send, retry or completion rights;
     /// native decoding, row attribution and snapshot freshness remain separate.
