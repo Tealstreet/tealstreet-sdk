@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message; refusal, dispatch and ownership assertions stay intact.
 import type { TwapLockManager } from './twap/twapLock';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -312,5 +313,5 @@ it.skipIf(!algos)('an algo op still waiting when the account is disposed is repo
   worker.exchange!.on('error', (message: string) => errors.push(message));
   worker.handlePayload({ op: 'chaser:start', data: { symbol: 'BTCUSDT', size: 0.002, side: 'buy', maxAttempts: 10 } });
   worker.dispose();
-  expect(errors).toEqual(['chaser:start was not run: the binance engine never started']);
+  expect(errors).toEqual(['Starting the chase wasn’t possible because binance couldn’t load']);
 });

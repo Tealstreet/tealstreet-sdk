@@ -72,16 +72,16 @@ test('the real Cross Trade refusal predicate keeps old and new holds, and reject
   assert.equal(isUncertainRefusal('An earlier order hasn’t been confirmed'), false);
 });
 
-test('locale summary fragments preserve count and leave the single action to their presenters', () => {
+test('locale summary fragments preserve count and include one action for every presenter', () => {
   const { trade } = JSON.parse(readFileSync(new URL('../../../../apps/web/src/locales/en/trade.json', import.meta.url), 'utf8'));
-  assert.equal(trade['placement-outcome-unknown_one'], '{{count}} order not confirmed');
-  assert.equal(trade['placement-outcome-unknown_other'], '{{count}} orders not confirmed');
+  assert.equal(trade['placement-outcome-unknown_one'], '{{count}} order not confirmed. Check your open orders before trying again.');
+  assert.equal(trade['placement-outcome-unknown_other'], '{{count}} orders not confirmed. Check your open orders before trying again.');
   assert.equal(trade['connection-status-bybitdemo-chaser-warning'], 'Bybit Demo order updates are not ready. Wait for live updates before starting a chase.');
   assert.equal(trade['hosted-server-switch-failed'], 'Accounts could not reconnect after the cloud settings changed');
   assert.equal(trade['breakeven-all-partial'], 'Breakeven stops: {{placed}} placed, {{failed}} not completed, {{unconfirmed}} not confirmed. Check your open orders before trying again.');
   for (const key of ['placement-outcome-unknown_one', 'placement-outcome-unknown_other']) {
     assert.equal((trade[key].match(/{{count}}/g) ?? []).length, 1);
-    assert.doesNotMatch(trade[key], /check|retry|trying again/i);
+    assert.equal(trade[key].split(guidance).length - 1, 1);
   }
 });
 
@@ -96,4 +96,25 @@ test('both signing-failure wordings still prove no send despite a nested network
   }
   assert.equal(isUnknownOutcome({ message: 'Network Error' }), true);
   assert.equal(isUnknownOutcome({ message: 'Signing isn’t available for this account', outcome: 'unknown' }), true);
+});
+
+// Rule 5: cleanup keeps waiting only for the same NotSent fence under either server wording.
+test('scripted cleanup recognizes old and new cancel-all fences without admitting other failures', () => {
+  const source = readFileSync(new URL('../../../harness/live-smoke.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('const waitingForRead =');
+  const end = source.indexOf(' { failed = true; break; }', start);
+  assert.ok(start >= 0 && end > start);
+  const fragment = source.slice(start, end);
+  const declarationEnd = fragment.indexOf(';') + 1;
+  const condition = fragment.slice(declarationEnd).trim().slice('if ('.length, -1);
+  const waiting = new Function('error', 'end', `${fragment.slice(0, declarationEnd)} return !(${condition});`);
+  const oldMessage = 'Placement outcome is uncertain; reconcile before cancel-all';
+  const newMessage = 'An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders.';
+  for (const message of [oldMessage, newMessage]) {
+    assert.equal(waiting({ message, outcome: 'notSent' }, Infinity), true);
+    assert.equal(waiting({ message, outcome: 'unknown' }, Infinity), false);
+    assert.equal(waiting({ message, outcome: 'rejected' }, Infinity), false);
+    assert.equal(waiting({ message, outcome: 'notSent' }, 0), false);
+  }
+  assert.equal(waiting({ message: 'Other refusal', outcome: 'notSent' }, Infinity), false);
 });

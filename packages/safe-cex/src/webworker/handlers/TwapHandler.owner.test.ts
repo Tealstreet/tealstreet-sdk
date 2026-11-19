@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message; refusal, dispatch and ownership assertions stay intact.
 import type { PlaceOrderOpts } from '../../types';
 import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 import type { TwapOptions } from '../twap/TwapOptions';
@@ -164,7 +165,7 @@ describe.each(['lock', 'reconciliation'] as const)('TWAP owner change during %s 
     expect(h.exchange.algoOp).not.toHaveBeenCalled();
     expect(h.held()).toBe(false);
     expect(h.postMessage).toHaveBeenLastCalledWith({ op: 'twap:stateUpdate', data: {} });
-    expect(h.exchange.emitter.emit).toHaveBeenCalledWith('warning', 'TWAP BTCUSDT restore cancelled-for-owner-change');
+    expect(h.exchange.emitter.emit).toHaveBeenCalledWith('warning', 'TWAP BTCUSDT wasn’t restored because the account connection changed.');
   });
 
   it('keeps the same owner slice amounts and interval', async () => {
@@ -200,7 +201,7 @@ it('captures the owner before the engine-readiness queue, and drops a stale queu
   expect(h.slices).toEqual([]);
   expect(h.exchange.algoOp).not.toHaveBeenCalled();
   expect(h.exchange.findOrderByClientOrderId).not.toHaveBeenCalled();
-  expect(h.exchange.emitter.emit).toHaveBeenCalledWith('warning', 'TWAP BTCUSDT restore cancelled-for-owner-change');
+  expect(h.exchange.emitter.emit).toHaveBeenCalledWith('warning', 'TWAP BTCUSDT wasn’t restored because the account connection changed.');
 });
 
 it.each([undefined, 0, 1, 7])('preserves persisted generation %s in waiting and dispatched rows without publishing the session snapshot', async (ownerGeneration) => {
@@ -258,7 +259,7 @@ it.each(['uncertain', 'failed'] as const)(
     await vi.advanceTimersByTimeAsync(1000);
     expect(h.slices).toEqual([]);
     expect(h.exchange.emitter.emit.mock.calls).toEqual([
-      ['warning', 'TWAP BTCUSDT restore cancelled-for-owner-change'],
+      ['warning', 'TWAP BTCUSDT wasn’t restored because the account connection changed.'],
     ]);
   },
 );
@@ -270,7 +271,7 @@ it('fails closed for an owned row when the host supplies no owner check', async 
   await vi.advanceTimersByTimeAsync(1000);
   expect(h.slices).toEqual([]);
   expect(h.exchange.algoOp).not.toHaveBeenCalled();
-  expect(h.exchange.emitter.emit).toHaveBeenCalledWith('warning', 'TWAP BTCUSDT restore cancelled-for-owner-change');
+  expect(h.exchange.emitter.emit).toHaveBeenCalledWith('warning', 'TWAP BTCUSDT wasn’t restored because the account connection changed.');
 });
 
 it.each(['A', 'B'])('refuses an untagged row under owner %s without inventing ownership', async (ownerId) => {
@@ -284,7 +285,7 @@ it.each(['A', 'B'])('refuses an untagged row under owner %s without inventing ow
   expect(h.adopted).toEqual([]);
   expect(h.exchange.emitter.emit).toHaveBeenCalledWith(
     'warning',
-    'TWAP BTCUSDT restore cancelled-for-owner-change: persisted ownerId is missing',
+    'TWAP BTCUSDT wasn’t restored because the account connection changed.',
   );
 });
 
@@ -303,7 +304,7 @@ it('keeps an A native persistence snapshot tagged through receive before B tries
   await vi.advanceTimersByTimeAsync(1000);
   expect(b.slices).toEqual([]);
   expect(b.adopted).toEqual([]);
-  expect(b.exchange.emitter.emit).toHaveBeenCalledWith('warning', 'TWAP BTCUSDT restore cancelled-for-owner-change');
+  expect(b.exchange.emitter.emit).toHaveBeenCalledWith('warning', 'TWAP BTCUSDT wasn’t restored because the account connection changed.');
 });
 
 it('restores the native tagged A snapshot for the same owner with unchanged slices', async () => {

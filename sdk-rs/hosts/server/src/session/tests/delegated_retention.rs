@@ -96,7 +96,7 @@ async fn restart_notice_precedes_handover_and_echoes_only_the_current_registrati
             value["d"]["data"][0]
                 .as_str()
                 .unwrap()
-                .contains("waiting for your key")
+                .contains("needs your key again")
         );
         let expected = envelope::algo_notice(
             "acct",
@@ -125,7 +125,7 @@ async fn restart_notice_precedes_handover_and_echoes_only_the_current_registrati
             !bob_sent
                 .try_recv()
                 .unwrap()
-                .contains("waiting for your key")
+                .contains("needs your key again")
         );
         bob.close();
     }

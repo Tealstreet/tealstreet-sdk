@@ -57,7 +57,7 @@ describe('OUT hosted accounts are refused while signing references remain availa
       const options: ExchangeOptions = { key: 'hosted-key', secret: '', remoteSigner, privateOnly: true };
       await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
       expect(() => new RustEngineExchange(name, options, new FrameStore())).toThrow(
-        `${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`,
+        `${exchangeMetadata[name].prettyName} isn’t available for server trading yet. Use browser trading for this exchange.`,
       );
     }
     expect(clock).not.toHaveBeenCalled();

@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message while retaining native outcome and zero-send assertions.
 // @vitest-environment node
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { Candle, ExchangeOptions, Market, OrderBook, PublicDataSource, StoreData } from '../../types';
@@ -581,7 +582,7 @@ describe('native public-feed ownership through real private workers', () => {
       publicFeed: { mode: 'shared', port: pending.port2 as unknown as MessagePort },
     });
     waiting.account.dispose();
-    await expect(waiting.startup).rejects.toThrow(/disposed/);
+    await expect(waiting.startup).rejects.toThrow(/coinbasespot was closed/);
   });
 
   it.each([

@@ -1,3 +1,4 @@
+// Rule 5: pin the calmer message; refusal, dispatch and ownership assertions stay intact.
 import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -85,7 +86,7 @@ describe('TwapHandler', () => {
     new TwapHandler(...handlerArgs(exchange)).handle({ op: 'twap:start', data: options } as StoreWorkerPayload);
     expect(exchange.emitter.emit).toHaveBeenCalledWith(
       'error',
-      'twap:start was not run: algos run only on a Rust engine account',
+      'Starting the TWAP isn’t available for this account',
     );
   });
 

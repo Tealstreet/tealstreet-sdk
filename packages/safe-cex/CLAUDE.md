@@ -2660,6 +2660,6 @@ of previously persisted rows. Reported-position PnL/fee conventions are unchange
 
 SDK error and warning text is shown verbatim by web/mobile. Use calm wording
 without transport/runtime jargon; unconfirmed orders still say to check open
-orders before trying again. Locale summary fragments leave the action to their
-presenters. Cross Trade holds recognize both the previous and current wording
+orders before trying again. Locale summary fragments retain check-before-retry guidance for consumers
+that show them directly. Presenters with a shared footer avoid repeating it. Cross Trade holds recognize both the previous and current wording
 while server, WASM and retained notices move through the rollout.

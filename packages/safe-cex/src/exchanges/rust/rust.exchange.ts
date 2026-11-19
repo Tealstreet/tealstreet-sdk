@@ -1589,7 +1589,7 @@ export class RustEngineExchange extends BaseExchange {
     const queued = this.queuedAlgoOps.splice(0);
     for (const { op, rust, refuse, owner } of queued) {
       try {
-        if (!this.algoOwnerCurrent(owner)) refuse(`${op} cancelled-for-owner-change`);
+        if (!this.algoOwnerCurrent(owner)) refuse(`${algoActionLabel(op)} stopped because the account connection changed`);
         else if (this.algoRoute === 'rust' && this.host?.checkAlgosForExecution()) rust();
         else if (this.algoRoute === 'unsupported') refuse(this.noAlgosMessage(op));
         else refuse(`${algoActionLabel(op)} wasn’t possible because ${this.name} couldn’t load`);
@@ -1603,7 +1603,7 @@ export class RustEngineExchange extends BaseExchange {
   algoOp = (op: string, data: unknown): void => {
     try {
       if (!this.host) throw new Error(`${this.name} is still loading`);
-      if (!this.host.checkAlgosForExecution()) throw new Error(`${this.name} algos are not running`);
+      if (!this.host.checkAlgosForExecution()) throw new Error(`Automated orders on ${this.name} aren’t running`);
       this.host.algoOp(op, data);
     } catch (error) {
       this.emitter.emit('error', `${algoActionLabel(op)} didn’t finish: ${error instanceof Error ? error.message : String(error)}`);
@@ -1636,7 +1636,7 @@ export class RustEngineExchange extends BaseExchange {
       clearTimeout(backstop);
     }
     if (!result.settled)
-      this.log('Stopped chases did not confirm their cancels before the nuke; orders may rest', LogSeverity.Warning);
+      this.log('Some chase cancellations weren’t confirmed before Nuke. Check your open orders.', LogSeverity.Warning);
     return {
       stoppedChasers: result.stoppedChasers,
       stoppedTwaps: result.stoppedTwaps,

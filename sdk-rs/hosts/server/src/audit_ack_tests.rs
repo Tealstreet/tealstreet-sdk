@@ -1,7 +1,7 @@
 // Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 use super::*;
 
-const DIAGNOSTIC: &str = "We couldn’t confirm this change. Check your open orders before trying again.. Bybit create-batch acknowledgement does not prove its orders (targets=1; result.list=array/2; retExtInfo.list=array/2; children=[0:orderId=nonempty,orderLinkId=empty,status=valid,code=0,echo=absent;1:orderId=nonempty,orderLinkId=empty,status=valid,code=0,echo=unmatched]; omitted=0)";
+const DIAGNOSTIC: &str = "We couldn’t confirm this change. Check your open orders before trying again. Bybit create-batch acknowledgement does not prove its orders (targets=1; result.list=array/2; retExtInfo.list=array/2; children=[0:orderId=nonempty,orderLinkId=empty,status=valid,code=0,echo=absent;1:orderId=nonempty,orderLinkId=empty,status=valid,code=0,echo=unmatched]; omitted=0)";
 
 fn legacy() -> String {
     VenueError::new(DIAGNOSTIC)
@@ -13,7 +13,7 @@ fn legacy() -> String {
 fn check(detail: Value) {
     let text = detail["message"].as_str().unwrap();
     assert!(
-        text.starts_with("The outcome is unknown"),
+        text.starts_with("We couldn’t confirm this change"),
         "decode before applying the text cap: {detail}"
     );
     assert!(text.chars().count() <= 160);

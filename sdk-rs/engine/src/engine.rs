@@ -9194,12 +9194,13 @@ mod streaming_tests {
         let mut engine = frame_engine();
         engine.venue.scoped = false;
         engine.venue.symbol_amend = true;
+        // Rule 5: pin the new display prefix; NotSent and zero venue dispatch remain required.
         let refused = |engine: &mut Engine<StreamVenue>, id: u32| {
             engine.drain_actions().any(|a| {
                 matches!(a, Action::Notice(Notice::CommandFailed { command, error })
                     if command == id
                         && error.outcome == Some(crate::Outcome::NotSent)
-                        && error.legacy_text().contains("uncertain"))
+                        && error.legacy_text().contains("An earlier order hasn’t been confirmed"))
             })
         };
         let unknown = |engine: &mut Engine<StreamVenue>, id: u32| {
@@ -9457,7 +9458,7 @@ mod streaming_tests {
             "later cancel-all is dispatched"
         );
         let actions: Vec<_> = engine.drain_actions().collect();
-        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("uncertain"))));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text().contains("An earlier order hasn’t been confirmed"))));
     }
 
     #[cfg(feature = "order-locks")]
@@ -9519,12 +9520,13 @@ mod streaming_tests {
                 })
                 .unwrap()
         };
+        // Rule 5: pin the new display prefix; NotSent and zero venue dispatch remain required.
         let refused = |engine: &mut Engine<StreamVenue>, id: u32| {
             engine.drain_actions().any(|a| {
                 matches!(a, Action::Notice(Notice::CommandFailed { command, error })
                     if command == id
                         && error.outcome == Some(crate::Outcome::NotSent)
-                        && error.legacy_text().contains("uncertain"))
+                        && error.legacy_text().contains("An earlier order hasn’t been confirmed"))
             })
         };
         engine.handle(0., Event::Command(held_place(1, "A")));

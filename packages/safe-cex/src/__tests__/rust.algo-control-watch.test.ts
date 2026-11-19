@@ -140,7 +140,7 @@ describe('a stop the user was told might not have landed', () => {
     update({ activeChasers: [] });
     vi.advanceTimersByTime(60_000);
     expect(told).toEqual([
-      'Chase hasn’t stopped yet; we’re still trying.',
+      'Still trying to stop Chase.',
       'Chase on BTCUSDT stopped after filling 0.4 of 1.',
     ]);
   });
@@ -173,7 +173,7 @@ describe('a stop the user was told might not have landed', () => {
     watch.observe('twap:stop', 't1');
     vi.advanceTimersByTime(60_000);
     update({ activeTWAPs: [] });
-    expect(told.at(-1)).toBe('TWAP stop is confirmed now.');
+    expect(told.at(-1)).toBe('TWAP has now stopped.');
   });
 });
 

@@ -1398,9 +1398,7 @@ impl BinanceFutures {
                     }
                     // The put-back itself may have landed: no claim either way.
                     (Some(gone), Some(refusal)) => {
-                        format!(
-                            "{gone}: {refusal}; putting it back has an unknown outcome: {message}"
-                        )
+                        format!("{gone}: {refusal}; restoring the previous order wasn’t confirmed")
                     }
                     (Some(gone), None) => format!("{gone}: {message}"),
                     _ => message.clone(),

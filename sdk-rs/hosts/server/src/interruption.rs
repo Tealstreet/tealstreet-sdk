@@ -300,7 +300,7 @@ mod tests {
             notice["d"]["data"][0]
                 .as_str()
                 .unwrap()
-                .contains("waiting for your key")
+                .contains("needs your key again")
         );
     }
     #[tokio::test(start_paused = true)]
