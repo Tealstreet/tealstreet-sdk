@@ -20,6 +20,8 @@ const POSITIONS: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"positi
 /// "Get Wallet Balance".
 const WALLET: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"totalEquity":"1010.5","accountIMRate":"0","accountIMRateByMp":"0","totalMarginBalance":"1010.5","totalInitialMargin":"95","totalInitialMarginByMp":"95","accountType":"UNIFIED","totalAvailableBalance":"915.5","accountMMRate":"0","accountMMRateByMp":"0","totalPerpUPL":"10","totalWalletBalance":"1000.5","accountLTV":"0","totalMaintenanceMargin":"5","totalMaintenanceMarginByMp":"5","coin":[{"availableToBorrow":"3","bonus":"0","accruedInterest":"0","availableToWithdraw":"0","totalOrderIM":"0","equity":"1010.5","totalPositionMM":"5","usdValue":"1010.5","spotHedgingQty":"0","unrealisedPnl":"10","collateralSwitch":true,"borrowAmount":"0.0","totalPositionIM":"95","walletBalance":"1000.5","cumRealisedPnl":"0","locked":"0","marginCollateral":true,"coin":"USDT","spotBorrow":"0"}]}]},"retExtInfo":{},"time":1690872862481}"#;
 const ORDER_ID: &str = "fd4300ae-7847-404e-b947-b46980a4d140";
+#[path = "batch_create_peers.rs"]
+mod batch_create_peers;
 const OK_EMPTY: &str =
     r#"{"retCode":0,"retMsg":"OK","result":{},"retExtInfo":{},"time":1672281607343}"#;
 

@@ -90,6 +90,14 @@ const ERROR_FIELDS: [&str; 5] = ["name", "kind", "message", "outcome", "venueCod
 
 const MAX_TEXT: usize = 160;
 
+#[cfg(test)]
+#[path = "audit_ack_tests.rs"]
+mod ack_tests;
+
+pub(crate) fn algo_error(error: &str) -> Value {
+    json!({"message": error.chars().take(MAX_TEXT).collect::<String>()})
+}
+
 fn scalar(value: &Value) -> Option<Value> {
     match value {
         Value::String(text) => Some(Value::String(text.chars().take(MAX_TEXT).collect())),

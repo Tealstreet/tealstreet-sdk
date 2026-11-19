@@ -1198,7 +1198,7 @@ pub(crate) async fn run_with_identity(
                     let result = match &dispatched {
                         Some(Ok(())) => Value::from("ok"),
                         Some(Err(error)) => {
-                            serde_json::json!({"message": error.chars().take(160).collect::<String>()})
+                            crate::audit::algo_error(error)
                         }
                         None => serde_json::json!({"message": "unhandled op"}),
                     };
