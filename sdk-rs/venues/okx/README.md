@@ -138,6 +138,27 @@ genuine signature answers still receive only one retry before permanent refusal.
 Public/frame-fed, non-EEA and already-configured refresh paths retain their
 existing behavior. No startup step places or replays a trading write.
 
+## Ordinary-order history coverage
+
+An explicit range older than seven days reads ordinary recent history first,
+then the three-month archive under the same read root, deadline and 100 ms
+continuation pacing. Merge identity is native `ordId`; recent rows win duplicate
+archive deliveries. Recent-only requests retain their existing request count.
+
+OKX retains unfilled canceled orders for only two hours, and the archive omits
+that population. Queries whose lower bound reaches the two-hour boundary by completion, or has
+no lower bound, emit the existing owned `retentionLimit` marker, including empty
+results. The check includes time spent fetching pages. A later
+page failure retains its more specific incomplete reason and accepted prefix.
+See the [recent](https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-order-history-last-7-days)
+and [archive](https://www.okx.com/docs-v5/en/#order-book-trading-trade-get-order-history-last-3-months)
+source contracts. `tests/history_order_retention.rs` exercises their combined read.
+
+The scope remains ordinary orders. Algo/protective history is a separate source;
+position-scoped rows with no native size need an explicit nullable-size model
+before they can be included. No size is fabricated and no archive is represented
+as a complete census of all order populations.
+
 ## Unresolved historical order markets
 
 An order can outlive its instrument's current catalogue entry. An in-window row

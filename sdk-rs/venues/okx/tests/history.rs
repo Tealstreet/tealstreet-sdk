@@ -295,10 +295,13 @@ fn unknown_historical_order_market_prevents_complete_coverage() {
                     && event.fields.contains(&("reason", safe_cex_engine::Value::Str("coverageGap".into())))
             )));
         } else {
+            // Only the unresolved-market gap is ruled out: an open-ended order read still
+            // carries OKX's two-hour retentionLimit marker (#3681), which is unrelated.
             assert!(
                 !out.iter().any(|a| matches!(a,
                     Action::Notice(Notice::Event(event))
                         if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+                        && event.fields.contains(&("reason", safe_cex_engine::Value::Str("coverageGap".into())))
                 )),
                 "an unrelated row cannot make this window incomplete"
             );

@@ -10164,7 +10164,7 @@
     {
       "venue": "okx",
       "tape": "sdk-rs/harness/tapes/okx-private.jsonl",
-      "tapeSha256": "74a118f8e887d45e9d4dc243cf48cbaf5b3a829fe553b4091073ca30bb7bed1c",
+      "tapeSha256": "ee67147610af9e7027fe4f9bbe8bff84ee90c046654a20f983e30edfd55d145a",
       "diagnostics": [
         {
           "failures": [
@@ -10202,7 +10202,7 @@
     {
       "venue": "okxdemo",
       "tape": "sdk-rs/harness/tapes/okxdemo-private.jsonl",
-      "tapeSha256": "9185854cc09dbad9b9142b3e5b15812b66813e4e413caa84467bf864807149af",
+      "tapeSha256": "24f0e9b69933d6959dabf689d5008584c7f20aa7c8b757ac08b5e78c5ae285fd",
       "diagnostics": [
         {
           "failures": [
@@ -10240,7 +10240,7 @@
     {
       "venue": "okxeu",
       "tape": "sdk-rs/harness/tapes/okxeu-private.jsonl",
-      "tapeSha256": "16a59dcbb227ea25238e7708803b49c8b87e26ca6863d1de9a7a6dfce3851ea9",
+      "tapeSha256": "c1012ef3433fb78a2faa1604bfdc28d1fc0121f5bd3ab9b2ac4f2e017d0ceb0a",
       "diagnostics": [
         {
           "failures": [
@@ -10287,7 +10287,7 @@
     {
       "venue": "okxeudemo",
       "tape": "sdk-rs/harness/tapes/okxeudemo-private.jsonl",
-      "tapeSha256": "1e3d0e42eaf44165351a876997b0894d25655d2fa031aabd46c6e5a693a7eb78",
+      "tapeSha256": "551bd79f10955800128c2cd3f5bcd7345cb791a88f00ffa40117b15d94cfdcd8",
       "diagnostics": [
         {
           "failures": [

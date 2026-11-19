@@ -538,6 +538,14 @@ const okx = (name) => ({
     name,
   },
   options: { testnet: name.endsWith('demo') },
+  async initializeReplay(impl, _options, { isPrivate }) {
+    if (!isPrivate || impl !== 'ts') return;
+    // Private tapes pin Date.now; the frozen signer otherwise constructs a
+    // wall-clock Date through dayjs and diverges from the same checked clock.
+    const { virtualClock } = await import('../../packages/safe-cex/src/utils/virtualClock.ts');
+    const { default: dayjs } = await import('dayjs');
+    virtualClock.getCurrentTime = () => dayjs.utc(Date.now());
+  },
   compareBalanceCurrencies: true,
   validateRequest({ method, url, body, headers }) {
     // Independent V5 HTTP proof before matching can erase clocks/aliases.
@@ -682,7 +690,7 @@ const okx = (name) => ({
     }
     // KNOWN_TS_FIXES: preserve production paging and mappers, route each native
     // product explicitly instead of the generic histories' hardcoded SWAP.
-    let source;
+    let source, archiveOrders = false;
     const get = exchange.xhr.get.bind(exchange.xhr);
     exchange.xhr.get = (url, config = {}) => {
       if (/\/(orders-history|bills(?:-archive)?)$/.test(url)) {
@@ -691,15 +699,33 @@ const okx = (name) => ({
           instType: market ? exchange.getMarketInstrumentType(market) : source ?? 'SWAP',
         } };
       }
+      if (archiveOrders && url === '/api/v5/trade/orders-history') url += '-archive';
       return get(url, config);
     };
     for (const method of ['fetchHistoricalOrders', 'fetchIncomeHistory']) {
       const original = exchange[method].bind(exchange);
+      const read = async (options) => {
+        if (method !== 'fetchHistoricalOrders' || !Number.isFinite(options.from)
+          || options.from >= Date.now() - 7 * 86_400_000) return original(options);
+        // O4: reuse the frozen mapper and cursor walk for the archive source.
+        // Recent identity wins; neither archive-only fills nor recent unfilled
+        // cancellations may be lost by applying the caller limit per source.
+        const rows = await original({ ...options, limit: undefined });
+        archiveOrders = true;
+        try {
+          const seen = new Set(rows.map((row) => row.id));
+          for (const row of await original({ ...options, limit: undefined })) {
+            if (!seen.has(row.id)) { seen.add(row.id); rows.push(row); }
+          }
+        } finally { archiveOrders = false; }
+        rows.sort((a, b) => b.createdTime - a.createdTime);
+        return options.limit > 0 ? rows.slice(0, options.limit) : rows;
+      };
       exchange[method] = async (options = {}) => {
-        if (!name.startsWith('okxeu') || options.symbol) return original(options);
+        if (!name.startsWith('okxeu') || options.symbol) return read(options);
         const rows = [];
         try {
-          for (source of ['SWAP', 'FUTURES']) rows.push(...await original(options));
+          for (source of ['SWAP', 'FUTURES']) rows.push(...await read(options));
         } finally { source = undefined; }
         const income = method === 'fetchIncomeHistory';
         const unique = [...new Map(rows.map((row) => [income ? row.tranId : row.id, row])).values()]
