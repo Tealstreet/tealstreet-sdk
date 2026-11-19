@@ -95,21 +95,6 @@ KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. HTTP
 text; only their telemetry assertion is deferred. No shared engine code is
 changed to add this venue companion event.
 
-## Partial bulk cancellation (AGT-69)
-
-OKX answers a partially successful `cancel-batch-orders` or `cancel-algos` with
-code `2` ("Bulk operation partially successful") and code `1` when every row
-failed, each row carrying its own `sCode`. Stopping on that envelope left every
-later batch unsent, so cancel-all kept the algo SL and conditional orders open
-whenever one limit row answered `51400`. A cancel job now settles such rows
-individually: `0` is cancelled, `51400` is already gone, and other definitive
-codes are refused. Then the next batch goes. Once every batch has run, a job with
-refused rows fails with `OKX left N of M orders open: <id>: <reason> (code X); ...`
-and per-order `elements` across all batches. Only refused rows revert their
-optimistic status. With no refused rows the command completes. Rows that are
-unproven, identity-mismatched or timed out (`51412`, etc.) still stop as Unknown,
-and nothing is retried. Pins: `tests/cancel_partial.rs`.
-
 ## Native write refusal diagnostics
 
 One ACK decoder borrows plain messages and owns escaped messages. Owned text
@@ -133,6 +118,21 @@ and pins decoded diagnostics, accepted siblings, unchanged settings on failure,
 and no extra writes after a failure. The fixture uses the public documentation's
 example code/reason, not a private account response.
 
+
+## Partial bulk cancellation (AGT-69)
+
+OKX answers a partially successful `cancel-batch-orders` or `cancel-algos` with
+code `2` ("Bulk operation partially successful") and code `1` when every row
+failed, each row carrying its own `sCode`. Stopping on that envelope left every
+later batch unsent, so cancel-all kept the algo SL and conditional orders open
+whenever one limit row answered `51400`. A cancel job now settles such rows
+individually: `0` is cancelled, `51400` is already gone, and other definitive
+codes are refused. Then the next batch goes. Once every batch has run, a job with
+refused rows fails with `OKX left N of M orders open: <id>: <reason> (code X); ...`
+and per-order `elements` across all batches. Only refused rows revert their
+optimistic status. With no refused rows the command completes. Rows that are
+unproven, identity-mismatched or timed out (`51412`, etc.) still stop as Unknown,
+and nothing is retried. Pins: `tests/cancel_partial.rs`.
 
 ## EEA private startup
 
