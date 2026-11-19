@@ -166,6 +166,9 @@ pub(crate) fn client_order_id(venue: &str, intent: &str) -> Option<String> {
         "bitget" | "bitgetusdc" | "bitgetinverse" | "okx" | "okxdemo" | "okxeu" | "okxeudemo"
         | "blofin" | "binancepm" => Some(hex()),
         "lighter" | "lighter-robinhood" | "binanceinverse" | "asterdex" | "kraken" | "mexc" => None,
+        // WOO refuses the UUID, and router/outbox accept only lossless forms, so it
+        // omits the ID exactly as the action path's WOO limits already do.
+        "woo" => None,
         _ => Some(intent.to_owned()),
     }
 }

@@ -650,6 +650,7 @@ async fn order_frames_without_caller_id_keep_null_receipt_and_original_intent() 
                 "asterdex",
                 "kraken",
                 "mexc",
+                "woo",
             ] {
                 for unknown in [false, true] {
                     let registry = crate::accounts::tests::registry();
@@ -712,6 +713,50 @@ async fn order_frames_without_caller_id_keep_null_receipt_and_original_intent() 
                     registry.dispose(&account, Disposal::PageDisposed);
                 }
             }
+        })
+        .await;
+}
+
+// 2026-11-19 woo-t: a plain market submit carried the intent UUID as WOO's
+// clientOrderId, which WOO refuses before the venue. It now omits the caller ID.
+#[tokio::test]
+async fn woo_market_submit_sends_without_a_caller_id() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account(&registry, "A", "woo", tape.clone());
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            let key = intent(0);
+            let params = json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":0.001});
+            let fingerprint =
+                crate::order_contract::fingerprint("synthetic-main", &key, &params, 1).unwrap();
+            session
+                .handle(
+                    &json!({"t":"order.submit","d":{"accountName":"synthetic-main",
+            "intentId":key,"params":params,"seq":1,"ageMs":0,"fingerprint":fingerprint}})
+                    .to_string(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                order_frame(&mut sent, "order.ack").await["d"]["received"],
+                true
+            );
+            let outcome = order_frame(&mut sent, "order.outcome").await;
+            assert_eq!(outcome["d"]["intentId"], key);
+            assert_eq!(outcome["d"]["outcome"], "placed", "{outcome}");
+            assert!(outcome["d"]["clientOrderId"].is_null(), "{outcome}");
+            assert_eq!(*tape.writes.lock().unwrap(), vec!["create"]);
+            assert!(
+                tape.client_order_ids
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .all(|id| id != &key)
+            );
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
         })
         .await;
 }

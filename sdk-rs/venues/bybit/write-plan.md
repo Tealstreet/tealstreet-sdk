@@ -51,16 +51,37 @@ reports these decisions without making them.
 
 Partial TP/SL edits cancel then replace. Replacement payloads use native default
 Market execution and omit conditional Limit fields for Full and Partial modes.
-The lead's explicit master-preservation rule retains the guarded put-back after
-a definitive replacement refusal. Native standalone lineage, complete peer census,
-positive cancellation proof and current protection validation authorize one attempt;
-Unknown or an already-gone cancel never does. Put-back preserves the original
+
+**Exactly one stop (AGT-34).** Once the cancel has landed, the plan ends with
+exactly one live stop (the replacement or the old stop put back) or says plainly
+that there is none; it never places a second stop. The orderId proof read ignores
+`nextPageCursor`: an orderId names at most one order, and live Bybit returns a
+cursor beside the single row, which used to fail every edit. Proof failures are
+classified. A row showing the old stop still live, or triggered/filled, ends the
+edit definitely with no replacement (two reduce-only stops could over-close).
+Missing or unreadable evidence gets one final orderId read on realtime. If that
+read shows the stop cancelled, the edit goes out. If it is still missing, the edit
+goes out, and the command's own result (a presented failure, so it reaches the
+hosted action result as well as the browser) says that a second stop may exist
+and names both checks. This residual (a live old stop that both reads missed) is
+accepted until the atomic amend follow-up. A lost proof read is read again with
+backoff, because a failed read may only be followed by a read (engine guard
+`failed_read_cannot_continue_as_mutation`). If reads are lost for the whole
+backoff, the outcome is explicitly Unprotected. A definitive replacement refusal
+always puts the old stop back. So does a replacement the guard would refuse,
+checked before sending and again at release. A replacement refused before release
+(veto, signing, pacing) sent nothing, so the engine lets the plan follow it with
+the put-back. If both guards refuse (for example, a stale reference), the outcome
+is explicitly Unprotected without a venue call. Lineage and the peer census only
+word the put-back (standalone when unproven). An already-gone cancel still never
+puts back, and an Unknown cancel, replacement or put-back still never resends.
+Put-back preserves the original
 native size, trigger source and conditional execution fields. Its passive report
 appends an Applied TradingStop or failure row without erasing the refused replacement.
 
 The legacy TS cancel/replace context is `bybit.exchange.ts:3221–3224`, and its batch
 catch is at `:3015–3042`. Those TS paths lack this put-back and catch more batch
-errors; the reviewed master-preservation rule explicitly governs these two details.
+errors; the exactly-one-stop rule above governs these two details.
 Protection warnings and native reconciliation retain their master behavior.
 
 Attaching changes only optional `elements`; the engine owns aggregate outcome,

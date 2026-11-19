@@ -137,11 +137,15 @@ pub struct TradeRow<'a> {
     pub px: f64,
     pub time: f64,
 }
+fn sent_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<f64>>, D::Error> {
+    optional_number(d).map(Some)
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FastCtx {
-    #[serde(default, deserialize_with = "optional_number")]
-    pub mark_px: Option<f64>,
+    /// Outer `None`: this diff omitted the mark (unchanged); `Some(None)`: sent as null.
+    #[serde(default, deserialize_with = "sent_number")]
+    pub mark_px: Option<Option<f64>>,
     #[serde(default, deserialize_with = "optional_number")]
     pub mid_px: Option<f64>,
 }

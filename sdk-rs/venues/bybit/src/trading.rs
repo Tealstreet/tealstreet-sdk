@@ -59,7 +59,7 @@ enum Call {
             safe_cex_engine::model::OrderType,
         ),
         /// That stop's id and own trading-stop body: sent once if this write is refused.
-        restore: Option<(String, String)>,
+        restore: (String, String),
     },
     /// Puts back the stop a refused replacement left the position without.
     RestorePartialStop {
@@ -1441,7 +1441,7 @@ impl BybitLinear {
                     body,
                     call: Call::PartialStop {
                         stop: (order.symbol.clone(), order.side, order.kind),
-                        restore: Some((order.id.clone(), restore)),
+                        restore: (order.id.clone(), restore),
                     },
                 }],
             });

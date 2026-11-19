@@ -4,6 +4,12 @@ use crate::wire::OrderRow;
 use safe_cex_engine::Store;
 use safe_cex_engine::error::Protection;
 
+pub(crate) const STALE_MARK: &str =
+    "Hyperliquid requires a fresh mark price before editing protection; order unchanged";
+/// A mark that would not stay fresh this long past sizing (or until the amend bound,
+/// the latest possible cancel release) is re-read before the cancel is released.
+const MARK_HEADROOM_MS: f64 = 1_000.0;
+
 pub(super) struct Amend {
     before: Order,
     original: OrderWire,
@@ -146,6 +152,33 @@ impl Hyperliquid {
         job.protection = Some(Box::new(captured));
         Ok(())
     }
+    /// The protected symbol, when its mark must be re-read before the cancel.
+    pub(super) fn protective_mark_unfresh(
+        &self,
+        cx: &Cx<'_, Pending>,
+        deadline: f64,
+    ) -> Option<String> {
+        let symbol = &self
+            .trading
+            .active
+            .as_ref()?
+            .protection
+            .as_ref()?
+            .before
+            .symbol;
+        let fresh = cx
+            .store
+            .reference_seen_at(symbol, StopTriggerType::MarkPrice)
+            .is_some_and(|seen| seen <= cx.now)
+            && safe_cex_engine::protective_amend::fresh_reference(
+                cx.store,
+                symbol,
+                StopTriggerType::MarkPrice,
+                (cx.now + MARK_HEADROOM_MS).min(deadline),
+            )
+            .is_some();
+        (!fresh).then(|| symbol.clone())
+    }
     pub(super) fn prepare_protective_replace(
         &self,
         cx: &Cx<'_, Pending>,
@@ -279,10 +312,18 @@ impl Hyperliquid {
             }
             source
         };
-        let mark = store.reference_seen_at(&source.symbol, StopTriggerType::MarkPrice)
+        let mark = store
+            .reference_seen_at(&source.symbol, StopTriggerType::MarkPrice)
             .filter(|seen| now.is_finite() && *seen <= now)
-            .and_then(|_| safe_cex_engine::protective_amend::fresh_reference(store, &source.symbol, StopTriggerType::MarkPrice, now))
-            .ok_or_else(|| not_sent("Hyperliquid requires a fresh mark price before editing protection; order unchanged"))?;
+            .and_then(|_| {
+                safe_cex_engine::protective_amend::fresh_reference(
+                    store,
+                    &source.symbol,
+                    StopTriggerType::MarkPrice,
+                    now,
+                )
+            })
+            .ok_or_else(|| not_sent(STALE_MARK))?;
         let (kind, trigger) = if restoring {
             (source.kind, source.price)
         } else {

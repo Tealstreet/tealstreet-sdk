@@ -555,24 +555,28 @@ describe('Bybit frame-fed COSIGNED protective edit preflight (real WASM)', () =>
       expect(fixture.rpc).toEqual([]);
     }, 15_000);
   }
-  for (const failure of ['proof', 'signer'] as const) {
-    it(`keeps Unknown and fences new placements if ${failure} is lost after cancellation`, async () => {
-      const fixture = await account('StopLoss');
-      if (failure === 'proof') fixture.fault('afterCancel');
-      else fixture.afterCancel(() => fixture.disableSigner());
-      await expect(fixture.edit()).rejects.toMatchObject({ outcome: 'unknown' });
-      await expect(
-        fixture.page.placeOrder({
-          symbol: 'BTCUSDT',
-          side: OrderSide.Buy,
-          type: OrderType.Limit,
-          amount: 1,
-          price: 100,
-        }),
-      ).rejects.toThrow('uncertain');
-      expect(fixture.writes().map((call) => call.path)).toEqual(['/v5/order/cancel-batch']);
-    }, 15_000);
-  }
+  // AGT-34: this pin was `keeps Unknown and fences new placements if ${failure} is lost
+  // after cancellation`; it moved to #3704's exactly-one-stop rule. Ending Unknown after a
+  // certain (retCode 0) cancel left the position with no stop. Unreadable proof now gets
+  // one final orderId read and then the replacement, and the command's own result says a
+  // second stop may exist; a lost signer cannot send anything, so the outcome is
+  // explicitly Unprotected. Neither leaves an uncertain write, so placements are not fenced.
+  it('places the replacement after a final read when proof is unreadable after cancellation', async () => {
+    const fixture = await account('StopLoss');
+    fixture.fault('afterCancel');
+    await expect(fixture.edit()).rejects.toThrow(/a second stop may exist; check Open Orders/);
+    expect(fixture.writes().map((call) => call.path)).toEqual([
+      '/v5/order/cancel-batch',
+      '/v5/position/trading-stop',
+    ]);
+    expect(fixture.writes()[1]?.body).toContain('"stopLoss":"95"');
+  }, 15_000);
+  it('ends explicitly Unprotected if the signer is lost after cancellation', async () => {
+    const fixture = await account('StopLoss');
+    fixture.afterCancel(() => fixture.disableSigner());
+    await expect(fixture.edit()).rejects.toMatchObject({ protection: 'unprotected' });
+    expect(fixture.writes().map((call) => call.path)).toEqual(['/v5/order/cancel-batch']);
+  }, 15_000);
   it('does not cancel after the captured order changes during a proof read', async () => {
     const fixture = await account('StopLoss');
     const gate = fixture.pauseProof();

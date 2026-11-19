@@ -205,6 +205,9 @@ pub struct Hyperliquid {
     /// Newest trade time per watched symbol whose `last` is now its trade price;
     /// until its first trade, and for every other symbol, `last` is the mid.
     trade_last: HashMap<String, f64>,
+    /// Marks this socket's `fastAssetCtxs` diffs sent, per symbol. A later row for
+    /// the symbol omitting `markPx` confirms a stored mark still equal to it.
+    mark_lineage: Option<(SocketId, HashMap<String, f64>)>,
     assets: HashMap<String, u32>,
     isolated_only: HashSet<String>,
     coins: HashMap<String, String>,
@@ -251,6 +254,7 @@ impl Hyperliquid {
             candle_complete_scopes: HashSet::new(),
             candle_excluded: HashSet::new(),
             trade_last: HashMap::new(),
+            mark_lineage: None,
             assets: HashMap::new(),
             isolated_only: HashSet::new(),
             coins: HashMap::new(),
@@ -691,7 +695,7 @@ impl Hyperliquid {
             .get(&coin.to_ascii_lowercase())
             .map(String::as_str)
     }
-    fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
+    fn public_frame(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         let Ok(frame) = serde_json::from_str::<Envelope>(text) else {
             return;
         };
@@ -722,39 +726,78 @@ impl Hyperliquid {
             }
             "fastAssetCtxs" => {
                 cx.record_socket_topic(&["@fastAssetCtxs|||||||"]);
-                if let Ok(encoded) = serde_json::from_str::<&str>(raw)
-                    && let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded)
-                    && let Ok(decoded) =
-                        miniz_oxide::inflate::decompress_to_vec_with_limit(&bytes, 2_000_000)
-                    && let Ok(contexts) = serde_json::from_slice::<HashMap<&str, FastCtx>>(&decoded)
-                {
-                    for (coin, context) in contexts {
-                        if let Some(symbol) = self.symbol(coin) {
-                            let usable =
-                                |v: Option<f64>| v.is_some_and(|v| v.is_finite() && v > 0.0);
-                            let mid_is_last = !self.trade_last.contains_key(symbol);
-                            // The references this context carries, changed or not (bits: last, mark).
-                            let observed = (u16::from(mid_is_last && usable(context.mid_px)) << 2)
-                                | (u16::from(usable(context.mark_px)) << 3);
-                            cx.store.update_ticker(symbol, |t| {
-                                if let Some(mark) =
-                                    context.mark_px.filter(|v| v.is_finite() && *v > 0.0)
-                                {
-                                    t.mark = mark;
+                // A diff this socket could not read may have moved any mark.
+                let lineage = self
+                    .mark_lineage
+                    .take()
+                    .filter(|(owner, _)| *owner == socket)
+                    .map(|(_, lineage)| lineage);
+                let Some(contexts) = serde_json::from_str::<&str>(raw)
+                    .ok()
+                    .and_then(|encoded| {
+                        base64::engine::general_purpose::STANDARD
+                            .decode(encoded)
+                            .ok()
+                    })
+                    .and_then(|bytes| {
+                        miniz_oxide::inflate::decompress_to_vec_with_limit(&bytes, 2_000_000).ok()
+                    })
+                else {
+                    return;
+                };
+                let Ok(contexts) = serde_json::from_slice::<HashMap<&str, FastCtx>>(&contexts)
+                else {
+                    return;
+                };
+                let mut lineage = lineage.unwrap_or_default();
+                for (coin, context) in contexts {
+                    if let Some(symbol) = self.symbol(coin) {
+                        let usable = |v: Option<f64>| v.is_some_and(|v| v.is_finite() && v > 0.0);
+                        let mid_is_last = !self.trade_last.contains_key(symbol);
+                        let mark = context
+                            .mark_px
+                            .flatten()
+                            .filter(|v| v.is_finite() && *v > 0.0);
+                        // Diffs omit an unchanged mark; only this socket's own value,
+                        // still the stored one, is confirmed by that omission.
+                        let inherited = match context.mark_px {
+                            Some(_) => {
+                                match mark {
+                                    Some(mark) => lineage.insert(symbol.to_owned(), mark),
+                                    None => lineage.remove(symbol),
+                                };
+                                false
+                            }
+                            None => {
+                                let current = cx.store.ticker(symbol).map(|t| t.mark);
+                                let confirmed = lineage
+                                    .get(symbol)
+                                    .is_some_and(|known| Some(*known) == current);
+                                if !confirmed {
+                                    lineage.remove(symbol);
                                 }
-                                if let Some(mid) =
-                                    context.mid_px.filter(|v| v.is_finite() && *v > 0.0)
-                                {
-                                    if mid_is_last {
-                                        t.last = mid;
-                                    }
-                                    t.mid_price = Some(mid);
+                                confirmed
+                            }
+                        };
+                        // The references this context carries, changed or not (bits: last, mark).
+                        let observed = (u16::from(mid_is_last && usable(context.mid_px)) << 2)
+                            | (u16::from(mark.is_some() || inherited) << 3);
+                        cx.store.update_ticker(symbol, |t| {
+                            if let Some(mark) = mark {
+                                t.mark = mark;
+                            }
+                            if let Some(mid) = context.mid_px.filter(|v| v.is_finite() && *v > 0.0)
+                            {
+                                if mid_is_last {
+                                    t.last = mid;
                                 }
-                            });
-                            cx.store.observe_ticker_fields(symbol, observed);
-                        }
+                                t.mid_price = Some(mid);
+                            }
+                        });
+                        cx.store.observe_ticker_fields(symbol, observed);
                     }
                 }
+                self.mark_lineage = Some((socket, lineage));
             }
             "trades" => {
                 if let Ok(rows) = serde_json::from_str::<Vec<TradeRow>>(raw) {
@@ -1640,7 +1683,7 @@ impl Venue for Hyperliquid {
             return;
         }
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public_frame(cx, text);
+            self.public_frame(cx, socket, text);
         }
         self.account_frame(cx, text);
         self.live_balance(cx);
