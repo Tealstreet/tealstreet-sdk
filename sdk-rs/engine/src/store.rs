@@ -417,10 +417,16 @@ impl Store {
             .map(|index| &self.tickers[index as usize])
     }
 
+    /// Replace the ticker table. A surviving symbol's last, mark or index price keeps
+    /// its seen and observed times while its value is unchanged (AGT-55): rediscovery
+    /// carries old rows, and re-dating them would pass a stale price as fresh.
     pub fn set_tickers(&mut self, mut tickers: Vec<Ticker>) {
         tickers.shrink_to_fit();
         self.ticker_revision = self.ticker_revision.wrapping_add(1);
-        self.tickers = tickers;
+        let previous = std::mem::replace(&mut self.tickers, tickers);
+        let previous_index = std::mem::take(&mut self.ticker_by_symbol);
+        let previous_seen = std::mem::take(&mut self.ticker_seen_at);
+        let previous_observed = std::mem::take(&mut self.ticker_observed_at);
         // Input-order insertion keeps the last duplicate as the lookup winner.
         // Rebuilding releases obsolete keys and capacity after replacement.
         self.ticker_by_symbol = self
@@ -429,10 +435,41 @@ impl Store {
             .enumerate()
             .map(|(index, ticker)| (ticker.symbol.as_str().into(), index as u32))
             .collect();
+        let clock = self.clock;
+        let (seen, observed) = self
+            .tickers
+            .iter()
+            .map(|ticker| {
+                let mut times = ([clock; 3], [clock; 3]);
+                let Some(&old) = previous_index.get(ticker.symbol.as_str()) else {
+                    return times;
+                };
+                let old = old as usize;
+                let (Some(row), Some(seen), Some(observed)) = (
+                    previous.get(old),
+                    previous_seen.get(old),
+                    previous_observed.get(old),
+                ) else {
+                    return times;
+                };
+                let values = [
+                    (ticker.last, row.last),
+                    (ticker.mark, row.mark),
+                    (ticker.index, row.index),
+                ];
+                for (slot, (value, before)) in values.into_iter().enumerate() {
+                    if value.to_bits() == before.to_bits() {
+                        times.0[slot] = seen[slot];
+                        times.1[slot] = observed[slot];
+                    }
+                }
+                times
+            })
+            .unzip();
+        self.ticker_seen_at = seen;
+        self.ticker_observed_at = observed;
         self.changes.tickers_replaced = true;
         self.ticker_masks = vec![0; self.tickers.len()];
-        self.ticker_seen_at = vec![[self.clock; 3]; self.tickers.len()];
-        self.ticker_observed_at = vec![[self.clock; 3]; self.tickers.len()];
         self.dirty_tickers.clear();
         self.set_loaded(|loaded| loaded.tickers = true);
     }
@@ -2857,6 +2894,111 @@ mod tests {
             assert_eq!(combined.ticker_observed_at, times);
             assert!(combined.take_pending().ticker_deltas.is_empty());
         }
+    }
+
+    fn priced(symbol: &str, last: f64, mark: f64) -> Ticker {
+        Ticker {
+            last,
+            mark,
+            index: mark,
+            ..ticker(symbol)
+        }
+    }
+
+    fn mark_fresh_at(store: &Store, symbol: &str, now: f64) -> Option<f64> {
+        crate::protective_amend::fresh_reference(store, symbol, StopTriggerType::MarkPrice, now)
+    }
+
+    #[test]
+    fn rediscovery_does_not_refresh_a_surviving_stale_mark() {
+        let mut store = Store::default();
+        store.set_clock(1_000.);
+        store.set_tickers(vec![priced("BTC", 99., 100.)]);
+        store.set_clock(20_000.);
+        let mut carried = store.tickers().to_vec();
+        carried.push(priced("ETH", 9., 10.));
+        store.set_tickers(carried);
+        for reference in [
+            StopTriggerType::LastPrice,
+            StopTriggerType::MarkPrice,
+            StopTriggerType::IndexPrice,
+        ] {
+            assert_eq!(store.reference_seen_at("BTC", reference), Some(1_000.));
+            assert_eq!(store.reference_seen_at("ETH", reference), Some(20_000.));
+        }
+        assert_eq!(store.ticker_observed_at[0], [1_000.; 3]);
+        assert_eq!(store.ticker_observed_at[1], [20_000.; 3]);
+        assert_eq!(store.ticker("BTC").unwrap().mark, 100.);
+        assert!(
+            mark_fresh_at(&store, "BTC", 20_000.).is_none(),
+            "a carried 19 s old mark must not pass the protective freshness gate"
+        );
+        assert_eq!(mark_fresh_at(&store, "ETH", 20_000.), Some(10.));
+    }
+
+    #[test]
+    fn replacement_stamps_only_the_references_whose_value_changed() {
+        let mut store = Store::default();
+        store.set_clock(1_000.);
+        store.set_tickers(vec![priced("BTC", 99., 100.)]);
+        store.set_clock(20_000.);
+        store.set_tickers(vec![Ticker {
+            mark: 101.,
+            ..priced("BTC", 99., 100.)
+        }]);
+        assert_eq!(
+            store.reference_seen_at("BTC", StopTriggerType::LastPrice),
+            Some(1_000.)
+        );
+        assert_eq!(
+            store.reference_seen_at("BTC", StopTriggerType::MarkPrice),
+            Some(20_000.)
+        );
+        assert_eq!(store.ticker_observed_at[0], [1_000., 20_000., 1_000.]);
+        assert_eq!(mark_fresh_at(&store, "BTC", 20_000.), Some(101.));
+    }
+
+    #[test]
+    fn a_streamed_mark_after_rediscovery_still_freshens_it() {
+        let mut store = Store::default();
+        store.set_clock(1_000.);
+        store.set_tickers(vec![priced("BTC", 99., 100.)]);
+        store.set_clock(20_000.);
+        store.set_tickers(store.tickers().to_vec());
+        store.set_clock(21_000.);
+        store.update_ticker("BTC", |ticker| ticker.mark = 102.);
+        assert_eq!(
+            store.reference_seen_at("BTC", StopTriggerType::MarkPrice),
+            Some(21_000.)
+        );
+        assert_eq!(mark_fresh_at(&store, "BTC", 21_000.), Some(102.));
+        store.set_clock(22_000.);
+        store.observe_ticker_fields("BTC", 1 << 3);
+        assert_eq!(
+            store.reference_seen_at("BTC", StopTriggerType::MarkPrice),
+            Some(22_000.),
+            "an explicitly reported unchanged mark still counts as observed"
+        );
+    }
+
+    #[test]
+    fn rediscovery_keeps_an_on_demand_mark_and_its_receipt_time() {
+        let mut store = Store::default();
+        store.set_clock(1_000.);
+        store.set_tickers(vec![priced("BTC", 99., 100.)]);
+        // The on-demand read answers with the venue's current mark.
+        store.set_clock(15_000.);
+        store.update_ticker("BTC", |ticker| ticker.mark = 103.);
+        store.observe_ticker_fields("BTC", 1 << 3);
+        store.set_clock(18_000.);
+        store.set_tickers(store.tickers().to_vec());
+        assert_eq!(store.ticker("BTC").unwrap().mark, 103.);
+        assert_eq!(
+            store.reference_seen_at("BTC", StopTriggerType::MarkPrice),
+            Some(15_000.)
+        );
+        assert_eq!(mark_fresh_at(&store, "BTC", 18_000.), Some(103.));
+        assert!(mark_fresh_at(&store, "BTC", 20_001.).is_none());
     }
 
     #[test]
