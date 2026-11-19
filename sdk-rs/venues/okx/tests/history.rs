@@ -94,6 +94,59 @@ struct Execution {
     maker: bool,
     position_side: String,
 }
+
+#[test]
+fn fills_preserve_signed_fee_costs_and_maker_rebates() {
+    // OKX v5: fee/fillFee is negative for a charge and positive for a rebate.
+    // Canonical commission uses the opposite, cost-positive convention.
+    for (fee, fill_fee, cost) in [
+        (Some("0.4"), None, -0.4),
+        (Some("-0.4"), None, 0.4),
+        (Some("0"), None, 0.0),
+        (None, None, 0.0),
+        (Some(""), None, 0.0),
+        (None, Some("0.4"), -0.4),
+        (None, Some("-0.4"), 0.4),
+        (Some(""), Some("0.4"), -0.4),
+        (Some("-0.4"), Some("0.8"), 0.4),
+    ] {
+        for archived in [false, true] {
+            let mut row: serde_json::Value = serde_json::from_str(FILL).unwrap();
+            row.as_object_mut().unwrap().remove("fee");
+            if let Some(fee) = fee {
+                row["fee"] = fee.into();
+            }
+            if let Some(fill_fee) = fill_fee {
+                row["fillFee"] = fill_fee.into();
+            }
+            let body = envelope(&row.to_string());
+            let empty = envelope("");
+            let mut e = trading_engine();
+            let recent = query(&mut e, fills());
+            reply(&mut e, &recent, if archived { &empty } else { &body }, 10.0);
+            let archive = prepared(&mut e, 1_710_000_000_010.)
+                .into_iter()
+                .find(|a| matches!(a, Action::Http(_)))
+                .unwrap();
+            reply(
+                &mut e,
+                &archive,
+                if archived { &body } else { &empty },
+                11.0,
+            );
+            let rows: Vec<Execution> = serde_json::from_str(&result(&mut e)).unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(
+                rows[0].commission, cost,
+                "fee={fee:?}, fillFee={fill_fee:?}, archived={archived}"
+            );
+            assert_eq!(rows[0].commission_asset, "USDT");
+            assert_eq!(rows[0].realized_pnl, 3.0);
+            assert!(rows[0].maker);
+        }
+    }
+}
+
 #[test]
 fn fills_fallback_deduplicates_trade_identity_and_converts_contracts() {
     let mut e = trading_engine();

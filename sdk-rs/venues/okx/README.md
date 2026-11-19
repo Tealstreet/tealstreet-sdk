@@ -10,7 +10,16 @@ Cached market identities remain available to financial state; a refreshed
 catalogue can omit the refused instrument without deleting those cached rows.
 Private/business errors, unbound refusals and other public topics are unchanged.
 
-## Execution rules
+## Historical fill fees
+
+OKX v5 `fee` / `fillFee` is negative for a charge and positive for a maker
+rebate. Historical fills negate that signed value into cost-positive
+`commission`, matching the position journal's fee convention. Recent and archive
+reads retain the same fee-field precedence, currency and missing-value handling.
+`tests/history.rs` covers charges, rebates, zero and missing fees through both
+endpoints. See the [OKX v5 fee definitions](https://www.okx.com/docs-v5/en/).
+
+## Execution parity
 
 The retained TypeScript adapter is the authority for trading rules. This change
 adds outcome reporting without introducing whole-plan minimum, native cap or
