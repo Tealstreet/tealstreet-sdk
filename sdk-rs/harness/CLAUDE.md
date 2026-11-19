@@ -30,11 +30,18 @@ recurring merge conflict.
   than 10 KiB. `wasm-budget.mjs` holds only the mechanism.
 - **PRs fail only on the byte ceiling** (`wasmBudgetError`: measured > current
   cap). A reserve under 10 KiB is a `::warning::` and step-summary line
-  (`wasmReserveWarning`), never a failure, and PRs do not edit caps.
-- A successfully sealed family remains downloadable after a failed byte ceiling
-  or isolation check; failed sealing or cancelled runs do not publish it.
+  (`wasmReserveWarning`), never a failure, and the bot restores it.
+- **Over-cap uploads are PR-only (rule-17 owner, 2026-11-19).** On a PR a
+  successfully sealed family stays downloadable after a failed byte ceiling or
+  isolation check, so the author can run `update-wasm-caps.mjs` on it. On master
+  (push or dispatch) a family uploads only when every step passed: an over-cap
+  family stays red with no artifact, so `wasm-caps.yml` can never raise a cap
+  master already overran. Failed sealing or cancelled runs publish nothing.
   Retention is measurement evidence only: the family job still fails, required
   coverage still refuses, and replay still requires a successful family job.
+- **A PR that outgrows its cap raises it itself**, in a separate commit that
+  edits `wasm-caps.json`, adds a dated `wasm-caps-history.md` line, and carries
+  a CLEAR naming the growth. The bot is not a path for absorbing an overrun.
 - **The reserve is restored on master by a bot.** `.github/workflows/wasm-caps.yml`
   runs after every master push run of `Rust SDK`, downloads that run's
   `wasm-family-*` and `replay-combined-package` artifacts and runs

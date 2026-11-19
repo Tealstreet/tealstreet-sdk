@@ -644,8 +644,9 @@ jobs:
         if: matrix.family == 'mexc'
         run: corepack yarn -s node sdk-rs/harness/capability-feature-control.mjs
       - name: Retain sealed same-run family build
-        # Preserve measured evidence after a cap refusal; the failed job still gates replay/merge.
-        if: ${{ !cancelled() && steps.family_seal.outcome == 'success' }}
+        # A PR keeps an over-cap seal as evidence (the failed job still gates replay/merge).
+        # Master uploads only a passing family, so the wasm-caps bot never absorbs an overrun.
+        if: ${{ !cancelled() && steps.family_seal.outcome == 'success' && (success() || github.event_name == 'pull_request') }}
         uses: actions/upload-artifact@v7
         with:
           name: wasm-family-${{ matrix.family }}
