@@ -330,6 +330,72 @@ fn documented_order_statuses_map_on_rest_snapshots_and_private_deltas() {
     }
 }
 
+// Box log 2026-11-19 (AGT-5 bug 60): `unknown order status: "CANCELING"` on a cancel in flight.
+#[test]
+fn canceling_keeps_the_order_listed_until_the_venue_reports_canceled() {
+    let (mut e, socket, http) = seeded();
+    let body = format!(
+        r#"{{"code":0,"data":[{}]}}"#,
+        order("rest", "CANCELING", "0.25")
+    );
+    for request in http {
+        response(
+            &mut e,
+            &request,
+            30.0,
+            if request.url.ends_with("/v3/account") {
+                ACCOUNT
+            } else {
+                &body
+            },
+        );
+    }
+    let rest = e.store().order("rest").expect("REST CANCELING row");
+    assert_eq!(rest.status, OrderStatus::Canceling);
+    assert_eq!(rest.filled, 0.25);
+    assert_eq!(rest.remaining, 1.75);
+
+    e.handle(40.0, Event::WsOpened { socket });
+    e.prepared(40.0).for_each(drop);
+    ws(&mut e, socket, 50.0, r#"{"op":"login","success":true}"#);
+    e.prepared(50.0).for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        100.0,
+        &frame(
+            "delta",
+            &format!(r#"{{"orders":[{}]}}"#, order("stream", "OPEN", "0.5")),
+        ),
+    );
+    ws(
+        &mut e,
+        socket,
+        200.0,
+        &frame(
+            "delta",
+            &format!(r#"{{"orders":[{}]}}"#, order("stream", "CANCELING", "0.5")),
+        ),
+    );
+    let stream = e.store().order("stream").expect("WS CANCELING row");
+    assert_eq!(stream.status, OrderStatus::Canceling);
+    assert_eq!(stream.filled, 0.5);
+    assert!(!e.prepared(200.0).any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::ROW_SKIPPED
+    )), "CANCELING must not be skipped");
+
+    ws(
+        &mut e,
+        socket,
+        300.0,
+        &frame(
+            "delta",
+            &format!(r#"{{"orders":[{}]}}"#, order("stream", "CANCELED", "0.5")),
+        ),
+    );
+    assert!(e.store().order("stream").is_none());
+}
+
 #[test]
 fn unknown_order_status_is_visible_and_preserves_the_live_order() {
     // Neither spelling variants nor a future venue state establish terminality.
