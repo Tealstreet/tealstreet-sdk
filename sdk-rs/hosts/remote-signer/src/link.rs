@@ -672,12 +672,17 @@ mod timeout_diagnostics_tests {
             } else {
                 if order == 1 {
                     tokio::time::advance(SIGN_TIMEOUT).await;
-                    tokio::task::yield_now().await;
+                    let result = task.await.unwrap();
                     barrier.wait();
-                } else {
-                    barrier.wait();
-                    tokio::time::advance(SIGN_TIMEOUT).await;
+                    let accepted = reply.join().unwrap();
+                    assert_eq!(result, Err(Failure::TimedOut));
+                    assert!(!accepted, "late-reply control");
+                    assert_eq!(seen.lock().unwrap().len(), 1);
+                    assert!(link.state().pending.is_empty());
+                    continue;
                 }
+                barrier.wait();
+                tokio::time::advance(SIGN_TIMEOUT).await;
                 let accepted = reply.join().unwrap();
                 let result = task.await.unwrap();
                 if result.is_ok() {
@@ -686,9 +691,6 @@ mod timeout_diagnostics_tests {
                     assert_eq!(result, Err(Failure::TimedOut));
                 }
                 assert_eq!(seen.lock().unwrap().len(), usize::from(result.is_err()));
-                if order == 1 {
-                    assert!(!accepted, "late-reply control");
-                }
             }
             assert!(link.state().pending.is_empty());
         }
