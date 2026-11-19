@@ -61,6 +61,8 @@ command({op:'amendOrder',id:'7002',price:95,amount:0.5});
 // TS cancels and replaces; Rust edits the resting limit in place with ModifyOrder (tx 17).
 cancel(7002,12);only('ts');write(14,orderInfo(9500,500),13);only('ts');open(legs.slice(1).map((r)=>({...r,client_order_index:Number(r.order_index)})),7);only('ts');
 write(17,{AccountIndex:42,ApiKeyIndex:3,MarketIndex:1,Index:7002,BaseAmount:500,Price:9500,TriggerPrice:0,ExpiredAt:1,Sig:'placeholder'},12);only('rust');
+// Rust completes the modify only once its tx has executed (AGT-77; status 2).
+http('GET','/api/v1/tx?by=hash&value=offline-tx-12',{code:200,hash:'offline-tx-12',status:2},undefined,{afterCommand:7,impl:'rust'});
 open([{...legs[0],price:'95',initial_base_amount:'0.5',remaining_base_amount:'0.5'},...legs.slice(1)].map((r)=>({...r,client_order_index:Number(r.order_index)})),7);only('rust');
 command({op:'placeOrders',orders:[{symbol:'ETH',type:'limit',side:'buy',price:96,amount:0.25},{symbol:'ETH',type:'limit',side:'buy',price:97,amount:0.5}]});
 // The modify spends one nonce where TS spent two, so Rust's batch starts one lower.
