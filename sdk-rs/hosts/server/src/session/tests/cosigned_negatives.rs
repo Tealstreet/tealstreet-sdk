@@ -1,6 +1,9 @@
 use super::*;
 use safe_cex_remote_signer::SignerLink;
 
+#[path = "hosted_first_connect.rs"]
+mod hosted_first_connect;
+
 // The image workflow runs `cargo test -p safe-cex-exchange-server` alone: its
 // tests compete at full intra-crate parallelism and can starve each other,
 // unlike Rust / native test, which spreads the load across the workspace run.

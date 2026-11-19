@@ -617,7 +617,13 @@ impl Session {
                         diagnostic.refused(refusal);
                     }
                     self.drop_early(&completed.account_name, "verification refused");
-                    out.send(if refusal.unavailable {
+                    out.send(if let Some(conflict) = refusal.settings {
+                        envelope::init_settings_conflict(
+                            &completed.account_name,
+                            conflict,
+                            refusal.stage,
+                        )
+                    } else if refusal.unavailable {
                         envelope::init_proof_unavailable(&completed.account_name)
                     } else {
                         match refusal.transition {
@@ -764,6 +770,9 @@ impl Session {
     }
 
     fn open_probed_cosigned(&mut self, init: InitPayload) {
+        let diagnostic = self
+            .handovers
+            .refusal_context(&init.account_name, &init.exchange_name);
         let permit = self.registry.probe_permit(self.user(), &init);
         let out = self.handover_out(&init.account_name);
         let (signing_out, lifetime) = out.isolated();
@@ -789,7 +798,7 @@ impl Session {
                     Some(ProbedInit {
                         init,
                         permit,
-                        diagnostic: None,
+                        diagnostic: Some(diagnostic),
                     }),
                 )
             },
@@ -981,12 +990,17 @@ impl Session {
     }
 
     fn refuse_handover(&self, name: &str, refusal: ProbeRefusal) {
-        self.handover_out(name).send(envelope::init_unverified(
-            name,
-            refusal.transient,
-            envelope::InitRefusalReasonClass::Unknown,
-            refusal.into(),
-        ));
+        let frame = if let Some(conflict) = refusal.settings {
+            envelope::init_settings_conflict(name, conflict, refusal.stage)
+        } else {
+            envelope::init_unverified(
+                name,
+                refusal.transient,
+                envelope::InitRefusalReasonClass::Unknown,
+                refusal.into(),
+            )
+        };
+        self.handover_out(name).send(frame);
     }
 
     /// Exercise the trusted construction entry point from this authenticated
