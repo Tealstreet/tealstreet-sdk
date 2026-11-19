@@ -15,7 +15,7 @@ import { coinbasePrivateTape } from '../../../../../sdk-rs/harness/private-tape-
 import { Tape } from '../../../../../sdk-rs/harness/tape.mjs';
 import { venueOf } from '../../../../../sdk-rs/harness/venues.mjs';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
-import { inProcessPortPair, RustPublicFeedProvider } from '../../exchanges/rust/publicFeed';
+import { RustPublicFeedProvider } from '../../exchanges/rust/publicFeed';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { FrameStore } from '../../store/frameStore';
 import { directTransport } from '../../transport/direct';
@@ -686,7 +686,8 @@ describe('native public-feed ownership through real private workers', () => {
     vi.spyOn(source.account, 'observePublicFeed').mockImplementation((next) => { observer = next; return () => {}; });
     const provider = new RustPublicFeedProvider(source.account);
     cleanups.push(() => provider.dispose());
-    const [providerPort, accountPort] = inProcessPortPair();
+    // Shared-worker policy requires real ports; same-realm pairs expose only the protocol.
+    const { port1: providerPort, port2: accountPort } = new globalThis.MessageChannel();
     provider.attach(providerPort);
     const side = await exchange({ ...COINBASE_REPLAY, privateOnly: true,
       publicFeed: { mode: 'shared', port: accountPort } });
