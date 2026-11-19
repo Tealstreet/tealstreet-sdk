@@ -140,8 +140,14 @@ test('the bot workflow measures master Rust runs and only opens a reviewed PR', 
   assert.match(workflow, /node sdk-rs\/harness\/update-wasm-caps\.mjs[\s\S]*--root measured[\s\S]*--source-head "\$MEASURED_SHA" --run-id "\$MEASURED_RUN"/);
   assert.match(workflow, /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}\n\s+path: measured/);
   assert.match(workflow, /chore\(wasm\): restore rule-17 reserve/);
-  assert.match(workflow, /git commit [^\n]*\n[^\n]*-- sdk-rs\/harness\/wasm-caps\.json/);
-  assert.doesNotMatch(workflow, /gh pr merge|--auto\b|auto-merge:/);
+  assert.match(workflow, /git commit [^\n]*\n[^\n]*Measured by Rust SDK run \$RUN_URL[^\n]*-- sdk-rs\/harness\/wasm-caps\.json/);
+  // Actions may not create or approve PRs in this repo (coordinator, #3686): push the bot branch only.
+  assert.match(workflow, /BOT_BRANCH: bot\/wasm-caps/);
+  const pushes = [...workflow.matchAll(/^\s*git push\b.*$/gm)].map(([line]) => line.trim());
+  assert.deepEqual(pushes, ['git push --force-with-lease="refs/heads/$BOT_BRANCH:${BOT_LEASE:-}" origin "HEAD:refs/heads/$BOT_BRANCH"']);
+  assert.match(workflow, />> "\$GITHUB_STEP_SUMMARY"/);
+  assert.doesNotMatch(workflow, /\bgh\s|GH_TOKEN|pulls|pull-requests:/, 'no PR API and no PR permission');
+  assert.match(workflow, /permissions:\n\s+contents: write\n\s+actions: read\n\n/);
   assert.doesNotMatch(workflow, /secrets\./, 'GITHUB_TOKEN only');
   for (const [, action] of workflow.matchAll(/uses: ([^@\s]+)@/g)) assert.match(action, /^actions\//, 'GitHub-owned actions only');
 });

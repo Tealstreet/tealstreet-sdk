@@ -38,11 +38,15 @@ recurring merge conflict.
   own `validateCiWasm` (its input list defines that run's fingerprint), the Node
   module must match its seal, size = max(web, Node), and
   cap = max(cap, ceil((measured + 10 KiB) / KiB) KiB). Caps are never lowered;
-  unmeasured families keep theirs; an unknown family refuses. Changes go to one
-  bot PR (`bot/wasm-caps`, "chore(wasm): restore rule-17 reserve") that keeps
-  raises it already proposed; nothing auto-merges. A GITHUB_TOKEN PR starts no
-  workflows, so re-run CI on it by hand before merging. The repo setting allowing
-  Actions to create PRs must stay on.
+  unmeasured families keep theirs; an unknown family refuses. Raised caps are
+  pushed (lease-guarded, recreated from master, keeping raises it already
+  carried) to the bot-owned branch `bot/wasm-caps` and written to the job
+  summary. **The workflow calls no PR API and has no `pull-requests`
+  permission**: Actions PR creation/approval stays OFF in this repo because these
+  images run on boxes holding user keys (coordinator, #3686). Sam's local
+  `fleet-watch` opens "chore(wasm): restore rule-17 reserve" with his token when
+  the branch's caps differ from master and no PR is open, so CI runs on it
+  normally; nothing auto-merges.
 - **Ceilings that are decisions, not measurements** (a combined raise ahead of
   measurement, a new family) are hand edits to `wasm-caps.json` with a dated
   line in `wasm-caps-history.md`, which also holds every pre-cutover provenance
