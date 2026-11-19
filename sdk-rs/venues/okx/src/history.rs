@@ -278,9 +278,9 @@ fn fill_bound(value: Option<f64>) -> Option<f64> {
 }
 fn fill_seconds(value: f64) -> f64 {
     if value > 1_000_000_000_000.0 {
-        (value / 1000.0).floor()
+        value / 1000.0
     } else {
-        value.floor()
+        value
     }
 }
 fn positive(value: &str) -> Option<f64> {
@@ -981,7 +981,12 @@ impl Okx {
                 let id = text(row.trade_id).or_else(|| text(row.bill_id));
                 let timestamp = fill_seconds(time);
                 let key = id.as_ref().map(|id| format!("id:{id}")).unwrap_or_else(|| {
-                    format!("{}:{timestamp}:{price}:{qty}:{}", order_id, row.side)
+                    // Keep the existing fallback identity at whole-second precision.
+                    let identity_timestamp = timestamp.floor();
+                    format!(
+                        "{}:{identity_timestamp}:{price}:{qty}:{}",
+                        order_id, row.side
+                    )
                 });
                 let execution = Execution {
                     id,

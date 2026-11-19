@@ -903,9 +903,9 @@ fn page(walk: &Walk, body: &str) -> serde_json::Result<(Rows, Option<String>)> {
                 rows.push(Execution {
                     id: e.exec_id.as_deref().unwrap_or_default().to_owned(),
                     timestamp: if time > 100_000_000_000.0 {
-                        (time / 1000.0).floor()
+                        time / 1000.0
                     } else {
-                        time.floor()
+                        time
                     },
                     symbol: e.symbol.into_owned(),
                     order_id: e.order_id.into_owned(),
