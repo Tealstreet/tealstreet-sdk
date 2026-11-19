@@ -4,6 +4,8 @@
 use crate::Pending;
 #[path = "trading/context.rs"]
 mod context;
+#[path = "trading/diagnostics.rs"]
+mod diagnostics;
 #[path = "trading/reference.rs"]
 mod reference;
 pub use reference::ReferenceRead;
@@ -47,6 +49,7 @@ const UNKNOWN_WORDS: &str = "The outcome is unknown. Check Open Orders";
 const MISSING_ORDER_WORDS: &str = "BingX order was already filled or cancelled; check Open Orders";
 
 pub struct Request {
+    shape: Option<safe_cex_engine::error::bingx_write_shape::BingxWriteShape>,
     write: usize,
     command: CommandId,
     call: Call,
@@ -201,6 +204,7 @@ struct Observation {
 }
 #[derive(Default)]
 pub struct Trading {
+    replacement_ids: VecDeque<String>,
     jobs: HashMap<CommandId, Run>,
     references: HashMap<String, protection::References>,
     /// Retired settings writes whose metadata custody finishes at the next callback.
@@ -459,7 +463,7 @@ fn unknown(message: impl Into<String>) -> VenueError {
 }
 fn present_unknown(mut error: VenueError, note: Option<&str>) -> VenueError {
     if error.venue_message.is_none() {
-        error.venue_message = Some(error.message.clone().into_boxed_str());
+        error.venue_message = Some(error.message.clone().into_boxed_str().into());
     }
     error.message = match note {
         Some(note) => format!("{UNKNOWN_WORDS}. {note}"),
@@ -766,11 +770,19 @@ impl Trading {
                 && (matches!(step.call, Call::Cancel { .. } | Call::Replace { .. })
                     || run.job.restoring);
             let restoring = run.job.restoring;
+            let shape = diagnostics::capture(
+                cx,
+                &step,
+                run.job.guard.as_ref(),
+                &self.observed,
+                &self.replacement_ids,
+            );
             cx.command_progress(command, step.receipts);
             self.queue(
                 cx,
                 credentials,
                 Request {
+                    shape,
                     write,
                     command,
                     call: step.call,
@@ -1228,6 +1240,13 @@ impl Trading {
                     fact.verdict(),
                     Verdict::Refused(_) | Verdict::RefusedResend(_)
                 );
+            let fact = if fact.error().kind == Some(ErrorKind::InvalidInput)
+                || envelope.as_ref().is_ok_and(|e| e.code == 109400)
+            {
+                fact.with_bingx_write_shape(request.shape)
+            } else {
+                fact
+            };
             let error = fact.error().clone();
             let grant = match cx.http_write_fact(
                 &request.context,
@@ -1282,6 +1301,16 @@ impl Trading {
             && cx.validate_http_write_effects(&request.context).is_ok()
         {
             apply(self, cx, &request.call, canceled);
+            if let Ok(ids) = &result
+                && (matches!(request.call, Call::Replace { .. })
+                    || (matches!(request.call, Call::Place)
+                        && self
+                            .jobs
+                            .get(&request.command)
+                            .is_some_and(|run| run.job.replaces_cancelled.is_some() || restoring)))
+            {
+                diagnostics::remember(&mut self.replacement_ids, ids);
+            }
             on_effects(cx, &request);
         }
         let Some(run) = self

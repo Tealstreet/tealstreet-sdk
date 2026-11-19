@@ -55,6 +55,8 @@ fn a_snapshot_frame_carries_the_whole_state_without_draining_changes() {
     };
     let snapshot = h.engine.snapshot_frame(h.now).to_vec();
     use safe_cex_engine::wire::section::*;
+    // Rule 5 / #3640: Store::everything includes HTTP request stats after STATUS;
+    // the full-snapshot inventory must retain those counters and exact ordering.
     assert_eq!(
         kinds(&snapshot),
         [
@@ -67,6 +69,7 @@ fn a_snapshot_frame_carries_the_whole_state_without_draining_changes() {
             BALANCE,
             SETTINGS,
             STATUS,
+            REQUEST_STATS,
             VENUE_STATE,
             CAPABILITIES,
             BOOK,

@@ -1,4 +1,7 @@
 //! Original identity controls over genuine Engine entry and dispatch APIs.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::request_context::{
     Claim, Context, Error, HttpAction, Operation, Permit, Policy, Preparation, Prepared,
@@ -279,7 +282,7 @@ fn native_wire_identity_row_and_duplicate_reply_on_all_four_hosts() {
             [Ok(r#"{"userId":"0","affiliateId":"own"}"#.into())]
         );
         assert_eq!(diagnostics(&actions), 0);
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
         assert!(outcomes(&reply(&mut e, NOW + 2., &request, 200, ROW)).is_empty());
     }
 }

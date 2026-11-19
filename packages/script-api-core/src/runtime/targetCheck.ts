@@ -54,12 +54,12 @@ const VERSION_FIELD: Record<TargetName, keyof RuntimeDescriptor> = {
   mobile: 'mobileApiVersion',
 };
 
-const SCRIPT_VERSION_FIELD: Record<TargetName, keyof ScriptDescriptor> = {
+const SCRIPT_VERSION_FIELD = {
   core: 'coreApiVersion',
   cli: 'cliApiVersion',
   web: 'webApiVersion',
   mobile: 'mobileApiVersion',
-};
+} satisfies Record<TargetName, keyof ScriptDescriptor>;
 
 const SURFACE_LABEL: Record<TargetName, string> = {
   core: 'CORE',
@@ -91,7 +91,7 @@ export const validateTargets = (script: ScriptDescriptor, runtime: RuntimeDescri
     );
   }
 
-  const targetsToVersionCheck = ['core', ...runnableMatches] as TargetName[];
+  const targetsToVersionCheck: TargetName[] = ['core', ...runnableMatches];
   for (const target of targetsToVersionCheck) {
     if (!runtime.mountedTargets.includes(target)) {
       throw new Error(`this runtime does not mount the '${target}' API surface`);
@@ -100,7 +100,7 @@ export const validateTargets = (script: ScriptDescriptor, runtime: RuntimeDescri
     if (typeof provided !== 'string' || provided.length === 0) {
       throw new Error(`this script requires the '${target}' surface; runtime provides no '${target}' API version`);
     }
-    const required = (script[SCRIPT_VERSION_FIELD[target]] as string | undefined) ?? '0.0.0';
+    const required = script[SCRIPT_VERSION_FIELD[target]] ?? '0.0.0';
     if (compareVersions(provided, required) < 0) {
       throw new Error(`script requires ${SURFACE_LABEL[target]} v${required}; runtime provides v${provided}`);
     }

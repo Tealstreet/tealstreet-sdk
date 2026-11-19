@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 const deferred = () => {
   let resolve!: (value: { markets: never[]; tickers: never[] }) => void;
@@ -22,7 +22,7 @@ describe('Hyperliquid HIP-3 startup budget', () => {
         testnet: false,
         tuning: { consoleLogging: false },
       },
-      new DefaultStore(),
+      new FrameStore(),
     );
 
     const requests = [deferred(), deferred(), deferred()];

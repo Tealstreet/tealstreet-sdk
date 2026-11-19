@@ -1,4 +1,7 @@
 //! Configuration validates the selected read signer while attribution remains primary-key scoped.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, ReadCredentials, Response,
 };
@@ -139,7 +142,7 @@ fn identity_primary_hmac_and_stable_id_preserve_existing_account_settings_and_st
         result(respond(&mut e, &r, 200, CONFIG), false).unwrap(),
         r#"{"userId":"weex-account-7"}"#
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     assert!(respond(&mut e, &r, 200, CONFIG).is_empty());
 }
 #[test]
@@ -231,7 +234,7 @@ fn identity_disabled_trading_missing_or_malformed_config_and_business_errors_rej
         let before = e.account_snapshot_frame(NOW).to_vec();
         let r = request(&mut e);
         result(respond(&mut e, &r, 200, body), true).unwrap_err();
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     }
 }
 #[test]
@@ -314,7 +317,15 @@ fn identity_network_and_http_failures_settle_once_without_reconciliation() {
             respond(&mut e, &r, 503, "unavailable")
         };
         result(actions, true).unwrap_err();
-        assert_eq!(e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(
+            &before,
+            e.account_snapshot_frame(NOW),
+            if network {
+                [0, 0, 0, 1, 0]
+            } else {
+                [0, 0, 0, 0, 1]
+            },
+        );
         assert!(respond(&mut e, &r, 200, CONFIG).is_empty());
     }
 }
@@ -329,5 +340,5 @@ fn identity_rate_rejection_keeps_global_cooldown_and_does_not_install_private_po
             .unwrap_err()
             .contains("rate limited")
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [0, 1, 0, 0, 0]);
 }

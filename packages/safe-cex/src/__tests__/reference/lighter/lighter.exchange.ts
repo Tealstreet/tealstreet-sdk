@@ -1,9 +1,13 @@
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../../store/store.interface';
-import type { ExchangeName } from '../../../types';
 import type { LighterAccountTier } from '../../../exchanges/lighter/lighter.account-tier';
 import type { LighterBuilderFeeConfig } from '../../../exchanges/lighter/lighter.builder-fee';
-import type { LighterCreateGroupedOrdersRequest, LighterCreateOrderRequest, LighterSignerAdapter } from './lighter.signer';
+import type { StoreData } from '../../../generated/StoreData';
+import type { ExchangeName } from '../../../types';
+import type {
+  LighterCreateGroupedOrdersRequest,
+  LighterCreateOrderRequest,
+  LighterSignerAdapter,
+} from './lighter.signer';
 
 import dayjs from 'dayjs';
 import chunk from 'lodash/chunk';
@@ -15,6 +19,41 @@ import { forEachSeries } from 'p-iteration';
 import { CandlestickApi, LighterApiClient, OrderApi } from '@tealstreet/lighter-sdk';
 import { getCryptoApi, initWasm, isWasmReady } from '@tealstreet/poseidon-crypto';
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { BaseExchange } from '../../../exchanges/base';
+import {
+  extractLighterAccountTierFromPayload,
+  hasNonZeroLighterIntegratorFee,
+  isLighterAccountTierEligibleForPartnerAttribution,
+  isLighterPartnerAttributionApprovalMissingRejection,
+  isLighterPartnerAttributionTierRejection,
+  LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE,
+  LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE,
+} from '../../../exchanges/lighter/lighter.account-tier';
+import { resolveLighterBuilderFeeConfig } from '../../../exchanges/lighter/lighter.builder-fee';
+import {
+  ENDPOINTS,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  LighterDeploymentProfile,
+  ORDER_SIDE,
+  ORDER_STATUS,
+  ORDER_TIME_IN_FORCE,
+  ORDER_TYPE,
+  resolveLighterDeploymentProfile,
+  resolveLighterInterval,
+} from '../../../exchanges/lighter/lighter.types';
+import {
+  getLighterAmountDecimals,
+  getLighterOrderMinimums,
+  getLighterPriceDecimals,
+  isLighterL1Address,
+  parseLighterApiKeyIndex,
+  parseLighterPositiveIntegerString,
+  resolveLighterCancelTargets,
+  toLighterApiKeyIndexString,
+  toLighterScaledInt,
+} from '../../../exchanges/lighter/lighter.utils';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -44,42 +83,10 @@ import { loop } from '../../../utils/loop';
 import { mergeUpdatesUsingLastUpdate } from '../../../utils/mergeUpdatesUsingLastUpdate';
 import { adjust, subtract } from '../../../utils/safe-math';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { createLighterSDKClient } from './lighter.api';
-import {
-  extractLighterAccountTierFromPayload,
-  hasNonZeroLighterIntegratorFee,
-  isLighterAccountTierEligibleForPartnerAttribution,
-  isLighterPartnerAttributionApprovalMissingRejection,
-  isLighterPartnerAttributionTierRejection,
-  LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE,
-  LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE,
-} from '../../../exchanges/lighter/lighter.account-tier';
-import { resolveLighterBuilderFeeConfig } from '../../../exchanges/lighter/lighter.builder-fee';
 import { createLighterSignerAdapter } from './lighter.signer';
-import {
-  ENDPOINTS,
-  GRAFANA_ENDPOINTS_EVERY,
-  GRAFANA_ENDPOINTS_PERIODIC,
-  LighterDeploymentProfile,
-  ORDER_SIDE,
-  ORDER_STATUS,
-  ORDER_TIME_IN_FORCE,
-  ORDER_TYPE,
-  resolveLighterDeploymentProfile,
-  resolveLighterInterval,
-} from '../../../exchanges/lighter/lighter.types';
-import {
-  getLighterAmountDecimals,
-  getLighterOrderMinimums,
-  getLighterPriceDecimals,
-  isLighterL1Address,
-  parseLighterApiKeyIndex,
-  parseLighterPositiveIntegerString,
-  resolveLighterCancelTargets,
-  toLighterApiKeyIndexString,
-  toLighterScaledInt,
-} from '../../../exchanges/lighter/lighter.utils';
 import { LighterPrivateWebsocket } from './lighter.ws-private';
 import { LighterPublicWebsocket } from './lighter.ws-public';
 
@@ -206,7 +213,7 @@ export class LighterExchange extends BaseExchange {
   // Track recently cancelled orders to prevent re-adding them before API processes cancellation
   recentlyCancelledOrders: Map<string, number> = new Map();
 
-  // Store account index from API
+  // FrameStore account index from API
   private accountIndex?: bigint;
   private hasWarnedMissingOrderAuth = false;
   private hasWarnedMissingOrderAccountIndex = false;
@@ -232,7 +239,7 @@ export class LighterExchange extends BaseExchange {
   private lastTransientSnapshotWarningAt = 0;
   private hasWarnedAccountLimitsLookup = false;
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.lighterDeploymentProfile = resolveLighterDeploymentProfile({
@@ -307,12 +314,7 @@ export class LighterExchange extends BaseExchange {
   private inferStopLossTypeFromReduceOnlyLimit = (
     order: Pick<Order, 'symbol' | 'type' | 'side' | 'price' | 'reduceOnly'>,
   ): OrderType | undefined => {
-    if (
-      order.type !== OrderType.Limit ||
-      !order.reduceOnly ||
-      !Number.isFinite(order.price) ||
-      order.price <= 0
-    ) {
+    if (order.type !== OrderType.Limit || !order.reduceOnly || !Number.isFinite(order.price) || order.price <= 0) {
       return undefined;
     }
 
@@ -739,10 +741,14 @@ export class LighterExchange extends BaseExchange {
 
     const balance = await this.fetchRawBalance();
     if (!this.isDisposed) {
-      this.store.update({
-        balance,
-        loaded: { ...this.store.loaded, balance: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          loaded: { balance: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     }
   };
 
@@ -937,20 +943,22 @@ export class LighterExchange extends BaseExchange {
           .toLowerCase()
           .includes('invalid account l1 address')
       ) {
-        return { error: (
-          'Invalid L1 address for account lookup. For Lighter, the Public Key field is an API key, not an L1 address. ' +
-          'Enter account index in Application ID.'
-        ) };
+        return {
+          error:
+            'Invalid L1 address for account lookup. For Lighter, the Public Key field is an API key, not an L1 address. ' +
+            'Enter account index in Application ID.',
+        };
       }
       if (
         String(message || '')
           .toLowerCase()
           .includes('not found')
       ) {
-        return { error: (
-          'Lighter account lookup failed. API Key Index is not account index. ' +
-          'Enter your account index in Application ID.'
-        ) };
+        return {
+          error:
+            'Lighter account lookup failed. API Key Index is not account index. ' +
+            'Enter your account index in Application ID.',
+        };
       }
 
       return { error: message || 'Invalid API key or credentials' };
@@ -961,7 +969,11 @@ export class LighterExchange extends BaseExchange {
 
   start = async () => {
     // Lighter is net-position based: opposite-side fills reduce/flip exposure rather than opening a hedge.
-    this.store.setSetting('isHedged', false);
+    applyReferenceFixture(
+      this.store,
+      { options: { ...this.store.options, ['isHedged']: false } },
+      this.store.markets.map((row) => row.symbol),
+    );
 
     const useExternalPublicData = await this.initExternalPublicData();
     const publicDataOnly =
@@ -979,25 +991,29 @@ export class LighterExchange extends BaseExchange {
       await this.fetchMarkets().then((markets) => {
         if (this.isDisposed) return [];
         this.log(`Loaded ${markets.length} Lighter markets`);
-        this.store.update({
-          markets,
-          tickers: markets.map((market) => ({
-            id: market.id,
-            symbol: market.symbol,
-            bid: 0,
-            ask: 0,
-            last: 0,
-            volume: 0,
-            quoteVolume: 0,
-            mark: 0,
-            index: 0,
-            percentage: 0,
-            openInterest: 0,
-            fundingRate: 0,
-            fundingTime: 0,
-          })),
-          loaded: { ...this.store.loaded, markets: true, tickers: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            markets,
+            tickers: markets.map((market) => ({
+              id: market.id,
+              symbol: market.symbol,
+              bid: 0,
+              ask: 0,
+              last: 0,
+              volume: 0,
+              quoteVolume: 0,
+              mark: 0,
+              index: 0,
+              percentage: 0,
+              openInterest: 0,
+              fundingRate: 0,
+              fundingTime: 0,
+            })),
+            loaded: { markets: true, tickers: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
         return markets;
       });
 
@@ -1015,9 +1031,16 @@ export class LighterExchange extends BaseExchange {
 
     // Start ticking live data
     if (publicDataOnly) {
-      this.store.update({
-        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          positions: [],
+          orders: [],
+          balance: { total: 0, free: 0, used: 0, upnl: 0 },
+          loaded: { balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
       return;
     }
 
@@ -1033,20 +1056,42 @@ export class LighterExchange extends BaseExchange {
       const [, balance] = await Promise.all([
         this.fetchPositions(undefined, { allowRecentAccountSnapshot: true }).then((positions) => {
           if (this.isDisposed) return [];
-          this.store.addOrUpdatePositionsFull(positions);
-          this.store.update({
-            loaded: { ...this.store.loaded, positions: true, orders: true },
-          });
+          (() => {
+            const incoming: StoreData['positions'] = positions;
+            return applyReferenceFixture(
+              this.store,
+              {
+                positions: incoming.map((row) => ({
+                  ...this.store.positions.find((old) => old.id === row.id),
+                  ...row,
+                })),
+              },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
+          applyReferenceFixture(
+            this.store,
+            {
+              loaded: { positions: true, orders: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
           return positions;
         }),
         this.fetchRawBalance({ allowRecentAccountSnapshot: true, includeAccountLimits: false }),
       ]);
 
       if (this.isDisposed) return;
-      this.store.update({
-        balance,
-        loaded: { ...this.store.loaded, balance: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          positions: this.store.positions,
+          orders: this.store.orders,
+          loaded: { balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     } catch (err: any) {
       this.handlePrivateSnapshotFetchError(err);
     }
@@ -1081,20 +1126,44 @@ export class LighterExchange extends BaseExchange {
           : fetchedPositions;
 
       // Update positions
-      this.store.addOrUpdatePositionsFull(positions);
-      this.store.addOrUpdateOrdersFull(fetchedOrders);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
+      (() => {
+        const incoming: StoreData['orders'] = fetchedOrders;
+        return applyReferenceFixture(
+          this.store,
+          { orders: incoming.map((row) => ({ ...this.store.orders.find((old) => old.id === row.id), ...row })) },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
 
-      this.store.update({
-        loaded: { ...this.store.loaded, positions: true, orders: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       const balance = await this.fetchBalance({ allowRecentAccountSnapshot: true });
 
       if (this.isDisposed) return;
-      this.store.update({
-        balance,
-        loaded: { ...this.store.loaded, balance: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          balance,
+          loaded: { balance: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
     } catch (err: any) {
       this.handlePrivateSnapshotFetchError(err);
     }
@@ -1123,10 +1192,14 @@ export class LighterExchange extends BaseExchange {
   ): Promise<void> => {
     const balance = await this.fetchRawBalance(opts);
     if (this.isDisposed) return;
-    this.store.update({
-      balance,
-      loaded: { ...this.store.loaded, balance: true },
-    });
+    applyReferenceFixture(
+      this.store,
+      {
+        balance,
+        loaded: { balance: true },
+      },
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   fetchRawBalance = async (
@@ -1302,7 +1375,7 @@ export class LighterExchange extends BaseExchange {
         unrealizedPnl: 0,
         contracts: 0,
         leverage: leverageBySymbol[m.symbol] || m.limits.leverage.max || 10,
-        liquidationPrice: 0,
+        liquidationPrice: null,
         positionMode: PositionMode.OneWay,
         marginType: positionMarginType,
       });
@@ -1367,11 +1440,7 @@ export class LighterExchange extends BaseExchange {
             response?: { data?: { message?: unknown; error?: { message?: unknown } } };
           }
         | undefined;
-      const candidates = [
-        error?.message,
-        error?.response?.data?.message,
-        error?.response?.data?.error?.message,
-      ];
+      const candidates = [error?.message, error?.response?.data?.message, error?.response?.data?.error?.message];
       return candidates.some((message) => /invalid auth:\s*couldn'?t find account/i.test(String(message || '')));
     };
 
@@ -1814,49 +1883,47 @@ export class LighterExchange extends BaseExchange {
   fetchMarketsHelper = async () => {
     const marketRows = await this.fetchLighterMarketRows();
 
-    const markets: Market[] = marketRows
-      .filter(isLighterPerpMarket)
-      .map((market: any) => {
-        const symbol = String(market.symbol || '');
-        const { base: parsedBase, quote: parsedQuote } = parseLighterMarketSymbol(
-          symbol,
-          this.lighterDeploymentProfile.quoteCurrency,
-        );
-        const amountDecimals = Number(market.supported_size_decimals ?? 3);
-        const priceDecimals = Number(market.supported_price_decimals ?? 2);
-        const amountIncrement = amountDecimals >= 0 ? 1 / 10 ** amountDecimals : 0.001;
-        const priceIncrement = priceDecimals >= 0 ? 1 / 10 ** priceDecimals : 0.01;
-        const maxLeverage = getLighterMarketLeverageMax(market);
+    const markets: Market[] = marketRows.filter(isLighterPerpMarket).map((market: any) => {
+      const symbol = String(market.symbol || '');
+      const { base: parsedBase, quote: parsedQuote } = parseLighterMarketSymbol(
+        symbol,
+        this.lighterDeploymentProfile.quoteCurrency,
+      );
+      const amountDecimals = Number(market.supported_size_decimals ?? 3);
+      const priceDecimals = Number(market.supported_price_decimals ?? 2);
+      const amountIncrement = amountDecimals >= 0 ? 1 / 10 ** amountDecimals : 0.001;
+      const priceIncrement = priceDecimals >= 0 ? 1 / 10 ** priceDecimals : 0.01;
+      const maxLeverage = getLighterMarketLeverageMax(market);
 
-        return {
-          id: String(market.market_id),
-          symbol,
-          base: parsedBase,
-          quote: parsedQuote,
-          active: true,
-          precision: {
-            amount: amountIncrement,
-            price: priceIncrement,
+      return {
+        id: String(market.market_id),
+        symbol,
+        base: parsedBase,
+        quote: parsedQuote,
+        active: true,
+        precision: {
+          amount: amountIncrement,
+          price: priceIncrement,
+        },
+        limits: {
+          amount: {
+            min: parseFloat(market.min_base_amount || '0'),
+            max: parseFloat(market.order_quote_limit || '1000000'),
           },
-          limits: {
-            amount: {
-              min: parseFloat(market.min_base_amount || '0'),
-              max: parseFloat(market.order_quote_limit || '1000000'),
-            },
-            leverage: {
-              min: 1,
-              max: maxLeverage,
-            },
+          leverage: {
+            min: 1,
+            max: maxLeverage,
           },
-          isExpiring: false,
-          isSpot: false,
-          info: {
-            ...market,
-            amountDecimals,
-            priceDecimals,
-          },
-        };
-      });
+        },
+        isExpiring: false,
+        isSpot: false,
+        info: {
+          ...market,
+          amountDecimals,
+          priceDecimals,
+        },
+      };
+    });
 
     return markets;
   };
@@ -2207,7 +2274,9 @@ export class LighterExchange extends BaseExchange {
 
   private refreshMarginModeStateAfterInvalidOrder = async (symbol: string): Promise<void> => {
     const configuredMarginMode = this.getMarketConfiguredMarginMode(this.store.marketsBySymbol[symbol]);
-    const hasOpenPosition = this.store.positions.some((position) => position.symbol === symbol && position.contracts > 0);
+    const hasOpenPosition = this.store.positions.some(
+      (position) => position.symbol === symbol && position.contracts > 0,
+    );
     if (configuredMarginMode !== undefined && !hasOpenPosition) {
       // If Lighter rejects create-order with invalid margin mode while our flat
       // placeholder came from market config, the account-level mode is stale.
@@ -2220,7 +2289,19 @@ export class LighterExchange extends BaseExchange {
     try {
       const positions = await this.fetchPositions();
       if (!this.isDisposed) {
-        this.store.addOrUpdatePositionsFull(positions);
+        (() => {
+          const incoming: StoreData['positions'] = positions;
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     } catch (error: any) {
       this.log(
@@ -2300,7 +2381,19 @@ export class LighterExchange extends BaseExchange {
     try {
       refreshedPositions = await this.fetchPositions();
       if (!this.isDisposed) {
-        this.store.addOrUpdatePositionsFull(refreshedPositions);
+        (() => {
+          const incoming: StoreData['positions'] = refreshedPositions;
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     } catch (error: any) {
       this.log(
@@ -2422,8 +2515,7 @@ export class LighterExchange extends BaseExchange {
     // Lighter market orders are signed as slippage-bounded orders; use the freshest available live price.
     const executionPrice = isMarketOrderType
       ? adjust(
-          this.resolveMarketOrderReferencePrice(opts.symbol, opts.side) *
-            (opts.side === OrderSide.Buy ? 1.02 : 0.98),
+          this.resolveMarketOrderReferencePrice(opts.symbol, opts.side) * (opts.side === OrderSide.Buy ? 1.02 : 0.98),
           pPrice,
         )
       : isConditionalOrderType
@@ -2892,7 +2984,14 @@ export class LighterExchange extends BaseExchange {
     });
 
     // Immediately remove all cancelled orders from the store
-    this.store.removeOrders(allOrderIdsToRemove.map((id) => ({ id })));
+    (() => {
+      const removed: Array<Pick<StoreData['orders'][number], 'id'>> = allOrderIdsToRemove.map((id) => ({ id }));
+      return applyReferenceFixture(
+        this.store,
+        { orders: this.store.orders.filter((row) => !removed.some((target) => target.id === row.id)) },
+        this.store.markets.map((row) => row.symbol),
+      );
+    })();
 
     // Group into lots of 10
     const lots = chunk(ordersToCancel, 10);
@@ -3051,7 +3150,16 @@ export class LighterExchange extends BaseExchange {
       if (this.isDisposed) {
         return;
       }
-      this.store.addOrUpdatePositionsFull(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: incoming.map((row) => ({ ...this.store.positions.find((old) => old.id === row.id), ...row })),
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     } catch (refreshError: any) {
       this.log(
         `[Lighter] Failed to refresh leverage state for ${symbol}: ${refreshError?.message || String(refreshError)}`,
@@ -3094,7 +3202,7 @@ export class LighterExchange extends BaseExchange {
     contracts: number,
     leverage: number,
     marginMode: 0 | 1 | undefined,
-  ): number => {
+  ): number | null => {
     const rawLiquidationPrice = Number.parseFloat(String(v(p, 'liquidationPrice') ?? v(p, 'liquidation_price') ?? 0));
     const rawIsFinite = Number.isFinite(rawLiquidationPrice) && rawLiquidationPrice > 0;
     const rawIsProfitSide =
@@ -3115,7 +3223,7 @@ export class LighterExchange extends BaseExchange {
       !Number.isFinite(contracts) ||
       contracts <= 0
     ) {
-      return rawIsFinite ? rawLiquidationPrice : 0;
+      return rawIsFinite ? rawLiquidationPrice : null;
     }
 
     const rawAllocatedMargin = Number.parseFloat(
@@ -3140,7 +3248,7 @@ export class LighterExchange extends BaseExchange {
       maintenanceMarginFraction < 0 ||
       maintenanceMarginFraction >= 1
     ) {
-      return rawIsFinite ? rawLiquidationPrice : 0;
+      return rawIsFinite ? rawLiquidationPrice : null;
     }
 
     const derivedLiquidationPrice =
@@ -3152,7 +3260,7 @@ export class LighterExchange extends BaseExchange {
       return derivedLiquidationPrice;
     }
 
-    return rawIsFinite ? rawLiquidationPrice : 0;
+    return rawIsFinite ? rawLiquidationPrice : null;
   };
 
   mapPosition(p: Record<string, any>) {
@@ -3206,7 +3314,7 @@ export class LighterExchange extends BaseExchange {
       unrealizedPnl,
       realizedPnl: parseFloat(v(p, 'realizedPnl') || v(p, 'realized_pnl') || 0),
       contracts,
-      liquidationPrice,
+      liquidationPrice: nativeLiquidationPrice(liquidationPrice),
       positionMode: PositionMode.OneWay,
       marginType: this.marginModeToMarginType(marginMode),
       info: p,

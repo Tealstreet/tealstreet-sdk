@@ -1,41 +1,46 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
-      {
-        id: 'BTCUSD-PERP',
-        symbol: 'BTCUSD-PERP',
-        base: 'BTC',
-        quote: 'USD',
-        active: true,
-        precision: { amount: 0.001, price: 0.5 },
-        limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
-        info: { underlyingSymbol: 'BTCUSD-INDEX' },
-      },
-    ],
-    tickers: [
-      {
-        id: 'BTCUSD-PERP',
-        symbol: 'BTCUSD-PERP',
-        bid: 60_000,
-        ask: 60_010,
-        last: 60_005,
-        mark: 60_005,
-        index: 60_004,
-        percentage: 1,
-        fundingRate: 0.0001,
-        fundingTime: 0,
-        volume: 100,
-        quoteVolume: 6_000_000,
-        openInterest: 10,
-      },
-    ],
-  });
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    {
+      markets: [
+        {
+          id: 'BTCUSD-PERP',
+          symbol: 'BTCUSD-PERP',
+          base: 'BTC',
+          quote: 'USD',
+          active: true,
+          precision: { amount: 0.001, price: 0.5 },
+          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 50 } },
+          info: { underlyingSymbol: 'BTCUSD-INDEX' },
+        },
+      ],
+      tickers: [
+        {
+          id: 'BTCUSD-PERP',
+          symbol: 'BTCUSD-PERP',
+          bid: 60_000,
+          ask: 60_010,
+          last: 60_005,
+          mark: 60_005,
+          index: 60_004,
+          percentage: 1,
+          fundingRate: 0.0001,
+          fundingTime: 0,
+          volume: 100,
+          quoteVolume: 6_000_000,
+          openInterest: 10,
+        },
+      ],
+    },
+    store.markets.map((row) => row.symbol),
+  );
   return new CryptocomExchange('cryptocom', { key: 'key', secret: 'secret' }, store);
 };
 
@@ -70,16 +75,14 @@ describe('audit regression: Crypto.com public valuation streams', () => {
       const initialFrames = send.mock.calls.map(([payload]) => JSON.parse(payload));
       expect(initialFrames).toHaveLength(2);
       expect(initialFrames.map((frame) => frame.params.channels.length)).toEqual([100, 4]);
-      expect(initialFrames.flatMap((frame) => frame.params.channels)).toEqual(
-        [
-          ...markets.map(({ instrumentName }) => `ticker.${instrumentName}`),
-          ...markets.flatMap(({ instrumentName, indexInstrumentName }) => [
-            `mark.${instrumentName}`,
-            `index.${indexInstrumentName}`,
-            `funding.${instrumentName}`,
-          ]),
-        ],
-      );
+      expect(initialFrames.flatMap((frame) => frame.params.channels)).toEqual([
+        ...markets.map(({ instrumentName }) => `ticker.${instrumentName}`),
+        ...markets.flatMap(({ instrumentName, indexInstrumentName }) => [
+          `mark.${instrumentName}`,
+          `index.${indexInstrumentName}`,
+          `funding.${instrumentName}`,
+        ]),
+      ]);
       expect(
         initialFrames
           .flatMap((frame) => frame.params.channels)

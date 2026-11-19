@@ -235,6 +235,8 @@ impl Venue for TestVenue {
 mod after_failure;
 #[path = "trading/allocation.rs"]
 mod allocation;
+#[path = "trading/shape.rs"]
+mod shape;
 
 struct Harness {
     engine: Engine<TestVenue>,

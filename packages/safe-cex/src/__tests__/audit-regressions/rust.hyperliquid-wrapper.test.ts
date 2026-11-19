@@ -1,4 +1,3 @@
-import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeOptions, Market, Order, PlaceOrderOpts } from '../../types';
@@ -7,10 +6,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { replacementClientOrderIdOf } from '../../exchanges/clientOrderId';
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
-import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { engineCapabilities } from '../fixtures/engineCapabilities';
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
 const CLOID = '0x0123456789abcdef0123456789abcdef';
 const MARKET: Market = {
@@ -62,13 +63,17 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
       commands.push(command);
       return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result(command)) }]);
     },
-    takeFrame: () => new Uint8Array(consumerFrame({
-      loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
-    })),
+    takeFrame: () =>
+      new Uint8Array(
+        consumerFrame({
+          loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+        }),
+      ),
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noActions,
     wsMessage: noActions,
-    wsClose: noActions, wsRouteExhausted: noActions,
+    wsClose: noActions,
+    wsRouteExhausted: noActions,
     httpStart: noActions,
     httpChunk: noActions,
     httpEnd: noActions,
@@ -80,12 +85,17 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
   });
   const load = vi.fn(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
   setWasmEngineLoader(load);
-  const store = new DefaultStore();
+  const store = new FrameStore();
   installNativeStartupFrames(engine, store);
-  store.update({
-    markets: [MARKET],
-    loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
-  });
+  store.apply(
+    nativeFixture(
+      {
+        markets: [MARKET],
+        loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new RustEngineExchange(
     'hyperliquid',
     { key: 'api-wallet', secret: 'private-key', ...options },
@@ -274,5 +284,4 @@ describe('Rust Hyperliquid wrapper', () => {
     await exchange.start();
     expect(JSON.parse(construct.mock.calls[0][1]).hyperliquidFastBook).toBe(fast === true);
   });
-
 });

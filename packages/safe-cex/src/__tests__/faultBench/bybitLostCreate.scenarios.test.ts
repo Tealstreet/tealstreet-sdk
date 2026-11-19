@@ -2,9 +2,10 @@ import type { Market } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from '../reference/bybit/bybit.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { createFakeVenue } from './fakeVenue';
 import { createFaultAdapter } from './faultAdapter';
 
@@ -31,8 +32,13 @@ afterEach(() => {
 });
 
 const setup = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BybitExchange('bybit' as any, { key: 'k', secret: 's' } as any, store);
   exchanges.push(exchange);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);

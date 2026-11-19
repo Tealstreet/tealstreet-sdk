@@ -5582,6 +5582,9 @@ impl<V: Venue> Engine<V> {
         }
         // Validate the complete update before changing state.
         update.validate()?;
+        if let Some(stats) = update.message_handler_stats {
+            self.store.set_public_message_stats(stats, now);
+        }
         let mut accepted_tickers = false;
         for ticker in update.tickers {
             if !ticker.has_values() || self.store.market(&ticker.symbol).is_none() {
@@ -6385,6 +6388,7 @@ impl<V: Venue> Engine<V> {
                 cx.io.core.streams.remove(&request);
                 cx.io.core.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
+                    cx.store.record_request_outcome(None);
                     cx.io.core.health.count(log_code::HTTP_FAILED);
                     let kind = cx.io.core.http_failure_kind;
                     let make_failure = || VenueError::new(error).kind(kind);
@@ -6778,6 +6782,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn count_http_status(&mut self, status: u16) {
+        self.store.record_request_outcome(Some(status));
         if status == 429 {
             self.io.core.health.count(log_code::RATE_LIMITED);
         } else if status >= 500 {
@@ -7953,6 +7958,7 @@ impl<V: Venue> Engine<V> {
     /// this method deliberately leaves the stream's baseline untouched.
     pub fn snapshot_frame(&mut self, now: f64) -> &[u8] {
         self.assert_live();
+        self.store.set_clock(now);
         self.expire_read_roots(now);
         #[cfg(feature = "managed-sockets")]
         self.io.core.socket_driver.state.prepare_stats();
@@ -7999,6 +8005,29 @@ impl<V: Venue> Engine<V> {
         &self.io.core.snapshot
     }
 
+    /// Transfer a late-subscriber frame to a host that appends native sections.
+    /// This leaves the stream baseline untouched, like `snapshot_frame`.
+    pub fn snapshot_frame_owned(&mut self, now: f64) -> Vec<u8> {
+        self.snapshot_frame(now);
+        std::mem::take(&mut self.io.core.snapshot)
+    }
+
+    /// Transfer a private read frame without consuming stream changes or events.
+    pub fn account_snapshot_frame_owned(&mut self, now: f64) -> Vec<u8> {
+        self.account_snapshot_frame(now);
+        std::mem::take(&mut self.io.core.snapshot)
+    }
+
+    /// Transfer a flush frame instead of retaining a second host-side copy.
+    pub fn take_frame_owned(&mut self, now: f64, market_only: bool) -> Option<Vec<u8>> {
+        if market_only {
+            self.take_market_frame(now)
+        } else {
+            self.take_frame(now)
+        }?;
+        Some(std::mem::take(&mut self.io.core.frame))
+    }
+
     /// Write everything that changed since the previous call as one flush
     /// frame. Returns `None` when nothing changed.
     pub fn take_frame(&mut self, now: f64) -> Option<&[u8]> {
@@ -8018,6 +8047,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn write_frame(&mut self, now: f64, store: bool) -> Option<&[u8]> {
+        self.store.set_clock(now);
         // A fill must not reach a consumer before its order: a book-cadence
         // flush carrying fills writes the store sections with them.
         let store = store || !self.io.core.fills.is_empty();
@@ -8067,20 +8097,41 @@ impl<V: Venue> Engine<V> {
             // A market-only flush must not publish row indexes ahead of MARKETS.
             !self.book_deltas || store || markets_match
         };
-        let buffer = std::mem::take(&mut self.io.core.frame);
-        let mut w = FrameWriter::new(buffer, now);
+        let pending = store.then(|| self.store.take_pending());
+        let (bytes, strings) = pending.as_ref().map_or((0, 0), |pending| {
+            self.store.frame_table_reservation(pending)
+        });
         #[cfg(feature = "managed-sockets")]
         let publish_stats = store && self.io.core.socket_driver.state.stats_due(now);
         #[cfg(feature = "managed-sockets")]
         if publish_stats {
             self.io.core.socket_driver.state.prepare_stats();
+        }
+        #[cfg(feature = "managed-sockets")]
+        let (bytes, strings) = if publish_stats {
+            let (stats_bytes, stats_strings) = self
+                .io
+                .core
+                .socket_driver
+                .state
+                .stats_frame_reservation(false);
+            (bytes + stats_bytes, strings + stats_strings)
+        } else {
+            (bytes, strings)
+        };
+        // Allocate the startup output before its temporary interning tables.
+        // Growing it around those tables leaves holes in WASM's linear heap.
+        let buffer = std::mem::take(&mut self.io.core.frame);
+        let mut w = FrameWriter::new(buffer, now);
+        w.reserve_tables(bytes, strings);
+        #[cfg(feature = "managed-sockets")]
+        if publish_stats {
             self.io
                 .core
                 .socket_driver
                 .state
                 .write_stats(&mut w, now, false);
         }
-        let pending = store.then(|| self.store.take_pending());
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
             if let Some(state) = self.venue.export_venue_state_for(&self.store)
@@ -8543,6 +8594,43 @@ mod streaming_tests {
         }
     }
 
+    #[test]
+    fn owned_host_frames_transfer_buffers_without_consuming_snapshot_baselines() {
+        let mut borrowed = frame_engine();
+        let mut owned = frame_engine();
+        borrowed.store.set_markets(vec![market("A")]);
+        owned.store.set_markets(vec![market("A")]);
+        assert_eq!(owned.snapshot_frame_owned(1.), borrowed.snapshot_frame(1.));
+        assert_eq!(
+            owned.io.core.snapshot.capacity(),
+            0,
+            "owned snapshot transfers its allocation"
+        );
+        assert_eq!(
+            owned.account_snapshot_frame_owned(2.),
+            borrowed.account_snapshot_frame(2.)
+        );
+        assert_eq!(
+            owned.io.core.snapshot.capacity(),
+            0,
+            "owned account read transfers its allocation"
+        );
+        assert_eq!(
+            owned.take_frame_owned(3., false).as_deref(),
+            borrowed.take_frame(3.)
+        );
+        assert_eq!(
+            owned.io.core.frame.capacity(),
+            0,
+            "owned flush transfers its allocation"
+        );
+        assert!(owned.take_frame_owned(4., false).is_none());
+        assert!(borrowed.take_frame(4.).is_none());
+        assert_eq!(
+            owned.take_frame_owned(5., true).as_deref(),
+            borrowed.take_market_frame(5.)
+        );
+    }
     #[test]
     fn revision_two_fills_emit_public_identity_and_absent_financial_values() {
         for financials in [
@@ -9761,6 +9849,7 @@ mod streaming_tests {
         });
         let snapshot = engine.account_snapshot_frame(1.).to_vec();
         let sections = crate::wire::sections(&snapshot).collect::<Vec<_>>();
+        // Rule 5: 7b723d8837 adds native requestStats section 35 to snapshots.
         assert_eq!(
             sections.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
             [
@@ -9769,6 +9858,7 @@ mod streaming_tests {
                 section::BALANCE,
                 section::SETTINGS,
                 section::STATUS,
+                section::REQUEST_STATS,
                 section::ACCOUNT_READ
             ]
         );

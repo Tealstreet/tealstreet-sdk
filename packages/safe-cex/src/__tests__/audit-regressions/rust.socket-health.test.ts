@@ -3,9 +3,12 @@ import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { summarizeSocketHealth } from '../../exchanges/base';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { RUST_SOCKET_STALE_MS, RustSocketHandle } from '../../exchanges/rust/rustSockets';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import * as engineTransport from '../../transport/engine';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
@@ -35,6 +38,13 @@ const setup = async (
   const engineCloses: Array<[number, number]> = [];
   let nextSocket = 1;
   const channels = new Map<number, 'public' | 'private'>();
+  let diagnostics: ReturnType<typeof engineTransport.createEngineTransport>['reconnectDiagnostics'] | undefined;
+  const createTransport = engineTransport.createEngineTransport;
+  vi.spyOn(engineTransport, 'createEngineTransport').mockImplementation((...args) => {
+    const transport = createTransport(...args);
+    diagnostics = transport.reconnectDiagnostics;
+    return transport;
+  });
   const connect = (channel: 'public' | 'private') => {
     const socket = nextSocket++;
     channels.set(socket, channel);
@@ -105,12 +115,25 @@ const setup = async (
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   }));
-  const store = new DefaultStore();
-  installNativeStartupFrames(engine, store);
-  store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
+  const store = new FrameStore();
+  // This fake bypasses LocalFrames: explicitly emit its section-26 evidence.
+  installNativeStartupFrames(engine, store, () => ({
+    socketHealth: {
+      ...summarizeSocketHealth(exchange.getPublicSockets(), exchange.getPrivateSockets()),
+      ...(diagnostics && { reconnectDiagnostics: diagnostics() }),
+    },
+  }));
+  store.apply(
+    nativeFixture(
+      { loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new RustEngineExchange(
     venue,
-    singleSocket === 'public' ? { key: '', secret: '', publicDataOnly: true } : { key: 'k', secret: 's', passphrase: 'fixture' },
+    singleSocket === 'public'
+      ? { key: '', secret: '', publicDataOnly: true }
+      : { key: 'k', secret: 's', passphrase: 'fixture' },
     store,
   );
   exchanges.push(exchange);
@@ -122,6 +145,7 @@ const setup = async (
     const socket = live(channel);
     socket.handlers.onOpen();
     socket.handlers.onMessage(text);
+    exchange.socketHost?.flush();
   };
   return { exchange, store, sockets, engineCloses, live, deliver };
 };
@@ -141,6 +165,7 @@ describe('Rust engine socket health (cutover B5)', () => {
       if (mode === 'keyed') expect(store.socketHealth?.privateInitialized).toBe(true);
       live(primary).handlers.onClose(1006);
       exchange.syncSocketHealthToStore();
+      exchange.socketHost?.flush();
       expect(store.socketHealth?.publicInitialized).toBe(false);
       if (mode === 'keyed') expect(store.socketHealth?.privateInitialized).toBe(false);
     },
@@ -172,6 +197,7 @@ describe('Rust engine socket health (cutover B5)', () => {
     deliver('private');
     live('private').handlers.onClose(1006);
     exchange.syncSocketHealthToStore();
+    exchange.socketHost?.flush();
     expect(store.socketHealth?.reconnectDiagnostics?.private).toMatchObject({
       initiator: 'unknown',
       phase: 'established',
@@ -181,6 +207,7 @@ describe('Rust engine socket health (cutover B5)', () => {
     });
     const snapshot = store.socketHealth?.reconnectDiagnostics;
     exchange.syncSocketHealthToStore();
+    exchange.socketHost?.flush();
     expect(store.socketHealth?.reconnectDiagnostics).toBe(snapshot);
   });
 
@@ -191,6 +218,7 @@ describe('Rust engine socket health (cutover B5)', () => {
     expect(last).toBeGreaterThan(0);
     live('private').handlers.onClose(1006);
     exchange.syncSocketHealthToStore();
+    exchange.socketHost?.flush();
     expect(store.socketHealth!.privateInitialized).toBe(false);
     expect(store.socketHealth!.privateLastMessage).toBe(last);
     expect(exchange.privateWebsocket!.lastReceived).toBe(last);
@@ -201,6 +229,7 @@ describe('Rust engine socket health (cutover B5)', () => {
     deliver('private');
     vi.useFakeTimers({ now: Date.now() + RUST_SOCKET_STALE_MS + 1 });
     exchange.syncSocketHealthToStore();
+    exchange.socketHost?.flush();
     // cli-core's stale-stream gate blocks on exactly this pair.
     expect(store.socketHealth).toMatchObject({ privateInitialized: true, privateHealthy: false });
   });
@@ -218,7 +247,10 @@ describe('Rust engine socket health (cutover B5)', () => {
       // No socket close callback or native supervisor deadline runs while the laptop sleeps.
       vi.setSystemTime(Date.now() + 101_012);
       await vi.advanceTimersByTimeAsync(5_000);
-      expect(engineCloses.sort()).toEqual([[1, 1006], [2, 1006]]);
+      expect(engineCloses.sort()).toEqual([
+        [1, 1006],
+        [2, 1006],
+      ]);
       expect(sockets.slice(0, 2).every((socket) => socket.closed)).toBe(true);
       expect(sockets).toHaveLength(4);
       // Aggregate health defaults true without initialized sockets; readiness remains false.
@@ -250,7 +282,9 @@ describe('Rust engine socket health (cutover B5)', () => {
       vi.useFakeTimers({ now: 1_800_000_000_000 });
       let sleepOffset = 0;
       const { exchange, engineCloses, deliver, live, store } = await setup(
-        undefined, 'blofin', () => Date.now() - sleepOffset,
+        undefined,
+        'blofin',
+        () => Date.now() - sleepOffset,
       );
       deliver('private');
       const original = live('private');
@@ -278,7 +312,9 @@ describe('Rust engine socket health (cutover B5)', () => {
       vi.useFakeTimers({ now: 1_800_000_000_000 });
       let sleepOffset = 0;
       const { exchange, engineCloses, deliver, live } = await setup(
-        undefined, 'cryptocom', () => Date.now() - sleepOffset,
+        undefined,
+        'cryptocom',
+        () => Date.now() - sleepOffset,
       );
       deliver('private');
       sleepOffset = 50_000;
@@ -369,6 +405,7 @@ describe('Rust engine socket health (cutover B5)', () => {
     expect(exchange.getAllSockets()).toHaveLength(3);
 
     exchange.reconnect();
+    exchange.socketHost?.flush();
     expect(sockets.slice(0, 2).every((socket) => socket.closed)).toBe(true);
     expect(engineCloses.sort()).toEqual([
       [1, 1006],
@@ -409,7 +446,7 @@ describe('Rust engine socket health (cutover B5)', () => {
   });
 
   it('credential rejections raise authFailureStreak until the private stream delivers again', async () => {
-    const { exchange, deliver } = await setup();
+    const { exchange, store, deliver } = await setup();
     deliver('private', 'rejected');
     // The first frame proved nothing yet: the same frame rejected the key.
     expect(exchange.authFailureStreak).toBe(1);
@@ -418,7 +455,10 @@ describe('Rust engine socket health (cutover B5)', () => {
     deliver('public', 'deactivate');
     expect(exchange.authFailureStreak).toBe(2);
 
+    // Auth recovery observes the transport transition before its next native health frame.
+    const published = store.socketHealth;
     exchange.reconnect();
+    expect(store.socketHealth).toBe(published);
     deliver('private');
     expect(exchange.authFailureStreak).toBe(0);
   });

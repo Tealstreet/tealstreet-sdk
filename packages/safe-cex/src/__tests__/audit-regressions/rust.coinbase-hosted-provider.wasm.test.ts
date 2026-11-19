@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { createRemoteSignerProvider } from '../../exchanges/rust/remoteSignerProvider';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { prepareRecordedHttp } from '../support/managedHttp';
 
 const now = 1700000000000;
@@ -41,7 +41,7 @@ const fixture = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => 
   const exchange = new RustEngineExchange(
     name,
     { key, secret: seed.toString('base64'), coinbaseJwtAlgorithm: 'edDsa', ...options } as ExchangeOptions,
-    new DefaultStore(),
+    new FrameStore(),
   );
   live.push(exchange);
   return { exchange, io };
@@ -282,7 +282,14 @@ it('actual WASM PayloadSigner has REST-only custody and matches local JWS bytes'
   expect(
     verify(null, Buffer.from(`${head}.${claims}`), createPublicKey(edKey), Buffer.from(signature, 'base64url')),
   ).toBe(true);
-  expect(callback).toHaveBeenCalledExactlyOnceWith({ exchangeName: 'coinbasespot', key, payload: `${head}.${claims}`, scheme: 'coinbase-jws', encoding: 'base64url', algorithm: 'ed25519' });
+  expect(callback).toHaveBeenCalledExactlyOnceWith({
+    exchangeName: 'coinbasespot',
+    key,
+    payload: `${head}.${claims}`,
+    scheme: 'coinbase-jws',
+    encoding: 'base64url',
+    algorithm: 'ed25519',
+  });
   expect(exchange.exchange.options).not.toHaveProperty('payloadSigner');
   const ws = await exchange.exchange.signWsAuth({
     id: 'ws',

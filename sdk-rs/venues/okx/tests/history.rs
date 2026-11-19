@@ -187,6 +187,68 @@ fn history_preserves_canceled_orders_and_native_contract_conversion() {
     assert!(rows[0].reduce_only);
 }
 
+// Drive a native orders-history reply through the real query/HTTP/serialization path.
+fn order_finance(extra: &str) -> serde_json::Value {
+    let mut e = trading_engine();
+    let a = query(&mut e, orders(None));
+    let native = order("999");
+    let native = format!("{},{extra}}}", native.strip_suffix('}').unwrap());
+    reply(&mut e, &a, &envelope(&native), 10.0);
+    let mut rows: Vec<serde_json::Value> = serde_json::from_str(&result(&mut e)).unwrap();
+    assert_eq!(rows.len(), 1, "financial fields must not discard the order");
+    rows.remove(0)
+}
+
+#[test]
+fn history_retains_native_order_finance_without_netting_pnl() {
+    for (fee, pnl, cost, rebate) in [
+        ("-0.4", "3.5", Some(0.4), None),
+        ("0.1", "-2", None, Some(0.1)),
+        ("0", "0", Some(0.0), None),
+    ] {
+        let row = order_finance(&format!(r#""fee":"{fee}","feeCcy":"USDT","pnl":"{pnl}""#));
+        assert_eq!(row["realizedPnl"].as_f64(), pnl.parse::<f64>().ok());
+        assert_eq!(row.get("fees").and_then(serde_json::Value::as_f64), cost);
+        assert_eq!(
+            row.get("rebate").and_then(serde_json::Value::as_f64),
+            rebate
+        );
+        assert_eq!(row["feeAsset"], "USDT");
+        assert_eq!(
+            row.get("rebateAsset").and_then(serde_json::Value::as_str),
+            rebate.map(|_| "USDT")
+        );
+        // Existing order identity, contract conversion and terminal state are controls.
+        assert_eq!(row["id"], "999");
+        assert_eq!(row["status"], "canceled");
+        assert_eq!(row["amount"], 0.03);
+        assert_eq!(row["filled"], 0.015);
+    }
+}
+
+#[test]
+fn history_omits_unknown_order_finance_and_preserves_reported_zero() {
+    for extra in [
+        r#""feeCcy":"""#,
+        r#""fee":"","feeCcy":"","pnl":"""#,
+        r#""fee":null,"feeCcy":null,"pnl":null"#,
+        r#""fee":"bad","feeCcy":"","pnl":"bad""#,
+        r#""fee":"NaN","feeCcy":"","pnl":"Infinity""#,
+        r#""fee":"1e309","feeCcy":"","pnl":"-1e309""#,
+    ] {
+        let row = order_finance(extra);
+        for key in ["fees", "feeAsset", "rebate", "rebateAsset", "realizedPnl"] {
+            assert!(
+                row.get(key).is_none(),
+                "{key} must remain absent for {extra}"
+            );
+        }
+    }
+    let row = order_finance(r#""fee":"0","feeCcy":"USDT","pnl":"0""#);
+    assert_eq!(row["fees"], 0.0);
+    assert_eq!(row["realizedPnl"], 0.0);
+}
+
 fn next_page(e: &mut Engine<Okx>) -> Action {
     let out = actions(e);
     let (timer, time) = out

@@ -3,14 +3,7 @@ import type { ExchangeOptions } from '../types';
 import createHmac from 'create-hmac';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createAPI } from './reference/kucoin/kucoin.api';
-import { KucoinExchange } from './reference/kucoin/kucoin.exchange';
-import { BROKER_ID, ENDPOINTS } from './reference/kucoin/kucoin.types';
-import { createKucoinSpotAPI } from './reference/kucoin/kucoinspot.api';
-import { KUCOIN_SPOT_ENDPOINTS } from './reference/kucoin/kucoinspot.types';
-import { KucoinPublicWebsocket } from './reference/kucoin/kucoin.ws-public';
-import { DefaultStore } from '../store/store.base';
-import { SIGNING_CAPTURE_FLAG } from '../utils/signingCapture';
+import { FrameStore } from '../store/frameStore';
 import {
   MarginType,
   OrderSide,
@@ -21,6 +14,15 @@ import {
   PositionMode,
   PositionSide,
 } from '../types';
+import { SIGNING_CAPTURE_FLAG } from '../utils/signingCapture';
+import { nativeOrder } from './cutover/nativeOrder';
+import { applyReferenceFixture } from './cutover/referenceFixture';
+import { createAPI } from './reference/kucoin/kucoin.api';
+import { KucoinExchange } from './reference/kucoin/kucoin.exchange';
+import { BROKER_ID, ENDPOINTS } from './reference/kucoin/kucoin.types';
+import { KucoinPublicWebsocket } from './reference/kucoin/kucoin.ws-public';
+import { createKucoinSpotAPI } from './reference/kucoin/kucoinspot.api';
+import { KUCOIN_SPOT_ENDPOINTS } from './reference/kucoin/kucoinspot.types';
 
 const OPEN_STATE = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;
 
@@ -34,7 +36,7 @@ const createMockWs = () =>
   }) as any;
 
 const makeExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new KucoinExchange(
     'kucoin' as any,
     {
@@ -170,9 +172,7 @@ describe('KucoinExchange current futures docs compatibility', () => {
     const expectedApiSign = createHmac('sha256', 's')
       .update('123456789POST/api/v1/orders{"symbol":"XBTUSDTM","side":"buy","type":"limit","size":"1"}')
       .digest('base64');
-    const expectedPartnerSign = createHmac('sha256', 'broker-secret')
-      .update('123456789goodbrokerk')
-      .digest('base64');
+    const expectedPartnerSign = createHmac('sha256', 'broker-secret').update('123456789goodbrokerk').digest('base64');
 
     expect(getHeader(headers, 'KC-API-TIMESTAMP')).toBe('123456789');
     expect(getHeader(headers, 'KC-API-SIGN')).toBe(expectedApiSign);
@@ -307,19 +307,23 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('maps /allTickers array rows through marketsById', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({
         data: {
@@ -358,19 +362,23 @@ describe('KucoinExchange current futures docs compatibility', () => {
     vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
 
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const get = vi.fn().mockResolvedValue({
       data: {
         data: [[1757659080000, 115328.4, 115328.4, 115284.2, 115284.2, 602, 69424.9528]],
@@ -435,19 +443,23 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('fetches missing-position metadata from current margin, position, and leverage endpoints', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const get = vi.fn((endpoint: string) => {
       if (endpoint === ENDPOINTS.GET_MARGIN_MODE) {
         return Promise.resolve({ data: { code: '200000', data: { marginMode: 'CROSS' } } });
@@ -487,19 +499,23 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('uses current REST endpoints and payloads for cross leverage, margin mode, and position mode', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 125 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 125 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const post = vi.fn().mockResolvedValue({ data: { code: '200000', data: true } });
     exchange.xhr = { post } as any;
     vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Cross);
@@ -516,19 +532,23 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('does not call the cross leverage endpoint for isolated margin', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 125 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 125 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const post = vi.fn();
     exchange.xhr = { post } as any;
     vi.spyOn(exchange, 'getOrFetchMarginType').mockResolvedValue(MarginType.Isolated);
@@ -550,19 +570,23 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('uses native KuCoin contract ids for order create and cancel requests', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const deleteRequest = vi.fn().mockResolvedValue({ data: { code: '200000', data: {} } });
     exchange.unlimitedXHR = { delete: deleteRequest } as any;
 
@@ -594,19 +618,23 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('cancels a standalone TP/SL via /api/v1/orders (where it is placed), not /api/v1/stopOrders', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const deleteRequest = vi.fn().mockResolvedValue({ data: { code: '200000', data: {} } });
     exchange.unlimitedXHR = { delete: deleteRequest } as any;
 
@@ -623,20 +651,24 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('places a full-position (infinity) TP/SL via closeOrder:true with no size, never size:"0"', () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          contractSize: 0.001,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            contractSize: 0.001,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
 
     // amount:0 is the app's "Full Position / infinity TP/SL" (the chart bracket
     // sends 0 when supportsInfinityStops is on). KuCoin's /api/v1/orders rejects
@@ -657,20 +689,24 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('places a partial TP/SL with size in native contracts and no closeOrder flag', () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          contractSize: 0.001,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            contractSize: 0.001,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
 
     const payload = exchange.formatAlgoOrder({
       symbol: 'BTCUSDT',
@@ -688,20 +724,24 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('surfaces a non-200000 KuCoin rejection code instead of swallowing it (silent place failure)', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          contractSize: 0.001,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            contractSize: 0.001,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
 
     // KuCoin returns HTTP 200 with a rejection code in the body. The old code only
     // read body.data.orderId, so a rejection produced no id, no throw, no toast —
@@ -739,33 +779,37 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('preserves existing TP/SL orders when the stop-order book fetch fails (does not wipe the chart)', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [kucoinMarket],
-      // The chart full-replaces store.orders with fetchOrders(); seed it with a
-      // WS-delivered SL alongside a limit, as it would be on a live chart.
-      orders: [
-        {
-          id: 'limit-1',
-          symbol: 'BTCUSDT',
-          type: OrderType.Limit,
-          side: OrderSide.Buy,
-          price: 60000,
-          amount: 0.001,
-          remaining: 0.001,
-          status: OrderStatus.Open,
-        } as any,
-        {
-          id: 'sl-1',
-          symbol: 'BTCUSDT',
-          type: OrderType.StopLoss,
-          side: OrderSide.Sell,
-          price: 50000,
-          amount: 0.001,
-          remaining: 0.001,
-          status: OrderStatus.Open,
-        } as any,
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [kucoinMarket],
+        // The chart full-replaces store.orders with fetchOrders(); seed it with a
+        // WS-delivered SL alongside a limit, as it would be on a live chart.
+        orders: [
+          nativeOrder({
+            id: 'limit-1',
+            symbol: 'BTCUSDT',
+            type: OrderType.Limit,
+            side: OrderSide.Buy,
+            price: 60000,
+            amount: 0.001,
+            remaining: 0.001,
+            status: OrderStatus.Open,
+          }) as any,
+          nativeOrder({
+            id: 'sl-1',
+            symbol: 'BTCUSDT',
+            type: OrderType.StopLoss,
+            side: OrderSide.Sell,
+            price: 50000,
+            amount: 0.001,
+            remaining: 0.001,
+            status: OrderStatus.Open,
+          }) as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
 
     // Normal book (/api/v1/orders) succeeds; stop book (/api/v1/stopOrders) FAILS.
     const get = vi.fn((endpoint: string) => {
@@ -807,21 +851,25 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('preserves existing limit orders when the normal-order book fetch fails', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [kucoinMarket],
-      orders: [
-        {
-          id: 'limit-1',
-          symbol: 'BTCUSDT',
-          type: OrderType.Limit,
-          side: OrderSide.Buy,
-          price: 60000,
-          amount: 0.001,
-          remaining: 0.001,
-          status: OrderStatus.Open,
-        } as any,
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [kucoinMarket],
+        orders: [
+          nativeOrder({
+            id: 'limit-1',
+            symbol: 'BTCUSDT',
+            type: OrderType.Limit,
+            side: OrderSide.Buy,
+            price: 60000,
+            amount: 0.001,
+            remaining: 0.001,
+            status: OrderStatus.Open,
+          }) as any,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
 
     // Normal book FAILS; stop book succeeds (returns a fresh SL).
     const get = vi.fn((endpoint: string) => {
@@ -861,19 +909,23 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('sends post-only via the postOnly boolean, not an invalid timeInForce', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
 
     const [payload] = await exchange.formatCreateOrder({
       symbol: 'BTCUSDT',
@@ -892,20 +944,24 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('does not misclassify a normal limit order (stop: "") as a stop, preserving its price', () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          contractSize: 0.001,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            contractSize: 0.001,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
 
     // KuCoin returns stop: "" for non-stop orders — must stay a Limit with its
     // real price, not get rewritten to stopPrice (0).
@@ -929,34 +985,38 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('routes attached take-profit and stop-loss orders through current st-orders fields', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-      positions: [
-        {
-          id: 'BTCUSDT:long',
-          symbol: 'BTCUSDT',
-          side: PositionSide.Long,
-          entryPrice: 65000,
-          notional: 65000,
-          leverage: 5,
-          marginType: MarginType.Isolated,
-          positionMode: PositionMode.Hedged,
-          unrealizedPnl: 0,
-          contracts: 1,
-          liquidationPrice: 0,
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+        positions: [
+          {
+            id: 'BTCUSDT:long',
+            symbol: 'BTCUSDT',
+            side: PositionSide.Long,
+            entryPrice: 65000,
+            notional: 65000,
+            leverage: 5,
+            marginType: MarginType.Isolated,
+            positionMode: PositionMode.Hedged,
+            unrealizedPnl: 0,
+            contracts: 1,
+            liquidationPrice: null,
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const post = vi.fn().mockResolvedValue({ data: { code: '200000', data: { orderId: 'order-id' } } });
     exchange.unlimitedXHR = { post } as any;
 
@@ -989,34 +1049,38 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('places standalone futures stop orders through the normal order endpoint stop fields', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-      positions: [
-        {
-          id: 'BTCUSDT:long',
-          symbol: 'BTCUSDT',
-          side: PositionSide.Long,
-          entryPrice: 65000,
-          notional: 65000,
-          leverage: 5,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.Hedged,
-          unrealizedPnl: 0,
-          contracts: 1,
-          liquidationPrice: 0,
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+        positions: [
+          {
+            id: 'BTCUSDT:long',
+            symbol: 'BTCUSDT',
+            side: PositionSide.Long,
+            entryPrice: 65000,
+            notional: 65000,
+            leverage: 5,
+            marginType: MarginType.Cross,
+            positionMode: PositionMode.Hedged,
+            unrealizedPnl: 0,
+            contracts: 1,
+            liquidationPrice: null,
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const post = vi.fn().mockResolvedValue({ data: { code: '200000', data: { orderId: 'stop-id' } } });
     exchange.unlimitedXHR = { post } as any;
 
@@ -1047,19 +1111,23 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('rejects trailing stop placement because it is absent from current futures REST docs', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
 
     await expect(
       exchange.placeOrder({
@@ -1095,19 +1163,23 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('snapshot socket bulk-subscribes its shard; detail socket is on-demand only', () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
 
     // Snapshot socket: bulk last/24h%/funding/volume for its interleaved shard.
     const snapshot = new KucoinPublicWebsocket(exchange, { role: 'snapshot', shardIndex: 0, shardCount: 1 });
@@ -1161,10 +1233,18 @@ describe('KucoinExchange current futures docs compatibility', () => {
       volume: 0,
       quoteVolume: 0,
     };
-    store.update({ tickers: [ticker] });
+    applyReferenceFixture(
+      store,
+      { tickers: [ticker] },
+      store.markets.map((row) => row.symbol),
+    );
     const ws = exchange.publicWebsocket;
     ws.ws = createMockWs();
-    const updateTicker = vi.spyOn(store, 'updateTicker');
+    const updateTicker = (() => {
+      const observed = vi.fn<(value: typeof store.tickers) => void>();
+      store.subscribe('tickers', (value) => observed(value));
+      return observed;
+    })();
     const candleCallback = vi.fn();
 
     ws.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, candleCallback);
@@ -1186,10 +1266,9 @@ describe('KucoinExchange current futures docs compatibility', () => {
       }),
     } as MessageEvent);
 
-    expect(updateTicker).toHaveBeenCalledWith(
-      expect.objectContaining({ symbol: 'BTCUSDT' }),
-      expect.objectContaining({ bid: 86454.5, ask: 86454.6 }),
-    );
+    expect(updateTicker).toHaveBeenCalledWith([
+      expect.objectContaining({ symbol: 'BTCUSDT', bid: 86454.5, ask: 86454.6 }),
+    ]);
     expect(candleCallback).toHaveBeenCalledWith({
       timestamp: 1731898200,
       open: 90638.6,
@@ -1217,10 +1296,18 @@ describe('KucoinExchange current futures docs compatibility', () => {
       volume: 0,
       quoteVolume: 0,
     };
-    store.update({ tickers: [ticker] });
+    applyReferenceFixture(
+      store,
+      { tickers: [ticker] },
+      store.markets.map((row) => row.symbol),
+    );
     const ws = exchange.publicWebsocket;
     ws.ws = createMockWs();
-    const updateTicker = vi.spyOn(store, 'updateTicker');
+    const updateTicker = (() => {
+      const observed = vi.fn<(value: typeof store.tickers) => void>();
+      store.subscribe('tickers', (value) => observed(value));
+      return observed;
+    })();
 
     // snapshot.24h carries last/funding/24h%/volume but NOT bid/ask — the
     // update must omit bid/ask so the tickerV2 values survive.
@@ -1235,14 +1322,15 @@ describe('KucoinExchange current futures docs compatibility', () => {
       },
     });
 
-    const update = updateTicker.mock.calls[0][1];
+    const update = updateTicker.mock.calls[0][0][0];
+    if (!update) throw new Error('Expected the native ticker observation');
     expect(update.last).toBe(72175.4);
     expect(update.fundingRate).toBe(0.000107);
     expect(update.percentage).toBeCloseTo(-2.38, 6); // priceChgPct(-0.0238) * 100
     expect(update.volume).toBe(2581.453);
     expect(update.quoteVolume).toBe(188909573.1256);
-    expect(update).not.toHaveProperty('bid');
-    expect(update).not.toHaveProperty('ask');
+    expect(update.bid).toBe(store.tickers[0].bid);
+    expect(update.ask).toBe(store.tickers[0].ask);
   });
 
   it('updates mark/index from the instrument channel, resolving symbol from the topic', () => {
@@ -1262,10 +1350,18 @@ describe('KucoinExchange current futures docs compatibility', () => {
       volume: 0,
       quoteVolume: 0,
     };
-    store.update({ tickers: [ticker] });
+    applyReferenceFixture(
+      store,
+      { tickers: [ticker] },
+      store.markets.map((row) => row.symbol),
+    );
     const ws = exchange.publicWebsocket;
     ws.ws = createMockWs();
-    const updateTicker = vi.spyOn(store, 'updateTicker');
+    const updateTicker = (() => {
+      const observed = vi.fn<(value: typeof store.tickers) => void>();
+      store.subscribe('tickers', (value) => observed(value));
+      return observed;
+    })();
 
     // /contract/instrument data has no symbol field — it comes from the topic.
     ws.handleInstrument({
@@ -1274,27 +1370,30 @@ describe('KucoinExchange current futures docs compatibility', () => {
       data: { markPrice: 72176.3, indexPrice: 72172.81, granularity: 1000 },
     });
 
-    expect(updateTicker).toHaveBeenCalledWith(expect.objectContaining({ symbol: 'BTCUSDT' }), {
-      mark: 72176.3,
-      index: 72172.81,
-    });
+    expect(updateTicker).toHaveBeenCalledWith([
+      expect.objectContaining({ symbol: 'BTCUSDT', mark: 72176.3, index: 72172.81 }),
+    ]);
   });
 
   it('seeds futures websocket orderbook from REST snapshot and applies incremental changes', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const get = vi.fn().mockResolvedValue({
       data: {
         code: '200000',
@@ -1340,19 +1439,23 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('refetches futures websocket orderbook snapshots instead of applying sequence gaps', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const get = vi
       .fn()
       .mockResolvedValueOnce({
@@ -1404,19 +1507,23 @@ describe('KucoinExchange current futures docs compatibility', () => {
 
   it('keeps refetching futures websocket orderbooks when a replacement snapshot is still behind a buffered gap', async () => {
     const { exchange, store } = makeExchange();
-    store.update({
-      markets: [
-        {
-          id: 'XBTUSDTM',
-          symbol: 'BTCUSDT',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 1, price: 0.1 },
-          limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'XBTUSDTM',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 1, price: 0.1 },
+            limits: { amount: { min: 1, max: 1000000 }, leverage: { min: 1, max: 125 } },
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const get = vi
       .fn()
       .mockResolvedValueOnce({
@@ -1546,8 +1653,17 @@ describe('KucoinExchange current futures docs compatibility', () => {
   it('handles current futures private order event types', () => {
     const { exchange, store } = makeExchange();
     const ws = exchange.privateWebsocket;
-    const updateStatus = vi.spyOn(store, 'updateOrderStatus');
-    const addOrUpdateOrder = vi.spyOn(store, 'addOrUpdateOrder');
+    applyReferenceFixture(store, { orders: [nativeOrder({ id: 'cancel-id', symbol: 'BTCUSDT' })] });
+    const updateStatus = (() => {
+      const observed = vi.fn<(value: typeof store.orders) => void>();
+      store.subscribe('orders', (value) => observed(value));
+      return observed;
+    })();
+    const addOrUpdateOrder = (() => {
+      const observed = vi.fn<(value: typeof store.orders) => void>();
+      store.subscribe('orders', (value) => observed(value));
+      return observed;
+    })();
     const emit = vi.spyOn(exchange.emitter, 'emit');
 
     ws.handleOrderTopic({
@@ -1598,15 +1714,21 @@ describe('KucoinExchange current futures docs compatibility', () => {
       },
     });
 
-    expect(updateStatus).toHaveBeenCalledWith(expect.objectContaining({ id: 'cancel-id' }), OrderStatus.Canceled);
+    expect(updateStatus).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'cancel-id', status: OrderStatus.Canceled })]),
+    );
     expect(emit).toHaveBeenCalledWith(
       'fill',
       expect.objectContaining({ id: 'match-id', symbol: 'BTCUSDT', price: 91670, amount: 1 }),
     );
-    expect(addOrUpdateOrder).toHaveBeenCalledWith(expect.objectContaining({ id: 'match-id', symbol: 'BTCUSDT' }));
+    expect(addOrUpdateOrder).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'match-id', symbol: 'BTCUSDT' })]),
+    );
     // exactly one fill across the match + filled pair (no double-fire)
     expect((emit as any).mock.calls.filter((c: any[]) => c[0] === 'fill')).toHaveLength(1);
-    expect(updateStatus).toHaveBeenCalledWith(expect.objectContaining({ id: 'match-id' }), OrderStatus.Closed);
+    expect(updateStatus).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'match-id', status: OrderStatus.Closed })]),
+    );
   });
 
   it('maps current futures stop order websocket payloads', () => {

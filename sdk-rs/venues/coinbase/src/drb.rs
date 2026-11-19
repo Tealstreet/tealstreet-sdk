@@ -102,7 +102,7 @@ impl std::fmt::Debug for RpcError {
 pub struct Failure {
     pub verdict: Verdict,
     pub code: Option<i64>,
-    pub rpc_error: Option<RpcError>,
+    pub rpc_error: Option<Box<RpcError>>,
 }
 impl Failure {
     fn unknown(kind: Option<ErrorKind>) -> Self {
@@ -563,7 +563,7 @@ impl Transport {
                 Err(Failure {
                     verdict,
                     code: Some(error.code),
-                    rpc_error: Some(error),
+                    rpc_error: Some(Box::new(error)),
                 })
             }
             _ => Err(Failure {

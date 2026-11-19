@@ -2,33 +2,27 @@ import type { Exchange } from '../../exchanges/base';
 import type { ExchangeName, FetchedLeverage } from '../../types';
 import type { ExchangeMetadataWorkerType } from '../../webworker/ExchangeMetadataWorkerType';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { OrderStopTriggerType } from '../../types';
 import { UiStateHandler } from '../../webworker/handlers/UiStateHandler';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 
 // Rust venues (Bitrue, BloFin, GRVT, ...) resolve fetchLeverageForSymbol to null when they hold
 // no confirmed leverage; a SETTINGS frame may confirm leverage while that fetch is in flight.
 const setup = () => {
-  const state = { fetchedLeverage: {} as Record<string, FetchedLeverage>, positions: [] };
-  const store = {
-    get fetchedLeverage() {
-      return state.fetchedLeverage;
-    },
-    get positions() {
-      return state.positions;
-    },
-    update: (changes: Partial<typeof state>) => Object.assign(state, changes),
-    updatePositions: () => {},
-  };
+  const store = new FrameStore();
   let settle!: { resolve: (value: FetchedLeverage | null) => void; reject: (error: unknown) => void };
   const exchange = {
     name: 'bitrue',
     store,
-    fetchLeverageForSymbol: () =>
-      new Promise<FetchedLeverage | null>((resolve, reject) => {
-        settle = { resolve, reject };
-      }),
+    fetchLeverageForSymbol: vi.fn(
+      () =>
+        new Promise<FetchedLeverage | null>((resolve, reject) => {
+          settle = { resolve, reject };
+        }),
+    ),
     getActiveTickerSymbols: () => [],
     setActiveTickerSymbols: () => {},
   } as unknown as Exchange;
@@ -44,7 +38,7 @@ const setup = () => {
   };
   const handler = new UiStateHandler('acct', 'bitrue' as ExchangeName, exchange, {} as Worker, settings, metadata);
   handler.handle({ op: 'ui:state', data: { activeMarginSymbol: 'BTCUSDT' } });
-  return { state, settle };
+  return { state: store, settle, handler, exchange };
 };
 
 const confirmed: FetchedLeverage = { buyLeverage: 20, sellLeverage: 20 };
@@ -53,41 +47,44 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 describe('UiStateHandler active-margin leverage fetch', () => {
   it('keeps frame-confirmed leverage when the in-flight fetch resolves null', async () => {
     const { state, settle } = setup();
-    expect(state.fetchedLeverage.BTCUSDT?.isFetching).toBe(true);
+    expect(state.fetchedLeverage).not.toHaveProperty('BTCUSDT');
 
-    state.fetchedLeverage = { BTCUSDT: confirmed };
+    applyReferenceFixture(state, { fetchedLeverage: { BTCUSDT: confirmed } });
     settle.resolve(null);
     await flush();
 
-    expect(state.fetchedLeverage.BTCUSDT).toEqual(confirmed);
+    expect(state.fetchedLeverage.BTCUSDT).toMatchObject(confirmed);
   });
 
   it('keeps frame-confirmed leverage when the in-flight fetch rejects', async () => {
     const { state, settle } = setup();
 
-    state.fetchedLeverage = { BTCUSDT: confirmed };
+    applyReferenceFixture(state, { fetchedLeverage: { BTCUSDT: confirmed } });
     settle.reject(new Error('timeout'));
     await flush();
 
-    expect(state.fetchedLeverage.BTCUSDT).toEqual(confirmed);
+    expect(state.fetchedLeverage.BTCUSDT).toMatchObject(confirmed);
   });
 
-  it('clears a placeholder that frame recovery copied while the fetch was in flight', async () => {
-    const { state, settle } = setup();
+  it('coalesces a duplicate request without publishing a placeholder', async () => {
+    const { state, settle, handler, exchange } = setup();
 
-    state.fetchedLeverage = { BTCUSDT: { ...state.fetchedLeverage.BTCUSDT } };
+    handler.handle({ op: 'ui:state', data: { activeMarginSymbol: 'BTCUSDT' } });
+    expect(exchange.fetchLeverageForSymbol).toHaveBeenCalledTimes(1);
     settle.resolve(null);
     await flush();
 
     expect(state.fetchedLeverage).not.toHaveProperty('BTCUSDT');
   });
 
-  it('clears its own placeholder when nothing confirmed leverage', async () => {
-    const { state, settle } = setup();
+  it('allows another read after an unconfirmed request settles', async () => {
+    const { state, settle, handler, exchange } = setup();
 
     settle.resolve(null);
     await flush();
 
     expect(state.fetchedLeverage).not.toHaveProperty('BTCUSDT');
+    handler.handle({ op: 'ui:state', data: { activeMarginSymbol: 'BTCUSDT' } });
+    expect(exchange.fetchLeverageForSymbol).toHaveBeenCalledTimes(2);
   });
 });

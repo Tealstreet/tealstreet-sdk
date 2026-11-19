@@ -5,8 +5,8 @@ import { createHmac } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
+import { FrameStore } from '../../store/frameStore';
 import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 class TestHyroExchange extends HyrotraderExchange {
   getBybitRestBaseUrl() {
@@ -21,7 +21,7 @@ describe('HyroTrader transmitted request signing', () => {
     const exchange = new TestHyroExchange(
       'hyrotrader',
       { key: 'fixture-key', secret: 'fixture-secret' },
-      new DefaultStore(),
+      new FrameStore(),
     );
     exchanges.push(exchange);
     let captured!: InternalAxiosRequestConfig;

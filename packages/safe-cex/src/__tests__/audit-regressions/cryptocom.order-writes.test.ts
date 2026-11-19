@@ -1,22 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { privateProxyIpsVultrTokyo } from '@tealstreet/proxy-ips-lists/src';
+import { getExchangeMetadata } from '../../exchangeMetadata';
+import { FrameStore } from '../../store/frameStore';
+import { Market, Order, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType } from '../../types';
+import { virtualClock } from '../../utils/virtualClock';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { createAPI, formatCryptocomApiError } from '../reference/cryptocom/cryptocom.api';
 import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
 import { generateSignature } from '../reference/cryptocom/cryptocom.signing';
 import { ENDPOINTS } from '../reference/cryptocom/cryptocom.types';
-import { getExchangeMetadata } from '../../exchangeMetadata';
-import { DefaultStore } from '../../store/store.base';
-import {
-  Market,
-  Order,
-  OrderSide,
-  OrderStatus,
-  OrderStopTriggerType,
-  OrderTimeInForce,
-  OrderType,
-} from '../../types';
-import { virtualClock } from '../../utils/virtualClock';
 
 const MARKET: Market = {
   id: 'BTCUSD-PERP',
@@ -29,8 +22,13 @@ const MARKET: Market = {
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   return new CryptocomExchange('cryptocom', { key: 'key', secret: 'secret' }, store);
 };
 
@@ -117,9 +115,7 @@ describe('audit regression: Crypto.com order writes', () => {
       ),
     );
 
-    await expect(api.post(ENDPOINTS.BALANCE, {})).rejects.toThrow(
-      'Crypto.com API Error 40101: Synthetic auth failure',
-    );
+    await expect(api.post(ENDPOINTS.BALANCE, {})).rejects.toThrow('Crypto.com API Error 40101: Synthetic auth failure');
     expect(emitAndLogError).toHaveBeenCalledWith('Crypto.com API Error 40101: Synthetic auth failure');
   });
 

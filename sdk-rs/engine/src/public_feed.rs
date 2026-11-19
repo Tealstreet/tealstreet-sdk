@@ -20,6 +20,24 @@ pub struct PublicFeedUpdate {
     pub books: Vec<PublicBook>,
     #[serde(default)]
     pub candles: Vec<PublicCandle>,
+    pub message_handler_stats: Option<PublicMessageStats>,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublicMessageStats {
+    pub replace: bool,
+    pub rows: Vec<PublicMessageStat>,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublicMessageStat {
+    pub group: u8,
+    pub topic: String,
+    pub subscribed: bool,
+    pub active: bool,
+    pub age_ms: Option<f64>,
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -52,6 +70,17 @@ fn midpoint_update<'de, D: serde::Deserializer<'de>>(
 
 impl PublicFeedUpdate {
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if self.message_handler_stats.as_ref().is_some_and(|stats| {
+            stats.rows.len() > 8192 * 512
+                || stats.rows.iter().any(|row| {
+                    row.group > 2
+                        || row.topic.is_empty()
+                        || row.age_ms.is_some_and(|age| !age.is_finite() || age < 0.)
+                        || (row.active && (!row.subscribed || row.age_ms.is_none()))
+                })
+        }) {
+            return Err("invalid shared public diagnostics");
+        }
         if self.tickers.iter().any(|ticker| !ticker.valid())
             || self.candles.iter().any(|candle| {
                 [

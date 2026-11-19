@@ -1,11 +1,11 @@
-import type { ExchangeName, ExchangeOptions } from '../../types';
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 
+import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 const endpoints = vi.hoisted(() => ({
   productionRest: { livenet: '', testnet: '' },
@@ -33,7 +33,7 @@ const create = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'hy
   const exchange = new RustEngineExchange(
     name,
     { key: '', secret: '', publicDataOnly: true, ...options },
-    new DefaultStore(),
+    new FrameStore(),
   );
   exchanges.push(exchange);
   return exchange;
@@ -57,9 +57,15 @@ afterEach(() => {
 describe('HyroTrader Rust startup configuration', () => {
   it('refuses explicit production with missing livenet instead of loading the simulator', async () => {
     configure('simulator');
-    const io = vi.fn(() => { throw new Error('Unconfigured production must not send requests'); });
+    const io = vi.fn(() => {
+      throw new Error('Unconfigured production must not send requests');
+    });
     const transport = vi.fn((): Transport => ({
-      now: () => 0, request: io, connect: io, setTimeout: vi.fn(), clearTimeout: vi.fn(),
+      now: () => 0,
+      request: io,
+      connect: io,
+      setTimeout: vi.fn(),
+      clearTimeout: vi.fn(),
     }));
     setRustEngineTransport(transport);
     try {
@@ -67,12 +73,15 @@ describe('HyroTrader Rust startup configuration', () => {
       exchange.emitter.on('error', vi.fn());
       await expect(exchange.start()).rejects.toMatchObject({
         message: 'HyroTrader production URLs are not configured in this build.',
-        kind: 'invalidInput', outcome: 'notSent',
+        kind: 'invalidInput',
+        outcome: 'notSent',
       });
       expect(loader).not.toHaveBeenCalled();
       expect(transport).not.toHaveBeenCalled();
       expect(io).not.toHaveBeenCalled();
-    } finally { setRustEngineTransport(nativeTransport); }
+    } finally {
+      setRustEngineTransport(nativeTransport);
+    }
   });
 
   it('uses configured production testnet without requiring production livenet', async () => {

@@ -106,38 +106,27 @@ fn bybit_key_id_preserves_case_and_its_declared_no_trim_policy() {
 
 #[test]
 fn identity_outputs_keep_twap_labels_local_and_preserve_owner_ids() {
-    for (op, data, path) in [
-        (
-            "store",
-            serde_json::json!({"activeTWAPs":[{"accountName":"first","symbol":"BTCUSDT"}]}),
-            "/d/data/activeTWAPs/0/accountName",
-        ),
-        (
-            "twap:stateUpdate",
-            serde_json::json!({"twap-1":{"options":{"accountName":"first"},"state":{"accountName":"first"},"ownerId":"digest"}}),
-            "/d/data/twap-1/options/accountName",
-        ),
-    ] {
-        let output = crate::envelope::with_account_label(
-            crate::envelope::msg("first", op, data.clone()),
-            "second",
-        );
-        let output: Value = serde_json::from_str(&output).unwrap();
-        assert_eq!(output["d"]["accountName"], "second");
-        assert_eq!(output.pointer(path).unwrap(), "second");
-        if op == "twap:stateUpdate" {
-            assert_eq!(output["d"]["data"]["twap-1"]["ownerId"], "digest");
-            assert_eq!(
-                output["d"]["data"]["twap-1"]["state"]["accountName"],
-                "second"
-            );
-        }
-        let unchanged = crate::envelope::msg("first", op, data);
-        assert_eq!(
-            crate::envelope::with_account_label(unchanged.clone(), "first"),
-            unchanged
-        );
-    }
+    let data = serde_json::json!({"twap-1":{"options":{"accountName":"first"},"state":{"accountName":"first"},"ownerId":"digest"}});
+    let output = crate::envelope::with_account_label(
+        crate::envelope::msg("first", "twap:stateUpdate", data.clone()),
+        "second",
+    );
+    let output: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(output["d"]["accountName"], "second");
+    assert_eq!(
+        output["d"]["data"]["twap-1"]["options"]["accountName"],
+        "second"
+    );
+    assert_eq!(
+        output["d"]["data"]["twap-1"]["state"]["accountName"],
+        "second"
+    );
+    assert_eq!(output["d"]["data"]["twap-1"]["ownerId"], "digest");
+    let unchanged = crate::envelope::msg("first", "twap:stateUpdate", data);
+    assert_eq!(
+        crate::envelope::with_account_label(unchanged.clone(), "first"),
+        unchanged
+    );
 }
 
 #[test]
@@ -330,7 +319,7 @@ async fn identity_broadcast_reaches_each_label_once_and_counts_one_socket() {
                     .unwrap();
                 assert!(Arc::ptr_eq(&joined, &account));
             }
-            let update = crate::envelope::msg(&account.name, "store", json!({"activeChasers":[]}));
+            let update = crate::envelope::msg(&account.name, "log", json!({"message":"fixture"}));
             let holding = account.reach_live(Some(update.clone()));
             assert_eq!(holding.live, [7]);
             assert!(!holding.parked);

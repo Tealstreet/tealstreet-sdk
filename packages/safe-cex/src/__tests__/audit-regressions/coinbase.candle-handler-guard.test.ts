@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 describe('Coinbase candle-handler audit regression', () => {
   it('skips products without listeners and continues dispatching the frame', () => {
     const exchange = new CoinbaseExchange(
       'coinbase' as any,
       { key: 'test', secret: 'test', tealstreetTunnel: false } as any,
-      new DefaultStore(),
+      new FrameStore(),
     );
     const ethHandler = vi.fn();
     exchange.publicWebsocket.messageHandlers['candles.ETH-USD'] = [ethHandler];

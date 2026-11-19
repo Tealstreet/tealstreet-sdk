@@ -1,24 +1,31 @@
+import type { Market, Order } from '../../types';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
-import type { Market, Order } from '../../types';
 import { BaseExchange } from '../../exchanges/base';
-import { FrameApplier } from '../../store/frameApplier';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderStatus, OrderType, OrderStopTriggerType } from '../../types';
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType } from '../../types';
 import { ChaserOrderInstance } from '../../webworker/chaserOrder/ChaserOrderInstance';
 import { ChaserOrderManager } from '../../webworker/chaserOrder/ChaserOrderManager';
 import { consumerFrame } from '../cutover/consumerFrame';
+import { nativeFixture } from '../cutover/nativeFixture';
 
 const market: Market = {
-  id: 'BTCUSDT', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', active: true,
+  id: 'BTCUSDT',
+  symbol: 'BTCUSDT',
+  base: 'BTC',
+  quote: 'USDT',
+  active: true,
   precision: { amount: 0.1, price: 0.1 },
   limits: { amount: { min: 0.1, max: 1000 }, leverage: { min: 1, max: 100 } },
 };
 
 // Independent revision-1/2 fixture: no MARKETS needed because the symbol is explicit.
 function identifiedFillFrame(revision: 1 | 2, financials?: [number, number], id?: string): ArrayBuffer {
-  const texts = ['order-1', 'BTCUSDT', ...(id !== undefined ? [id] : [])].map((value) => new TextEncoder().encode(value));
+  const texts = ['order-1', 'BTCUSDT', ...(id !== undefined ? [id] : [])].map((value) =>
+    new TextEncoder().encode(value),
+  );
   const stringsSize = 4 + (texts.length + 1) * 4 + texts.reduce((n, value) => n + value.length, 0);
   const fillSize = revision === 2 || financials ? 56 : 40;
   const buffer = new ArrayBuffer(16 + 8 + fillSize + 8 + stringsSize);
@@ -64,7 +71,7 @@ describe('native fill and trigger metadata at the SDK boundary', () => {
       for (const financials of financialCases) {
         const original = identifiedFillFrame(revision, financials);
         const frame = new Frame(structuredClone(original, { transfer: [original] }));
-        const applier = new FrameApplier(new DefaultStore());
+        const applier = new FrameStore();
         applier.apply(frame);
         expect(() => applier.fills(frame)).toThrow('Fill identity requires a native event id');
       }
@@ -72,7 +79,7 @@ describe('native fill and trigger metadata at the SDK boundary', () => {
     for (const financials of financialCases) {
       const original = identifiedFillFrame(2, financials, '9007199254740997');
       const frame = new Frame(structuredClone(original, { transfer: [original] }));
-      const applier = new FrameApplier(new DefaultStore());
+      const applier = new FrameStore();
       applier.apply(frame);
       const fill = applier.fills(frame)[0];
       expect(fill).toMatchObject({ id: '9007199254740997', orderId: 'order-1', symbol: 'BTCUSDT' });
@@ -87,18 +94,26 @@ describe('native fill and trigger metadata at the SDK boundary', () => {
     const original = identifiedFillFrame(2, [-3.5, -0.25], 'execution-1');
     const buffer = transfer ? structuredClone(original, { transfer: [original] }) : original;
     if (transfer) expect(original.byteLength).toBe(0);
-    const store = new DefaultStore();
-    const applier = new FrameApplier(store);
+    const store = new FrameStore();
+    const applier = store;
     const frame = new Frame(buffer);
     applier.apply(frame);
-    expect(applier.fills(frame)).toEqual([{
-      id: 'execution-1', orderId: 'order-1', symbol: 'BTCUSDT', side: OrderSide.Buy,
-      price: 100, amount: 0.3, realizedPnl: -3.5, fee: -0.25,
-    }]);
+    expect(applier.fills(frame)).toEqual([
+      {
+        id: 'execution-1',
+        orderId: 'order-1',
+        symbol: 'BTCUSDT',
+        side: OrderSide.Buy,
+        price: 100,
+        amount: 0.3,
+        realizedPnl: -3.5,
+        fee: -0.25,
+      },
+    ]);
   });
 
   it('retains financial zeroes, omits sentinels and refuses infinite financials', () => {
-    const applier = new FrameApplier(new DefaultStore());
+    const applier = new FrameStore();
     const cases: Array<[number, number] | undefined> = [undefined, [0, 0], [NaN, NaN]];
     for (const values of cases) {
       const frame = new Frame(identifiedFillFrame(2, values, 'execution-1'));
@@ -118,28 +133,46 @@ describe('native fill and trigger metadata at the SDK boundary', () => {
 
   it('preserves the generic trigger alongside conditional-order fields', () => {
     const order: Order = {
-      id: 'conditional', symbol: 'BTCUSDT', side: OrderSide.Sell, type: OrderType.Conditional,
-      status: OrderStatus.Open, price: 90, amount: 1, remaining: 1, filled: 0,
-      reduceOnly: true, lastUpdate: 1, triggerType: OrderStopTriggerType.MarkPrice,
+      id: 'conditional',
+      symbol: 'BTCUSDT',
+      side: OrderSide.Sell,
+      type: OrderType.Conditional,
+      status: OrderStatus.Open,
+      price: 90,
+      amount: 1,
+      remaining: 1,
+      filled: 0,
+      reduceOnly: true,
+      lastUpdate: 1,
+      triggerType: OrderStopTriggerType.MarkPrice,
     };
-    const store = new DefaultStore();
-    new FrameApplier(store).apply(new Frame(consumerFrame({ markets: [market], orders: [order] })));
+    const store = new FrameStore();
+    store.apply(new Frame(consumerFrame({ markets: [market], orders: [order] })));
     expect(store.orders[0]).toMatchObject({ type: OrderType.Conditional, triggerType: OrderStopTriggerType.MarkPrice });
   });
 
   it('attributes a decoded execution to the actual chaser order', async () => {
     vi.useFakeTimers();
-    const store = new DefaultStore();
-    const applier = new FrameApplier(store);
+    const store = new FrameStore();
+    const applier = store;
     const frame = new Frame(identifiedFillFrame(2, [0, 0], 'execution-7'));
     applier.apply(new Frame(consumerFrame({ markets: [market] })));
     applier.apply(frame);
-    store.update({ tickers: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', last: 100, bid: 100, ask: 101 } as never] });
+    store.apply(
+      nativeFixture(
+        { tickers: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', last: 100, bid: 100, ask: 101 } as never] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new BaseExchange('hyperliquid', { key: '', secret: '', publicDataOnly: true }, store);
     exchange.placeOrder = vi.fn().mockResolvedValue(['order-1']);
     exchange.cancelOrders = vi.fn().mockResolvedValue(undefined);
     const instance = new ChaserOrderInstance(exchange, {
-      symbol: 'BTCUSDT', size: 2, side: OrderSide.Buy, maxAttempts: 10, delay: 5000,
+      symbol: 'BTCUSDT',
+      size: 2,
+      side: OrderSide.Buy,
+      maxAttempts: 10,
+      delay: 5000,
     });
     const manager = new ChaserOrderManager();
     manager.add(instance);

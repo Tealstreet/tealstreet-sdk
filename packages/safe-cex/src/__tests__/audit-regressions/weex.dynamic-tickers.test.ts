@@ -1,21 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { WeexExchange } from '../reference/weex/weex.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: Array.from({ length: 105 }, (_, index) => ({
-      id: `SYMBOL${index}`,
-      symbol: `SYMBOL${index}`,
-      base: `BASE${index}`,
-      quote: 'USDT',
-      active: true,
-      precision: { amount: 0.001, price: 0.1 },
-      limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
-    })) as any,
-  });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      {
+        markets: Array.from({ length: 105 }, (_, index) => ({
+          id: `SYMBOL${index}`,
+          symbol: `SYMBOL${index}`,
+          base: `BASE${index}`,
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+        })) as any,
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   return new WeexExchange('weex' as any, { key: 'key', secret: 'secret', passphrase: 'passphrase' } as any, store);
 };
 

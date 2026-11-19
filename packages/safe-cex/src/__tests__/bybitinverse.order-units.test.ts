@@ -1,19 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { BYBIT_BRAZIL_SITE_ID } from '../exchanges/bybit/bybit.site';
-import { BybitInverseExchange } from './reference/bybit/bybitinverse.exchange';
+import { FrameStore } from '../store/frameStore';
 import { OrderSide, OrderType } from '../types';
+import { nativeOrder } from './cutover/nativeOrder';
+import { BybitInverseExchange } from './reference/bybit/bybitinverse.exchange';
 
 const createInverseExchange = () => {
-  const store = {
-    subscribe: vi.fn(),
-    markets: [],
-    marketsBySymbol: {},
-    tickersBySymbol: {},
-    orders: [],
-    positions: [],
-    addOrUpdateOrders: vi.fn(),
-  } as any;
+  const store = new FrameStore();
   const exchange = new BybitInverseExchange(
     'bybitinverse' as any,
     { key: 'key', secret: 'secret', testnet: false, bybitSiteId: BYBIT_BRAZIL_SITE_ID } as any,
@@ -34,15 +28,15 @@ describe('bybit inverse order units', () => {
       { qty: '1000', price: '2600' },
     );
 
-    const [[[order]]] = store.addOrUpdateOrders.mock.calls;
+    const order = store.orders[0];
     expect(order.remaining).toBeCloseTo(1000 / 2600, 8);
-    expect(order.extra.remainingNative).toBe(1000);
-    expect(order.extra.remainingNotional).toBe(1000);
+    expect(order.extra?.remainingNative).toBe(1000);
+    expect(order.extra?.remainingNotional).toBe(1000);
   });
 
   it('sizes an amount amend from contracts left after fills', () => {
     const { exchange, store } = createInverseExchange();
-    const order = {
+    const order = nativeOrder({
       id: 'oid-1',
       symbol: 'ETHUSD',
       price: 2600,
@@ -50,18 +44,18 @@ describe('bybit inverse order units', () => {
       filled: 400,
       remaining: 600 / 2600,
       extra: { remainingNative: 600 },
-    };
+    });
 
     exchange.applyLocalOrderUpdateAfterRestWrite(order, { amount: 1500 });
 
-    const [[[updated]]] = store.addOrUpdateOrders.mock.calls;
-    expect(updated.extra.remainingNative).toBe(1100);
+    const updated = store.orders[0];
+    expect(updated.extra?.remainingNative).toBe(1100);
     expect(updated.remaining).toBeCloseTo(1100 / 2600, 8);
   });
 
   it('does not re-convert a web synthetic order whose remaining is already USD', () => {
     const { exchange, store } = createInverseExchange();
-    const order = {
+    const order = nativeOrder({
       id: 'oid-1',
       symbol: 'ETHUSD',
       price: 2600,
@@ -69,18 +63,18 @@ describe('bybit inverse order units', () => {
       filled: 400,
       remaining: 600,
       extra: { remainingNative: 600 },
-    };
+    });
 
     exchange.applyLocalOrderUpdateAfterRestWrite(order, { price: 2400 });
 
-    const [[[updated]]] = store.addOrUpdateOrders.mock.calls;
+    const updated = store.orders[0];
     expect(updated.remaining).toBeCloseTo(600 / 2400, 8);
-    expect(updated.extra.remainingNative).toBe(600);
+    expect(updated.extra?.remainingNative).toBe(600);
   });
 
   it('keeps an amended local order in base units at its new price', () => {
     const { exchange, store } = createInverseExchange();
-    const order = {
+    const order = nativeOrder({
       id: 'oid-1',
       symbol: 'ETHUSD',
       price: 2600,
@@ -88,13 +82,13 @@ describe('bybit inverse order units', () => {
       filled: 0,
       remaining: 1000 / 2600,
       extra: { remainingNative: 1000 },
-    };
+    });
 
     exchange.applyLocalOrderUpdateAfterRestWrite(order, { price: 2500 });
 
-    const [[[updated]]] = store.addOrUpdateOrders.mock.calls;
+    const updated = store.orders[0];
     expect(updated.remaining).toBeCloseTo(1000 / 2500, 8);
-    expect(updated.extra.remainingNative).toBe(1000);
+    expect(updated.extra?.remainingNative).toBe(1000);
   });
 
   it('sizes the row and its split stop-loss and take-profit from contracts left, in coin at each price', () => {
@@ -117,7 +111,7 @@ describe('bybit inverse order units', () => {
 
     expect(row.remaining).toBeCloseTo(400 / 2600, 8);
     expect(stopLoss.remaining).toBeCloseTo(400 / 2000, 8);
-    expect(stopLoss.extra.remainingNative).toBe(400);
+    expect(stopLoss.extra?.remainingNative).toBe(400);
     expect(takeProfit.remaining).toBeCloseTo(400 / 3200, 8);
   });
 });

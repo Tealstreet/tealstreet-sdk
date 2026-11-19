@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
-import { ENDPOINTS } from '../reference/apexomni/apexomni.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionSide } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
+import { ENDPOINTS } from '../reference/apexomni/apexomni.types';
 
 const market = (id: string, symbol = id) => ({
   id,
@@ -32,7 +33,7 @@ const ticker = (id: string, symbol = id) => ({
   quoteVolume: 0,
 });
 
-const createExchange = (store = new DefaultStore()) =>
+const createExchange = (store = new FrameStore()) =>
   new ApexOmniExchange(
     'apexomni' as any,
     { key: 'key', secret: 'secret', passphrase: 'passphrase', omniKeySeed: 'seed' } as any,
@@ -52,10 +53,25 @@ describe('ApeX Omni remaining audit regressions', () => {
   });
 
   it('uses freshly fetched position state when setting leverage and fails clearly if still unavailable', async () => {
-    const store = new DefaultStore();
-    store.update({ markets: [market('BTC-USDT')] as any });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [market('BTC-USDT')] as any },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = createExchange(store);
-    const fetchedPosition = { symbol: 'BTC-USDT', leverage: 5 } as any;
+    const fetchedPosition = {
+      id: 'BTC-USDT-long',
+      symbol: 'BTC-USDT',
+      side: PositionSide.Long,
+      contracts: 1,
+      notional: 100,
+      entryPrice: 100,
+      leverage: 5,
+      unrealizedPnl: 0,
+      liquidationPrice: null,
+    };
     vi.spyOn(exchange, 'fetchPositions').mockResolvedValueOnce([fetchedPosition]).mockResolvedValueOnce([]);
     const post = vi.fn().mockResolvedValue({ data: { code: 0 } });
     exchange.unlimitedXHR = { post } as any;
@@ -67,7 +83,12 @@ describe('ApeX Omni remaining audit regressions', () => {
       { headers: { 'Content-Type': 'multipart/form-data' } },
     );
 
-    store.update({ positions: [] });
+    store.apply(
+      nativeFixture(
+        { positions: [] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     await expect(exchange.setLeverage('BTC-USDT', 10)).rejects.toThrow(
       'Position state for BTC-USDT is unavailable; cannot set leverage',
     );
@@ -87,20 +108,29 @@ describe('ApeX Omni remaining audit regressions', () => {
   });
 
   it('continues a ticker batch when one symbol cannot run local PnL', () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [market('BTC-USDT')] as any,
-      tickers: [ticker('UNKNOWN-USDT'), ticker('BTC-USDT')],
-      positions: [
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
         {
-          id: 'UNKNOWN-USDT-long',
-          symbol: 'UNKNOWN-USDT',
-          side: PositionSide.Long,
-          entryPrice: 10,
-          contracts: 1,
+          markets: [market('BTC-USDT')] as any,
+          tickers: [ticker('UNKNOWN-USDT'), ticker('BTC-USDT')],
+          positions: [
+            {
+              id: 'UNKNOWN-USDT-long',
+              symbol: 'UNKNOWN-USDT',
+              side: PositionSide.Long,
+              entryPrice: 10,
+              contracts: 1,
+              notional: 10,
+              leverage: 1,
+              unrealizedPnl: 0,
+              liquidationPrice: null,
+            },
+          ] as any,
         },
-      ] as any,
-    });
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = createExchange(store);
 
     exchange.publicWebsocket.handleInstrumentInfoEvent({
@@ -132,7 +162,11 @@ describe('ApeX Omni remaining audit regressions', () => {
       lastUpdate: 0,
     } as any;
     vi.spyOn(exchange, 'mapOrder').mockReturnValueOnce([]).mockReturnValueOnce([mappedOrder]);
-    const addOrUpdateOrders = vi.spyOn(exchange.store, 'addOrUpdateOrders');
+    const addOrUpdateOrders = (() => {
+      const observed = vi.fn<(value: typeof exchange.store.orders) => void>();
+      exchange.store.subscribe('orders', (value) => observed(value));
+      return observed;
+    })();
 
     expect(() =>
       websocket.handleOrderTopic([
@@ -146,7 +180,7 @@ describe('ApeX Omni remaining audit regressions', () => {
   });
 
   it('preserves the sibling protective leg when updating a virtual bracket child', async () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const baseOrder = {
       id: 'parent',
       symbol: 'BTC-USDT',
@@ -158,7 +192,7 @@ describe('ApeX Omni remaining audit regressions', () => {
       filled: 0,
       remaining: 2,
       reduceOnly: false,
-      info: { id: 'parent' },
+      lastUpdate: 0,
     } as any;
     const stopLoss = {
       ...baseOrder,
@@ -176,14 +210,17 @@ describe('ApeX Omni remaining audit regressions', () => {
       price: 110,
       tpTriggerType: OrderStopTriggerType.LastPrice,
     } as any;
-    store.update({ orders: [baseOrder, stopLoss, takeProfit] });
+    store.apply(
+      nativeFixture(
+        { orders: [baseOrder, stopLoss, takeProfit] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = createExchange(store);
     const cancel = vi.spyOn(exchange, 'cancelOrders').mockResolvedValue(undefined);
     const place = vi.spyOn(exchange, 'placeOrder').mockResolvedValue(['replacement']);
 
-    await expect(
-      exchange.updateOrder({ order: takeProfit, update: { price: 115 } }),
-    ).resolves.toEqual(['replacement']);
+    await expect(exchange.updateOrder({ order: takeProfit, update: { price: 115 } })).resolves.toEqual(['replacement']);
 
     expect(cancel).toHaveBeenCalledWith([baseOrder]);
     expect(place).toHaveBeenCalledWith({
@@ -201,7 +238,7 @@ describe('ApeX Omni remaining audit regressions', () => {
   });
 
   it('rejects a virtual bracket update when replacement fails after cancellation', async () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const baseOrder = {
       id: 'parent',
       symbol: 'BTC-USDT',
@@ -213,7 +250,7 @@ describe('ApeX Omni remaining audit regressions', () => {
       filled: 0,
       remaining: 2,
       reduceOnly: false,
-      info: { id: 'parent' },
+      lastUpdate: 0,
     } as any;
     const stopLoss = {
       ...baseOrder,
@@ -223,15 +260,18 @@ describe('ApeX Omni remaining audit regressions', () => {
       price: 90,
       slTriggerType: OrderStopTriggerType.IndexPrice,
     } as any;
-    store.update({ orders: [baseOrder, stopLoss] });
+    store.apply(
+      nativeFixture(
+        { orders: [baseOrder, stopLoss] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = createExchange(store);
     const cancel = vi.spyOn(exchange, 'cancelOrders').mockResolvedValue(undefined);
     const replacementError = new Error('replacement failed');
     vi.spyOn(exchange, 'placeOrder').mockRejectedValue(replacementError);
 
-    await expect(
-      exchange.updateOrder({ order: stopLoss, update: { price: 92 } }),
-    ).rejects.toBe(replacementError);
+    await expect(exchange.updateOrder({ order: stopLoss, update: { price: 92 } })).rejects.toBe(replacementError);
     expect(cancel).toHaveBeenCalledWith([baseOrder]);
   });
 });

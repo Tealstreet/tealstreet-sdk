@@ -4,7 +4,7 @@ import type { ExchangeName } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { consumerFrame } from '../cutover/consumerFrame';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
@@ -116,7 +116,7 @@ const mirrorWith = (
       publicDataOnly: false,
       callerReportsPlacementFailures: fake.callerReports,
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   const calls: string[] = [];
   const orderAsks: unknown[][] = [];
@@ -393,7 +393,7 @@ describe('manual page writes never fall back to the hosted RPC', () => {
     exchange = new RustEngineExchange(
       'lighter',
       { key: 'fake-key', secret: 'fake-secret', workerMirror: true },
-      new DefaultStore(),
+      new FrameStore(),
     );
     exchange.on('callMethod', (event: { requestId: string; method: string }) => {
       exchange?.emitter.emit('callMethod:done', {

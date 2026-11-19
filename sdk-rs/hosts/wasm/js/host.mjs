@@ -1,3 +1,7 @@
+import { historyFailureOf } from './history-failure.mjs';
+export { historyFailureOf } from './history-failure.mjs';
+import { bingxWriteShapeFromError } from './bingx-write-shape.mjs';
+export { bingxWriteShapeOf, bingxWriteShapeFromError } from './bingx-write-shape.mjs';
 import { historyDecodeOf } from './history-decode.mjs';
 export { historyDecodeOf } from './history-decode.mjs';
 import { ManagedHttp, prepareFetch } from './managed-http.mjs';
@@ -140,6 +144,7 @@ const commandTimeout = (value) => {
 const WRITE_COMMANDS = new Set(['placeOrders', 'cancelOrders', 'cancelOrdersWithSymbols', 'amendOrder',
   'amendOrderWithSymbol', 'cancelSymbolOrders', 'setLeverage', 'setMarginType', 'setPositionMode', 'setStpMode',
   'setAccountTier', 'scheduleCancel']);
+export const writeCommandOf = (value) => typeof value === 'string' && WRITE_COMMANDS.has(value) ? value : undefined;
 class UnknownEngineActionError extends Error {}
 class CommandDiagnosticCallbackError extends Error {
   constructor(cause) { super('Command diagnostic callback failed', { cause }); }
@@ -198,6 +203,8 @@ function receiptSession(fill) {
 }
 
 function commandReceiptSnapshot(error, command) {
+  const operation = writeCommandOf(command?.op);
+  if (operation) error.command = operation;
   if (!command?.receiptKey) return;
   error.receiptKey = command.receiptKey;
   error.commandId = command.commandId;
@@ -257,6 +264,8 @@ function writePlanErrorOf(value, active, depth) {
     if (typeof value.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value.causeCode)) error.causeCode = value.causeCode;
     const historyDecode = historyDecodeOf(value.historyDecode);
     if (historyDecode) error.historyDecode = historyDecode;
+    const bingxWriteShape = bingxWriteShapeFromError(value);
+    if (bingxWriteShape) error.bingxWriteShape = bingxWriteShape;
     const builder = builderAuthorizationOf(value.builderAuthorization);
     if (builder) error.builderAuthorization = builder;
     if (Number.isFinite(value.retryAfterMs) && value.retryAfterMs >= 0) error.retryAfterMs = value.retryAfterMs;
@@ -326,6 +335,8 @@ export class ExchangeError extends Error {
     if (typeof detail.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(detail.causeCode)) this.causeCode = detail.causeCode;
     const historyDecode = historyDecodeOf(detail.historyDecode);
     if (historyDecode) this.historyDecode = historyDecode;
+    const bingxWriteShape = bingxWriteShapeFromError(detail);
+    if (bingxWriteShape) this.bingxWriteShape = bingxWriteShape;
     const venueCode = text(detail.venueCode);
     if (venueCode) this.venueCode = venueCode;
     const venueMessage = text(detail.venueMessage);
@@ -1621,7 +1632,12 @@ export class EngineHost {
         const pending = Number.isInteger(command) && command >= 0 && command <= 0xffff_ffff
           ? this.commands.get(command) : undefined;
         // The engine's closed reason code, never the message (which may quote the venue).
-        if (code === 'history.incomplete' && pending) pending.incomplete = typeof fields?.reason === 'string' ? fields.reason : true;
+        if (code === 'history.incomplete' && pending) {
+          pending.incomplete = typeof fields?.reason === 'string' ? fields.reason : true;
+          pending.historyFailure = fields?.reason === 'laterPageFailed' ? historyFailureOf({
+            operation: fields.historyOperation, kind: fields.historyFailureKind, venueCode: fields.historyVenueCode,
+          }) : undefined;
+        }
         const event = { level, code, message, fields };
         let callbackFailure;
         try { pending?.onEvent?.(event); }
@@ -1701,6 +1717,7 @@ export class EngineHost {
           if (pending.incomplete && Array.isArray(result)) {
             Object.defineProperty(result, 'incomplete', { value: true, writable: true, configurable: true });
             if (typeof pending.incomplete === 'string') Object.defineProperty(result, 'incompleteReason', { value: pending.incomplete, writable: true, configurable: true });
+            if (pending.historyFailure) Object.defineProperty(result, 'historyFailure', { value: pending.historyFailure, writable: true, configurable: true });
           }
           this.settleCommand(action.command, result);
         }

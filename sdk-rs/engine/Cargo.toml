@@ -5,6 +5,10 @@ edition.workspace = true
 publish.workspace = true
 
 [features]
+# Only Bybit carries closed later-page read-failure metadata.
+history-page-diagnostics = []
+# Only BingX attaches closed cancel/amend invalid-input request shape.
+bingx-write-diagnostics = []
 # Only Bitget, Kraken and BingX serialize closed history row-validation detail.
 history-row-diagnostics = []
 # Only counter-nonce families link send-time reservation and release repair.

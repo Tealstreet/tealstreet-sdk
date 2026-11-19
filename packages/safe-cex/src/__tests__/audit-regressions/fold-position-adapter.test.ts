@@ -14,6 +14,7 @@ const interval = (over: Partial<PositionInterval> = {}): PositionInterval => ({
   side: PositionSide.Long,
   openedAt: 1_000_000,
   closedAt: 2_000_000,
+  closingExecutionId: '2',
   maxSize: 1,
   closedSize: 1,
   complete: true,
@@ -88,6 +89,7 @@ describe('folded-interval position adapter (binance / hyperliquid)', () => {
   it('builds a whole round trip end-to-end from raw fills', () => {
     const intervals = reconstructPositionIntervals([
       {
+        id: '1',
         symbol: 'BTCUSDT',
         timestamp: 1_000,
         price: 100,
@@ -97,6 +99,7 @@ describe('folded-interval position adapter (binance / hyperliquid)', () => {
         commissionAsset: 'USDT',
       },
       {
+        id: '2',
         symbol: 'BTCUSDT',
         timestamp: 2_000,
         price: 110,

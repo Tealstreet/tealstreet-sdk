@@ -1,12 +1,30 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { BinanceInverseExchange } from './binanceinverse.exchange';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { LogSeverity, MarginType, OrderRejectReason, OrderStatus, OrderType, PositionMode, PositionSide } from '../../../types';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
+import {
+  BASE_WS_URL,
+  ENDPOINTS,
+  ORDER_SIDE,
+  ORDER_TRIGGER_TYPE,
+  ORDER_TYPE,
+  POSITION_SIDE,
+} from '../../../exchanges/binance/binanceinverse.types';
+import {
+  LogSeverity,
+  MarginType,
+  OrderRejectReason,
+  OrderStatus,
+  OrderType,
+  PositionMode,
+  PositionSide,
+} from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
 import { v } from '../../../utils/get-key';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseWebSocket } from '../../../exchanges/base.ws';
-import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_TRIGGER_TYPE, ORDER_TYPE, POSITION_SIDE } from '../../../exchanges/binance/binanceinverse.types';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 
 const LISTEN_KEY_REFRESH_MS = 30 * 60 * 1000;
 const LISTEN_KEY_RETRY_MIN_MS = 5_000;
@@ -136,40 +154,101 @@ export class BinanceInversePrivateWebsocket extends BaseWebSocket<BinanceInverse
           price: parseFloat(data.ap),
           amount: parseFloat(data.l),
         });
-        this.store.updateOrder({ id: orderId }, { filled, remaining: amount - filled, lastUpdate: virtualClock.getCurrentTimeMs() });
+        (() => {
+          const target = { id: orderId };
+          const changes: Partial<StoreData['orders'][number]> = {
+            filled,
+            remaining: amount - filled,
+            lastUpdate: virtualClock.getCurrentTimeMs(),
+          };
+          return applyReferenceFixture(
+            this.store,
+            { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
 
       if (data.X === 'NEW') {
-        this.store.addOrUpdateOrder({
-          id: orderId,
-          status: OrderStatus.Open,
-          symbol: data.s,
-          type: ORDER_TYPE[data.ot],
-          side: ORDER_SIDE[data.S],
-          price: parseFloat(data.p) || parseFloat(data.sp),
-          amount,
-          filled,
-          lastUpdate: virtualClock.getCurrentTimeMs(),
-          remaining: amount - filled,
-          reduceOnly: data.R || false,
-          close: data.cp || false,
-          info: { ...data, orderId },
-          ...(ORDER_TYPE[data.ot] === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
-          ...(ORDER_TYPE[data.ot] === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
-        });
+        (() => {
+          const incoming: StoreData['orders'] = [
+            {
+              id: orderId,
+              status: OrderStatus.Open,
+              symbol: data.s,
+              type: ORDER_TYPE[data.ot],
+              side: ORDER_SIDE[data.S],
+              price: parseFloat(data.p) || parseFloat(data.sp),
+              amount,
+              filled,
+              lastUpdate: virtualClock.getCurrentTimeMs(),
+              remaining: amount - filled,
+              reduceOnly: data.R || false,
+              close: data.cp || false,
+              info: { ...data, orderId },
+              ...(ORDER_TYPE[data.ot] === OrderType.TakeProfit && { tpTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
+              ...(ORDER_TYPE[data.ot] === OrderType.StopLoss && { slTriggerType: ORDER_TRIGGER_TYPE[v(data, 'wt')] }),
+            },
+          ];
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: [
+                ...this.store.orders.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.orders.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
 
       if (data.X === 'CANCELED' || data.X === 'EXPIRED' || data.X === 'CANCELLED') {
-        this.store.updateOrderStatus({ id: orderId }, OrderStatus.Canceled);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Canceled;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
         const rejectReason = this.getOrderRejectReason(data);
         if (rejectReason) {
           const existingOrder = this.store.orders.find((order) => order.id === orderId);
-          this.store.updateOrder({ id: orderId }, { extra: { ...existingOrder?.extra, rejectReason } });
+          (() => {
+            const target = { id: orderId };
+            const changes: Partial<StoreData['orders'][number]> = { extra: { ...existingOrder?.extra, rejectReason } };
+            return applyReferenceFixture(
+              this.store,
+              { orders: this.store.orders.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+              this.store.markets.map((row) => row.symbol),
+            );
+          })();
         }
       }
 
       if (data.X === 'FILLED') {
-        this.store.updateOrderStatus({ id: orderId }, OrderStatus.Closed);
+        (() => {
+          const targets: Array<Pick<StoreData['orders'][number], 'id'>> = [{ id: orderId }];
+          const status: StoreData['orders'][number]['status'] = OrderStatus.Closed;
+          return applyReferenceFixture(
+            this.store,
+            {
+              orders: this.store.orders.map((row) =>
+                targets.some((target) => target.id === row.id) ? { ...row, status } : row,
+              ),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     });
     this.throttledFetchOrders();
@@ -199,24 +278,42 @@ export class BinanceInversePrivateWebsocket extends BaseWebSocket<BinanceInverse
         const referencePrice = ticker?.mark || ticker?.last || entryPrice;
         const nativeContracts = Math.abs(signedNativeContracts);
         const contractSize = market?.contractSize || 1;
-        const baseContracts = referencePrice > 0 ? nativeContracts * contractSize / referencePrice : position?.contracts || 0;
+        const baseContracts =
+          referencePrice > 0 ? (nativeContracts * contractSize) / referencePrice : position?.contracts || 0;
         const side = signedNativeContracts === 0 && position ? position.side : eventSide;
 
-        this.store.addOrUpdatePosition({
-          ...position,
-          id,
-          symbol,
-          side,
-          entryPrice,
-          contracts: baseContracts,
-          notional: nativeContracts * contractSize,
-          unrealizedPnl: upnl,
-          leverage: position?.leverage ?? 0,
-          liquidationPrice: position?.liquidationPrice ?? 0,
-          marginType: position?.marginType ?? MarginType.Cross,
-          positionMode,
-          info: { ...position?.info, ...p, contractsNative: nativeContracts },
-        });
+        (() => {
+          const incoming: StoreData['positions'] = [
+            {
+              ...position,
+              id,
+              symbol,
+              side,
+              entryPrice,
+              contracts: baseContracts,
+              notional: nativeContracts * contractSize,
+              unrealizedPnl: upnl,
+              leverage: position?.leverage ?? 0,
+              liquidationPrice: nativeLiquidationPrice(position?.liquidationPrice ?? 0),
+              marginType: position?.marginType ?? MarginType.Cross,
+              positionMode,
+              info: { ...position?.info, ...p, contractsNative: nativeContracts },
+            },
+          ];
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: [
+                ...this.store.positions.map((row) => {
+                  const change = incoming.find((item) => item.id === row.id);
+                  return change ? { ...row, ...change } : row;
+                }),
+                ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+              ],
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       });
     });
   };
@@ -249,7 +346,19 @@ export class BinanceInversePrivateWebsocket extends BaseWebSocket<BinanceInverse
     try {
       const positions = await this.parent.fetchPositions();
       if (!this.isDisposed && eventVersionAtStart === this.parent.getPositionStateVersion()) {
-        this.store.addOrUpdatePositionsFull(positions);
+        (() => {
+          const incoming: StoreData['positions'] = positions;
+          return applyReferenceFixture(
+            this.store,
+            {
+              positions: incoming.map((row) => ({
+                ...this.store.positions.find((old) => old.id === row.id),
+                ...row,
+              })),
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
     } catch {
       // Retry on the next account event.
@@ -298,7 +407,11 @@ export class BinanceInversePrivateWebsocket extends BaseWebSocket<BinanceInverse
     try {
       const orders = await this.parent.fetchOrders();
       if (this.isDisposed || this.parent.ordersSnapshotStale) return;
-      this.parent.store.update({ orders, loaded: { ...this.parent.store.loaded, orders: true } });
+      applyReferenceFixture(
+        this.parent.store,
+        { orders, loaded: { orders: true } },
+        this.parent.store.markets.map((row) => row.symbol),
+      );
     } catch {
       // Fetch failures are retried on the next order event.
     }

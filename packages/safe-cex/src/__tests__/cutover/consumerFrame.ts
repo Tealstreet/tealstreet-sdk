@@ -150,13 +150,29 @@ export function consumerFrame(
         'fundingTime',
         'volume',
         'quoteVolume',
-      ].map((field) => data.tickers!.map((row) => row[field as keyof typeof row] as number)),
+        'midPrice',
+      ].map((field) => data.tickers!.map((row) => (row[field as keyof typeof row] as number) ?? NaN)),
+      [...data.tickers.map((row) => ref(row.symbol)), ...data.tickers.map((row) => ref(row.id))],
+      1,
     );
-  if (delta) table(4, [], [delta]);
+  if (data.tickers?.some((row) => row.observedAt))
+    table(
+      24,
+      [],
+      [
+        data.tickers.flatMap((row, index) => [
+          index,
+          ...(row.observedAt ?? [null, null, null]).map((time) => time ?? -Infinity),
+        ]),
+      ],
+    );
+  if (delta) table(4, [], [delta], [], 1);
   if (data.orders) {
     const rows = data.orders;
-    const columns: (keyof Pick<Order, 'price' | 'amount' | 'filled' | 'remaining' | 'lastUpdate' | 'takeProfit' | 'stopLoss'>)[] =
-      ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
+    const columns: (keyof Pick<
+      Order,
+      'price' | 'amount' | 'filled' | 'remaining' | 'lastUpdate' | 'takeProfit' | 'stopLoss'
+    >)[] = ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
     const status = ['open', 'closed', 'canceled', 'creating', 'updating', 'canceling'];
     const type = ['market', 'limit', 'conditional', 'stop_market', 'take_profit_market', 'trailing_stop_market'];
     const tif = [undefined, 'GoodTillCancel', 'ImmediateOrCancel', 'FillOrKill', 'PostOnly'];
@@ -182,7 +198,8 @@ export function consumerFrame(
         ...rows.map((row) => marketIndex(row.symbol)),
         ...rows.map(enums),
       ],
-      columns.map((field) => rows.map((row) => row[field] ?? NaN))
+      columns
+        .map((field) => rows.map((row) => row[field] ?? NaN))
         .concat([
           rows.map((row) => row.extra?.remainingNative ?? NaN),
           rows.map((row) => row.extra?.filledInPlacementUnits ?? NaN),
@@ -265,15 +282,16 @@ export function consumerFrame(
     }
     sections.push({ kind: 9, bytes });
   }
-  if (data.loaded)
+  // STATUS also owns position mode and latency; neither needs a loaded update.
+  if (data.loaded || data.options || data.latency !== undefined)
     table(
       10,
       [
-        Number(data.loaded.balance) |
-          (Number(data.loaded.orders) << 1) |
-          (Number(data.loaded.markets) << 2) |
-          (Number(data.loaded.tickers) << 3) |
-          (Number(data.loaded.positions) << 4),
+        Number(data.loaded?.balance ?? false) |
+          (Number(data.loaded?.orders ?? false) << 1) |
+          (Number(data.loaded?.markets ?? false) << 2) |
+          (Number(data.loaded?.tickers ?? false) << 3) |
+          (Number(data.loaded?.positions ?? false) << 4),
         Number(data.options?.isHedged) | (data.latency != null ? 2 : 0),
       ],
       [[data.latency ?? 0]],
@@ -289,14 +307,14 @@ export function consumerFrame(
         ...rows.map((row) => [undefined, 'isolated', 'cross'].indexOf(row.marginType)),
       ],
       [rows.map((row) => row.buyLeverage), rows.map((row) => row.buyLeverage), rows.map((row) => row.sellLeverage)],
+      entries.map(([symbol]) => ref(symbol)),
+      1,
     );
   }
   if (events) {
     table(5, [0, 1, 1, 0], [[99, 2, 2, 101, 3, 3]]);
     table(6, [1, 0, ref('1m')], [[1_700_000_000, 100, 102, 99, 101, 5]]);
-    const fill = typeof events === 'object'
-      ? events
-      : { fillId: 'order-1', fillSymbol: marketSymbols[0] ?? 'BTCUSDT' };
+    const fill = typeof events === 'object' ? events : { fillId: 'order-1', fillSymbol: marketSymbols[0] ?? 'BTCUSDT' };
     const fills = new Uint8Array(56);
     const fillView = new DataView(fills.buffer);
     [1, ref('order-1'), 0, 0].forEach((word, i) => fillView.setUint32(i * 4, word, true));

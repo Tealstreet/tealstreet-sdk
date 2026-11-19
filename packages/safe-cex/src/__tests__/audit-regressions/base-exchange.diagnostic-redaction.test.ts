@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BaseExchange } from '../../exchanges/base';
 import { BaseWebSocket } from '../../exchanges/base.ws';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { reportEvent, setTelemetrySink } from '../../telemetry';
 import { LogSeverity } from '../../types';
 import { diagnosticConsole } from '../../utils/diagnosticRedaction';
@@ -21,7 +21,7 @@ const makeExchange = (consoleLogging: boolean) =>
   new BaseExchange(
     'bybit',
     { key: '', secret: '', publicDataOnly: true, tuning: { consoleLogging } },
-    new DefaultStore(),
+    new FrameStore(),
   );
 const exchanges: BaseExchange[] = [];
 

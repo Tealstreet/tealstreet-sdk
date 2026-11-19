@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 import { ENDPOINTS } from '../reference/coinbase/coinbase.types';
-import { DefaultStore } from '../../store/store.base';
 
 describe('Coinbase account identity audit regression', () => {
   it('uses the selected permitted portfolio UUID instead of a Binance-shaped balance response', async () => {
     const exchange = new CoinbaseExchange(
       'coinbase' as any,
       { key: 'test', secret: 'test', tealstreetTunnel: false } as any,
-      new DefaultStore(),
+      new FrameStore(),
     );
     const get = vi
       .fn()

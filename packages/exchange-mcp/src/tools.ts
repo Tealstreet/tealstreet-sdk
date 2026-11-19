@@ -173,7 +173,8 @@ export const tools: Tool[] = [
   }),
   tool({
     name: 'get_order_history',
-    description: 'Past orders, including filled and cancelled ones. Known partial history includes rows and incompleteness metadata.',
+    description:
+      'Past orders, including filled and cancelled ones. Known partial history includes rows and incompleteness metadata.',
     method: 'fetchHistoricalOrders',
     input: { symbol: symbol.optional(), orderId: z.string().optional(), from, to, limit },
     run: async (exchange, args) =>
@@ -188,14 +189,16 @@ export const tools: Tool[] = [
   }),
   tool({
     name: 'get_closed_pnl',
-    description: 'Realised PnL of closed positions for one market. Known partial history includes rows and incompleteness metadata.',
+    description:
+      'Realised PnL of closed positions for one market. Known partial history includes rows and incompleteness metadata.',
     method: 'fetchClosedPnl',
     input: { symbol, from, to, limit },
     run: async (exchange, args) => withUtc(await exchange.fetchClosedPnl(args), { time: 'ms', closedTime: 'ms' }),
   }),
   tool({
     name: 'get_income',
-    description: 'Account income records: funding, fees, realised PnL and transfers. Known partial history includes rows and incompleteness metadata.',
+    description:
+      'Account income records: funding, fees, realised PnL and transfers. Known partial history includes rows and incompleteness metadata.',
     method: 'fetchIncomeHistory',
     input: {
       symbol: symbol.optional(),
@@ -309,7 +312,7 @@ export const tools: Tool[] = [
     },
     run: async (exchange, args) => {
       const positions = await exchange.fetchPositions();
-      const store = { ...exchange.store, markets: exchange.store.markets, positions };
+      const store = { ...exchange.store.data, positions };
       const account = 'mcp';
       const adapter = createCoreAdapter({
         getExchange: () => exchange,

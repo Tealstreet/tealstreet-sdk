@@ -2,10 +2,11 @@ import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ENDPOINTS } from '../../exchanges/lighter/lighter.types';
+import { FrameStore } from '../../store/frameStore';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { LighterExchange } from '../reference/lighter/lighter.exchange';
 import { createLighterSignerAdapter } from '../reference/lighter/lighter.signer';
-import { ENDPOINTS } from '../../exchanges/lighter/lighter.types';
-import { DefaultStore } from '../../store/store.base';
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -68,8 +69,9 @@ const setup = (name: ExchangeName, overrides: Partial<ExchangeOptions> = {}) => 
     payloadSigner,
     ...overrides,
   };
-  const exchange = new LighterExchange(name, options, new DefaultStore());
+  const exchange = new LighterExchange(name, options, new FrameStore());
   exchanges.push(exchange);
+  applyReferenceFixture(exchange.store, { orders: [] });
   (exchange as any).accountIndex = 123n;
   vi.spyOn(exchange, 'fetchMarkets').mockResolvedValue([]);
   vi.spyOn(exchange, 'log').mockImplementation(() => undefined);

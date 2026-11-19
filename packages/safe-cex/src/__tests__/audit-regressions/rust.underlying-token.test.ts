@@ -1,10 +1,9 @@
 import type { Market } from '../../types';
 
-import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { describe, expect, it } from 'vitest';
 
-import { FrameApplier } from '../../store/frameApplier';
-import { DefaultStore } from '../../store/store.base';
+import { Frame } from '@tealstreet/safe-cex-wasm/wire';
+import { FrameStore } from '../../store/frameStore';
 import { consumerFrame } from '../cutover/consumerFrame';
 
 const market = (symbol: string, base: string, info?: Record<string, unknown>): Market =>
@@ -27,8 +26,8 @@ describe('the underlying token behind a wrapped spot pair reaches market.info as
       market('PURR/USDC', 'PURR', { hlTokenName: 'PURR' }),
       market('BTC-PERP', 'BTC'),
     ];
-    const store = new DefaultStore();
-    new FrameApplier(store).apply(new Frame(consumerFrame({ markets })));
+    const store = new FrameStore();
+    store.apply(new Frame(consumerFrame({ markets })));
     const bySymbol = Object.fromEntries(store.markets.map((m) => [m.symbol, m]));
     expect(bySymbol['UBTC/USDC'].info).toEqual({ hlTokenName: 'UBTC', hlTokenFullName: 'Unit Bitcoin' });
     expect(bySymbol['PURR/USDC'].info).toEqual({ hlTokenName: 'PURR', hlTokenFullName: undefined });

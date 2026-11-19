@@ -1,4 +1,7 @@
 //! Original public-candle custody controls; the native implementation is unchanged.
+#[path = "../../../engine/tests/support/request_stats_frame.rs"]
+mod request_stats_frame;
+use request_stats_frame::assert_request_stats_frame;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{
@@ -548,12 +551,15 @@ fn live_root_child_timeout_preserves_typed_read_failure() {
 #[test]
 fn expired_background_page_cannot_publish_a_candle() {
     let (mut e, _) = boot();
+    let before_stats = e.snapshot_frame(NOW).to_vec();
     let actions = subscribe(&mut e, NOW);
     let request = native_packet(&mut e, actions, NOW);
     outcome(&mut e, NOW + 20_000., &request, &page(NOW, false));
-    assert!(
-        e.take_frame(NOW + 20_000.).is_none(),
-        "expired physical page must not publish"
+    assert_request_stats_frame(
+        &before_stats,
+        e.take_frame(NOW + 20_000.),
+        NOW + 20_000.,
+        [0, 0, 0, 1, 0],
     );
 }
 #[test]
@@ -750,6 +756,7 @@ fn native_stale_subscription_success_and_failure_preserve_new_generation() {
         assert!(e.drain_actions().next().is_none());
         let actions = subscribe(&mut e, NOW);
         let current = native_packet(&mut e, actions, NOW);
+        let before_stats = e.snapshot_frame(NOW).to_vec();
         if fail {
             e.handle(
                 NOW,
@@ -762,7 +769,16 @@ fn native_stale_subscription_success_and_failure_preserve_new_generation() {
         } else {
             outcome(&mut e, NOW, &old, &page(NOW, false));
         }
-        assert!(e.take_frame(NOW).is_none());
+        assert_request_stats_frame(
+            &before_stats,
+            e.take_frame(NOW),
+            NOW,
+            if fail {
+                [0, 0, 0, 1, 0]
+            } else {
+                [1, 0, 0, 0, 0]
+            },
+        );
         outcome(&mut e, NOW, &current, &page(NOW, false));
         assert!(e.take_frame(NOW).is_some());
     }

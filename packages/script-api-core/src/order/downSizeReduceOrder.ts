@@ -64,7 +64,7 @@ const unfilled = (order: Order): number => Math.max(0, order.amount - (order.fil
 export const downSizeReduceOrder = (
   market: Market,
   order: PlaceOrderOpts,
-  positions: Position[],
+  positions: readonly Position[],
   orders: readonly Order[],
   price: number,
   {

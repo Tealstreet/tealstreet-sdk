@@ -1,7 +1,6 @@
 //! Prepared page and terminal transactions for a uniquely bound Read history.
 use super::*;
 use crate::engine::http_lifecycle::PreparedReadCleanup;
-use crate::{Level, Value};
 
 pub(crate) struct PreparedHistoryPage {
     plan: Plan,
@@ -68,7 +67,7 @@ impl<P> Cx<'_, P> {
         page: Option<(&Slot, &Context)>,
         released_failure: bool,
         error: Option<VenueError>,
-        marker: Option<(crate::history::IncompleteReason, String)>,
+        marker: Option<crate::history::Incomplete>,
     ) -> Result<PreparedHistoryTerminal, Error> {
         if self.io.core.http_owner_poison
             || self.io.core.http_plan_poison
@@ -116,15 +115,7 @@ impl<P> Cx<'_, P> {
         let Owner::Command { id, .. } = plan.owner() else {
             unreachable!()
         };
-        let marker = marker.map(|(reason, message)| crate::log::LogEvent {
-            level: Level::Warn,
-            code: crate::log::code::HISTORY_INCOMPLETE,
-            message,
-            fields: vec![
-                ("command", Value::Num(f64::from(id))),
-                ("reason", Value::Str(reason.code().into())),
-            ],
-        });
+        let marker = marker.map(|marker| marker.event(id));
         Ok(PreparedHistoryTerminal {
             plan: plan.clone(),
             seal,

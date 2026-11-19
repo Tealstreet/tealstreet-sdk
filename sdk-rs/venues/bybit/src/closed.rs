@@ -121,7 +121,8 @@ impl BybitLinear {
         let mut request = Request {
             output,
             history: CursorHistory::new(
-                completion,
+                completion
+                    .with_operation(safe_cex_engine::history::HistoryOperation::BybitClosedPnl),
                 CursorWalk::new(MAX_PAGES),
                 |reason| {
                     match reason {

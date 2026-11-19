@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { BaseExchange } from '../../exchanges/base';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import {
   MarginType,
   OrderRejectReason,
@@ -26,8 +26,8 @@ afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
 function pair() {
   const options = { key: '', secret: '', publicDataOnly: true };
-  const worker = new RustEngineExchange('binance', options, new DefaultStore());
-  const main = new BaseExchange('binance', options, new DefaultStore());
+  const worker = new RustEngineExchange('binance', options, new FrameStore());
+  const main = new BaseExchange('binance', options, new FrameStore());
   exchanges.push(worker, main);
   worker.onFrame = (buffer) => main.applyWorkerFrame(structuredClone(buffer, { transfer: [buffer] }));
   return {

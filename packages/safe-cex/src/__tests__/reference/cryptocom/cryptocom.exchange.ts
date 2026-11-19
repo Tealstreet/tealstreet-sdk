@@ -1,8 +1,7 @@
 import type { Axios } from 'axios';
-import type { Store } from '../../../store/store.interface';
 import type {
-  CryptocomBalanceSummary,
   CryptocomAccountsResponse,
+  CryptocomBalanceSummary,
   CryptocomBook,
   CryptocomCandlestick,
   CryptocomInstrument,
@@ -17,6 +16,9 @@ import sumBy from 'lodash/sumBy';
 import uniqBy from 'lodash/uniqBy';
 import { forEachSeries } from 'p-iteration';
 
+import { BaseExchange } from '../../../exchanges/base';
+import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -43,10 +45,18 @@ import {
 } from '../../../types';
 import { createPositionId } from '../../../utils/createPositionId';
 import { virtualClock } from '../../../utils/virtualClock';
-import { BaseExchange } from '../../../exchanges/base';
-import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
-import { createAPI, isCryptocomAuthenticationErrorCode, isCryptocomAuthenticationFailureMessage } from './cryptocom.api';
-import { ENDPOINTS, GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC, mapCandlestickInterval } from './cryptocom.types';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import {
+  createAPI,
+  isCryptocomAuthenticationErrorCode,
+  isCryptocomAuthenticationFailureMessage,
+} from './cryptocom.api';
+import {
+  ENDPOINTS,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  mapCandlestickInterval,
+} from './cryptocom.types';
 import { CryptocomPrivateWebSocket } from './cryptocom.ws-private';
 import { CryptocomPublicWebSocket } from './cryptocom.ws-public';
 
@@ -71,7 +81,7 @@ export class CryptocomExchange extends BaseExchange {
     return this._suppressCryptocomValidationErrorEmission;
   }
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     // Rate limit conservatively (100 RPS according to docs, but we'll use 50)
@@ -129,20 +139,28 @@ export class CryptocomExchange extends BaseExchange {
       const markets = await this.fetchMarkets();
       if (this.isDisposed) return;
 
-      this.store.update({
-        markets,
-        loaded: { ...this.store.loaded, markets: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          markets,
+          loaded: { markets: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       const tickers = await this.fetchTickers();
       if (this.isDisposed) return;
 
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} Crypto.com markets`);
 
-      this.store.update({
-        tickers,
-        loaded: { ...this.store.loaded, tickers: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       // Connect WebSockets
       this.publicWebsocket.connectAndSubscribe();
@@ -150,9 +168,13 @@ export class CryptocomExchange extends BaseExchange {
 
     const publicDataOnly = this.isPublicDataOnly;
     if (publicDataOnly) {
-      this.store.update({
-        loaded: { ...this.store.loaded, balance: true, positions: true, orders: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          loaded: { balance: true, positions: true, orders: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
       return;
     }
 
@@ -197,10 +219,14 @@ export class CryptocomExchange extends BaseExchange {
 
     this.log(`Loaded Crypto.com orders`);
 
-    this.store.update({
-      orders,
-      loaded: { ...this.store.loaded, orders: true },
-    });
+    applyReferenceFixture(
+      this.store,
+      {
+        orders,
+        loaded: { orders: true },
+      },
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   tick = async (count = 0) => {
@@ -210,7 +236,11 @@ export class CryptocomExchange extends BaseExchange {
       try {
         const positions = await this.fetchPositions();
         if (this.isDisposed) return;
-        this.store.update({ positions, loaded: { ...this.store.loaded, positions: true } });
+        applyReferenceFixture(
+          this.store,
+          { positions, loaded: { positions: true } },
+          this.store.markets.map((row) => row.symbol),
+        );
 
         const balance = await this.fetchBalance();
         if (this.isDisposed) return;
@@ -218,15 +248,23 @@ export class CryptocomExchange extends BaseExchange {
         const upnl = positions.length > 0 ? sumBy(positions, 'unrealizedPnl') : 0;
         (balance as Writable<Balance>).upnl = upnl;
 
-        this.store.update({
-          balance,
-          loaded: { ...this.store.loaded, balance: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            loaded: { balance: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
 
         if (count % 4 === 0) {
           const orders = await this.fetchOrders();
           if (this.isDisposed) return;
-          this.store.update({ orders, loaded: { ...this.store.loaded, orders: true } });
+          applyReferenceFixture(
+            this.store,
+            { orders, loaded: { orders: true } },
+            this.store.markets.map((row) => row.symbol),
+          );
         }
       } catch (err: any) {
         this.log(`Error in tick: ${err?.message}`, LogSeverity.Error);
@@ -425,7 +463,7 @@ export class CryptocomExchange extends BaseExchange {
             leverage: 1,
             unrealizedPnl: parseFloat(p.open_position_pnl) || 0,
             contracts,
-            liquidationPrice: 0,
+            liquidationPrice: null,
             marginType: p.isolation_type === 'ISOLATED_MARGIN' ? MarginType.Isolated : MarginType.Cross,
             positionMode,
             info: { isolationId: p.isolation_id },
@@ -450,7 +488,7 @@ export class CryptocomExchange extends BaseExchange {
               leverage: 1,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               lastUpdate: virtualClock.getCurrentTimeMs(),
               positionMode,
               marginType: MarginType.Cross,
@@ -464,7 +502,7 @@ export class CryptocomExchange extends BaseExchange {
               leverage: 1,
               unrealizedPnl: 0,
               contracts: 0,
-              liquidationPrice: 0,
+              liquidationPrice: null,
               lastUpdate: virtualClock.getCurrentTimeMs(),
               positionMode,
               marginType: MarginType.Cross,

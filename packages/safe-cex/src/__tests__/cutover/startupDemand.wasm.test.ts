@@ -9,7 +9,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustPublicFeedProvider } from '../../exchanges/rust/publicFeed';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { realVenue } from './realVenue';
 
 const cleanups: Array<() => void> = [];
@@ -67,7 +67,7 @@ it('actual native startup replays retained books/candles after delayed metadata 
     release = resolve;
   });
   const f = input(gate);
-  const source = new RustEngineExchange('bybit', f.recorded.options, new DefaultStore());
+  const source = new RustEngineExchange('bybit', f.recorded.options, new FrameStore());
   cleanups.push(() => source.dispose());
   const books: OrderBook[] = [];
   const candles: Candle[] = [];
@@ -137,7 +137,7 @@ it('actual native startup replays retained books/candles after delayed metadata 
 
 it('an actual native shared-catalog mismatch never acquires provider book or candle demand', async () => {
   const sourceInput = input();
-  const source = new RustEngineExchange('bybit', sourceInput.recorded.options, new DefaultStore());
+  const source = new RustEngineExchange('bybit', sourceInput.recorded.options, new FrameStore());
   cleanups.push(() => source.dispose());
   await source.start();
   const provider = new RustPublicFeedProvider(source);
@@ -157,7 +157,7 @@ it('an actual native shared-catalog mismatch never acquires provider book or can
       ...receiverInput.recorded.options,
       publicFeed: { mode: 'shared', port: channel.port2 as unknown as MessagePort },
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   cleanups.push(() => receiver.dispose());
   receiver.listenOrderBook('BTCUSDT', () => {});
@@ -172,7 +172,7 @@ it('an actual native shared-catalog mismatch never acquires provider book or can
 
 it('shared ticker reads wait for the accepted provider snapshot while catalog reads finish earlier', async () => {
   const sourceInput = input();
-  const source = new RustEngineExchange('bybit', sourceInput.recorded.options, new DefaultStore());
+  const source = new RustEngineExchange('bybit', sourceInput.recorded.options, new FrameStore());
   cleanups.push(() => source.dispose());
   await source.start();
   for (const receive of sourceInput.messages)
@@ -210,7 +210,7 @@ it('shared ticker reads wait for the accepted provider snapshot while catalog re
       ...receiverInput.recorded.options,
       publicFeed: { mode: 'shared', port: downstream.port2 as unknown as MessagePort },
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
   cleanups.push(() => receiver.dispose());
   const catalog = receiver.fetchMarkets();

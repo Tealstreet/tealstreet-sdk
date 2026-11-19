@@ -12,10 +12,7 @@ import { OrderSide } from '../types';
 import { calcOrderBookTotal, sortOrderBook } from '../utils/orderbook';
 import { BookFrames } from './bookFrames';
 import { readCandleFrame } from './candleFrames';
-import { marketDataFrameApplier } from './marketDataFrameApplier.fixture';
-import { DefaultStore } from './store.base';
-
-const FrameApplier = marketDataFrameApplier();
+import { FrameStore } from './frameStore';
 
 let fixtures: Record<string, number[]>;
 const symbols = ['ZERO/USD'];
@@ -106,12 +103,12 @@ describe('Rust market data frames', () => {
     expect(book).toEqual(result[0].orderbook);
   });
 
-  it('matches the DefaultStore frame path and serialization without inventing stored books or candles', () => {
+  it('matches the FrameStore frame path and serialization without inventing stored books or candles', () => {
     const snapshot = frame('snapshot');
-    const store = new DefaultStore();
-    const applier = new FrameApplier(store);
+    const store = new FrameStore();
+    const applier = store;
     applier.apply(snapshot);
-    const serialized = JSON.parse(JSON.stringify(store.serialize()));
+    const serialized = JSON.parse(JSON.stringify(store.data));
     expect(applier.books(snapshot)).toEqual([
       {
         symbol: 'ZERO/USD',
@@ -144,10 +141,10 @@ describe('Rust market data frames', () => {
   });
 
   it.each(['unordered', 'invalidTotal'])(
-    'integrated FrameApplier refuses %s book batches and discards their baselines',
+    'integrated FrameStore refuses %s book batches and discards their baselines',
     (name) => {
-      const store = new DefaultStore();
-      const applier = new FrameApplier(store);
+      const store = new FrameStore();
+      const applier = store;
       applier.apply(frame('snapshot'));
       const invalid = frame(name);
       expect(() => applier.apply(invalid)).toThrow();
@@ -155,20 +152,20 @@ describe('Rust market data frames', () => {
       expect(() => applier.apply(frame('delta'))).toThrow();
       applier.apply(frame('snapshot'));
       expect(applier.books(frame('delta'))[0].orderbook.bids[0].price).toBe(1);
-      expect(JSON.parse(JSON.stringify(store.serialize())).markets[0].symbol).toBe('ZERO/USD');
+      expect(JSON.parse(JSON.stringify(store.data)).markets[0].symbol).toBe('ZERO/USD');
     },
   );
 
   it.each(['unknownCandle', 'invalidCandle'])(
-    'integrated FrameApplier refuses %s candle batches without emitting repaired values',
+    'integrated FrameStore refuses %s candle batches without emitting repaired values',
     (name) => {
-      const store = new DefaultStore();
-      const applier = new FrameApplier(store);
+      const store = new FrameStore();
+      const applier = store;
       applier.apply(frame('snapshot'));
       const invalid = frame(name);
       applier.apply(invalid);
       expect(() => applier.candles(invalid)).toThrow();
-      expect(JSON.parse(JSON.stringify(store.serialize()))).not.toHaveProperty('candles');
+      expect(JSON.parse(JSON.stringify(store.data))).not.toHaveProperty('candles');
       expect(applier.candles(frame('snapshot'))[0].candle.volume).toBe(0);
     },
   );

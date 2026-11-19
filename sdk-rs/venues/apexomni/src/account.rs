@@ -355,6 +355,21 @@ fn base_id(id: &str) -> &str {
         .unwrap_or(id)
 }
 
+fn unknown_order_status(status: &str) -> String {
+    if status.len() <= 32 && status.bytes().all(|byte| (b' '..=b'~').contains(&byte)) {
+        let message = format!("unknown order status: {status:?}");
+        // #3649: status data must not acquire authentication advice in Cx::notice.
+        if safe_cex_engine::error::ip_whitelist_text(&message, None).is_none() {
+            return message;
+        }
+    }
+    format!(
+        "unknown order status: <bytes={} sha256={}>",
+        status.len(),
+        safe_cex_crypto::hex(&safe_cex_crypto::sha256(status.as_bytes())),
+    )
+}
+
 pub(crate) fn map_order(
     store: &Store,
     raw: &wire::OrderRow<'_>,
@@ -373,7 +388,7 @@ pub(crate) fn map_order(
         "PENDING" | "OPEN" | "UNTRIGGERED" => OrderStatus::Open,
         "FILLED" | "EXPIRED" => OrderStatus::Closed,
         "CANCELED" => OrderStatus::Canceled,
-        _ => return Err("unknown order status".into()),
+        _ => return Err(unknown_order_status(&raw.status)),
     };
     let kind = match raw.kind.as_ref() {
         "LIMIT" => OrderType::Limit,

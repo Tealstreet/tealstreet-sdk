@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
+import { FrameStore } from '../../store/frameStore';
 import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 const orderlyFamily = ['woofi', 'kodiakfi', 'mode', 'what'] as const;
 
@@ -11,7 +11,7 @@ describe('audit regression: Orderly 100x leverage support', () => {
     const exchange = new OrderlyExchange(
       'woofi',
       { key: 'test-key', secret: 'test-secret', applicationId: 'test-account' },
-      new DefaultStore(),
+      new FrameStore(),
     );
     const post = vi.fn().mockResolvedValue({ data: { success: true } });
     exchange.xhr = { post } as any;

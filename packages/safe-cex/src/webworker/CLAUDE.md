@@ -1,3 +1,14 @@
+# Native frame cutover
+
+`ExchangeWorker` forwards native SCXF frames in every mode and sends native
+snapshot bytes to late subscribers. There is no `op: store`, serialized seed,
+mutable-store postprocessing, ticker delta side channel or derived payload.
+`FrameStore` owns the decoded generated state. UI leverage reads track in-flight
+requests outside account state and wait for native SETTINGS frames. Book delivery
+does not rewrite ticker values. Engine recovery replaces the frame store and
+establishes a new native snapshot baseline. The historical bridge notes below
+are superseded wherever they describe the removed mutable store transport.
+
 # CLAUDE.md — safe-cex/src/webworker
 
 The worker that runs an exchange instance off the main thread and
@@ -631,3 +642,11 @@ does not decide host reporting policy or add a telemetry client.
 `history_reason`, including when message text is redacted. Unknown causes,
 invalid pairs and extra row/request fields are dropped; the diagnostic packet
 still passes through the existing redactor and the web Sentry sanitizer.
+
+## Closed BingX write diagnostics
+
+`bingxWriteShape` crosses host/command/worker boundaries only after closed enum,
+parameter-name and numeric-bound validation. The original error keeps its existing
+classification and reporting policy. Existing typed error tags carry endpoint,
+method, parameter-name chunks, ID class/digit count, target kind, symbol format
+and observed/unobserved replacement provenance. No request/row values are copied.

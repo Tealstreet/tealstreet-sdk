@@ -3,10 +3,10 @@ import { resolve } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 // Transform the real constructor graph during setup; load() still re-evaluates
 // it after each environment change rather than timing cold imports in a test.
 import '../reference/bybit/hyrotrader.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 // The account-options mapper never constructs an exchange. Avoid importing
 // every venue through its unused factory dependency, and fail if it is called.
@@ -86,7 +86,7 @@ describe('HyroTrader build-time configuration', () => {
     expect(HYROTRADER_PROD_WS_URL.private.livenet).toBe('wss://sim-tealstreet.hyro.site/v5/private');
 
     const { HyrotraderExchange } = await import('../reference/bybit/hyrotrader.exchange');
-    const exchange = new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
+    const exchange = new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new FrameStore());
     try {
       expect(exchange.getBybitRestBaseUrl('livenet')).toBe('https://sim-tealstreet.hyro.site');
     } finally {
@@ -100,7 +100,7 @@ describe('HyroTrader build-time configuration', () => {
     const exchange = new HyrotraderExchange(
       'hyrotrader',
       { key: '', secret: '', extra: { hyrotraderMode: 'demo' } },
-      new DefaultStore(),
+      new FrameStore(),
     );
     try {
       expect(exchange.isDemo).toBe(true);
@@ -113,7 +113,7 @@ describe('HyroTrader build-time configuration', () => {
   it('keeps simulator config scoped to bundled demo accounts when production env is unset', async () => {
     await load('https://simulator.test');
     const { HyrotraderExchange } = await import('../reference/bybit/hyrotrader.exchange');
-    const exchange = new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
+    const exchange = new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new FrameStore());
     try {
       expect(exchange.isDemo).toBe(false);
       expect(exchange.getBybitRestBaseUrl('livenet')).toBe('https://sim-tealstreet.hyro.site');
@@ -127,7 +127,7 @@ describe('HyroTrader build-time configuration', () => {
   it('marks unflagged accounts as production', async () => {
     await load('', '', '', 'https://prod.test');
     const { HyrotraderExchange } = await import('../reference/bybit/hyrotrader.exchange');
-    const exchange = new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
+    const exchange = new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new FrameStore());
     try {
       expect(exchange.isDemo).toBe(false);
       expect(exchange.getBybitRestBaseUrl('livenet')).toBe('https://prod.test');
@@ -139,11 +139,11 @@ describe('HyroTrader build-time configuration', () => {
   it('reloads real constructors with fresh production origins while existing instances retain their captured config', async () => {
     await load('https://first.test');
     const firstModule = await import('../reference/bybit/hyrotrader.exchange');
-    const first = new firstModule.HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
+    const first = new firstModule.HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new FrameStore());
     try {
       await load('', '', '', 'https://second.test');
       const secondModule = await import('../reference/bybit/hyrotrader.exchange');
-      const second = new secondModule.HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
+      const second = new secondModule.HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new FrameStore());
       try {
         expect(first.getBybitRestBaseUrl('livenet')).toBe('https://sim-tealstreet.hyro.site');
         expect(first.getBybitPublicWsUrl('linear', 'livenet')).toBe('wss://sim-tealstreet.hyro.site/v5/public/linear');
@@ -206,9 +206,9 @@ describe('HyroTrader build-time configuration', () => {
     const demo = new HyrotraderExchange(
       'hyrotrader',
       { key: '', secret: '', extra: { hyrotraderMode: 'demo' } },
-      new DefaultStore(),
+      new FrameStore(),
     );
-    const prod = new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new DefaultStore());
+    const prod = new HyrotraderExchange('hyrotrader', { key: '', secret: '' }, new FrameStore());
     try {
       // The method is `protected` on the base — reach through the instance
       // for the audit assertion. Any caller shape would be acceptable; the
