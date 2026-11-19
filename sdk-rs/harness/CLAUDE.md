@@ -31,6 +31,10 @@ recurring merge conflict.
 - **PRs fail only on the byte ceiling** (`wasmBudgetError`: measured > current
   cap). A reserve under 10 KiB is a `::warning::` and step-summary line
   (`wasmReserveWarning`), never a failure, and PRs do not edit caps.
+- A successfully sealed family remains downloadable after a failed byte ceiling
+  or isolation check; failed sealing or cancelled runs do not publish it.
+  Retention is measurement evidence only: the family job still fails, required
+  coverage still refuses, and replay still requires a successful family job.
 - **The reserve is restored on master by a bot.** `.github/workflows/wasm-caps.yml`
   runs after every master push run of `Rust SDK`, downloads that run's
   `wasm-family-*` and `replay-combined-package` artifacts and runs
@@ -185,6 +189,17 @@ job took 30-38 min and set the Rust critical path); every shard sorts the same l
 so together they run each mode exactly once. #3640 needed four runs to surface
 ~124 failures because the first failing target stopped the job;
 `affected-ci-workflow.test.mjs` pins this shape.
+
+Bitunix managed sockets retain private ping bytes, the independent ten-second
+login-answer bound with Observe, first-pong idle gating, balance pacing and
+read/reconciliation controls. Native host configuration validates the declared
+4096 capacity; direct book/candle commands bound canonical future topics before
+intent/settings mutation, independent of epoch state. Aliases share native topics;
+refusal preserves accepted intent and the live feed. Frame-fed engines register
+no managed Bitunix feeds. An unopened private dial is not a login-answer timeout.
+Historical #2301 measurements and retained branch ceilings are archived in
+`wasm-caps-history.md`; use the generated cap mechanism above, without restoring
+per-PR measurement census tests or superseded batch/reviewer-count holds.
 
 Binance saturated-history paging preserves the existing request pacing and caller
 deadlines. The measured #3671 Binance floor and its historical CI provenance are

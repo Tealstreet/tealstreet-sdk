@@ -1,0 +1,722 @@
+//! Engine-managed socket lifecycle for Bitunix's futures and private feeds:
+//! frames are admitted only on the open, current, unexpired epoch, and each
+//! open runs its subscriptions and login once.
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Notice, PublicFeedPolicy, Response, SocketId,
+    TimerId,
+};
+mod support;
+use safe_cex_venue_bitunix::BitunixFutures;
+
+const DEPTH: &str = r#"{"channel":"market_btcusdt_depthop_0.1","data":{"bids":[["96000","2"]],"asks":[["96001","3"]]}}"#;
+const LATER_DEPTH: &str = r#"{"channel":"market_btcusdt_depthop_0.1","data":{"bids":[["95000","2"]],"asks":[["95001","3"]]}}"#;
+fn order(id: &str) -> String {
+    format!(
+        r#"{{"ch":"order","data":{{"event":"CREATE","symbol":"BTCUSDT","orderId":"{id}","side":"BUY","type":"LIMIT","qty":"2","price":"90000","dealAmount":"0"}}}}"#
+    )
+}
+/// Futures idle bound: the legacy supervisor's 45 s.
+const IDLE_MS: f64 = 45_000.0;
+
+struct H {
+    engine: Engine<BitunixFutures>,
+    now: f64,
+    requests: Vec<HttpRequest>,
+    sockets: Vec<(SocketId, String)>,
+    sent: Vec<(SocketId, String)>,
+    closed: Vec<SocketId>,
+    timers: Vec<(TimerId, f64)>,
+    notices: Vec<Notice>,
+}
+
+impl H {
+    /// A keyed account with markets loaded; no socket is open yet.
+    fn start() -> Self {
+        Self::start_with(support::PAIRS, support::TICKERS)
+    }
+    /// `start` over a caller's catalogue and ticker seed.
+    fn start_with(pairs: &str, tickers: &str) -> Self {
+        Self::start_with_policy(pairs, tickers, PublicFeedPolicy::Direct)
+    }
+    fn start_with_policy(pairs: &str, tickers: &str, policy: PublicFeedPolicy) -> Self {
+        Self::start_with_mode(pairs, tickers, policy, false)
+    }
+    fn start_with_mode(
+        pairs: &str,
+        tickers: &str,
+        policy: PublicFeedPolicy,
+        frame_fed: bool,
+    ) -> Self {
+        let mut h = Self {
+            engine: support::engine(support::Options {
+                key: Some("replay-key".into()),
+                secret: Some("replay-material".into()),
+                ..support::Options::default()
+            }),
+            now: 1_700_000_000_000.0,
+            requests: vec![],
+            sockets: vec![],
+            sent: vec![],
+            closed: vec![],
+            timers: vec![],
+            notices: vec![],
+        };
+        h.engine.set_public_feed_policy(policy).unwrap();
+        if frame_fed {
+            h.engine.set_frame_fed().unwrap();
+        }
+        h.engine.start(h.now);
+        h.collect();
+        h.reply("trading_pairs", pairs);
+        if h.requests.iter().any(|r| r.url.contains("/tickers")) {
+            h.reply("/tickers", tickers);
+        }
+        h
+    }
+    /// Startup account reads answered, the private socket not yet open.
+    fn account_unopened() -> Self {
+        let mut h = Self::start();
+        for (part, body) in [
+            ("get_single_account", support::ACCOUNT),
+            ("get_pending_positions", support::POSITIONS),
+            ("get_pending_orders", support::ORDERS),
+            ("/tpsl/", support::TPSL),
+        ] {
+            if h.requests.iter().any(|r| r.url.contains(part)) {
+                h.reply(part, body);
+            }
+        }
+        h
+    }
+    /// As `account_unopened`, with the private socket open.
+    fn account() -> Self {
+        let mut h = Self::account_unopened();
+        let socket = h.private();
+        h.open(socket);
+        h.message(socket, r#"{"op":"login","data":{"result":true}}"#);
+        h
+    }
+    fn futures(&self) -> SocketId {
+        self.socket("ws-futures")
+    }
+    fn private(&self) -> SocketId {
+        self.socket("/private/")
+    }
+    fn socket(&self, part: &str) -> SocketId {
+        self.sockets
+            .iter()
+            .rev()
+            .find(|(_, url)| url.contains(part))
+            .unwrap_or_else(|| panic!("no {part} socket: {:?}", self.sockets))
+            .0
+    }
+    fn sent_on(&self, socket: SocketId, text: &str) -> usize {
+        self.sent
+            .iter()
+            .filter(|(s, t)| *s == socket && t.contains(text))
+            .count()
+    }
+    fn collect(&mut self) {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
+            match action {
+                Action::Http(request) => self.requests.push(request),
+                Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
+                Action::WsClose { socket } => self.closed.push(socket),
+                Action::WsSend { socket, text } => self.sent.push((socket, text)),
+                Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
+                Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                Action::Notice(notice) => self.notices.push(notice),
+                _ => {}
+            }
+        }
+    }
+    fn event(&mut self, event: Event<'_>) {
+        self.engine.handle(self.now, event);
+        self.collect();
+    }
+    fn reply(&mut self, part: &str, body: &str) {
+        let position = self
+            .requests
+            .iter()
+            .position(|r| r.url.contains(part))
+            .unwrap_or_else(|| panic!("missing {part}"));
+        let request = self.requests.remove(position);
+        self.event(Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body,
+            },
+        });
+    }
+    fn open(&mut self, socket: SocketId) {
+        self.event(Event::WsOpened { socket });
+    }
+    fn message(&mut self, socket: SocketId, text: &str) {
+        self.event(Event::WsMessage { socket, text });
+    }
+    fn subscribe_book(&mut self) {
+        self.event(Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }));
+    }
+    fn best_bid(&self) -> Option<f64> {
+        self.engine.book("BTCUSDT").and_then(|book| book.best_bid())
+    }
+}
+
+// REDs: these fail on the legacy supervisor, which admits a frame on a
+// socket whose idle deadline is due until its timer is delivered.
+
+#[test]
+fn futures_frame_at_idle_equality_is_not_published() {
+    let mut h = H::start();
+    h.subscribe_book();
+    let socket = h.futures();
+    h.open(socket);
+    h.message(socket, DEPTH);
+    assert_eq!(h.best_bid(), Some(96_000.0), "a live epoch publishes");
+    // The idle deadline is due but its timer has not been delivered yet.
+    h.now += IDLE_MS;
+    h.message(socket, LATER_DEPTH);
+    assert_ne!(h.best_bid(), Some(95_000.0));
+}
+
+#[test]
+fn private_frame_at_idle_equality_after_the_first_pong_is_not_reduced() {
+    let mut h = H::account();
+    let socket = h.private();
+    h.message(socket, r#"{"op":"pong"}"#);
+    h.message(socket, &order("live"));
+    assert!(
+        h.engine.store().order("live").is_some(),
+        "a live epoch reduces"
+    );
+    h.now += IDLE_MS;
+    h.message(socket, &order("late"));
+    assert!(h.engine.store().order("late").is_none());
+}
+
+// Controls: green before and after adoption. Legacy Bitunix already fences
+// duplicate opens and frames before open; adoption must keep that.
+
+#[test]
+fn futures_duplicate_open_does_not_resubscribe() {
+    let mut h = H::start();
+    h.subscribe_book();
+    let socket = h.futures();
+    h.open(socket);
+    let subscribes = h.sent_on(socket, "depthop");
+    assert_eq!(subscribes, 1);
+    h.open(socket);
+    assert_eq!(h.sent_on(socket, "depthop"), subscribes);
+    for topic in ["system_notice", "reconnected", "onconnected"] {
+        assert_eq!(
+            h.sent_on(socket, topic),
+            1,
+            "duplicate open cannot repeat bootstrap"
+        );
+    }
+}
+
+#[test]
+fn futures_frame_before_open_is_not_published() {
+    let mut h = H::start();
+    h.subscribe_book();
+    let socket = h.futures();
+    h.message(socket, DEPTH);
+    assert_eq!(h.best_bid(), None);
+    h.open(socket);
+    h.message(socket, DEPTH);
+    assert_eq!(h.best_bid(), Some(96_000.0), "an open epoch publishes");
+}
+
+#[test]
+fn private_duplicate_open_does_not_log_in_twice() {
+    let mut h = H::start();
+    let socket = h.private();
+    h.open(socket);
+    assert_eq!(h.sent_on(socket, r#""op":"login""#), 1);
+    h.open(socket);
+    assert_eq!(h.sent_on(socket, r#""op":"login""#), 1);
+}
+
+#[test]
+fn private_frame_before_open_is_not_reduced() {
+    let mut h = H::account_unopened();
+    let socket = h.private();
+    h.message(socket, &order("early"));
+    assert!(h.engine.store().order("early").is_none());
+    h.open(socket);
+    h.message(socket, &order("after"));
+    assert!(
+        h.engine.store().order("after").is_some(),
+        "an open epoch reduces"
+    );
+}
+
+#[test]
+fn futures_open_subscribes_each_interest_once() {
+    let mut h = H::start();
+    h.subscribe_book();
+    let socket = h.futures();
+    h.open(socket);
+    assert_eq!(h.sent_on(socket, "market_btcusdt_depthop_0.1"), 1);
+    let frames: Vec<_> = h
+        .sent
+        .iter()
+        .filter(|(id, _)| *id == socket)
+        .map(|(_, text)| text)
+        .collect();
+    for (frame, topic) in frames
+        .iter()
+        .zip(["system_notice", "reconnected", "onconnected"])
+    {
+        assert!(
+            frame.contains(topic),
+            "system bootstrap precedes caller interests: {frames:?}"
+        );
+    }
+}
+
+#[test]
+fn private_open_pings_then_logs_in() {
+    let mut h = H::start();
+    let socket = h.private();
+    h.open(socket);
+    let frames: Vec<_> = h
+        .sent
+        .iter()
+        .filter(|(s, _)| *s == socket)
+        .map(|(_, t)| t.as_str())
+        .collect();
+    let ping = frames.iter().position(|t| t.contains(r#""op":"ping""#));
+    let login = frames.iter().position(|t| t.contains(r#""op":"login""#));
+    assert!(ping.is_some() && login.is_some(), "{frames:?}");
+    assert!(ping < login, "the ping precedes the login: {frames:?}");
+}
+
+// Source-phase pins (8x5tm1 GO condition 3; dazzy3 pin 1 for D1).
+
+/// The public shards keep the legacy cadence (lib.rs: 20-symbol chunks, one
+/// frame per 250 ms queue timer): the first frame at open, then one per 250 ms,
+/// and the same again after a reconnect.
+#[test]
+fn public_shards_send_twenty_symbol_frames_250_ms_apart_and_again_on_reopen() {
+    let rows: Vec<_> = (0..45)
+        .map(|i| format!(r#"{{"symbol":"T{i}USDT","base":"T{i}","quote":"USDT","symbolStatus":"OPEN","basePrecision":3,"quotePrecision":1,"maxLimitOrderVolume":"100"}}"#))
+        .collect();
+    let pairs = format!(r#"{{"code":0,"data":[{}]}}"#, rows.join(","));
+    let tickers = r#"{"code":0,"data":[{"symbol":"T0USDT","last":"1","open":"1","markPrice":"1","baseVol":"1","quoteVol":"1"}]}"#;
+    let mut h = H::start_with(&pairs, tickers);
+    let ticker_shard = |h: &H| {
+        h.sockets
+            .iter()
+            .rev()
+            .filter(|(_, url)| url.contains("/public/"))
+            .map(|(s, _)| *s)
+            .collect::<Vec<_>>()
+    };
+    let shards = ticker_shard(&h);
+    assert_eq!(shards.len(), 2, "a ticker and a price shard for 45 markets");
+    let socket = shards[0];
+    let frames = |h: &H, socket: SocketId| -> Vec<usize> {
+        h.sent
+            .iter()
+            .filter(|(s, t)| *s == socket && t.contains(r#""op":"subscribe""#))
+            .map(|(_, t)| {
+                serde_json::from_str::<serde_json::Value>(t).unwrap()["args"]
+                    .as_array()
+                    .unwrap()
+                    .len()
+            })
+            .collect()
+    };
+    let paced = |h: &mut H, socket: SocketId| {
+        let opened = h.now;
+        h.open(socket);
+        assert_eq!(frames(h, socket), [20], "one frame in the open tick");
+        for (step, expected) in [(250.0, vec![20, 20]), (500.0, vec![20, 20, 5])] {
+            let due: Vec<_> = h
+                .timers
+                .iter()
+                .filter(|(_, at)| *at == opened + step)
+                .map(|(t, _)| *t)
+                .collect();
+            assert!(!due.is_empty(), "a pacing timer at +{step}");
+            h.now = opened + step;
+            for timer in due {
+                h.event(Event::TimerFired { timer });
+            }
+            assert_eq!(frames(h, socket), expected, "at +{step}");
+        }
+    };
+    paced(&mut h, socket);
+    // Reconnect: the replacement shard socket paces its replay identically.
+    h.now += 1.0;
+    let before: Vec<_> = h.timers.iter().map(|(t, _)| *t).collect();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    let (timer, at) = *h
+        .timers
+        .iter()
+        .filter(|(t, _)| !before.contains(t))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("the shard's reconnect backoff");
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    let replacement = h
+        .sockets
+        .iter()
+        .rev()
+        .find(|(s, url)| url.contains("/public/") && !shards.contains(s))
+        .expect("the shard reconnects")
+        .0;
+    h.sent.retain(|(s, _)| *s != replacement);
+    paced(&mut h, replacement);
+}
+
+/// Observe preserves private-data delivery before an answer, within master's
+/// independent ten-second login deadline.
+#[test]
+fn private_frames_reduce_before_the_login_answer_within_its_deadline() {
+    let mut h = H::account_unopened();
+    let socket = h.private();
+    h.open(socket);
+    h.now += 9_999.0;
+    h.message(socket, &order("before-login"));
+    assert!(h.engine.store().order("before-login").is_some());
+    assert!(!h.closed.contains(&socket));
+}
+
+#[test]
+fn private_frame_at_login_deadline_is_not_reduced_before_its_timer() {
+    let mut h = H::account_unopened();
+    let socket = h.private();
+    h.open(socket);
+    h.now += 10_000.0;
+    h.message(socket, &order("after-login-deadline"));
+    assert!(h.engine.store().order("after-login-deadline").is_none());
+    assert!(h.closed.contains(&socket));
+}
+
+#[test]
+fn login_answer_at_its_deadline_cannot_revive_the_private_epoch() {
+    let mut h = H::account_unopened();
+    let socket = h.private();
+    h.open(socket);
+    h.now += 10_000.0;
+    h.message(socket, r#"{"op":"login","data":{"result":true}}"#);
+    h.message(socket, &order("after-late-login"));
+    assert!(h.engine.store().order("after-late-login").is_none());
+    assert!(h.closed.contains(&socket));
+}
+
+#[test]
+fn host_supplied_public_data_suppresses_shards_without_an_admission_error() {
+    for policy in [PublicFeedPolicy::Shared, PublicFeedPolicy::Disabled] {
+        let h = H::start_with_policy(support::PAIRS, support::TICKERS, policy);
+        assert!(!h.sockets.iter().any(|(_, url)| url.contains("/public/")));
+        assert!(h.sockets.iter().any(|(_, url)| url.contains("ws-futures")));
+        assert!(h.sockets.iter().any(|(_, url)| url.contains("/private/")));
+        assert!(
+            !h.notices
+                .iter()
+                .any(|notice| matches!(notice, Notice::Event(event)
+            if event.code == safe_cex_engine::log::code::SUBSCRIPTION_REJECTED)),
+            "intentional public suppression is not socket refusal: {:?}",
+            h.notices
+        );
+    }
+}
+
+#[test]
+fn channel_named_pong_does_not_enable_the_private_idle_watch() {
+    for text in [r#"{"ch":"pong"}"#, r#"{"ch":"ping","pong":1}"#] {
+        let mut h = H::account();
+        let socket = h.private();
+        h.message(socket, text);
+        h.now += IDLE_MS + 1.0;
+        h.message(socket, &order("still-live-without-a-real-pong"));
+        assert!(
+            h.engine
+                .store()
+                .order("still-live-without-a-real-pong")
+                .is_some(),
+            "{text}"
+        );
+        assert!(!h.closed.contains(&socket));
+    }
+}
+
+#[test]
+fn candle_symbol_aliases_cannot_refuse_the_live_futures_feed() {
+    for (removed, retained) in [("btcusdt", "BTCUSDT"), ("BTCUSDT", "btcusdt")] {
+        let mut h = H::start();
+        let socket = h.futures();
+        h.open(socket);
+        h.subscribe_book();
+        for symbol in ["BTCUSDT", "btcusdt"] {
+            h.event(Event::Command(Command::SubscribeCandles {
+                symbol: symbol.into(),
+                interval: safe_cex_engine::model::Interval::M1,
+            }));
+        }
+        assert!(
+            !h.closed.contains(&socket),
+            "aliases must not stop the feed"
+        );
+        assert_eq!(h.sent_on(socket, "market_btcusdt_klineop_1min"), 1);
+        h.message(socket, DEPTH);
+        assert_eq!(h.best_bid(), Some(96_000.0));
+        for symbol in [None, Some(removed)] {
+            if let Some(symbol) = symbol {
+                h.event(Event::Command(Command::UnsubscribeCandles {
+                    symbol: symbol.into(),
+                    interval: safe_cex_engine::model::Interval::M1,
+                }));
+            }
+            h.engine.take_frame(h.now);
+            h.message(socket, r#"{"channel":"market_btcusdt_klineop_1min","data":{"time":1700000000000,"open":"100","high":"125","low":"99","close":"123","volume":"2"}}"#);
+            let frame = h.engine.take_frame(h.now).expect("live candle frame");
+            let rows = safe_cex_engine::wire::sections(frame)
+                .find(|(tag, _)| *tag == safe_cex_engine::wire::section::CANDLES)
+                .expect("candle delivered for the retained caller")
+                .1;
+            assert_eq!(
+                u32::from_le_bytes(rows[..4].try_into().unwrap()),
+                1,
+                "one candle publication per native topic, including aliases"
+            );
+            assert_eq!(u32::from_le_bytes(rows[4..8].try_into().unwrap()), 0);
+        }
+        assert_eq!(
+            h.sent_on(socket, "market_btcusdt_klineop_1min"),
+            1,
+            "removing {removed} must preserve {retained}"
+        );
+        h.event(Event::Command(Command::UnsubscribeCandles {
+            symbol: retained.into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }));
+        assert!(h.sent.iter().any(|(s, text)| *s == socket
+            && text.contains("unsub")
+            && text.contains("market_btcusdt_klineop_1min")));
+        h.engine.take_frame(h.now);
+        h.message(socket, r#"{"channel":"market_btcusdt_klineop_1min","data":{"time":1700000000000,"open":"100","high":"125","low":"99","close":"123","volume":"2"}}"#);
+        if let Some(frame) = h.engine.take_frame(h.now) {
+            assert!(
+                !safe_cex_engine::wire::sections(frame)
+                    .any(|(tag, _)| tag == safe_cex_engine::wire::section::CANDLES)
+            );
+        }
+        h.event(Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }));
+        assert_eq!(h.sent_on(socket, "market_btcusdt_klineop_1min"), 3);
+    }
+}
+
+#[test]
+fn private_connect_timeout_does_not_claim_a_missing_login_answer() {
+    for opened in [false, true] {
+        let mut h = H::account_unopened();
+        let socket = h.private();
+        if opened {
+            h.open(socket);
+        }
+        // A delayed ingress proves the due deadline even before its timer runs.
+        h.now += 10_000.0;
+        h.message(socket, r#"{"op":"pong"}"#);
+        if !opened {
+            h.open(socket);
+        }
+        assert!(h.closed.contains(&socket));
+        let missing_login = h.notices.iter().filter(|notice| matches!(notice,
+            Notice::Event(event) if event.message.contains("did not answer the private socket login"))).count();
+        assert_eq!(missing_login, usize::from(opened), "opened={opened}");
+        let (timer, at) = h
+            .timers
+            .iter()
+            .copied()
+            .find(|(_, at)| (750.0..=1000.0).contains(&(*at - h.now)))
+            .expect("bounded recovery retry");
+        h.now = at;
+        h.event(Event::TimerFired { timer });
+        assert_ne!(h.private(), socket);
+    }
+}
+
+#[test]
+fn frame_fed_discovery_never_registers_or_dials_managed_sockets() {
+    let h = H::start_with_mode(
+        support::PAIRS,
+        support::TICKERS,
+        PublicFeedPolicy::Direct,
+        true,
+    );
+    assert!(
+        h.sockets.is_empty(),
+        "frame-fed discovery must not dial: {:?}",
+        h.sockets
+    );
+    assert!(h.closed.is_empty());
+}
+
+#[test]
+fn reconnect_restores_the_native_hosts_full_subscription_limit() {
+    let mut h = H::start();
+    let socket = h.futures();
+    h.open(socket);
+    let mut expected = (0..safe_cex_engine::socket_lifecycle::MAX_FRAMES)
+        .map(|index| format!("market_t{index}usdt_klineop_1min"))
+        .collect::<Vec<_>>();
+    expected.sort();
+    let topics_on = |h: &H, socket| {
+        let mut topics = h
+            .sent
+            .iter()
+            .filter(|(s, _)| *s == socket)
+            .filter_map(|(_, text)| serde_json::from_str::<serde_json::Value>(text).ok())
+            .filter(|v| v["event"] == "sub")
+            .filter_map(|v| v["params"]["channel"].as_str().map(str::to_owned))
+            .filter(|s| s.contains("klineop_"))
+            .collect::<Vec<_>>();
+        topics.sort();
+        topics
+    };
+    for index in 0..safe_cex_engine::socket_lifecycle::MAX_FRAMES {
+        h.event(Event::Command(Command::SubscribeCandles {
+            symbol: format!("T{index}USDT"),
+            interval: safe_cex_engine::model::Interval::M1,
+        }));
+    }
+    assert_eq!(
+        h.sent_on(socket, "klineop_1min"),
+        4096,
+        "all accepted subscriptions were live"
+    );
+    assert_eq!(topics_on(&h, socket), expected);
+    // Caller aliases share one wire topic, including at the exact replay cap.
+    h.event(Event::Command(Command::SubscribeCandles {
+        symbol: "t0usdt".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    }));
+    let before = h.sent.len();
+    let notice_count = h.notices.len();
+    h.subscribe_book();
+    h.event(Event::Command(Command::SubscribeCandles {
+        symbol: "OVERFLOWUSDT".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    }));
+    assert_eq!(
+        h.sent.len(),
+        before,
+        "refused topics publish no subscription"
+    );
+    assert!(
+        h.notices.len() >= notice_count + 2,
+        "both overflow commands must refuse"
+    );
+    assert!(
+        !h.closed.contains(&socket),
+        "refusal must retain the live feed"
+    );
+    h.event(Event::Command(Command::UnsubscribeCandles {
+        symbol: "OVERFLOWUSDT".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    }));
+    assert_eq!(
+        h.sent.len(),
+        before,
+        "rejected candle intent must not remain resident"
+    );
+    h.event(Event::WsClosed { socket, code: 1006 });
+    let (timer, at) = h
+        .timers
+        .iter()
+        .copied()
+        .find(|(_, at)| (*at - h.now) >= 750.0 && (*at - h.now) <= 1000.0)
+        .expect("futures retry");
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    let replacement = h.futures();
+    assert_ne!(replacement, socket);
+    h.open(replacement);
+    assert!(!h.closed.contains(&replacement));
+    assert_eq!(h.sent_on(replacement, "klineop_1min"), 4096);
+    assert_eq!(topics_on(&h, replacement), expected);
+    for topic in ["system_notice", "reconnected", "onconnected"] {
+        assert_eq!(h.sent_on(replacement, topic), 1);
+    }
+}
+
+#[test]
+fn a_freed_topic_accepts_a_book_after_direct_engine_overflow_refusal() {
+    let mut h = H::start();
+    let socket = h.futures();
+    h.open(socket);
+    for index in 0..safe_cex_engine::socket_lifecycle::MAX_FRAMES {
+        h.event(Event::Command(Command::SubscribeCandles {
+            symbol: format!("T{index}USDT"),
+            interval: safe_cex_engine::model::Interval::M1,
+        }));
+    }
+    h.subscribe_book();
+    h.event(Event::Command(Command::UnsubscribeCandles {
+        symbol: "T1USDT".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    }));
+    h.subscribe_book();
+    h.message(socket, DEPTH);
+    assert_eq!(
+        h.best_bid(),
+        Some(96_000.0),
+        "refusal must not stop the feed or retain rejected book intent"
+    );
+}
+
+#[test]
+fn direct_replay_capacity_is_enforced_before_open_and_while_no_epoch_is_live() {
+    for before_open in [false, true] {
+        let mut h = H::start();
+        let old = h.futures();
+        h.event(Event::WsClosed {
+            socket: old,
+            code: 1006,
+        });
+        for index in 0..safe_cex_engine::socket_lifecycle::MAX_FRAMES {
+            h.event(Event::Command(Command::SubscribeCandles {
+                symbol: format!("T{index}USDT"),
+                interval: safe_cex_engine::model::Interval::M1,
+            }));
+        }
+        let retry = |h: &mut H| {
+            let (timer, at) = h
+                .timers
+                .iter()
+                .copied()
+                .find(|(_, at)| (750.0..=1000.0).contains(&(*at - h.now)))
+                .expect("retry");
+            h.now = at;
+            h.event(Event::TimerFired { timer });
+        };
+        if before_open {
+            retry(&mut h);
+        }
+        let notices = h.notices.len();
+        h.subscribe_book();
+        assert!(
+            h.notices.len() > notices,
+            "pending overflow must refuse before recording book intent: before_open={before_open}"
+        );
+        if !before_open {
+            retry(&mut h);
+        }
+        let replacement = h.futures();
+        h.open(replacement);
+        assert!(!h.closed.contains(&replacement));
+        assert_eq!(h.sent_on(replacement, "klineop_1min"), 4096);
+    }
+}

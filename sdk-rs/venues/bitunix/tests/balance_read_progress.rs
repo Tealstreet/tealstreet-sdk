@@ -138,6 +138,7 @@ fn notification_repair_cannot_supersede_a_slow_balance_read() {
 fn lost_read_replacement_and_late_callbacks_keep_the_new_balance_read_owned() {
     for late_failure in [false, true] {
         let (mut e, socket) = startup();
+        event(&mut e, socket, r#"{"op":"login","data":{"result":true}}"#);
         let old = begin(&mut e, socket);
         let actions = notify(&mut e, socket, 10100.0);
         let actions = fire(&mut e, timer_at(&actions, 11100.0), 11100.0);
@@ -292,6 +293,7 @@ fn synchronous_balance_signing_failure_releases_before_the_normal_repair() {
 #[test]
 fn every_balance_issuer_anchors_the_lost_read_bound_at_actual_dispatch() {
     let (mut e, socket) = startup();
+    event(&mut e, socket, r#"{"op":"login","data":{"result":true}}"#);
     let old = begin(&mut e, socket); // dispatched1100
     let actions = notify(&mut e, socket, 9600.0);
     let actions = fire(&mut e, timer_at(&actions, 10600.0), 10600.0);
