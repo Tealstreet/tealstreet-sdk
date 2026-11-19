@@ -31,6 +31,10 @@ recurring merge conflict.
 - **PRs fail only on the byte ceiling** (`wasmBudgetError`: measured > current
   cap). A reserve under 10 KiB is a `::warning::` and step-summary line
   (`wasmReserveWarning`), never a failure, and PRs do not edit caps.
+- A successfully sealed family remains downloadable after a failed byte ceiling
+  or isolation check; failed sealing or cancelled runs do not publish it.
+  Retention is measurement evidence only: the family job still fails, required
+  coverage still refuses, and replay still requires a successful family job.
 - **The reserve is restored on master by a bot.** `.github/workflows/wasm-caps.yml`
   runs after every master push run of `Rust SDK`, downloads that run's
   `wasm-family-*` and `replay-combined-package` artifacts and runs

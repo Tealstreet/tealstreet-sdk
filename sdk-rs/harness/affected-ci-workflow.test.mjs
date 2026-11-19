@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { RUST_SCOPE_PATTERNS } from './ci-scope.mjs';
 
 const source = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
@@ -68,6 +69,49 @@ function check(text) {
 }
 
 test('PR replay is affected-only and independent; CPU stays on calibrated landing runners', () => check(source));
+
+// Model the GitHub status functions for the actual workflow condition: a failed
+// byte ceiling must retain an already sealed measurement without admitting replay.
+function checkSealedFamilyRetention(text) {
+  const families = job(text, 'families');
+  const seal = /      - name: Seal the selected family build\n([\s\S]*?)(?=      - )/.exec(families)?.[1];
+  const upload = /      - name: Retain sealed same-run family build\n([\s\S]*?)(?=\n      - )/.exec(families)?.[1];
+  assert(seal && upload, 'seal and upload steps must remain');
+  const condition = /        if: (.+)/.exec(upload)?.[1]?.replace(/^\$\{\{\s*|\s*\}\}$/g, '') ?? 'success()';
+  const sealId = /        id: (\w+)/.exec(seal)?.[1] ?? 'missing_seal';
+  for (const [outcome, earlierFailure, cancelled, expected] of [
+    ['success', true, false, true], // actual over-cap run: sealed, then cap check fails
+    ['success', false, false, true],
+    ['failure', true, false, false],
+    ['skipped', true, false, false],
+    ['success', false, true, false],
+  ]) {
+    const actual = runInNewContext(condition, {
+      cancelled: () => cancelled,
+      success: () => !earlierFailure && !cancelled,
+      always: () => true,
+      steps: { [sealId]: { outcome } },
+    });
+    assert.equal(actual, expected, `seal=${outcome}, earlierFailure=${earlierFailure}, cancelled=${cancelled}`);
+  }
+  const sizeStep = /      - name: Check family isolation, every alias and the shipped size\n([\s\S]*?)(?=      - )/.exec(families)?.[1];
+  assert(sizeStep);
+  assert.doesNotMatch(sizeStep, /continue-on-error|\bif:/);
+  assert.match(job(text, 'replay'), /needs\.families\.result == 'success'/);
+}
+
+test('an over-cap family retains only its completed seal while size and replay gates stay strict', () => {
+  checkSealedFamilyRetention(source);
+});
+
+test('sealed-family retention rejects success-only, unsealed or cancelled uploads', () => {
+  const guard = "!cancelled() && steps.family_seal.outcome == 'success'";
+  assert(source.includes(guard));
+  for (const condition of ['success()', 'always()', "steps.family_seal.outcome == 'success'"]) {
+    assert.throws(() => checkSealedFamilyRetention(source.replace(guard, condition)), /seal=/);
+  }
+});
+
 
 function checkIsolatedTypes(text) {
   const native = job(text, 'native');
