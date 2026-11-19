@@ -125,7 +125,7 @@ test('stray directories and combined-only downloads refuse', (t) => {
   assert.throws(() => collectMeasurements({ artifacts: artifactTree(t, {}), root: '.', validate: seal() }), /no sealed family artifacts/);
 });
 
-test('the bot workflow measures master Rust runs and only opens a reviewed PR', () => {
+test('the bot workflow measures master Rust runs, pushes only changed caps and dispatches their checks', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/wasm-caps.yml', import.meta.url), 'utf8');
   const rust = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
   assert.match(rust, /^name: Rust SDK$/m);
@@ -147,8 +147,14 @@ test('the bot workflow measures master Rust runs and only opens a reviewed PR', 
   const pushes = [...workflow.matchAll(/^\s*git push\b.*$/gm)].map(([line]) => line.trim());
   assert.deepEqual(pushes, ['git push --force-with-lease="refs/heads/$BOT_BRANCH:${BOT_LEASE:-}" origin "HEAD:refs/heads/$BOT_BRANCH"']);
   assert.match(workflow, />> "\$GITHUB_STEP_SUMMARY"/);
-  assert.doesNotMatch(workflow, /\bgh\s|GH_TOKEN|pulls|pull-requests:/, 'no PR API and no PR permission');
-  assert.match(workflow, /permissions:\n\s+contents: write\n\s+actions: read\n\n/);
+  assert.doesNotMatch(workflow, /\bgh\s+(pr|api)\b|pulls|pull-requests:/, 'no PR API and no PR permission');
+  // A GITHUB_TOKEN push starts no workflows, so the required checks are dispatched at the pushed head (AGT-23, #3690).
+  const ghCalls = [...workflow.matchAll(/^\s*gh\s.*$/gm)].map(([line]) => line.trim());
+  assert.deepEqual(ghCalls, ['gh workflow run ci.yml --ref "$BOT_BRANCH"', 'gh workflow run rust.yml --ref "$BOT_BRANCH"']);
+  assert.match(workflow, /if: env\.PUSHED == 'true'/);
+  // Caps identical to the bot branch push nothing, so an open PR's head and checks stay put.
+  assert.match(workflow, /cmp -s "\$RUNNER_TEMP\/bot-wasm-caps\.json" sdk-rs\/harness\/wasm-caps\.json[\s\S]*exit 0[\s\S]*git push/);
+  assert.match(workflow, /permissions:\n\s+contents: write\n(\s+#[^\n]*\n)?\s+actions: write\n\n/);
   assert.doesNotMatch(workflow, /secrets\./, 'GITHUB_TOKEN only');
   for (const [, action] of workflow.matchAll(/uses: ([^@\s]+)@/g)) assert.match(action, /^actions\//, 'GitHub-owned actions only');
 });
