@@ -71,7 +71,8 @@ function check(text) {
 test('PR replay is affected-only and independent; CPU stays on calibrated landing runners', () => check(source));
 
 // Model the GitHub status functions for the actual workflow condition: a failed
-// byte ceiling must retain an already sealed measurement without admitting replay.
+// byte ceiling retains an already sealed measurement on a PR only. On master the
+// wasm-caps bot would raise a cap from it, so an over-cap family uploads nothing.
 function checkSealedFamilyRetention(text) {
   const families = job(text, 'families');
   const seal = /      - name: Seal the selected family build\n([\s\S]*?)(?=      - )/.exec(families)?.[1];
@@ -79,20 +80,27 @@ function checkSealedFamilyRetention(text) {
   assert(seal && upload, 'seal and upload steps must remain');
   const condition = /        if: (.+)/.exec(upload)?.[1]?.replace(/^\$\{\{\s*|\s*\}\}$/g, '') ?? 'success()';
   const sealId = /        id: (\w+)/.exec(seal)?.[1] ?? 'missing_seal';
-  for (const [outcome, earlierFailure, cancelled, expected] of [
-    ['success', true, false, true], // actual over-cap run: sealed, then cap check fails
-    ['success', false, false, true],
-    ['failure', true, false, false],
-    ['skipped', true, false, false],
-    ['success', false, true, false],
+  const refs = { pull_request: 'refs/pull/1/merge', push: 'refs/heads/master', workflow_dispatch: 'refs/heads/master' };
+  for (const [event, outcome, earlierFailure, cancelled, expected] of [
+    ['pull_request', 'success', true, false, true], // PR over-cap: sealed, cap check fails, author keeps the evidence
+    ['push', 'success', true, false, false], // master over-cap: stays red with no artifact for the caps bot
+    ['workflow_dispatch', 'success', true, false, false],
+    ['pull_request', 'success', false, false, true],
+    ['push', 'success', false, false, true],
+    ['pull_request', 'failure', true, false, false],
+    ['pull_request', 'skipped', true, false, false],
+    ['push', 'failure', true, false, false],
+    ['pull_request', 'success', false, true, false],
+    ['push', 'success', false, true, false],
   ]) {
     const actual = runInNewContext(condition, {
       cancelled: () => cancelled,
       success: () => !earlierFailure && !cancelled,
       always: () => true,
+      github: { event_name: event, ref: refs[event] },
       steps: { [sealId]: { outcome } },
     });
-    assert.equal(actual, expected, `seal=${outcome}, earlierFailure=${earlierFailure}, cancelled=${cancelled}`);
+    assert.equal(actual, expected, `event=${event}, seal=${outcome}, earlierFailure=${earlierFailure}, cancelled=${cancelled}`);
   }
   const sizeStep = /      - name: Check family isolation, every alias and the shipped size\n([\s\S]*?)(?=      - )/.exec(families)?.[1];
   assert(sizeStep);
@@ -104,10 +112,16 @@ test('an over-cap family retains only its completed seal while size and replay g
   checkSealedFamilyRetention(source);
 });
 
-test('sealed-family retention rejects success-only, unsealed or cancelled uploads', () => {
-  const guard = "!cancelled() && steps.family_seal.outcome == 'success'";
+test('sealed-family retention rejects success-only, unsealed, cancelled or master over-cap uploads', () => {
+  const guard = "!cancelled() && steps.family_seal.outcome == 'success' && (success() || github.event_name == 'pull_request')";
   assert(source.includes(guard));
-  for (const condition of ['success()', 'always()', "steps.family_seal.outcome == 'success'"]) {
+  for (const condition of [
+    'success()',
+    'always()',
+    "steps.family_seal.outcome == 'success'",
+    // The pre-2026-11-19 guard (aae395f1fa) uploaded master over-cap families too.
+    "!cancelled() && steps.family_seal.outcome == 'success'",
+  ]) {
     assert.throws(() => checkSealedFamilyRetention(source.replace(guard, condition)), /seal=/);
   }
 });
