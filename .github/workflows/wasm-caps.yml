@@ -1,7 +1,10 @@
 # Generated WASM caps (rule 17). After each master Rust SDK run, measure every
 # sealed family artifact and the combined package of that run and raise any cap
 # whose reserve fell under 10 KiB: cap = max(cap, ceil((measured + 10 KiB) / KiB)).
-# Caps are never lowered. Raised caps go to the bot-owned branch bot/wasm-caps and
+# Caps are never lowered. Since 2026-11-19 a master family over its cap stays red
+# and uploads no artifact, so this bot only restores reserve and never absorbs an
+# overrun; a PR that outgrows its cap raises it itself in a separate commit with a
+# wasm-caps-history.md line and a CLEAR naming the growth. Raised caps go to the bot-owned branch bot/wasm-caps and
 # the job summary; this workflow calls no PR API. Actions may not create or approve
 # PRs here (coordinator decision on #3686), so Sam's fleet-watch opens the PR with
 # a user token, which also lets CI run on it normally.
@@ -27,7 +30,7 @@ concurrency:
 jobs:
   refresh:
     name: Restore rule-17 reserve
-    # Only master pushes measure every family; a failed run still uploads the families that fit.
+    # Only master pushes measure every family; a failed run uploads only the families that fit.
     if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 20
