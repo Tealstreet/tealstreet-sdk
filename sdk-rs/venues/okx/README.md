@@ -93,6 +93,21 @@ KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. HTTP
 text; only their telemetry assertion is deferred. No shared engine code is
 changed to add this venue companion event.
 
+## Entire-position TP/SL (AGT-68)
+
+OKX keeps one entire-position (`closeFraction=1`) TP/SL algo per position and
+refuses a second with `51088`. A full SL and TP placed in one command become
+one `oco` algo, as OKX documents and ccxt places them. A full-position SL or TP
+for a position that already holds an open full algo, of either kind, is refused
+before any write as not sent: "OKX allows one full-position TP/SL. Edit the
+existing order or remove it first." This also covers a command carrying both
+legs while one is held, so one leg is never sent with 51088 on the other.
+Adding a leg to a held algo through `amend-algos` is deliberately not done: it
+is undocumented, ccxt warns that a two-leg `conditional` applies only its SL,
+and a protective leg falsely reported as placed is worse than a refusal.
+Partial-size legs and other positions are unaffected. Legacy TS sends the
+second algo and gets `51088`; this is a recorded deviation.
+
 ## Native write refusal diagnostics
 
 One ACK decoder borrows plain messages and owns escaped messages. Owned text

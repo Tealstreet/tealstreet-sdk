@@ -102,8 +102,9 @@ completed successfully; it does not promise a venue fill or an empty future stor
 
 refused: result is null; error is {message:<bounded text>,outcome:"notSent"}.
 This requires proof that the ENTIRE action was not sent. Pre-dispatch validation,
-unadmitted account, unsupported capability, expired key and explicit native
-notSent are examples. ACK(false) is permitted only with that proof.
+unadmitted account, unsupported capability, expired key, explicit native
+notSent and a whole-action venue rejection (engine `rejected` with no partial
+effects or non-notSent element) are examples. ACK(false) is permitted only with that proof.
 
 unknown: result is null; error is {message:<bounded text>,outcome:"unknown"}.
 Any uncertain/partial action, post-dispatch interruption, malformed completion,

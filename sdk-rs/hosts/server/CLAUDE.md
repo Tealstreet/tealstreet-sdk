@@ -545,3 +545,11 @@ Action deadlines use the same bounded age, clamp future-key wall expiry to
 arrival-time plus 10 seconds and retain the client-age monotonic bound. Deferred
 work cannot renew that budget. The paired router policy must preserve its
 coverage-quarantine and cross-clock safety bounds when adopting this tolerance.
+
+## Venue rejections in typed action outcomes
+
+`order_actions::settle` treats an engine `rejected` error with no partial
+evidence (IDs, counts, `partial`, `protection`, or a non-`notSent` element) as
+`refused`/`notSent`, matching `order_frames::settle_intent`. Before AGT-68 a
+definitive refusal such as OKX 51088 settled `unknown` and left mobile's sticky
+"still unconfirmed" toast. Partial or uncertain failures stay `unknown`.

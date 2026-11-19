@@ -457,7 +457,20 @@ pub fn settle(
                 .is_some_and(|v| !v.is_empty())
                 || error["partialOrderCount"].as_u64().is_some_and(|v| v > 0)
                 || error["elements"].as_array().is_some_and(|v| !v.is_empty());
-            let not_sent = error["outcome"] == "notSent" && !partial;
+            // The engine's `rejected` means every released leg was definitively
+            // refused (AGT-68): no-effect proof, as for placement intents. Any
+            // partial, protection change or non-notSent element keeps it unknown.
+            let rejected = error["outcome"] == "rejected"
+                && !error["partial"].is_object()
+                && !error["protection"].is_string()
+                && error["partialOrderIds"]
+                    .as_array()
+                    .is_none_or(|v| v.is_empty())
+                && error["partialOrderCount"].as_u64().is_none_or(|v| v == 0)
+                && error["elements"]
+                    .as_array()
+                    .is_none_or(|v| v.iter().all(|e| e["status"] == "notSent"));
+            let not_sent = (error["outcome"] == "notSent" && !partial) || rejected;
             data["outcome"] = if not_sent { "refused" } else { "unknown" }.into();
             let message: String = error["message"]
                 .as_str()
@@ -772,6 +785,62 @@ mod tests {
             settle(&out, "main", &json!("intent"), 1, kind, answer);
             let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
             assert_eq!(frame["d"]["outcome"], expected, "{kind}: {frame}");
+        }
+    }
+
+    /// AGT-68: OKX 51088 was logged unknown and left a sticky "still
+    /// unconfirmed" toast. A whole-action venue rejection is no-effect proof,
+    /// exactly as `order_frames::settle_intent` already treats placements.
+    #[tokio::test]
+    async fn a_whole_action_venue_rejection_is_refused_not_unknown() {
+        let reason = "You can only place 1 TP/SL order to close an entire position (code 51088)";
+        for (kind, answer, expected) in [
+            (
+                "place",
+                Err(
+                    json!({"name":"ExchangeError","message":reason,"outcome":"rejected","venueCode":"51088"}),
+                ),
+                "refused",
+            ),
+            (
+                "place",
+                Err(json!({"message":reason,"outcome":"rejected",
+                    "elements":[{"index":0,"status":"notSent"}]})),
+                "refused",
+            ),
+            (
+                "place",
+                Err(
+                    json!({"message":reason,"outcome":"rejected","partialOrderIds":["native-first"]}),
+                ),
+                "unknown",
+            ),
+            (
+                "place",
+                Err(json!({"message":reason,"outcome":"rejected","partial":{"orderIds":[]}})),
+                "unknown",
+            ),
+            (
+                "cancelOrders",
+                Err(json!({"message":reason,"outcome":"rejected",
+                    "elements":[{"index":0,"status":"applied","effect":"cancel"}]})),
+                "unknown",
+            ),
+            (
+                "amend",
+                Err(json!({"message":reason,"outcome":"rejected","protection":"unprotected"})),
+                "unknown",
+            ),
+        ] {
+            let (out, mut sent, _) = Out::channel(4);
+            settle(&out, "main", &json!("intent"), 1, kind, answer);
+            let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+            assert_eq!(frame["d"]["outcome"], expected, "{kind}: {frame}");
+            if expected == "refused" {
+                assert_eq!(frame["d"]["error"]["outcome"], "notSent", "{frame}");
+                assert_eq!(frame["d"]["error"]["message"], reason);
+                assert!(frame["d"]["result"].is_null());
+            }
         }
     }
 

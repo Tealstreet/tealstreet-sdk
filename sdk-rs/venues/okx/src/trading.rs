@@ -377,6 +377,30 @@ struct OrderPayload {
     callback_spread: Option<String>,
 }
 
+const FULL_POSITION_HELD: &str =
+    "OKX allows one full-position TP/SL. Edit the existing order or remove it first.";
+
+/// `Some(true)` for a lone full-position SL, `Some(false)` for a lone full TP.
+fn single_full_leg(payload: &OrderPayload) -> Option<bool> {
+    if payload.ord_type != "conditional" || payload.close_fraction != Some("1") {
+        return None;
+    }
+    match (&payload.sl_trigger_px, &payload.tp_trigger_px) {
+        (Some(_), None) => Some(true),
+        (None, Some(_)) => Some(false),
+        _ => None,
+    }
+}
+
+fn complements(placed: &OrderPayload, payload: &OrderPayload) -> bool {
+    matches!(
+        (single_full_leg(placed), single_full_leg(payload)),
+        (Some(a), Some(b)) if a != b
+    ) && placed.inst_id == payload.inst_id
+        && placed.side == payload.side
+        && placed.pos_side == payload.pos_side
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Cancel<'a> {
@@ -747,6 +771,7 @@ impl Okx {
             .into_iter()
             .map(|o| self.order_payload(cx, &o, o.amount))
             .collect::<Result<Vec<_>, _>>()?;
+        let algos = self.full_position_algos(cx, algos)?;
         let mut steps = Vec::new();
         for batch in regular.chunks(20) {
             steps.push(placement_step(
@@ -765,6 +790,59 @@ impl Okx {
             )?);
         }
         Ok(job(steps, Finish::Ids))
+    }
+
+    /// OKX keeps ONE entire-position TP/SL algo per position and refuses a
+    /// second with 51088. A full SL and TP placed together become one `oco`
+    /// algo (as ccxt places them). A full leg for a position that already holds
+    /// a full algo is refused before any write: adding a leg to an existing
+    /// close-all algo through amend-algos is undocumented and unverified.
+    fn full_position_algos(
+        &self,
+        cx: &Cx<'_, Pending>,
+        payloads: Vec<OrderPayload>,
+    ) -> Result<Vec<OrderPayload>, String> {
+        let mut placed: Vec<OrderPayload> = Vec::new();
+        for payload in payloads {
+            if let Some(partner) = placed.iter_mut().find(|p| complements(p, &payload)) {
+                partner.ord_type = "oco";
+                if payload.sl_trigger_px.is_some() {
+                    partner.sl_trigger_px = payload.sl_trigger_px;
+                    partner.sl_ord_px = payload.sl_ord_px;
+                    partner.sl_trigger_px_type = payload.sl_trigger_px_type;
+                } else {
+                    partner.tp_trigger_px = payload.tp_trigger_px;
+                    partner.tp_ord_px = payload.tp_ord_px;
+                    partner.tp_trigger_px_type = payload.tp_trigger_px_type;
+                }
+                continue;
+            }
+            placed.push(payload);
+        }
+        if placed
+            .iter()
+            .any(|p| p.close_fraction == Some("1") && self.holds_full_position_algo(cx, p))
+        {
+            return Err(FULL_POSITION_HELD.into());
+        }
+        Ok(placed)
+    }
+
+    /// The position already has an open entire-position TP or SL. Full rows
+    /// carry the zero-size sentinel; trigger rows always have a size.
+    fn holds_full_position_algo(&self, cx: &Cx<'_, Pending>, payload: &OrderPayload) -> bool {
+        cx.store.orders().iter().any(|o| {
+            o.symbol == payload.symbol
+                && o.side == payload.side
+                && matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                && o.amount == 0.0
+                && matches!(o.status, OrderStatus::Open | OrderStatus::Updating)
+                && !self
+                    .trading
+                    .algo_orders
+                    .get(&o.id)
+                    .is_some_and(|observed| observed.trigger)
+        })
     }
 
     fn order_payload(
