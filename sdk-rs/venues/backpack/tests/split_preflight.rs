@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 
 use safe_cex_engine::write_plan::{AppliedEffect, ElementResult};
@@ -6,7 +7,8 @@ use serde_json::{Value, json};
 use std::collections::{BTreeSet, VecDeque};
 use support::managed::*;
 
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 

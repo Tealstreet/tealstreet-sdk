@@ -70,12 +70,15 @@ impl Request {
     }
 }
 
-pub(crate) const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+pub(crate) const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 pub(crate) fn write_failure_text(error: &VenueError) -> String {
     if error.outcome == Some(Outcome::Unknown) {
         // Projection retains uncertainty context without its presentation marker.
-        if error.message.contains(ENGINE_UNKNOWN_TEXT) {
+        if error.message.contains(ENGINE_UNKNOWN_TEXT)
+            || error.message.contains("Check your open orders")
+        {
             error.message.clone()
         } else if error.presents || error.message.contains("Check Open Orders") {
             format!("{}: {ENGINE_UNKNOWN_TEXT}", error.message)
@@ -574,7 +577,7 @@ impl AsterDex {
             {
                 (
                     command,
-                    Err("Aster position mode has not loaded yet; order placement is held until it does".into()),
+                    Err("Aster’s position mode is still loading. Wait for it to load before placing an order.".into()),
                 )
             }
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, &orders)),
@@ -978,7 +981,7 @@ impl AsterDex {
                 && let Some((symbol, ..)) = &job.replacing_stop
             {
                 let words = format!(
-                    "Your {symbol} stop's replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+                    "Your {symbol} replacement stop was declined, and restoring the original wasn’t confirmed. Check your open orders before adding protection."
                 );
                 let _ = cx.present_plan_failure(&plan, words);
             }
@@ -1463,7 +1466,7 @@ impl AsterDex {
                 } else {
                     failed_element(
                         element_error
-                            .unwrap_or_else(|| VenueError::new("Aster write outcome is unknown")),
+                            .unwrap_or_else(|| VenueError::new("Aster didn’t confirm this change. Check your open orders before trying again.")),
                     )
                 };
                 let _ = journal.record(index, result);
@@ -2099,6 +2102,7 @@ fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::fee_rate;

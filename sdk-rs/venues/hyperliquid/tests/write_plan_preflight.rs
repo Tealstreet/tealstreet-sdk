@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -339,7 +340,7 @@ fn runtime_failure_suffix(
         assert_eq!(elements[second_rows + 1]["error"]["outcome"], "notSent");
         assert_eq!(
             elements[second_rows + 1]["error"]["message"],
-            "Request is not in a sendable state"
+            "This request isn’t ready to send"
         );
     } else {
         assert!(elements[second_rows + 1].get("error").is_none(), "{error}");

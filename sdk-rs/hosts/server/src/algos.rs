@@ -407,7 +407,7 @@ impl AccountPort for Port {
         if !self.running.io_allowed() {
             return Box::pin(async {
                 Err(
-                    VenueError::new("Router lease expired; no new work was sent")
+                    VenueError::new("The server connection expired; no new orders were sent")
                         .kind(ErrorKind::VenueUnavailable)
                         .outcome(Outcome::NotSent),
                 )
@@ -521,7 +521,7 @@ fn stop_notices(
                     })
                 });
             let check = if resting {
-                " Its order may still be open: check it."
+                " Check your open orders."
             } else {
                 ""
             };
@@ -538,7 +538,7 @@ fn stop_notices(
             .as_str()
             .unwrap_or("this account");
         let check = if may_rest {
-            " Its orders may still be open: check them."
+            " Check your open orders."
         } else {
             ""
         };
@@ -1058,7 +1058,7 @@ pub(crate) async fn run_with_identity(
                     port.client.set(feed.client());
                     // Their completions went to the dropped client: the outcome is unknown.
                     for (_, waiter) in port.pending.borrow_mut().drain() {
-                        let mut error = VenueError::new("algo feed rejoined; command outcome unknown");
+                        let mut error = VenueError::new("The account connection was interrupted. Check your open orders before trying again.");
                         error.outcome = Some(Outcome::Unknown);
                         let _ = waiter.send(Err(error));
                     }
@@ -1082,7 +1082,7 @@ pub(crate) async fn run_with_identity(
                     let paused = twap.active_twaps(&name);
                     // No cancellation cleanup: already-dispatched orders may still rest or fill.
                     scope.dispose();
-                    let kept: Kept = "Router ownership expired: chases stopped and TWAPs paused. Resting orders were kept; an in-flight order may still fill. Check Open Orders, then explicitly resume TWAPs or start a new chase after reconnecting.".into();
+                    let kept: Kept = "The server connection expired: chases stopped and TWAPs paused without cancelling existing orders. Check your open orders before restarting them.".into();
                     for frame in kept.frames(&name) { (port.broadcast)(Some(frame)); }
                     handle.store_algos(&Vec::<safe_cex_chaser::ActiveChaser>::new(), &paused);
                     handle.flush_store_frames().await;
@@ -1095,7 +1095,7 @@ pub(crate) async fn run_with_identity(
                 Some(AlgoInput::Op { op, mut data, origin, twap_owner: captured_owner, action }) => {
                     let audit_refusal = |reason: &str| crate::audit::pre_dispatch_refused(Some(&who.venue), "algo", reason);
                     if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() {
-                        let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                        let message = "The automated-order request stopped because its account connection changed";
                         if action.is_some() { audit_refusal(message); }
                         port.emit("error", serde_json::json!(message).to_string());
                         if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
@@ -1123,7 +1123,7 @@ pub(crate) async fn run_with_identity(
                         continue;
                     }
                     if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() {
-                        let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                        let message = "The automated-order request stopped because its account connection changed";
                         if action.is_some() { audit_refusal(message); }
                         port.emit("error", serde_json::json!(message).to_string());
                         if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
@@ -1172,7 +1172,7 @@ pub(crate) async fn run_with_identity(
                             match user.admit() {
                                 // Admission can wait: re-check the owner after it, right before dispatch.
                                 Ok(_admission) if (op.starts_with("twap:") || op == "exec") && captured_owner != twap_owner.snapshot() => {
-                                    let message = "Algo operation cancelled-for-owner-change: authenticated connection binding changed";
+                                    let message = "The automated-order request stopped because its account connection changed";
                                     if action.is_some() { audit_refusal(message); }
                                     port.emit("error", serde_json::json!(message).to_string());
                                     if let Some(receipt) = action { receipt.finish(Err(serde_json::json!({"message":message,"outcome":"notSent"}))); }
@@ -1207,7 +1207,7 @@ pub(crate) async fn run_with_identity(
                     if let Some(receipt) = action {
                         // Dispatch admission is not proof that an asynchronous job or
                         // its venue writes completed. Ordinary algo events reconcile it.
-                        receipt.finish(Err(serde_json::json!({"message":"Algo operation dispatched; reconcile its account events","outcome":"unknown"})));
+                        receipt.finish(Err(serde_json::json!({"message":"Your automated-order request was sent. Check its status before trying again.","outcome":"unknown"})));
                     }
                 }
                 Some(AlgoInput::Nuke { mode, request_id, action }) => {
@@ -1219,7 +1219,7 @@ pub(crate) async fn run_with_identity(
                     }
                     let io_allowed = running.io_allowed();
                     if !io_allowed || action.as_ref().is_some_and(|receipt| !receipt.active()) {
-                        audit_refusal(if io_allowed {"Action registration retired before dispatch"} else {"io_fenced"});
+                        audit_refusal(if io_allowed {"This action couldn’t start because the account connection changed"} else {"io_fenced"});
                         if let Some(receipt) = action { receipt.finish(Err(crate::user_drain::refusal())); }
                         else { (port.emit)(crate::envelope::msg(&name, "callMethod:done", serde_json::json!({
                             "requestId":request_id,"success":false,"result":crate::user_drain::refusal(),
@@ -1258,7 +1258,7 @@ pub(crate) async fn run_with_identity(
                         }
                         _ if action.as_ref().is_some_and(|receipt| {
                             if !receipt.active() {
-                                audit_refusal("Action registration retired before dispatch");
+                                audit_refusal("This action couldn’t start because the account connection changed");
                                 true
                             } else if !running.io_allowed() {
                                 audit_refusal("io_fenced");
@@ -1268,7 +1268,7 @@ pub(crate) async fn run_with_identity(
                             }
                         }) => {
                             // Keep the existing wire error; only the journal distinguishes IO.
-                            Err(serde_json::json!({"message":"Action registration retired before dispatch","outcome":"notSent"}))
+                            Err(serde_json::json!({"message":"This action couldn’t start because the account connection changed","outcome":"notSent"}))
                         }
                         (_, Some(Err(error))) => {
                             audit_refusal("draining");
@@ -1411,7 +1411,7 @@ pub(crate) async fn run_with_identity(
                         port.client.set(feed.client());
                         for (_, waiter) in port.pending.borrow_mut().drain() {
                             let mut error =
-                                VenueError::new("algo feed rejoined; command outcome unknown");
+                                VenueError::new("The account connection was interrupted. Check your open orders before trying again.");
                             error.outcome = Some(Outcome::Unknown);
                             let _ = waiter.send(Err(error));
                         }
@@ -1561,6 +1561,7 @@ fn error_kind(kind: &str) -> Option<ErrorKind> {
     })
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1580,7 +1581,7 @@ mod tests {
                 end: false,
             }
         };
-        let retry = "Chaser stopped, but BTCUSDT order 71b464ec is still open: Signing provider is unavailable. Retrying the cancel; it can still fill until then. Cancel it in Open Orders or use Nuke";
+        let retry = "Chaser stopped, but BTCUSDT order 71b464ec is still open: Signing provider is unavailable. Retrying the cancel; it can still fill until then. Cancel it from your open orders.";
         let mut unheard = VecDeque::from([
             kept("warning", retry),
             kept("warning", &retry.replace("71b464ec", "other")),
@@ -1599,7 +1600,7 @@ mod tests {
                 .all(|kept| kept.retrying.as_deref() != Some("71b464ec"))
         );
         let failed = serde_json::to_string(
-            "Chaser could not cancel BTCUSDT order a1, other: refused; it may still be open. Cancel it in Open Orders or use Nuke",
+            "Chase couldn’t confirm cancellation of BTCUSDT order a1, other: refused. Cancel it from your open orders.",
         )
         .unwrap();
         drop_superseded(&mut unheard, "error", &failed);

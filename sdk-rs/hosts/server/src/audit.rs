@@ -188,7 +188,9 @@ pub(crate) fn command_refused(venue: Option<&str>, op: &str, message: &str, grou
         "not sent: invalid action binding" | "not sent: invalid order binding" => "invalid_binding",
         "not sent: unsupported action version" => "unsupported_version",
         "not sent: account not admitted for actions"
-        | "not sent: account not admitted for order frames" => "not_admitted",
+        | "not sent: account not admitted for order frames"
+        | "Order submissions aren’t available on this account connection"
+        | "Order changes aren’t available on this account connection" => "not_admitted",
         "not sent: invalid intent key" => "invalid_intent_key",
         "not sent: invalid key time" => "future_intent_key",
         "not sent: expired" => "expired_intent",
@@ -211,15 +213,24 @@ pub(crate) fn command_refused(venue: Option<&str>, op: &str, message: &str, grou
         | "not sent: submit exceeds size limit"
         | "not sent: action queue cancellation exceeds size limit" => "frame_too_large",
         "Unauthenticated order rejected" => "unauthenticated",
-        "Router lease expired; no new work was sent" => "lease_fenced",
+        "Router lease expired; no new work was sent"
+        | "The server connection expired; no new orders were sent" => "lease_fenced",
         "too many account reads in flight; retry shortly" => "capacity",
         "command IDs exhausted" => "command_ids_exhausted",
         "account is busy; command not sent" => "input_busy",
         crate::auth::TOKEN_EXPIRED => "auth_expired",
-        "Action expired; no further action command was sent" => "action_expired",
+        "Action expired; no further action command was sent"
+        | "This action expired before it could finish. Check your open orders and positions before trying again." => {
+            "action_expired"
+        }
         "Action registration retired; no further action command was sent"
-        | "Action registration retired before dispatch" => "registration_retired",
-        "Algo operation cancelled-for-owner-change: authenticated connection binding changed" => {
+        | "Action registration retired before dispatch"
+        | "The account connection changed before this action could finish. Check your open orders and positions before trying again."
+        | "This action couldn’t start because the account connection changed" => {
+            "registration_retired"
+        }
+        "Algo operation cancelled-for-owner-change: authenticated connection binding changed"
+        | "The automated-order request stopped because its account connection changed" => {
             "owner_changed"
         }
         crate::methods::NUKE_NOT_LOADED => "account_not_loaded",
@@ -425,6 +436,7 @@ pub fn log(who: &Who, origin: &str, fields: &Map<String, Value>, result: Value) 
     println!("{}", line(who, origin, fields, result));
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     #[test]

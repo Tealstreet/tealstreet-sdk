@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Oracles: KuCoin Classic Futures Add Order, Add TP/SL Order, Cancel Order,
 //! Switch Position Mode; safe-cex native-lot and client-ID contracts.
 use safe_cex_engine::error::Protection;
@@ -1283,19 +1284,19 @@ fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
             503,
             "<html>",
             (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
-            "KuCoin write outcome is unknown. Check Open Orders",
+            "KuCoin didn’t confirm this change. Check your open orders before trying again.",
         ),
         (
             503,
             r#"{"code":"500000","msg":"busy"}"#,
             (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
-            "KuCoin write outcome is unknown. Check Open Orders",
+            "KuCoin didn’t confirm this change. Check your open orders before trying again.",
         ),
         (
             429,
             r#"{"code":"429000","msg":"too many"}"#,
             (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
-            "KuCoin write outcome is unknown. Check Open Orders",
+            "KuCoin didn’t confirm this change. Check your open orders before trying again.",
         ),
         (
             200,
@@ -1326,7 +1327,7 @@ fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
             200,
             r#"{"code":"200000","data":{}}"#,
             unknown,
-            "KuCoin write outcome is unknown. Check Open Orders",
+            "KuCoin didn’t confirm this change. Check your open orders before trying again.",
         ),
     ] {
         let mut h = Harness::new();
@@ -1426,7 +1427,7 @@ fn cancel_legs_combine_outcomes_without_overclaiming() {
         assert_eq!(
             h.done(1).as_ref().unwrap_err(),
             if outcome.1 == Some(Outcome::Unknown) {
-                "KuCoin write outcome is unknown. Check Open Orders"
+                "KuCoin didn’t confirm this change. Check your open orders before trying again."
             } else {
                 "KuCoin API Error 100001: Unknown order (HTTP 400)"
             }
@@ -1875,7 +1876,7 @@ fn a_lost_cancel_confirmation_is_unknown_with_no_put_back_or_resend() {
         assert_eq!(error.protection, None);
         assert!(
             error.message.contains("could not be confirmed")
-                && error.message.contains("unknown")
+                && error.message.contains("confirm")
                 && error.message.contains("no replacement was sent"),
             "{}",
             error.message
@@ -2425,7 +2426,7 @@ fn managed_stop_ambiguous_writes_never_restore_or_resend() {
             assert_eq!(failure(&h).outcome, Some(Outcome::Unknown));
             assert_eq!(failure(&h).protection, None);
             assert!(writes(&h).is_empty());
-            assert!(failure(&h).message.contains("outcome is unknown"));
+            assert!(failure(&h).message.contains("confirm"));
         }
     }
 }
@@ -3192,7 +3193,11 @@ fn dispatched_write_ambiguity_matrix() {
             assert_eq!(error.outcome, Some(Outcome::Unknown), "{case}");
             let text = error.legacy_text().to_lowercase();
             assert!(
-                text.contains("unknown") && text.contains("check open orders"),
+                text.contains("confirm")
+                    && text
+                        .to_ascii_lowercase()
+                        .replace("check your open orders", "check open orders")
+                        .contains("check open orders"),
                 "{case}"
             );
             assert!(
@@ -3220,7 +3225,13 @@ fn review_3259_futures_business_rate_create_is_unknown() {
     assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
     assert_eq!(error.venue_code.as_deref(), Some("200002"));
-    assert!(error.message.contains("unknown") && error.message.contains("Check Open Orders"));
+    assert!(
+        error.message.contains("confirm")
+            && error
+                .message
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders")
+    );
     assert!(writes(&h).is_empty());
 }
 
@@ -3242,7 +3253,13 @@ fn review_3259_futures_business_rate_cancel_never_falls_back() {
     let error = failure(&h);
     assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
-    assert!(error.message.contains("unknown") && error.message.contains("Check Open Orders"));
+    assert!(
+        error.message.contains("confirm")
+            && error
+                .message
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders")
+    );
     assert!(writes(&h).is_empty());
 }
 
@@ -3271,7 +3288,11 @@ fn review_3259_cancel_job_keeps_the_unknown_legs_text() {
         assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
         assert_eq!(error.venue_code.as_deref(), Some("429000"));
         assert!(
-            error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+            error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders"),
             "{error:?}"
         );
         assert!(!error.message.contains("refused"), "{error:?}");
@@ -3334,7 +3355,10 @@ fn review_3259_futures_warning_is_normalized_before_the_terminal() {
         assert_eq!(warnings.len(), 1, "{operation}: {:?}", h.actions);
         let (warning_at, message) = warnings[0];
         assert!(
-            message.contains("unknown") && message.contains("Check Open Orders"),
+            message.contains("confirm")
+                && message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders"),
             "{operation}: {message}"
         );
         assert!(!message.contains("refused"), "{operation}: {message}");
@@ -3404,7 +3428,11 @@ fn postmerge_two_cancel_unknown_native_message_stays_actionable() {
     assert_eq!(error.venue_code.as_deref(), Some("500000"));
     assert_eq!(error.venue_message.as_deref(), Some("system error"));
     assert!(
-        error.message.contains("unknown") && error.message.contains("Check Open Orders"),
+        error.message.contains("confirm")
+            && error
+                .message
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
         "{error:?}"
     );
 }
@@ -3445,9 +3473,10 @@ fn postmerge_accepted_cancel_proof_warning_explains_uncertainty() {
         .collect();
     assert!(!warnings.is_empty());
     assert!(
-        warnings
-            .iter()
-            .all(|text| text.contains("unknown") && text.contains("Check Open Orders")),
+        warnings.iter().all(|text| text.contains("confirm")
+            && text
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders")),
         "{warnings:?}"
     );
 }

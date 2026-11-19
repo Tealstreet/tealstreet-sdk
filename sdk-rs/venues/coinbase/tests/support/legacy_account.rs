@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Offline regression oracles for legacy Advanced Trade codecs and trading.
 //! Production INTX startup is covered by private_drb; this unit fixture alone
 //! explicitly selects the old protocol so Spot/CFM shared-code coverage remains.
@@ -1589,7 +1590,7 @@ fn a_selected_cfm_accounts_null_balance_is_unknown_and_keeps_its_cash() {
         s.reply(read, 200, body);
         s.collect();
         assert_eq!(s.e.store().balance(), &before);
-        assert!(s.logs.iter().any(|log| log.contains("unknown")
+        assert!(s.logs.iter().any(|log| log.contains("confirm")
             && log.contains("/api/v3/brokerage/cfm/balance_summary")
             && log.contains("field `balance_summary`")));
         let retry = next_read(&mut s, "/cfm/balance_summary");

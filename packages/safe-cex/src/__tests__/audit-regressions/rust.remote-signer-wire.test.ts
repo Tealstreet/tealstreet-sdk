@@ -81,7 +81,7 @@ it.each([
 ] as const)('%s refuses recognized WS grammar with malformed or contradictory prepared metadata', async (exchangeName, text, receipt) => {
   const actual: RemoteSignerRequest[] = [];
   const provider = createRemoteSignerProvider({ exchangeName, identities: { primary: identity }, remoteSigner: remote(actual) });
-  await expect(provider(prepared(text, receipt), { signal: new AbortController().signal })).rejects.toThrow('Remote signing request refused');
+  await expect(provider(prepared(text, receipt), { signal: new AbortController().signal })).rejects.toThrow('This request couldn’t be signed');
   expect(actual).toEqual([]);
 });
 
@@ -102,11 +102,11 @@ it('native Spot WS metadata mismatch and later malformed WS work reject the whol
     { kind: 'credential', key: identity.credential },
     { kind: 'bytes', bytes: Array.from(new TextEncoder().encode(`&recvWindow=5000&timestamp=${NOW + 1}`)) },
   ] });
-  await expect(provider(work, { signal: new AbortController().signal })).rejects.toThrow('Remote signing request refused');
+  await expect(provider(work, { signal: new AbortController().signal })).rejects.toThrow('This request couldn’t be signed');
   expect(actual).toEqual([]);
   const bybit = createRemoteSignerProvider({ exchangeName: 'bybit', identities: { primary: identity }, remoteSigner: remote(actual) });
   const batch = prepared('first-valid-preimage', {});
   batch.operations.push(...prepared('GET/realtimeNaN', {}).operations.slice(1));
-  await expect(bybit(batch, { signal: new AbortController().signal })).rejects.toThrow('Remote signing request refused');
+  await expect(bybit(batch, { signal: new AbortController().signal })).rejects.toThrow('This request couldn’t be signed');
   expect(actual).toEqual([]);
 });

@@ -45,7 +45,8 @@ const ORDER: &str = "/openApi/swap/v2/trade/order";
 const CANCEL_ALL: &str = "/openApi/swap/v2/trade/allOpenOrders";
 const AMEND: &str = "/openApi/swap/v1/trade/amend";
 const REPLACE: &str = "/openApi/swap/v1/trade/cancelReplace";
-const UNKNOWN_WORDS: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_WORDS: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 const MISSING_ORDER_WORDS: &str = "BingX order was already filled or cancelled; check Open Orders";
 
 pub struct Request {
@@ -1092,11 +1093,11 @@ impl Trading {
         };
         let decoded = if guarded && (rate_limited || half_refused || missing_cancel_proof) {
             Err(unknown(if rate_limited {
-                "BingX outcome unknown, check Open Orders"
+                "BingX didn’t confirm this change. Check your open orders before trying again."
             } else if half_refused {
                 "BingX replacement was refused after its target was canceled"
             } else {
-                "BingX cancellation did not prove the target; outcome unknown, check Open Orders"
+                "BingX didn’t confirm this order’s cancellation. Check your open orders before trying again."
             }))
         } else {
             decoded
@@ -2338,6 +2339,7 @@ pub(crate) fn evidence(
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod reply_tests {
     #[test]

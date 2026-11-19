@@ -234,7 +234,7 @@ struct PageResult<'a> {
 
 pub(crate) fn unknown(link: &str, cause: &str) -> VenueError {
     VenueError::new(format!(
-        "HyroTrader order outcome is unknown (orderLinkId {link}). Reconcile before placing a replacement: {cause}"
+        "HyroTrader didn’t confirm order {link}: {cause}. Check your open orders before placing a replacement."
     ))
     .outcome(safe_cex_engine::Outcome::Unknown)
 }

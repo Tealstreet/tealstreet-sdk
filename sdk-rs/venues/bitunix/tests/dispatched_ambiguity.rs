@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Released writes cannot prove refusal from an ambiguous status or native rate code.
 mod support;
 use safe_cex_engine::model::{OrderType, PlaceOrderOpts};
@@ -135,7 +136,11 @@ fn probe(status: u16, code: i64, unknown: bool) {
         if unknown {
             let message = error.message.to_ascii_lowercase();
             assert!(
-                message.contains("unknown") && message.contains("check open orders"),
+                message.contains("confirm")
+                    && message
+                        .to_ascii_lowercase()
+                        .replace("check your open orders", "check open orders")
+                        .contains("check open orders"),
                 "{case}/{status}/{code}: {error:?}"
             );
             assert!(
@@ -262,7 +267,11 @@ fn replacement_stale_refusal(status: u16, code: i64, unknown: bool) {
     if unknown {
         let text = error.message.lines().next().unwrap().to_ascii_lowercase();
         assert!(
-            text.contains("unknown") && text.contains("check open orders"),
+            text.contains("confirm")
+                && text
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
             "{error:?}"
         );
         assert!(
@@ -429,7 +438,11 @@ fn assert_batch_unknown(e: &mut TestEngine, now: f64, code: i64, check_native: b
     }
     let text = error.legacy_text().to_ascii_lowercase();
     assert!(
-        text.contains("unknown") && text.contains("check open orders"),
+        text.contains("confirm")
+            && text
+                .to_ascii_lowercase()
+                .replace("check your open orders", "check open orders")
+                .contains("check open orders"),
         "{error:?}"
     );
     let headline = error.message.lines().next().unwrap().to_ascii_lowercase();

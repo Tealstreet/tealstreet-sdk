@@ -26,7 +26,8 @@ const CALL_MS: u32 = 20_000;
 /// 2026-10-26). Cited refusals are pre-execution; anything unlisted proves
 /// nothing. "Gone" is satisfied only for a cancel. BloFin returns its 400/401
 /// codes in a 200 body; only 403 (firewall) and 429 are documented HTTP statuses.
-const UNKNOWN_WRITE: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_WRITE: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
     if error.outcome == Some(Outcome::Unknown)
@@ -975,7 +976,10 @@ impl Blofin {
                 || !matches!(source.position_side.as_str(), "net" | "long" | "short")
             {
                 if conditional {
-                    return Err("BloFin replacement provenance is incomplete".into());
+                    return Err(
+                        "BloFin’s original order details aren’t complete enough to replace it"
+                            .into(),
+                    );
                 }
             } else {
                 payload.margin_mode = source.margin_mode.clone();
@@ -1024,7 +1028,10 @@ impl Blofin {
                     "last" | "mark" | "index"
                 ) || !(source.order_price == -1.0 || source.order_price > 0.0)
                 {
-                    return Err("BloFin trigger replacement provenance is incomplete".into());
+                    return Err(
+                        "BloFin’s original trigger details aren’t complete enough to replace it"
+                            .into(),
+                    );
                 }
                 payload.trigger_price_type = Some(source.trigger_price_type.clone());
                 payload.order_price = Some(num::format(source.order_price));
@@ -1280,7 +1287,7 @@ impl Blofin {
             let real = id.split("__").next().unwrap_or(id);
             let source = self.account.sources.get(id);
             if family == 2 && source.is_none_or(|s| s.algo_id != *id || s.inst_id != m.id) {
-                return Err("BloFin conditional cancel requires authoritative provenance".into());
+                return Err("The BloFin conditional order’s details need to load before it can be cancelled".into());
             }
             // Inline attached legs share the normal parent's native cancel target.
             let family = if family == 1
@@ -1781,7 +1788,9 @@ impl Blofin {
             return Ok(rows);
         }
         if order.kind == OrderType::Conditional && source.is_none() {
-            return Err("BloFin trigger replacement requires provenance".into());
+            return Err(
+                "The BloFin trigger’s details need to load before it can be replaced".into(),
+            );
         }
         if let Some(price) = price {
             positive(num::adjust(price, m.precision.price), "amend price")?;
@@ -2376,7 +2385,7 @@ impl Blofin {
                 })
                 .unwrap_or_else(|| "order".into());
             let words = format!(
-                "Your {what}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+                "Your replacement {what} was declined, and restoring the original wasn’t confirmed. Check your open orders before adding protection."
             );
             let _ = cx.present_plan_failure(&plan, words);
         }
@@ -3794,6 +3803,7 @@ fn margin_on_flat_symbols(cx: &mut Cx<'_, Pending>, mode: MarginType) {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

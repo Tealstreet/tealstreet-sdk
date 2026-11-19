@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Original controls: caller-wait propagation and managed history are absent.
 #[path = "../../../engine/tests/support/request_stats_frame.rs"]
 mod request_stats_frame;
@@ -691,7 +692,10 @@ fn dequeued_child_capacity_refusal_discards_rows_without_completing_peers() {
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].0, OWNER);
     assert_eq!(failures[0].1.kind, Some(ErrorKind::Internal));
-    assert_eq!(failures[0].1.message, "Engine request capacity reached");
+    assert_eq!(
+        failures[0].1.message,
+        "The account’s request queue is full. Try again shortly."
+    );
     assert!(failures[0].1.outcome.is_none());
     assert!(done(&output).is_none());
     assert!(!output.iter().any(|a| matches!(

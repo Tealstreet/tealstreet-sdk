@@ -70,7 +70,7 @@ it('backpack_private_payload_and_undeclared_venue_stay_refused', () => {
     } catch (error) {
       expect(error).toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
       if (name === 'backpack')
-        expect(error).toHaveProperty('message', 'Backpack requires RemoteSigner Ed25519 custody');
+        expect(error).toHaveProperty('message', 'This signing connection doesn’t support Backpack account keys');
       if (name === 'krakenspot')
         expect(error).toHaveProperty(
           'message',

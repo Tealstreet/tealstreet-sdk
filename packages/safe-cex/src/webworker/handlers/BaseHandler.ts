@@ -1,3 +1,4 @@
+import { algoActionLabel } from '../../utils/algoActionLabel';
 import type { TwapWorkerContext } from '../twap/TwapOwner';
 
 import { Exchange } from '../../exchanges/base';
@@ -75,7 +76,7 @@ export abstract class BaseHandler {
   ): void {
     const exchange = rustAlgoExchange(this._exchange);
     if (!exchange) {
-      refuse(`${payload.op} was not run: algos run only on a Rust engine account`);
+      refuse(`${algoActionLabel(payload.op)} isn’t available for this account`);
       return;
     }
     exchange.routeAlgoOp(

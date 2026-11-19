@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Behavioral contracts use the documented native transaction fields.
 mod support;
 use safe_cex_engine::model::*;
@@ -1496,7 +1497,7 @@ fn unproven_codes_in_a_200_stay_unknown_and_clear_on_the_next_read() {
         assert!(
             fenced.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandFailed { error, .. })
-                if error.message.contains("uncertain"))),
+                if error.message.contains("confirm"))),
             "{code}: {fenced:?}"
         );
         for read in &reads {

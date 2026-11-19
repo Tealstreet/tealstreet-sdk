@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Private data and trading against Binance's documented payloads.
 use support::Options;
 mod support;
@@ -542,7 +543,7 @@ fn cancel_all_reports_a_partial_failure_and_only_marks_what_succeeded() {
     assert_eq!(
         h.result(11),
         Some(&Err(
-            "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again."
                 .into()
         ))
     );
@@ -1424,7 +1425,7 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
         if status >= 500 {
             assert_eq!(
                 error.message,
-                "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                "The exchange reply didn’t confirm this change. Check your open orders before trying again."
             );
             let native: Option<serde_json::Value> = serde_json::from_str(body).ok();
             assert_eq!(
@@ -2312,10 +2313,6 @@ fn a_put_back_of_unknown_outcome_claims_no_protection() {
     ));
     let error = failure(&h);
     assert_eq!(error.protection, None, "{error:?}");
-    assert!(
-        error.message.contains("unknown outcome"),
-        "{}",
-        error.message
-    );
+    assert!(error.message.contains("confirm"), "{}", error.message);
     assert!(!h.has_request("/fapi/v1/algoOrder"), "never loops");
 }

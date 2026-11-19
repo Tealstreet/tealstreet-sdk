@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #![allow(dead_code)]
 mod support;
 
@@ -979,7 +980,9 @@ fn a_lost_create_fences_cancel_all_until_the_reconcile_snapshot() {
         .collect();
     assert_eq!(
         cancel_all(&mut engine, 50, 7.).as_deref(),
-        Some("Placement outcome is uncertain; reconcile before cancel-all")
+        Some(
+            "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders."
+        )
     );
     let (later, _) = release(&mut engine, 8.);
     reads.extend(
@@ -1011,7 +1014,9 @@ fn a_lost_create_fences_cancel_all_until_the_reconcile_snapshot() {
     }
     assert_ne!(
         cancel_all(&mut engine, 51, 10.).as_deref(),
-        Some("Placement outcome is uncertain; reconcile before cancel-all"),
+        Some(
+            "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders."
+        ),
         "the fresh snapshot clears the fence"
     );
 }
@@ -1079,7 +1084,7 @@ fn an_unknown_placement_refuses_a_retry_on_its_symbol_until_reconciled() {
     assert!(
         failures(&retry).iter().any(|error| {
             error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                && error.legacy_text().contains("uncertain")
+                && error.legacy_text().contains("confirm")
         }),
         "the retry is refused NotSent with the reason"
     );

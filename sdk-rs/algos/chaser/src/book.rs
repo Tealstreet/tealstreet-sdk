@@ -48,7 +48,12 @@ enum Settled {
 /// Opens the warning that a stop's cancel is being retried.
 const RETRYING: &str = "Chaser stopped, but ";
 /// Open the message that ends a stop's cancel, retried or not.
-const SETTLED: [&str; 2] = ["Chaser stopped: ", "Chaser could not cancel "];
+// Retained notices can use the previous wording until every client reconnects.
+const SETTLED: [&str; 3] = [
+    "Chaser stopped: ",
+    "Chaser could not cancel ",
+    "Chase couldn’t confirm cancellation of ",
+];
 
 /// The order a stop's retrying warning names, for a host that keeps warnings.
 pub fn retrying_order(message: &str) -> Option<&str> {
@@ -86,7 +91,7 @@ fn named_orders(message: &str) -> Vec<&str> {
 }
 
 /// Close All walks positions only, so it never reaches a stranded chase order.
-const CANCEL_WAY_OUT: &str = "Cancel it in Open Orders or use Nuke";
+const CANCEL_WAY_OUT: &str = "Cancel it from your open orders.";
 /// Each chase runs its own supervisor, price checks and REST reconciles.
 pub const MAX_CHASES_PER_ACCOUNT: usize = 50;
 const MISSING_ORDER_CONFIRMATIONS: u32 = 2;
@@ -197,7 +202,9 @@ fn stop_twap_unknown_cancel(chase: &Chase, error: &VenueError) -> bool {
     // Retain uncertainty for TWAP's journal and relinquish every remaining cancel.
     chase.note_order_may_be_open();
     chase.release_orders();
-    chase.mark_complete("The outcome is unknown. Check Open Orders");
+    chase.mark_complete(
+        "We couldn’t confirm this change. Check your open orders before trying again.",
+    );
     true
 }
 
@@ -428,7 +435,7 @@ impl ChaserBook {
         let told = !gone && !open.is_empty();
         if told {
             self.error(&format!(
-                "Chaser could not cancel {symbol} order {}: {}; it may still be open. {CANCEL_WAY_OUT}",
+                "Chase couldn’t confirm cancellation of {symbol} order {}: {}. {CANCEL_WAY_OUT}",
                 open.join(", "),
                 error.message
             ));
@@ -948,7 +955,7 @@ impl ChaserBook {
                     .any(|phrase| message.contains(phrase));
                 let finished_meanwhile = to_cancel.iter().all(|id| self.known_closed(id));
                 if !(fill_tracked && filled_or_gone) && !finished_meanwhile {
-                    self.error("Chaser failed to cancel orders, stopping");
+                    self.error("The chase stopped because its orders couldn’t be cancelled. Check your open orders.");
                     chase.mark_complete("Failed to cancel orders");
                     return Ok(());
                 }
@@ -1200,7 +1207,7 @@ impl ChaserBook {
             }
             if chase.remaining() == 0.0 {
                 chase.mark_complete("No remaining size. User likely cancelled order");
-                self.error("Chaser has no remaining size. User likely cancelled order");
+                self.error("The chase stopped because no order size remains");
                 return Vec::new();
             }
             if tries >= max_tries {
@@ -1515,7 +1522,7 @@ impl ChaserBook {
                     "{reason}; retrying the cancel of order {id}. {CANCEL_WAY_OUT}"
                 ));
                 self.warn(&format!(
-                    "{RETRYING}{symbol} order {id} is still open: {}. Retrying the cancel; it can still fill until then. {CANCEL_WAY_OUT}",
+                    "{RETRYING}{symbol} order {id} is still open: {}. Cancellation is being retried. {CANCEL_WAY_OUT}",
                     if signer_offline(&error) {
                         "the browser that signs for this account is offline"
                     } else {

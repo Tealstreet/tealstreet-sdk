@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Terminal wording follows the journal's final outcome across all write decoders.
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -295,10 +296,7 @@ fn final_outcome_controls_every_write_paths_terminal_presentation() {
                     }
                 }
             } else {
-                assert!(
-                    !text.contains("outcome is unknown"),
-                    "{path}/{answer}: {error:?}"
-                );
+                assert!(!text.contains("confirm"), "{path}/{answer}: {error:?}");
             }
             let mut later = Vec::new();
             for action in &actions {

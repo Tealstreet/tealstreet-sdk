@@ -1,3 +1,4 @@
+import { algoActionLabel } from '../../utils/algoActionLabel';
 import type {
   AccountAuthResult,
   AlgoStopAllResult,
@@ -349,7 +350,7 @@ const NUKE_FLAT_ROUNDS = 3;
 const NUKE_FLAT_SETTLE_MS = 2_000;
 /** The least wait after a close round before the read that can prove flat. */
 const NUKE_READ_SETTLE_MS = 500;
-const NUKE_NOT_CONFIRMED = 'Nuke could not confirm the account is flat';
+const NUKE_NOT_CONFIRMED = 'Nuke couldn’t confirm all positions were closed';
 const describeOpen = (positions: Pick<Position, 'symbol' | 'side' | 'contracts'>[]) =>
   positions.map((p) => `${p.symbol} ${p.side} ${p.contracts}`).join(', ');
 type FreshPositionsRead = {
@@ -372,9 +373,9 @@ const isFreshPositionsRead = (body: unknown): body is FreshPositionsRead => {
     )
   );
 };
-const NUKE_ORDERS_MAY_REMAIN = 'Orders, including triggers and TP/SL, may remain on this venue: check open orders';
+const NUKE_ORDERS_MAY_REMAIN = 'Not all orders were confirmed cancelled, including triggers and TP/SL. Check your open orders.';
 const NUKE_UNSEEN_ORDERS =
-  'Orders placed in the last few seconds may not be cancelled on this venue: check open orders';
+  'Cancellation doesn’t cover every newly placed order on this exchange. Check your open orders.';
 /** The one rule for when a nuke warns that unseen orders may rest. */
 const unseenOrdersWarning = (capabilities: EngineCapabilities): string | undefined =>
   capabilities.symbolCancelMissesUnseen && !capabilities.nukeAccountCancel ? NUKE_UNSEEN_ORDERS : undefined;
@@ -645,10 +646,10 @@ export class RustEngineExchange extends BaseExchange {
         host.assertCurrent();
         return result;
       } catch {
-        return { id: request.id, error: 'Hosted HTTP signing failed' };
+        return { id: request.id, error: 'This request couldn’t be signed' };
       }
     }
-    return { id: request.id, error: 'Hosted HTTP signing is unsupported in this build' };
+    return { id: request.id, error: 'This version doesn’t support signing requests on the server' };
   };
 
   override signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
@@ -661,10 +662,10 @@ export class RustEngineExchange extends BaseExchange {
         host.assertCurrent();
         return result;
       } catch {
-        return { id: request.id, error: 'Hosted WS auth signing failed' };
+        return { id: request.id, error: 'The account connection couldn’t be signed in' };
       }
     }
-    return { id: request.id, error: 'Hosted WS auth signing is unsupported in this build' };
+    return { id: request.id, error: 'This version doesn’t support signing in to the account on the server' };
   };
   private stopInProcessFeed?: () => void;
   private requestSharedSnapshot = false;
@@ -1299,7 +1300,7 @@ export class RustEngineExchange extends BaseExchange {
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.log(
-        `${this.name} manual writes are unavailable until the page engine is ready: ${reason}`,
+        `${this.name} isn’t ready for order changes yet: ${reason}`,
         LogSeverity.Warning,
       );
       return false;
@@ -1558,13 +1559,13 @@ export class RustEngineExchange extends BaseExchange {
       try {
         this.startAlgos(accountName);
       } catch (error) {
-        refuse(`${op} was not run: ${error instanceof Error ? error.message : String(error)}`);
+        refuse(`${algoActionLabel(op)} wasn’t possible: ${error instanceof Error ? error.message : String(error)}`);
         return;
       }
     }
     if (this.algoRoute === 'rust') {
       if (this.host?.checkAlgosForExecution()) rust();
-      else refuse(`${op} was not run: the ${this.name} engine stopped before it could run algos`);
+      else refuse(`${algoActionLabel(op)} wasn’t possible because ${this.name} was interrupted`);
       return;
     }
     if (this.algoRoute === 'unsupported') {
@@ -1572,17 +1573,17 @@ export class RustEngineExchange extends BaseExchange {
       return;
     }
     if (this.isDisposed || this.engineFailure) {
-      refuse(`${op} was not run: the ${this.name} engine stopped before it could run algos`);
+      refuse(`${algoActionLabel(op)} wasn’t possible because ${this.name} was interrupted`);
       return;
     }
     if (this.queuedAlgoOps.length >= MAX_QUEUED_ALGO_OPS) {
-      refuse(`${op} was not run: too many algo requests are waiting for the ${this.name} engine to start`);
+      refuse(`${algoActionLabel(op)} wasn’t possible on ${this.name}: too many requests are waiting. Try again shortly.`);
       return;
     }
     this.queuedAlgoOps.push({ op, rust, refuse, owner: captureTwapOwner(this.twapOwnerProvider) });
   };
 
-  private noAlgosMessage = (op: string) => `${op} was not run: this ${this.name} engine build has no algos`;
+  private noAlgosMessage = (op: string) => `${algoActionLabel(op)} isn’t available for ${this.name} in this version`;
 
   private replayQueuedAlgoOps() {
     const queued = this.queuedAlgoOps.splice(0);
@@ -1591,9 +1592,9 @@ export class RustEngineExchange extends BaseExchange {
         if (!this.algoOwnerCurrent(owner)) refuse(`${op} cancelled-for-owner-change`);
         else if (this.algoRoute === 'rust' && this.host?.checkAlgosForExecution()) rust();
         else if (this.algoRoute === 'unsupported') refuse(this.noAlgosMessage(op));
-        else refuse(`${op} was not run: the ${this.name} engine never started`);
+        else refuse(`${algoActionLabel(op)} wasn’t possible because ${this.name} couldn’t load`);
       } catch (error) {
-        refuse(`${op} failed: ${error instanceof Error ? error.message : String(error)}`);
+        refuse(`${algoActionLabel(op)} didn’t finish: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -1601,11 +1602,11 @@ export class RustEngineExchange extends BaseExchange {
   /** One worker algo op; a refusal reaches the user as an `error` event. */
   algoOp = (op: string, data: unknown): void => {
     try {
-      if (!this.host) throw new Error(`${this.name} engine is not started`);
+      if (!this.host) throw new Error(`${this.name} is still loading`);
       if (!this.host.checkAlgosForExecution()) throw new Error(`${this.name} algos are not running`);
       this.host.algoOp(op, data);
     } catch (error) {
-      this.emitter.emit('error', `${op} failed: ${error instanceof Error ? error.message : String(error)}`);
+      this.emitter.emit('error', `${algoActionLabel(op)} didn’t finish: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -1713,8 +1714,8 @@ export class RustEngineExchange extends BaseExchange {
     }
     assertEngineAccountRouting(options, this.name);
     if (!this.isPublicDataOnly && !this.signerSetup?.primaryComplete && isKeylessRemoteSigned(this.name, options)) {
-      throw new ExchangeError('Delegated signing is unsupported in this build', {
-        message: 'Delegated signing is unsupported in this build',
+      throw new ExchangeError('Server trading isn’t available in this version', {
+        message: 'Server trading isn’t available in this version',
         kind: 'unsupported',
         outcome: 'notSent',
       });
@@ -2125,12 +2126,12 @@ export class RustEngineExchange extends BaseExchange {
     let reason: string;
     if (this.isDelegatedMirror) {
       reason =
-        'this account uses DELEGATED server-only execution; its writes must use its delegated server connection, not the page manual-write engine.';
+        'this account makes changes through its server connection.';
     } else if (this.pageWriteSupported === false) {
       reason =
-        'this venue does not support a frame-fed manual-write engine on this page, and this operation has no source-writer route.';
+        'this exchange doesn’t support making this change from the current connection.';
     } else if (this.pageWriteSupported === true) {
-      reason = "the account's page manual-write engine did not initialize.";
+      reason = "the account couldn’t get ready to make changes.";
     } else {
       reason = "this page could not load or verify the venue's frame-fed manual-write support.";
     }
@@ -2190,7 +2191,7 @@ export class RustEngineExchange extends BaseExchange {
         if (failure || this.isDisposed) finish(failure ?? new Error('Exchange disposed during page market load'));
         else if (this.pageMarketsLoaded) finish();
       };
-      const message = 'Timed out waiting for page engine markets';
+      const message = 'Market details timed out while loading';
       const timeout = setTimeout(
         () =>
           finish(
@@ -2499,7 +2500,7 @@ export class RustEngineExchange extends BaseExchange {
 
   private captureEngineSnapshot(): EngineSnapshot {
     const frame = this.snapshotFrame();
-    if (!frame) throw new Error('Engine has not started');
+    if (!frame) throw new Error('The account is still loading');
     return { frame };
   }
 
@@ -3003,11 +3004,11 @@ export class RustEngineExchange extends BaseExchange {
     try {
       if (this.isDelegatedMirror) throw this.pageWriterUnavailable(command.op);
       if (this.engineFailure) throw this.engineFailure;
-      if (this.isDisposed) throw new Error(`${this.name} engine disposed`);
+      if (this.isDisposed) throw new Error(`${this.name} was closed`);
       // A cold wasm fetch: the worker takes calls before its engine is built. Reads wait.
       if (!this.host && this.startupState === 'pending' && COLD_START_READS.test(command.op)) await this.ensureHost();
       this.refuseWriteBeforeEngine();
-      if (!this.host) throw new Error(`${this.name} engine is not started`);
+      if (!this.host) throw new Error(`${this.name} is still loading`);
       if (this.requireCapabilities('command').finiteCommandNumbers) {
         const invalid = (value: unknown): boolean =>
           typeof value === 'number'
@@ -3046,7 +3047,7 @@ export class RustEngineExchange extends BaseExchange {
   /** A write that waited could go out after its caller timed out; failing lets the user retry. */
   private refuseWriteBeforeEngine() {
     if (this.host || this.startupState !== 'pending') return;
-    const message = `${this.name} engine is not started; nothing was sent, retry once it loads`;
+    const message = `${this.name} is still loading; nothing was sent. Try again once it loads.`;
     throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
   }
 
@@ -3363,7 +3364,7 @@ export class RustEngineExchange extends BaseExchange {
       return read;
     } catch (error) {
       const left = await this.positionsStillOpen().catch(() => []);
-      const named = left.length ? `${describeOpen(left)} may still be open: ` : '';
+      const named = left.length ? `Positions to check: ${describeOpen(left)}. ` : '';
       throw Object.assign(new Error(`${NUKE_NOT_CONFIRMED}: ${named}${errorMessage(error)}`), { cause: error });
     }
   };
@@ -3713,7 +3714,7 @@ export class RustEngineExchange extends BaseExchange {
     // A bridged mirror's store is kept current by the worker's frames.
     if (this.routesToWorker) return;
     this.assertEngineAlive();
-    if (!this.host) throw new Error('Rust engine is not started');
+    if (!this.host) throw new Error('The account is still loading');
     if (!(this.nativeLoaded & LOADED_FLAG.MARKETS)) throw new Error('Native market catalog is not ready');
     // Store state commits before notification; nested decision readers can use
     // that state without recursively publishing another account snapshot.

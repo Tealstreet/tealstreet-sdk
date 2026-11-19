@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import type { ExchangeAccountConfig, ExchangeName } from '../../types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -186,8 +187,8 @@ describe('Rust-only beta construction', () => {
         const prettyName = exchangeMetadata[name].prettyName;
         const message =
           signerKind === 'remoteSigner'
-            ? `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`
-            : `${prettyName} delegated signing is unsupported in this build`;
+            ? `${prettyName} isn’t available for server trading yet. Use browser trading for this exchange.`
+            : `Server trading for ${prettyName} isn’t available in this version`;
         await expect(createExchange(name, { key: 'public-key', secret: '', ...signing })).rejects.toMatchObject({
           message,
           kind: 'unsupported',

@@ -263,7 +263,7 @@ it('never falls back or leaks callback error text after a failed remote signatur
     payloadSigner,
   });
   await expect(provider(request('canonical-bytes'), { signal: new AbortController().signal })).rejects.toThrow(
-    /^Remote signing request refused$/,
+    /^This request couldn’t be signed$/,
   );
   expect(payloadSigner).not.toHaveBeenCalled();
 });

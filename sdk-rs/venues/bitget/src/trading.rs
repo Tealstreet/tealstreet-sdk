@@ -34,7 +34,8 @@ const CALL_MS: u32 = 20_000;
 /// Native wait for Classic/UTA account detection (scoped engine condition wait).
 const DETECTION_MS: u32 = 10_000;
 const DETECTION: &str = "Bitget account detection did not complete";
-const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 /// Bitget's native write codes: 40009 earns the one fresh resend; 40010, 40725,
 /// 45001 and the system, upgrade, busy and timeout codes prove nothing; the read side's key refusals keep their auth kind
@@ -1042,7 +1043,7 @@ impl BitgetFutures {
             .is_some_and(|job| job.error.is_some())
         {
             let _ = cx.present_plan_failure(&plan,
-                "Bitget protective replacement was refused; its put-back outcome is unknown, check Open Orders before placing another stop");
+                "The Bitget replacement stop was declined, and restoring the original wasn’t confirmed. Check your open orders before adding another stop.");
         }
         if let Err((pending, reason)) = cx.request_signed_managed(
             context,
@@ -3285,7 +3286,7 @@ impl BitgetFutures {
                     .map(|plan| format!(", planType {plan}"))
                     .unwrap_or_default();
                 error = Some(format!(
-                    "Bitget batch cancel did not acknowledge every order; these may still be open: {} (acknowledged [{}]{plan})",
+                    "Bitget didn’t confirm cancellation of these orders: {} (confirmed [{}]{plan}). Check your open orders before trying again.",
                     rest.join_with(", "),
                     listed.join_with(", ")
                 ));
@@ -4159,9 +4160,9 @@ impl BitgetFutures {
         if released || request.signature_retry {
             // A released write, or a resend after the first attempt reached the venue.
             error.outcome = Some(Outcome::Unknown);
-            error
-                .message
-                .push_str("; outcome unknown, check Open Orders");
+            error.message.push_str(
+                ". This change wasn’t confirmed. Check your open orders before trying again.",
+            );
         }
         if released && request.call.is_place() {
             self.account.orders_version = self.account.orders_version.wrapping_add(1);
@@ -4245,8 +4246,10 @@ impl BitgetFutures {
             let inherited = cx.inherit_plan_uncertainty(plan);
             debug_assert!(inherited.is_ok(), "{inherited:?}");
         }
-        let error = VenueError::new(format!("{unproven}; outcome unknown, check Open Orders"))
-            .outcome(Outcome::Unknown);
+        let error = VenueError::new(format!(
+            "{unproven}. This change wasn’t confirmed. Check your open orders before trying again."
+        ))
+        .outcome(Outcome::Unknown);
         self.end(cx, job, current, error);
         self.refresh_orders(cx, false);
     }
@@ -4879,6 +4882,7 @@ impl Planned {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod code_table_tests {
     use super::*;

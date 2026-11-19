@@ -506,7 +506,7 @@ fn record_rows(
 
 fn amend_row(before: &Order, body: &str) -> Result<ResultRow, VenueError> {
     let row: ResultRow = serde_json::from_str(body)
-        .map_err(|_| unknown("WEEX malformed TP/SL amendment response"))?;
+        .map_err(|_| unknown("WEEX’s TP/SL edit reply couldn’t be read"))?;
     if contradictory(&row) {
         return Err(unknown("WEEX contradictory amendment acknowledgement"));
     }

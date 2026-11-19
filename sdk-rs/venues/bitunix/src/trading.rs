@@ -47,7 +47,7 @@ fn unknown_inventory_row(
     cx.event(
         safe_cex_engine::Level::Warn,
         "command.unknown_inventory",
-        "The outcome is unknown. Check Open Orders",
+        "We couldn’t confirm this change. Check your open orders before trying again.",
         fields,
     );
 }
@@ -1880,10 +1880,11 @@ impl BitunixFutures {
         self.kept_gone(command, &mut error);
         if error.outcome == Some(Outcome::Unknown) {
             error.message = if error.message.is_empty() {
-                "The outcome is unknown. Check Open Orders".into()
+                "We couldn’t confirm this change. Check your open orders before trying again."
+                    .into()
             } else {
                 format!(
-                    "{}. The outcome is unknown. Check Open Orders",
+                    "{}. We couldn’t confirm this change. Check your open orders before trying again.",
                     error.message
                 )
             };
@@ -2520,7 +2521,7 @@ impl BitunixFutures {
                 .first()
                 .cloned()
                 .ok_or_else(|| "Bitunix place response has no order ID".to_owned()),
-            Ok((_, true)) => Err("Malformed Bitunix order acknowledgement".to_owned()),
+            Ok((_, true)) => Err("Bitunix’s order reply couldn’t be read".to_owned()),
             Err(error) => Err(error),
         };
         if let (Ok(id), Some(live)) = (&accepted, self.trading.live.get_mut(&request.command)) {
@@ -2562,7 +2563,11 @@ impl BitunixFutures {
             error_code: Option<error::Code>,
         }
         let Ok(rows) = serde_json::from_str::<BatchResult<'_>>(data) else {
-            return Self::record(cx, request, Err("Malformed Bitunix batch response".into()));
+            return Self::record(
+                cx,
+                request,
+                Err("Bitunix’s batch reply couldn’t be read".into()),
+            );
         };
         let (successes, mut malformed) = match ack_rows(rows.success_list) {
             Ok(rows) => (rows, false),
@@ -2684,7 +2689,11 @@ impl BitunixFutures {
             serde_json::from_str::<Canceled<'_>>(data)
         };
         let Ok(ack) = ack else {
-            return Self::record(cx, request, Err("Malformed Bitunix cancellation".into()));
+            return Self::record(
+                cx,
+                request,
+                Err("Bitunix’s cancellation reply couldn’t be read".into()),
+            );
         };
         let raw_ids: Vec<_> = ids
             .iter()
@@ -2868,7 +2877,7 @@ impl BitunixFutures {
             "Bitunix cancellation not acknowledged for every order; replacement was not placed"
                 .to_owned()
         } else if message.is_empty() {
-            "Malformed Bitunix cancellation acknowledgement".to_owned()
+            "Bitunix didn’t confirm the requested cancellation".to_owned()
         } else {
             message.join_with("; ")
         };
@@ -2888,7 +2897,7 @@ impl BitunixFutures {
                 | WriteResult::Failed(error),
             ) => {
                 if error.outcome == Some(Outcome::Unknown) {
-                    const UNKNOWN: &str = "The outcome is unknown. Check Open Orders";
+                    const UNKNOWN: &str = "We couldn’t confirm this change. Check your open orders before trying again.";
                     if let Some(live) = self.trading.live.get_mut(&request.command) {
                         live.note = Some(match live.note.take() {
                             Some(note) => format!("{note}; {UNKNOWN}"),
@@ -3120,6 +3129,7 @@ fn append_protection(
     Ok(())
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod split_tests {
     use super::split_quantities;

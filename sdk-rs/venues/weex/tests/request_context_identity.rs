@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! FetchAccount refusals and remote validation retain genuine initial Read custody.
 #[path = "../../../engine/tests/support/account_snapshot.rs"]
 mod account_snapshot;
@@ -324,13 +325,13 @@ fn capacity(branch: Branch) {
         &actions,
         900,
         ErrorKind::Internal,
-        "Engine request capacity reached",
+        "The account’s request queue is full. Try again shortly.",
     );
     refused(
         &ask(&mut e, NOW, 800),
         800,
         ErrorKind::Internal,
-        "Engine request capacity reached",
+        "The account’s request queue is full. Try again shortly.",
     );
     retire(&mut e, 1);
     let actions = ask(&mut e, NOW, 800);
@@ -345,7 +346,7 @@ fn capacity(branch: Branch) {
         &ask(&mut e, NOW, 801),
         801,
         ErrorKind::Internal,
-        "Engine request capacity reached",
+        "The account’s request queue is full. Try again shortly.",
     );
     for owner in 2..=256 {
         retire(&mut e, owner);
@@ -386,7 +387,7 @@ fn invalid_clock_uses_engine_entry_without_native_diagnostic() {
                 &ask(&mut e, now, 810),
                 810,
                 ErrorKind::InvalidInput,
-                "Invalid request context",
+                "This request couldn’t be prepared",
             );
             let actions = ask(&mut e, NOW, 810);
             if matches!(branch, Branch::Remote) {

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Native request contract from the official Aster V3 New Order, Cancel Order,
 //! Change Initial Leverage and STP examples. Synthetic credentials only.
 use safe_cex_engine::model::*;
@@ -1372,7 +1373,7 @@ fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
                     assert!(
                         error
                             .message
-                            .contains("The outcome is unknown. Check Open Orders")
+                            .contains("We couldn’t confirm this change. Check your open orders before trying again.")
                     );
                 } else {
                     assert!(message.contains(told), "{v3} {status} {body}: {message}");

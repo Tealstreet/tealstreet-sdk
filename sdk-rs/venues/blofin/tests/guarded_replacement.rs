@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Stop edits BloFin cannot make in place (a leg of a partly filled entry): the
 //! cancel is re-checked when it is finally sent, and a refused replacement puts
 //! the original entry and its legs back once.
@@ -438,8 +439,11 @@ fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
         h.respond_status(restore, status, "");
         let error = failure(&h).expect("the engine seals the Plan");
         assert!(
-            error.message.contains("put-back's outcome is unknown")
-                && error.message.contains("Check Open Orders")
+            error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders")
                 && !error.message.contains("trigger refused"),
             "{status}: {}",
             error.message
@@ -489,10 +493,16 @@ fn dispatched_ambiguity_protective_cancel_and_replacement_never_restore() {
             );
             assert_eq!(error.protection, None);
             assert!(
-                error.message.to_lowercase().contains("unknown"),
+                error.message.to_lowercase().contains("confirm"),
                 "{error:?}"
             );
-            assert!(error.message.contains("Check Open Orders"), "{error:?}");
+            assert!(
+                error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders"),
+                "{error:?}"
+            );
             assert!(!error.message.contains("refused"), "{error:?}");
             assert!(!error.message.contains("position has no stop"), "{error:?}");
             assert!(writes(&h).is_empty(), "no resend, replacement or put-back");

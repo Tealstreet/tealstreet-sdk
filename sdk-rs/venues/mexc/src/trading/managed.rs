@@ -255,7 +255,7 @@ impl MexcFutures {
             if operation == Operation::Mutation {
                 let edit = job.protection.as_ref().ok_or(Error::State)?;
                 let words = format!(
-                    "The outcome of your {} protection update is unknown. Check Open Orders and your position before replacing protection.",
+                    "Your {} protection update wasn’t confirmed. Check your open orders and position before adding protection.",
                     edit.observed.symbol
                 );
                 cx.present_plan_failure(&plan, words)?;
@@ -522,7 +522,9 @@ impl MexcFutures {
             .get(
                 &job.protection
                     .as_ref()
-                    .ok_or_else(|| not_sent("MEXC protection provenance missing"))?
+                    .ok_or_else(|| {
+                        not_sent("The MEXC protection order’s original details aren’t available")
+                    })?
                     .observed
                     .id,
             )
@@ -532,10 +534,9 @@ impl MexcFutures {
                 "MEXC native protection changed after preparation; stop not changed",
             ));
         }
-        let edit = job
-            .protection
-            .as_ref()
-            .ok_or_else(|| not_sent("MEXC protection provenance missing"))?;
+        let edit = job.protection.as_ref().ok_or_else(|| {
+            not_sent("The MEXC protection order’s original details aren’t available")
+        })?;
         match request.native.call {
             Call::Cancel { .. } | Call::NativeEdit => {
                 protection::guard_at(store, now, utc, &self.references, edit, false)

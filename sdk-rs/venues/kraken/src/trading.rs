@@ -1162,7 +1162,7 @@ impl Kraken {
         error: &str,
     ) {
         let error = VenueError::new(format!(
-            "Kraken request failed; write outcome may be uncertain: {error}"
+            "Kraken didn’t confirm this change: {error}. Check your open orders before trying again."
         ))
         .kind(ErrorKind::Network);
         let error = if request.step.is_read() {
@@ -1202,7 +1202,7 @@ fn blocks_after_uncertainty(job: &Job) -> bool {
 }
 fn queued_uncertainty() -> VenueError {
     not_sent(
-        "Kraken Futures queued write was not sent: earlier write outcome is uncertain. Check Open Orders before retrying",
+        "This Kraken Futures change wasn’t sent because an earlier change hasn’t been confirmed. Check your open orders before trying again.",
     )
 }
 fn trading_failure(mut error: VenueError, partial: bool) -> VenueError {
@@ -1211,7 +1211,7 @@ fn trading_failure(mut error: VenueError, partial: bool) -> VenueError {
     }
     if error.outcome == Some(Outcome::Unknown) && !error.message.contains("Check Open Orders") {
         error.message = format!(
-            "Kraken write outcome is unknown. Check Open Orders: {}",
+            "Kraken didn’t confirm this change. Check your open orders before trying again.: {}",
             error.message
         );
     }
@@ -1369,7 +1369,8 @@ fn classified_failure(
         && (matches!(response.status, 408 | 429 | 500..)
             || error.kind == Some(ErrorKind::RateLimited))
     {
-        error.message = "Kraken write outcome is unknown. Check Open Orders".into();
+        error.message =
+            "Kraken didn’t confirm this change. Check your open orders before trying again.".into();
     }
     error
 }

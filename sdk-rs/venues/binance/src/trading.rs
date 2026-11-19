@@ -35,7 +35,8 @@ const BROKER_PREFIX: &str = "x-s3vFFRQp";
 /// Errors callers handle themselves; they are not shown to the user.
 const SILENT_CODES: [i64; 4] = [-2011, -2013, -4059, -5022];
 const UNKNOWN_ORDER: i64 = -2011;
-const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
     if error.outcome == Some(Outcome::Unknown)
@@ -43,6 +44,7 @@ pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
         && !error
             .message
             .contains("outcome of this order change is unknown")
+        && !error.message.contains("This order change wasn’t confirmed")
     {
         format!("{}. {UNKNOWN_TEXT}", error.message)
     } else {
@@ -1248,11 +1250,11 @@ impl BinanceFutures {
                         }
                     } else {
                         unproven = true;
-                        rejection = Some((0, "Binance batch response malformed".into()));
+                        rejection = Some((0, "Binance’s batch reply couldn’t be read".into()));
                     }
                 } else {
                     unproven = true;
-                    rejection = Some((0, "Binance batch response malformed".into()));
+                    rejection = Some((0, "Binance’s batch reply couldn’t be read".into()));
                 }
                 rejection
             }
@@ -3466,7 +3468,7 @@ impl BinanceFutures {
         let invalid = || {
             Some((
                 0,
-                "Binance cancellation acknowledgement malformed or mismatched".to_owned(),
+                "Binance didn’t confirm the requested cancellation".to_owned(),
             ))
         };
         match proof {
@@ -3665,6 +3667,7 @@ fn identities(params: &Params) -> Vec<OrderIdentityReceipt> {
     .collect()
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod audit_tests {
     use super::generated_id_with;

@@ -472,7 +472,7 @@ impl Hyperliquid {
                 || error.kind == Some(ErrorKind::RateLimited)
             {
                 error.message = format!(
-                    "Hyperliquid {} put-back's outcome is unknown. Check Open Orders: {}",
+                    "Restoring your Hyperliquid {} wasn’t confirmed: {}. Check your open orders before adding protection.",
                     p.before.symbol, error.message
                 );
                 error.outcome = Some(Outcome::Unknown);
@@ -491,7 +491,7 @@ impl Hyperliquid {
                 .as_ref()
                 .map_or("replacement failed", |e| e.message.as_str());
             error.message = format!(
-                "UNPROTECTED: original {} protection could not be restored after {prior}: {}",
+                "Your original {} protection could not be restored after {prior}: {}. Add protection for this position.",
                 p.before.symbol, error.message
             );
             error.protection = Some(Protection::Unprotected);
@@ -511,7 +511,7 @@ impl Hyperliquid {
         }
         if p.grouping.is_none() {
             error.message = format!(
-                "UNPROTECTED: {} stop removed; please re-place protection. Replacement refused: {}",
+                "Your {} stop was removed and its replacement was declined: {}. Add a new stop.",
                 p.before.symbol, error.message
             );
             error.protection = Some(Protection::Unprotected);

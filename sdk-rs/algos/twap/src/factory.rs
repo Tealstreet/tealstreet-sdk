@@ -69,7 +69,7 @@ struct Inner {
 
 fn start_owner_change_error(dispatched: bool) -> VenueError {
     if dispatched {
-        VenueError::new("TWAP start outcome is unknown: authenticated connection binding changed after slice dispatch")
+        VenueError::new("The account connection changed while the TWAP was starting. Check your open orders before restarting it.")
             .outcome(Outcome::Unknown)
     } else {
         VenueError::new(

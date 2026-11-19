@@ -21,7 +21,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
 // Canonical engine wording copied under the lead's venue-local literal rule.
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 pub(crate) fn terminal_failure_text(error: &VenueError) -> String {
     if error.elements.as_ref().is_some_and(|rows| {
@@ -1116,7 +1117,7 @@ impl Hyperliquid {
             } => {
                 if self.settings_uncertain(&symbol) {
                     return Err(
-                        "Hyperliquid settings are uncertain; wait for account reconciliation"
+                        "Hyperliquid’s settings update hasn’t been confirmed. Wait for the account to refresh before changing settings again."
                             .into(),
                     );
                 }
@@ -1981,6 +1982,7 @@ fn unproven(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod signing_tests {
     use super::*;

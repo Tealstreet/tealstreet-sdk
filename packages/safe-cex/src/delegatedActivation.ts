@@ -57,25 +57,25 @@ export function requireDelegatedActivation(
   venue: ExchangeName,
 ): void {
   if (flags?.DELEGATED !== true)
-    throw new DelegatedActivationError('delegatedDisabled', 'DELEGATED is not enabled for this owner');
+    throw new DelegatedActivationError('delegatedDisabled', 'Server trading isn’t enabled for this account');
   if (capabilities.delegatedOrderFramesV1 !== true)
     throw new DelegatedActivationError(
       'delegatedOrderFramesUnavailable',
-      'DELEGATED order frames are not enabled on this box',
+      'This server doesn’t support order submissions yet',
     );
   if (capabilities.delegatedOrderLedgerV1 !== true)
     throw new DelegatedActivationError(
       'delegatedOrderLedgerUnavailable',
-      'DELEGATED requires the router ledger on this connection',
+      'This connection doesn’t support confirmed order submissions yet',
     );
   if (capabilities.delegatedVenueV1 !== venue)
-    throw new DelegatedActivationError('delegatedVenueUnavailable', 'DELEGATED capabilities belong to another venue');
+    throw new DelegatedActivationError('delegatedVenueUnavailable', 'This connection is configured for a different exchange');
   if (capabilities.delegatedActivationScopeV1?.place !== true)
-    throw new DelegatedActivationError('delegatedPlaceUnavailable', 'DELEGATED place capability is unavailable');
+    throw new DelegatedActivationError('delegatedPlaceUnavailable', 'Order placement isn’t available on this connection');
   if (capabilities.delegatedActivationScopeV1.close !== 'reduceOnly')
     throw new DelegatedActivationError(
       'delegatedCloseUnavailable',
-      'DELEGATED reduce-only close capability is unavailable',
+      'Closing positions isn’t available on this connection',
     );
   // Amend, venue cancel, cancel-all and nuke deliberately do not gate activation.
 }
@@ -84,11 +84,11 @@ export function requireDelegatedAction(action: string, params: Record<string, un
   if (action === 'place') return;
   if (action === 'close') {
     if (params?.reduceOnly !== true)
-      throw new DelegatedActivationError('delegatedReduceOnlyRequired', 'DELEGATED close requires reduceOnly=true');
+      throw new DelegatedActivationError('delegatedReduceOnlyRequired', 'Closing a position requires a reduce-only order');
     return;
   }
   throw new DelegatedActivationError(
     'delegatedActionUnavailable',
-    `DELEGATED ${action} is unavailable; only place and reduce-only close are enabled`,
+    `${action} isn’t available here; only placing orders and reduce-only closing are supported`,
   );
 }

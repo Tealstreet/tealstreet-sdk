@@ -19,7 +19,8 @@ use safe_cex_engine::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
-const UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 const TIER_MESSAGE: &str = "Lighter requires Plus or Premium account tier for Tealstreet partner-attributed orders with non-zero integrator fees. Switch this account to Plus or Premium, then retry.";
 const APPROVAL_MESSAGE: &str = "Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click \"Approve Builder Fee\" and retry.";
@@ -820,7 +821,7 @@ impl Lighter {
         };
         let queued = self.trading.active.is_some() || !self.trading.queue.is_empty();
         if queued && cx.park_preflight_for(&preflight, None).is_err() {
-            let _ = cx.fail_preflight(&preflight, "Lighter FIFO admission failed");
+            let _ = cx.fail_preflight(&preflight, "Lighter couldn’t prepare this request");
             return;
         }
         self.trading.queue.push_back(Job {
@@ -1223,12 +1224,12 @@ impl Lighter {
         {
             let message = if edit.canceled {
                 format!(
-                    "Your {} protection outcome unknown; check Open Orders",
+                    "Your {} protection wasn’t confirmed. Check your open orders before adding protection.",
                     edit.original.observed.symbol
                 )
             } else {
                 format!(
-                    "Your {} stop edit outcome unknown; check Open Orders",
+                    "Your {} stop edit wasn’t confirmed. Check your open orders before trying again.",
                     edit.original.observed.symbol
                 )
             };
@@ -1320,7 +1321,7 @@ impl Lighter {
                     .get(symbol)
                     .is_some_and(|epoch| self.account_setting_epoch(symbol) <= *epoch)
                 {
-                    return Err("Lighter account settings are awaiting reconciliation after an uncertain transaction".into());
+                    return Err("Lighter’s settings update hasn’t been confirmed. Wait for the account to refresh before changing settings again.".into());
                 }
                 let market = cx
                     .store
@@ -1408,7 +1409,7 @@ impl Lighter {
         let kind = &request;
         if matches!(response.status, 405 | 429) && !matches!(kind, Request::Submit(_)) {
             if matches!(kind, Request::CancelProof | Request::RestoreProof) {
-                self.trade_finish(cx, uncertain("Lighter protection proof outcome unknown after rate limit; check Open Orders").kind(ErrorKind::RateLimited));
+                self.trade_finish(cx, uncertain("Lighter’s rate limit prevented confirmation of your protection. Check your open orders before adding protection.").kind(ErrorKind::RateLimited));
                 return;
             }
             let parsed = serde_json::from_str::<Reply>(response.body).ok();
@@ -1529,7 +1530,7 @@ impl Lighter {
                             .original,
                     );
                 if !valid {
-                    self.trade_finish(cx, uncertain("Lighter cancellation outcome unknown; check Open Orders; replacement withheld"));
+                    self.trade_finish(cx, uncertain("Lighter didn’t confirm the cancellation, so no replacement was sent. Check your open orders before trying again."));
                     return;
                 }
                 let old = self
@@ -1643,7 +1644,7 @@ impl Lighter {
                     let present_unknown = matches!(code, Some(23000 | 23100))
                         || (unknown && self.trading.active.as_ref().unwrap().retried_nonce);
                     if present_unknown {
-                        message.push_str(". The outcome is unknown. Check Open Orders");
+                        message.push_str(". We couldn’t confirm this change. Check your open orders before trying again.");
                     }
                     let mut error = VenueError::new(message);
                     // Uncertainty must supersede an earlier nonce
@@ -1657,7 +1658,7 @@ impl Lighter {
                         };
                         error.message = if unknown {
                             format!(
-                                "Lighter {noun} edit outcome unknown: {}; check Open Orders",
+                                "Your Lighter {noun} edit wasn’t confirmed: {}. Check your open orders before trying again.",
                                 error.message
                             )
                         } else {
@@ -1959,7 +1960,7 @@ impl Lighter {
             Request::Submit(s) => {
                 self.submission_uncertain(cx, &s.effect);
                 let error = uncertain(format!(
-                    "Uncertain Lighter transaction result: {error}; check open orders before retrying"
+                    "Lighter didn’t confirm this change: {error}. Check your open orders before trying again."
                 ));
                 let error = self.note_replacement_lost(&s.effect, error);
                 self.trade_finish(cx, error.kind(ErrorKind::Network));
@@ -2554,7 +2555,7 @@ fn snap_leverage(requested: f64) -> f64 {
 /// Lighter lets a maker-only key send only 0ms speed-bump transactions.
 const MAKER_ONLY_MESSAGE: &str = "This Lighter API key is maker-only, which allows only post-only orders and cancels; change leverage or place market and stop orders from a key that is not maker-only";
 const UNCERTAIN_RESULT: &str =
-    "Uncertain Lighter transaction result; check open orders before retrying";
+    "Lighter didn’t confirm this change. Check your open orders before trying again.";
 
 /// Refused before any transaction was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
@@ -3005,7 +3006,7 @@ impl Lighter {
         let kind = &request;
         let error = if matches!(kind, Request::CancelProof | Request::RestoreProof) {
             uncertain(format!(
-                "Lighter protection proof outcome unknown: {}; check Open Orders",
+                "Lighter didn’t confirm your protection: {}. Check your open orders before adding protection.",
                 error.message
             ))
         } else {
@@ -3067,6 +3068,7 @@ impl Lighter {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod client_index_parity_tests {
     use super::*;

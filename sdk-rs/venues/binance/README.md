@@ -86,7 +86,7 @@ attribution is kept separately from the engine's aggregate physical classificati
 The journal adds no filter validation, reallocation, retries or dispatch decisions.
 It also reaches engine-owned unproven HTTP seals through the existing read-only
 capture hook. Venue-authored Unknown failures and warnings include exactly
-`The outcome is unknown. Check Open Orders`; engine-owned seals retain their
+`We couldn’t confirm this change. Check your open orders before trying again.`; engine-owned seals retain their
 existing canonical wording. Existing cancellation and amendment paths continue
 to use their physical lifecycle journal.
 

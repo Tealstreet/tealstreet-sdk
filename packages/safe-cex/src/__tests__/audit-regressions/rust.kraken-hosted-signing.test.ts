@@ -114,14 +114,14 @@ it('refuses foreign refs, partial graphs, wrong-account answers and callback mat
   ]) {
     const request = work('challenge');
     mutate(request);
-    await expect(provider(request, signal())).rejects.toThrow('Remote signing request refused');
+    await expect(provider(request, signal())).rejects.toThrow('This request couldn’t be signed');
   }
   expect(sign).not.toHaveBeenCalled();
-  await expect(provider(work('challenge'), signal())).rejects.toThrow('Remote signing request refused');
+  await expect(provider(work('challenge'), signal())).rejects.toThrow('This request couldn’t be signed');
   sign.mockImplementationOnce(async () => {
     throw new Error('fixture-private-material');
   });
-  await expect(provider(work('challenge'), signal())).rejects.toThrow(/^Remote signing request refused$/);
+  await expect(provider(work('challenge'), signal())).rejects.toThrow(/^This request couldn’t be signed$/);
 });
 
 it('selects secondary device custody and never forwards opaque refs', async () => {
@@ -167,7 +167,7 @@ it('cancels a pending remote response and refuses malformed signatures atomicall
   });
   const controller = new AbortController();
   const pending = provider(work('challenge'), { signal: controller.signal });
-  const rejected = expect(pending).rejects.toThrow('Remote signing canceled');
+  const rejected = expect(pending).rejects.toThrow('Signing was cancelled');
   controller.abort();
   finish({ id: sign.mock.calls[0][0].id, wsAuthSignature: 'late fixture-private-material' });
   await rejected;
@@ -175,7 +175,7 @@ it('cancels a pending remote response and refuses malformed signatures atomicall
     id: request.id,
     wsAuthSignature: JSON.stringify({ credential: 'fixture-key', signature: 'AAAA' }),
   }));
-  await expect(provider(work('challenge'), signal())).rejects.toThrow(/^Remote signing request refused$/);
+  await expect(provider(work('challenge'), signal())).rejects.toThrow(/^This request couldn’t be signed$/);
 });
 
 it('compatibility HTTP signing preserves encoded form bytes and a frozen u64 nonce', async () => {

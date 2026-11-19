@@ -779,14 +779,14 @@ impl fmt::Display for crate::request_context::Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use crate::request_context::Error;
         f.write_str(match self {
-            Error::Invalid => "Invalid request context",
-            Error::Capacity => "Engine request capacity reached",
+            Error::Invalid => "This request couldn’t be prepared",
+            Error::Capacity => "The account’s request queue is full. Try again shortly.",
             Error::Duplicate => "Request is already in flight",
-            Error::State => "Request is not in a sendable state",
-            Error::TimedOut => "Request context timed out",
-            Error::Stale => "Request context is stale",
-            Error::Revoked => "Request context was revoked",
-            Error::RetryForbidden => "Request may not be retried",
+            Error::State => "This request isn’t ready to send",
+            Error::TimedOut => "This request timed out",
+            Error::Stale => "This request is out of date",
+            Error::Revoked => "This request was interrupted",
+            Error::RetryForbidden => "This request can’t be sent again",
         })
     }
 }
@@ -913,10 +913,10 @@ impl std::error::Error for VenueError {}
 pub fn order_gone_text(symbol: &str, unknown: bool) -> String {
     if unknown {
         format!(
-            "Your {symbol} order may be gone: it was canceled and its replacement's outcome is unknown. Check Open Orders"
+            "Your {symbol} order was cancelled, but its replacement wasn’t confirmed. Check your open orders before trying again."
         )
     } else {
-        format!("Your {symbol} order is gone: it was canceled and its replacement refused")
+        format!("Your {symbol} order was cancelled and its replacement was declined")
     }
 }
 
@@ -940,15 +940,16 @@ pub fn stop_gone_text(
     };
     if unknown {
         format!(
-            "Your {symbol} {position} position may have no {order}: the old {order} was canceled and its replacement's outcome is unknown. Check Open Orders"
+            "Your {symbol} {position} position’s {order} was cancelled, but its replacement wasn’t confirmed. Check your open orders before adding protection."
         )
     } else {
         format!(
-            "Your {symbol} {position} position has no {order}: the old {order} was canceled and its replacement refused"
+            "Your {symbol} {position} position has no {order}: the previous {order} was cancelled and its replacement was declined"
         )
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1118,7 +1119,7 @@ mod tests {
     fn request_context_refusals_are_typed_not_sent_failures() {
         use crate::request_context::Error;
         let error = Error::TimedOut.venue_error();
-        assert_eq!(error.message, "Request context timed out");
+        assert_eq!(error.message, "This request timed out");
         assert_eq!(error.kind, Some(ErrorKind::Timeout));
         assert_eq!(error.outcome, Some(Outcome::NotSent));
         for (reason, kind) in [
@@ -1189,9 +1190,12 @@ mod tests {
     fn a_vanished_order_names_its_symbol() {
         assert_eq!(
             super::order_gone_text("BTCUSDT", false),
-            "Your BTCUSDT order is gone: it was canceled and its replacement refused"
+            "Your BTCUSDT order was cancelled and its replacement was declined"
         );
-        assert!(super::order_gone_text("ETHUSDT", true).contains("Your ETHUSDT order may be gone"));
+        assert!(
+            super::order_gone_text("ETHUSDT", true)
+                .contains("Your ETHUSDT order was cancelled, but its replacement wasn’t confirmed")
+        );
     }
 
     #[test]
@@ -1199,11 +1203,11 @@ mod tests {
         use crate::model::{OrderSide, OrderType};
         assert_eq!(
             super::stop_gone_text("BTCUSDT", OrderSide::Sell, OrderType::StopLoss, false),
-            "Your BTCUSDT long position has no stop: the old stop was canceled and its replacement refused"
+            "Your BTCUSDT long position has no stop: the previous stop was cancelled and its replacement was declined"
         );
         assert!(
             super::stop_gone_text("ETHUSDT", OrderSide::Buy, OrderType::TakeProfit, true)
-                .starts_with("Your ETHUSDT short position may have no take profit")
+                .starts_with("Your ETHUSDT short position’s take profit was cancelled, but its replacement wasn’t confirmed")
         );
     }
 }

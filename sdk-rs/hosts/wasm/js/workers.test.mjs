@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 // The Workers host against fake Workers primitives (WebSocketPair, upgrade
 // fetch) and the real Node build of the engine. Run after `yarn rust:build-wasm`.
 import assert from 'node:assert/strict';
@@ -817,7 +818,7 @@ for (const phase of ['start', 'flush']) {
       for (const received of r.messages) {
         assert.equal(received.length, 1);
         assert.deepEqual(received[0], { op: 'startupFailed', detail: {
-          message: 'Exchange engine stopped unexpectedly; recreate the engine', kind: 'internal', outcome: 'unknown',
+          message: 'Trading was interrupted for this account; recreate the engine', kind: 'internal', outcome: 'unknown',
         } });
       }
       const failure = r.object.startupFailure;

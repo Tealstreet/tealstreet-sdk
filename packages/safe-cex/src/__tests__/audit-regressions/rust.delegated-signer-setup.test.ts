@@ -221,7 +221,7 @@ describe('trusted delegated signer setup capsule', () => {
     expect(setup.hasSecondary).toBe(true);
     await setup.signer(request(config.signing), callContext());
     expect(upstream.sign).toHaveBeenCalledTimes(1);
-    await expect(setup.signer(request(config.signing, true), callContext())).rejects.toThrow('Remote signing request refused');
+    await expect(setup.signer(request(config.signing, true), callContext())).rejects.toThrow('This request couldn’t be signed');
     expect(upstream.sign).toHaveBeenCalledTimes(1);
     expect(fallback).not.toHaveBeenCalled();
     setup.dispose();
@@ -284,7 +284,7 @@ describe('trusted delegated signer setup capsule', () => {
     const { config } = construct(setup);
     const copied = setup.signer;
     const inFlight = copied(request(config.signing), callContext());
-    const canceled = expect(inFlight).rejects.toThrow('Remote signing canceled');
+    const canceled = expect(inFlight).rejects.toThrow('Signing was cancelled');
     setup.dispose();
     await canceled;
     await expect(copied(request(config.signing), callContext())).rejects.toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
@@ -319,7 +319,7 @@ describe('trusted delegated signer setup capsule', () => {
     const controller = new AbortController();
     const remove = vi.spyOn(controller.signal, 'removeEventListener');
     const active = setup.signer(request(config.signing), { signal: controller.signal });
-    const canceled = expect(active).rejects.toThrow('Remote signing canceled');
+    const canceled = expect(active).rejects.toThrow('Signing was cancelled');
     controller.abort();
     await canceled;
     expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
@@ -339,7 +339,7 @@ describe('trusted delegated signer setup capsule', () => {
     const settled = Promise.allSettled(pending);
     setup.dispose();
     const results = await settled;
-    expect(results.every((result) => result.status === 'rejected' && result.reason.message === 'Remote signing canceled')).toBe(true);
+    expect(results.every((result) => result.status === 'rejected' && result.reason.message === 'Signing was cancelled')).toBe(true);
     expect(callback).toHaveBeenCalledTimes(64);
   });
 

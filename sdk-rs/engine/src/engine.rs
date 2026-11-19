@@ -209,6 +209,7 @@ impl MergedScopeAuth {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod merged_scope_auth_tests {
     use super::{AuthOutcome, AuthOutcome::*, MergedScopeAuth, Response};
@@ -646,10 +647,10 @@ pub const REPAIR_SILENCE_MS: f64 = 30_000.0;
 #[cfg(feature = "managed-sockets")]
 const REPEAT_REPAIR_WINDOW_MS: f64 = 10.0 * 60_000.0;
 #[cfg(feature = "order-locks")]
-const UNCERTAIN_PLACEMENT: &str =
-    "Placement outcome is uncertain; reconcile before placing or amending";
+const UNCERTAIN_PLACEMENT: &str = "An earlier order hasn’t been confirmed. Check your open orders before placing or editing orders.";
 #[cfg(feature = "order-locks")]
-const UNCERTAIN_CANCEL_ALL: &str = "Placement outcome is uncertain; reconcile before cancel-all";
+const UNCERTAIN_CANCEL_ALL: &str =
+    "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders.";
 #[cfg(feature = "order-locks")]
 fn fence_refusal(message: &str, hold: Option<&str>) -> VenueError {
     match hold {
@@ -4116,7 +4117,7 @@ impl<V: Venue> Clone for HttpRelease<V> {
 }
 
 /// One exchange implementation. All methods are synchronous and must not block.
-const PUBLIC_FEED_UNAVAILABLE_TEXT: &str = "Live WebSocket connection failed to establish. Historical candles may still load, but live charts and order books will not update. Check your network, VPN, firewall, or browser extensions, then reload Tealstreet.";
+const PUBLIC_FEED_UNAVAILABLE_TEXT: &str = "Live market data couldn’t connect; charts and order books aren’t updating. Check your network connection.";
 
 /// One notice per outage when no public socket opens. A connect timeout or a backoff
 /// timer always delivers an event while a feed is failing, so `is_due` needs no timer.
@@ -9384,7 +9385,7 @@ mod streaming_tests {
         );
         let actions: Vec<_> = engine.drain_actions().collect();
         for command in [2, 3] {
-            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command && error.legacy_text() == "Placement outcome is uncertain; reconcile before cancel-all" && error.outcome == Some(crate::Outcome::NotSent))));
+            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command && error.legacy_text() == "An earlier order hasn’t been confirmed. Check your open orders before cancelling all orders." && error.outcome == Some(crate::Outcome::NotSent))));
         }
         engine
             .io

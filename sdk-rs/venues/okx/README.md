@@ -73,7 +73,7 @@ Stop-after-Unknown is a recorded parity exception (Sean/daxx, 2026-11-08).
 When a native response leaves a write unproven, the rest of that action stays
 unsent, including signature-looking replies and protective replacements. The
 terminal preserves accepted IDs and indexed placement facts, identifies the
-unconfirmed request, and says `The outcome is unknown. Check Open Orders`.
+unconfirmed request, and says `We couldn’t confirm this change. Check your open orders before trying again.`.
 The venue emits one `order.outcome_unknown` event with the command, accepted
 count and unconfirmed request. Late acknowledgements cannot restart the action
 or emit another terminal/event. Proven signature refusals and definite native

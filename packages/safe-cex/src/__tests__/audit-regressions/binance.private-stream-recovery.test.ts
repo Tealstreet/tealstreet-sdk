@@ -45,7 +45,7 @@ describe('binance user data stream recovery', () => {
     it('retries a failed listenKey request with backoff, then connects', async () => {
       const post = vi
         .fn()
-        .mockRejectedValueOnce(new Error('Remote signer unavailable — WebSocket disconnected (gone <5s)'))
+        .mockRejectedValueOnce(new Error('Signing isn’t available for this account — WebSocket disconnected (gone <5s)'))
         .mockResolvedValue({ data: { listenKey: 'lk-1' } });
       const socket = new Ctor(makeParent(xhr, post) as any) as any;
       const created: string[] = [];

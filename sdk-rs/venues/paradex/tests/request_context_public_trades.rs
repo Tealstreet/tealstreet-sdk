@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Native single-page trades through real managed preparation and Read authority.
 #[path = "../../../engine/tests/support/request_stats_frame.rs"]
 mod request_stats_frame;
@@ -417,7 +418,10 @@ fn initial_capacity_denial_also_precedes_missing_market_empty_completion() {
         assert_eq!(failed.len(), 1);
         let error = failed[0].as_ref().unwrap_err();
         assert_eq!(error.kind, Some(ErrorKind::Internal));
-        assert_eq!(error.message, "Engine request capacity reached");
+        assert_eq!(
+            error.message,
+            "The account’s request queue is full. Try again shortly."
+        );
         assert_eq!(error.outcome, None);
         assert!(!actions.iter().any(|a| matches!(
             a,

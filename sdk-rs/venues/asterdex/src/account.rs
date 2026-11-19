@@ -1004,7 +1004,7 @@ impl AsterDex {
                     let reason = error.as_deref().unwrap_or("unrecognized dualSidePosition");
                     cx.retried_failure("asterdex.account:778",
                         format!(
-                            "Aster position mode read failed ({reason}); order placement is held until it loads, retrying in {:.1}s",
+                            "Aster’s position mode couldn’t be loaded ({reason}); trying again in {:.1}s. Orders will be available once it loads.",
                             delay / 1_000.0
                         ));
                     if self.account.mode_timer.is_none() {

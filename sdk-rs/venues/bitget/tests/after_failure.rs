@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -602,8 +603,9 @@ fn below_minimum_protective_quantity_is_sent_at_its_rounded_trigger() {
     }
 }
 
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
-const ENGINE_SEALED_UNKNOWN_TEXT: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
+const ENGINE_SEALED_UNKNOWN_TEXT: &str = "This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again.";
 const UNKNOWN_REPLY: &str = r#"{"code":"40010","msg":"Request timeout","data":null}"#;
 
 fn unknown_pin(h: &Harness, placed: &[String], unknown_identity: &str) {

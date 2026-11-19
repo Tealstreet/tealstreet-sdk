@@ -1275,7 +1275,7 @@ impl ApexOmni {
             && let Some((symbol, _, kind)) = &job.replaces
         {
             let words = format!(
-                "Your {symbol} {}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders",
+                "Your {symbol} replacement {} was declined, and restoring the original wasn’t confirmed. Check your open orders before adding protection.",
                 what(*kind)
             );
             let _ = cx.present_plan_failure(&plan, words);
@@ -1384,7 +1384,7 @@ impl ApexOmni {
                     error.message
                 ),
                 (true, true) => format!(
-                    "Your {symbol} {what}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders ({})",
+                    "Your {symbol} replacement {what} was declined, and restoring the original wasn’t confirmed. Check your open orders before adding protection. ({})",
                     error.message
                 ),
                 (true, false) => error.message,
@@ -1664,7 +1664,7 @@ impl ApexOmni {
                 |(symbol, _, kind)| format!("{symbol} {}", what(*kind)),
             );
         let mut error = unknown(format!(
-            "Your {what} was not replaced: its cancel was sent but could not be confirmed, so whether it still stands is unknown. Check Open Orders"
+            "Your {what} wasn’t replaced because its cancellation wasn’t confirmed. Check your open orders before trying again."
         ));
         error.presents = true;
         // Only here is it unknown whether the original stands: reconcile it.
@@ -1823,7 +1823,7 @@ impl ApexOmni {
             });
             let message = envelope
                 .as_ref()
-                .map_or("ApeX Omni malformed write response", |e| e.msg.as_ref());
+                .map_or("ApeX Omni’s reply couldn’t be read", |e| e.msg.as_ref());
             let message = crate::failure_text(code.unwrap_or(i64::from(response.status)), message);
             let Ok(fact) = cx.classify_write(&delivery.context, &APEX, native.as_ref(), message)
             else {
@@ -2080,6 +2080,7 @@ fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

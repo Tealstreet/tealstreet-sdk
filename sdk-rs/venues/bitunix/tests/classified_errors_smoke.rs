@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 
 use safe_cex_engine::{Action, Command, ErrorKind, Event, Notice, Outcome, VenueError};
@@ -60,7 +61,7 @@ fn dispatched_write_transport_loss_is_unknown() {
     let error = failure(&mut engine, 992);
     assert_eq!(
         error.message,
-        "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: response lost. The outcome is unknown. Check Open Orders"
+        "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: response lost. We couldn’t confirm this change. Check your open orders before trying again."
     );
     assert_eq!(error.kind, Some(ErrorKind::Network));
     assert_eq!(error.outcome, Some(Outcome::Unknown));

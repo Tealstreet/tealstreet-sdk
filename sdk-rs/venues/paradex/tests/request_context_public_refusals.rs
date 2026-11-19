@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Native local history decisions publish only with genuine Read custody.
 use safe_cex_engine::book::Book;
 use safe_cex_engine::model::{Interval, Limits, Market, MinMax, Precision};
@@ -230,7 +231,7 @@ fn capacity(branch: Local) {
             &ask(&mut e, NOW, 700, branch),
             700,
             ErrorKind::Internal,
-            "Engine request capacity reached",
+            "The account’s request queue is full. Try again shortly.",
         );
         assert_eq!(
             one(&retire(&mut e, NOW + 1.), 1).unwrap_err().message,
@@ -257,7 +258,7 @@ fn clock(branch: Local) {
             &ask(&mut e, invalid, 701, branch),
             701,
             ErrorKind::InvalidInput,
-            "Invalid request context",
+            "This request couldn’t be prepared",
         );
         if matches!(branch, Local::Book) {
             e.handle(NOW, Event::Command(command(701, branch)));

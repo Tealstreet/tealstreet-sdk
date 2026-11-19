@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Variant order semantics from the V5 create/cancel specifications and the
 //! documented Hyro simulator identity/reconciliation contract.
 mod support;
@@ -1639,9 +1640,9 @@ fn cancel_all_failed_read_retains_unknown_scope_and_warning() {
     let error = applied_failure(&h, 998);
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(
-        error
-            .message
-            .contains("The outcome is unknown. Check Open Orders")
+        error.message.contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        )
     );
     let rows = error.elements.as_ref().expect("cancel-all scope journal");
     assert_eq!(rows.len(), 1);
@@ -4238,7 +4239,7 @@ fn hyro_lost_ack_reports_to_each_observer_before_its_terminal() {
         error: "lost",
     });
     let expected = format!(
-        "The outcome is unknown. Check Open Orders. HyroTrader order outcome is unknown (orderLinkId {id}). Reconcile before placing a replacement: lost"
+        "We couldn’t confirm this change. Check your open orders before trying again.. HyroTrader order outcome is unknown (orderLinkId {id}). Reconcile before placing a replacement: lost"
     );
     for command in [91, 92] {
         let notices: Vec<_> = h
@@ -4777,7 +4778,10 @@ fn cancel_unknown_pair() -> Harness {
 fn applied_cancel_unknown_has_actionable_guidance_and_native_diagnostics() {
     let h = cancel_unknown_pair();
     let error = spot_parity_error(&h, 120);
-    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    assert_eq!(
+        error.message,
+        "We couldn’t confirm this change. Check your open orders before trying again."
+    );
     assert_eq!(error.venue_code.as_deref(), Some("10016"));
     assert_eq!(
         error.venue_message.as_deref(),
@@ -4807,7 +4811,7 @@ fn applied_cancel_unknown_emits_one_bounded_outcome_event() {
     assert_eq!(events[0].level, safe_cex_engine::Level::Warn);
     assert_eq!(
         events[0].message,
-        "The outcome is unknown. Check Open Orders"
+        "We couldn’t confirm this change. Check your open orders before trying again."
     );
     assert_eq!(
         events[0].fields,
@@ -5062,9 +5066,9 @@ fn cancel_journal_terminal_case(failure: &str) {
         let error = spot_parity_error(&h, 124);
         assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
         assert_eq!(
-            error
-                .message
-                .starts_with("The outcome is unknown. Check Open Orders"),
+            error.message.starts_with(
+                "We couldn’t confirm this change. Check your open orders before trying again."
+            ),
             failure == "timeout",
             "whole-Plan expiry must own the seal; call timeout remains venue-presented"
         );
@@ -5395,7 +5399,7 @@ fn an_unknown_inverse_placement_reconciles_on_the_inverse_category_and_releases(
     place(&mut h, 2, vec![order("BTCUSD", 10.0)]);
     assert!(
         h.result(2)
-            .is_some_and(|r| r.as_ref().is_err_and(|e| e.contains("uncertain"))),
+            .is_some_and(|r| r.as_ref().is_err_and(|e| e.contains("confirm"))),
         "{:?}",
         h.result(2)
     );
@@ -7470,7 +7474,8 @@ fn spot_ts_parity_definite_lot_refusal_finishes_order_then_stops_batch() {
 #[test]
 fn spot_ts_parity_unknown_stops_lots_and_batch_with_canonical_evidence() {
     // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybitspot.exchange.ts:844-856.
-    const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+    const ENGINE_UNKNOWN_TEXT: &str =
+        "We couldn’t confirm this change. Check your open orders before trying again.";
     for status in [Some(200), Some(503), None] {
         let mut h = spot_split_plan_market("0.01", "1190");
         place(
@@ -7784,9 +7789,9 @@ fn write_pacing_prevents_a_spot_burst_and_keeps_rate_limit_unknown() {
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert_eq!(error.venue_code.as_deref(), Some("10018"));
     assert!(
-        error
-            .message
-            .contains("The outcome is unknown. Check Open Orders")
+        error.message.contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        )
     );
     h.advance(2000.0);
     assert!(

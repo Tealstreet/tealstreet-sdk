@@ -18,7 +18,7 @@ The journal records this recovery without controlling dispatch.
 
 Unknown publications retain placed native IDs and indexed Unknown/NotSent rows.
 The terminal error, Unknown elements and `order.outcome_unknown` telemetry carry
-`The outcome is unknown. Check Open Orders`. The literal is intentionally copied
+`We couldn’t confirm this change. Check your open orders before trying again.`. The literal is intentionally copied
 from the engine under the lead's venue-local wording rule. Telemetry identifies the
 command and lists actual placed IDs and unknown indices as comma-separated fields.
 
@@ -38,7 +38,7 @@ the engine's native classification and partial metadata. Confirmed rows report
 report `unknown` with the native diagnostic. Cancel targets remain absent from
 created-order IDs; an empty created-ID list does not mean no cancellations applied.
 
-A decoded Unknown row publishes `The outcome is unknown. Check Open Orders`
+A decoded Unknown row publishes `We couldn’t confirm this change. Check your open orders before trying again.`
 and one independent `order.outcome_unknown` event correlated by `commandId`.
 Native error text remains available in `venueMessage`. The journal and diagnostic
 do not authorize dispatch, retries, restoration or store changes.

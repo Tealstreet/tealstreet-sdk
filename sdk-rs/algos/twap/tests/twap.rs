@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Ports of the TS TWAP suites: TwapInstance, TwapInstance.timeout,
 //! TwapInstance.termination-race, TwapManager and TwapHandler.
 
@@ -710,7 +711,7 @@ fn a_timed_out_slice_sends_no_market_if_its_order_may_still_be_open() {
     assert!(market_amounts(&effects).is_empty());
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        TwapEffect::Log { message } if message == "The outcome is unknown. Check Open Orders"
+        TwapEffect::Log { message } if message == "We couldn’t confirm this change. Check your open orders before trying again."
     )));
 }
 
@@ -1278,7 +1279,7 @@ fn an_unknown_placement_outcome_halts_the_action() {
     );
     assert_eq!(
         logs(&settled),
-        ["The outcome is unknown. Check Open Orders"]
+        ["We couldn’t confirm this change. Check your open orders before trying again."]
     );
     assert!(book.get(&id).is_none());
     assert!(book.wake_at().is_none());
@@ -1412,7 +1413,7 @@ fn restore_refuses_a_running_twap_whose_schedule_lapsed() {
     let effects = book.handle("twap:state", &restore, &mut env, &view);
     assert_eq!(
         logs(&effects),
-        ["TWAP BTCUSDT not restored: its schedule lapsed, so no client was running it"]
+        ["TWAP BTCUSDT not restored: its saved schedule has expired"]
     );
     assert_eq!(book.ids().collect::<Vec<_>>(), ["fresh", "paused"]);
 }
@@ -1620,7 +1621,7 @@ fn an_unreconciled_in_flight_slice_is_counted_and_never_placed_again() {
     // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at packages/safe-cex/src/webworker/twap/TwapInstance.ts:291-310.
     assert_eq!(
         logs(&effects),
-        ["The outcome is unknown. Check Open Orders"]
+        ["We couldn’t confirm this change. Check your open orders before trying again."]
     );
     assert!(book.get("restored").is_none());
     assert!(placements(&book.wake(&mut env, &view)).is_empty());
@@ -1682,7 +1683,7 @@ fn an_in_flight_slice_counts_toward_the_restore_bounds() {
     lapsed[0]["state"]["nextOrderAt"] = json!(env.now - 600_000.0);
     let effects = book.handle("twap:state", &lapsed, &mut env, &view);
     assert!(effects.contains(&TwapEffect::Log {
-        message: "TWAP BTCUSDT not restored: its schedule lapsed, so no client was running it; a slice may have been in flight, check open orders and fills".into()
+        message: "TWAP BTCUSDT not restored: its saved schedule expired with a slice still pending; check your open orders and fills before restarting it".into()
     }));
     assert!(book.get("restored").is_none());
 }
@@ -1728,7 +1729,7 @@ fn a_late_remainder_success_updates_unknown_journal_without_restarting() {
     );
     assert_eq!(
         logs(&unknown),
-        ["The outcome is unknown. Check Open Orders"]
+        ["We couldn’t confirm this change. Check your open orders before trying again."]
     );
     let late = book.remainder_settled(&id, 1, Ok(vec!["late-native".to_owned()]));
     let error = late
@@ -1738,7 +1739,10 @@ fn a_late_remainder_success_updates_unknown_journal_without_restarting() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    assert_eq!(
+        error.message,
+        "We couldn’t confirm this change. Check your open orders before trying again."
+    );
     assert_eq!(error.partial.as_ref().unwrap().order_ids, ["late-native"]);
     let rows = error.elements.as_ref().unwrap();
     assert!(
@@ -1784,7 +1788,10 @@ fn a_skipped_zero_slice_keeps_unknown_element_indices_aligned() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    assert_eq!(
+        error.message,
+        "We couldn’t confirm this change. Check your open orders before trying again."
+    );
     let rows = error.elements.as_ref().unwrap();
     assert!(matches!(
         &rows[0].result,

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Scripted orders from Bitrue's documented v2 futures payloads.
 mod support;
 use safe_cex_engine::model::*;
@@ -431,13 +432,13 @@ fn conditional_census_requires_complete_success() {
             0,
             "{scenario} cannot authorize a guessed cancellation"
         );
-        assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 8, error } if error.legacy_text().contains("uncertain"))));
+        assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 8, error } if error.legacy_text().contains("confirm"))));
         for command in [9, 10] {
             h.command(Command::CancelSymbolOrders {
                 command,
                 symbol: "E-BTC-USDT".into(),
             });
-            assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: id, error } if *id == command && error.legacy_text().contains("uncertain"))));
+            assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: id, error } if *id == command && error.legacy_text().contains("confirm"))));
         }
         assert_eq!(h.writes(), 0);
     }
@@ -464,7 +465,7 @@ fn conditional_census_superseded_by_stream_cannot_authorize_cancel_all() {
     h.reply(census, &protective_census(&client));
     assert!(h.failed());
     assert_eq!(h.writes(), 0);
-    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 8, error } if error.legacy_text().contains("uncertain"))));
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 8, error } if error.legacy_text().contains("confirm"))));
 }
 #[test]
 fn conditional_census_transport_retries_do_not_complete_or_send_guessed_cancel() {
@@ -491,7 +492,7 @@ fn conditional_census_transport_retries_do_not_complete_or_send_guessed_cancel()
         }
     }
     assert!(h.failed());
-    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 8, error } if error.legacy_text().contains("uncertain"))));
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 8, error } if error.legacy_text().contains("confirm"))));
 }
 #[test]
 fn attached_protection_census_owns_the_native_open_set_even_when_one_leg_is_gone() {
@@ -588,13 +589,13 @@ fn protective_amend_failed_census_keeps_native_cancel_all_uncertain_until_a_fres
     );
     let census = post_write_census(&mut h);
     h.reply(census, r#"{"code":"-1","msg":"denied"}"#);
-    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 11, error } if error.legacy_text().contains("uncertain"))));
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 11, error } if error.legacy_text().contains("confirm"))));
     h.command(Command::CancelSymbolOrders {
         command: 12,
         symbol: "E-BTC-USDT".into(),
     });
     assert_eq!(h.writes(), 0);
-    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 12, error } if error.legacy_text().contains("uncertain"))));
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 12, error } if error.legacy_text().contains("confirm"))));
     // The settled job's refresh is the next fresh census.
     let census = order_read(&mut h);
     h.reply(census, r#"{"code":"0","data":[]}"#);
@@ -690,7 +691,7 @@ fn protective_amend_lost_or_malformed_create_ack_fences_cancel_until_fresh_nativ
                 command,
                 symbol: "E-BTC-USDT".into(),
             });
-            assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: id, error } if *id == command && error.legacy_text().contains("uncertain"))), "{outcome}: held census must prevent empty cancel success");
+            assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: id, error } if *id == command && error.legacy_text().contains("confirm"))), "{outcome}: held census must prevent empty cancel success");
             assert_eq!(
                 h.writes(),
                 0,
@@ -829,7 +830,7 @@ fn protective_amend_rejection_preserves_an_earlier_lost_replacement_fence() {
         command: 16,
         symbol: "E-BTC-USDT".into(),
     });
-    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 16, error } if error.legacy_text().contains("uncertain"))));
+    assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 16, error } if error.legacy_text().contains("confirm"))));
     assert_eq!(h.writes(), 0);
 }
 

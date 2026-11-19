@@ -12,7 +12,8 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::signing::{Algorithm, KeyUse, Need};
 use safe_cex_engine::write_plan::{AppliedEffect, Element, ElementResult, WritePlan};
 
-const CANCEL_UNKNOWN: &str = "The outcome is unknown. Check Open Orders";
+const CANCEL_UNKNOWN: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 pub(crate) const PACING: safe_cex_engine::request_context::Pacing =
     safe_cex_engine::request_context::Pacing {

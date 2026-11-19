@@ -319,7 +319,8 @@ fn finish_missing(h: &mut Harness) {
 /// The final orderId read's own check when it too finds nothing.
 const FINAL_MISSING: &str = "axis=final final-len=0";
 
-/// The command error and the `[proof-diag]` warnings both name the failed check, and
+/// Rule 5 (Sam, 2026-11-20): plain user guidance; failed checks stay in diagnostics.
+/// The command error and the `[proof-diag]` warnings retain their distinct roles, and
 /// (AGT-34) after one final orderId read the replacement is still sent rather than
 /// ending the edit as Unknown.
 fn assert_proof_diag(h: &mut Harness, reason: &str) {
@@ -334,9 +335,9 @@ fn assert_proof_diag(h: &mut Harness, reason: &str) {
         .collect();
     assert_eq!(
         errors,
-        vec![format!(
-            "Bybit did not confirm that the old BTCUSDT order was cancelled, so its replacement is placed anyway; check Open Orders for a duplicate [proof: {reason}; {FINAL_MISSING}]"
-        )]
+        vec![
+            "Your BTCUSDT replacement was sent before the old order’s cancellation was confirmed. Check your open orders for a duplicate."
+        ]
     );
     let warnings: Vec<_> = h
         .notices
@@ -378,7 +379,10 @@ fn assert_proof_stops(h: &mut Harness, reason: &str, shows: &str) {
         })
         .unwrap_or_else(|| panic!("{reason}: {:?}", h.result(91)));
     assert!(
-        error.message.contains(&format!("[proof: {reason}]")),
+        h.notices.iter().any(|notice| matches!(notice,
+            safe_cex_engine::Notice::Event(event)
+                if event.code == "partial.proof_failed"
+                    && event.message == format!("[proof-diag] {reason}"))),
         "{error:?}"
     );
     assert!(error.message.contains(shows), "{error:?}");

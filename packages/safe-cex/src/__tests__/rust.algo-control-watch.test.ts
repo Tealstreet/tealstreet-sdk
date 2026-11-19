@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { OrderSide } from '../types';
@@ -73,16 +74,16 @@ describe('a chase or TWAP stop', () => {
     expect(sent).toEqual([]);
   });
 
-  it('says it is unconfirmed at 15 s and NOT confirmed at 60 s, then stops sending', () => {
+  it('says it is unconfirmed at 15 s and couldn’t confirm that at 60 s, then stops sending', () => {
     const { rows, sent, told, watch } = setup();
     rows.activeTWAPs = [twap('t1', TwapStatus.Running)];
     watch.observe('twap:stop', 't1');
     vi.advanceTimersByTime(14_999);
     expect(told).toEqual([]);
     vi.advanceTimersByTime(1);
-    expect(told[0]).toContain('not confirmed yet');
+    expect(told[0]).toContain('Still trying to stop');
     vi.advanceTimersByTime(45_000);
-    expect(told[1]).toContain('NOT confirmed');
+    expect(told[1]).toContain('couldn’t confirm that');
     expect(sent).toHaveLength(11);
     expect(sent.every(([op, id]) => op === 'twap:stop' && id === 't1')).toBe(true);
     vi.advanceTimersByTime(60_000);
@@ -102,12 +103,12 @@ describe('a chase or TWAP stop', () => {
 });
 
 describe('a stop the user was told might not have landed', () => {
-  it('ends with how the chase ended, even after NOT confirmed', () => {
+  it('ends with how the chase ended, even after couldn’t confirm that', () => {
     const { rows, sent, told, watch } = setup();
     rows.activeChasers = [chaser('c1')];
     watch.observe('chaser:terminate', 'c1');
     vi.advanceTimersByTime(60_000);
-    expect(told.at(-1)).toContain('NOT confirmed');
+    expect(told.at(-1)).toContain('couldn’t confirm that');
     const resent = sent.length;
     // The connection returns; the server replays the chase's end.
     watch.chaseCompleted({ id: 'c1', symbol: 'BTCUSDT', size: 1, filled: 1 });
@@ -139,7 +140,7 @@ describe('a stop the user was told might not have landed', () => {
     update({ activeChasers: [] });
     vi.advanceTimersByTime(60_000);
     expect(told).toEqual([
-      'Chase stop is not confirmed yet; retrying. It may still be running.',
+      'Chase hasn’t stopped yet; we’re still trying.',
       'Chase on BTCUSDT stopped after filling 0.4 of 1.',
     ]);
   });
@@ -153,7 +154,7 @@ describe('a stop the user was told might not have landed', () => {
     vi.advanceTimersByTime(9_999);
     expect(told).toHaveLength(2);
     vi.advanceTimersByTime(1);
-    expect(told.at(-1)).toContain('whether it filled is not known');
+    expect(told.at(-1)).toContain('Check your open orders and positions for fills');
   });
 
   it('a stop confirmed before any warning says nothing of its end', () => {
@@ -210,9 +211,9 @@ describe('a running chase whose engine went away', () => {
     expect(told).toEqual([]);
     vi.advanceTimersByTime(1);
     expect(told).toHaveLength(1);
-    expect(told[0]).toContain('Chase on BTCUSDT ended without a result');
-    expect(told[0]).toContain('order o1 may still be open, or may have filled');
-    expect(told[0]).toContain('check Positions and Open Orders');
+    expect(told[0]).toContain('Chase on BTCUSDT was interrupted');
+    expect(told[0]).toContain('Check your open orders and positions for order o1');
+    expect(told[0]).toContain('Check your open orders and positions');
   });
 
   it('says nothing when the completion comes with the row, either way round', () => {
@@ -256,7 +257,7 @@ describe('a start, resume or pause', () => {
     vi.advanceTimersByTime(60_000);
     expect(sent).toEqual([]);
     expect(told).toHaveLength(4);
-    expect(told.every((message) => message.includes('not sent again'))).toBe(true);
+    expect(told.every((message) => message.includes('Check your open orders before trying again.'))).toBe(true);
   });
 
   it('is confirmed by a new row, or a chase that already finished', () => {

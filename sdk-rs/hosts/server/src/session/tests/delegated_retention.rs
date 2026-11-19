@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 use super::*;
 use safe_cex_engine::signing::{Algorithm, Capability, KeyRef};
 
@@ -99,7 +100,7 @@ async fn restart_notice_precedes_handover_and_echoes_only_the_current_registrati
         );
         let expected = envelope::algo_notice(
             "acct",
-            "The previous server (01) lost its memory-only delegated key (waiting for your key). Only client-retained TWAP schedules can be restored, paused. Check Open Orders before explicitly resuming TWAPs or starting new chases; resting orders may still fill.",
+            "Trading on the previous server (01) was interrupted and needs your key again. Saved TWAPs can be restored paused. Check your open orders before restarting automated orders.",
             None,
         );
         let expected = id.filter(|id| !id.is_empty()).map_or_else(

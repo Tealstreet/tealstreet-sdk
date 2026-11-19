@@ -346,36 +346,26 @@ impl ProofFailure {
             outcome: Some(Outcome::Rejected),
             presents: true,
             ..VenueError::new(format!(
-                "Your {symbol} {what} was not edited: Bybit {shows}, so no replacement was placed; check Open Orders [proof: {}]",
-                self.reason
+                "Your {symbol} {what} was not edited: Bybit {shows}, so no replacement was placed. Check your open orders."
             ))
         }
     }
 
     /// Told to the user while the replacement still goes out.
-    pub(super) fn warning(&self, symbol: &str, earlier: Option<&str>) -> String {
+    pub(super) fn warning(&self, symbol: &str, _earlier: Option<&str>) -> String {
         format!(
-            "Bybit did not confirm that the old {symbol} order was cancelled, so its replacement is placed anyway; check Open Orders for a duplicate [proof: {}]",
-            self.reasons(earlier)
+            "Your {symbol} replacement was sent before the old order’s cancellation was confirmed. Check your open orders for a duplicate."
         )
-    }
-
-    fn reasons(&self, earlier: Option<&str>) -> String {
-        match earlier {
-            Some(earlier) => format!("{earlier}; {}", self.reason),
-            None => self.reason.clone(),
-        }
     }
 
     /// The command's own outcome when the edit went out on unconfirmed evidence: the
     /// old stop may still be live beside it, so this is presented, never a silent success.
-    pub(super) fn second_stop_may_exist(&self, symbol: &str, earlier: Option<&str>) -> VenueError {
+    pub(super) fn second_stop_may_exist(&self, symbol: &str, _earlier: Option<&str>) -> VenueError {
         VenueError {
             kind: Some(safe_cex_engine::ErrorKind::Rejected),
             presents: true,
             ..VenueError::new(format!(
-                "Your {symbol} edit was sent, but Bybit did not confirm that the old order was cancelled, so a second stop may exist; check Open Orders [proof: {}]",
-                self.reasons(earlier)
+                "Your {symbol} edit was sent before the old stop’s cancellation was confirmed. Check your open orders for a second stop."
             ))
         }
     }
@@ -639,7 +629,7 @@ impl Flow {
     ) -> Result<(), VenueError> {
         // AGT-34: lineage no longer gates the put-back; a cancelled stop always goes back.
         if !self.unproven && (self.terminal.is_none() || !self.history_done) {
-            return Err(VenueError::new("Protection cannot be re-placed without native cancellation proof; check Open Orders").outcome(Outcome::NotSent));
+            return Err(VenueError::new("The old stop’s cancellation hasn’t been confirmed. Check your open orders before adding protection.").outcome(Outcome::NotSent));
         }
         let validation = self.guard.validate_order(store, true).and_then(|()| {
             if restoring {

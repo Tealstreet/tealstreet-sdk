@@ -50,7 +50,7 @@ impl Adapter {
             for (target, command) in self.traded_symbol_cancels() {
                 if self.cx.scope.is_disposed() {
                     return Err(
-                        json!({"message":"Nuke scope disposed","outcome":"unknown","partialOrderIds":ids}),
+                        json!({"message":"Nuke was interrupted when the account closed. Check your orders and positions before trying again.","outcome":"unknown","partialOrderIds":ids}),
                     );
                 }
                 match self.run_command(command).await {
@@ -73,7 +73,7 @@ impl Adapter {
                 for position in positions {
                     if self.cx.scope.is_disposed() {
                         return Err(
-                            json!({"message":"Nuke scope disposed","outcome":"unknown","partialOrderIds":ids}),
+                            json!({"message":"Nuke was interrupted when the account closed. Check your orders and positions before trying again.","outcome":"unknown","partialOrderIds":ids}),
                         );
                     }
                     let symbol = position["symbol"].as_str().unwrap_or("unknown").to_owned();
@@ -92,7 +92,7 @@ impl Adapter {
                                 closed += 1;
                                 continue;
                             }
-                            json!({"message":"Invalid placement result","outcome":"unknown"})
+                            json!({"message":"The exchange reply didn’t confirm this order. Check your open orders before trying again.","outcome":"unknown"})
                         }
                         Err(error) => {
                             if let Some(partial) = error["partialOrderIds"].as_array() {
@@ -117,7 +117,7 @@ impl Adapter {
                     }
                     if self.cx.scope.is_disposed() {
                         return Err(
-                            json!({"message":"Nuke scope disposed","outcome":"unknown","partialOrderIds":ids}),
+                            json!({"message":"Nuke was interrupted when the account closed. Check your orders and positions before trying again.","outcome":"unknown","partialOrderIds":ids}),
                         );
                     }
                     let read = self.read_fresh_positions().await;
@@ -134,7 +134,7 @@ impl Adapter {
                             let left = if named.is_empty() {
                                 String::new()
                             } else {
-                                format!("{named} may still be open: ")
+                                format!("Positions to check: {named}. ")
                             };
                             failures.push(
                                 json!({"message":format!("{NUKE_NOT_CONFIRMED}: {left}{cause}")}),
@@ -207,7 +207,7 @@ impl Adapter {
             for (target, command) in self.sweep_commands(&cancelled_symbols) {
                 if self.cx.scope.is_disposed() {
                     return Err(
-                        json!({"message":"Nuke scope disposed","outcome":"unknown","partialOrderIds":ids}),
+                        json!({"message":"Nuke was interrupted when the account closed. Check your orders and positions before trying again.","outcome":"unknown","partialOrderIds":ids}),
                     );
                 }
                 match self.run_command(command).await {
@@ -369,13 +369,12 @@ const NUKE_CLOSE_RETRY_MS: u64 = 100;
 const NUKE_FLAT_SETTLE_MS: u64 = 2_000;
 /// The least wait after a close round before the read that can prove flat.
 const NUKE_READ_SETTLE_MS: u64 = 500;
-const NUKE_NOT_CONFIRMED: &str = "Nuke could not confirm the account is flat";
+const NUKE_NOT_CONFIRMED: &str = "Nuke couldn’t confirm all positions were closed";
 /// The target an account-wide cancel is named by in a nuke's failures.
 const ACCOUNT_TARGET: &str = "the account";
-const NUKE_ORDERS_MAY_REMAIN: &str =
-    "Orders, including triggers and TP/SL, may remain on this venue: check open orders";
+const NUKE_ORDERS_MAY_REMAIN: &str = "Not all orders were confirmed cancelled, including triggers and TP/SL. Check your open orders.";
 const NUKE_UNSEEN_ORDERS: &str =
-    "Orders placed in the last few seconds may not be cancelled on this venue: check open orders";
+    "Cancellation doesn’t cover every newly placed order on this exchange. Check your open orders.";
 
 /// The one rule for when a nuke warns that unseen orders may rest.
 fn unseen_orders_warning(capabilities: &safe_cex_engine::Capabilities) -> Option<&'static str> {

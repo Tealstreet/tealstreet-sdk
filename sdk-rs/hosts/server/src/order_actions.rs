@@ -390,7 +390,7 @@ pub fn unsupported(out: &Out, name: &str, id: &Value, seq: u64) {
         name,
         json!({"version":1,"intentId":id,"seq":seq,
         "outcome":"unsupported","result":null,
-        "error":{"message":"Unsupported v1 action schema","outcome":"unsupported"}}),
+        "error":{"message":"This action isn’t supported by this version","outcome":"unsupported"}}),
     );
 }
 
@@ -403,7 +403,7 @@ pub fn settle(
     answer: Result<Value, Value>,
 ) {
     let mut data = json!({"version":1,"intentId":id,"seq":seq,"outcome":"unknown","result":null,
-        "error":{"message":"Action result is not yet known","outcome":"unknown"}});
+        "error":{"message":"We couldn’t confirm this action. Check your open orders and positions before trying again.","outcome":"unknown"}});
     match answer {
         Ok(result) => {
             let applied = match kind {
@@ -461,7 +461,7 @@ pub fn settle(
             data["outcome"] = if not_sent { "refused" } else { "unknown" }.into();
             let message: String = error["message"]
                 .as_str()
-                .unwrap_or("Action result is not yet known")
+                .unwrap_or("We couldn’t confirm this action. Check your open orders and positions before trying again.")
                 .chars()
                 .take(512)
                 .collect();
@@ -525,9 +525,13 @@ impl ActionGuard {
     pub(crate) fn check(&self) -> Result<(), &'static str> {
         crate::auth::Verifier::check_expiry(self.token_expires_at_ms, crate::accounts::now_ms())?;
         if self.deadline.expired() {
-            Err("Action expired; no further action command was sent")
+            Err(
+                "This action expired before it could finish. Check your open orders and positions before trying again.",
+            )
         } else if !self.registration.action_active() {
-            Err("Action registration retired; no further action command was sent")
+            Err(
+                "The account connection changed before this action could finish. Check your open orders and positions before trying again.",
+            )
         } else {
             Ok(())
         }
@@ -536,7 +540,7 @@ impl ActionGuard {
 
 pub(crate) fn expired_outcome() -> Value {
     // Expiry is a dispatch fence, not whole-intent evidence of non-forwarding.
-    json!({"message":"Action expired; check orders and positions","outcome":"unknown"})
+    json!({"message":"This action expired. Check your open orders and positions before trying again.","outcome":"unknown"})
 }
 
 /// An actor-queued nuke owns its original registration and expiry, including
@@ -590,13 +594,14 @@ impl Drop for NukeReceipt {
                 seq,
                 self.kind,
                 Err(
-                    json!({"message":"Action interrupted; check orders and positions","outcome":"unknown"}),
+                    json!({"message":"This action was interrupted. Check your open orders and positions before trying again.","outcome":"unknown"}),
                 ),
             );
         }
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

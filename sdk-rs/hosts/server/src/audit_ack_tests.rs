@@ -1,6 +1,7 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 use super::*;
 
-const DIAGNOSTIC: &str = "The outcome is unknown. Check Open Orders. Bybit create-batch acknowledgement does not prove its orders (targets=1; result.list=array/2; retExtInfo.list=array/2; children=[0:orderId=nonempty,orderLinkId=empty,status=valid,code=0,echo=absent;1:orderId=nonempty,orderLinkId=empty,status=valid,code=0,echo=unmatched]; omitted=0)";
+const DIAGNOSTIC: &str = "We couldn’t confirm this change. Check your open orders before trying again.. Bybit create-batch acknowledgement does not prove its orders (targets=1; result.list=array/2; retExtInfo.list=array/2; children=[0:orderId=nonempty,orderLinkId=empty,status=valid,code=0,echo=absent;1:orderId=nonempty,orderLinkId=empty,status=valid,code=0,echo=unmatched]; omitted=0)";
 
 fn legacy() -> String {
     VenueError::new(DIAGNOSTIC)

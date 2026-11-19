@@ -198,10 +198,10 @@ export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: 
   )
     return;
   if (!exchange || (!secondaryReadHeaders[exchange] && exchange !== 'cryptocom')) {
-    throw new Error('Rust engine secondary signing keys are unsupported for this venue');
+    throw new Error('Extra read-only API keys aren’t supported for this exchange');
   }
   if (!options.secondary_key || !options.secondary_secret) {
-    throw new Error('Rust engine secondary signing keys require a nonempty key and secret');
+    throw new Error('The extra API credentials need both a key and secret');
   }
   if (
     [
@@ -219,7 +219,7 @@ export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: 
     ].includes(exchange) &&
     !(options.secondary_passphrase ?? options.passphrase)
   ) {
-    throw new Error('Rust engine secondary signing keys require a passphrase');
+    throw new Error('The extra API credentials need a passphrase');
   }
 };
 

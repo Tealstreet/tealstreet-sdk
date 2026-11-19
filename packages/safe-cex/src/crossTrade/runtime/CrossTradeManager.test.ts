@@ -140,11 +140,15 @@ describe('CrossTradeManager._safePlaceOrder', () => {
   });
 
   // Bravulasco: an uncertain refusal was retried every 3 s loop. It is a hold, not a failure.
-  it('holds a symbol refused as uncertain for 15 s, doubling to 5 min, until a placement lands', async () => {
+  // Rule 5 (Sam, 2026-11-20): both wordings keep the same no-retry hold.
+  it.each([
+    'Placement outcome is uncertain; reconcile before placing or amending',
+    'An earlier order hasn’t been confirmed. Check your open orders before placing or editing orders.',
+  ])('holds a symbol for 15 s, doubling to 5 min, until a placement lands: %s', async (message) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
     const market = makeMarket();
-    const uncertain = new Error('Placement outcome is uncertain; reconcile before placing or amending');
+    const uncertain = new Error(message);
     placeOrderMock.mockReset();
     placeOrderMock.mockRejectedValue(uncertain);
     const attempt = () => manager._safePlaceOrder(makeCopier(), market, 100, 'copier1', OrderSide.Buy, 0.5, false);

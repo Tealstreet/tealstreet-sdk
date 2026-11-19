@@ -123,3 +123,10 @@ not promote the orders axis grade. The projection and limits are documented in
 `docker-native-server-pr.yml` builds both production Dockerfiles from the repo root on PRs.
 It imports the master image caches with a read-only automatic token; it never publishes images or caches.
 The existing master-only workflows remain the sole image publishers and signers.
+
+## User-facing notification wording
+
+Messages shown in the UI use calm, plain language: what happened, then at most
+one short action. Unconfirmed changes still ask users to check before retrying;
+missing protection remains explicit. Keep structured outcomes, retries and
+severity unchanged, including recognition of retained older messages.

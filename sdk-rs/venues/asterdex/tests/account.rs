@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Official Aster V3 account, positionRisk and user-data payload contracts.
 //! https://github.com/asterdex/api-docs/blob/master/V3(Recommended)/EN/aster-finance-futures-api-v3.md
 use safe_cex_engine::model::{OrderStatus, PositionSide};
@@ -2084,8 +2085,11 @@ fn protective_amend_restore_sealed_on_a_5xx_says_its_outcome_is_unknown() {
         h.respond_status(restore, status, "");
         let error = h.failures.last().unwrap().clone();
         assert!(
-            error.message.contains("put-back's outcome is unknown")
-                && error.message.contains("Check Open Orders")
+            error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders")
                 && !error.message.contains("immediately trigger"),
             "{status}: {}",
             error.message
@@ -2205,7 +2209,7 @@ fn an_ordinary_replacement_refused_with_an_unlisted_code_stays_refused() {
         error.protection,
         Some(safe_cex_engine::error::Protection::Unprotected)
     );
-    assert!(!error.message.contains("unknown"), "{error:?}");
+    assert!(!error.message.contains("confirm"), "{error:?}");
     assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
 }
 

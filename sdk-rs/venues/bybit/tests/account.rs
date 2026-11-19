@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Private data and trading against Bybit's documented payloads.
 mod support;
 
@@ -3420,7 +3421,7 @@ fn an_unknown_placement_refuses_a_retry_on_its_symbol_until_reconciled() {
     assert!(!fresh.is_empty(), "BTC's own reconcile read");
     let fenced = |h: &Harness, command| {
         h.result(command)
-            .is_some_and(|result| result.as_ref().is_err_and(|e| e.contains("uncertain")))
+            .is_some_and(|result| result.as_ref().is_err_and(|e| e.contains("confirm")))
             && !h.has_request("/v5/order/create-batch")
     };
     // 1. A user retry on BTC is refused NotSent and sends nothing.
@@ -3533,7 +3534,7 @@ fn cancel_all_after_an_unknown_placement_waits_for_the_fresh_read() {
     });
     assert!(
         h.result(62)
-            .is_some_and(|r| r.as_ref().is_err_and(|e| e.contains("uncertain"))),
+            .is_some_and(|r| r.as_ref().is_err_and(|e| e.contains("confirm"))),
         "cancel-all is refused while BTC is uncertain: {:?}",
         h.result(62)
     );

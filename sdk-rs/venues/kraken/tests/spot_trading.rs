@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 mod spot_support;
 use safe_cex_engine::{Action, Command, Event, Notice, Query, model::PlaceOrderOpts};
 use spot_support::*;
@@ -985,7 +986,7 @@ fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
         }),
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command:83, error}) if error.message.contains("uncertain") && error.outcome == Some(safe_cex_engine::Outcome::NotSent))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command:83, error}) if error.message.contains("confirm") && error.outcome == Some(safe_cex_engine::Outcome::NotSent))));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     reply(&mut e, &fresh, r#"{"error":[],"result":{"open":{}}}"#);
     reply(&mut e, &old, r#"{"error":[],"result":{"open":{}}}"#);
@@ -1280,7 +1281,7 @@ fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
                 actions.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandFailed { command, error })
                 if *command == id && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                && error.message.contains("uncertain"))),
+                && error.message.contains("confirm"))),
                 "{actions:?}"
             );
         };
@@ -1384,7 +1385,7 @@ fn slow_reconcile(held_completes_cleanly: bool) {
             actions.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandFailed { error, .. })
                 if error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-                    && error.message.contains("uncertain"))),
+                    && error.message.contains("confirm"))),
             "{actions:?}"
         );
     };
@@ -1794,7 +1795,7 @@ fn queued_write_after_native_failure(case: &str, body: &str, unknown: bool) {
         assert!(
             blocked.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandFailed { command: 903, error })
-                if error.outcome == Some(Outcome::NotSent) && error.message.contains("uncertain"))),
+                if error.outcome == Some(Outcome::NotSent) && error.message.contains("confirm"))),
             "fresh entry must demonstrate that the uncertainty fence is still held"
         );
         assert!(
@@ -1809,7 +1810,7 @@ fn queued_write_after_native_failure(case: &str, body: &str, unknown: bool) {
         assert!(actions.iter().any(|action| matches!(action,
             Action::Notice(Notice::CommandFailed { command: 902, error })
                 if error.outcome == Some(Outcome::NotSent)
-                    && error.message.contains("Check Open Orders"))));
+                    && error.message.replace("Check your open orders", "Check Open Orders").contains("Check Open Orders"))));
         let read = actions
             .iter()
             .find_map(|action| match action {

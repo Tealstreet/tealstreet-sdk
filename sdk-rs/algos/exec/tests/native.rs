@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 #![cfg(not(target_arch = "wasm32"))]
 use safe_cex_algos::{AccountPort, AlgoCx, AlgoFactory, AlgoStore, Change, CommandFuture, Scope};
 use safe_cex_engine::engine::{Command, CommandId};
@@ -1489,7 +1490,13 @@ async fn a_nuke_warns_of_unseen_orders_only_where_no_cancel_reaches_them() {
                 summary.contains("Orders placed in the last few seconds may not be cancelled"),
                 "{summary}"
             );
-            assert!(summary.contains("check open orders"), "{summary}");
+            assert!(
+                summary
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
+                "{summary}"
+            );
             assert_eq!(
                 result["warning"].as_str().map(|w| summary.ends_with(w)),
                 Some(true)
@@ -1501,7 +1508,11 @@ async fn a_nuke_warns_of_unseen_orders_only_where_no_cancel_reaches_them() {
             let error = nuke_answered(&failing, "all").await.unwrap_err();
             let message = error["message"].as_str().unwrap();
             assert!(
-                message.contains("may not be cancelled") && message.contains("check open orders"),
+                message.contains("may not be cancelled")
+                    && message
+                        .to_ascii_lowercase()
+                        .replace("check your open orders", "check open orders")
+                        .contains("check open orders"),
                 "{message}"
             );
 

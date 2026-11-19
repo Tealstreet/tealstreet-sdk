@@ -124,7 +124,7 @@
       "code": -1111,
       "error": {
         "kind": "rateLimited",
-        "message": "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders",
+        "message": "HTTP response does not prove the write outcome. We couldn’t confirm this change. Check your open orders before trying again.",
         "outcome": "unknown",
         "partial": {
           "orderIds": [
@@ -139,7 +139,7 @@
       "code": -1111,
       "error": {
         "kind": "venueUnavailable",
-        "message": "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders",
+        "message": "HTTP response does not prove the write outcome. We couldn’t confirm this change. Check your open orders before trying again.",
         "outcome": "unknown",
         "partial": {
           "orderIds": [

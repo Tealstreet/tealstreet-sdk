@@ -99,7 +99,7 @@ describe('a signer failure is not reported as a rejected API key', () => {
   // The strings the sockets actually emit on the two signer failure modes.
   const EMITTED = [
     'Remote WS signing unavailable: browser closed mid-signature',
-    'Remote signer unavailable — WebSocket disconnected (gone <5s)',
+    'Signing isn’t available for this account — WebSocket disconnected (gone <5s)',
     'Signing request V1StGXR8Z5jdHi6BmyT timed out after 15000ms',
     'WebSocket disconnected — signing aborted',
     'Failed to send signing request',

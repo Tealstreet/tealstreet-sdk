@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #![allow(dead_code)]
 mod support;
 #[path = "support/unknown_exceptions.rs"]
@@ -2062,7 +2063,7 @@ fn order_read_with_a_rejected_row_does_not_clear_an_uncertain_placement() {
             matches!(
                 a,
                 Action::Notice(Notice::CommandFailed { command: 2, error })
-                    if error.legacy_text().contains("uncertain")
+                    if error.legacy_text().contains("confirm")
             )
         });
         assert_eq!(refused, malformed);
@@ -2624,7 +2625,7 @@ fn a_rejected_row_with_a_stored_copy_still_releases_the_fence() {
             matches!(
                 a,
                 Action::Notice(Notice::CommandFailed { command: 2, error })
-                    if error.legacy_text().contains("uncertain")
+                    if error.legacy_text().contains("confirm")
             )
         });
         // A row the store already holds is older than the uncertain write.
@@ -2964,9 +2965,9 @@ fn cancel_batch_unknown_row_has_no_created_target_ids(algo: bool) {
         .expect_err("an unconfirmed cancellation stays Unknown");
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(
-        error
-            .message
-            .contains("The outcome is unknown. Check Open Orders"),
+        error.message.contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        ),
         "Unknown cancellation must explain reconciliation: {error:?}"
     );
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
@@ -2989,10 +2990,9 @@ fn cancel_batch_unknown_row_has_no_created_target_ids(algo: bool) {
     assert_eq!(elements[1]["error"]["outcome"], "unknown");
     assert_eq!(elements[1]["error"]["venueCode"], "51412");
     assert!(
-        elements[1]["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("The outcome is unknown. Check Open Orders")
+        elements[1]["error"]["message"].as_str().unwrap().contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        )
     );
     assert!(
         elements[1]["error"]["message"]
@@ -3068,11 +3068,9 @@ fn cancel_batch_unknown_reporting_distinguishes_satisfied_and_refused_rows() {
         let terminal = terminals(&out, 2);
         let error = terminal[0].as_ref().unwrap_err();
         assert_eq!(error.outcome, Some(Outcome::Unknown));
-        assert!(
-            error
-                .message
-                .contains("The outcome is unknown. Check Open Orders")
-        );
+        assert!(error.message.contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        ));
         assert!(
             error
                 .partial
@@ -3163,9 +3161,9 @@ fn rate_limited_cancel_row_uses_released_write_outcome(algo: bool, code: &str) {
     assert_eq!(error.venue_code.as_deref(), Some(code));
     assert_eq!(error.venue_message.as_deref(), Some("Rate limit"));
     assert!(
-        error
-            .message
-            .contains("The outcome is unknown. Check Open Orders")
+        error.message.contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        )
     );
     let partial = error.partial.as_ref().expect("indexed applied batch");
     assert!(partial.order_ids.is_empty());
@@ -3186,10 +3184,9 @@ fn rate_limited_cancel_row_uses_released_write_outcome(algo: bool, code: &str) {
     assert_eq!(elements[1]["error"]["kind"], "rateLimited");
     assert_eq!(elements[1]["error"]["venueCode"], code);
     assert!(
-        elements[1]["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("The outcome is unknown. Check Open Orders")
+        elements[1]["error"]["message"].as_str().unwrap().contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        )
     );
     let events: Vec<_> = after
         .iter()

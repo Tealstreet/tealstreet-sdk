@@ -51,7 +51,7 @@ const makeSigner = (mode: 'ok' | 'resolves-error' | 'throws') => ({
     () =>
       new Promise<{ wsAuthSignature?: string; error?: string }>((resolve, reject) => {
         setTimeout(() => {
-          if (mode === 'throws') reject(new Error('Remote signer unavailable — WebSocket disconnected (gone <5s)'));
+          if (mode === 'throws') reject(new Error('Signing isn’t available for this account — WebSocket disconnected (gone <5s)'));
           else if (mode === 'resolves-error') resolve({ error: 'browser closed mid-signature' });
           else resolve({ wsAuthSignature: 'apex-signature' });
         }, 5);

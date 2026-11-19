@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Exercise the trading state machine independently of polling and sockets.
 #[allow(dead_code)]
 #[path = "../src/paths.rs"]
@@ -19,7 +20,8 @@ use safe_cex_engine::{
 use sign::Credentials;
 use trading::Trading;
 
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 #[expect(
     clippy::large_enum_variant,
@@ -1373,9 +1375,9 @@ fn shared_hedged_leverage_short_failure_reports_long_success_without_rollback() 
             Some(body) if body != "malformed" => {
                 assert_eq!(error.venue_message.as_deref(), Some("SHORT refused"))
             }
-            Some(_) => assert!(message.contains("outcome is unknown")),
+            Some(_) => assert!(message.contains("confirm")),
             None => {
-                assert!(message.contains("outcome is unknown"));
+                assert!(message.contains("confirm"));
                 assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Network));
             }
         }
@@ -1878,7 +1880,7 @@ fn bracket_failure_text_distinguishes_refused_partial_and_accepted_entry() {
             &rows[entry_count + 1].result,
             ElementResult::Unknown { .. }
         ));
-        assert!(error.message.contains("unknown"), "{}", error.message);
+        assert!(error.message.contains("confirm"), "{}", error.message);
         if accepted_entries == 0 {
             assert!(!error.message.contains("entry was"), "{}", error.message);
         } else if accepted_entries < entry_count {
@@ -2626,7 +2628,10 @@ fn a_limit_replace_that_cancels_and_refuses_says_the_order_is_gone() {
     h.reply(r#"{"code":0,"data":{"cancelResult":"SUCCESS","newOrderResult":"FAILED"}}"#);
     let error = h.done[0].as_ref().unwrap_err();
     assert!(
-        error.contains("outcome is unknown") && error.contains("Check Open Orders"),
+        error.contains("confirm")
+            && error
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
         "{error}"
     );
 }
@@ -2657,7 +2662,7 @@ fn a_moved_stop_whose_replacement_is_lost_says_the_position_may_have_no_stop() {
     h.failed();
     let error = h.done[0].as_ref().unwrap_err();
     assert!(
-        error.contains("unknown") && error.contains("Open Orders"),
+        error.contains("confirm") && error.to_ascii_lowercase().contains("open orders"),
         "{error}"
     );
 }
@@ -2669,7 +2674,7 @@ fn a_moved_stop_whose_replacement_answer_is_unclear_does_not_claim_no_stop() {
         h.reply(body);
         let error = h.done[0].as_ref().unwrap_err();
         assert!(
-            error.contains("unknown") && error.contains("Open Orders"),
+            error.contains("confirm") && error.to_ascii_lowercase().contains("open orders"),
             "{body}: {error}"
         );
     }
@@ -2966,7 +2971,8 @@ fn refused_or_unproven_put_back_never_loops_and_only_definite_refusal_claims_unp
                 "{status}/{body}: {error:?}"
             );
             assert!(
-                error.message.contains("unknown") && error.message.contains("Open Orders"),
+                error.message.contains("confirm")
+                    && error.message.to_ascii_lowercase().contains("open orders"),
                 "{error:?}"
             );
             assert!(!error.message.contains("is unprotected"));
@@ -3000,7 +3006,10 @@ fn guarded_rate_limits_are_unknown_without_changing_unrelated_gateway_classifica
             );
             assert!(h.failures[0].protection.is_none());
             assert!(
-                h.failures[0].message.contains("Open Orders"),
+                h.failures[0]
+                    .message
+                    .to_ascii_lowercase()
+                    .contains("open orders"),
                 "{:?}",
                 h.failures
             );
@@ -3438,7 +3447,7 @@ fn a_rate_limited_or_server_failure_keeps_unknown_words_even_with_missing_order_
         h.reply_status(status, r#"{"code":109400,"msg":"order not exist"}"#);
         assert!(h.requests.is_empty());
         assert!(
-            h.failures[0].message.contains("outcome is unknown"),
+            h.failures[0].message.contains("confirm"),
             "{:?}",
             h.failures
         );

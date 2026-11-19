@@ -91,7 +91,7 @@ never retried. This is the recorded stop-after-UNKNOWN parity exception
 (Sean/daxx, 2026-11-08): legacy TS can continue after an unproven acknowledgement.
 Venue-authored terminal write failures retain acknowledged IDs and name the
 unconfirmed request with
-`The outcome is unknown. Check Open Orders`; the companion
+`We couldn’t confirm this change. Check your open orders before trying again.`; the companion
 `order.outcome_unknown` event reports the command, acknowledged count and
 unconfirmed request. Engine-sealed failures retain the engine's canonical text. History reads page executions, orders, income and public trades
 into the engine query shapes and reject incomplete financial results.

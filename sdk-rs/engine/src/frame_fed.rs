@@ -8,9 +8,9 @@
 use crate::Command;
 
 /// Refusal for a write that arrives before the venue's metadata loads.
-pub const MARKETS_NOT_LOADED: &str = "markets not loaded";
+pub const MARKETS_NOT_LOADED: &str = "Markets are still loading";
 /// Refusal for a command a frame-fed engine leaves to its data source.
-pub const DATA_SOURCE_ONLY: &str = "a frameFed engine executes only writes";
+pub const DATA_SOURCE_ONLY: &str = "This account connection doesn’t support data reads";
 
 /// How long after a fence was raised a source frame must have been written to
 /// lift it: the venue's own propagation to the source's private stream.
@@ -58,6 +58,7 @@ pub fn refusal(command: &Command, markets_loaded: bool) -> Option<&'static str> 
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod tests {
     use super::*;

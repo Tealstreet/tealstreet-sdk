@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Real weighted info queue and native placement fence; no host cleanup claim.
 use super::*;
 use safe_cex_engine::request_context::Error;
@@ -290,7 +291,7 @@ fn assert_fenced(actions: &[Action], command: u32) {
         actions.iter().any(|action| matches!(action,
             Action::Notice(Notice::CommandFailed { command: id, error })
             if *id == command && error.outcome == Some(Outcome::NotSent)
-                && error.message.contains("Placement outcome is uncertain")
+                && error.message.contains("An earlier order hasn’t been confirmed")
         )),
         "queued pre-mark census must not release the fence: {actions:?}"
     );

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Outcome};
 use safe_cex_venue_lighter::Lighter;
@@ -206,7 +207,11 @@ fn guarded_rate_and_uncertain_replacement_never_put_back_or_resend() {
             .unwrap();
         let message = error.message.to_ascii_lowercase();
         assert!(
-            message.contains("unknown") && message.contains("check open orders"),
+            message.contains("confirm")
+                && message
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
             "{error:?}"
         );
         assert!(

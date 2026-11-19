@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Synchronous trading refusals settle only a genuine Mutation entry
 //! (docs/plans/RUST_LIGHTER_LOCAL_TRADE_REFUSALS.md).
 mod support;
@@ -136,7 +137,7 @@ fn free_capacity_keeps_each_native_refusal_exact() {
         assert_eq!(errors.len(), 1, "{case}: one terminal");
         assert_eq!(errors[0].outcome, Some(Outcome::NotSent), "{case}");
         assert_ne!(
-            errors[0].message, "Engine request capacity reached",
+            errors[0].message, "The account’s request queue is full. Try again shortly.",
             "{case}"
         );
         if let Some(message) = message {
@@ -156,7 +157,7 @@ fn full_owner_capacity_refuses_each_at_genuine_admission() {
         let errors = failure(&actions);
         assert_eq!(errors.len(), 1, "{case}: one terminal");
         assert_eq!(errors[0].outcome, Some(Outcome::NotSent), "{case}");
-        if errors[0].message != "Engine request capacity reached" {
+        if errors[0].message != "The account’s request queue is full. Try again shortly." {
             native.push(format!("{case}: {}", errors[0].message));
         }
     }

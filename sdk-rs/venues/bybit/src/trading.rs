@@ -119,7 +119,7 @@ impl PartialStopGuard {
     ) -> Result<(), VenueError> {
         let reference = self.original.trigger_type.ok_or_else(|| {
             safe_cex_engine::protective_amend::refused(Some(
-                "The original trigger source is unknown; your protection is unchanged".into(),
+                "The original trigger source isn’t available; your protection is unchanged".into(),
             ))
         })?;
         let mut original = self.clone();
@@ -168,7 +168,7 @@ impl PartialStopGuard {
         });
         if !unchanged || self.original.filled != 0.0 || !protected {
             return Err(safe_cex_engine::protective_amend::refused(Some(format!(
-                "The original {} protection changed, filled, or no longer protects an open position; check Open Orders before editing it",
+                "The original {} protection or position changed. Check your open orders before editing it.",
                 self.symbol
             ))));
         }

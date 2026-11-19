@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:net';
@@ -535,7 +536,7 @@ test('health counters are parsed from the engine and unavailable after disposal'
   assert.deepEqual(host.health(), { wsOpened: 2, httpFailures: 1 });
   assert.equal(new EngineHost({}, {}).health(), undefined);
   host.dispose();
-  assert.throws(() => host.health(), /engine disposed/);
+  assert.throws(() => host.health(), /The account was closed/);
 });
 
 test('a terminal startup failure reaches the host with its structured detail', () => {

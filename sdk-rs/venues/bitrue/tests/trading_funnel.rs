@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! B2 originals (docs/plans/RUST_BITRUE_REQUEST_FUNNEL.md, controls 7-15):
 //! trading writes on Preflight roots and serial or complete Plans.
 mod support;
@@ -232,7 +233,10 @@ fn an_unproven_verify_prepares_no_replacement() {
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert!(
         error.message.contains("could not be confirmed")
-            && error.message.contains("Check Open Orders"),
+            && error
+                .message
+                .replace("Check your open orders", "Check Open Orders")
+                .contains("Check Open Orders"),
         "{}",
         error.message
     );
@@ -415,7 +419,7 @@ fn a_lost_protective_create_fences_cancel_all_until_a_primary_reconcile() {
         command: 8,
         symbol: "E-BTC-USDT".into(),
     });
-    assert!(failure(&h, 8).is_some_and(|e| e.message.contains("uncertain")));
+    assert!(failure(&h, 8).is_some_and(|e| e.message.contains("confirm")));
     // Answer reads that predate the seal; the reconcile is Primary-signed.
     let reconcile = loop {
         let Some(read) = h

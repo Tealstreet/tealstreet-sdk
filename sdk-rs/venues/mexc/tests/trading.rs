@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 mod support;
 use safe_cex_engine::model::{BybitBbo, OrderStatus, PlaceOrderOpts};
 use safe_cex_engine::{Action, Command, Event, Notice, Response};
@@ -2650,7 +2651,7 @@ fn protective_terminal_read_never_treats_absence_or_triggered_as_cancel_proof() 
         inspect_reply(&mut e, &terminal, 330., &row);
         let actions = drained(&mut e);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
-        assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.protection.is_none() && error.outcome.is_none() && error.partial.as_ref().is_some_and(|partial|partial.order_ids==["guarded"]) && error.message.contains("status is unknown"))),"{actions:?}");
+        assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.protection.is_none() && error.outcome.is_none() && error.partial.as_ref().is_some_and(|partial|partial.order_ids==["guarded"]) && error.message.contains("confirm"))),"{actions:?}");
     }
 }
 
@@ -2864,7 +2865,7 @@ fn protective_terminal_inspection_is_bounded_without_resending_cancel() {
                 .unwrap();
             e.handle(at, Event::TimerFired { timer });
         } else {
-            assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.protection.is_none() && error.outcome.is_none() && error.partial.as_ref().is_some_and(|partial|partial.order_ids==["guarded"]) && error.message.contains("status is unknown"))));
+            assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.protection.is_none() && error.outcome.is_none() && error.partial.as_ref().is_some_and(|partial|partial.order_ids==["guarded"]) && error.message.contains("confirm"))));
         }
     }
 }
@@ -3092,8 +3093,11 @@ fn protective_rate_limit_on_replacement_or_put_back_is_unknown_without_protectio
                 .unwrap();
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
             assert!(error.protection.is_none());
-            assert!(error.message.contains("is unknown"), "{error:?}");
-            assert!(error.message.contains("Open Orders") && error.message.contains("position"));
+            assert!(error.message.contains("confirm"), "{error:?}");
+            assert!(
+                error.message.to_ascii_lowercase().contains("open orders")
+                    && error.message.contains("position")
+            );
             assert!(!error.message.contains("both refused"));
         }
     }
@@ -3138,9 +3142,10 @@ fn protective_native_rate_limit_is_unknown_without_not_changed_or_cancel() {
             .unwrap();
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert!(error.protection.is_none());
-        assert!(error.message.contains("is unknown"), "{error:?}");
+        assert!(error.message.contains("confirm"), "{error:?}");
         assert!(
-            error.message.contains("Open Orders") && error.message.contains("position"),
+            error.message.to_ascii_lowercase().contains("open orders")
+                && error.message.contains("position"),
             "{error:?}"
         );
         assert!(!error.message.contains("not changed"));
@@ -3317,13 +3322,12 @@ fn protective_ambiguous_envelope_codes_never_restore_or_report_not_sent() {
                     "mode={mode}, status={status}, code={code}"
                 );
                 assert!(errors[0].protection.is_none());
+                assert!(errors[0].message.contains("confirm"), "{:?}", errors[0]);
                 assert!(
-                    errors[0].message.contains("status is unknown"),
-                    "{:?}",
                     errors[0]
-                );
-                assert!(
-                    errors[0].message.contains("Open Orders")
+                        .message
+                        .to_ascii_lowercase()
+                        .contains("open orders")
                         && errors[0].message.contains("position")
                 );
                 assert!(!errors[0].message.contains("restored"));
@@ -4186,7 +4190,7 @@ fn protective_engine_sealed_unknown_reports_uncertainty_on_every_write_leg() {
             assert!(error.protection.is_none(), "{leg}/{status}: {error:?}");
             assert_eq!(
                 error.message,
-                "The outcome of your BTCUSDT protection update is unknown. Check Open Orders and your position before replacing protection.",
+                "Your BTCUSDT protection update wasn’t confirmed. Check your open orders and position before adding protection.",
                 "{leg}/{status}"
             );
             assert!(!actions.iter().any(|a| match a {

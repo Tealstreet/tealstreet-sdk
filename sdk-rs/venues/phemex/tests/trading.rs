@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Documented g-API payloads and mutation lifecycle regressions.
 mod support;
 use safe_cex_engine::model::*;
@@ -707,7 +708,10 @@ fn split_definite_refusal_then_unknown_still_stops_suffix() {
     assert!(writes(&actions).is_empty());
     let error = failure(&actions);
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    assert_eq!(error.message, "The outcome is unknown. Check Open Orders");
+    assert_eq!(
+        error.message,
+        "We couldn’t confirm this change. Check your open orders before trying again."
+    );
     let rows = error.elements.as_ref().unwrap();
     assert!(matches!(
         rows[0].result,
@@ -724,7 +728,8 @@ fn split_definite_refusal_then_unknown_still_stops_suffix() {
 
 fn assert_split_unknown(unknown: usize, body: Value) {
     use safe_cex_engine::write_plan::ElementResult;
-    const GUIDANCE: &str = "The outcome is unknown. Check Open Orders";
+    const GUIDANCE: &str =
+        "We couldn’t confirm this change. Check your open orders before trying again.";
     let mut e = engine();
     let mut order = opts("");
     order.amount = 2.123;
@@ -3589,7 +3594,7 @@ fn lost_client_order_id_cannot_be_reused_until_its_read_settles_it() {
         "a retry would be canceled as the late landing"
     );
     assert_eq!(failure(&a).outcome, Some(safe_cex_engine::Outcome::NotSent));
-    assert!(done(&a).unwrap_err().contains("uncertain"), "{a:?}");
+    assert!(done(&a).unwrap_err().contains("confirm"), "{a:?}");
     let read = open_order_reads(&at(&mut e, wake, Event::TimerFired { timer })).remove(0);
     let a = reply(&mut e, wake + 1., &read, 200, &rows(vec![]));
     assert!(deletes(&a).is_empty());
@@ -4499,8 +4504,11 @@ fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
         let a = raw_status(&mut e, restore, status);
         let error = failure(&a);
         assert!(
-            error.message.contains("put-back's outcome is unknown")
-                && error.message.contains("Check Open Orders")
+            error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders")
                 && !error.message.contains("TE_NO_ENOUGH"),
             "{status}: {}",
             error.message
@@ -4797,7 +4805,7 @@ fn ordinary_replacement_text_matches_master() {
         let expected = if status == 200 {
             "Phemex 11082 TE_RISK_LIMIT_EXCEEDED; Your BTCUSDT order is gone: it was canceled and its replacement refused"
         } else {
-            "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again."
         };
         assert_eq!(error.message, expected);
         assert_eq!(error.legacy_text(), expected);

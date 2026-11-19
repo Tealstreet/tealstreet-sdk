@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Drives a Bybit engine through scripted responses and frames built from the
 //! documented V5 payloads (bybit-exchange.github.io/docs/v5).
 #![allow(dead_code)]
@@ -497,9 +498,10 @@ fn prepared_actions(
     output
 }
 
-pub const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+pub const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
-pub const ENGINE_UNKNOWN_AFTER_REFUSAL_TEXT: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+pub const ENGINE_UNKNOWN_AFTER_REFUSAL_TEXT: &str = "This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again.";
 
 pub fn assert_unknown_pin(
     h: &mut Harness,

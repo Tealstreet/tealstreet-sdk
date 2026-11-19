@@ -24,7 +24,8 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const BROKER: &str = "e847386590ce4dBC";
-const UNKNOWN_OUTCOME_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const UNKNOWN_OUTCOME_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 /// Every write is one call with its own 20 s bound; only a 50113 signature
 /// refusal, which executed nothing, is re-signed and sent once more.
@@ -1483,7 +1484,7 @@ impl Okx {
                 );
             }
             let envelope: wire::Envelope<'_> = serde_json::from_str(response.body)
-                .map_err(|_| "Malformed OKX native order source")?;
+                .map_err(|_| "OKX’s original order details couldn’t be read")?;
             if envelope.code != "0" {
                 return Err(format!(
                     "OKX {}: {}; the order is unchanged",
@@ -1499,7 +1500,7 @@ impl Okx {
                 }
                 let quotes: Vec<Quote<'_>> =
                     serde_json::from_str(envelope.data.ok_or("Missing OKX ticker")?.get())
-                        .map_err(|_| "Malformed OKX ticker")?;
+                        .map_err(|_| "OKX’s current price couldn’t be read")?;
                 let [quote] = quotes.as_slice() else {
                     return Err("OKX ticker must name exactly one instrument".into());
                 };
@@ -1536,7 +1537,7 @@ impl Okx {
                     .ok_or("Missing OKX native order source")?
                     .get(),
             )
-            .map_err(|_| "Malformed OKX native order source")?;
+            .map_err(|_| "OKX’s original order details couldn’t be read")?;
             let [row] = rows.as_slice() else {
                 return Err("OKX native order source must name exactly one order".into());
             };
@@ -1692,7 +1693,7 @@ impl Okx {
             });
         let Some(acks) = acks else {
             if matches!(envelope.code, "0" | "2") {
-                return self.unproven(cx, request, "Malformed OKX write response");
+                return self.unproven(cx, request, "OKX’s reply couldn’t be read");
             }
             let message = write_failure_message(&envelope);
             return self.failure(cx, request, Some(envelope.code), message, response.status);
@@ -1798,7 +1799,7 @@ impl Okx {
             let message = if missing_id {
                 "OKX placement response missing order ID"
             } else {
-                "OKX 50004: write execution status is unknown"
+                "OKX didn’t confirm this change (50004). Check your open orders before trying again."
             };
             // Preserve proven siblings in this same unproven batch. Recording
             // only an empty Unknown fact loses them in the engine projection.
@@ -2220,8 +2221,10 @@ impl Okx {
                         return;
                     }
                     Err(reason) => {
-                        error.message =
-                            format!("{}; restore admission failed: {reason}", error.message)
+                        error.message = format!(
+                            "{}; restoring the original order couldn’t be prepared: {reason}",
+                            error.message
+                        )
                     }
                 }
             }
@@ -2286,7 +2289,7 @@ impl Okx {
                 "{}; {}",
                 error.message,
                 if uncertain {
-                    "OKX trailing protection is unconfirmed; check Open Orders before placing another stop"
+                    "The OKX trailing stop wasn’t confirmed. Check your open orders before adding another stop."
                 } else {
                     "The old OKX trailing stop was canceled and could not be replaced; the position is unprotected"
                 }
@@ -2886,6 +2889,7 @@ impl PlacementIdentities for [OrderPayload] {
     }
 }
 
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 #[cfg(test)]
 mod code_table_tests {
     use super::*;

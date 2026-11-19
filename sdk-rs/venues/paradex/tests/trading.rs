@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display pins move; outcome and no-resend assertions stay.
 //! Trading contracts against documented request/response wire shapes.
 mod support;
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
@@ -59,7 +60,11 @@ fn assert_dispatched_unknown(h: &Harness) {
     );
     let text = error.legacy_text().to_ascii_lowercase();
     assert!(
-        text.contains("unknown") && text.contains("check open orders"),
+        text.contains("confirm")
+            && text
+                .to_ascii_lowercase()
+                .replace("check your open orders", "check open orders")
+                .contains("check open orders"),
         "{text}"
     );
     assert!(
@@ -2092,7 +2097,11 @@ fn assert_aggregated_unknown_diagnostic(unknown_first: bool, malformed: bool) {
     assert_eq!(error.kind, kind);
     let text = error.legacy_text().to_ascii_lowercase();
     assert!(
-        text.contains("unknown") && text.contains("check open orders"),
+        text.contains("confirm")
+            && text
+                .to_ascii_lowercase()
+                .replace("check your open orders", "check open orders")
+                .contains("check open orders"),
         "{error:?}"
     );
     assert_eq!(
@@ -2142,7 +2151,13 @@ fn the_first_unknown_diagnostic_is_retained_and_the_next_leg_is_withheld() {
         };
         assert_eq!(error.kind, Some(kind));
         assert_eq!(error.venue_message.as_deref(), Some(diagnostic));
-        assert!(error.message.contains("unknown") && error.message.contains("Check Open Orders"));
+        assert!(
+            error.message.contains("confirm")
+                && error
+                    .message
+                    .replace("Check your open orders", "Check Open Orders")
+                    .contains("Check Open Orders")
+        );
         assert!(!h.pending.iter().any(|r| r.method != Method::Get));
     }
 }
@@ -2182,7 +2197,11 @@ fn aggregation_normalizes_transport_unknown_warning() {
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         let text = error.legacy_text().to_ascii_lowercase();
         assert!(
-            text.contains("unknown") && text.contains("check open orders"),
+            text.contains("confirm")
+                && text
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
             "{error:?}"
         );
         assert_eq!(text.contains("definitive refusal"), !lost_first, "{text}");
@@ -2223,7 +2242,11 @@ fn aggregation_keeps_unknown_warning_beside_a_definitive_refusal() {
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
             let text = error.legacy_text().to_ascii_lowercase();
             assert!(
-                text.contains("unknown") && text.contains("check open orders"),
+                text.contains("confirm")
+                    && text
+                        .to_ascii_lowercase()
+                        .replace("check your open orders", "check open orders")
+                        .contains("check open orders"),
                 "{error:?}"
             );
             assert_eq!(
@@ -2340,7 +2363,7 @@ fn an_unknown_placement_refuses_a_retry_until_a_fresh_order_read_reconciles_it()
         !h.pending.iter().any(|r| r.method == Method::Post),
         "the retry was written while the first placement is uncertain"
     );
-    assert!(h.result(9).unwrap_err().contains("uncertain"));
+    assert!(h.result(9).unwrap_err().contains("confirm"));
     assert_eq!(
         h.failures.last().and_then(|e| e.outcome),
         Some(safe_cex_engine::Outcome::NotSent)
@@ -2349,7 +2372,7 @@ fn an_unknown_placement_refuses_a_retry_until_a_fresh_order_read_reconciles_it()
     // 2. The read in flight before the write completes; the fence holds.
     h.respond(stale, 200, r#"{"results":[]}"#);
     place(&mut h, 10, vec![opts(OrderType::Limit)]);
-    assert!(h.result(10).unwrap_err().contains("uncertain"));
+    assert!(h.result(10).unwrap_err().contains("confirm"));
     assert!(!h.pending.iter().any(|r| r.method == Method::Post));
 
     // 3. The hook's owed read, dispatched after the write, releases it.
@@ -2417,7 +2440,7 @@ fn engine_reasks_join_a_slow_post_write_read_that_then_releases_the_fence() {
         // Each re-ask joins the slow read: no restart, no second read.
         assert!(h.pending.is_empty(), "{:?}", h.pending);
         place(&mut h, 9, vec![opts(OrderType::Limit)]);
-        assert!(h.result(9).unwrap_err().contains("uncertain"));
+        assert!(h.result(9).unwrap_err().contains("confirm"));
     }
     assert_eq!(reasks, vec![1_000., 3_000., 7_000.]);
     h.respond(slow, 200, r#"{"results":[]}"#);
@@ -2451,7 +2474,7 @@ fn cancel_all_waits_for_reconciliation_after_an_unknown_placement_but_cancel_by_
         !h.pending.iter().any(|r| r.method == Method::Delete),
         "cancel-all was sent while the placement is uncertain"
     );
-    assert!(h.result(9).unwrap_err().contains("uncertain"));
+    assert!(h.result(9).unwrap_err().contains("confirm"));
     assert_eq!(
         h.failures.last().and_then(|e| e.outcome),
         Some(safe_cex_engine::Outcome::NotSent)
@@ -2463,7 +2486,7 @@ fn cancel_all_waits_for_reconciliation_after_an_unknown_placement_but_cancel_by_
     });
     let cancel = take_method(&mut h, Method::Delete, "/orders/resting");
     h.respond(cancel, 200, "{}");
-    assert!(!h.result(10).is_err_and(|e| e.contains("uncertain")));
+    assert!(!h.result(10).is_err_and(|e| e.contains("confirm")));
     // The cancel changed the order store after that read began, so its
     // snapshot cannot commit and cannot release the fence.
     h.respond(fresh, 200, r#"{"results":[]}"#);
@@ -2471,7 +2494,7 @@ fn cancel_all_waits_for_reconciliation_after_an_unknown_placement_but_cancel_by_
         command: 11,
         symbol: "BTC-USD-PERP".into(),
     });
-    assert!(h.result(11).unwrap_err().contains("uncertain"));
+    assert!(h.result(11).unwrap_err().contains("confirm"));
     // The engine's re-ask starts a new read, whose clean snapshot releases it.
     let (timer, at) = h
         .actions
@@ -2611,7 +2634,12 @@ fn a_stop_replacement_with_unknown_outcome_says_the_stop_may_be_gone() {
     );
     let error = h.result(13).unwrap_err();
     assert!(error.contains("may have no stop"), "{error}");
-    assert!(error.contains("Check Open Orders"), "{error}");
+    assert!(
+        error
+            .replace("Check your open orders", "Check Open Orders")
+            .contains("Check Open Orders"),
+        "{error}"
+    );
 }
 
 #[test]

@@ -1,3 +1,4 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Structured write failures preserve transport/native provenance and batch effects.
 mod support;
 use safe_cex_engine::model::{OrderStatus, PlaceOrderOpts};
@@ -85,7 +86,7 @@ fn write_failures_classify_http_before_body_and_keep_native_diagnostics() {
         if unproven {
             assert_eq!(
                 error.message,
-                "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: The exchange reply didn’t confirm this change. Check your open orders before trying again."
             );
         } else {
             assert_eq!(error.message, "Sign signature error");
@@ -157,7 +158,7 @@ fn write_transport_and_malformed_success_are_unknown_but_preflight_is_not_sent()
         if body.is_none() {
             assert_eq!(
                 error.message,
-                "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: response lost. The outcome is unknown. Check Open Orders"
+                "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: response lost. We couldn’t confirm this change. Check your open orders before trying again."
             );
         }
     }
@@ -243,9 +244,9 @@ fn an_unknown_batch_leg_ends_the_job_before_later_chunks() {
     let error = classified_failure(&mut e, 1005);
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert!(
-        error
-            .message
-            .contains("The outcome is unknown. Check Open Orders")
+        error.message.contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        )
     );
     assert_eq!(
         error.partial.unwrap().order_ids,
@@ -384,9 +385,9 @@ fn mixed_cancel_unknown_has_guidance_and_one_independent_diagnostic() {
         .collect();
     assert_eq!(
         (
-            error
-                .message
-                .contains("The outcome is unknown. Check Open Orders"),
+            error.message.contains(
+                "We couldn’t confirm this change. Check your open orders before trying again."
+            ),
             diagnostics.len()
         ),
         (true, 1),
@@ -618,11 +619,9 @@ fn malformed_cancel_peer_preserves_confirmed_cancellation_and_blocks_replacement
         );
         let error = classified_failure(&mut e, 1011);
         assert_eq!(error.outcome, Some(Outcome::Unknown));
-        assert!(
-            error
-                .message
-                .contains("The outcome is unknown. Check Open Orders")
-        );
+        assert!(error.message.contains(
+            "We couldn’t confirm this change. Check your open orders before trying again."
+        ));
         assert_eq!(
             e.store().order("one").unwrap().status,
             OrderStatus::Canceled
@@ -652,7 +651,7 @@ fn undocumented_native_code_is_uncertain_even_with_an_empty_message() {
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(
         error.message,
-        "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: The outcome is unknown. Check Open Orders"
+        "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: We couldn’t confirm this change. Check your open orders before trying again."
     );
     assert_eq!(error.venue_code.as_deref(), Some("99999"));
 }

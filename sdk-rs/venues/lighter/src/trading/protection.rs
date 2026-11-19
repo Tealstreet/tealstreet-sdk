@@ -558,7 +558,7 @@ impl Lighter {
             .observed;
         if error.outcome == Some(Outcome::Unknown) {
             error.message = format!(
-                "Your {} protection outcome unknown; check Open Orders: {}",
+                "Your {} protection wasn’t confirmed. Check your open orders before adding protection.: {}",
                 old.symbol, error.message
             );
             error.protection = None;

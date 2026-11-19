@@ -1597,7 +1597,7 @@ impl WeexFutures {
             } => apply_cancel(cx, before, native, *all, body, owned),
             Call::Amend { before, price } => {
                 let response = serde_json::from_str::<ResultRow>(body)
-                    .map_err(|_| unknown("WEEX malformed TP/SL amendment response"))?;
+                    .map_err(|_| unknown("WEEX’s TP/SL edit reply couldn’t be read"))?;
                 if !response.success {
                     Err(response.error().into())
                 } else {
@@ -1854,7 +1854,7 @@ fn apply_cancel(
 }
 fn metadata(body: &str, symbol: Option<&String>) -> Result<(), VenueError> {
     let row = serde_json::from_str::<MetadataResult>(body)
-        .map_err(|_| unknown("WEEX malformed settings response"))?;
+        .map_err(|_| unknown("WEEX’s settings reply couldn’t be read"))?;
     if row.success == Some(false) || row.code.as_ref().is_some_and(|c| !c.success()) {
         return Err(if row.msg.is_empty() {
             "WEEX settings update rejected".to_owned()
@@ -1886,7 +1886,7 @@ fn place_rows(
     body: &str,
 ) -> Result<Vec<ResultRow>, VenueError> {
     let decoded: Rows =
-        serde_json::from_str(body).map_err(|_| unknown("WEEX malformed order response"))?;
+        serde_json::from_str(body).map_err(|_| unknown("WEEX’s order reply couldn’t be read"))?;
     if batch && !matches!(&decoded, Rows::Many(_)) {
         return Err(unknown("WEEX batch response must be an array"));
     }
@@ -1932,7 +1932,7 @@ fn cancel_rows(
     body: &str,
 ) -> Result<Vec<(String, ResultRow)>, VenueError> {
     let rows = serde_json::from_str::<Rows>(body)
-        .map_err(|_| unknown("WEEX malformed cancellation response"))?
+        .map_err(|_| unknown("WEEX’s cancellation reply couldn’t be read"))?
         .into_vec();
     let mut seen = HashSet::new();
     let mut results = Vec::new();

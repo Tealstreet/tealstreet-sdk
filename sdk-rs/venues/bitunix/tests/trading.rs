@@ -1,10 +1,12 @@
+// Rule 5 (Sam, 2026-11-20): display wording only; outcome and no-retry checks stay.
 //! Outbound payloads follow bitunix.com/api-docs/futures/trade and tp_sl.
 mod support;
 use safe_cex_engine::model::{OrderStatus, PlaceOrderOpts};
 use safe_cex_engine::{Action, Command, Event, Notice};
 use support::*;
 
-const ENGINE_UNKNOWN_TEXT: &str = "The outcome is unknown. Check Open Orders";
+const ENGINE_UNKNOWN_TEXT: &str =
+    "We couldn’t confirm this change. Check your open orders before trying again.";
 
 fn assert_unknown_notice(actions: &[Action], command: u32, placed: &[&str]) {
     let failures: Vec<_> = actions
@@ -1819,7 +1821,7 @@ fn unknown_fallback_replacement_http503_keeps_engine_sealed_wording() {
     assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert_eq!(
         failures[0].message,
-        "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders"
+        "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again."
     );
 }
 
