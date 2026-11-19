@@ -213,3 +213,12 @@ exact caps. Combined measures 18,087,936 − 206,989 B and stays at its ceiling.
 Managed HTTP preparation observations change shipped host JS, so they move the
 beta input fingerprint and require a new release/pin. They do not change Rust
 sources or waive fresh combined-consumer/size evidence or any retained floor.
+
+Native CI is fail-complete. Every `Rust / native <check>` row runs its matrix
+`command` through `run-all-checks.mjs`: one command per line (no `&&` chains),
+each line runs even after an earlier failure, every `cargo test` carries
+`--no-fail-fast`, and the step ends with a per-crate list of failing tests in the
+log and step summary while still failing the job. `test-http-plan-feature-modes.py`
+likewise runs every engine mode before failing. #3640 needed four runs to surface
+~124 failures because the first failing target stopped the job;
+`affected-ci-workflow.test.mjs` pins this shape.
