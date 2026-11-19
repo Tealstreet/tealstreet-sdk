@@ -147,10 +147,15 @@ test('the bot workflow measures master Rust runs, pushes only changed caps and d
   const pushes = [...workflow.matchAll(/^\s*git push\b.*$/gm)].map(([line]) => line.trim());
   assert.deepEqual(pushes, ['git push --force-with-lease="refs/heads/$BOT_BRANCH:${BOT_LEASE:-}" origin "HEAD:refs/heads/$BOT_BRANCH"']);
   assert.match(workflow, />> "\$GITHUB_STEP_SUMMARY"/);
-  assert.doesNotMatch(workflow, /\bgh\s+(pr|api)\b|pulls|pull-requests:/, 'no PR API and no PR permission');
-  // A GITHUB_TOKEN push starts no workflows, so the required checks are dispatched at the pushed head (AGT-23, #3690).
-  const ghCalls = [...workflow.matchAll(/^\s*gh\s.*$/gm)].map(([line]) => line.trim());
-  assert.deepEqual(ghCalls, ['gh workflow run ci.yml --ref "$BOT_BRANCH"', 'gh workflow run rust.yml --ref "$BOT_BRANCH"']);
+  assert.doesNotMatch(workflow, /\bgh\s+pr\b|pulls|pull-requests:/, 'no PR API and no PR permission');
+  // A bot push queues the PR's runs as action_required; they shadow dispatched checks, so the job approves them (#3690 at 16b8c590).
+  const ghCalls = [...workflow.matchAll(/\bgh\s+(?:run|api|workflow)\b[^\n]*/g)].map(([call]) => call.trim());
+  assert.deepEqual(ghCalls, [
+    'gh run list --branch "$BOT_BRANCH" --commit "$head" --event pull_request \\',
+    'gh run list --branch "$BOT_BRANCH" --commit "$head" --event pull_request \\',
+    'gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run/approve"',
+  ]);
+  assert.doesNotMatch(workflow, /gh workflow run/, 'dispatched runs are shadowed by the queued PR runs');
   assert.match(workflow, /if: env\.PUSHED == 'true'/);
   // Caps identical to the bot branch push nothing, so an open PR's head and checks stay put.
   assert.match(workflow, /cmp -s "\$RUNNER_TEMP\/bot-wasm-caps\.json" sdk-rs\/harness\/wasm-caps\.json[\s\S]*exit 0[\s\S]*git push/);

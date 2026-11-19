@@ -85,10 +85,12 @@ recurring merge conflict.
   images run on boxes holding user keys (coordinator, #3686). Sam's local
   `fleet-watch` opens "chore(wasm): restore rule-17 reserve" with his token when
   the branch's caps differ from master and no PR is open; nothing auto-merges.
-  **A GITHUB_TOKEN push starts no workflows**, so later bot pushes left #3690
-  with no `ci` or `Rust / required coverage` at head. The job therefore skips
-  the push when the caps equal the bot branch's, and after a push dispatches
-  `ci.yml` and `rust.yml` on the bot branch (its only use of `actions: write`).
+  **A bot push to the open PR queues its pull_request runs as
+  `action_required`**, and those empty suites shadow any dispatched run's
+  checks in the PR rollup, so #3690 stayed BLOCKED with green dispatched `ci`
+  and `Rust / required coverage` at 16b8c590. The job therefore skips the push
+  when the caps equal the bot branch's, and after a push approves that head's
+  queued runs (its only use of `actions: write`). Do not go back to dispatching.
 - **Ceilings that are decisions, not measurements** (a combined raise ahead of
   measurement, a new family) are hand edits to `wasm-caps.json` with a dated
   line in `wasm-caps-history.md`, which also holds every pre-cutover provenance

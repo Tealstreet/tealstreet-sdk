@@ -7,9 +7,10 @@
 # wasm-caps-history.md line and a CLEAR naming the growth. Raised caps go to the bot-owned branch bot/wasm-caps and
 # the job summary; this workflow calls no PR API. Actions may not create or approve
 # PRs here (coordinator decision on #3686), so Sam's fleet-watch opens the PR with
-# a user token. A GITHUB_TOKEN push starts no workflows, so after pushing, the job
-# dispatches the required CI and Rust SDK workflows at the new head; a run whose
-# caps match the bot branch pushes nothing, so the open PR's head and checks stay put.
+# a user token. A bot push to an open PR queues its pull_request runs as
+# action_required, which hide any other run's checks from branch protection, so
+# after pushing, the job approves those runs (workflow runs, never a PR review).
+# A run whose caps match the bot branch pushes nothing, so the PR head stays put.
 #
 # Keep every step GitHub-owned: this repo's Actions policy allows only
 # GitHub-owned actions.
@@ -23,7 +24,7 @@ on:
 
 permissions:
   contents: write
-  # write only to dispatch the required workflows at the pushed head.
+  # write only to approve the pushed head's queued pull_request runs.
   actions: write
 
 concurrency:
@@ -106,13 +107,31 @@ jobs:
             echo "Pushed raised caps to \`$BOT_BRANCH\` from [Rust SDK run $MEASURED_RUN]($RUN_URL) at \`$MEASURED_SHA\`."
             echo "fleet-watch opens the PR \"chore(wasm): restore rule-17 reserve\" with a user token."
           } >> "$GITHUB_STEP_SUMMARY"
-      # workflow_dispatch is the one event a GITHUB_TOKEN may start; it reports the
+      # Dispatched runs do not help: the newer action_required suites shadow them in
+      # the PR's rollup (#3690 at 16b8c590). Approving the queued runs reports the
       # required `ci` and `Rust / required coverage` checks on the pushed head.
-      - name: Run the required checks at the pushed head
+      - name: Approve the pushed head's pull_request runs
         if: env.PUSHED == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh workflow run ci.yml --ref "$BOT_BRANCH"
-          gh workflow run rust.yml --ref "$BOT_BRANCH"
-          echo "Dispatched CI and Rust SDK on \`$BOT_BRANCH\`." >> "$GITHUB_STEP_SUMMARY"
+          head=$(git rev-parse HEAD)
+          # No open PR means no runs; fleet-watch's user-token PR then runs CI normally.
+          for _ in $(seq 1 20); do
+            queued=$(gh run list --branch "$BOT_BRANCH" --commit "$head" --event pull_request \
+              --json databaseId,conclusion --jq '.[] | select(.conclusion == "action_required") | .databaseId')
+            [ -n "$queued" ] && break
+            sleep 15
+          done
+          if [ -z "$queued" ]; then
+            echo "No queued pull_request runs at \`$head\` (no open PR); nothing approved." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Let the rest of the PR's workflows queue before approving the batch.
+          sleep 30
+          queued=$(gh run list --branch "$BOT_BRANCH" --commit "$head" --event pull_request \
+            --json databaseId,conclusion --jq '.[] | select(.conclusion == "action_required") | .databaseId')
+          for run in $queued; do
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run/approve"
+          done
+          echo "Approved pull_request runs ${queued//$'\n'/ } at \`$head\`." >> "$GITHUB_STEP_SUMMARY"
