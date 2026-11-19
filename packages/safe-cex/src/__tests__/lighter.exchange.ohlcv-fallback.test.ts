@@ -1,8 +1,9 @@
+import type { Candle, ExchangeOptions } from '../types';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../store/frameStore';
 import { LighterExchange } from './reference/lighter/lighter.exchange';
-import { DefaultStore } from '../store/store.base';
-import type { Candle, ExchangeOptions } from '../types';
 
 vi.mock('@tealstreet/poseidon-crypto', () => ({
   initWasm: vi.fn(),
@@ -50,7 +51,7 @@ describe('LighterExchange OHLCV REST fallback dedupe', () => {
       testnet: false,
     } as ExchangeOptions;
 
-    return new LighterExchange('lighter', options, new DefaultStore());
+    return new LighterExchange('lighter', options, new FrameStore());
   };
 
   const candle: Candle = {

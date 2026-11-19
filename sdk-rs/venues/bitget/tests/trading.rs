@@ -209,6 +209,83 @@ fn place_honors_caller_id_rounds_and_uses_broker_header() {
 }
 
 #[test]
+fn delegated_uuid_encoding_preserves_one_plain_limit_order() {
+    // Bug 69: the hosted encoder (85b32c27469) keeps all UUID bits in 32 hex
+    // characters. A raw 36-character intent must still refuse before any write.
+    let intent = "018bcfe5-6800-7101-8101-010101010101";
+    let compact = "018bcfe5680071018101010101010101";
+    for unified in [false, true] {
+        for client in [intent, compact] {
+            let mut h = if unified { uta() } else { Harness::classic() };
+            place(
+                &mut h,
+                vec![json!({
+                    "symbol":"BTCUSDT", "type":"limit", "side":"buy",
+                    "amount":0.001, "price":55000, "clientOrderId":client
+                })],
+            );
+            if client == intent {
+                let error = h.done.last().unwrap().1.as_ref().unwrap_err();
+                assert!(error.contains("clientOrderId cannot be honored verbatim"));
+                assert_eq!(
+                    h.failures.last().unwrap().outcome,
+                    Some(safe_cex_engine::Outcome::NotSent)
+                );
+                assert!(
+                    h.requests
+                        .iter()
+                        .all(|request| request.method == Method::Get)
+                );
+                continue;
+            }
+            assert_eq!(
+                h.requests
+                    .iter()
+                    .filter(|request| request.method == Method::Post)
+                    .count(),
+                1,
+                "one caller ID must address exactly one native order"
+            );
+            let (request, payload) = body(
+                &mut h,
+                if unified {
+                    "/api/v3/trade/place-order"
+                } else {
+                    "/batch-place-order"
+                },
+            );
+            let order = if unified {
+                &payload
+            } else {
+                assert_eq!(payload["orderList"].as_array().unwrap().len(), 1);
+                &payload["orderList"][0]
+            };
+            assert_eq!(order["clientOid"], compact);
+            assert_eq!(order[if unified { "qty" } else { "size" }], "0.001");
+            assert_eq!(order["price"], "55000");
+            if unified {
+                h.reply(
+                    request,
+                    200,
+                    r#"{"code":"00000","data":{"orderId":"fixture-order"}}"#,
+                );
+            } else {
+                batch_success(&mut h, request, &["fixture-order"]);
+            }
+            assert_eq!(
+                h.done.last().unwrap().1.as_ref().unwrap(),
+                r#"["fixture-order"]"#
+            );
+            assert!(
+                h.requests
+                    .iter()
+                    .all(|request| request.method == Method::Get)
+            );
+        }
+    }
+}
+
+#[test]
 fn all_caller_ids_are_checked_before_any_order_write() {
     let mut h = Harness::classic();
     let good = limit();

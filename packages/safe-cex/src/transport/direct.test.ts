@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { BybitExchange } from '../__tests__/reference/bybit/bybit.exchange';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { directTransport } from './direct';
 import { resolveTransportRouting, withPublicCorsProxy } from './registry';
 
@@ -18,7 +18,7 @@ describe('direct transport', () => {
     const exchange = new BybitExchange(
       'bybit',
       { key: 'k', secret: 's', transport: directTransport },
-      new DefaultStore(),
+      new FrameStore(),
     );
     try {
       expect(exchange.xhr.defaults.baseURL).toBe('https://api.bybit.com');
@@ -34,7 +34,7 @@ describe('direct transport', () => {
         new BybitExchange(
           'bybit',
           { key: 'k', secret: 's', tealstreetTunnel: true, transport: directTransport },
-          new DefaultStore(),
+          new FrameStore(),
         ),
     ).toThrow(/direct transport is active/);
   });

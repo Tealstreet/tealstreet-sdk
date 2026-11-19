@@ -1,8 +1,3 @@
-vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
-});
-
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { BaseExchange } from '../exchanges/base';
 
@@ -11,10 +6,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { exchangeRegistry } from '../exchanges/registry';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { directTransport } from '../transport/direct';
 import { PositionMode } from '../types';
 import { prepareRecordedHttp } from './support/managedHttp';
+
+vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
+});
 
 const REST = 'https://rpc.txflow-testnet.xyz';
 const PUBLIC_PROXY = 'https://public-cors.invalid';
@@ -113,7 +113,7 @@ describe('TxFlow production registry through real Wasm', () => {
     const tape = recordedTxFlowTransport();
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const Exchange = await exchangeRegistry.txflow();
     exchange = new Exchange(
       'txflow',
@@ -183,14 +183,19 @@ describe('TxFlow production registry through real Wasm', () => {
       { url: 'wss://rpc.txflow-testnet.xyz/ws', channel: 'private' },
       { url: 'wss://rpc.txflow-testnet.xyz/api-ws', channel: 'public' },
     ]);
-    await vi.waitFor(() => {
-      const nodeSubscriptions = tape.sockets[0].sent as Array<{ type?: string; subscription?: { user?: string } }>;
-      const privateSubscriptions = nodeSubscriptions.filter(({ subscription }) => subscription?.user);
-      expect(privateSubscriptions.map(({ type }) => type)).toEqual([
-        'orderUpdates', 'clearinghouseState', 'userAssetData',
-      ]);
-      expect(privateSubscriptions.every(({ subscription }) => subscription!.user === WALLET)).toBe(true);
-    }, { timeout: 3000 });
+    await vi.waitFor(
+      () => {
+        const nodeSubscriptions = tape.sockets[0].sent as Array<{ type?: string; subscription?: { user?: string } }>;
+        const privateSubscriptions = nodeSubscriptions.filter(({ subscription }) => subscription?.user);
+        expect(privateSubscriptions.map(({ type }) => type)).toEqual([
+          'orderUpdates',
+          'clearinghouseState',
+          'userAssetData',
+        ]);
+        expect(privateSubscriptions.every(({ subscription }) => subscription!.user === WALLET)).toBe(true);
+      },
+      { timeout: 3000 },
+    );
   });
 
   it('rejects mainnet startup before HTTP or socket I/O', async () => {
@@ -198,7 +203,7 @@ describe('TxFlow production registry through real Wasm', () => {
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.transport);
     const Exchange = await exchangeRegistry.txflow();
-    exchange = new Exchange('txflow', { ...OPTIONS, testnet: false }, new DefaultStore());
+    exchange = new Exchange('txflow', { ...OPTIONS, testnet: false }, new FrameStore());
     await expect(exchange.start()).rejects.toThrow('TxFlow mainnet is offline; testnet is required');
     expect(tape.requests).toEqual([]);
     expect(tape.sockets).toEqual([]);

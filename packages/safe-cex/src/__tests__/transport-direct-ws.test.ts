@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../store/frameStore';
+import { directTransport } from '../transport/direct';
 import { BitgetExchange } from './reference/bitget/bitget.exchange';
 import { GrvtExchange } from './reference/grvt/grvt.exchange';
 import { LighterExchange } from './reference/lighter/lighter.exchange';
-import { DefaultStore } from '../store/store.base';
-import { directTransport } from '../transport/direct';
 
 // The routing tables only ever ran under the Tealstreet transport, so three ws
 // classes dereferenced hosts that the direct transport never resolves.
@@ -22,7 +22,7 @@ describe('direct transport websockets', () => {
       new BitgetExchange(
         'bitget',
         { key: '', secret: '', publicDataOnly: true, transport: directTransport },
-        new DefaultStore(),
+        new FrameStore(),
       ),
     );
     const socket = exchange.publicWebsocket as any;
@@ -46,7 +46,7 @@ describe('direct transport websockets', () => {
           grvtTradingAccountId: 'acct',
           transport: directTransport,
         },
-        new DefaultStore(),
+        new FrameStore(),
       ),
     );
     const socket = (exchange as any).privateWebsocket;
@@ -73,7 +73,7 @@ describe('direct transport websockets', () => {
           tealstreetWsRoute: true,
           transport: directTransport,
         },
-        new DefaultStore(),
+        new FrameStore(),
       ),
     );
 

@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -62,6 +62,8 @@ export function verifyGateSuite({ suite, entries, manifest, accepted = ACCEPTED_
 }
 
 export function loadGateLedger({ root = process.cwd(), directory = 'sdk-rs/harness/out/ci', includeRaw = false } = {}) {
+  if (!existsSync(resolve(root, directory, 'ledger.jsonl')))
+    throw new Error('No strict replay ledger: an earlier build or size check failed before replay measurement');
   const outputRoot = realpathSync(resolve(root, 'sdk-rs/harness/out'));
   const file = (path) => {
     if (typeof path !== 'string') throw new Error('invalid gate evidence path');

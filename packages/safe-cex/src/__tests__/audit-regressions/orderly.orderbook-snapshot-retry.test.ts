@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 describe('audit regression: Orderly orderbook snapshot recovery', () => {
   it('re-arms snapshot loading after a transient REST failure', async () => {
     const exchange = new OrderlyExchange(
       'woofi',
       { key: 'test-key', secret: 'test-secret', applicationId: 'test-account' },
-      new DefaultStore(),
+      new FrameStore(),
     );
     const get = vi
       .fn()

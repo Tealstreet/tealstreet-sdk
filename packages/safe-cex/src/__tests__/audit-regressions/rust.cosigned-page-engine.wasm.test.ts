@@ -7,11 +7,12 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { gunzipSync } from 'node:zlib';
+
 import { afterEach, beforeAll, expect, it } from 'vitest';
 
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderType } from '../../types';
 import { prepareRecordedHttp } from '../support/managedHttp';
 
@@ -46,8 +47,10 @@ const pageEngine = ({ losePlacement = false, loseCancel = false } = {}) => {
     request: async (request) => {
       sent.push({ method: request.method, url: request.url });
       // The placement reached the venue, but its response never came back.
-      if (losePlacement && new URL(request.url).pathname === '/v5/order/create-batch') throw new Error('socket hang up');
-      if (loseCancel && new URL(request.url).pathname === '/v5/order/cancel-batch') throw new Error('cancel response lost');
+      if (losePlacement && new URL(request.url).pathname === '/v5/order/create-batch')
+        throw new Error('socket hang up');
+      if (loseCancel && new URL(request.url).pathname === '/v5/order/cancel-batch')
+        throw new Error('cancel response lost');
       const row = recorded.get(request.url);
       const body =
         row?.body ??
@@ -55,7 +58,17 @@ const pageEngine = ({ losePlacement = false, loseCancel = false } = {}) => {
           ? JSON.stringify({
               retCode: 0,
               retMsg: 'OK',
-              result: { list: [{ category: 'linear', symbol: 'BTCUSDT', orderId: 'page-1', orderLinkId: '', createAt: `${Date.now()}` }] },
+              result: {
+                list: [
+                  {
+                    category: 'linear',
+                    symbol: 'BTCUSDT',
+                    orderId: 'page-1',
+                    orderLinkId: '',
+                    createAt: `${Date.now()}`,
+                  },
+                ],
+              },
               retExtInfo: { list: [{ code: 0, msg: 'OK' }] },
               time: Date.now(),
             })
@@ -73,7 +86,7 @@ const pageEngine = ({ losePlacement = false, loseCancel = false } = {}) => {
   };
   setRustEngineTransport(() => transport);
   const options = { key: 'page-key', secret: 'page-mac-key', workerMirror: true } as ExchangeOptions;
-  const exchange = new RustEngineExchange('bybit', options, new DefaultStore());
+  const exchange = new RustEngineExchange('bybit', options, new FrameStore());
   live.push(exchange);
   // The hosted bridge: what the controller wires to the exchange-server facade.
   const calls: string[] = [];
@@ -93,8 +106,15 @@ const BTC = 'BTCUSDT';
 const privateTape = () => {
   const dir = mkdtempSync(join(tmpdir(), 'bybit-tape-'));
   const out = join(dir, 'bybit-private.jsonl');
-  execFileSync(process.execPath, [resolve(__dirname, '../../../../../sdk-rs/harness/private-tape-bybit.mjs'), '--out', out]);
-  const rows = readFileSync(out, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as Row);
+  execFileSync(process.execPath, [
+    resolve(__dirname, '../../../../../sdk-rs/harness/private-tape-bybit.mjs'),
+    '--out',
+    out,
+  ]);
+  const rows = readFileSync(out, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as Row);
   rmSync(dir, { recursive: true });
   return new Map(rows.filter((row) => row.type === 'http' && row.method === 'GET').map((row) => [row.url!, row]));
 };
@@ -117,7 +137,11 @@ const serverEngine = async () => {
     clearTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
   };
   setRustEngineTransport(() => transport);
-  const server = new RustEngineExchange('bybit', { key: 'server-key', secret: 'server-mac-key' } as ExchangeOptions, new DefaultStore());
+  const server = new RustEngineExchange(
+    'bybit',
+    { key: 'server-key', secret: 'server-mac-key' } as ExchangeOptions,
+    new FrameStore(),
+  );
   live.push(server);
   await server.start();
   setRustEngineTransport();

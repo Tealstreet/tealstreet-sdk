@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 vi.mock('../../utils/virtualClock', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../utils/virtualClock')>();
@@ -12,7 +12,7 @@ const accounts: RustEngineExchange[] = [];
 afterEach(() => accounts.splice(0).forEach((exchange) => exchange.dispose()));
 
 const account = () => {
-  const exchange = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+  const exchange = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
   accounts.push(exchange);
   return exchange;
 };

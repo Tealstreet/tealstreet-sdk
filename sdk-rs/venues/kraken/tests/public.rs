@@ -1,3 +1,6 @@
+#[path = "../../../engine/tests/support/request_stats_frame.rs"]
+mod request_stats_frame;
+use request_stats_frame::assert_request_stats_frame;
 mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, SocketChannel};
 use safe_cex_venue_kraken::{Kraken, Options};
@@ -172,13 +175,14 @@ fn old_candle_reply_cannot_seed_a_recreated_subscription() {
     );
     e.handle(NOW, Event::Command(c()));
     let new = requests(&mut e).pop().unwrap();
+    let before_stats = e.snapshot_frame(NOW).to_vec();
     reply(
         &mut e,
         &old,
         200,
         r#"{"candles":[{"time":1700000000000,"open":"9","high":"9","low":"9","close":"9","volume":"9"}]}"#,
     );
-    assert!(e.take_frame(NOW).is_none());
+    assert_request_stats_frame(&before_stats, e.take_frame(NOW), NOW, [1, 0, 0, 0, 0]);
     reply(&mut e, &new, 200, r#"{"candles":[]}"#);
 }
 #[test]

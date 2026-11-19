@@ -1,14 +1,17 @@
-import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 import { expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 it('Binance USD-M journal folds per-symbol fills like the TS venue', async () => {
-  const exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
+  const exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new FrameStore());
   adoptEngineCapabilities(exchange);
   const fold = vi
-    .spyOn(exchange as unknown as { foldClosedPositionRecords: (...args: unknown[]) => Promise<unknown[]> }, 'foldClosedPositionRecords')
+    .spyOn(
+      exchange as unknown as { foldClosedPositionRecords: (...args: unknown[]) => Promise<unknown[]> },
+      'foldClosedPositionRecords',
+    )
     .mockResolvedValue([]);
   try {
     await expect(exchange.fetchHistoricalPositions({ account: 'acct', from: 1, to: 2 })).resolves.toEqual([]);

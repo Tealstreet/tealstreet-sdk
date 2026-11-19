@@ -2,9 +2,10 @@ import type { Market } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../reference/binance/binance.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderStatus } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { createFakeVenue } from './fakeVenue';
 import { createFaultAdapter } from './faultAdapter';
 
@@ -24,8 +25,13 @@ const exchanges: BinanceExchange[] = [];
 
 // Binance's query-order endpoint, by client ID: live or closed, -2013 for an ID it never saw.
 const setup = (rows: Record<string, Record<string, unknown>>) => {
-  const store = new DefaultStore();
-  store.update({ markets: [MARKET] });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      { markets: [MARKET] },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new BinanceExchange(
     'binance',
     { key: 'key', secret: 'secret', tealstreetTunnel: false } as any,

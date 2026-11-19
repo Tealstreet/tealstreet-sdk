@@ -46,6 +46,21 @@ fn market(writer: &mut FrameWriter<'_>) {
     writer.end();
 }
 
+// Recovery snapshots establish a fresh identity domain; unlike deltas they
+// must include every market used by their book/candle row indexes.
+fn identity_markets(writer: &mut FrameWriter<'_>) {
+    let strings = ["a", "A/USD", "a", "USD", "b", "B/USD", "b", "USD"].map(|s| writer.string(s));
+    writer.begin(section::MARKETS);
+    writer.u32s([2]);
+    writer.u32s(strings);
+    writer.u32s([1, 1]);
+    writer.pad();
+    for value in [0.001, 0.01, 0.0, 100.0, 1.0, 100.0, f64::NAN, 1.0, 0.0, 0.0] {
+        writer.f64s([value, value]);
+    }
+    writer.end();
+}
+
 fn main() {
     let mut initial = Book::default();
     initial.load_sorted(BookSide::Bids, [(2.0, 1.0), (0.0, 2.0)]);
@@ -145,5 +160,28 @@ fn main() {
         "invalidCandle",
         packed(|writer| candle_output::write(writer, &[(0, "1m", candle(f64::NAN))])),
     );
+    let mut unordered = Book::default();
+    unordered.load_sorted(BookSide::Bids, [(0.0, 1.0), (2.0, 1.0)]);
+    for (name, is_candle, valid) in [
+        ("identity-bookUpdate", false, true),
+        ("identity-unordered", false, false),
+        ("identity-candleUpdate", true, true),
+        ("identity-invalidCandle", true, false),
+    ] {
+        frames.insert(
+            name,
+            packed(|writer| {
+                identity_markets(writer);
+                if is_candle {
+                    candle_output::write(
+                        writer,
+                        &[(0, "1m", candle(if valid { 0.0 } else { f64::NAN }))],
+                    );
+                } else {
+                    book_output::write(if valid { &initial } else { &unordered }, 0, writer);
+                }
+            }),
+        );
+    }
     println!("{}", serde_json::to_string(&frames).unwrap());
 }

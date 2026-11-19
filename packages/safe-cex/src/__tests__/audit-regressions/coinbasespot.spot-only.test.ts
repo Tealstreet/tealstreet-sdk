@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { CoinbaseSpotExchange } from '../reference/coinbase/coinbasespot.exchange';
+import { FrameStore } from '../../store/frameStore';
 import { ENDPOINTS } from '../reference/coinbase/coinbase.types';
-import { DefaultStore } from '../../store/store.base';
+import { CoinbaseSpotExchange } from '../reference/coinbase/coinbasespot.exchange';
 
 const makeExchange = () =>
   new CoinbaseSpotExchange(
     'coinbasespot' as any,
     { key: 'api-key', secret: 'api-secret', tealstreetProxy: false, tealstreetTunnel: false } as any,
-    new DefaultStore(),
+    new FrameStore(),
   );
 
 const makeSpotProduct = () => ({

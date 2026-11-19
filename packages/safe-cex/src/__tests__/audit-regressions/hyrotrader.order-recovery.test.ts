@@ -2,8 +2,9 @@ import { AxiosError } from 'axios';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { Market, OrderSide, OrderStatus, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
 
 class TestHyroExchange extends HyrotraderExchange {
@@ -13,20 +14,25 @@ class TestHyroExchange extends HyrotraderExchange {
 }
 const exchanges: TestHyroExchange[] = [];
 const setup = (max = 100) => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: 'BTCUSDT',
-        symbol: 'BTCUSDT',
-        base: 'BTC',
-        quote: 'USDT',
-        active: true,
-        precision: { amount: 0.001, price: 0.1 },
-        limits: { amount: { min: 0.001, max }, leverage: { min: 1, max: 100 } },
-      } satisfies Market,
-    ],
-  });
+        markets: [
+          {
+            id: 'BTCUSDT',
+            symbol: 'BTCUSDT',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.001, price: 0.1 },
+            limits: { amount: { min: 0.001, max }, leverage: { min: 1, max: 100 } },
+          } satisfies Market,
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new TestHyroExchange('hyrotrader', { key: 'key', secret: 'secret' }, store);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
   exchanges.push(exchange);
@@ -108,7 +114,12 @@ describe('HyroTrader deadline and transport recovery', () => {
     exchange.privateWebsocket.onMessage(
       new MessageEvent('message', { data: JSON.stringify({ topic: 'order', data: [raw] }) }),
     );
-    store.update({ orders: [] });
+    store.apply(
+      nativeFixture(
+        { orders: [] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     get.mockResolvedValue(response({ list: [{ ...raw, orderStatus: 'New', cumExecQty: '0', leavesQty: '0.01' }] }));
     expect(await exchange.placeOrder(order)).toEqual(['seen-between-calls']);
     expect(store.orders).toEqual([]);
@@ -186,7 +197,12 @@ describe('HyroTrader deadline and transport recovery', () => {
         }),
       }),
     );
-    store.update({ orders: [] });
+    store.apply(
+      nativeFixture(
+        { orders: [] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     resolve(response({ orderId: 'filled-before-ack' }));
     await pending;
     expect(store.orders).toEqual([]);

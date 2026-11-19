@@ -26,6 +26,9 @@ pub fn write_delta(book: &Book, previous: &Book, market: u32, w: &mut FrameWrite
 
 /// Write the full book as a `BOOK` section: rows of `[price, amount, total]`.
 pub fn write(book: &Book, market: u32, w: &mut FrameWriter<'_>) {
+    // Level counts are known before serialization; reserve the header and all
+    // numeric columns once instead of growing a large startup frame geometrically.
+    w.reserve_tables(24 + (book.bids().len() + book.asks().len()) * 24, 0);
     w.begin(section::BOOK);
     w.u32s([
         market,

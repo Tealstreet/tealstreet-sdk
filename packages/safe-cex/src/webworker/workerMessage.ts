@@ -1,24 +1,22 @@
-import type { StoreWorkerIncomingOp, StoreWorkerPayload } from './StoreWorkerPayload';
 import type { WriteMarks } from '../writeTiming';
+import type { StoreWorkerIncomingOp, StoreWorkerPayload } from './StoreWorkerPayload';
+
 import { WRITE_STAGES } from '../writeTiming';
 
 const incomingOps = {
-  'init': true,
-  'dispose': true,
-  'reinit': true,
-  'deactivate': true,
-  'sayHi': true,
-  'forwardFrames': true,
-  'store': true,
-  'merge-loaded': true,
-  'merge-message-handler-stats': true,
-  'sendSnapshot': true,
-  'settings': true,
+  init: true,
+  dispose: true,
+  reinit: true,
+  deactivate: true,
+  sayHi: true,
+  forwardFrames: true,
+  sendSnapshot: true,
+  settings: true,
   'sync-time': true,
-  'subscribeOHLCV': true,
-  'unsubscribeOHLCV': true,
-  'subscribeOrderBook': true,
-  'unsubscribeOrderBook': true,
+  subscribeOHLCV: true,
+  unsubscribeOHLCV: true,
+  subscribeOrderBook: true,
+  unsubscribeOrderBook: true,
   'chaser:start': true,
   'chaser:terminate': true,
   'chaser:terminateAll': true,
@@ -28,18 +26,18 @@ const incomingOps = {
   'twap:pause': true,
   'twap:stop': true,
   'twap:state': true,
-  'updatePositions': true,
-  'callMethod': true,
-  'exec': true,
+  updatePositions: true,
+  callMethod: true,
+  exec: true,
   'dev:simulateWebSocketsReconnect': true,
   'dev:simulateHOWClose': true,
   'dev:forceOpen': true,
   'dev:forceClose': true,
   'ui:state': true,
   'sign-res': true,
-  '__worker_ping__': true,
-  '__workerConfig': true,
-  '__perfFixtureDump': true,
+  __worker_ping__: true,
+  __workerConfig: true,
+  __perfFixtureDump: true,
 } satisfies Record<StoreWorkerIncomingOp, true>;
 
 export const isWorkerRecord = (value: unknown): value is Record<string, unknown> =>
@@ -58,7 +56,7 @@ export function isWorkerMessage(value: unknown): value is WorkerMessage {
     if (!isWorkerRecord(value.data) || typeof value.data.exchangeName !== 'string') return false;
     if (value.data.accountName !== undefined && typeof value.data.accountName !== 'string') return false;
     if (!isWorkerRecord(value.data.options)) return false;
-    for (const field of ['settings', 'metadata', 'store']) {
+    for (const field of ['settings', 'metadata']) {
       if (value.data[field] !== undefined && !isWorkerRecord(value.data[field])) return false;
     }
   }
@@ -66,4 +64,5 @@ export function isWorkerMessage(value: unknown): value is WorkerMessage {
 }
 
 export const isWorkerWriteMarks = (value: unknown): value is WriteMarks =>
-  isWorkerRecord(value) && WRITE_STAGES.every(stage => value[stage] === undefined || typeof value[stage] === 'number');
+  isWorkerRecord(value) &&
+  WRITE_STAGES.every((stage) => value[stage] === undefined || typeof value[stage] === 'number');

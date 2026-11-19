@@ -11,7 +11,7 @@ import { assertBetaAccount, BETA_VENUES } from '../../exchanges/rust/betaVenues'
 import { deriveRemoteSigningPolicy } from '../../exchanges/rust/construction';
 import { createRustRegistry, getRegisteredExchangeNames } from '../../exchanges/rustRegistry';
 import { createExchange, createPublicExchange, preloadExchange } from '../../index';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { virtualClock } from '../../utils/virtualClock';
 
 const state = vi.hoisted(() => {
@@ -134,10 +134,10 @@ describe('Rust-only beta construction', () => {
     setWasmEngineLoader(load);
     for (const name of out) {
       expect(
-        () => new RustEngineExchange(name, { key: '', secret: '', publicDataOnly: true }, new DefaultStore()),
+        () => new RustEngineExchange(name, { key: '', secret: '', publicDataOnly: true }, new FrameStore()),
       ).toThrow('unsupported in this build');
     }
-    const working = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    const working = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
     working.dispose();
     expect(load).not.toHaveBeenCalled();
   });
@@ -184,9 +184,10 @@ describe('Rust-only beta construction', () => {
       const signing = signerKind === 'remoteSigner' ? { remoteSigner } : { payloadSigner };
       for (const name of BETA_VENUES.filter((venue) => deriveRemoteSigningPolicy(venue)?.enabled !== true)) {
         const prettyName = exchangeMetadata[name].prettyName;
-        const message = signerKind === 'remoteSigner'
-          ? `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`
-          : `${prettyName} delegated signing is unsupported in this build`;
+        const message =
+          signerKind === 'remoteSigner'
+            ? `${prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`
+            : `${prettyName} delegated signing is unsupported in this build`;
         await expect(createExchange(name, { key: 'public-key', secret: '', ...signing })).rejects.toMatchObject({
           message,
           kind: 'unsupported',

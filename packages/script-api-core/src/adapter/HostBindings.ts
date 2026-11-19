@@ -11,7 +11,7 @@ import type {
   Timeframe,
   UpdateOrderOpts,
 } from '@tealstreet/safe-cex/src/types';
-import type { Store } from '@tealstreet/safe-cex/src/store/store.interface';
+import type { StoreData } from '@tealstreet/safe-cex/src/generated/StoreData';
 import type { CommandOutcome } from '@tealstreet/safe-cex/src/commandOutcome';
 
 import type { HistoricalPosition, PrintKind, RunCommandResult } from '../api/CoreApi.types';
@@ -53,7 +53,7 @@ import type { MaybePromise } from './AdapterContext';
  */
 export interface HostExchange {
   readonly name?: ExchangeName;
-  readonly store?: Store;
+  readonly store?: StoreData;
   readonly fetchOHLCV?: (opts: {
     readonly symbol: string;
     readonly interval: Timeframe;
@@ -97,7 +97,7 @@ export interface HostWriteEvent {
 export interface HostBindings {
   // ── Where the host keeps things ────────────────────────────────────────
   getExchange(account: string): HostExchange | undefined;
-  getStore(account: string): Store | undefined;
+  getStore(account: string): StoreData | undefined;
   /** Host-owned optimistic ids and wake/account lifetime checks, after shared rounding. */
   submitOrderAmend?(account: string, options: UpdateOrderOpts): Promise<unknown>;
 

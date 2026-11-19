@@ -2,9 +2,9 @@ import type { ExchangeOptions } from '../types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LighterExchange } from './reference/lighter/lighter.exchange';
 import { ENDPOINTS } from '../exchanges/lighter/lighter.types';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
+import { LighterExchange } from './reference/lighter/lighter.exchange';
 
 const { lighterApiGetMock, lighterApiSendRawTxMock } = vi.hoisted(() => ({
   lighterApiGetMock: vi.fn(),
@@ -58,7 +58,7 @@ describe('LighterExchange account lookup fallbacks', () => {
       ...overrides,
     } as ExchangeOptions;
 
-    return new LighterExchange('lighter', options, new DefaultStore());
+    return new LighterExchange('lighter', options, new FrameStore());
   };
 
   beforeEach(() => {

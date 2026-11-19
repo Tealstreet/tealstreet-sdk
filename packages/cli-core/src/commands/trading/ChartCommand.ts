@@ -295,7 +295,7 @@ export function renderCandleChart(
         rowStr += RED + cell[1] + RESET + ' ';
       } else if (hasLine) {
         // Draw dotted line through empty space
-        const lineColor = getLineColor(linesAtRow![0]);
+        const lineColor = getLineColor(linesAtRow[0]);
         rowStr += `${lineColor}·${RESET} `;
       } else {
         rowStr += cell + ' ';
@@ -304,7 +304,7 @@ export function renderCandleChart(
 
     // Add chart line labels on the right side
     if (hasLine) {
-      const line = linesAtRow![0]; // Show first line (position takes priority)
+      const line = linesAtRow[0]; // Show first line (position takes priority)
       const lineColor = getLineColor(line);
       rowStr += `${lineColor}◄ ${line.label}${RESET}`;
     } else if (lastPrice !== undefined && row === lastPriceRow) {
@@ -565,7 +565,7 @@ export class ChartCommand extends TradingBaseCommand {
       // Calculate countdown for chart
       let countdown: string | undefined;
       if (timeframe in TIMEFRAME_MS) {
-        const tfMs = TIMEFRAME_MS[timeframe as Timeframe];
+        const tfMs = TIMEFRAME_MS[timeframe];
         const candleEndTime = lastCandle.timestamp * 1000 + tfMs;
         const remaining = candleEndTime - Date.now();
         if (remaining > 0) {

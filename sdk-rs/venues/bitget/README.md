@@ -66,6 +66,15 @@ repeat the rounded equal lot `ceil(amount / max)` times, then append the rounded
 remainder. Per-lot rounding can change the submitted total. Batch chunks retain
 their 50-row limit and the existing partial-failure reporting.
 
+DELEGATED intent UUIDs use the server's lossless 32-character hexadecimal
+`clientOid` encoding (85b32c27469), while the router retains the original intent
+UUID. This fits the [UTA REST client-ID contract](https://www.bitget.com/docs/catalog/trading/order-management)
+and the shared native adapter's 32-character limit. A raw UUID has 36 characters
+and is refused before a write. Caller IDs also require one physical order: split
+amounts, brackets and algorithmic orders retain their existing refusal.
+`tests/trading.rs::delegated_uuid_encoding_preserves_one_plain_limit_order`
+pins the 0.001 BTCUSDT at 55000 case on Classic and UTA without venue I/O.
+
 UTA fills use the dedicated execution channel. UTA account topics cover multiple
 products, so orders are filtered by category and positions by margin coin and
 known market. Combined standalone TP/SL strategies use separate leg identities

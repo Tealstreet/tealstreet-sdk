@@ -1,12 +1,14 @@
-import { describe, expect, it } from 'vitest';
-import { mapParadexSignerSetup } from '../../exchanges/rust/paradexSignerSetup';
-import { deriveSignerSetupPolicy, derivePublicMode } from '../../exchanges/rust/construction';
-import { LocalSignerSetup } from '../../exchanges/rust/localSignerSetup';
 import type { ExchangeOptions } from '../../types';
+
+import { describe, expect, it } from 'vitest';
+
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
-import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
+import { derivePublicMode, deriveSignerSetupPolicy } from '../../exchanges/rust/construction';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
-import { DefaultStore } from '../../store/store.base';
+import { LocalSignerSetup } from '../../exchanges/rust/localSignerSetup';
+import { mapParadexSignerSetup } from '../../exchanges/rust/paradexSignerSetup';
+import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
+import { FrameStore } from '../../store/frameStore';
 
 const STARK = `0x${'0'.repeat(63)}1`;
 const ETHEREUM = '11'.repeat(32);
@@ -20,7 +22,9 @@ describe('Paradex trusted Stark setup capsule', () => {
       expect(setup.credentialPresence).toEqual({ key: false, secret: true });
       let captured: string | undefined;
       class Capture {
-        constructor(_venue: string, _options: string, json?: string) { captured = json; }
+        constructor(_venue: string, _options: string, json?: string) {
+          captured = json;
+        }
       }
       setup.construct(Capture as never, 'paradex', '{}');
       expect(JSON.parse(captured!)).toEqual({ primary: { secret: key } });
@@ -31,11 +35,14 @@ describe('Paradex trusted Stark setup capsule', () => {
 
   it('refuses secondary and caller signer metadata', () => {
     for (const extra of [
-      { secondary_key: '' }, { secondary_secret: 'secret' }, { secondary_passphrase: '' },
+      { secondary_key: '' },
+      { secondary_secret: 'secret' },
+      { secondary_passphrase: '' },
       { localSigner: { primary: { stableId: 'caller' } } },
     ]) {
-      expect(() => mapParadexSignerSetup({ ...extra, ...ACCOUNT, key: STARK } as ExchangeOptions))
-        .toThrow('Invalid Paradex local signer setup');
+      expect(() => mapParadexSignerSetup({ ...extra, ...ACCOUNT, key: STARK } as ExchangeOptions)).toThrow(
+        'Invalid Paradex local signer setup',
+      );
     }
   });
 
@@ -58,22 +65,33 @@ describe('Paradex trusted Stark setup capsule', () => {
       let received: unknown[] | undefined;
       const stop = new Error('constructor boundary reached');
       class Capture {
-        constructor(...args: unknown[]) { received = args; throw stop; }
+        constructor(...args: unknown[]) {
+          received = args;
+          throw stop;
+        }
       }
       setWasmEngineLoader(async () => ({ WasmEngine: Capture as never }));
-      setRustEngineTransport(() => ({
-        now: () => 1000,
-        http: async () => { throw new Error('no HTTP at constructor boundary'); },
-        connectSocket: () => { throw new Error('no socket at constructor boundary'); },
-        setTimeout, clearTimeout,
-      }) as never);
-      const exchange = new RustEngineExchange('paradex', options, new DefaultStore());
+      setRustEngineTransport(
+        () =>
+          ({
+            now: () => 1000,
+            http: async () => {
+              throw new Error('no HTTP at constructor boundary');
+            },
+            connectSocket: () => {
+              throw new Error('no socket at constructor boundary');
+            },
+            setTimeout,
+            clearTimeout,
+          }) as never,
+      );
+      const exchange = new RustEngineExchange('paradex', options, new FrameStore());
       try {
         expect(exchange.isPublicDataOnly).toBe(false);
         expect(Reflect.get(exchange, 'canSign')).toBe(true);
         for (const field of ['key', 'secret', 'passphrase']) expect(exchange.options).not.toHaveProperty(field);
         await expect(exchange.start()).rejects.toBe(stop);
-        expect(received).toEqual(expected ??= received);
+        expect(received).toEqual((expected ??= received));
         const engineOptions = JSON.parse(received?.[1] as string);
         expect(engineOptions).toMatchObject(ACCOUNT);
         for (const field of ['key', 'secret', 'passphrase', 'payloadSigner']) {

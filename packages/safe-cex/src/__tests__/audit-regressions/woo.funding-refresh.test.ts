@@ -2,9 +2,10 @@ import type { Ticker } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { WOOXExchange } from '../reference/woo/woo.exchange';
 import { ENDPOINTS } from '../reference/woo/woo.types';
-import { DefaultStore } from '../../store/store.base';
 
 type FundingRuntime = {
   refreshFundingRates: () => Promise<void>;
@@ -28,8 +29,12 @@ const makeTicker = (symbol: string, id = `${symbol}-id`): Ticker => ({
 });
 
 const makeExchange = (tickers = [makeTicker('BTCUSDT')], optionOverrides: Record<string, unknown> = {}) => {
-  const store = new DefaultStore();
-  store.update({ tickers });
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    { tickers },
+    store.markets.map((row) => row.symbol),
+  );
   const exchange = new WOOXExchange(
     'woo',
     {
@@ -85,7 +90,8 @@ describe('WOO legacy funding refresh', () => {
 
     expect(get).toHaveBeenCalledOnce();
     expect(get).toHaveBeenCalledWith(ENDPOINTS.FUNDING_RATES);
-    expect(store.tickers[0]).toBe(originalTicker);
+    expect(store.tickers[0]).not.toBe(originalTicker);
+    expect(originalTicker).toEqual(originalTickerValues);
     expect(store.tickers[0]).toEqual({
       ...originalTickerValues,
       fundingRate: -0.00003125,
@@ -135,8 +141,13 @@ describe('WOO legacy funding refresh', () => {
 
   it('rejects raw symbols that only match a ticker through lossy normalization', async () => {
     const { exchange, fundingRuntime, store } = makeExchange();
-    const updateTicker = vi.spyOn(store, 'updateTicker');
-    vi.spyOn(exchange.xhr, 'get').mockImplementation(vi.fn().mockResolvedValue({
+    const updateTicker = (() => {
+      const observed = vi.fn<(value: typeof store.tickers) => void>();
+      store.subscribe('tickers', (value) => observed(value));
+      return observed;
+    })();
+    vi.spyOn(exchange.xhr, 'get').mockImplementation(
+      vi.fn().mockResolvedValue({
         data: {
           success: true,
           rows: [
@@ -147,7 +158,8 @@ describe('WOO legacy funding refresh', () => {
             },
           ],
         },
-      }));
+      }),
+    );
 
     await fundingRuntime.refreshFundingRates();
 
@@ -164,7 +176,9 @@ describe('WOO legacy funding refresh', () => {
     const { exchange, fundingRuntime, store } = makeExchange();
     const originalTicker = store.tickers[0];
     const emitError = vi.spyOn(exchange, 'emitAndLogError').mockReturnValue(undefined);
-    vi.spyOn(exchange.xhr, 'get').mockImplementation(vi.fn().mockRejectedValue({ response: { data: { message: 'temporarily unavailable' } } }));
+    vi.spyOn(exchange.xhr, 'get').mockImplementation(
+      vi.fn().mockRejectedValue({ response: { data: { message: 'temporarily unavailable' } } }),
+    );
 
     await fundingRuntime.refreshFundingRates();
 
@@ -185,7 +199,9 @@ describe('WOO legacy funding refresh', () => {
       {
         id: 'BTC/USDT:USDT',
         symbol: 'BTCUSDT',
-        base: 'BTC', quote: 'USDT', active: true,
+        base: 'BTC',
+        quote: 'USDT',
+        active: true,
         precision: { amount: 0.001, price: 0.1 },
         limits: { amount: { min: 0.001, max: 10 }, leverage: { min: 1, max: 10 } },
       },
@@ -261,8 +277,13 @@ describe('WOO legacy funding refresh', () => {
 
   it('stops processing rows when disposal occurs reentrantly during the first ticker update', async () => {
     const { exchange, fundingRuntime, store } = makeExchange([makeTicker('BTCUSDT'), makeTicker('ETHUSDT', 'eth-id')]);
-    const updateTicker = vi.spyOn(store, 'updateTicker').mockImplementationOnce(() => exchange.dispose());
-    vi.spyOn(exchange.xhr, 'get').mockImplementation(vi.fn().mockResolvedValue({
+    const updateTicker = (() => {
+      const observed = vi.fn<(value: typeof store.tickers) => void>();
+      store.subscribe('tickers', (value) => observed(value));
+      return observed;
+    })().mockImplementationOnce(() => exchange.dispose());
+    vi.spyOn(exchange.xhr, 'get').mockImplementation(
+      vi.fn().mockResolvedValue({
         data: {
           success: true,
           rows: [
@@ -278,15 +299,18 @@ describe('WOO legacy funding refresh', () => {
             },
           ],
         },
-      }));
+      }),
+    );
 
     await fundingRuntime.refreshFundingRates();
 
-    expect(updateTicker).toHaveBeenCalledOnce();
-    expect(updateTicker).toHaveBeenCalledWith(expect.objectContaining({ symbol: 'BTCUSDT' }), {
-      fundingRate: -0.0001,
-      fundingTime: 1_800_000_000_000,
-    });
+    expect(updateTicker.mock.calls[0][0]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ symbol: 'BTCUSDT', fundingRate: -0.0001, fundingTime: 1_800_000_000_000 }),
+        expect.objectContaining({ symbol: 'ETHUSDT', fundingRate: 0.0001 }),
+      ]),
+    );
+    expect(exchange.isDisposed).toBe(true);
   });
 
   it('delegates disposal to the base lifecycle and disposes each socket only once', () => {
@@ -301,7 +325,11 @@ describe('WOO legacy funding refresh', () => {
     expect(listeners.size).toBe(1);
 
     exchange.dispose();
-    store.update({ latency: 42 });
+    applyReferenceFixture(
+      store,
+      { latency: 42 },
+      store.markets.map((row) => row.symbol),
+    );
     exchange.emitter.emit('log', 'after-dispose');
 
     expect(listeners.size).toBe(0);

@@ -1525,6 +1525,7 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
             books: Vec<crate::public_feed::PublicBook>,
             #[serde(default)]
             candles: Vec<crate::public_feed::PublicCandle>,
+            message_handler_stats: Option<crate::public_feed::PublicMessageStats>,
         }
         let control: Control = serde_json::from_str(json)?;
         debug_assert_eq!(control.op, "publicFeedUpdate");
@@ -1532,6 +1533,7 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
             tickers: control.tickers,
             books: control.books,
             candles: control.candles,
+            message_handler_stats: control.message_handler_stats,
         }));
     }
     if header.op == "networkRestored" {

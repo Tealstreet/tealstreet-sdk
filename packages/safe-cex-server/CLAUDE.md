@@ -31,8 +31,10 @@ deployed application routes, authorization and shell features remain caller-owne
 
 ## PublicExchangeFactory Rust lifecycle
 
-- A current-hour Redis hit hydrates a lazy exchange without opening sockets or
-  fetching metadata. Consumers that need live feeds explicitly start the exchange.
+- A current-hour Redis hit returns cached handle metadata without opening sockets
+  or seeding engine state. `handle.markets` serves the cache; `exchange.store`
+  becomes loaded only after native SCXF frames arrive. Consumers that need live
+  feeds explicitly start the exchange.
 - Rust public catalogs with nondefault product/deployment selectors use a
   profile-qualified Redis namespace for snapshots, latest fallback and locks.
   The profile shares the public-feed identity (environment, product flags,

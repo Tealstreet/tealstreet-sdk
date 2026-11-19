@@ -1,10 +1,12 @@
+import type { StoreData } from '../../../generated/StoreData';
 import type { Candle, OHLCVOptions, OrderBook, Timeframe } from '../../../types';
 import type { BitunixExchange } from './bitunix.exchange';
 
-import { v } from '../../../utils/get-key';
-import { virtualClock } from '../../../utils/virtualClock';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { resolveTransportRouting } from '../../../transport/registry';
+import { v } from '../../../utils/get-key';
+import { virtualClock } from '../../../utils/virtualClock';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
 import { BASE_WS_URL, KlineInterval } from './bitunix.types';
 
 type Data = Array<Record<string, any>>;
@@ -214,7 +216,6 @@ export class BitunixPublicWebsocket extends BaseWebSocket<BitunixExchange> {
       const key = JSON.stringify(arg);
       this.topics[key] = 1;
     }
-
   };
 
   subscribeToBook = (symbol: string, sub: 'depth_book1' | 'depth_book5' | 'depth_book15' | 'depth_books') => {
@@ -280,14 +281,22 @@ export class BitunixPublicWebsocket extends BaseWebSocket<BitunixExchange> {
       const data = event.data;
       const lastPrice = parseFloat(v(data, 'la'));
       const openPrice = parseFloat(v(data, 'o'));
-      this.store.updateTicker(ticker, {
-        last: lastPrice,
-        // bid: lastPrice,
-        // ask: lastPrice,
-        percentage: ((lastPrice - openPrice) / openPrice) * 100,
-        volume: parseFloat(v(data, 'b')),
-        quoteVolume: parseFloat(v(data, 'q')),
-      });
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = {
+          last: lastPrice,
+          // bid: lastPrice,
+          // ask: lastPrice,
+          percentage: ((lastPrice - openPrice) / openPrice) * 100,
+          volume: parseFloat(v(data, 'b')),
+          quoteVolume: parseFloat(v(data, 'q')),
+        };
+        return applyReferenceFixture(
+          this.store,
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
   };
 
@@ -297,12 +306,20 @@ export class BitunixPublicWebsocket extends BaseWebSocket<BitunixExchange> {
 
     if (ticker) {
       const data = event.data;
-      this.store.updateTicker(ticker, {
-        mark: parseFloat(v(data, 'mp')),
-        index: parseFloat(v(data, 'ip')),
-        fundingRate: parseFloat(v(data, 'fr')),
-        fundingTime: nextFundingTime(v(data, 'nft') || v(data, 'ft')),
-      });
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = {
+          mark: parseFloat(v(data, 'mp')),
+          index: parseFloat(v(data, 'ip')),
+          fundingRate: parseFloat(v(data, 'fr')),
+          fundingTime: nextFundingTime(v(data, 'nft') || v(data, 'ft')),
+        };
+        return applyReferenceFixture(
+          this.store,
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
   };
 
@@ -312,10 +329,18 @@ export class BitunixPublicWebsocket extends BaseWebSocket<BitunixExchange> {
 
     if (ticker) {
       const data = event.data;
-      this.store.updateTicker(ticker, {
-        bid: parseFloat(data?.b?.[0]?.[0]) || 0,
-        ask: parseFloat(data?.a?.[0]?.[0]) || 0,
-      });
+      (() => {
+        const target = ticker;
+        const changes: Partial<StoreData['tickers'][number]> = {
+          bid: parseFloat(data?.b?.[0]?.[0]) || 0,
+          ask: parseFloat(data?.a?.[0]?.[0]) || 0,
+        };
+        return applyReferenceFixture(
+          this.store,
+          { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
     }
   };
 

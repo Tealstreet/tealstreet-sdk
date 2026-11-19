@@ -2,9 +2,10 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { Market, OrderType } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
 
 const MARKET: Market = {
   id: 'XBTUSDTM',
@@ -22,8 +23,13 @@ const MARKET: Market = {
 
 describe('KuCoin algo cancel-replace rejection', () => {
   it('surfaces a replacement failure after the original protection was cancelled', async () => {
-    const store = new DefaultStore();
-    store.update({ markets: [MARKET] });
+    const store = new FrameStore();
+    store.apply(
+      nativeFixture(
+        { markets: [MARKET] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const exchange = new KucoinExchange(
       'kucoin',
       {

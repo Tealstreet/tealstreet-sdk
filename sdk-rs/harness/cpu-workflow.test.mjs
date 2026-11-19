@@ -173,3 +173,13 @@ esac
   assert.equal(withoutPin.status, 1, withoutPin.stdout + withoutPin.stderr);
   assert.match(withoutPin.stdout, /requires Node v22; found v24\.22\.2/);
 });
+
+test('both native consumer jobs execute the wasm-free mobile suite through an existing script', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../../packages/safe-cex-react-native/package.json', import.meta.url)));
+  const commands = [...source.matchAll(/corepack yarn workspace @tealstreet\/safe-cex-react-native (\S+)/g)];
+  assert.equal(commands.length, 2, 'retain mobile verification in both consumer jobs');
+  for (const [, command] of commands) {
+    assert.equal(command, 'test-unit', 'mobile consumes delegated frames with WebAssembly unavailable');
+    assert.ok(Object.hasOwn(pkg.scripts, command), `missing mobile test script ${command}`);
+  }
+});

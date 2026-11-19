@@ -1,4 +1,7 @@
 //! Identity uses the authenticated main-account header, never the trading subaccount.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
 use safe_cex_venue_grvt::{Grvt, Options};
 const NOW: f64 = 1_700_000_000_000.;
@@ -152,7 +155,7 @@ fn identity_joins_login_then_validates_exact_route_and_returns_main_id_without_s
             h.output(42, false).unwrap(),
             format!(r#"{{"userId":"{main}","affiliateId":null}}"#)
         );
-        assert_eq!(h.e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(&before, h.e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
         h.respond(&r, 200, SUMMARY, "");
         assert!(h.actions.is_empty());
     }
@@ -181,7 +184,7 @@ fn identity_accepts_current_response_header_rotation_but_rejects_older_session_r
         "x-grvt-account-id: must-not-overwrite",
     );
     assert!(h.output(43, true).unwrap_err().contains("Stale"));
-    assert_eq!(h.e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, h.e.account_snapshot_frame(NOW), [2, 0, 0, 0, 0]);
     h.ask(44);
     let current = h.take("/account_summary");
     assert!(
@@ -236,7 +239,15 @@ fn identity_rejects_missing_or_malformed_summary_and_http_errors_without_state_c
         let before = h.e.account_snapshot_frame(NOW).to_vec();
         h.respond(&r, status, body, "");
         h.output(42, true).unwrap_err();
-        assert_eq!(h.e.account_snapshot_frame(NOW), before);
+        assert_unchanged_account(
+            &before,
+            h.e.account_snapshot_frame(NOW),
+            if status == 200 {
+                [1, 0, 0, 0, 0]
+            } else {
+                [0, 0, 0, 0, 1]
+            },
+        );
     }
 }
 #[test]

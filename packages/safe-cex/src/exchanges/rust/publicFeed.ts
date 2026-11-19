@@ -1,3 +1,4 @@
+import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import type {
   Candle,
   ExchangeName,
@@ -24,6 +25,7 @@ type FeedUpdate = {
   >;
   books?: Array<{ symbol: string; bids: number[][]; asks: number[][] }>;
   candles?: Array<Candle & { symbol: string; interval: string }>;
+  messageHandlerStats?: { replace: boolean; rows: Array<{ group: number; topic: string; subscribed: boolean; active: boolean; ageMs: number | null }> };
 };
 type Request =
   | { op: 'hello'; identity: string; observations?: boolean }
@@ -76,7 +78,7 @@ const feedMarket = (market: Market): FeedMarket => ({
     },
   }),
 });
-type Reply = { op: 'ready'; markets: FeedMarket[] } | { op: 'pong' } | { op: 'error'; message: string } | FeedUpdate;
+type Reply = { op: 'ready'; markets: FeedMarket[] } | { op: 'pong' } | { op: 'error'; message: string } | { op: 'publicDiagnostics'; frame: ArrayBuffer } | FeedUpdate;
 
 const tickerFields = [
   'bid',
@@ -166,6 +168,9 @@ export class RustPublicFeedProvider {
           cleanup();
         } else seed();
       },
+      diagnostics: (frame) => {
+        if (ready) send({ op: 'publicDiagnostics', frame: frame.buffer.slice(0) });
+      },
       closed: () => {
         send({ op: 'error', message: 'Shared public feed source disposed' });
         cleanup();
@@ -200,6 +205,9 @@ export class RustPublicFeedProvider {
         ready = true;
         observations = data.observations === true;
         send({ op: 'ready', markets: this.source.store.markets.map(feedMarket) });
+        const snapshot = this.source.snapshotFrame();
+        if (snapshot && new Frame(snapshot).messageHandlerStats())
+          send({ op: 'publicDiagnostics', frame: snapshot });
         seed();
       } else if (data.op === 'dispose') cleanup();
       else if (ready && data.op === 'tickerSymbols') {
@@ -364,6 +372,22 @@ export class RustPublicFeedClient {
       this.reject = undefined;
     } else if (message.op === 'pong') this.lastPong = Date.now();
     else if (message.op === 'error') this.failed(new Error(message.message));
+    else if (this.ready && message.op === 'publicDiagnostics') {
+      if (!(message.frame instanceof ArrayBuffer)) this.failed(new Error('Invalid native public diagnostics'));
+      else {
+        try {
+          const stats = new Frame(message.frame).messageHandlerStats();
+          if (stats) void this.ingest({
+            op: 'publicFeedUpdate',
+            messageHandlerStats: { replace: stats.replace, rows: Array.from({ length: stats.count }, (_, index) => ({
+              group: stats.group(index), topic: stats.topic(index), subscribed: stats.subscribed(index), active: stats.active(index),
+              ageMs: Number.isNaN(stats.ageMs(index)) ? null : stats.ageMs(index),
+            })) },
+          }).catch(this.failed);
+        }
+        catch (error) { this.failed(error instanceof Error ? error : new Error(String(error))); }
+      }
+    }
     else if (this.ready && message.op === 'publicFeedUpdate') void this.ingest(message).catch(this.failed);
   };
   validateMarkets(markets: Market[]): void {
@@ -481,11 +505,14 @@ class InProcessHub {
   private tickerTimer?: ReturnType<typeof setTimeout>;
   private sweep?: ReturnType<typeof setInterval>;
   private readonly unsubscribe: () => void;
+  private readonly nativeSnapshot: () => ArrayBuffer | undefined;
 
   constructor(
     private readonly source: PublicDataSource,
     private readonly release: () => void,
   ) {
+    if (!source.snapshotFrame) throw new Error('Native shared public source requires snapshotFrame');
+    this.nativeSnapshot = source.snapshotFrame.bind(source);
     this.unsubscribe = source.store.subscribe(() => this.updated());
     this.sweep = setInterval(() => {
       const now = Date.now();
@@ -545,7 +572,13 @@ class InProcessHub {
     client.resubscribe();
   }
 
+  private diagnostics(client: HubClient) {
+    const frame = this.read(this.nativeSnapshot);
+    if (frame && new Frame(frame).messageHandlerStats()) client.send({ op: 'publicDiagnostics', frame });
+  }
+
   seed(client: HubClient) {
+    this.diagnostics(client);
     const tickers = this.read(() => this.source.store.tickers);
     if (!tickers?.length) return;
     client.send({ op: 'publicFeedUpdate', tickers: tickers.map((ticker) => tickerRow(ticker, client.observations)) });
@@ -559,6 +592,7 @@ class InProcessHub {
         client.ready = true;
         client.send({ op: 'ready', markets: this.markets });
         if (seed) client.send(seed);
+        this.diagnostics(client);
         client.resubscribe();
       }
       return;
@@ -569,6 +603,7 @@ class InProcessHub {
 
   private tick = () => {
     this.tickerTimer = undefined;
+    for (const client of this.clients) if (client.ready) this.diagnostics(client);
     const tickers = this.read(() => this.source.store.tickers);
     if (!tickers?.length) return;
     const changed: TickerRow[] = [];

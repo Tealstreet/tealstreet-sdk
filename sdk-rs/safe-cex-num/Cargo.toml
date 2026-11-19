@@ -4,13 +4,17 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[features]
+default = ["source-json"]
+source-json = ["safe-cex-types/source-json", "serde_json/arbitrary_precision", "serde_json/preserve_order"]
+
 [dependencies]
 safe-cex-position-math.workspace = true
-safe-cex-types.workspace = true
+safe-cex-types = { workspace = true, default-features = false }
 indexmap = { version = "2.14.2", features = ["serde"] }
 ryu-js = "1"
 serde.workspace = true
-serde_json = { version = "1.0.152", features = ["float_roundtrip", "preserve_order", "arbitrary_precision", "raw_value"] }
+serde_json = { version = "1.0.152", features = ["float_roundtrip", "raw_value"] }
 num-bigint = "0.4.6"
 num-traits = "0.2.19"
 

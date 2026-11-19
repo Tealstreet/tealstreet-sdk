@@ -1,16 +1,15 @@
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
-
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { BaseExchange, CAPABILITY_METHODS } from '../../exchanges/base';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { ExchangeName, ExchangeOptions } from '../../types';
 import { legacyVenueRegistry as exchangeRegistry } from '../reference/legacyVenueRegistry';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 vi.hoisted(() => {
   // HyroTrader builds Bybit REST clients during construction, before the test ever starts I/O.
@@ -47,7 +46,7 @@ const createImplementation = async (exchangeName: ExchangeName, publicDataOnly =
     grvtTradingAccountId: 'capability-contract-account',
   };
 
-  const exchange = new Exchange(exchangeName, options, new DefaultStore());
+  const exchange = new Exchange(exchangeName, options, new FrameStore());
   liveInstances.push(exchange);
   return exchange;
 };

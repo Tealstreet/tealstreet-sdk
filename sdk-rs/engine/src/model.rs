@@ -289,18 +289,18 @@ pub enum MarginType {
     Cross,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MinMax {
     pub min: f64,
     pub max: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Min {
     pub min: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Precision {
     pub amount: f64,
     pub price: f64,
@@ -315,7 +315,7 @@ impl Precision {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Limits {
     pub amount: MinMax,
     pub leverage: MinMax,
@@ -420,7 +420,7 @@ pub struct PredictionHolding {
     pub mergeable: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Market {
     pub id: String,

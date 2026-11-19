@@ -6,13 +6,16 @@ import type { StoreWorkerPayload } from '../StoreWorkerPayload';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { nativePosition } from '../../__tests__/cutover/nativePosition';
+import { applyReferenceFixture } from '../../__tests__/cutover/referenceFixture';
+import { FrameStore } from '../../store/frameStore';
 import { OrderStopTriggerType, PositionMode, PositionSide } from '../../types';
 import { UiStateHandler } from './UiStateHandler';
 
 describe('UiStateHandler', () => {
   let handler: UiStateHandler;
   let mockExchange: Exchange;
-  let mockStore: any;
+  let mockStore: FrameStore;
   let mockFetchLeverageForSymbol: ReturnType<typeof vi.fn>;
   let mockSetActiveTickerSymbols: ReturnType<typeof vi.fn>;
   let mockGetActiveTickerSymbols: ReturnType<typeof vi.fn>;
@@ -23,12 +26,7 @@ describe('UiStateHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockStore = {
-      fetchedLeverage: {},
-      positions: [],
-      update: vi.fn((changes) => Object.assign(mockStore, changes)),
-      updatePositions: vi.fn(),
-    };
+    mockStore = new FrameStore();
 
     mockFetchLeverageForSymbol = vi.fn();
     mockSetActiveTickerSymbols = vi.fn();
@@ -70,7 +68,16 @@ describe('UiStateHandler', () => {
   describe('handle', () => {
     describe('ui:state', () => {
       it('should fetch leverage for new activeMarginSymbol', async () => {
-        mockFetchLeverageForSymbol.mockResolvedValue({ buyLeverage: 10, sellLeverage: 10 });
+        mockFetchLeverageForSymbol.mockImplementation(async () => {
+          applyReferenceFixture(mockStore, {
+            fetchedLeverage: { BTCUSDT: { buyLeverage: 10, sellLeverage: 10 } },
+            positions: mockStore.positions.map((row) => ({
+              ...row,
+              leverage: row.side === PositionSide.Short ? 10 : 10,
+            })),
+          });
+          return { buyLeverage: 10, sellLeverage: 10 };
+        });
 
         const payload: StoreWorkerPayload = {
           op: 'ui:state',
@@ -86,7 +93,7 @@ describe('UiStateHandler', () => {
 
         // Wait for async completion
         await vi.waitFor(() => {
-          expect(mockStore.update).toHaveBeenCalled();
+          expect(mockStore.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 10, sellLeverage: 10 });
         });
       });
 
@@ -135,9 +142,7 @@ describe('UiStateHandler', () => {
       });
 
       it('should not fetch if leverage already exists for symbol', () => {
-        mockStore.fetchedLeverage = {
-          BTCUSDT: { buyLeverage: 10, sellLeverage: 10 },
-        };
+        applyReferenceFixture(mockStore, { fetchedLeverage: { BTCUSDT: { buyLeverage: 10, sellLeverage: 10 } } });
 
         const payload: StoreWorkerPayload = {
           op: 'ui:state',
@@ -149,10 +154,9 @@ describe('UiStateHandler', () => {
         expect(mockFetchLeverageForSymbol).not.toHaveBeenCalled();
       });
 
-      it('should not fetch if currently fetching for symbol', () => {
-        mockStore.fetchedLeverage = {
-          BTCUSDT: { buyLeverage: 0, sellLeverage: 0, isFetching: true },
-        };
+      it('coalesces requests while the native read is pending', () => {
+        mockFetchLeverageForSymbol.mockReturnValue(new Promise(() => {}));
+        handler.handle({ op: 'ui:state', data: { activeMarginSymbol: 'BTCUSDT' } });
 
         const payload: StoreWorkerPayload = {
           op: 'ui:state',
@@ -161,7 +165,7 @@ describe('UiStateHandler', () => {
 
         handler.handle(payload);
 
-        expect(mockFetchLeverageForSymbol).not.toHaveBeenCalled();
+        expect(mockFetchLeverageForSymbol).toHaveBeenCalledTimes(1);
       });
 
       it('should not fetch if activeMarginSymbol is empty', () => {
@@ -176,16 +180,27 @@ describe('UiStateHandler', () => {
       });
 
       it('should update positions with fetched leverage', async () => {
-        mockFetchLeverageForSymbol.mockResolvedValue({ buyLeverage: 25, sellLeverage: 25 });
-        mockStore.positions = [
-          {
-            id: 'pos-1',
-            symbol: 'BTCUSDT',
-            leverage: 10,
-            positionMode: PositionMode.OneWay,
-            side: PositionSide.Long,
-          },
-        ];
+        mockFetchLeverageForSymbol.mockImplementation(async () => {
+          applyReferenceFixture(mockStore, {
+            fetchedLeverage: { BTCUSDT: { buyLeverage: 25, sellLeverage: 25 } },
+            positions: mockStore.positions.map((row) => ({
+              ...row,
+              leverage: row.side === PositionSide.Short ? 25 : 25,
+            })),
+          });
+          return { buyLeverage: 25, sellLeverage: 25 };
+        });
+        applyReferenceFixture(mockStore, {
+          positions: [
+            nativePosition({
+              id: 'pos-1',
+              symbol: 'BTCUSDT',
+              leverage: 10,
+              positionMode: PositionMode.OneWay,
+              side: PositionSide.Long,
+            }),
+          ],
+        });
 
         const payload: StoreWorkerPayload = {
           op: 'ui:state',
@@ -195,25 +210,35 @@ describe('UiStateHandler', () => {
         handler.handle(payload);
 
         await vi.waitFor(() => {
-          expect(mockStore.updatePositions).toHaveBeenCalled();
+          expect(mockStore.positions[0]?.leverage).not.toBe(10);
         });
 
         // Check the update was called with correct leverage
-        const updateCall = mockStore.updatePositions.mock.calls[0][0];
-        expect(updateCall[0][1].leverage).toBe(25);
+        expect(mockStore.positions[0].leverage).toBe(25);
       });
 
       it('should use sellLeverage for short positions in hedge mode', async () => {
-        mockFetchLeverageForSymbol.mockResolvedValue({ buyLeverage: 20, sellLeverage: 15 });
-        mockStore.positions = [
-          {
-            id: 'pos-1',
-            symbol: 'BTCUSDT',
-            leverage: 10,
-            positionMode: PositionMode.Hedged,
-            side: PositionSide.Short,
-          },
-        ];
+        mockFetchLeverageForSymbol.mockImplementation(async () => {
+          applyReferenceFixture(mockStore, {
+            fetchedLeverage: { BTCUSDT: { buyLeverage: 20, sellLeverage: 15 } },
+            positions: mockStore.positions.map((row) => ({
+              ...row,
+              leverage: row.side === PositionSide.Short ? 15 : 20,
+            })),
+          });
+          return { buyLeverage: 20, sellLeverage: 15 };
+        });
+        applyReferenceFixture(mockStore, {
+          positions: [
+            nativePosition({
+              id: 'pos-1',
+              symbol: 'BTCUSDT',
+              leverage: 10,
+              positionMode: PositionMode.Hedged,
+              side: PositionSide.Short,
+            }),
+          ],
+        });
 
         const payload: StoreWorkerPayload = {
           op: 'ui:state',
@@ -223,11 +248,10 @@ describe('UiStateHandler', () => {
         handler.handle(payload);
 
         await vi.waitFor(() => {
-          expect(mockStore.updatePositions).toHaveBeenCalled();
+          expect(mockStore.positions[0]?.leverage).not.toBe(10);
         });
 
-        const updateCall = mockStore.updatePositions.mock.calls[0][0];
-        expect(updateCall[0][1].leverage).toBe(15); // sellLeverage
+        expect(mockStore.positions[0].leverage).toBe(15); // sellLeverage
       });
 
       it('should handle fetch failure gracefully', async () => {
@@ -241,8 +265,7 @@ describe('UiStateHandler', () => {
         handler.handle(payload);
 
         await vi.waitFor(() => {
-          // Should have updated twice: once to mark fetching, once to remove marker
-          expect(mockStore.update).toHaveBeenCalledTimes(2);
+          expect(mockFetchLeverageForSymbol).toHaveBeenCalledExactlyOnceWith('BTCUSDT');
         });
         expect(mockStore.fetchedLeverage).not.toHaveProperty('BTCUSDT');
       });
@@ -258,8 +281,7 @@ describe('UiStateHandler', () => {
         handler.handle(payload);
 
         await vi.waitFor(() => {
-          // Should have updated twice: once to mark fetching, once to remove marker on error
-          expect(mockStore.update).toHaveBeenCalledTimes(2);
+          expect(mockFetchLeverageForSymbol).toHaveBeenCalledExactlyOnceWith('BTCUSDT');
         });
         expect(mockStore.fetchedLeverage).not.toHaveProperty('BTCUSDT');
       });

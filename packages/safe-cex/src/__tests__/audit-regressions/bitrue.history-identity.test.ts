@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { Market } from '../../types';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
 
 const market: Market = {
   id: 'E-BTC-USDT',
@@ -29,8 +30,12 @@ const row = {
 };
 const make = (rows: unknown[]) => {
   vi.useFakeTimers();
-  const store = new DefaultStore();
-  store.update({ markets: [market] });
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    { markets: [market] },
+    store.markets.map((row) => row.symbol),
+  );
   const exchange = new BitrueExchange('bitrue', { key: 'key', secret: 'secret' }, store);
   vi.spyOn(exchange as any, 'emitAndLogError').mockImplementation(() => undefined);
   (exchange as any).xhr.get = vi.fn().mockResolvedValue({ data: { code: '0', data: rows } });

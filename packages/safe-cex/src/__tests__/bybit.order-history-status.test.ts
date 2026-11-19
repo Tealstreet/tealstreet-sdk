@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { ENDPOINTS, ORDER_HISTORY_MAX_WINDOW_MS } from '../exchanges/bybit/bybit.types';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 import { BybitExchange } from './reference/bybit/bybit.exchange';
 import { BybitDemoExchange } from './reference/bybit/bybitdemo.exchange';
 import { HyroOrderRecovery } from './reference/bybit/hyrotrader.order-recovery';
@@ -26,7 +26,7 @@ const setup = (Exchange = BybitExchange, enableInverseMarkets = false) => {
   const exchange = new Exchange(
     Exchange === BybitDemoExchange ? 'bybitdemo' : 'bybit',
     { key: 'k', secret: 's', enableInverseMarkets, tuning: { consoleLogging: false } },
-    new DefaultStore(),
+    new FrameStore(),
   );
   exchanges.push(exchange);
   return exchange;

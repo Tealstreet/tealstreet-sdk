@@ -4,10 +4,10 @@ import type { PlaceOrderOpts } from '../../types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderType } from '../../types';
 import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { ENDPOINTS } from '../reference/paradex/paradex.types';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderType } from '../../types';
 
 const { uuidMock } = vi.hoisted(() => ({ uuidMock: vi.fn() }));
 vi.mock('../../utils/uuid', () => ({ uuid: uuidMock }));
@@ -26,7 +26,7 @@ const createExchange = () => {
   const exchange = new ParadexExchange(
     'paradex',
     { publicDataOnly: true, tuning: { consoleLogging: false } } as any,
-    new DefaultStore(),
+    new FrameStore(),
   );
   const signOrder = vi.fn(async () => ({
     signature: '["r","s"]',

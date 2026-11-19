@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 import {
   ASTERDEX_MAIN_WALLET_REQUIRED_HINT,
   ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE,
   isAsterDEXMainWalletError,
 } from '../../exchanges/asterdex/asterdex.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 
 describe('audit regression: AsterDEX V3 auth context', () => {
   it('requires the main wallet when API-wallet credentials are entered', async () => {
@@ -16,7 +16,7 @@ describe('audit regression: AsterDEX V3 auth context', () => {
         key: '0x1111111111111111111111111111111111111111',
         secret: '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       },
-      new DefaultStore(),
+      new FrameStore(),
     );
     vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
 
@@ -40,13 +40,9 @@ describe('audit regression: AsterDEX V3 auth context', () => {
       // here would silently misroute rejections coming from an out-of-date
       // deploy or a persisted error string.
       expect(
-        isAsterDEXMainWalletError(
-          'AsterDEX v3 keys require Main Wallet Address (applicationId / auth.userAddress)',
-        ),
+        isAsterDEXMainWalletError('AsterDEX v3 keys require Main Wallet Address (applicationId / auth.userAddress)'),
       ).toBe(true);
-      expect(
-        isAsterDEXMainWalletError('Missing auth.userAddress on AsterDEX account'),
-      ).toBe(true);
+      expect(isAsterDEXMainWalletError('Missing auth.userAddress on AsterDEX account')).toBe(true);
     });
 
     it('rejects unrelated exchange errors', () => {

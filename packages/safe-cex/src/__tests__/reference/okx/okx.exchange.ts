@@ -1,9 +1,8 @@
-import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
-import type { Store } from '../../../store/store.interface';
 import type { ClientOrderLookup } from '../../../exchanges/clientOrderId';
 import type { OkxInstrumentType, OkxRegion } from '../../../exchanges/okx/okx.types';
+import type { StoreData } from '../../../generated/StoreData';
 
 import BigNumber from 'bignumber.js';
 import dayjs from 'dayjs';
@@ -14,7 +13,21 @@ import sumBy from 'lodash/sumBy';
 import { forEachSeries, map, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { AccountMarketOverlay, BaseExchange, CallableMethodsInWorker } from '../../../exchanges/base';
+import { orderCarriesClientOrderId, patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import {
+  BROKER_ID,
+  ENDPOINTS,
+  GRAFANA_ENDPOINTS_EVERY,
+  GRAFANA_ENDPOINTS_PERIODIC,
+  INTERVAL,
+  ORDER_SIDE,
+  ORDER_STATUS,
+  ORDER_TYPE,
+  REVERSE_ORDER_TYPE,
+} from '../../../exchanges/okx/okx.types';
 import { mapOkxPositionHistory } from '../../../journal/okx.position-adapter';
+import { FrameStore } from '../../../store/frameStore';
 import {
   Balance,
   Candle,
@@ -57,24 +70,14 @@ import { roundUSD } from '../../../utils/roundUSD';
 import { add, adjust, multiply, subtract } from '../../../utils/safe-math';
 import { uuid } from '../../../utils/uuid';
 import { virtualClock } from '../../../utils/virtualClock';
-import { AccountMarketOverlay, BaseExchange, CallableMethodsInWorker } from '../../../exchanges/base';
-import { orderCarriesClientOrderId, patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
+import { nativeLiquidationPrice } from '../../cutover/nativePosition';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { compareClosedPnlTimes } from '../closed-pnl-sort';
 import { parseAccountEquity } from './okx.account-equity';
 import { createAPI } from './okx.api';
 import { mapOkxClosedPosition } from './okx.closed-pnl';
 import { mapOkxBillToIncomeRecords, OKX_BILL_TYPE_BY_INCOME_TYPE } from './okx.income';
 import { mapOkxHistoricalOrder } from './okx.order-history';
-import {
-  BROKER_ID,
-  ENDPOINTS,
-  GRAFANA_ENDPOINTS_EVERY,
-  GRAFANA_ENDPOINTS_PERIODIC,
-  INTERVAL,
-  ORDER_SIDE,
-  ORDER_STATUS,
-  ORDER_TYPE,
-  REVERSE_ORDER_TYPE,
-} from '../../../exchanges/okx/okx.types';
 import { OKXBusinessWebsocket } from './okx.ws-business';
 import { OKXPrivateWebsocket } from './okx.ws-private';
 import { OKXPublicWebsocket } from './okx.ws-public';
@@ -181,7 +184,7 @@ export class OKXExchange extends BaseExchange {
 
   private readonly indexPriceMarketIds = new Set<string>();
 
-  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: Store) {
+  constructor(exchangeName: ExchangeName, opts: ExchangeOptions, store: FrameStore) {
     super(exchangeName, opts, store);
 
     this.region = exchangeName === 'okxeu' || exchangeName === 'okxeudemo' ? 'okxeu' : 'okx';
@@ -281,10 +284,14 @@ export class OKXExchange extends BaseExchange {
     if (!useExternalPublicData) {
       const [markets, rawTickers] = await Promise.all([
         this.fetchMarkets().then((markets) => {
-          this.store.update({
-            markets,
-            loaded: { ...this.store.loaded, markets: true },
-          });
+          applyReferenceFixture(
+            this.store,
+            {
+              markets,
+              loaded: { markets: true },
+            },
+            this.store.markets.map((row) => row.symbol),
+          );
           return markets;
         }),
         this.fetchTickersRaw(),
@@ -292,10 +299,14 @@ export class OKXExchange extends BaseExchange {
 
       if (this.isDisposed) return;
       const tickers = this.parseTickers(rawTickers);
-      this.store.update({
-        tickers,
-        loaded: { ...this.store.loaded, tickers: true },
-      });
+      applyReferenceFixture(
+        this.store,
+        {
+          tickers,
+          loaded: { tickers: true },
+        },
+        this.store.markets.map((row) => row.symbol),
+      );
 
       this.log(`Loaded ${Math.min(tickers.length, markets.length)} OKX markets`);
 
@@ -324,17 +335,25 @@ export class OKXExchange extends BaseExchange {
         if (this.accountEquityUsd !== undefined) {
           balance = this.calculateBalanceUsedAvail(balance.info, positions, this.store.orders, this._accountLevel || 2);
         }
-        this.store.update({
-          balance,
-          positions,
-          loaded: { ...this.store.loaded, balance: true, positions: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            balance,
+            positions,
+            loaded: { balance: true, positions: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
       }),
       this.fetchOrders().then((orders) => {
-        this.store.update({
-          orders,
-          loaded: { ...this.store.loaded, orders: true },
-        });
+        applyReferenceFixture(
+          this.store,
+          {
+            orders,
+            loaded: { orders: true },
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
       }),
     ]);
 
@@ -351,7 +370,12 @@ export class OKXExchange extends BaseExchange {
         this.store.orders || [],
       );
       if (this.isDisposed) return;
-      if (equityRevision === this.accountEquityRevision) this.store.update({ balance });
+      if (equityRevision === this.accountEquityRevision)
+        applyReferenceFixture(
+          this.store,
+          { balance },
+          this.store.markets.map((row) => row.symbol),
+        );
       loop(() => this.tick(), this.getTickInterval());
     }
   };
@@ -561,7 +585,7 @@ export class OKXExchange extends BaseExchange {
         notional: 0,
         unrealizedPnl: 0,
         contracts: 0,
-        liquidationPrice: 0,
+        liquidationPrice: null,
       };
     });
     const positions = [...openPositionsForSymbols, ...fakePositions];
@@ -630,7 +654,11 @@ export class OKXExchange extends BaseExchange {
       this.store.orders,
       this._accountLevel || 2,
     );
-    this.store.update({ balance });
+    applyReferenceFixture(
+      this.store,
+      { balance },
+      this.store.markets.map((row) => row.symbol),
+    );
   };
 
   formatBalanceUsedAvail = async (bal: any, positions: Position[], orders: Order[]) => {
@@ -1653,12 +1681,31 @@ export class OKXExchange extends BaseExchange {
         });
 
         const positions = await this.fetchPositions();
-        this.store.update({ positions });
+        applyReferenceFixture(
+          this.store,
+          { positions },
+          this.store.markets.map((row) => row.symbol),
+        );
       }
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       const positions = await this.fetchPositions();
-      this.store.addOrUpdatePositions(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
       throw new Error(err?.response?.data?.msg || err?.message);
     }
   };
@@ -1717,14 +1764,33 @@ export class OKXExchange extends BaseExchange {
       if (data.msg === '') {
         this._accountPositionMode = hedged ? PositionMode.Hedged : PositionMode.OneWay;
         const positions = await this.fetchPositions();
-        this.store.update({ positions });
+        applyReferenceFixture(
+          this.store,
+          { positions },
+          this.store.markets.map((row) => row.symbol),
+        );
       } else {
         throw new Error(data.msg);
       }
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);
       const positions = await this.fetchPositions();
-      this.store.addOrUpdatePositions(positions);
+      (() => {
+        const incoming: StoreData['positions'] = positions;
+        return applyReferenceFixture(
+          this.store,
+          {
+            positions: [
+              ...this.store.positions.map((row) => {
+                const change = incoming.find((item) => item.id === row.id);
+                return change ? { ...row, ...change } : row;
+              }),
+              ...incoming.filter((row) => !this.store.positions.some((old) => old.id === row.id)),
+            ],
+          },
+          this.store.markets.map((row) => row.symbol),
+        );
+      })();
       throw new Error(err?.response?.data?.msg || err?.message);
     }
   };
@@ -2118,7 +2184,7 @@ export class OKXExchange extends BaseExchange {
         leverage: parseFloat(p.lever || existingPosition?.leverage || '0'),
         unrealizedPnl: contracts ? adjust(unrealizedPnl, market.precision.price) : 0,
         contracts: sizeInBase,
-        liquidationPrice: parseFloat(p.liqPx || '0'),
+        liquidationPrice: nativeLiquidationPrice(parseFloat(p.liqPx || '0')),
         marginType: p.mgnMode === 'cross' ? MarginType.Cross : MarginType.Isolated,
         positionMode: this._accountPositionMode || PositionMode.OneWay,
         extra: {

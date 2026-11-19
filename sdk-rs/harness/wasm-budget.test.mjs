@@ -4,6 +4,22 @@ import { test } from 'node:test';
 import { venueFamily, venueFamilies } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
+// #3669 run 44325589048, artifact 14437511989: optimized Hyperliquid 2,309,206 B.
+// Coordinator approved measured +10 KiB rounded up, retaining all parent floors.
+for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+  test(`#3669 ${venue} diagnostics retain measured reserve and strict boundaries`, () => {
+    const measured = 2_309_206;
+    const requiredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.equal(requiredCap, 2_320_384);
+    assert.ok(cap >= Math.max(2_317_312, requiredCap));
+    assert.ok(cap - measured >= 10 * 1024);
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  });
+}
+
 // #3643 CI44132069302/job134212792364, composition9fd6c31b5299 (PR36a0f89ed4f2 + mastercd4052047a9f).
 // Optimized web/Node 2,292,953 B, SHA256 ef43266ef637108ab003a62b16674079df413c8db0a6fe1c10edaa277281ef53.
 // Coordinator approved measured +10 KiB rounded up on 2026-11-18; all earlier floors remain.
@@ -508,7 +524,8 @@ test('#3268 restage (run 42563664495 at d83accc10298) retains current measured h
 
 test('combined shipping build and standalone builds retain distinct fixed ceilings', () => {
   assert.equal(WASM_BUDGETS.venue, 1_343_488);
-  assert.equal(WASM_BUDGETS.combined, 17 * 1024 * 1024);
+  // #3640 raised the combined ceiling from 17 MiB to 17.25 MiB (native store cutover; see wasm-budget.mjs).
+  assert.equal(WASM_BUDGETS.combined, 17.25 * 1024 * 1024);
   for (const profile of Object.keys(WASM_BUDGETS)) {
     assert.equal(wasmBudgetError(WASM_BUDGETS[profile], profile), undefined);
     assert.match(wasmBudgetError(WASM_BUDGETS[profile] + 1, profile), /exceeds/);
@@ -520,12 +537,14 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 
 
 
-test('the approved combined ceiling accepts 17 MiB exactly and rejects the next byte', () => {
+// The 17 MiB ceiling (#3140) moved to 17.25 MiB in #3640; its measured sizes stay accepted.
+test('the approved combined ceiling accepts 17.25 MiB exactly and rejects the next byte', () => {
   for (const venue of [undefined, ...Object.keys(WASM_VENUE_OVERRIDES)]) {
     assert.equal(wasmBudgetError(16_778_652, 'combined', venue), undefined, '#3140 measured size');
-    assert.equal(wasmBudgetError(17_825_791, 'combined', venue), undefined);
-    assert.equal(wasmBudgetError(17_825_792, 'combined', venue), undefined);
-    assert.equal(wasmBudgetError(17_825_793, 'combined', venue), 'combined wasm 17825793 exceeds 17825792 bytes');
+    assert.equal(wasmBudgetError(17_856_202, 'combined', venue), undefined, '#3640 measured size');
+    assert.equal(wasmBudgetError(18_087_935, 'combined', venue), undefined);
+    assert.equal(wasmBudgetError(18_087_936, 'combined', venue), undefined);
+    assert.equal(wasmBudgetError(18_087_937, 'combined', venue), 'combined wasm 18087937 exceeds 18087936 bytes');
   }
 });
 
@@ -4073,6 +4092,272 @@ test('BingX shared command codecs retain the measured optimized reserve', () => 
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
 });
 
+// Rule 5 / #3640: remeasure all27 families after native allocation/chaser fixes.
+// CI 44266062446 source 283acdd2f583259fa40113dc88f58b54adac610d, native inputs match c0113a933d.
+// SAFE_CEX_WASM_OPT=required corepack yarn rust:build-wasm --venue FAMILY
+// Rust1.99.0 / bindgen0.2.129 / Binaryen132; web/Node identical; two -Oz passes.
+// Follow-up replaces bb6590f792 measurement provenance without amending earlier commits.
+for (const [family, measured, required, sha256, aliases] of [
+  [
+    "apexomni",
+    2220751,
+    2231296,
+    "dfb0fa2d787dc732c417206db14e03399e764d9e844e674edb00eab89a3a710e",
+    [
+      "apexomni"
+    ]
+  ],
+  [
+    "asterdex",
+    2385027,
+    2396160,
+    "e6a1adab7ecb17c1b16b0bb17851c5b82e835cb7a2d3e1995fc00fb8fa57986b",
+    [
+      "asterdex"
+    ]
+  ],
+  [
+    "backpack",
+    2193919,
+    2204672,
+    "ad6e6816230105ad7f2435df6b22dc5608606cc318103446fdb3463704792019",
+    [
+      "backpack"
+    ]
+  ],
+  [
+    "binance",
+    2399175,
+    2409472,
+    "f79444b14168342f3462fded8fe412578394a2c973459e30d492caabe42078eb",
+    [
+      "binance"
+    ]
+  ],
+  [
+    "bingx",
+    2270745,
+    2281472,
+    "ef586380c8b6bd8e20a3e2987a26a4bcd870a6ba5b88f8b2f800540686c9b6cd",
+    [
+      "bingx"
+    ]
+  ],
+  [
+    "bitget",
+    2918561,
+    2929664,
+    "6ef022237a7baafe51b3e464a41bbedd96dc3e1f45fcb96cde38caadfab8a53d",
+    [
+      "bitget",
+      "bitgetusdc"
+    ]
+  ],
+  [
+    "bitrue",
+    2030087,
+    2040832,
+    "f3b2090b13b49cd15916715fb11eb187d2de992b9412bb9231c32fdc3462e9d5",
+    [
+      "bitrue"
+    ]
+  ],
+  [
+    "bitunix",
+    2059916,
+    2070528,
+    "e7cb693567ce7dc6770d0d0dde0e770202580fb660d45849bf917078b7f69369",
+    [
+      "bitunix"
+    ]
+  ],
+  [
+    "blofin",
+    2192734,
+    2203648,
+    "01cdb77227b07f8f0959ef5c1cf4bf4983e1227fa49184a44f3d4a5a78f36c49",
+    [
+      "blofin"
+    ]
+  ],
+  [
+    "coinbase",
+    2466856,
+    2478080,
+    "7693e6784c74e9eb700c549b79b84c44db4f066502a48f41b27414063ce28ecf",
+    [
+      "coinbase"
+    ]
+  ],
+  [
+    "cryptocom",
+    1935411,
+    1946624,
+    "e1246b54134ca1c1a5beb9469744a0a93fe0fdb66a4eb3ad218c463594e5ed0f",
+    [
+      "cryptocom"
+    ]
+  ],
+  [
+    "grvt",
+    2160946,
+    2171904,
+    "a2590f52a24aed1b433b5375c632ff011b98c3f61a648923ceb25a79684ec294",
+    [
+      "grvt"
+    ]
+  ],
+  [
+    "hyperliquid",
+    2428631,
+    2439168,
+    "aff893505edf698ccd1997148fa611524361b7437a58fd2810ff116d5bbdacdd",
+    [
+      "hyperliquid",
+      "hyperliquidspot"
+    ]
+  ],
+  [
+    "kraken",
+    2412386,
+    2422784,
+    "73e7014a9a87236911d331855a7d009b13f52e295b6cde8a655da61556f3d2ea",
+    [
+      "kraken",
+      "krakenspot"
+    ]
+  ],
+  [
+    "kucoin",
+    1986956,
+    1997824,
+    "858ee1d21f1e443f4813e21b37db68130e799698537722b4cbd18f0402b266f5",
+    [
+      "kucoin"
+    ]
+  ],
+  [
+    "kucoinspot",
+    2669219,
+    2679808,
+    "8d4260591c80f6697cc783fdb58a6327273da3d59d4364207ebe3f0168307bc4",
+    [
+      "kucoinspot"
+    ]
+  ],
+  [
+    "lighter",
+    2342879,
+    2353152,
+    "6a182aacc16009af4c4bee6864a8bbd600a3b1c78abca6096f90973bc6ab8cd3",
+    [
+      "lighter",
+      "lighter-robinhood"
+    ]
+  ],
+  [
+    "mexc",
+    2071600,
+    2082816,
+    "c15059b683588685e1ecabc96097db1178d9c094ea54175a7659b8c5d1527965",
+    [
+      "mexc"
+    ]
+  ],
+  [
+    "okx",
+    2179779,
+    2190336,
+    "e1f3bd28dee0fa45690fc91885e827f3358855b2e15edc43011e4a3a9a2081a9",
+    [
+      "okx"
+    ]
+  ],
+  [
+    "orderly",
+    1903948,
+    1914880,
+    "88bef4319c6e2c2ae3379a5bfe72cc5da91f4ed567fcb3c82b883e3e5220bdb8",
+    [
+      "orderly"
+    ]
+  ],
+  [
+    "paradex",
+    2431053,
+    2442240,
+    "efcd0c03fed2fde15ab17a82b7c7fc98423561624a6183600a51a77986d03644",
+    [
+      "paradex"
+    ]
+  ],
+  [
+    "phemex",
+    2242920,
+    2253824,
+    "ae359d4830fe1038d31920bc81946424bc4c1c2bd62644661ce4ff8eefae6362",
+    [
+      "phemex"
+    ]
+  ],
+  [
+    "polymarket",
+    1786332,
+    1797120,
+    "b92937150ddece67d6026cc604c8ec945a0d521bbd21b1b7c3462e8c2d238e51",
+    [
+      "polymarket"
+    ]
+  ],
+  [
+    "txflow",
+    2287526,
+    2297856,
+    "3456d8fa9d7865e00bcfa4197c4084bd9a21b0cb4bf9eb51957c59f96ffc2c10",
+    [
+      "txflow"
+    ]
+  ],
+  [
+    "weex",
+    2150534,
+    2161664,
+    "90438d8fe568e089b91eb9ec9082a3d0b79e4bf71acf7ce3ebb79e2cc22d50f4",
+    [
+      "weex"
+    ]
+  ],
+  [
+    "woo",
+    2873004,
+    2883584,
+    "6816124c90b7f4afdbbeabcadbf59a3e043f30aa9cfc9b2918b7b186a0428957",
+    [
+      "woo"
+    ]
+  ]
+]) {
+  test(`#3640 final native-store rule 17: ${family} reserve and aliases`, () => {
+    assert.match(sha256, /^[0-9a-f]{64}$/);
+    assert.equal(required, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    for (const alias of aliases) {
+      assert.equal(venueFamily(alias), family);
+      const cap = WASM_VENUE_OVERRIDES[alias];
+      // This earlier composition remains a floor after later measured reserve refreshes.
+      assert.ok(cap >= required, 'retain the original native-store measured floor');
+      assert.equal(cap, WASM_VENUE_OVERRIDES[family]);
+      assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', alias), undefined);
+      assert.equal(wasmBudgetError(cap, 'venue', alias), undefined);
+      assert.match(wasmBudgetError(cap + 1, 'venue', alias), /exceeds/);
+    }
+  });
+}
+
+test('#3640 family sweep preserves separately approved Bybit and combined ceilings', () => {
+  assert.equal(WASM_VENUE_OVERRIDES.bybit, 2_696_192);
+  assert.equal(WASM_BUDGETS.combined, 18_087_936);
+});
+
 // #3638 Rule 5: Rust SDK run 44220118208, artifact 14390662738.
 // Exact source 06c5b32372b7eb047af0039b861e3b58dc8bc0cd; equal optimized web/Node/replay modules.
 // Coordinator: measured + 10 KiB rounded up, preserving historical floors.
@@ -4144,7 +4429,7 @@ for (const venue of ['bitget', 'bitgetusdc']) {
     const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
     const cap = WASM_VENUE_OVERRIDES[venue];
     assert.equal(required, 2_795_520);
-    assert.equal(cap, required);
+    assert.ok(cap >= required, 'retain the M44 measured reserve alongside the native-store floor');
     assert.ok(cap >= 2_793_472, 'retain the approved pre-merge floor');
     assert.ok(cap - measured >= 10 * 1024);
     assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', venue), undefined);
@@ -4152,3 +4437,232 @@ for (const venue of ['bitget', 'bitgetusdc']) {
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   });
 }
+
+// Rule 5 / #3640: final allocation/chaser inputs; separately approved ceilings remain fixed.
+// Bybit CI44266062446; combined local c0113a933d, optimized web/Node paired hashes agree.
+test('#3640 final Bybit and combined fit approved ceilings', () => {
+  assert.equal(wasmBudgetError(2670297, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(17866681, 'combined'), undefined);
+});
+
+// #3640 post-master rule 17: CI run 44302321301, PR head 7e9d5723fad5e8820242a18b205c068dd8eb851f.
+// Built source 1fdd2db8279b2d4ab697720f2169cd0b6941a078 has the identical tree c2bf155c4e89dbcceb92c77982e18bd23824118d.
+// All 27 wasm-family artifacts: Rust1.99.0 / bindgen0.2.129 / Binaryen132, required two -Oz passes.
+// Sealed build.json source/run/input fingerprint and JS/package/module hashes verified; optimized web/Node bytes and hashes match.
+// Each tuple pins family, measured bytes, parent cap, paired module SHA256, all routed aliases and the CI artifact ID.
+const postMasterReserveMeasurements = [
+  ['apexomni', 2_221_403, 2_231_296, '193bb6035b6b8ec007bc59426a3c8d041a9078544a141f942f71cfd9f1eaaa97', ['apexomni'], 14426802575],
+  ['asterdex', 2_385_297, 2_396_160, '66ebbf601d8c04a3734d2a5e8d088fd1a83e38bb1a82bf6dcfa8a1547e97e135', ['asterdex'], 14425539944],
+  ['backpack', 2_194_170, 2_204_672, '24cc7d61cb47a50dbc2bb7fa556f963c549a9a85b2b02b127c5c89cec059467a', ['backpack'], 14427485937],
+  ['binance', 2_399_452, 2_409_472, '1b0d30cbaca03f7b322134826f216aabd1173dc04c021febbb14213a6caf0146', ['binance', 'binanceinverse', 'binancepm', 'binanceoptions', 'binancespot'], 14425857970],
+  ['bingx', 2_270_996, 2_281_472, '54c0e1759dd66c6d76032f3ce18c84d370b3ee5be1fcafc76d2f1ef287bf452b', ['bingx', 'bingxspot'], 14427600380],
+  ['bitget', 2_918_770, 2_929_664, '2400a09e2d6dd51c3e3347531c273929fbae524ee34b336cc9904fe4ebc47a94', ['bitget', 'bitgetinverse', 'bitgetusdc'], 14426037766],
+  ['bitrue', 2_030_338, 2_040_832, '86ede9f124e6e069737701c24da13bf2868209851f0487aacc11b7975d02f863', ['bitrue'], 14426777326],
+  ['bitunix', 2_060_167, 2_070_528, '5cbfe1c812b152be9fc40242e95804d5069baac7ceb99c38205184fb0922ed9f', ['bitunix'], 14426103396],
+  ['blofin', 2_192_985, 2_203_648, 'e4dfb89a75b3575807fd6825877435ec3fbd6cf20238f1878bff436c4dab8486', ['blofin'], 14425927809],
+  ['bybit', 2_670_556, 2_696_192, '70cb1cae66bf86108ad153ec0b16420d5c46db04a9dc756316217652fa8e04cb', ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'], 14427266218],
+  ['coinbase', 2_467_135, 2_478_080, '2bd68345e2bb7d0f1075ae6607d84af066607319e5f010dd973619668a92bc7e', ['coinbase', 'coinbasespot'], 14427027314],
+  ['cryptocom', 1_935_686, 1_946_624, '67755d278a5d797e02803aa1abbf2fd4389b5b25ef20ca3834609ba13fcc38ca', ['cryptocom'], 14426732045],
+  ['grvt', 2_161_229, 2_171_904, '36969f3edb0b3ea15dd0ec595590d62f20d6976b8be1b8e2ce6a290bdfcf5e56', ['grvt'], 14427455470],
+  ['hyperliquid', 2_428_882, 2_439_168, 'c6ea5abfc697f796283241073552d13751164810cf38264d28ff072898681f66', ['hyperliquid', 'hyperliquidspot'], 14427207778],
+  ['kraken', 2_412_637, 2_422_784, 'f30e01e9c371b3d226937806f76f3edb0e6dc5c9e3cc42ff500fd08fa0e1b804', ['kraken', 'krakenspot'], 14427176717],
+  ['kucoin', 1_987_229, 1_997_824, '99372e6eb8201352dd7eaad8ccba0c02ce8c55a6dcff88731459aafedbf8d5d1', ['kucoin'], 14427171520],
+  ['kucoinspot', 2_669_453, 2_679_808, '8b61e04e3dfc65e5ec76d41aabe64de593cf7be4ceff0dc6e55bc94fbb0117f3', ['kucoinspot'], 14427760047],
+  ['lighter', 2_343_161, 2_353_152, '62df49b7977246384829fa61c649af35886b647bd6b15dad6bfa4bd17500f63b', ['lighter', 'lighter-robinhood'], 14426338781],
+  ['mexc', 2_071_869, 2_082_816, '360adfcc45a1041d38f9d5f33344bec72d7e24a814474d2e59f85a7167538008', ['mexc'], 14427017973],
+  ['okx', 2_180_034, 2_190_336, 'ce7fb2dfc16cbc0d1fef22330a1df3d4bcee7cd5bd21966002ab7b8024ef15a7', ['okx', 'okxdemo', 'okxeu', 'okxeudemo'], 14426628131],
+  ['orderly', 1_904_199, 1_914_880, 'bffe4b93f606b1947b5bee66ffe0e4be0531f6b423630bf8b008c69e98ba9e78', ['orderly', 'kodiakfi', 'mode', 'what', 'woofi'], 14427530436],
+  ['paradex', 2_431_304, 2_442_240, '245be56095673b49375ab47c5a8ce0d2cb59ce4fdc5f4584e7ea489158a7844d', ['paradex'], 14426877553],
+  ['phemex', 2_243_190, 2_253_824, '4b2a7b5afab6d2c20ec9a49cfc83f23626c5f65a4d341cb044bd28a15a873bee', ['phemex'], 14426463443],
+  ['polymarket', 1_786_592, 1_797_120, 'b86fea8262408335339cc44331924c7ad7a33d3ea2eb189087bee53643db9cc3', ['polymarket'], 14425908933],
+  ['txflow', 2_287_781, 2_297_856, '46995b6b4097494d4e38c59b9878b702cdd8ba447bb82c458b1af8ab1f23b66c', ['txflow'], 14426828486],
+  ['weex', 2_150_775, 2_161_664, '775aec55ab7962fb28d7a4557a08eb32618f3223f90a4cb06a19c5e387dbd036', ['weex'], 14425818798],
+  ['woo', 2_875_093, 2_883_584, '45358e66399d0a26b69c0a4ca86d62cd023beaac12ca53986743d0f25177ca61', ['woo'], 14427037266],
+];
+
+for (const [family, measured, parentCap, sha256, aliases, artifact] of postMasterReserveMeasurements) {
+  test(`#3640 post-master rule 17: ${family} complete reserve and alias audit`, () => {
+    assert.match(sha256, /^[0-9a-f]{64}$/);
+    assert.ok(Number.isSafeInteger(artifact) && artifact > 0);
+    const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[family];
+    // Historical composition stays a floor; the complete M46 census below pins the exact current cap.
+    assert.ok(cap >= Math.max(parentCap, required), 'retain every earlier measured reserve and parent floor');
+    assert.ok(cap - measured >= 10 * 1024, `${family}: ${cap - measured} bytes of reserve`);
+    for (const alias of aliases) {
+      assert.equal(venueFamily(alias), family);
+      if (Object.hasOwn(WASM_VENUE_OVERRIDES, alias)) {
+        assert.equal(WASM_VENUE_OVERRIDES[alias], cap);
+        assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', alias), undefined);
+        assert.equal(wasmBudgetError(cap, 'venue', alias), undefined);
+        assert.match(wasmBudgetError(cap + 1, 'venue', alias), /exceeds/);
+      }
+    }
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  });
+}
+
+test('#3640 post-master reserve census covers every family and budget alias', () => {
+  assert.deepEqual(postMasterReserveMeasurements.map(([family]) => family).sort(), [...venueFamilies].sort());
+  const aliases = postMasterReserveMeasurements.flatMap(([, , , , names]) => names);
+  assert.equal(aliases.length, 49, 'all routed names at the pinned CI source');
+  assert.equal(aliases.length, new Set(aliases).size);
+  const budgetAliases = aliases.filter((alias) => Object.hasOwn(WASM_VENUE_OVERRIDES, alias)).sort();
+  assert.deepEqual(budgetAliases, Object.keys(WASM_VENUE_OVERRIDES).sort());
+});
+
+// CI 44302321301 combined artifact 14427602030, source/tree as above; optimized web/Node modules match.
+// SHA256 b7693720dffd5c3878c09ea239e9949532c43d110e4883080aa07b476ad482a3, measured 17,869,568 B.
+test('#3640 post-master combined build retains its measured reserve and parent ceiling', () => {
+  const measured = 17_869_568;
+  const parentCap = 18_087_936;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(WASM_BUDGETS.combined, Math.max(parentCap, required));
+  assert.equal(WASM_BUDGETS.combined - measured, 218_368);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'combined'), undefined);
+  assert.equal(wasmBudgetError(WASM_BUDGETS.combined, 'combined'), undefined);
+  assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined'), /exceeds/);
+});
+
+// #3640 vetoable M46 rule 17: complete CI run 44319661954, head d931514bb9750d82e2f538ed454b0d24edd0db5f.
+// Built source de42fedbb4021e94d1162e4420b8583d0d20906a has identical tree 96034a1dc92a991b43673ee6023cd915815b42fe.
+// All 31 measurement jobs completed successfully before this census; all 27 sealed family artifacts verified.
+// Rust1.99.0 / bindgen0.2.129 / Binaryen132, required two -Oz passes; optimized web/Node hashes match.
+// Tuples: family, measured bytes, parent cap, paired module SHA256, all routed aliases, artifact ID.
+const m46ReserveMeasurements = [
+  ['apexomni', 2_221_499, 2_232_320, '10b21908c4228d0eeb8da7859b3ca2d837715531c6aa0acce9c0af576f911b88', ['apexomni'], 14434253983],
+  ['asterdex', 2_385_366, 2_396_160, '15131a05b946f46cfa0869bbd99b1d96de28295dc97c546222287079b2228602', ['asterdex'], 14434307727],
+  ['backpack', 2_194_243, 2_204_672, 'e4ac1ad98e2718829dbee4b7429d3b1b21478a5b4e3594250f1a51dbfe43e9eb', ['backpack'], 14434746254],
+  ['binance', 2_399_548, 2_410_496, '8f65a33e378620a67ae85e629a5e0f69d7f780b49ddb2e1ee9ac4eb9fc080c9d', ['binance', 'binanceinverse', 'binancepm', 'binanceoptions', 'binancespot'], 14435345088],
+  ['bingx', 2_280_540, 2_281_472, '43b6deab11cf21d7566a4f257fc13e849d294d41b98e1a3e30e461c5205021e9', ['bingx', 'bingxspot'], 14434571947],
+  ['bitget', 2_918_911, 2_929_664, '239158cbf1ca4b1d776832a02338759f13447e5015149d4d59a940e4f3ebc38a', ['bitget', 'bitgetinverse', 'bitgetusdc'], 14435500072],
+  ['bitrue', 2_030_425, 2_040_832, '7d3a567671e51508d0577947d5eb9999fd941fb2f56dbc333be42026dd2fd6aa', ['bitrue'], 14435400462],
+  ['bitunix', 2_060_267, 2_070_528, 'c1bf013f44d3fb0d1ea98d44592a92ae3448890fdef959c5b765ee3e37d3b051', ['bitunix'], 14434103149],
+  ['blofin', 2_193_054, 2_203_648, '6f053daba3682ad2375ce7a48b08636fd4802e9df7892c2e991e4b8f8d5e755a', ['blofin'], 14433119064],
+  ['bybit', 2_670_652, 2_696_192, '76fbaf355e73bf6b5292f784b5479a9f2a7ab5d9988c88ebc3700d02d30301dc', ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'], 14434357021],
+  ['coinbase', 2_467_231, 2_478_080, '5df8c70d8ba2597306f3264e82e032ad0c541738e160f464201b80aeb52c4598', ['coinbase', 'coinbasespot'], 14435110703],
+  ['cryptocom', 1_935_754, 1_946_624, '5295ac8606d45645e0e34980f60e993e5906ae089c25990c1fdff3efba4e7dce', ['cryptocom'], 14433549166],
+  ['grvt', 2_161_325, 2_171_904, '7ab9c27e4f5416ed0230d6a12167ca4f2c0b3b3d6b438132edbed8c7ce5b4819', ['grvt'], 14435005799],
+  ['hyperliquid', 2_428_978, 2_439_168, 'f242e0ade5f65c8cf9fd93bd0f211b02668d1f69f381221b1452a1d6fabf53ff', ['hyperliquid', 'hyperliquidspot'], 14435086069],
+  ['kraken', 2_412_733, 2_423_808, '6cafd9893661512013b26bb853f170caeda6f93b4149f92a0660a342ebc61adc', ['kraken', 'krakenspot'], 14435035761],
+  ['kucoin', 1_987_325, 1_997_824, 'd5e348710e013476abe057e7b935688e71016c090371aff560991247db93e886', ['kucoin'], 14435081529],
+  ['kucoinspot', 2_669_540, 2_679_808, '93e27408a62c1de0476a6b90b4f5ae20d690996485e7f4702602eda6a80950c6', ['kucoinspot'], 14434612501],
+  ['lighter', 2_343_151, 2_354_176, 'acda5b0d152fdb44552fa4500f3920cfc22b4100d438fdec05a1bdbeafc54069', ['lighter', 'lighter-robinhood'], 14434940914],
+  ['mexc', 2_074_423, 2_082_816, '0c71123e5adb6b43bc1b70488dd43674e758935f6ab404826f5aa22419ba5bcf', ['mexc'], 14433734049],
+  ['okx', 2_180_126, 2_190_336, 'c32226e5e573aebd0beca89567131ce7ce719369a730f7cfa0e5c763525a34fa', ['okx', 'okxdemo', 'okxeu', 'okxeudemo'], 14435011270],
+  ['orderly', 1_904_286, 1_914_880, 'e7f1a44d85c2ec939a33e1705e71999e6850dfdaa963d5918c5e6d682f2f3e1b', ['orderly', 'kodiakfi', 'mode', 'what', 'woofi'], 14433868603],
+  ['paradex', 2_431_400, 2_442_240, '892d6da913e90c29ddf6c9138d9c9486c682bec36a846183199a69b2d366201f', ['paradex'], 14435400501],
+  ['phemex', 2_243_263, 2_253_824, '6a138d96809233b17c89f263ec26c3fcb78e92e191028877b9a5de350f12b7d7', ['phemex'], 14435275349],
+  ['polymarket', 1_786_678, 1_797_120, '5e8e6545f4969be065ff5eefaa2183c38c099c300e9a180652ed1d6ebede2ef8', ['polymarket'], 14434626467],
+  ['txflow', 2_287_868, 2_298_880, 'ef49fce8d93fff542a4b2a0b15105d75e6587d209fc6db9f7bdc663950e77a32', ['txflow'], 14435150538],
+  ['weex', 2_150_848, 2_161_664, '0f9b9cf33f198eb13dc44eb883a2f70cb36e752076b297cb0f29c5d254e94833', ['weex'], 14434032692],
+  ['woo', 2_875_192, 2_885_632, '9595296a78bd8053db61b6ab9899ab2a2a4d5fc64e8da389eee34c7940451e5a', ['woo'], 14435596190],
+];
+
+for (const [family, measured, parentCap, sha256, aliases, artifact] of m46ReserveMeasurements) {
+  test(`#3640 M46 rule 17: ${family} complete reserve and alias audit`, () => {
+    assert.match(sha256, /^[0-9a-f]{64}$/);
+    assert.ok(Number.isSafeInteger(artifact) && artifact > 0);
+    const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[family];
+    // Historical composition stays a floor; the complete M48 census below pins the exact current cap.
+    assert.ok(cap >= Math.max(parentCap, required), 'retain every earlier measured reserve and parent floor');
+    assert.ok(cap - measured >= 10 * 1024, `${family}: ${cap - measured} bytes of reserve`);
+    for (const alias of aliases) {
+      assert.equal(venueFamily(alias), family);
+      // Routed aliases consume their parent family; explicit budget aliases must share its cap.
+      if (Object.hasOwn(WASM_VENUE_OVERRIDES, alias)) {
+        assert.equal(WASM_VENUE_OVERRIDES[alias], cap);
+        assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', alias), undefined);
+        assert.equal(wasmBudgetError(cap, 'venue', alias), undefined);
+        assert.match(wasmBudgetError(cap + 1, 'venue', alias), /exceeds/);
+      }
+    }
+    assert.equal(wasmBudgetError(measured + 10 * 1024, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  });
+}
+
+test('#3640 M46 reserve census covers every family and budget alias', () => {
+  assert.deepEqual(m46ReserveMeasurements.map(([family]) => family).sort(), [...venueFamilies].sort());
+  const aliases = m46ReserveMeasurements.flatMap(([, , , , names]) => names);
+  assert.equal(aliases.length, 49, 'all routed names at the pinned CI source');
+  assert.equal(aliases.length, new Set(aliases).size);
+  const budgetAliases = aliases.filter((alias) => Object.hasOwn(WASM_VENUE_OVERRIDES, alias)).sort();
+  assert.deepEqual(budgetAliases, Object.keys(WASM_VENUE_OVERRIDES).sort());
+});
+
+// CI44319661954 combined artifact 14435287450; same source/tree as above.
+// Optimized web/Node 17,876,808 B, SHA256 12320b94f86e8c4561366588bc255edc0d1b438fdcd3c8989d9e22714cc44cee.
+test('#3640 M46 combined build retains its measured reserve and parent ceiling', () => {
+  const measured = 17_876_808;
+  const parentCap = 18_087_936;
+  const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(WASM_BUDGETS.combined, Math.max(parentCap, required));
+  assert.equal(WASM_BUDGETS.combined - measured, 211_128);
+  assert.equal(wasmBudgetError(measured + 10 * 1024, 'combined'), undefined);
+  assert.equal(wasmBudgetError(WASM_BUDGETS.combined, 'combined'), undefined);
+  assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined'), /exceeds/);
+});
+
+// #3640 vetoable M48 rule 17: complete CI run 44389135230, head d123c9b38c4559ab38b5df8142981c7fdcc008b5.
+// Built source 42e792c614d768737151090feb06c4da4558855a (GitHub merge of master 04a2f14e5b) has the identical tree; all 27 family artifacts verified.
+// Tuples: family, measured bytes, parent cap, paired module SHA256, all routed aliases, artifact ID.
+const m48ReserveMeasurements = [
+  ['apexomni', 2_221_419, 2_232_320, 'ef17b39c836a3ec30ca7d3cfcd96fe324b8b4cc9b58d4a4277824a727294aa91', ['apexomni'], 14468375144],
+  ['asterdex', 2_385_133, 2_396_160, '541bddd20f80d03653e79c1fadb200bdeec0698d00a909ac3b7b319c6b257958', ['asterdex'], 14466874389],
+  ['backpack', 2_194_252, 2_204_672, '9e4b86a0f71fe0f213ee2db58a6796e3a678a06aac921a96b289d35f106eb91e', ['backpack'], 14467900321],
+  ['binance', 2_399_396, 2_410_496, 'd6837f05f2f802fabfb6540ae1f442f62da4f934e67a1f299b0879330fa122d6', ['binance', 'binanceinverse', 'binancepm', 'binanceoptions', 'binancespot'], 14467173971],
+  ['bingx', 2_280_457, 2_291_712, '272f2ae883b996e884840be09f0d55fcdba756b49e1892112470ce4023d991c4', ['bingx', 'bingxspot'], 14467099060],
+  ['bitget', 2_919_109, 2_929_664, '4b4a6a08d1dce0a40edd21b32cd59e59f59c4d4bbbec232f94b68ef09fac8ecb', ['bitget', 'bitgetinverse', 'bitgetusdc'], 14468855063],
+  ['bitrue', 2_030_311, 2_040_832, '6a6f2007b2e78457d33e36db142b57c892282d3fb12157ec5a56548ca6f76314', ['bitrue'], 14467318646],
+  ['bitunix', 2_060_309, 2_070_528, '259d7f7c42217927e3b78aa3d5dbe73a58ea575a8eeb4614a66223eec463a07a', ['bitunix'], 14467079162],
+  ['blofin', 2_193_059, 2_203_648, 'b6858d2b82fc868e589b5e80455ddf4f443bb1b9ac9065f1b1a133d52aed6846', ['blofin'], 14467990385],
+  ['bybit', 2_676_941, 2_696_192, 'e0131d879a3ab7055fd3415e898c95ab4c2ef88a83f19ce6e7e49165b9c00785', ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'], 14467398587],
+  ['coinbase', 2_467_165, 2_478_080, '4bc75a578c84de8e311878e198cb9c03627cefc3d13d7acf80710f0001f59690', ['coinbase', 'coinbasespot'], 14467820449],
+  ['cryptocom', 1_935_691, 1_946_624, '2179663ac7ec334f11dd737a18e3e6004a974ec9547a84a440648d4f9ec4588f', ['cryptocom'], 14468805079],
+  ['grvt', 2_161_326, 2_171_904, 'ff82bd79aa884e7bd2c761ba5e1f7f6207c29060bb2885457fc5d0110f9d075d', ['grvt'], 14468015358],
+  ['hyperliquid', 2_428_911, 2_440_192, '1cf92064c945d5addbe45b8d3e7d7e8a0938a4bdb841e95c4d1dbc7919caa818', ['hyperliquid', 'hyperliquidspot'], 14467550679],
+  ['kraken', 2_412_529, 2_423_808, '6babfbee8410ed263527da399bb25c94dea98b834f030f7500881b2db1f59465', ['kraken', 'krakenspot'], 14468655220],
+  ['kucoin', 1_987_327, 1_997_824, '312cfa5c38a46076c1a4c085456e7f261d46673e785090a2969e2672d52914bb', ['kucoin'], 14467670522],
+  ['kucoinspot', 2_669_596, 2_679_808, 'b34c4c82215750a4fc7031143cac366ed5d7cfc82399ddc96ab13deab4f520eb', ['kucoinspot'], 14468325467],
+  ['lighter', 2_343_190, 2_354_176, 'b45e012230d54875a5e7183a64e40a5ca1e9b4ca01579c9c34cd646e7391d442', ['lighter', 'lighter-robinhood'], 14466919402],
+  ['mexc', 2_074_432, 2_084_864, '21fe260572fc9a6efa99f898a9bd380fb50ae6d17e203d1f01ff85bed6857a41', ['mexc'], 14466764890],
+  ['okx', 2_181_378, 2_191_360, '5754641f60a4094992f8fc052990303ebbfc4188421a7938655fe5ff3e4a504a', ['okx', 'okxdemo', 'okxeu', 'okxeudemo'], 14467433385],
+  ['orderly', 1_904_311, 1_914_880, '74922b4fcb3dee097143f7f22be5a868f654753972442f2ada6deeba087d8f4c', ['orderly', 'kodiakfi', 'mode', 'what', 'woofi'], 14468310213],
+  ['paradex', 2_431_392, 2_442_240, 'ee4714b2e2bd71a89d24f139d5c2405af49238936542a8609f17e7535c52ad6d', ['paradex'], 14466804576],
+  ['phemex', 2_243_042, 2_253_824, '95fd0cb08905951516047c40d41ab947b99b130a68f0d7e4b44fa47fe7a191bb', ['phemex'], 14466814441],
+  ['polymarket', 1_786_673, 1_797_120, 'fbf879c883e9dfd8c8956c92ebdc0dfbcde371ea9e5d47f51d098b678a83a677', ['polymarket'], 14467655373],
+  ['txflow', 2_287_899, 2_298_880, 'fb3f1df78c15cda35023c16db94dcdd78416e9800cfe41ddefff58924f7fcabc', ['txflow'], 14468515168],
+  ['weex', 2_150_790, 2_161_664, 'b6007d2d6f23d3063812c2fef30a0a045605090c66abab1ffa052e28d9129c60', ['weex'], 14468055458],
+  ['woo', 2_875_139, 2_885_632, '3fc66068aa915daa0fba4d680d20da7193ee570e7e56592799b4045c0e80af48', ['woo'], 14468885150],
+];
+
+for (const [family, measured, parentCap, sha256, aliases, artifact] of m48ReserveMeasurements) {
+  test(`#3640 M48 rule 17: ${family} complete reserve and alias audit`, () => {
+    assert.match(sha256, /^[0-9a-f]{64}$/);
+    assert.ok(Number.isSafeInteger(artifact) && artifact > 0);
+    const required = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+    const cap = WASM_VENUE_OVERRIDES[family];
+    assert.equal(cap, Math.max(parentCap, required), 'raise only to measured reserve; never lower a parent cap');
+    assert.ok(cap - measured >= 10 * 1024, `${family}: ${cap - measured} bytes of reserve`);
+    for (const alias of aliases) {
+      assert.equal(venueFamily(alias), family);
+      if (Object.hasOwn(WASM_VENUE_OVERRIDES, alias)) assert.equal(WASM_VENUE_OVERRIDES[alias], cap);
+    }
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  });
+}
+
+test('#3640 M48 reserve census covers every family', () => {
+  assert.deepEqual(m48ReserveMeasurements.map(([family]) => family).sort(), [...venueFamilies].sort());
+});
+
+// CI44389135230 combined package: optimized web/Node 17,880,947 B, SHA256 07d9c9d787961a7cafa778e2104edd1804385e05532d46184d72b0e2e2571f15.
+test('#3640 M48 combined build keeps at least 10 KiB under its ceiling', () => {
+  assert.ok(WASM_BUDGETS.combined - 17_880_947 >= 10 * 1024);
+});

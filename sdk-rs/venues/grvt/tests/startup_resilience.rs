@@ -1,3 +1,6 @@
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{Action, Event, Response};
 use safe_cex_venue_grvt::{Grvt, Options};
@@ -144,7 +147,7 @@ fn empty_or_all_malformed_catalogue_retains_current_state_and_recovers_after_bac
                     },
                 },
             );
-            assert_eq!(engine.snapshot_frame(0.0), before);
+            assert_unchanged_account(&before, engine.snapshot_frame(0.0), [1, 0, 0, 0, 0]);
             assert_eq!(engine.store().loaded().markets, seeded);
             let actions: Vec<_> = engine.drain_actions().collect();
             assert!(

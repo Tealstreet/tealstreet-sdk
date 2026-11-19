@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 import { binanceVenue } from './binance-venue-fixture.mjs';
 import { EngineHost } from './host.mjs';
+import { Frame } from './wire.mjs';
 
 const built = new URL('../pkg/node/safe_cex_wasm.js', import.meta.url);
 const engineModule = existsSync(built) ? createRequire(import.meta.url)(built.pathname) : undefined;
@@ -32,7 +33,7 @@ async function startedAccount() {
   return { venue, host, emits };
 }
 
-const lastRows = (emits) => emits.filter((emit) => emit.op === 'store').at(-1)?.data;
+const lastRows = (host) => { const frame = new Frame(host.snapshot()); return { activeChasers: frame.activeChasers(), activeTWAPs: frame.activeTWAPs() }; };
 
 test('a local chase places a limit at the bid and completes when the user stream fills it', enabled, async () => {
   const { venue, host, emits } = await startedAccount();
@@ -42,7 +43,7 @@ test('a local chase places a limit at the bid and completes when the user stream
     assert.equal(venue.placements.length, 1, 'the Rust chaser placed one order');
     const [order] = venue.placements;
     assert.deepEqual([order.type, order.side, order.price, order.origQty], ['LIMIT', 'BUY', '95999.9', '0.002']);
-    assert.equal(lastRows(emits).activeChasers.length, 1);
+    assert.equal(lastRows(host).activeChasers.length, 1);
 
     venue.fill(order);
     // The host's flush hands the fill to the algos; the timer it arms runs the chase's next check.
@@ -54,7 +55,7 @@ test('a local chase places a limit at the bid and completes when the user stream
     assert.equal(complete.data.clientId, 'chase-1');
     assert.equal(complete.data.symbol, 'BTCUSDT');
     assert.equal(complete.data.filled, 0.002);
-    assert.deepEqual(lastRows(emits).activeChasers, []);
+    assert.deepEqual(lastRows(host).activeChasers, []);
     assert.equal(venue.placements.length, 1, 'a filled chase places nothing more');
     assert.deepEqual(emits.filter((emit) => emit.op === 'error'), []);
   } finally { host.dispose(); }
@@ -68,7 +69,7 @@ test('a two-slice TWAP places its second slice when the host timer fires, then c
     await venue.settle();
     assert.equal(venue.placements.length, 1, 'the first slice at once');
     assert.equal(venue.placements[0].type, 'MARKET');
-    assert.equal(lastRows(emits).activeTWAPs.length, 1);
+    assert.equal(lastRows(host).activeTWAPs.length, 1);
     const running = emits.filter((emit) => emit.op === 'twap:stateUpdate').at(-1);
     assert.equal(Object.keys(running.data).length, 1, 'the running TWAP is persisted');
     assert.ok(host.algoTimer !== undefined, 'the host armed the slice timer');
@@ -80,7 +81,7 @@ test('a two-slice TWAP places its second slice when the host timer fires, then c
     assert.deepEqual(venue.placements.map((order) => order.origQty), ['0.002', '0.002']);
 
     await venue.advance(1_000);
-    assert.deepEqual(lastRows(emits).activeTWAPs, [], 'the TWAP completed');
+    assert.deepEqual(lastRows(host).activeTWAPs, [], 'the TWAP completed');
     assert.deepEqual(emits.filter((emit) => emit.op === 'twap:stateUpdate').at(-1).data, {}, 'nothing left to restore');
   } finally { host.dispose(); }
 });
@@ -131,7 +132,7 @@ test('algoStopAll stops TWAPs and chases, waits for the chase cancels, and keeps
     host.algoOp('chaser:start', { symbol: 'BTCUSDT', size: 0.002, side: 'buy', maxAttempts: 10 });
     host.algoOp('twap:start', TWAP);
     await venue.settle();
-    const rows = lastRows(emits);
+    const rows = lastRows(host);
     assert.equal(rows.activeChasers.length, 1);
     assert.equal(rows.activeTWAPs.length, 1);
     const chase = venue.placements.find((order) => order.type === 'LIMIT');
@@ -145,7 +146,7 @@ test('algoStopAll stops TWAPs and chases, waits for the chase cancels, and keeps
     assert.deepEqual(result, { stoppedChasers: [rows.activeChasers[0].id], stoppedTwaps: [rows.activeTWAPs[0].id], settled: true, placedSymbols: ['BTCUSDT'] });
     assert.deepEqual(venue.cancels, [String(chase.orderId)]);
     assert.deepEqual(stateUpdates(emits).at(-1), {}, 'the stopped TWAP is no longer persisted');
-    assert.deepEqual(lastRows(emits), { activeChasers: [], activeTWAPs: [] });
+    assert.deepEqual(lastRows(host), { activeChasers: [], activeTWAPs: [] });
     assert.ok(!emits.some((emit) => emit.op === 'algos:stopped'), 'the report answers the wait, not the worker');
     assert.equal(host.algosRunning, true);
     await venue.advance(60_000);

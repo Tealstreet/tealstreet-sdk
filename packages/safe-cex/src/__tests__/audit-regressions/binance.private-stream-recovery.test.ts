@@ -1,8 +1,11 @@
+import { FrameStore } from '../../store/frameStore';
+import { loop } from '../../utils/loop';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { nativeOrder } from '../cutover/nativeOrder';
 import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { BinancePrivateWebsocket } from '../reference/binance/binance.ws-private';
 import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 import { BinancePMPrivateWebsocket } from '../reference/binance/binancepm.ws-private';
-import { loop } from '../../utils/loop';
 
 vi.mock('../../utils/loop', () => ({ loop: vi.fn() }));
 
@@ -200,7 +203,8 @@ describe('binance startup orders after a failed fetch', () => {
   ] as const;
 
   it.each(EXCHANGES)('$label: stays unloaded, then the retry loads it', async ({ make, failFetch }) => {
-    const store = { loaded: {} as Record<string, boolean>, orders: [], subscribe: vi.fn(), update: vi.fn() };
+    const store = new FrameStore();
+    store.apply(nativeFixture({ positions: [], balance: { total: 0, free: 0, used: 0, upnl: 0 } }));
     const exchange = make(store);
     exchange.emitAndLogError = vi.fn();
     exchange.log = vi.fn();
@@ -212,12 +216,11 @@ describe('binance startup orders after a failed fetch', () => {
     failing.mockRestore();
     vi.spyOn(exchange, 'fetchOrders').mockImplementation(async () => {
       exchange.ordersSnapshotStale = false;
-      return [{ id: 'o1' }];
+      return [nativeOrder({ id: 'o1', symbol: 'BTCUSDT' })];
     });
     await exchange.retryOrdersSnapshot();
-    expect(store.update).toHaveBeenCalledWith(
-      expect.objectContaining({ orders: [{ id: 'o1' }], loaded: expect.objectContaining({ orders: true }) }),
-    );
+    expect(store.orders).toEqual([nativeOrder({ id: 'o1', symbol: 'BTCUSDT' })]);
+    expect(store.loaded.orders).toBe(true);
     expect(loop).not.toHaveBeenCalled();
   });
 });

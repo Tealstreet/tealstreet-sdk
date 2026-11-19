@@ -1,6 +1,7 @@
+import { FrameStore } from '../../../../safe-cex/src/store/frameStore';
+import { nativeFixture } from '../../../../safe-cex/src/__tests__/cutover/nativeFixture';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DefaultStore } from '@tealstreet/safe-cex/src/store/store.base';
 import { PositionSide, type Position } from '@tealstreet/safe-cex/src/types';
 
 import type { CLIPlatformAdapter, ExchangeLike } from '../../types';
@@ -29,11 +30,16 @@ function fixture(notional: number | null) {
       liquidationPrice: null,
     }),
   );
-  const store = new DefaultStore();
-  store.update({
-    positions: [position],
-    balance: { ...store.balance, total: 1000, free: 1000, used: 0 },
-  });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      {
+        positions: [position],
+        balance: { ...store.balance, total: 1000, free: 1000, used: 0 },
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange: ExchangeLike = {
     name: 'kraken',
     store,
@@ -87,9 +93,14 @@ describe('position notional across JSON consumers', () => {
   ])('$name', ({ name, render }) => {
     it.each([null, NaN, Infinity, -Infinity])('shows %s as unknown rather than a partial total or zero', (notional) => {
       const { store, exchange } = fixture(notional);
-      store.update({
-        positions: [...store.positions, { ...store.positions[0], id: 'known', symbol: 'ETHUSDT', notional: 250 }],
-      });
+      store.apply(
+        nativeFixture(
+          {
+            positions: [...store.positions, { ...store.positions[0], id: 'known', symbol: 'ETHUSDT', notional: 250 }],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
       const output = plain(render(exchange));
       expect(output).toContain('—');
       expect(output).not.toMatch(/NaN|Infinity/);
@@ -144,9 +155,14 @@ describe('position notional across JSON consumers', () => {
     'refuses the %s sizing token when a required position notional is unknown',
     (token) => {
       const { store, exchange } = fixture(NaN);
-      store.update({
-        positions: [...store.positions, { ...store.positions[0], id: 'short', side: PositionSide.Short }],
-      });
+      store.apply(
+        nativeFixture(
+          {
+            positions: [...store.positions, { ...store.positions[0], id: 'short', side: PositionSide.Short }],
+          },
+          store.markets.map((row) => row.symbol),
+        ),
+      );
       expect(() =>
         preprocessSegment(`buy ${token}`, {
           exchange,
@@ -168,7 +184,12 @@ describe('position notional across JSON consumers', () => {
     ]) {
       expect(preprocessSegment(`buy ${token}`, ctx)).toBe(`buy ${value}`);
     }
-    store.update({ positions: [] });
+    store.apply(
+      nativeFixture(
+        { positions: [] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     expect(preprocessSegment('buy $totallongusd', ctx)).toBe('buy 0');
   });
 });

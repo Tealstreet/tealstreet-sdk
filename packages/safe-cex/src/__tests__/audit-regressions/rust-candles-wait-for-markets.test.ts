@@ -1,19 +1,23 @@
+import { afterEach, expect, it, vi } from 'vitest';
+
+import { LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
+import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { FrameStore } from '../../store/frameStore';
+
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
   return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
 });
 
-import { afterEach, expect, it, vi } from 'vitest';
-import { LOADED_FLAG } from '@tealstreet/safe-cex-wasm/wire';
-
-import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
-
 const exchanges: RustEngineExchange[] = [];
 afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
 const setup = (nativeLoaded: number) => {
-  const exchange = new RustEngineExchange('phemex', { key: '', secret: '', publicDataOnly: true } as never, new DefaultStore());
+  const exchange = new RustEngineExchange(
+    'phemex',
+    { key: '', secret: '', publicDataOnly: true } as never,
+    new FrameStore(),
+  );
   exchanges.push(exchange);
   const command = vi.fn().mockResolvedValue([]);
   Object.defineProperty(exchange, 'command', { value: command });

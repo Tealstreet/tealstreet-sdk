@@ -1,15 +1,15 @@
 import type { Axios } from 'axios';
+import type { PlaceOrderOpts } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { uuidMock } = vi.hoisted(() => ({ uuidMock: vi.fn() }));
-vi.mock('../../utils/uuid', () => ({ uuid: uuidMock }));
-
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderTimeInForce, OrderType } from '../../types';
 import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { ENDPOINTS } from '../reference/paradex/paradex.types';
-import { DefaultStore } from '../../store/store.base';
-import type { PlaceOrderOpts } from '../../types';
-import { OrderSide, OrderTimeInForce, OrderType } from '../../types';
+
+const { uuidMock } = vi.hoisted(() => ({ uuidMock: vi.fn() }));
+vi.mock('../../utils/uuid', () => ({ uuid: uuidMock }));
 
 const regularOrder = (index: number, overrides: Partial<PlaceOrderOpts> = {}): PlaceOrderOpts => ({
   symbol: 'BTC-USD-PERP',
@@ -24,7 +24,7 @@ const createExchange = () => {
   const exchange = new ParadexExchange(
     'paradex',
     { publicDataOnly: true, tuning: { consoleLogging: false } } as any,
-    new DefaultStore(),
+    new FrameStore(),
   );
   let signed = 0;
   const signOrder = vi.fn(async () => {
@@ -70,9 +70,7 @@ describe('Paradex native regular-order batching', () => {
     expect(signOrder).toHaveBeenCalledTimes(21);
     const payloads = post.mock.calls.flatMap(([, rows]) => rows);
     expect(new Set(payloads.map(({ client_id }) => client_id)).size).toBe(21);
-    expect(payloads.every(({ client_id }) => /^ts_[A-Za-z0-9]+$/.test(client_id) && client_id.length <= 64)).toBe(
-      true,
-    );
+    expect(payloads.every(({ client_id }) => /^ts_[A-Za-z0-9]+$/.test(client_id) && client_id.length <= 64)).toBe(true);
     expect(new Set(payloads.map(({ signature_timestamp }) => signature_timestamp)).size).toBe(21);
   });
 
@@ -86,7 +84,10 @@ describe('Paradex native regular-order batching', () => {
         return {
           data: {
             errors: [],
-            orders: body.map((row: any, index: number) => ({ id: `batch-${endpoints.length}-${index}`, client_id: row.client_id })),
+            orders: body.map((row: any, index: number) => ({
+              id: `batch-${endpoints.length}-${index}`,
+              client_id: row.client_id,
+            })),
           },
         };
       }
@@ -149,9 +150,9 @@ describe('Paradex native regular-order batching', () => {
   it('performs no network write when any independent signature fails', async () => {
     const { exchange, signOrder } = createExchange();
     const post = vi.fn();
-    signOrder.mockResolvedValueOnce({ signature: '["r","s"]', signature_timestamp: 1 }).mockRejectedValueOnce(
-      new Error('signer unavailable'),
-    );
+    signOrder
+      .mockResolvedValueOnce({ signature: '["r","s"]', signature_timestamp: 1 })
+      .mockRejectedValueOnce(new Error('signer unavailable'));
     exchange.xhr = { post } as unknown as Axios;
 
     await expect(exchange.placeOrders([regularOrder(0), regularOrder(1), regularOrder(2)])).rejects.toThrow(
