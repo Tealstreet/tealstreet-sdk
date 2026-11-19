@@ -704,3 +704,92 @@ fn the_second_stop_warning_survives_a_long_venue_refusal() {
             .contains("a second stop may exist")
     );
 }
+
+/// Bybit's private stream answers our own cancel with the terminal row: `leavesQty`
+/// becomes "0" and `updatedTime` moves. M54 (2026-11-19 16:10-16:19Z, bear5) vetoed
+/// every replacement AND put-back as "the reference, order, or protected position
+/// changed after cancellation", because that row no longer equalled the original.
+fn own_cancel_frame(h: &mut Harness, id: &str, kind: &str, trigger: &str, status: &str) {
+    h.message("/v5/private", &format!(r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"{id}","side":"Sell","orderType":"Market","orderStatus":"{status}","cancelType":"CancelByUser","rejectReason":"EC_NoError","stopOrderType":"{kind}","tpslMode":"Partial","qty":"0.001","cumExecQty":"0","cumExecValue":"0","avgPrice":"0","price":"0","leavesQty":"0","leavesValue":"0","triggerPrice":"{trigger}","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0,"updatedTime":"{}"}}]}}"#, h.now as u64 + 50));
+}
+
+#[test]
+fn our_own_cancel_frame_is_not_a_change_for_the_replacement_or_put_back() {
+    let profile = PROFILES[0];
+    for (kind, trigger, price, amount, level, expected) in [
+        ("StopLoss", "90", Some(95.0), None, "stopLoss", "95"),
+        ("TakeProfit", "110", Some(111.0), None, "takeProfit", "111"),
+        ("StopLoss", "90", None, Some(0.002), "stopLoss", "90"),
+    ] {
+        for status in ["Cancelled", "Deactivated"] {
+            for refused in [false, true] {
+                let shape = format!("{kind}/{price:?}/{amount:?}/{status}/refused={refused}");
+                let mut h = ready(profile);
+                let original = incident_order(&mut h, "partial", kind, trigger);
+                edit_to(&mut h, 91, "partial", price, amount);
+                own_cancel_frame(&mut h, "partial", kind, trigger, status);
+                let mut row = native_partial_target(&h, profile, &original);
+                row["orderStatus"] = status.into();
+                h.respond("&orderId=partial", 200, &page(vec![row], CURSOR));
+                census(&mut h);
+                let writes = stop_writes(&h);
+                assert_eq!(
+                    writes.len(),
+                    1,
+                    "{shape}: replacement vetoed: {:?}",
+                    h.result(91)
+                );
+                assert_eq!(writes[0][level], expected, "{shape}");
+                if !refused {
+                    h.respond("/v5/position/trading-stop", 200, OK);
+                    assert!(
+                        h.result(91).is_some_and(Result::is_ok),
+                        "{shape}: {:?}",
+                        h.result(91)
+                    );
+                    continue;
+                }
+                h.respond(
+                    "/v5/position/trading-stop",
+                    200,
+                    r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
+                );
+                h.advance(200.0);
+                let writes = stop_writes(&h);
+                assert_eq!(
+                    writes.len(),
+                    1,
+                    "{shape}: put-back vetoed: {:?}",
+                    h.result(91)
+                );
+                assert_eq!(writes[0][level], trigger, "{shape}");
+                h.respond("/v5/position/trading-stop", 200, OK);
+                assert_eq!(
+                    failure(&h, 91).protection,
+                    Some(safe_cex_engine::error::Protection::Restored),
+                    "{shape}"
+                );
+            }
+        }
+    }
+}
+
+/// Control: the cancel frame is forgiven only its zeroed `leavesQty`. A terminal row
+/// that shows a fill still blocks both the replacement and the put-back, and the edit
+/// says plainly that the position has no stop.
+#[test]
+fn a_cancel_frame_showing_a_fill_still_blocks_the_replacement() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    let original = incident_stop(&mut h, "partial");
+    edit(&mut h, 91, "partial");
+    h.message("/v5/private", &format!(r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"partial","side":"Sell","orderType":"Market","orderStatus":"Cancelled","stopOrderType":"StopLoss","tpslMode":"Partial","qty":"0.001","cumExecQty":"0.0005","cumExecValue":"0.045","avgPrice":"90","price":"0","leavesQty":"0","triggerPrice":"90","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0,"updatedTime":"{}"}}]}}"#, h.now as u64 + 50));
+    let row = native_partial_target(&h, profile, &original);
+    h.respond("&orderId=partial", 200, &page(vec![row], CURSOR));
+    census(&mut h);
+    assert!(stop_writes(&h).is_empty(), "{:?}", h.result(91));
+    assert_eq!(
+        failure(&h, 91).protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
+}
