@@ -12,8 +12,10 @@ const TARGET_POLL_DELAY_MS: u32 = 100;
 /// The wait before each target history read: about 5 s in all for history to index the cancel.
 const HISTORY_POLL_DELAYS_MS: [u32; 6] = [250, 500, 750, 1_000, 1_250, 1_500];
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
-/// Proof reads lost in transport that are read again before the plan gives up.
-const LOST_PROOF_READS: u8 = 3;
+/// Proof reads lost in transport that are read again (about 25 s with backoff) before
+/// the plan gives up. A failed read may only be followed by another read (engine guard
+/// `failed_read_cannot_continue_as_mutation`), so the edit continues once one answers.
+const LOST_PROOF_READS: u8 = 20;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Axis {
@@ -21,6 +23,19 @@ pub(super) enum Axis {
     TargetHistory,
     Live,
     History,
+    /// One last orderId read on realtime before acting on missing evidence.
+    Final,
+}
+
+/// What a failed proof read says about the old stop.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Evidence {
+    /// Missing or unreadable: the cancel landed, so the edit still goes out.
+    Missing,
+    /// Bybit still shows the old stop live: a replacement would make two.
+    Live,
+    /// Bybit shows the old stop triggered or filled: the position already moved.
+    Executed,
 }
 
 pub(super) fn proof(category: &str, order: &Order, axis: Axis) -> Planned {
@@ -28,7 +43,7 @@ pub(super) fn proof(category: &str, order: &Order, axis: Axis) -> Planned {
         .str("category", category)
         .str("symbol", &order.symbol);
     let query = match axis {
-        Axis::Target | Axis::TargetHistory => query.str("orderId", &order.id),
+        Axis::Target | Axis::TargetHistory | Axis::Final => query.str("orderId", &order.id),
         Axis::Live => query.str("openOnly", "0").str("limit", "50"),
         Axis::History => query.str("limit", "50"),
     };
@@ -107,6 +122,30 @@ fn reference(reference: StopTriggerType) -> &'static str {
 
 fn cancelled_terminal(status: &str) -> bool {
     matches!(status, "Cancelled" | "Deactivated")
+}
+
+fn executed(row: &NativeStop) -> bool {
+    row.cum_exec_qty.parse::<f64>().is_ok_and(|qty| qty != 0.0)
+        || matches!(
+            row.order_status.as_str(),
+            "Triggered" | "Filled" | "PartiallyFilled" | "PartiallyFilledCanceled"
+        )
+}
+
+/// What a row naming the old stop's own id says about it; any other row says nothing.
+fn evidence(row: &NativeStop, target: &str) -> Evidence {
+    if row.order_id != target {
+        Evidence::Missing
+    } else if executed(row) {
+        Evidence::Executed
+    } else if matches!(
+        row.order_status.as_str(),
+        "Untriggered" | "New" | "Active" | "Created"
+    ) {
+        Evidence::Live
+    } else {
+        Evidence::Missing
+    }
 }
 
 fn matches_partial_kind(row: &NativeStop, kind: OrderType) -> bool {
@@ -255,6 +294,8 @@ pub(super) struct Flow {
     unproven: bool,
     /// Lost proof reads already read again.
     lost_reads: u8,
+    /// The failed check that sent the plan to its final orderId read.
+    first_failure: Option<String>,
 }
 
 pub(super) enum Observation {
@@ -265,6 +306,7 @@ pub(super) enum Observation {
 /// A failed proof read and the check that failed it: enum values only, never venue data.
 pub(super) struct ProofFailure {
     pub(super) reason: String,
+    pub(super) evidence: Evidence,
 }
 
 impl ProofFailure {
@@ -274,17 +316,50 @@ impl ProofFailure {
             Axis::TargetHistory => "target-history",
             Axis::Live => "live",
             Axis::History => "history",
+            Axis::Final => "final",
         };
         Self {
             reason: format!("axis={axis} {check}"),
+            evidence: Evidence::Missing,
+        }
+    }
+
+    fn showing(mut self, evidence: Evidence) -> Self {
+        self.evidence = evidence;
+        self
+    }
+
+    /// The definite end of an edit whose old stop Bybit still shows live or executed.
+    pub(super) fn not_replaced(&self, symbol: &str, kind: OrderType) -> VenueError {
+        let what = if kind == OrderType::TakeProfit {
+            "take profit"
+        } else {
+            "stop"
+        };
+        let shows = if self.evidence == Evidence::Executed {
+            "shows the old order already triggered or filled"
+        } else {
+            "still shows it live after accepting its cancel"
+        };
+        VenueError {
+            kind: Some(safe_cex_engine::ErrorKind::Rejected),
+            outcome: Some(Outcome::Rejected),
+            presents: true,
+            ..VenueError::new(format!(
+                "Your {symbol} {what} was not edited: Bybit {shows}, so no replacement was placed; check Open Orders [proof: {}]",
+                self.reason
+            ))
         }
     }
 
     /// Told to the user while the replacement still goes out.
-    pub(super) fn warning(&self, symbol: &str) -> String {
+    pub(super) fn warning(&self, symbol: &str, earlier: Option<&str>) -> String {
+        let reason = match earlier {
+            Some(earlier) => format!("{earlier}; {}", self.reason),
+            None => self.reason.clone(),
+        };
         format!(
-            "Bybit did not confirm that the old {symbol} order was cancelled, so its replacement is placed anyway; check Open Orders for a duplicate [proof: {}]",
-            self.reason
+            "Bybit did not confirm that the old {symbol} order was cancelled, so its replacement is placed anyway; check Open Orders for a duplicate [proof: {reason}]"
         )
     }
 }
@@ -335,6 +410,45 @@ impl Flow {
     pub(super) fn symbol(&self) -> &str {
         &self.guard.symbol
     }
+    pub(super) fn kind(&self) -> OrderType {
+        self.guard.original.kind
+    }
+    /// The explicit end when neither the replacement nor the old stop can be sent.
+    pub(super) fn unprotected(&self, cause: &str) -> VenueError {
+        let order = &self.guard.original;
+        let position = if order.side == super::OrderSide::Sell {
+            "long"
+        } else {
+            "short"
+        };
+        let what = if order.kind == OrderType::TakeProfit {
+            "take profit"
+        } else {
+            "stop"
+        };
+        let gone = format!(
+            "Your {} {position} position has no {what}: the old {what} was canceled and {cause}",
+            order.symbol
+        );
+        VenueError {
+            kind: Some(safe_cex_engine::ErrorKind::Network),
+            outcome: Some(Outcome::NotSent),
+            protection: Some(safe_cex_engine::error::Protection::Unprotected),
+            presents: true,
+            ..VenueError::new(format!("{gone}; re-place protection on Bybit"))
+        }
+    }
+    pub(super) fn note_failure(&mut self, failure: &ProofFailure) {
+        self.first_failure
+            .get_or_insert_with(|| failure.reason.clone());
+    }
+    pub(super) fn first_failure(&self) -> Option<&str> {
+        self.first_failure.as_deref()
+    }
+    /// Whether the old stop's own row has been read as cancelled.
+    pub(super) fn target_proven(&self) -> bool {
+        self.terminal.is_some()
+    }
     pub(super) fn target_id(&self) -> &str {
         &self.guard.original.id
     }
@@ -351,6 +465,7 @@ impl Flow {
             history_window: None,
             unproven: false,
             lost_reads: 0,
+            first_failure: None,
         }
     }
 
@@ -366,6 +481,13 @@ impl Flow {
     pub(super) fn read_lost_proof_again(&mut self) -> bool {
         self.lost_reads += 1;
         self.lost_reads <= LOST_PROOF_READS
+    }
+
+    /// Backoff before reading a lost proof again.
+    pub(super) fn lost_read_delay_ms(&self) -> u32 {
+        let index =
+            usize::from(self.lost_reads.saturating_sub(1)).min(HISTORY_POLL_DELAYS_MS.len() - 1);
+        HISTORY_POLL_DELAYS_MS[index]
     }
 
     pub(super) fn observe(
@@ -385,6 +507,22 @@ impl Flow {
         }
         if page.list.len() > 50 {
             return Err(failed("len"));
+        }
+        if axis == Axis::Final {
+            let [row] = page.list.as_slice() else {
+                return Err(failed(&format!("final-len={}", page.list.len())));
+            };
+            if row.order_id != self.guard.original.id || row.symbol != self.guard.symbol {
+                return Err(failed("final-field=identity"));
+            }
+            if !cancelled_terminal(&row.order_status) || executed(row) {
+                return Err(failed(&row_reason("final", row, &self.guard))
+                    .showing(evidence(row, &self.guard.original.id)));
+            }
+            // Cancelled with nothing executed: the stop is gone, so its edit goes out.
+            self.terminal = page.list.pop();
+            self.abandon_proof();
+            return Ok(Observation::Complete);
         }
         if matches!(axis, Axis::Target | Axis::TargetHistory) {
             self.target_reads += 1;
@@ -417,7 +555,8 @@ impl Flow {
                 return Ok(Observation::Retry(retry));
             }
             if !cancelled_terminal(&row.order_status) || !matches_original(&row, &self.guard) {
-                return Err(failed(&row_reason("target", &row, &self.guard)));
+                return Err(failed(&row_reason("target", &row, &self.guard))
+                    .showing(evidence(&row, &self.guard.original.id)));
             }
             self.terminal = Some(row);
         } else {
@@ -429,7 +568,8 @@ impl Flow {
                     && (!cancelled_terminal(&row.order_status)
                         || !matches_original(row, &self.guard))
             }) {
-                return Err(failed(&row_reason("peer-target", row, &self.guard)));
+                return Err(failed(&row_reason("peer-target", row, &self.guard))
+                    .showing(evidence(row, &self.guard.original.id)));
             }
             self.complete &= page.next_page_cursor.is_empty();
             if axis == Axis::History {

@@ -187,14 +187,19 @@ fn first_read_field_matrix_preserves_real_identity_and_economic_mismatches() {
         let (mut h, mut row) = first_proof("StopLoss");
         row[field] = replacement;
         answer(&mut h, vec![row], "");
-        // AGT-34: a mismatch still fails the proof (named in the diagnostic), but the
-        // cancel has landed, so the replacement goes out instead of leaving no stop.
+        // AGT-34: a mismatch still fails the proof (named in the diagnostic). An executed
+        // old stop never gets a replacement; otherwise one final orderId read, then the
+        // replacement goes out instead of leaving no stop.
         assert!(proof_failed(&h), "changed {field} unexpectedly accepted");
         assert!(!h.unknown.contains(&91), "{field}");
         assert!(!h.has_request("&openOnly=0&limit=50"), "{field}");
         assert!(!h.has_request("/v5/order/history"), "{field}");
-        h.advance(200.0);
-        assert!(h.has_request("/v5/position/trading-stop"), "{field}");
+        finish_missing(&mut h);
+        assert_eq!(
+            h.has_request("/v5/position/trading-stop"),
+            field != "cumExecQty",
+            "{field}"
+        );
     }
 }
 
@@ -225,20 +230,25 @@ fn first_read_missing_or_empty_fields_are_not_assumed_safe() {
                 proof_failed(&h),
                 "{field}/missing={missing} unexpectedly accepted"
             );
-            h.advance(200.0);
+            finish_missing(&mut h);
             assert!(h.has_request("/v5/position/trading-stop"));
         }
     }
 }
 
+/// AGT-34: was `first_read_two_rows_fail_closed_without_a_second_read`, which ended
+/// with no stop after the landed cancel. Two rows are unreadable evidence: exactly one
+/// final orderId read follows, then the replacement goes out.
 #[test]
-fn first_read_two_rows_fail_closed_without_a_second_read() {
+fn first_read_two_rows_get_one_final_order_read_then_the_replacement() {
     let (mut h, row) = first_proof("StopLoss");
     answer(&mut h, vec![row.clone(), row], "");
     assert!(proof_failed(&h));
-    assert!(!h.has_request("&orderId=partial"));
     assert!(!h.has_request("/v5/order/history"));
     h.advance(200.0);
+    assert!(h.has_request("&orderId=partial"), "one final orderId read");
+    finish_missing(&mut h);
+    assert!(!h.has_request("&orderId=partial"));
     assert!(h.has_request("/v5/position/trading-stop"));
 }
 
@@ -293,10 +303,27 @@ fn proof_failed(h: &Harness) -> bool {
     })
 }
 
-/// The command error and the `[proof-diag]` warning both name the failed check, and
-/// (AGT-34) the replacement is still sent rather than ending the edit as Unknown.
-fn assert_proof_diag(h: &mut Harness, reason: &str) {
+/// Answers the final orderId read (if any) as still missing.
+fn finish_missing(h: &mut Harness) {
     h.advance(200.0);
+    if h.has_request("&orderId=partial") {
+        h.respond(
+            "&orderId=partial",
+            200,
+            r#"{"retCode":0,"result":{"category":"linear","list":[],"nextPageCursor":""}}"#,
+        );
+    }
+    h.advance(200.0);
+}
+
+/// The final orderId read's own check when it too finds nothing.
+const FINAL_MISSING: &str = "axis=final final-len=0";
+
+/// The command error and the `[proof-diag]` warnings both name the failed check, and
+/// (AGT-34) after one final orderId read the replacement is still sent rather than
+/// ending the edit as Unknown.
+fn assert_proof_diag(h: &mut Harness, reason: &str) {
+    finish_missing(h);
     assert!(!h.unknown.contains(&91), "{reason}");
     assert!(h.has_request("/v5/position/trading-stop"), "{reason}");
     let errors: Vec<_> = h
@@ -308,7 +335,7 @@ fn assert_proof_diag(h: &mut Harness, reason: &str) {
     assert_eq!(
         errors,
         vec![format!(
-            "Bybit did not confirm that the old BTCUSDT order was cancelled, so its replacement is placed anyway; check Open Orders for a duplicate [proof: {reason}]"
+            "Bybit did not confirm that the old BTCUSDT order was cancelled, so its replacement is placed anyway; check Open Orders for a duplicate [proof: {reason}; {FINAL_MISSING}]"
         )]
     );
     let warnings: Vec<_> = h
@@ -323,10 +350,41 @@ fn assert_proof_diag(h: &mut Harness, reason: &str) {
         .collect();
     assert_eq!(
         warnings,
-        vec![(
-            safe_cex_engine::Level::Warn,
-            format!("[proof-diag] {reason}")
-        )]
+        vec![
+            (
+                safe_cex_engine::Level::Warn,
+                format!("[proof-diag] {reason}")
+            ),
+            (
+                safe_cex_engine::Level::Warn,
+                format!("[proof-diag] {FINAL_MISSING}")
+            )
+        ]
+    );
+}
+
+/// AGT-34: Bybit shows the old stop live or executed. No second stop is sent and the
+/// edit ends definitely, naming the check.
+fn assert_proof_stops(h: &mut Harness, reason: &str, shows: &str) {
+    h.advance(200.0);
+    assert!(!h.unknown.contains(&91), "{reason}");
+    assert!(!h.has_request("/v5/position/trading-stop"), "{reason}");
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("{reason}: {:?}", h.result(91)));
+    assert!(
+        error.message.contains(&format!("[proof: {reason}]")),
+        "{error:?}"
+    );
+    assert!(error.message.contains(shows), "{error:?}");
+    assert!(
+        error.message.contains("no replacement was placed"),
+        "{error:?}"
     );
 }
 
@@ -335,7 +393,11 @@ fn proof_diag_names_a_non_terminal_first_read_status() {
     let (mut h, mut row) = first_proof("StopLoss");
     row["orderStatus"] = "Triggered".into();
     answer(&mut h, vec![row], "");
-    assert_proof_diag(&mut h, "axis=target target-status=Triggered");
+    assert_proof_stops(
+        &mut h,
+        "axis=target target-status=Triggered",
+        "already triggered or filled",
+    );
 }
 
 #[test]
@@ -384,9 +446,10 @@ fn proof_diag_names_status_and_field_together() {
     row["orderStatus"] = "Filled".into();
     row["cumExecQty"] = "1".into();
     answer(&mut h, vec![row], "");
-    assert_proof_diag(
+    assert_proof_stops(
         &mut h,
         "axis=target target-status=Filled target-field=cumExecQty",
+        "already triggered or filled",
     );
 }
 
@@ -451,7 +514,11 @@ fn proof_diag_names_a_census_row_for_the_target() {
         })
         .to_string(),
     );
-    assert_proof_diag(&mut h, "axis=live peer-target-status=New");
+    assert_proof_stops(
+        &mut h,
+        "axis=live peer-target-status=New",
+        "still shows it live",
+    );
 }
 
 /// A unified account's realtime read omits the cancelled stop: three empty target reads.

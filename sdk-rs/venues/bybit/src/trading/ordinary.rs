@@ -1208,7 +1208,14 @@ impl BybitLinear {
             {
                 Ok(partial::Observation::Retry(axis)) => Decision::ProofPoll(axis),
                 Ok(partial::Observation::Complete) => {
-                    if matches!(axis, partial::Axis::Target | partial::Axis::TargetHistory) {
+                    if axis == partial::Axis::Final {
+                        run.queue
+                            .retain(|leg| !matches!(leg.planned.call, Call::PartialProof(_)));
+                    }
+                    if matches!(
+                        axis,
+                        partial::Axis::Target | partial::Axis::TargetHistory | partial::Axis::Final
+                    ) {
                         let target = run.partial.as_ref().unwrap().target_id().to_owned();
                         self.note_partial_stop_canceled(&target);
                         mark_canceled(
@@ -1235,14 +1242,32 @@ impl BybitLinear {
                         "partial.proof_failed",
                         format!("[proof-diag] {}", failure.reason),
                     );
-                    // AGT-34: the cancel has landed, so stopping here leaves neither stop.
-                    // Skip the remaining proof and send the replacement (put-back on refusal).
+                    // AGT-34: after a landed cancel the end state is exactly one live stop.
                     let flow = run.partial.as_mut().unwrap();
-                    flow.abandon_proof();
-                    cx.command_error(id, failure.warning(flow.symbol()));
-                    run.queue
-                        .retain(|leg| !matches!(leg.planned.call, Call::PartialProof(_)));
-                    Decision::Next(Vec::new())
+                    match failure.evidence {
+                        // The old stop is still there (or already fired): a second would over-close.
+                        partial::Evidence::Live | partial::Evidence::Executed => {
+                            Decision::Failed(failure.not_replaced(flow.symbol(), flow.kind()))
+                        }
+                        // Unreadable evidence: one last orderId read settles it.
+                        partial::Evidence::Missing
+                            if axis != partial::Axis::Final && !flow.target_proven() =>
+                        {
+                            flow.note_failure(&failure);
+                            Decision::ProofPoll(partial::Axis::Final)
+                        }
+                        // Still missing: the cancel landed, so the edit goes out (put-back on refusal).
+                        partial::Evidence::Missing => {
+                            flow.abandon_proof();
+                            cx.command_error(
+                                id,
+                                failure.warning(flow.symbol(), flow.first_failure()),
+                            );
+                            run.queue
+                                .retain(|leg| !matches!(leg.planned.call, Call::PartialProof(_)));
+                            Decision::Next(Vec::new())
+                        }
+                    }
                 }
             }
         } else {
@@ -1354,14 +1379,9 @@ impl BybitLinear {
                     )
                     .is_err()
                 {
-                    let _ = cx.inherit_plan_uncertainty(&plan);
-                    let _ = cx.fail_plan(
-                        &plan,
-                        VenueError::new(
-                            "The protective cancel could not be confirmed; check Open Orders",
-                        )
-                        .outcome(Outcome::Unknown),
-                    );
+                    run.queue.pop_front();
+                    let (slot, context) = (active.slot.clone(), active.context.clone());
+                    self.put_back_after_lost_proof(cx, id, entry, &slot, &context, true);
                     return;
                 }
                 self.park(id, entry);
@@ -1675,23 +1695,44 @@ impl BybitLinear {
         id: CommandId,
         run: &mut Run,
     ) {
-        let (Some(flow), Some(leg)) = (run.partial.as_ref(), run.queue.front()) else {
+        let Some(refusal) = run
+            .partial
+            .as_ref()
+            .filter(|_| {
+                run.queue
+                    .front()
+                    .is_some_and(|leg| matches!(leg.planned.call, Call::PartialStop { .. }))
+            })
+            .and_then(|flow| flow.replacement_refusal(cx.store, cx.now))
+        else {
             return;
+        };
+        self.swap_replacement_for_put_back(cx, id, run, refusal);
+    }
+
+    /// Replaces the queued replacement with the old stop's put-back, recording the
+    /// replacement as not sent. False when the old stop may not go back.
+    fn swap_replacement_for_put_back(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        id: CommandId,
+        run: &mut Run,
+        refusal: String,
+    ) -> bool {
+        let (Some(flow), Some(leg)) = (run.partial.as_ref(), run.queue.front()) else {
+            return false;
         };
         let Call::PartialStop {
             stop,
             restore: (replaced, body),
         } = &leg.planned.call
         else {
-            return;
-        };
-        let Some(refusal) = flow.replacement_refusal(cx.store, cx.now) else {
-            return;
+            return false;
         };
         if self.trading.gone_before_cancel.contains(replaced)
             || flow.validate(cx.store, cx.now, true).is_err()
         {
-            return;
+            return false;
         }
         let call = Call::RestorePartialStop {
             stop: stop.clone(),
@@ -1723,6 +1764,53 @@ impl BybitLinear {
             elements,
             effects: replaced_leg.effects,
         });
+        true
+    }
+
+    /// The proof reads are lost or the plan cannot schedule the next one, after a
+    /// landed cancel: put the old stop back now, or say plainly there is none. Only a
+    /// delivered read may be followed by a write (`delivered`).
+    fn put_back_after_lost_proof(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: CommandId,
+        mut entry: Ordinary,
+        slot: &Slot,
+        context: &Context,
+        delivered: bool,
+    ) {
+        let Stage::Plan(run) = &mut entry.stage else {
+            return;
+        };
+        run.active = None;
+        run.queue
+            .retain(|leg| !matches!(leg.planned.call, Call::PartialProof(_)));
+        let flow = run
+            .partial
+            .as_mut()
+            .expect("proof belongs to Partial amend");
+        flow.abandon_proof();
+        let refusal = "Bybit's cancellation proof could not be read".to_owned();
+        if delivered
+            && self.swap_replacement_for_put_back(cx, id, run, refusal)
+            && cx
+                .continue_serial_plan(
+                    &run.plan,
+                    slot,
+                    context,
+                    partial_call(Operation::Mutation, 1),
+                )
+                .is_ok()
+        {
+            self.continue_ordinary(cx, id, entry);
+            return;
+        }
+        let flow = run
+            .partial
+            .as_ref()
+            .expect("proof belongs to Partial amend");
+        let error = flow.unprotected("Bybit could not be read to confirm it");
+        run.finish_failure(cx, error);
     }
 
     /// This category's order read has landed. A plan cannot seal inside another
@@ -1875,13 +1963,13 @@ impl BybitLinear {
             return;
         };
         // AGT-34: a proof read lost after the cancel landed is read again, so the
-        // edit still reaches its replacement or put-back.
+        // edit still reaches its replacement or put-back once one answers.
         if let Call::PartialProof(axis) = active.leg.planned.call
             && let Some(flow) = run.partial.as_mut()
             && flow.read_lost_proof_again()
         {
             let planned = flow.proof(axis);
-            let delay_ms = flow.poll_delay_ms(axis);
+            let delay_ms = flow.lost_read_delay_ms();
             let (slot, context) = (active.slot.clone(), active.context.clone());
             if cx
                 .continue_serial_plan_after(
@@ -1904,6 +1992,76 @@ impl BybitLinear {
                 self.park(request.command, entry);
                 return;
             }
+        }
+        if matches!(active.leg.planned.call, Call::PartialProof(_)) && run.partial.is_some() {
+            let (slot, context) = (active.slot.clone(), active.context.clone());
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                "partial.proof_failed",
+                "[proof-diag] lost",
+            );
+            self.put_back_after_lost_proof(cx, request.command, entry, &slot, &context, false);
+            return;
+        }
+        // A replacement refused before release (release guard, signing, pacing) sent
+        // nothing: put the old stop back rather than end with neither.
+        if let Call::PartialStop {
+            restore: (replaced, _),
+            ..
+        } = &active.leg.planned.call
+            && error.outcome == Some(Outcome::NotSent)
+            && run.partial.is_some()
+        {
+            let replaced = replaced.clone();
+            let (slot, context) = (active.slot.clone(), active.context.clone());
+            let active = run.active.take().expect("matched active leg");
+            run.queue.push_front(active.leg);
+            let refusal = run
+                .partial
+                .as_ref()
+                .and_then(|flow| flow.replacement_refusal(cx.store, cx.now))
+                .unwrap_or_else(|| error.message.clone());
+            let swapped = self.swap_replacement_for_put_back(cx, request.command, run, refusal);
+            self.trading.gone_before_cancel.remove(&replaced);
+            if swapped {
+                let continued = cx.continue_serial_plan(
+                    &run.plan,
+                    &slot,
+                    &context,
+                    partial_call(Operation::Mutation, 1),
+                );
+                if continued.is_ok() {
+                    self.continue_ordinary(cx, request.command, entry);
+                } else {
+                    let flow = run.partial.as_ref().expect("checked above");
+                    let error =
+                        flow.unprotected("neither its replacement nor the old one could be sent");
+                    run.finish_failure(cx, error);
+                }
+                return;
+            }
+            let leg = run.queue.pop_front().expect("pushed back above");
+            run.active = Some(Active {
+                slot,
+                context,
+                leg,
+                local: None,
+                results: None,
+            });
+        }
+        let Stage::Plan(run) = &mut entry.stage else {
+            return;
+        };
+        let Some(active) = run.active.as_ref() else {
+            return;
+        };
+        // The replacement has settled, so its already-gone mark has served.
+        if let Call::PartialStop {
+            restore: (replaced, _),
+            ..
+        } = &active.leg.planned.call
+        {
+            self.trading.gone_before_cancel.remove(replaced);
         }
         if let Some(report) = &mut run.cancellations {
             let mut error = error;

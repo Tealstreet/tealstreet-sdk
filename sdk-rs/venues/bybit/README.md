@@ -58,8 +58,9 @@ with `Variant::Hyrotrader` through the normal signing-provider setup.
   remain authoritative; it does not invent a cancellation or fill event.
 - Protective-edit proof pages can contain ordinary orders without a trigger
   source. The edited/cancelled stop still requires its exact known `triggerBy`;
-  missing/changed target evidence fails the proof, which is reported while the
-  replacement is still sent (never neither stop; see `write-plan.md`).
+  missing/changed target evidence fails the proof. A live or executed old stop
+  ends the edit without a replacement, and other failures get one final orderId
+  read before the replacement (exactly one stop; see `write-plan.md`).
 - Private reconnects require the existing correlated auth/subscription handshake
   and REST snapshots. A timeout/transport failure is not proof of a rejected
   order; retain the existing identity-based reconciliation before retrying.

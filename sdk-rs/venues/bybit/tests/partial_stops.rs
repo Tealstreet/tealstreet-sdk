@@ -2096,8 +2096,9 @@ fn partial_cancel_ack_waits_for_a_target_terminal_read_before_any_create() {
     assert!(proof.url.contains("orderId=partial"), "{}", proof.url);
 }
 
-/// AGT-34: these rows still never PROVE the cancellation (the store keeps the order
-/// open), but the pin no longer requires stopping with no stop: the replacement goes out.
+/// AGT-34: these rows still never PROVE the cancellation on the first read. A row
+/// showing the old stop live or filled ends the edit with no second stop; otherwise
+/// one final orderId read follows and the replacement goes out instead of no stop.
 #[test]
 fn partial_absent_live_filled_or_mismatched_native_rows_never_prove_cancellation() {
     for refusal in [
@@ -2148,8 +2149,8 @@ fn partial_absent_live_filled_or_mismatched_native_rows_never_prove_cancellation
         }})
         .to_string();
         h.respond("&orderId=partial", 200, &answer);
-        // Three realtime reads, then the bounded history polls for an absent stop.
-        for _ in 0..8 {
+        // Three realtime reads, the bounded history polls, then one final orderId read.
+        for _ in 0..12 {
             h.advance(1_500.0);
             if !h.has_request("&orderId=partial") {
                 break;
@@ -2158,14 +2159,31 @@ fn partial_absent_live_filled_or_mismatched_native_rows_never_prove_cancellation
             h.respond("&orderId=partial", 200, &answer);
         }
         h.advance(200.0);
+        if matches!(refusal, "open" | "filled") {
+            assert!(!h.has_request("/v5/position/trading-stop"), "{refusal}");
+            let error = h
+                .notices
+                .iter()
+                .find_map(|notice| match notice {
+                    safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{refusal}: {:?}", h.result(91)));
+            assert!(
+                error.message.contains("no replacement was placed"),
+                "{error:?}"
+            );
+            continue;
+        }
         assert!(
             h.has_request("/v5/position/trading-stop"),
             "{refusal}: {:?}",
             h.result(91)
         );
-        assert_ne!(
-            h.engine.store().order("partial").unwrap().status,
-            OrderStatus::Canceled,
+        // Only a final read naming the old stop's own id as cancelled proves it gone.
+        assert_eq!(
+            h.engine.store().order("partial").unwrap().status == OrderStatus::Canceled,
+            matches!(refusal, "wrong-trigger" | "wrong-size"),
             "{refusal}"
         );
         h.respond("/v5/position/trading-stop", 200, OK);
@@ -2217,10 +2235,12 @@ fn partial_cancellation_poll_waits_for_native_terminal_evidence() {
     assert!(h.result(91).is_some_and(|result| result.is_ok()));
 }
 
-/// AGT-34: a lost proof read is now read again (three times); only when every read is
-/// lost does the edit end Unknown, still without claiming protection either way.
+/// AGT-34: was `partial_proof_transport_loss_never_creates_or_claims_protection`, which
+/// sealed Unknown with `protection: None` after a certain cancel. A lost read is read
+/// again with backoff; only when every read is lost does the edit end, and then it says
+/// explicitly that the position is unprotected (no venue write can follow a failed read).
 #[test]
-fn partial_proof_transport_loss_never_creates_or_claims_protection() {
+fn partial_proof_transport_loss_ends_explicitly_unprotected() {
     let profile = PROFILES[0];
     let mut h = ready(profile);
     seed(
@@ -2234,18 +2254,17 @@ fn partial_proof_transport_loss_never_creates_or_claims_protection() {
     );
     amend(&mut h, Some(95.0), None);
     h.respond(profile.cancel_path(), 200, r#"{"retCode":0,"result":{"orderId":"partial"},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
-    for lost in 0..4 {
-        if lost > 0 {
-            h.advance(200.0);
+    for _ in 0..30 {
+        if !h.has_request("&orderId=partial") {
+            break;
         }
         let request = h.take("&orderId=partial");
         h.event(Event::HttpFailed {
             request: request.id,
             error: "lost native cancellation proof",
         });
+        h.advance(1_500.0);
     }
-    h.advance(200.0);
-    assert!(!h.has_request("&orderId=partial"));
     assert!(!h.has_request("/v5/position/trading-stop"));
     let error = h
         .notices
@@ -2255,13 +2274,17 @@ fn partial_proof_transport_loss_never_creates_or_claims_protection() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(
+    assert_ne!(
         error.outcome,
         Some(safe_cex_engine::Outcome::Unknown),
         "{error:?}"
     );
-    assert_eq!(error.protection, None, "{error:?}");
-    assert!(error.message.contains("Open Orders"), "{error:?}");
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected),
+        "{error:?}"
+    );
+    assert!(error.message.contains("re-place"), "{error:?}");
 }
 
 #[test]

@@ -303,6 +303,9 @@ fn cancelled_target_without_its_trigger_source_fails_the_proof_but_sends_the_rep
     terminal.as_object_mut().unwrap().remove("triggerBy");
     amend(&mut h, Some(95.0), None);
     h.respond(PROFILES[0].cancel_path(), 200, r#"{"retCode":0,"result":{"list":[{"orderId":"partial"}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
+    page(&mut h, "&orderId=partial", vec![terminal.clone()]);
+    // One final orderId read: the old stop's own row, cancelled, proves it gone.
+    h.advance(200.0);
     page(&mut h, "&orderId=partial", vec![terminal]);
     h.advance(200.0);
     assert!(h.unknown.is_empty());

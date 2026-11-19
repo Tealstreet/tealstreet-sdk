@@ -215,7 +215,7 @@ fn any_proof_failure_after_a_landed_cancel_still_places_the_replacement() {
                 .iter()
                 .any(|(command, message)| *command == 91
                     && message.contains("Open Orders")
-                    && message.contains("[proof: axis=target")),
+                    && message.contains("[proof: axis=")),
             "{shape}: the unconfirmed cancel is named: {:?}",
             h.command_errors
         );
@@ -265,7 +265,7 @@ fn a_lost_proof_read_is_read_again_and_then_places_the_replacement() {
         error: "lost native cancellation proof",
     });
     assert!(h.result(91).is_none(), "{:?}", h.result(91));
-    h.advance(200.0);
+    h.advance(300.0);
     let row = native_partial_target(&h, profile, &original);
     h.respond("&orderId=partial", 200, &page(vec![row], CURSOR));
     census(&mut h);
@@ -381,21 +381,28 @@ fn lose(h: &mut Harness, path: &str) {
     });
 }
 
-/// F1: the cancel was certain (retCode 0); only the reads were lost. The
-/// replacement must still go out rather than sealing Unknown with no stop.
+/// F1 / probe (B): the cancel was certain (retCode 0); only the reads were lost. A
+/// failed read may only be followed by another read (engine guard
+/// `failed_read_cannot_continue_as_mutation`), so the proof is read again with backoff
+/// and the edit goes out once one answers, instead of sealing with no write.
 #[test]
-fn four_lost_proof_reads_after_an_accepted_cancel_still_send_the_replacement() {
+fn four_lost_proof_reads_after_an_accepted_cancel_still_end_with_one_stop() {
     let profile = PROFILES[0];
     let mut h = ready(profile);
-    incident_stop(&mut h, "partial");
+    let original = incident_stop(&mut h, "partial");
     edit(&mut h, 91, "partial");
     for lost in 0..4 {
         if lost > 0 {
-            h.advance(200.0);
+            h.advance(1_500.0);
         }
         lose(&mut h, "&orderId=partial");
     }
-    h.advance(200.0);
+    assert!(h.result(91).is_none(), "{:?}", h.result(91));
+    h.advance(1_500.0);
+    set_reference_prices(&mut h, 100.0, 100.0);
+    let row = native_partial_target(&h, profile, &original);
+    h.respond("&orderId=partial", 200, &page(vec![row], CURSOR));
+    census(&mut h);
     let writes = stop_writes(&h);
     assert_eq!(writes.len(), 1, "{:?}", h.result(91));
     assert_eq!(writes[0]["stopLoss"], "95");
@@ -405,13 +412,31 @@ fn four_lost_proof_reads_after_an_accepted_cancel_still_send_the_replacement() {
         "{:?}",
         h.result(91)
     );
-    assert!(
-        h.command_errors
-            .iter()
-            .any(|(command, message)| *command == 91 && message.contains("Open Orders")),
-        "{:?}",
-        h.command_errors
+}
+
+/// Every proof read lost for the whole backoff: nothing can be sent, and the outcome
+/// says plainly that the cancelled stop is gone (never a silent Unknown).
+#[test]
+fn proof_reads_lost_throughout_end_explicitly_unprotected() {
+    let mut h = ready(PROFILES[0]);
+    incident_stop(&mut h, "partial");
+    edit(&mut h, 91, "partial");
+    for _ in 0..30 {
+        if !h.has_request("&orderId=partial") {
+            break;
+        }
+        lose(&mut h, "&orderId=partial");
+        h.advance(1_500.0);
+    }
+    assert!(stop_writes(&h).is_empty());
+    let error = failure(&h, 91);
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected),
+        "{error:?}"
     );
+    assert!(error.message.contains("re-place"), "{error:?}");
+    assert!(error.message.contains("canceled"), "{error:?}");
 }
 
 /// Proves the target, then holds the replacement in signing preparation.
@@ -602,5 +627,33 @@ fn unreadable_evidence_is_settled_by_a_final_order_read() {
         !h.command_errors.iter().any(|(command, _)| *command == 91),
         "{:?}",
         h.command_errors
+    );
+}
+
+/// A replacement whose signing fails before release sent nothing: the old stop goes back.
+#[test]
+fn a_replacement_that_fails_signing_puts_the_old_stop_back() {
+    let mut h = ready(PROFILES[0]);
+    let preparation = replacement_held_in_preparation(&mut h);
+    h.engine.http_preparation_failed(
+        h.now,
+        preparation,
+        safe_cex_engine::request_context::Error::Revoked,
+        safe_cex_engine::VenueError::new("Signing refused"),
+    );
+    h.collect();
+    h.advance(200.0);
+    let writes = stop_writes(&h);
+    assert_eq!(
+        writes.len(),
+        1,
+        "the old stop must go back: {:?}",
+        h.result(91)
+    );
+    assert_eq!(writes[0]["stopLoss"], "90");
+    h.respond("/v5/position/trading-stop", 200, OK);
+    assert_eq!(
+        failure(&h, 91).protection,
+        Some(safe_cex_engine::error::Protection::Restored)
     );
 }
