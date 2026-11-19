@@ -27,7 +27,7 @@ concurrency:
 jobs:
   refresh:
     name: Restore rule-17 reserve
-    # Only master pushes measure every family; a failed run still uploads the families that fit.
+    # Only master pushes measure every family; successfully sealed artifacts survive later cap failures.
     if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 20

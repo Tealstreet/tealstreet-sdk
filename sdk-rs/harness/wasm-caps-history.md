@@ -1700,3 +1700,34 @@ would compute 2,412,544 bytes for this measurement, but restoration belongs to
 the master artifact bot after master measurement. These parent artifacts do not
 replace fresh final-head gates or artifact provenance, and no memory or financial
 guard changes.
+
+
+## 2026-11-19 — #2301 final cap lineage correction
+
+The earlier #2301 entry's restoration to master describes intermediate commit
+`29804fae7b37beee9cfe604e6064deec2dc0eb30`, not the final merged PR head
+`b402d387537b55d7844e677647f911e43ea929e0`. Commit
+`042895e4f1011df81827e0c2fe900e865fdbb7f7` subsequently ran the unchanged
+canonical `update-wasm-caps.mjs` locally against an authenticated PR capture;
+it did not come from the master artifact bot or its bot-owned branch.
+
+Capture run `44468292572`, artifact `14503995107`, sealed source
+`edab68a7abcf1095c2a3c0940211da62d1e9c1e0` with the exact capture-head tree.
+Its optimized web/Node modules both measure 2,120,375 bytes, SHA256
+`9d71c6d627852e9db3ab41ded6a8d01295a689878d9e74261b8539736a11f04c`.
+The validated generator output changes only Bitunix from 2,071,552 to
+2,130,944 bytes, retaining 10,569 bytes. Final-head artifact `14504430092`
+from run `44469409712` independently confirms those bytes and the cap.
+PR #2301 landed as merge `712da67a8c5b42d90305e6445b7df19e22ed9600`.
+
+This correction records the generation route and supersedes the earlier entry's
+present-tense description of the final cap. Measurement validation and an
+independent source review do not themselves authorize a policy exception.
+The standing master-bot-only default remains as documented unless Sam records
+an explicit disposition; this entry grants no general PR-owned cap authority.
+
+The retained-seal guard also applies to master push runs: a successful seal can
+be uploaded after a later byte-ceiling failure, and the master updater can then
+measure that over-cap artifact. Failed family/required/replay gates remain failed.
+This states the current mechanism; the scope of that master-side behavior is a
+separate maintainer policy decision from the authenticity of the measurement.
