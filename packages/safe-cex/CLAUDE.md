@@ -1,3 +1,25 @@
+# Native store cutover (2026-11-17)
+
+Account state has one native path: Rust SCXF -> pure-JS wire reader -> FrameStore
+-> generated StoreData. FrameStore supplies immutable section identities and
+typed versioned subscriptions. Native worker snapshots carry exact bytes;
+there is no mutable Store, DefaultStore, FrameApplier, serialized seed or
+worker op:store path. Page mirrors apply source frames directly, including
+native derived sections; their optional signing engine cannot republish state.
+Public-only mirrors need no page engine. Mobile is DELEGATED-only with no wasm
+loader. Read `src/store/CLAUDE.md` for current state/recovery/unit contracts;
+older store-bridge notes in this historical package guide are superseded.
+
+Retained TS protocol references are test producers: they explicitly encode SCXF
+from observed venue facts. Their completion flags belong to the producer and
+survive consumer readiness clamping until all account datasets arrive. Raw REST
+fixtures stay raw; generated native fixture builders seed only canonical rows.
+Terminal admission remains at the reference producer before it emits frames.
+No production mutable Store API or RPC-result publication is restored.
+High-volume ticker references emit SCXF section 4 deltas when the ordered identity
+catalogue and observation metadata stay unchanged; catalogue/freshness replacements
+retain full sections. This keeps unchanged row identities and bounded replay work.
+
 # CLAUDE.md - safe-cex Package
 
 The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
@@ -617,7 +639,9 @@ See `docs/plans/callers/startup-incomplete-causes.md` for the field contract.
 
 Managed HTTP failures also emit the JS host's Debug `http.request_failed` event,
 with the actual SDK venue plus method, redacted path template, phase and closed
-failure kind. Queries, origins and request material are never diagnostic fields;
+failure kind. Closed preparation stage, route kind, encoded error class and capped
+prepare/budget-wait milliseconds remain passive observations of actual awaits.
+Queries, origins and request material are never diagnostic fields;
 this event does not emit another error or change retries/native deadlines.
 
 ## Rust public-feed ownership
@@ -770,32 +794,33 @@ epoch-shaped scheduling clock to `performance.now()`, and never moves its live
 deadlines on subsequent synchronization. Browser workers wait up to 30 s for
 an initial host time push before anchoring. Later syncs update only the engine's
 protocol UTC fallback; small corrections preserve venue calibration, while a
->1 s host-baseline discontinuity (including suspend) invalidates it. The default
-transport records wall-versus-monotonic divergence as pending UTC data;
-EngineHost drains it outside HTTP handoffs before the next Rust call. A detected
-step also defers a shared server-time resync to refresh the cached wall-clock
-offset. This permits a one-off request in browser workers; ordinary worker sync
-still uses page pushes. Resync notifications run after the current handoff. Journal
-UTC bounds and scheduled-cancel validation still use synchronized wall time.
-Explicit host/recording transports retain their own clock; native servers supply
-their OS clock and own its synchronization. See `docs/plans/callers/engine-monotonic-deadlines.md`. There is no per-venue
-`hostClock` capability (wire bit14 is reserved). `RustEngineExchange` routes from that record,
-never from venue names, and adopts it once the engine exists (`ensureHost` or
-`start`); `engineCapabilities` is undefined before then. `leverageQuery` decides
-`fetchLeverageForSymbol`: `onRead` asks the venue, `settings` answers from
-published rails, and `onMetadata` answers from those rails once a metadata
-refresh has loaded them but asks the venue for a symbol not yet refreshed (the
-worker only asks when the active symbol has no rails). `onReadAndMetadata`
-keeps explicit reads fresh and also refreshes a selected symbol through
-`updateSymbolMetadata`; it does not add metadata reads to ordinary `onRead`
-venues. WEEX uses `onReadAndMetadata` so selecting a flat symbol refreshes
-its signed configuration despite cached rails; public-only metadata stays inert.
-Missing history axes
-take the branded base fallbacks, so `exchange.capabilities` reports them absent
-once the engine exists. `account` also gates the engine: `FetchAccount` to a
-venue whose record says `unsupported` is refused before the venue runs, so a
-venue answering identity for only some products (Binance USD-M/PM, Bybit
-except HyroTrader) reports it per product.
+
+> 1 s host-baseline discontinuity (including suspend) invalidates it. The default
+> transport records wall-versus-monotonic divergence as pending UTC data;
+> EngineHost drains it outside HTTP handoffs before the next Rust call. A detected
+> step also defers a shared server-time resync to refresh the cached wall-clock
+> offset. This permits a one-off request in browser workers; ordinary worker sync
+> still uses page pushes. Resync notifications run after the current handoff. Journal
+> UTC bounds and scheduled-cancel validation still use synchronized wall time.
+> Explicit host/recording transports retain their own clock; native servers supply
+> their OS clock and own its synchronization. See `docs/plans/callers/engine-monotonic-deadlines.md`. There is no per-venue
+> `hostClock` capability (wire bit14 is reserved). `RustEngineExchange` routes from that record,
+> never from venue names, and adopts it once the engine exists (`ensureHost` or
+> `start`); `engineCapabilities` is undefined before then. `leverageQuery` decides
+> `fetchLeverageForSymbol`: `onRead` asks the venue, `settings` answers from
+> published rails, and `onMetadata` answers from those rails once a metadata
+> refresh has loaded them but asks the venue for a symbol not yet refreshed (the
+> worker only asks when the active symbol has no rails). `onReadAndMetadata`
+> keeps explicit reads fresh and also refreshes a selected symbol through
+> `updateSymbolMetadata`; it does not add metadata reads to ordinary `onRead`
+> venues. WEEX uses `onReadAndMetadata` so selecting a flat symbol refreshes
+> its signed configuration despite cached rails; public-only metadata stays inert.
+> Missing history axes
+> take the branded base fallbacks, so `exchange.capabilities` reports them absent
+> once the engine exists. `account` also gates the engine: `FetchAccount` to a
+> venue whose record says `unsupported` is refused before the venue runs, so a
+> venue answering identity for only some products (Binance USD-M/PM, Bybit
+> except HyroTrader) reports it per product.
 
 Journal adapters, closed-position formats, history-bound normalization, filter
 refusals, STP/execution controls, numeric validation and book callback isolation
@@ -1093,6 +1118,20 @@ and receiver together. Public `historyCompletenessOf`, `withHistoryCompleteness`
 and `copyHistoryCompleteness` helpers preserve it before row transformations;
 Rust derived position and reported closed-PnL mappings retain it even on empty
 results. Bybit's derived history combines both source axes' assertions.
+A Bybit closed-PnL range whose closing order cannot be joined to an explicit
+`long`, `short` or `both` leg returns no aggregates and carries
+`incompleteReason: unresolvedHedgeLeg`. An absent resolver, empty order response,
+missing order ID or missing order leg is not evidence of one-way mode. Native
+close rows are left untouched and can be re-read through the existing raw history
+path; only a complete join can publish the aggregate's stable key/count. This does
+not add persistent raw-event storage (the separate retention/rebuild decision).
+
+Optional `completeness.failure: { operation, kind, venueCode? }` retains a Bybit
+later-page failure through the same owning-result mapping and serialization.
+`historyFailureOf` allowlists every field; native messages and row values never
+enter it. The array's `historyFailure` property is non-enumerable. Replacing an
+assertion replaces its diagnostic too, so a different partial input cannot
+borrow the earlier input's error facts. Grouping is a caller concern.
 
 The journal fold refuses a derived position when any nonzero fee contribution uses a currency
 that differs from its settlement currency or has no reported currency: there is no
@@ -1135,9 +1174,12 @@ the one physical socket in both health channels. Hyperliquid and TxFlow use it
 only when their public topics are direct; separate sockets remain independent.
 `RustEngineExchange` exposes one `RustSocketHandle` per channel through the
 `BaseWebSocket` fields, so `getAllSockets`, `reconnect`, `recoverAfterOffline`,
-CLI `ConnectionMonitor` and the base `dispose` work unchanged. It writes
-`store.socketHealth` through the shared `summarizeSocketHealth`, on socket
-changes and every 5 s, never through the TS watchdog. Channel health uses a
+CLI `ConnectionMonitor` and the base `dispose` work unchanged. Native SCXF
+section 26 owns `store.socketHealth`. The host observes socket changes and
+checks recovery every 5 s through `summarizeSocketHealth`. Auth recovery tracks
+the transport's initialization transition independently of the last published
+health frame, so a reconnect followed by private traffic resets the rejection
+streak even before the native health publication arrives. Channel health uses a
 60 s silence threshold. Reconnecting closes only
 open sockets; a connect in flight is left alone, as in TS. `Deactivate` and
 `auth.rejected` events raise `authFailureStreak`; a private stream delivering
@@ -2392,7 +2434,6 @@ explicit Primary stableId before provider trimming. JS/native setup reject a
 conflicting supplied mapping. Generic LocalSigner never derives stable IDs;
 MEXC venue execution reads only installed metadata, never hashes credentials.
 
-
 Chart consumers must honor `exchangeMetadata.supportsKlineSeconds` and optional
 `supportedCandleIntervals`. Hyperliquid and HyperliquidSpot share their native
 interval set, which excludes seconds and 6h; neither may reach a candle subscription.
@@ -2431,7 +2472,6 @@ failed streams cannot supply a native-code notice. HTTP 429 reports once at the
 response headers regardless of body content, size or stream completion, without
 consuming the body. Status-only notices carry HTTP 429 instead of a guessed
 native code.
-
 
 Hyperliquid `/info` admission shares a token bucket across account workers through
 IndexedDB. Prepare may wait but reserves no weight. Admission durably reserves

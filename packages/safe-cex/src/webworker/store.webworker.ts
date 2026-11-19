@@ -371,16 +371,6 @@ const start = (ctx: Worker, shared = false) => {
       anonymousExchangeWorkers[exchangeName] = exchangeWorker;
     }
 
-    // Seed the worker store with the main-thread's serialized state BEFORE
-    // starting the exchange. The exchange's fetchMarkets() will then populate
-    // markets/tickers on top. Seeding AFTER start() would race and could wipe
-    // freshly-loaded markets when the main-thread store is empty (cold load,
-    // no IndexedDB cache, default-demo, etc.).
-    // A fresh worker runs no algos: chase and TWAP rows in the seed belong to
-    // algos that died with the worker before it, and would show as running.
-    const { activeChasers: _deadChasers, activeTWAPs: _deadTwaps, ...seed } = payload.data.store ?? {};
-    exchangeWorker.store.update(seed);
-
     failedWorker = undefined;
     const started = await exchangeWorker.start();
     if (!started) {
@@ -600,7 +590,6 @@ const start = (ctx: Worker, shared = false) => {
         }
         break;
       default:
-        // case 'store':
         // case 'dispose':
         // case 'subscribeOHLCV':
         // case 'subscribeOrderBook':

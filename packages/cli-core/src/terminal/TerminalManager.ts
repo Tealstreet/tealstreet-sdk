@@ -37,7 +37,7 @@ export interface ReadlineOptions {
  * - Clean terminal state transitions
  */
 export class TerminalManager {
-  private readline: readline.Interface | null = null;
+  private readline: (readline.Interface & { history?: string[] }) | null = null;
   private isInSuspendMode = false;
   private savedHistory: string[] = [];
   private readlineOptions: ReadlineOptions | null = null;
@@ -87,7 +87,7 @@ export class TerminalManager {
 
     // Save history before closing
     if (this.readline) {
-      this.savedHistory = [...((this.readline as any).history || [])];
+      this.savedHistory = [...(this.readline.history || [])];
       this.readline.pause();
       this.readline.close();
       this.readline = null;
@@ -106,7 +106,7 @@ export class TerminalManager {
     this.isInSuspendMode = false;
 
     // Ensure clean terminal state
-    if (process.stdin.isTTY && (process.stdin as any).isRaw) {
+    if (process.stdin.isTTY && process.stdin.isRaw) {
       process.stdin.setRawMode(false);
     }
 

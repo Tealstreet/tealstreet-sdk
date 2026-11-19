@@ -2,6 +2,10 @@ import type { RemoteSigner } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { BASE_WS_URL, ENDPOINTS, USER_DATA_RECV_WINDOW } from '../../exchanges/binance/binancespot.types';
+import { FrameStore } from '../../store/frameStore';
+import { OrderStatus } from '../../types';
+import { virtualClock } from '../../utils/virtualClock';
 import { BinanceSpotExchange } from '../reference/binance/binancespot.exchange';
 import {
   BINANCE_SPOT_HEARTBEAT_REQUEST_ID,
@@ -9,20 +13,12 @@ import {
   BinancePrivateWebsocket,
   buildBinanceSpotUserDataSignaturePayload,
 } from '../reference/binance/binancespot.ws-private';
-import { BASE_WS_URL, ENDPOINTS, USER_DATA_RECV_WINDOW } from '../../exchanges/binance/binancespot.types';
-import { DefaultStore } from '../../store/store.base';
-import { OrderStatus } from '../../types';
-import { virtualClock } from '../../utils/virtualClock';
 
 const exchanges: BinanceSpotExchange[] = [];
 
 const createSubject = (options: Record<string, unknown> = {}) => {
-  const store = new DefaultStore();
-  const exchange = new BinanceSpotExchange(
-    'binancespot',
-    { key: 'api-key', secret: 'api-secret', ...options },
-    store,
-  );
+  const store = new FrameStore();
+  const exchange = new BinanceSpotExchange('binancespot', { key: 'api-key', secret: 'api-secret', ...options }, store);
   exchanges.push(exchange);
   return { exchange, store, websocket: new BinancePrivateWebsocket(exchange) };
 };
@@ -49,15 +45,11 @@ describe('Binance Spot WebSocket API user-data subscription', () => {
     for (const testnet of [false, true]) {
       const { websocket } = createSubject({ testnet });
       const addEventListener = vi.fn();
-      const createWebsocket = vi
-        .spyOn(websocket, 'createWebsocket')
-        .mockReturnValue({ addEventListener } as any);
+      const createWebsocket = vi.spyOn(websocket, 'createWebsocket').mockReturnValue({ addEventListener } as any);
 
       await websocket.connectAndSubscribe();
 
-      expect(createWebsocket).toHaveBeenCalledWith(
-        testnet ? BASE_WS_URL.private.testnet : BASE_WS_URL.private.livenet,
-      );
+      expect(createWebsocket).toHaveBeenCalledWith(testnet ? BASE_WS_URL.private.testnet : BASE_WS_URL.private.livenet);
       expect(addEventListener).toHaveBeenCalledWith('open', websocket.onOpen);
     }
   });

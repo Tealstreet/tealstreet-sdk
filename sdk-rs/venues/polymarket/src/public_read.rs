@@ -23,26 +23,34 @@ pub(crate) fn local(
     operation: Operation,
     result: Result<String, String>,
 ) {
+    let _ = local_result(cx, operation, result);
+}
+
+/// Whether a local read actually completed under its captured command admission.
+pub(crate) fn local_result(
+    cx: &mut Cx<'_, Pending>,
+    operation: Operation,
+    result: Result<String, String>,
+) -> bool {
     match cx.command_wait() {
         Some(CommandWait::Remaining(_)) => {}
         Some(CommandWait::Expired) => {
             let _ = cx.reject_expired_command(operation);
-            return;
+            return false;
         }
         None => {
             let _ = cx.reject_unstamped_command(operation);
-            return;
+            return false;
         }
     }
     let Ok(context) = cx.admit_http_command(policy(operation)) else {
-        return;
+        return false;
     };
     match result {
-        Ok(data) => {
-            let _ = cx.done_context(&context, data);
-        }
+        Ok(data) => cx.done_context(&context, data).is_ok(),
         Err(error) => {
             let _ = cx.fail_context(&context, error);
+            false
         }
     }
 }

@@ -2,8 +2,9 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import * as construction from '../../exchanges/rust/construction';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { MarginType, PositionMode } from '../../types';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
@@ -22,7 +23,7 @@ const build = (name: 'phemex' | 'bybit', enabled: boolean) => {
     ...policy,
     helpers: { resolveLeverageContext: enabled },
   });
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new RustEngineExchange(name, { key: '', secret: '' }, store);
   exchanges.push(exchange);
   adoptEngineCapabilities(exchange, { leverageQuery: 'settings' });
@@ -63,7 +64,12 @@ it('uses the declared capability for fresh leverage dispatch, independently of v
 
 it('keeps the default cached path when fresh-context support is undeclared, including on a Phemex name', async () => {
   const { exchange, store, command } = build('phemex', false);
-  store.update({ fetchedLeverage: { ADAUSDT: { buyLeverage: 99, sellLeverage: 99 } } });
+  store.apply(
+    nativeFixture(
+      { fetchedLeverage: { ADAUSDT: { buyLeverage: 99, sellLeverage: 99 } } },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   await expect(exchange.fetchLeverageForSymbol('ADAUSDT', true)).resolves.toMatchObject({
     buyLeverage: 99,
     sellLeverage: 99,

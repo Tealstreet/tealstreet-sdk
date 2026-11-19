@@ -3044,6 +3044,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "safe-cex-algos"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-engine",
+ "tokio",
+]
+
+[[package]]
+name = "safe-cex-chaser"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-algos",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "safe-cex-crypto"
 version = "0.1.0"
 dependencies = [
@@ -3091,6 +3110,7 @@ dependencies = [
  "rustls",
  "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-store-frames",
  "safe-cex-venue-binance",
  "serde",
  "serde_json",
@@ -3110,6 +3130,16 @@ dependencies = [
 [[package]]
 name = "safe-cex-position-math"
 version = "0.1.0"
+
+[[package]]
+name = "safe-cex-store-frames"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-chaser",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "safe-cex-venue-binance"

@@ -1,8 +1,9 @@
+import type { AssetCtx, Meta } from '../../exchanges/hyperliquid/hyperliquid.types';
+
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
-import { DefaultStore } from '../../store/store.base';
-import type { AssetCtx, Meta } from '../../exchanges/hyperliquid/hyperliquid.types';
 
 const createExchange = (): HyperliquidExchange =>
   new HyperliquidExchange(
@@ -13,7 +14,7 @@ const createExchange = (): HyperliquidExchange =>
       applicationId: '0xuser',
       tuning: { consoleLogging: false },
     },
-    new DefaultStore(),
+    new FrameStore(),
   );
 
 const wldMeta: Meta = {
@@ -54,10 +55,7 @@ describe('Hyperliquid market-data normalization', () => {
     const exchange = createExchange();
     (exchange as any).xhr = {
       post: vi.fn().mockResolvedValue({
-        data: [
-          { universe: [{ name: 'vWLD', szDecimals: 1, maxLeverage: 10, onlyIsolated: false }] },
-          [wldAssetCtx],
-        ],
+        data: [{ universe: [{ name: 'vWLD', szDecimals: 1, maxLeverage: 10, onlyIsolated: false }] }, [wldAssetCtx]],
       }),
     };
 

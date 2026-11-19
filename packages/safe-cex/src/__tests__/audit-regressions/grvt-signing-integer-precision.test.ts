@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { Signer as GrvtSigner } from '@tealstreet/grvt-ts-sdk';
+import { FrameStore } from '../../store/frameStore';
+import { OrderSide, OrderType } from '../../types';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
 import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 import { grvtNanoseconds, grvtScaledUint64, grvtUint64 } from '../reference/grvt/grvt.integer';
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderType } from '../../types';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -50,21 +51,25 @@ describe('GRVT signing integer precision', () => {
   });
 
   it('signs the exact account and REST leg units instead of rounded Number products', async () => {
-    const store = new DefaultStore();
-    store.update({
-      markets: [
-        {
-          id: 'BTC_USDT_Perp',
-          symbol: 'BTC_USDT_PERP',
-          base: 'BTC',
-          quote: 'USDT',
-          active: true,
-          precision: { amount: 0.0000000000000001, price: 0.1 },
-          limits: { amount: { min: 0.0000000000000001, max: 100 }, leverage: { min: 1, max: 100 } },
-          info: { ih: '0x030501', bd: 18, qd: 6 },
-        },
-      ] as any,
-    });
+    const store = new FrameStore();
+    applyReferenceFixture(
+      store,
+      {
+        markets: [
+          {
+            id: 'BTC_USDT_Perp',
+            symbol: 'BTC_USDT_PERP',
+            base: 'BTC',
+            quote: 'USDT',
+            active: true,
+            precision: { amount: 0.0000000000000001, price: 0.1 },
+            limits: { amount: { min: 0.0000000000000001, max: 100 }, leverage: { min: 1, max: 100 } },
+            info: { ih: '0x030501', bd: 18, qd: 6 },
+          },
+        ] as any,
+      },
+      store.markets.map((row) => row.symbol),
+    );
     const exchange = new GrvtExchange(
       'grvt' as any,
       { secret: `0x${'01'.repeat(32)}`, tuning: { consoleLogging: false } } as any,

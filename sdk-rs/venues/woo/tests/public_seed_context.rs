@@ -1,4 +1,7 @@
 //! Local originals for unsigned seed custody; production is unchanged.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 mod support;
 
 use safe_cex_engine::log::code;
@@ -587,11 +590,7 @@ fn nonfinite_delivery(failure: bool) {
             } else {
                 response(&mut e, &p, invalid, 200, seed.body());
             }
-            assert_eq!(
-                e.snapshot_frame(now + 3.),
-                before,
-                "nonfinite DATA cannot change any Store section"
-            );
+            assert_unchanged_account(&before, e.snapshot_frame(now + 3.), [0, 0, 0, 1, 0]);
             let actions: Vec<_> = e.drain_actions().collect();
             let (watchdog, actions): (Vec<_>, Vec<_>) = actions.into_iter().partition(|action| {
                 matches!(action, Action::Notice(Notice::Event(event)) if event.code == code::STARTUP_INCOMPLETE)

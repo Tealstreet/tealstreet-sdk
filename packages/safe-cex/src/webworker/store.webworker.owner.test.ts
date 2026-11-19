@@ -40,7 +40,7 @@ vi.mock('./ExchangeWorker', () => ({
     handlePayload = vi.fn((payload: StoreWorkerPayload) => {
       if (payload.op === 'dispose') this.dispose();
     });
-    sendSnapshot = vi.fn(() => this.context.postMessage({ op: 'store', data: { owner: this.owner } }));
+    sendSnapshot = vi.fn(() => this.context.postMessage({ op: 'frame', data: { owner: this.owner } }));
     constructor(
       readonly context: Context,
       _accountName: string,
@@ -263,7 +263,7 @@ describe('SharedWorker session ownership', () => {
     expect(fixture.workers).toHaveLength(2);
     a.context.postMessage.mockClear();
     otherA.context.postMessage.mockClear();
-    fixture.workers[1].context.postMessage({ op: 'store', data: { owner: 'B' } });
+    fixture.workers[1].context.postMessage({ op: 'frame', data: { owner: 'B' } });
     expect(a.context.postMessage).not.toHaveBeenCalled();
     expect(otherA.context.postMessage).not.toHaveBeenCalled();
   });
@@ -307,7 +307,7 @@ describe('SharedWorker session ownership', () => {
     for (const command of bCommands) expect(workerA.handlePayload).not.toHaveBeenCalledWith(command);
     expect(a.context.postMessage).toHaveBeenCalledWith({ op: 'start-status', data: false });
     expect(
-      a.context.postMessage.mock.calls.some(([message]) => ['store', 'chaser:complete'].includes(message.op)),
+      a.context.postMessage.mock.calls.some(([message]) => ['frame', 'chaser:complete'].includes(message.op)),
     ).toBe(false);
     expect(otherA.context.postMessage).toHaveBeenCalledWith({
       op: 'chaser:complete',
@@ -399,7 +399,7 @@ describe.each(['account', 'anonymous'] as const)('SharedWorker %s publication ow
     const q = port(start);
     await p.send(ownerA());
     await q.send(ownerA());
-    const message = { op: 'store', data: { owner: 'A', publication: 'deferred' } };
+    const message = { op: 'frame', data: { owner: 'A', publication: 'deferred' } };
     const pending = deferredPublication(fixture.workers[0].context, message);
     pending.release();
     await pending.done;
@@ -413,7 +413,7 @@ describe.each(['account', 'anonymous'] as const)('SharedWorker %s publication ow
     const q = port(start);
     await p.send(ownerA());
     await q.send(ownerA());
-    const message = { op: 'store', data: { owner: 'A', publication: 'deferred' } };
+    const message = { op: 'frame', data: { owner: 'A', publication: 'deferred' } };
     const pending = deferredPublication(fixture.workers[0].context, message);
     await p.send({ op: 'dispose', instanceId: 'A' });
     await p.send(ownerB());
@@ -421,7 +421,7 @@ describe.each(['account', 'anonymous'] as const)('SharedWorker %s publication ow
     await pending.done;
     expect(p.context.postMessage).not.toHaveBeenCalledWith(message);
     expect(q.context.postMessage).toHaveBeenCalledWith(message);
-    const current = { op: 'store', data: { owner: 'B' } };
+    const current = { op: 'frame', data: { owner: 'B' } };
     fixture.workers[1].context.postMessage(current);
     expect(p.context.postMessage).toHaveBeenCalledWith(current);
     expect(q.context.postMessage).not.toHaveBeenCalledWith(current);
@@ -431,14 +431,14 @@ describe.each(['account', 'anonymous'] as const)('SharedWorker %s publication ow
     const { default: start } = await import('./store.webworker');
     const p = port(start);
     await p.send(ownerA());
-    const stale = { op: 'store', data: { generation: 'old' } };
+    const stale = { op: 'frame', data: { generation: 'old' } };
     const pending = deferredPublication(fixture.workers[0].context, stale);
     await p.send({ op: 'dispose', instanceId: 'A' });
     await p.send(ownerA('fresh-A'));
     pending.release();
     await pending.done;
     expect(p.context.postMessage).not.toHaveBeenCalledWith(stale);
-    const current = { op: 'store', data: { generation: 'current' } };
+    const current = { op: 'frame', data: { generation: 'current' } };
     fixture.workers[1].context.postMessage(current);
     expect(p.context.postMessage).toHaveBeenCalledWith(current);
   });

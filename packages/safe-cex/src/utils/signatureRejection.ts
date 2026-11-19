@@ -21,10 +21,10 @@ export const hasRetriedSignature = (config: unknown): boolean =>
 export const signatureRejectedResponse =
   (isRejection: IsSignatureRejection) =>
   (error: AxiosError): boolean => {
-    const config = error.config as InternalAxiosRequestConfig | undefined;
+    const config: (InternalAxiosRequestConfig & { [SIGNATURE_RETRY_CONFIG_KEY]?: boolean }) | undefined = error.config;
     if (!config || !error.response || hasRetriedSignature(config)) return false;
     if (!isRejection(error.response.data)) return false;
-    (config as unknown as Record<string, unknown>)[SIGNATURE_RETRY_CONFIG_KEY] = true;
+    config[SIGNATURE_RETRY_CONFIG_KEY] = true;
     return true;
   };
 

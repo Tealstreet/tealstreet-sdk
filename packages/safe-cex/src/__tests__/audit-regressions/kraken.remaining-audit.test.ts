@@ -2,14 +2,8 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { KrakenExchange } from '../reference/kraken/kraken.exchange';
-import { createAPI as createKrakenAPI } from '../reference/kraken/kraken.api';
-import { ENDPOINTS } from '../reference/kraken/kraken.types';
-import { KrakenSpotExchange } from '../reference/kraken/krakenspot.exchange';
-import { ENDPOINTS as SPOT_ENDPOINTS, INTERVAL } from '../reference/kraken/krakenspot.types';
-import { KrakenSpotPrivateWebsocket } from '../reference/kraken/krakenspot.ws-private';
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import {
   MarginType,
   OrderSide,
@@ -19,6 +13,13 @@ import {
   PositionMode,
   PositionSide,
 } from '../../types';
+import { applyReferenceFixture } from '../cutover/referenceFixture';
+import { createAPI as createKrakenAPI } from '../reference/kraken/kraken.api';
+import { KrakenExchange } from '../reference/kraken/kraken.exchange';
+import { ENDPOINTS } from '../reference/kraken/kraken.types';
+import { KrakenSpotExchange } from '../reference/kraken/krakenspot.exchange';
+import { INTERVAL, ENDPOINTS as SPOT_ENDPOINTS } from '../reference/kraken/krakenspot.types';
+import { KrakenSpotPrivateWebsocket } from '../reference/kraken/krakenspot.ws-private';
 
 const FUTURES_MARKET = {
   id: 'BTC/USD:USD',
@@ -48,53 +49,61 @@ const SPOT_MARKET = {
 };
 
 const createFuturesExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [FUTURES_MARKET],
-    tickers: [
-      {
-        id: FUTURES_MARKET.id,
-        symbol: FUTURES_MARKET.symbol,
-        bid: 49_999,
-        ask: 50_001,
-        last: 50_000,
-        mark: 50_000,
-        index: 50_000,
-        percentage: 0,
-        fundingRate: 0,
-        fundingTime: 0,
-        volume: 0,
-        quoteVolume: 0,
-        openInterest: 0,
-      },
-    ],
-  });
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    {
+      markets: [FUTURES_MARKET],
+      tickers: [
+        {
+          id: FUTURES_MARKET.id,
+          symbol: FUTURES_MARKET.symbol,
+          bid: 49_999,
+          ask: 50_001,
+          last: 50_000,
+          mark: 50_000,
+          index: 50_000,
+          percentage: 0,
+          fundingRate: 0,
+          fundingTime: 0,
+          volume: 0,
+          quoteVolume: 0,
+          openInterest: 0,
+        },
+      ],
+    },
+    store.markets.map((row) => row.symbol),
+  );
   const exchange = new KrakenExchange('kraken', { key: 'key', secret: 'c2VjcmV0' }, store);
   return { exchange, store };
 };
 
 const createSpotExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [SPOT_MARKET],
-    tickers: [
-      {
-        id: SPOT_MARKET.id,
-        symbol: SPOT_MARKET.symbol,
-        bid: 49_999,
-        ask: 50_001,
-        last: 50_000,
-        mark: 50_000,
-        index: 50_000,
-        percentage: 0,
-        fundingRate: 0,
-        fundingTime: 0,
-        volume: 0,
-        quoteVolume: 0,
-        openInterest: 0,
-      },
-    ],
-  });
+  const store = new FrameStore();
+  applyReferenceFixture(
+    store,
+    {
+      markets: [SPOT_MARKET],
+      tickers: [
+        {
+          id: SPOT_MARKET.id,
+          symbol: SPOT_MARKET.symbol,
+          bid: 49_999,
+          ask: 50_001,
+          last: 50_000,
+          mark: 50_000,
+          index: 50_000,
+          percentage: 0,
+          fundingRate: 0,
+          fundingTime: 0,
+          volume: 0,
+          quoteVolume: 0,
+          openInterest: 0,
+        },
+      ],
+    },
+    store.markets.map((row) => row.symbol),
+  );
   const exchange = new KrakenSpotExchange('krakenspot', { key: 'key', secret: 'c2VjcmV0' }, store);
   return { exchange, store };
 };
@@ -240,7 +249,7 @@ describe('Kraken remaining July audit regressions', () => {
     ).rejects.toThrow('Order cancellation rejected: notFound');
   });
 
-  it('places a Spot trailing stop with Kraken\'s required relative price', async () => {
+  it("places a Spot trailing stop with Kraken's required relative price", async () => {
     const { exchange } = createSpotExchange();
     const post = vi.fn().mockResolvedValue({ data: { error: [], result: { txid: ['spot-trailing-id'] } } });
     exchange.unlimitedXHR = { post } as unknown as Axios;
@@ -264,23 +273,27 @@ describe('Kraken remaining July audit regressions', () => {
 
   it('maps the documented unrealizedPnl field and preserves WS-only position values', async () => {
     const { exchange, store } = createFuturesExchange();
-    store.update({
-      positions: [
-        {
-          id: 'PF_XBTUSD:long',
-          symbol: 'PF_XBTUSD',
-          side: PositionSide.Long,
-          entryPrice: 48_000,
-          notional: 123_456,
-          leverage: 10,
-          unrealizedPnl: 200,
-          contracts: 2,
-          liquidationPrice: 42_000,
-          marginType: MarginType.Cross,
-          positionMode: PositionMode.OneWay,
-        },
-      ],
-    });
+    applyReferenceFixture(
+      store,
+      {
+        positions: [
+          {
+            id: 'PF_XBTUSD:long',
+            symbol: 'PF_XBTUSD',
+            side: PositionSide.Long,
+            entryPrice: 48_000,
+            notional: 123_456,
+            leverage: 10,
+            unrealizedPnl: 200,
+            contracts: 2,
+            liquidationPrice: 42_000,
+            marginType: MarginType.Cross,
+            positionMode: PositionMode.OneWay,
+          },
+        ],
+      },
+      store.markets.map((row) => row.symbol),
+    );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({
         data: {
@@ -500,7 +513,10 @@ describe('Kraken remaining July audit regressions', () => {
 
   it('fetches a fresh private WebSocket token on every socket open', async () => {
     const { exchange } = createSpotExchange();
-    const fetchWsToken = vi.spyOn(exchange, 'fetchWsToken').mockResolvedValueOnce('fresh-one').mockResolvedValueOnce('fresh-two');
+    const fetchWsToken = vi
+      .spyOn(exchange, 'fetchWsToken')
+      .mockResolvedValueOnce('fresh-one')
+      .mockResolvedValueOnce('fresh-two');
     const websocket = new KrakenSpotPrivateWebsocket(exchange);
     const send = vi.fn();
     websocket.ws = { readyState: WebSocket.OPEN, send } as unknown as WebSocket;

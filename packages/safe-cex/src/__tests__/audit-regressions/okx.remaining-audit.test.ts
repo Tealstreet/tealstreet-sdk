@@ -2,9 +2,10 @@ import type { ExchangeOptions, Market } from '../../types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { OKXExchange } from '../reference/okx/okx.exchange';
 import { ENDPOINTS } from '../../exchanges/okx/okx.types';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -29,28 +30,33 @@ const market: Market = {
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [market],
-    tickers: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: market.id,
-        symbol: market.symbol,
-        bid: 99,
-        ask: 101,
-        last: 100,
-        mark: 100,
-        index: 100,
-        percentage: 0,
-        fundingRate: 0,
-        fundingTime: 0,
-        volume: 0,
-        quoteVolume: 0,
-        openInterest: 0,
+        markets: [market],
+        tickers: [
+          {
+            id: market.id,
+            symbol: market.symbol,
+            bid: 99,
+            ask: 101,
+            last: 100,
+            mark: 100,
+            index: 100,
+            percentage: 0,
+            fundingRate: 0,
+            fundingTime: 0,
+            volume: 0,
+            quoteVolume: 0,
+            openInterest: 0,
+          },
+        ],
+        loaded: { ...store.loaded, markets: true, tickers: true },
       },
-    ],
-    loaded: { ...store.loaded, markets: true, tickers: true },
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   return new OKXExchange('okx', options, store);
 };
 

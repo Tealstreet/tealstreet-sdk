@@ -1,8 +1,9 @@
+import type { ExchangeOptions } from '../types';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../store/frameStore';
 import { LighterExchange } from './reference/lighter/lighter.exchange';
-import { DefaultStore } from '../store/store.base';
-import type { ExchangeOptions } from '../types';
 
 const { initWasmMock, isWasmReadyMock, getCryptoApiMock, createLighterSignerAdapterMock } = vi.hoisted(() => ({
   initWasmMock: vi.fn(),
@@ -60,7 +61,7 @@ describe('LighterExchange signer retry gate', () => {
       applicationId: '123',
       testnet: false,
     } as ExchangeOptions;
-    const exchange = new LighterExchange('lighter', options, new DefaultStore());
+    const exchange = new LighterExchange('lighter', options, new FrameStore());
     (exchange as any).ensureAccountIndex = vi.fn().mockResolvedValue(123n);
     return exchange;
   };

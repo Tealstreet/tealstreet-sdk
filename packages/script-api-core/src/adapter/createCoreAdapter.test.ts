@@ -1,3 +1,5 @@
+import { FrameStore } from '../../../safe-cex/src/store/frameStore';
+import { nativeFixture } from '../../../safe-cex/src/__tests__/cutover/nativeFixture';
 import type { Market, Order, Position } from '@tealstreet/safe-cex/src/types';
 import type { CoreAdapter } from './AdapterContext';
 import type { HostBindings, HostWriteEvent } from './HostBindings';
@@ -12,7 +14,6 @@ import { ScriptBatchOrderError } from '../index';
 
 import { CORE_WRITE_API_PATHS } from '../runtime/runtimeSurface';
 import { createCoreAdapter } from './createCoreAdapter';
-import { DefaultStore } from '@tealstreet/safe-cex/src/store/store.base';
 
 /**
  * The body is the thing three hosts used to write for themselves. These tests
@@ -46,8 +47,18 @@ const order = (over: Partial<Order> = {}): Order =>
     ...over,
   }) as unknown as Order;
 
-const position = (over: Partial<Position> = {}): Position =>
-  ({ symbol: 'BTCUSDT', side: 'long', contracts: 2, notional: 120_000, ...over }) as unknown as Position;
+const position = (over: Partial<Position> = {}): Position => ({
+  id: `${over.symbol ?? 'BTCUSDT'}-${over.side ?? PositionSide.Long}`,
+  symbol: 'BTCUSDT',
+  side: PositionSide.Long,
+  contracts: 2,
+  notional: 120_000,
+  entryPrice: 60_000,
+  leverage: 1,
+  unrealizedPnl: 0,
+  liquidationPrice: null,
+  ...over,
+});
 
 interface Fake {
   readonly host: HostBindings;
@@ -83,20 +94,30 @@ const fakeHost = (over: Partial<HostBindings> & { exchangeName?: string } = {}):
 
 describe('createCoreAdapter', () => {
   it.each([null, NaN, Infinity, -Infinity])('refuses a combined exposure with unknown notional %s', (notional) => {
-    const store = new DefaultStore();
-    const positions: Position[] = JSON.parse(JSON.stringify([
-      position({ notional }), position({ side: PositionSide.Short, notional: 250 }),
-    ]));
-    store.update({ positions });
+    const store = new FrameStore();
+    const positions: Position[] = JSON.parse(
+      JSON.stringify([position({ notional }), position({ side: PositionSide.Short, notional: 250 })]),
+    );
+    store.apply(
+      nativeFixture(
+        { positions },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     const { host } = fakeHost({ getStore: () => store });
     expect(() => createCoreAdapter(host).getCombinedBalance({})).toThrow(/notional.*unknown/i);
   });
 
   it('keeps complete and empty combined exposures numeric', () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const { host } = fakeHost({ getStore: () => store });
     expect(createCoreAdapter(host).getCombinedBalance({})).toMatchObject({ longExposure: 0, shortExposure: 0 });
-    store.update({ positions: [position({ notional: 250 }), position({ notional: 0 })] });
+    store.apply(
+      nativeFixture(
+        { positions: [position({ notional: 250 }), position({ notional: 0 })] },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     expect(createCoreAdapter(host).getCombinedBalance({})).toMatchObject({ longExposure: 250, shortExposure: 0 });
   });
   it('rounds an order size — the thing the CLI never did', () => {

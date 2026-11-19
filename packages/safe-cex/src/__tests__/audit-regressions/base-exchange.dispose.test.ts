@@ -1,9 +1,10 @@
 import { BaseExchange } from '../../exchanges/base';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 
 describe('BaseExchange disposal cleanup', () => {
   test('unsubscribes its store bridge and removes retained lifecycle listeners', () => {
-    const store = new DefaultStore();
+    const store = new FrameStore();
     const exchange = new BaseExchange('binance', { key: '', secret: '', publicDataOnly: true }, store);
     const logListener = vi.fn();
     const reconnectListener = vi.fn();
@@ -22,7 +23,12 @@ describe('BaseExchange disposal cleanup', () => {
     expect((store as any).listeners.size).toBe(1);
 
     exchange.dispose();
-    store.update({ latency: 42 });
+    store.apply(
+      nativeFixture(
+        { latency: 42 },
+        store.markets.map((row) => row.symbol),
+      ),
+    );
     exchange.emitter.emit('log', 'after-dispose');
     exchange.emitter.emit('ws-reconnected', '');
     exchange.emitter.emit('remoteSignerStatus', 'connected');

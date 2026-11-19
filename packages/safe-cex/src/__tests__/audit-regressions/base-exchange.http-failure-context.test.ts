@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { BaseExchange } from '../../exchanges/base';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 
 /**
  * The HOW tunnel adapter resolves non-2xx without axios' settle(), so no axios
@@ -14,7 +14,7 @@ import { DefaultStore } from '../../store/store.base';
  * default here) rather than to the emitter. Asserting the emitted payload would pass
  * against a field that is undefined in every case, proving nothing.
  */
-const makeExchange = () => new BaseExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+const makeExchange = () => new BaseExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new FrameStore());
 
 const slot = (exchange: BaseExchange) => (exchange as any)._lastHttpFailure;
 

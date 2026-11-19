@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { BitgetExchange } from '../reference/bitget/bitget.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 import '../../transport/registerTealstreetTransport';
 
 const createExchange = () => {
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new BitgetExchange(
     'bitget',
     { key: 'k', secret: 's', passphrase: 'p', tuning: { consoleLogging: false } },

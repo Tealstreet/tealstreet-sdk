@@ -12,7 +12,7 @@ import {
   setRustEngineTransport,
   setWasmEngineLoader,
 } from '../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../store/store.base';
+import { FrameStore } from '../store/frameStore';
 
 vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
@@ -60,7 +60,7 @@ const startRejects = async (name: ExchangeName, options: Partial<ExchangeOptions
   const exchange = new RustEngineExchange(
     name,
     { key: '', secret: '', ...options } as ExchangeOptions,
-    new DefaultStore(),
+    new FrameStore(),
   );
   running.push(exchange);
   await expect(exchange.start()).rejects.toThrow(message);
@@ -135,7 +135,7 @@ it.each([
             return { signature: 'ab'.repeat(32) };
           },
         },
-        new DefaultStore(),
+        new FrameStore(),
       );
       running.push(exchange);
       await expect(exchange.loadCapabilities()).resolves.toBeDefined();
@@ -276,7 +276,7 @@ it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'polymarket', 'lighter', 'l
       if (bridgeRefuses) {
         let failure: unknown;
         try {
-          running.push(new RustEngineExchange(name, options, new DefaultStore()));
+          running.push(new RustEngineExchange(name, options, new FrameStore()));
         } catch (error) {
           failure = error;
         }
@@ -287,7 +287,7 @@ it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'polymarket', 'lighter', 'l
         });
         continue;
       }
-      const exchange = new RustEngineExchange(name, options, new DefaultStore());
+      const exchange = new RustEngineExchange(name, options, new FrameStore());
       running.push(exchange);
       // Retained fixtures bypass SDK admission; callback intent alone installs no native provider.
       const missingProvider = name === 'txflow';

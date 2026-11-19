@@ -167,7 +167,7 @@ pub fn replace_url_params(
                 string(&value)?
             };
             url = replace_all(&url, &original[begin..=end], &text)?;
-            params.shift_remove(key);
+            crate::remove_json_member(&mut params, key);
         }
         start = begin + 1;
     }

@@ -12,12 +12,12 @@ import {
   setRustEngineTransport,
   setWasmEngineLoader,
 } from '../../exchanges/rust/rust.exchange';
-import { FrameApplier } from '../../store/frameApplier';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { OrderSide, OrderStatus, OrderType, PositionSide } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { ExchangeWorker } from '../../webworker/ExchangeWorker';
 import { setMainAcceptsFrames } from '../../webworker/frameForwarding';
+import { nativeFixture } from './nativeFixture';
 import { realVenue } from './realVenue';
 
 // Clock synchronization is host policy. Supplying a local server-time source
@@ -55,14 +55,14 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       setRustEngineTransport(() => input!.transport);
       setMainAcceptsFrames(true);
       const frames: ArrayBuffer[] = [];
-      const storePayloads: Record<string, unknown>[] = [];
+      const outgoingOps: string[] = [];
       const errors: unknown[] = [];
       const ctx = {
         postMessage(message: { op: string; data: unknown }, transfer?: ArrayBuffer[]) {
           // Exercise the transfer boundary: the worker's original buffer detaches.
           const copy = structuredClone(message, transfer ? { transfer } : undefined);
           if (copy.op === 'frame') frames.push(copy.data as ArrayBuffer);
-          if (copy.op === 'store') storePayloads.push(copy.data as Record<string, unknown>);
+          outgoingOps.push(copy.op);
           if (copy.op === 'error') errors.push(copy.data);
         },
       };
@@ -128,8 +128,8 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       const before = frames.length;
       worker.sendSnapshot();
       expect(frames.length).toBeGreaterThan(before);
-      const lateStore = new DefaultStore();
-      const lateApplier = new FrameApplier(lateStore);
+      const lateStore = new FrameStore();
+      const lateApplier = lateStore;
       lateApplier.apply(new Frame(frames.at(-1)!));
       // A late HTTP reply may update native state just after the periodic
       // flush. Wait for the real store mirror to catch up with the snapshot;
@@ -146,20 +146,18 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       expect(lateStore.tickers.some((row) => row.last > 0 || row.bid > 0 || row.ask > 0)).toBe(true);
       expect(lateStore.loaded.markets).toBe(true);
       expect(lateStore.loaded.tickers).toBe(true);
-      // Frame mode carries venue collections exactly once; derived worker fields
-      // continue over the normal store payload alongside the transferred frame.
-      expect(storePayloads.length).toBeGreaterThan(0);
-      for (const payload of storePayloads) {
-        for (const key of ['markets', 'tickers', 'orders', 'positions', 'balance'])
-          expect(payload).not.toHaveProperty(key);
-      }
+      expect(outgoingOps).not.toContain('store');
       if (['bybitspot', 'coinbasespot', 'binancespot', 'kucoinspot', 'hyperliquidspot', 'krakenspot'].includes(name))
         expect(lateStore.markets.every((row) => row.isSpot)).toBe(true);
       if (name === 'hyperliquidspot' || name === 'krakenspot') {
         expect(input.spotMarkets.length).toBeGreaterThan(0);
         for (const store of [worker.store, lateStore]) {
-          expect(store.markets.map(({ id, symbol, base, quote }) => ({ id, symbol, base, quote }))).toEqual(input.spotMarkets);
-          expect(store.markets.every((row) => !row.isInverse && !row.isPerpetual && row.limits.leverage.max === 1)).toBe(true);
+          expect(store.markets.map(({ id, symbol, base, quote }) => ({ id, symbol, base, quote }))).toEqual(
+            input.spotMarkets,
+          );
+          expect(
+            store.markets.every((row) => !row.isInverse && !row.isPerpetual && row.limits.leverage.max === 1),
+          ).toBe(true);
           expect(store.positions.every((row) => row.contracts === 0)).toBe(true);
         }
       }
@@ -220,8 +218,8 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       // private baseline with the same published-unit decoder as the worker.
       const exchange = worker.exchange as RustEngineExchange;
       const baselineFrame = new Frame(exchange.snapshotFrame()!);
-      const baseline = new DefaultStore();
-      new FrameApplier(baseline).apply(baselineFrame);
+      const baseline = new FrameStore();
+      baseline.apply(baselineFrame);
       lateApplier.apply(baselineFrame);
       const baselineBooks = lateApplier.books(baselineFrame);
       const privateBaseline = structuredClone({
@@ -231,19 +229,42 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
         fetchedLeverage: baseline.fetchedLeverage,
       });
       const symbol = baseline.markets[0].symbol;
-      worker.store.update({
-        orders: [{
-          id: `ghost-order-${name}`, symbol, side: OrderSide.Buy,
-          status: OrderStatus.Open, type: OrderType.Limit,
-          price: 100, amount: 1, remaining: 1, filled: 0, reduceOnly: false, lastUpdate: 1,
-        }],
-        positions: [{
-          id: `ghost-position-${name}`, symbol, side: PositionSide.Long,
-          contracts: 1, entryPrice: 100, notional: 100, leverage: 2,
-          unrealizedPnl: 0, liquidationPrice: 50,
-        }],
-        balance: { free: 987654, used: 123456, total: 1111110, upnl: 42 },
-      });
+      worker.store.apply(
+        nativeFixture(
+          {
+            orders: [
+              {
+                id: `ghost-order-${name}`,
+                symbol,
+                side: OrderSide.Buy,
+                status: OrderStatus.Open,
+                type: OrderType.Limit,
+                price: 100,
+                amount: 1,
+                remaining: 1,
+                filled: 0,
+                reduceOnly: false,
+                lastUpdate: 1,
+              },
+            ],
+            positions: [
+              {
+                id: `ghost-position-${name}`,
+                symbol,
+                side: PositionSide.Long,
+                contracts: 1,
+                entryPrice: 100,
+                notional: 100,
+                leverage: 2,
+                unrealizedPnl: 0,
+                liquidationPrice: 50,
+              },
+            ],
+            balance: { free: 987654, used: 123456, total: 1111110, upnl: 42 },
+          },
+          worker.store.markets.map((row) => row.symbol),
+        ),
+      );
       const workerIds = { ...worker.store.updateIds };
       const lateIds = { ...lateStore.updateIds };
       const workerTickers = structuredClone(worker.store.tickers);
@@ -263,7 +284,9 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
         expect(store.fetchedLeverage).toEqual(privateBaseline.fetchedLeverage);
       }
       expect.soft(worker.store.updateIds, `${name}: account reads must not invent worker freshness`).toEqual(workerIds);
-      expect.soft(lateStore.updateIds, `${name}: transferred account reads must not invent main freshness`).toEqual(lateIds);
+      expect
+        .soft(lateStore.updateIds, `${name}: transferred account reads must not invent main freshness`)
+        .toEqual(lateIds);
       expect(worker.store.tickers).toEqual(workerTickers);
       expect(lateStore.tickers).toEqual(lateTickers);
       expect(lateApplier.books(accountFrame)).toEqual([]);

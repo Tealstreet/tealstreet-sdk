@@ -1,5 +1,3 @@
-import isEqual from 'lodash/isEqual';
-
 import { serializeCommandError } from '../../commandOutcome';
 import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
@@ -41,26 +39,10 @@ export class UpdatePositionsHandler extends BaseHandler {
         }
       }
 
-      const isFullAccountRefresh = validSymbols === undefined;
-      logging && diagnosticConsole.log('Updating positions', symbols);
-      const positions = await this._exchange.fetchPositions(symbols);
+      // fetchPositions applies the native ACCOUNT_READ frame before resolving.
+      await this._exchange.fetchPositions(symbols);
       if (this._exchange.isDisposed) return;
-      if (isEqual(positions, this._exchange.store.positions)) {
-        // Data unchanged - this is a success, positions are up-to-date
-        logging && diagnosticConsole.log('Positions unchanged, data is current');
-        this._ctx.postMessage({ op: 'updatePositions:done', data: { requestId, success: true } });
-      } else {
-        if (!this._exchange.isDisposed) {
-          if (isFullAccountRefresh) {
-            this._exchange.store.addOrUpdatePositionsFull(positions);
-          } else if (positions.length > 0) {
-            this._exchange.store.addOrUpdatePositions(positions);
-          }
-        }
-        logging && diagnosticConsole.log('Updated positions', positions);
-        logging && diagnosticConsole.log('Full positions', this._exchange.store.positions);
-        this._ctx.postMessage({ op: 'updatePositions:done', data: { requestId, success: true } });
-      }
+      this._ctx.postMessage({ op: 'updatePositions:done', data: { requestId, success: true } });
     } catch (e) {
       diagnosticConsole.error('Error updating positions', e);
       this._lastFailedRequest = now;

@@ -2,9 +2,10 @@ import type { ExchangeOptions, Market } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { OKXExchange } from '../reference/okx/okx.exchange';
 import { ORDER_STATS_TOPIC } from '../reference/okx/okx.ws-business';
-import { DefaultStore } from '../../store/store.base';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -29,11 +30,16 @@ const market: Market = {
 };
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    markets: [market],
-    loaded: { ...store.loaded, markets: true },
-  });
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
+      {
+        markets: [market],
+        loaded: { ...store.loaded, markets: true },
+      },
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   return new OKXExchange('okx', options, store);
 };
 
@@ -141,10 +147,7 @@ describe('OKX websocket exact-topic routing', () => {
     // Every order channel records under one stats topic on purpose: OKX only
     // pushes the channel for a category the account currently holds orders in,
     // so per-category entries went quiet independently as categories emptied.
-    expect(Object.keys(websocket.messageHandlersStats).sort()).toEqual([
-      `candle.1m.${market.id}`,
-      ORDER_STATS_TOPIC,
-    ]);
+    expect(Object.keys(websocket.messageHandlersStats).sort()).toEqual([`candle.1m.${market.id}`, ORDER_STATS_TOPIC]);
   });
 
   it('subscribes only after an exact successful login event', () => {

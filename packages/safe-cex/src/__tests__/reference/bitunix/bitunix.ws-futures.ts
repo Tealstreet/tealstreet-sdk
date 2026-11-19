@@ -1,12 +1,16 @@
+import type { StoreData } from '../../../generated/StoreData';
+
 import { inflate } from 'pako';
-import { Candle, OHLCVOptions, OrderBook } from '../../../types';
+
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { calcOrderBookTotal } from '../../../utils/orderbook';
-import { virtualClock } from '../../../utils/virtualClock';
 import { BaseWebSocket } from '../../../exchanges/base.ws';
 import { MessageHandlers } from '../../../exchanges/types';
-import { BitunixExchange } from './bitunix.exchange';
 import { resolveTransportRouting } from '../../../transport/registry';
+import { Candle, OHLCVOptions, OrderBook } from '../../../types';
+import { calcOrderBookTotal } from '../../../utils/orderbook';
+import { virtualClock } from '../../../utils/virtualClock';
+import { applyReferenceFixture } from '../../cutover/referenceFixture';
+import { BitunixExchange } from './bitunix.exchange';
 import { BASE_WS_URL } from './bitunix.types';
 import { INTERVAL } from './bitunix.ws-public';
 
@@ -140,9 +144,17 @@ export class BitunixFuturesWebsocket extends BaseWebSocket<BitunixExchange> {
     const parser = (json: any) => {
       const ticker = this.store.tickers.find((ticker) => ticker.symbol === opts.symbol);
       if (ticker) {
-        this.store.updateTicker(ticker, {
-          last: parseFloat(json.data.close),
-        });
+        (() => {
+          const target = ticker;
+          const changes: Partial<StoreData['tickers'][number]> = {
+            last: parseFloat(json.data.close),
+          };
+          return applyReferenceFixture(
+            this.store,
+            { tickers: this.store.tickers.map((row) => (row.id === target.id ? { ...row, ...changes } : row)) },
+            this.store.markets.map((row) => row.symbol),
+          );
+        })();
       }
       callback({
         timestamp: json.data.time,
@@ -256,5 +268,4 @@ export class BitunixFuturesWebsocket extends BaseWebSocket<BitunixExchange> {
       }
     };
   };
-
 }

@@ -1,3 +1,4 @@
+import { tsImport } from 'tsx/esm/api';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { EventEmitter } from 'node:events';
@@ -9,6 +10,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { atomicTsTape, createTsCapture, recordTsPublic, validateTsRecording } from './record-ts-runtime.mjs';
 import { venueOf } from './venues.mjs';
+
+const { FrameStore } = await tsImport('../../packages/safe-cex/src/store/frameStore.ts', import.meta.url);
+const { nativeFixture } = await tsImport('../../packages/safe-cex/src/__tests__/cutover/nativeFixture.ts', import.meta.url);
 
 const require = createRequire(new URL('../../packages/safe-cex/package.json', import.meta.url));
 const axios = require('axios').default;
@@ -126,10 +130,10 @@ test('actual production Binance constructor has no I/O and owns only standard HT
     http.request=refuse;https.request=refuse;globalThis.fetch=refuse;globalThis.WebSocket=class{constructor(){refuse()}};
     syncBuiltinESMExports();process.on('unhandledRejection',()=>{attempts++});
     const venue=venueOf('binance');
-    const [{BinanceExchange},{DefaultStore}]=await Promise.all([import(new URL(venue.ts.module,new URL('./sdk-rs/harness/venues.mjs',import.meta.url))),import('./packages/safe-cex/src/store/store.base.ts')]);
+    const [{BinanceExchange},{FrameStore}]=await Promise.all([import(new URL(venue.ts.module,new URL('./sdk-rs/harness/venues.mjs',import.meta.url))),import('./packages/safe-cex/src/store/frameStore.ts')]);
     const require=createRequire(new URL('./packages/safe-cex/package.json',import.meta.url));
     const capture=createTsCapture({axios:require('axios').default,write(){}});
-    const exchange=new BinanceExchange('binance',{publicDataOnly:true,tealstreetTunnel:false,tealstreetProxy:false},new DefaultStore());
+    const exchange=new BinanceExchange('binance',{publicDataOnly:true,tealstreetTunnel:false,tealstreetProxy:false},new FrameStore());
     const clients=axiosClients(exchange);assert(clients.length>=3);
     for(const client of clients)capture.wrapAxios(client);
     capture.restore();exchange.dispose();await new Promise(setImmediate);assert.equal(attempts,0);
@@ -256,14 +260,17 @@ function scenario(t, { missing = false, failSink = false, failLoader = false, ha
   Object.defineProperty(globalThis, 'WebSocket', { configurable: true, writable: true, value: BrowserSocket });
   t.after(() => { if (prior) Object.defineProperty(globalThis, 'WebSocket', prior); else delete globalThis.WebSocket; });
   const time = clock(), records = []; let published = false, aborted = false, disposed = false, restored = false;
-  class Store {
-    markets = []; loaded = { markets: false, tickers: false };
-    subscribe(callback) { this.callback = callback; return () => { this.callback = undefined; }; }
-  }
   class Exchange {
     constructor(_name, options, store) { assert(options.publicDataOnly); this.store = store; }
     async start() {
-      this.store.markets = [{ symbol: 'BTCUSDT' }]; this.store.loaded = { markets: true, tickers: true }; this.store.callback(this.store);
+      this.store.apply(nativeFixture({
+        markets: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', active: true,
+          precision: { price: 0.1, amount: 0.001 },
+          limits: { amount: { min: 0.001, max: 1000 }, leverage: { min: 1, max: 100 } } }],
+        tickers: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', bid: 99, ask: 101, last: 100, mark: 100, index: 100,
+          percentage: 0, openInterest: 0, fundingRate: 0, fundingTime: 0, volume: 0, quoteVolume: 0 }],
+        loaded: { ...this.store.loaded, markets: true, tickers: true },
+      }));
       this.socket = new globalThis.WebSocket('wss://public.example/ws');
       this.socket.addEventListener('open', () => {
         this.socket.send('{"method":"SUBSCRIBE","params":["TS_ONLY_STARTUP"],"id":1}');
@@ -287,7 +294,7 @@ function scenario(t, { missing = false, failSink = false, failLoader = false, ha
     async loadExchange() {
       if (failLoader) throw new Error('loader failed');
       if (hangLoader) return new Promise(() => {});
-      return { Exchange, DefaultStore: Store };
+      return { Exchange, FrameStore };
     },
   };
   const task = recordTsPublic({ books: missing ? ['BTCUSDT', 'ETHUSDT'] : ['BTCUSDT'], seconds: 1, env: {}, dependencies });

@@ -1,4 +1,7 @@
 //! Original callback controls for the complete private dispatch cutover.
+#[path = "../../../engine/tests/support/account_snapshot.rs"]
+mod account_snapshot;
+use account_snapshot::assert_unchanged_account;
 use safe_cex_engine::ControlFrame;
 mod support;
 use safe_cex_engine::signing::{
@@ -723,7 +726,7 @@ fn posted_read_keeps_primary_identity_without_route_or_auth_evidence() {
             r#"{"userId":"9007199254740993","affiliateId":null}"#.into()
         )]
     );
-    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_unchanged_account(&before, e.account_snapshot_frame(NOW), [1, 0, 0, 0, 0]);
     assert_eq!(e.health().auth_failures, 0);
 }
 #[test]

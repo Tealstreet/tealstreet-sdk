@@ -1,16 +1,3 @@
-vi.mock('../../exchanges/bybit/bybit.types', async (importOriginal) => {
-  const { configuredHyrotraderEndpoints } = await import('../fixtures/configuredHyrotraderEndpoints');
-  return {
-    ...(await importOriginal<typeof import('../../exchanges/bybit/bybit.types')>()),
-    ...configuredHyrotraderEndpoints,
-  };
-});
-
-vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
-  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
-});
-
 // @vitest-environment node
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
@@ -26,10 +13,23 @@ import {
   setRustEngineTransport,
   setWasmEngineLoader,
 } from '../../exchanges/rust/rust.exchange';
-import { DefaultStore } from '../../store/store.base';
+import { FrameStore } from '../../store/frameStore';
 import { consumerFrame } from '../cutover/consumerFrame';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
 import { nativeReadyFrame } from './rust.native-startup.fixtures';
+
+vi.mock('../../exchanges/bybit/bybit.types', async (importOriginal) => {
+  const { configuredHyrotraderEndpoints } = await import('../fixtures/configuredHyrotraderEndpoints');
+  return {
+    ...(await importOriginal<typeof import('../../exchanges/bybit/bybit.types')>()),
+    ...configuredHyrotraderEndpoints,
+  };
+});
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
 
 // Audited TS getAccount implementations and inherited product aliases. Keep this
 // independent from production dispatch, including Kraken Spot's balance command.
@@ -141,7 +141,8 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
       ),
     wsOpen: idle,
     wsMessage: idle,
-    wsClose: idle, wsRouteExhausted: idle,
+    wsClose: idle,
+    wsRouteExhausted: idle,
     httpStart: idle,
     httpChunk: idle,
     httpEnd: idle,
@@ -163,7 +164,7 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
           : ['lighter', 'lighter-robinhood'].includes(name)
             ? { publicDataOnly: true, key: '', secret: '', applicationId: '0' }
             : {};
-  const store = new DefaultStore();
+  const store = new FrameStore();
   const exchange = new RustEngineExchange(
     name,
     {
@@ -213,12 +214,12 @@ it.each(commandAliases)(
   '%s returns exact native identity through one cold command without starting reconciliation',
   async (name) => {
     const r = fixture(name);
-    const before = r.store.serialize();
+    const before = r.store.data;
     await expect(r.exchange.getAccount()).resolves.toEqual(identity);
     expect(r.queries()).toEqual([{ op: 'fetchAccount', command: 1 }]);
     expect(r.construct).toHaveBeenCalledOnce();
     expect(r.native.start).not.toHaveBeenCalled();
-    expect(r.store.serialize()).toEqual(before);
+    expect(r.store.data).toEqual(before);
     expect(r.errors).not.toHaveBeenCalled();
   },
 );

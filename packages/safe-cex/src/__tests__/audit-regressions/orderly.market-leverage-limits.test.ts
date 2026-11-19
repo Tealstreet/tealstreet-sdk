@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
 import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
-import { DefaultStore } from '../../store/store.base';
 
 describe('audit regression: Orderly market leverage limits', () => {
   it('derives each symbol cap from the documented base_imr field', async () => {
     const exchange = new OrderlyExchange(
       'woofi',
       { key: 'test-key', secret: 'test-secret', applicationId: 'test-account' },
-      new DefaultStore(),
+      new FrameStore(),
     );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({
@@ -49,16 +49,13 @@ describe('audit regression: Orderly market leverage limits', () => {
     const exchange = new OrderlyExchange(
       'woofi',
       { key: 'test-key', secret: 'test-secret', applicationId: 'test-account' },
-      new DefaultStore(),
+      new FrameStore(),
     );
     exchange.xhr = {
       get: vi.fn().mockResolvedValue({
         data: {
           data: {
-            rows: [
-              { symbol: 'PERP_ETH_USDC', max_leverage: 50 },
-              { symbol: 'PERP_SOL_USDC' },
-            ],
+            rows: [{ symbol: 'PERP_ETH_USDC', max_leverage: 50 }, { symbol: 'PERP_SOL_USDC' }],
           },
         },
       }),

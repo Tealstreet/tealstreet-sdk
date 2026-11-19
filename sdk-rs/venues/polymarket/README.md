@@ -49,3 +49,7 @@ The passive indexed journal preserves accepted orders, the uncertain element and
 unsent suffix; the existing driver stops without retrying. A single attributed
 `CommandError` and `order.outcome_unknown` event accompany the terminal, without
 logging signed bodies or credentials. Definite native refusals remain refusals.
+
+The immutable one-times leverage read also writes native SETTINGS rails for the
+requested symbol. Server and LOCAL SCXF consumers observe that confirmed result
+through FrameStore; no TypeScript cache mutation or private request is required.

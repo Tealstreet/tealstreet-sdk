@@ -50,6 +50,7 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 mod managed_http;
+mod store_frames;
 use managed_http::{HttpPacket, HttpPhaseOut};
 
 trait AnyEngine {
@@ -189,14 +190,13 @@ trait AnyEngine {
         Ok(())
     }
     fn drain(&mut self) -> Vec<Action>;
-    fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]>;
-    fn snapshot(&mut self, now: f64) -> &[u8];
-    fn account_snapshot(&mut self, now: f64) -> &[u8];
+    fn frame(&mut self, now: f64, market_only: bool) -> Option<Vec<u8>>;
+    fn snapshot(&mut self, now: f64) -> Vec<u8>;
+    fn account_snapshot(&mut self, now: f64) -> Vec<u8>;
     fn health(&self) -> Health {
         Health::default()
     }
     /// The engine store, projected for algos between engine calls.
-    #[cfg(feature = "algos")]
     fn store(&self) -> Option<&safe_cex_engine::Store> {
         None
     }
@@ -368,24 +368,19 @@ impl<V: Venue> AnyEngine for Engine<V> {
     fn drain(&mut self) -> Vec<Action> {
         self.drain_actions().collect()
     }
-    fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]> {
-        if market_only {
-            self.take_market_frame(now)
-        } else {
-            self.take_frame(now)
-        }
+    fn frame(&mut self, now: f64, market_only: bool) -> Option<Vec<u8>> {
+        self.take_frame_owned(now, market_only)
     }
-    fn snapshot(&mut self, now: f64) -> &[u8] {
-        self.snapshot_frame(now)
+    fn snapshot(&mut self, now: f64) -> Vec<u8> {
+        self.snapshot_frame_owned(now)
     }
-    fn account_snapshot(&mut self, now: f64) -> &[u8] {
-        self.account_snapshot_frame(now)
+    fn account_snapshot(&mut self, now: f64) -> Vec<u8> {
+        self.account_snapshot_frame_owned(now)
     }
     fn health(&self) -> Health {
         Engine::health(self).clone()
     }
 
-    #[cfg(feature = "algos")]
     fn store(&self) -> Option<&safe_cex_engine::Store> {
         Some(Engine::store(self))
     }
@@ -841,6 +836,7 @@ pub struct WasmEngine {
     #[cfg(feature = "coinbase")]
     coinbase_binding: Option<String>,
     construction: String,
+    store_frames: store_frames::LocalFrames,
     inner: Box<dyn AnyEngine>,
     #[cfg(feature = "hosted-signing")]
     hosted_identity: Option<(String, safe_cex_engine::signing::Identities)>,
@@ -1201,6 +1197,10 @@ impl WasmEngine {
             .map_err(|_| js_sys::Error::new("Invalid Coinbase public signing binding"))?;
         let construction = serde_json::to_string(&options.construction(venue))
             .map_err(|error| js_sys::Error::new(&error.to_string()))?;
+        let realtime_last_price = options
+            .tuning
+            .as_ref()
+            .is_some_and(|tuning| tuning.calculate_upnl_from_realtime_last_price);
         let inner = safe_cex_venues::build_with_signer_in_context(
             safe_cex_venues::ConstructionContext::Client,
             venue,
@@ -1216,6 +1216,7 @@ impl WasmEngine {
         Ok(Self {
             inner,
             construction,
+            store_frames: store_frames::LocalFrames::new(venue, realtime_last_price),
             dispatch_signing,
             external_signer,
             #[cfg(feature = "hosted-signing")]
@@ -1437,6 +1438,7 @@ impl WasmEngine {
 
     fn flush(&mut self) -> String {
         let actions = self.inner.drain();
+        self.store_frames.actions(&actions);
         if actions.is_empty() {
             return String::new();
         }
@@ -1490,6 +1492,7 @@ impl WasmEngine {
     pub fn ws_open(&mut self, socket: f64, now: f64) -> Result<String, js_sys::Error> {
         let socket = host_resource_id(socket)?;
         let socket = SocketId(socket);
+        self.store_frames.opened(socket, now);
         self.inner.handle(now, Event::WsOpened { socket });
         Ok(self.flush())
     }
@@ -1503,6 +1506,7 @@ impl WasmEngine {
     ) -> Result<String, js_sys::Error> {
         let socket = host_resource_id(socket)?;
         let socket = SocketId(socket);
+        self.store_frames.received(socket, now);
         self.inner.handle(now, Event::WsMessage { socket, text });
         Ok(self.flush())
     }
@@ -1546,6 +1550,7 @@ impl WasmEngine {
         now: f64,
     ) -> Result<String, js_sys::Error> {
         let socket = host_resource_id(socket)?;
+        self.store_frames.received(SocketId(socket), now);
         self.inner.handle(
             now,
             Event::WsBinary {
@@ -1560,6 +1565,7 @@ impl WasmEngine {
     pub fn ws_close(&mut self, socket: f64, code: u16, now: f64) -> Result<String, js_sys::Error> {
         let socket = host_resource_id(socket)?;
         let socket = SocketId(socket);
+        self.store_frames.closed(socket, Some(code), now);
         self.inner.handle(now, Event::WsClosed { socket, code });
         Ok(self.flush())
     }
@@ -1719,17 +1725,25 @@ impl WasmEngine {
     /// or skipped frames. Frames taken afterwards apply on top of it.
     #[wasm_bindgen(js_name = snapshotFrame)]
     pub fn snapshot_frame(&mut self, now: f64) -> js_sys::Uint8Array {
-        js_sys::Uint8Array::from(self.inner.snapshot(now))
+        let frame = self.inner.snapshot(now);
+        let frame = self
+            .store_frames
+            .frame(frame, self.inner.store(), true, now);
+        js_sys::Uint8Array::from(frame.as_slice())
     }
 
     /// Full private sections; leaves pending deltas and public baselines intact.
     #[wasm_bindgen(js_name = accountSnapshotFrame)]
     pub fn account_snapshot_frame(&mut self, now: f64) -> js_sys::Uint8Array {
-        js_sys::Uint8Array::from(self.inner.account_snapshot(now))
+        let frame = self.inner.account_snapshot(now);
+        let frame = self
+            .store_frames
+            .frame(frame, self.inner.store(), true, now);
+        js_sys::Uint8Array::from(frame.as_slice())
     }
 
     /// Transfer `frame.buffer` to the consumer: it is copied once, straight
-    /// out of the engine's reused frame buffer.
+    /// out of the owned native frame buffer.
     /// With `market_only`, just books, candles and fills (for the venue's
     /// book cadence); store sections wait for the next full frame.
     #[wasm_bindgen(js_name = takeFrame)]
@@ -1738,9 +1752,17 @@ impl WasmEngine {
         if self.algos.is_running() {
             return self.take_frame_with(now, market_only, |frame| js_sys::Uint8Array::from(frame));
         }
-        self.inner
+        let frame = self
+            .inner
             .frame(now, market_only)
-            .map(js_sys::Uint8Array::from)
+            .unwrap_or_else(|| safe_cex_store_frames::empty(now));
+        let frame = if market_only {
+            frame
+        } else {
+            self.store_frames
+                .frame(frame, self.inner.store(), false, now)
+        };
+        (frame.len() > 16).then(|| js_sys::Uint8Array::from(frame.as_slice()))
     }
 }
 
@@ -1756,11 +1778,19 @@ impl WasmEngine {
         market_only: bool,
         copy: impl FnOnce(&[u8]) -> T,
     ) -> Option<T> {
-        let frame = self.inner.frame(now, market_only)?;
-        let fills = safe_cex_engine::wire::fills(frame).unwrap_or_default();
-        let out = copy(frame);
+        let frame = self
+            .inner
+            .frame(now, market_only)
+            .unwrap_or_else(|| safe_cex_store_frames::empty(now));
+        let fills = safe_cex_engine::wire::fills(&frame).unwrap_or_default();
         self.algos.frame(self.inner.store(), fills);
-        Some(out)
+        let frame = if market_only {
+            frame
+        } else {
+            self.store_frames
+                .frame(frame, self.inner.store(), false, now)
+        };
+        (frame.len() > 16).then(|| copy(&frame))
     }
 }
 
@@ -1772,6 +1802,7 @@ impl WasmEngine {
             dispatch_signing: false,
             external_signer: false,
             construction: String::new(),
+            store_frames: Default::default(),
             inner,
             #[cfg(feature = "hosted-signing")]
             hosted_identity: None,
@@ -1797,6 +1828,24 @@ mod public_custody_tests;
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(feature = "bybit", feature = "bingx"))]
+    #[test]
+    fn constructor_supplies_display_metadata_and_user_tuning_to_local_frames() {
+        for (venue, tuning, expected) in [
+            ("bybit", false, true),
+            ("bybit", true, true),
+            ("bingx", false, false),
+            ("bingx", true, true),
+        ] {
+            let options = serde_json::json!({"publicDataOnly":true, "tuning":{"calculateUpnlFromRealtimeLastPrice":tuning}}).to_string();
+            let engine = super::WasmEngine::new(venue, &options, None).unwrap();
+            assert_eq!(
+                engine.store_frames.inputs.borrow().calculate_upnl_from_last,
+                expected,
+                "{venue}/{tuning}"
+            );
+        }
+    }
     #[test]
     fn socket_public_topics_are_optional_and_do_not_replace_the_primary_role() {
         let mut action = safe_cex_engine::Action::WsConnect {
@@ -2904,14 +2953,14 @@ mod tests {
                 self.drains.set(self.drains.get() + 1);
                 Vec::new()
             }
-            fn frame(&mut self, _: f64, _: bool) -> Option<&[u8]> {
+            fn frame(&mut self, _: f64, _: bool) -> Option<Vec<u8>> {
                 None
             }
-            fn snapshot(&mut self, _: f64) -> &[u8] {
-                &[]
+            fn snapshot(&mut self, _: f64) -> Vec<u8> {
+                Vec::new()
             }
-            fn account_snapshot(&mut self, _: f64) -> &[u8] {
-                &[]
+            fn account_snapshot(&mut self, _: f64) -> Vec<u8> {
+                Vec::new()
             }
         }
         let events = Rc::new(RefCell::new(Vec::new()));
@@ -2932,6 +2981,7 @@ mod tests {
             algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
+            store_frames: Default::default(),
             inner: Box::new(Commands {
                 events: Rc::clone(&events),
                 drains: Rc::clone(&drains),
@@ -3120,14 +3170,14 @@ mod tests {
         fn drain(&mut self) -> Vec<Action> {
             std::mem::take(&mut self.actions)
         }
-        fn frame(&mut self, _now: f64, _market_only: bool) -> Option<&[u8]> {
+        fn frame(&mut self, _now: f64, _market_only: bool) -> Option<Vec<u8>> {
             None
         }
-        fn snapshot(&mut self, _now: f64) -> &[u8] {
-            &[]
+        fn snapshot(&mut self, _now: f64) -> Vec<u8> {
+            Vec::new()
         }
-        fn account_snapshot(&mut self, _now: f64) -> &[u8] {
-            &[]
+        fn account_snapshot(&mut self, _now: f64) -> Vec<u8> {
+            Vec::new()
         }
     }
 
@@ -3192,14 +3242,14 @@ mod tests {
             fn drain(&mut self) -> Vec<Action> {
                 Vec::new()
             }
-            fn frame(&mut self, _: f64, _: bool) -> Option<&[u8]> {
+            fn frame(&mut self, _: f64, _: bool) -> Option<Vec<u8>> {
                 None
             }
-            fn snapshot(&mut self, _: f64) -> &[u8] {
-                &[]
+            fn snapshot(&mut self, _: f64) -> Vec<u8> {
+                Vec::new()
             }
-            fn account_snapshot(&mut self, _: f64) -> &[u8] {
-                &[]
+            fn account_snapshot(&mut self, _: f64) -> Vec<u8> {
+                Vec::new()
             }
             fn health(&self) -> Health {
                 Health {
@@ -3232,6 +3282,7 @@ mod tests {
                 algos: Default::default(),
                 external_signer: false,
                 construction: "{}".into(),
+                store_frames: Default::default(),
                 inner: Box::new(Counted),
             }
             .health(),
@@ -3268,6 +3319,7 @@ mod tests {
                 algos: Default::default(),
                 external_signer: false,
                 construction: "{}".into(),
+                store_frames: Default::default(),
                 inner: Box::<Messages>::default(),
             };
             let text = engine.ws_message(id as f64, "wide", 1.).unwrap();
@@ -3301,6 +3353,7 @@ mod tests {
             algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
+            store_frames: Default::default(),
             inner: Box::<Messages>::default(),
         };
         let mut legacy = engine();
@@ -3339,6 +3392,7 @@ mod tests {
             algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
+            store_frames: Default::default(),
             inner: Box::<Messages>::default(),
         };
         let mut bytes = WasmEngine {
@@ -3357,6 +3411,7 @@ mod tests {
             algos: Default::default(),
             external_signer: false,
             construction: "{}".into(),
+            store_frames: Default::default(),
             inner: Box::<Messages>::default(),
         };
         // A rejected byte message must neither handle an event nor drain existing actions.

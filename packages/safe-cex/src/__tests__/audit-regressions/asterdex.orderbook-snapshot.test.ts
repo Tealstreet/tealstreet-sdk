@@ -1,32 +1,39 @@
+import type { OrderBook } from '../../types';
+
 import { describe, expect, it, vi } from 'vitest';
 
+import { FrameStore } from '../../store/frameStore';
+import { nativeFixture } from '../cutover/nativeFixture';
 import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
-import { DefaultStore } from '../../store/store.base';
-import type { OrderBook } from '../../types';
 
 const symbol = 'BTCUSDT';
 
 const createExchange = () => {
-  const store = new DefaultStore();
-  store.update({
-    tickers: [
+  const store = new FrameStore();
+  store.apply(
+    nativeFixture(
       {
-        id: symbol,
-        symbol,
-        bid: 0,
-        ask: 0,
-        last: 100,
-        mark: 100,
-        index: 100,
-        percentage: 0,
-        fundingRate: 0,
-        fundingTime: 0,
-        openInterest: 0,
-        volume: 0,
-        quoteVolume: 0,
+        tickers: [
+          {
+            id: symbol,
+            symbol,
+            bid: 0,
+            ask: 0,
+            last: 100,
+            mark: 100,
+            index: 100,
+            percentage: 0,
+            fundingRate: 0,
+            fundingTime: 0,
+            openInterest: 0,
+            volume: 0,
+            quoteVolume: 0,
+          },
+        ] as any,
       },
-    ] as any,
-  });
+      store.markets.map((row) => row.symbol),
+    ),
+  );
   const exchange = new AsterDEXExchange('asterdex', { key: 'test-key', secret: 'test-secret' }, store);
   return { exchange, store, websocket: exchange.publicWebsocket };
 };
@@ -53,7 +60,19 @@ describe('audit regression: AsterDEX partial orderbook snapshots', () => {
     websocket.ws = { readyState: WebSocket.OPEN, send: (frame: string) => frames.push(frame) } as unknown as WebSocket;
 
     websocket.listenOrderBook(symbol, callback);
-    websocket.onMessage(snapshotFrame('btcusdt@depth20@100ms', [['99', '2'], ['100', '1']], [['102', '4'], ['101', '3']]) as MessageEvent);
+    websocket.onMessage(
+      snapshotFrame(
+        'btcusdt@depth20@100ms',
+        [
+          ['99', '2'],
+          ['100', '1'],
+        ],
+        [
+          ['102', '4'],
+          ['101', '3'],
+        ],
+      ) as MessageEvent,
+    );
 
     expect(frames.map((frame) => JSON.parse(frame))).toContainEqual({
       method: 'SUBSCRIBE',
@@ -119,7 +138,9 @@ describe('audit regression: AsterDEX partial orderbook snapshots', () => {
     const requests = frames.map((frame) => JSON.parse(frame));
     expect(requests).toContainEqual({ method: 'SUBSCRIBE', params: [orderBookStream], id: 1 });
     expect(requests).toContainEqual({ method: 'LIST_SUBSCRIPTIONS', id: -1 });
-    expect(requests.filter((request) => request.method === 'SUBSCRIBE').every((request) => request.id !== -1)).toBe(true);
+    expect(requests.filter((request) => request.method === 'SUBSCRIBE').every((request) => request.id !== -1)).toBe(
+      true,
+    );
   });
 
   it('shares one upstream stream, isolates listener snapshots, and tears down only after the final unsubscribe', () => {
