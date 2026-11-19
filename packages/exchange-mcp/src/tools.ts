@@ -95,7 +95,7 @@ const prepare = async (exchange: Exchange, opts: PlaceOrderOpts): Promise<PlaceO
     exchange.fetchOrders(),
     exchange.fetchTickers?.(),
   ]);
-  const like = exchange as unknown as ExchangeLike;
+  const like: ExchangeLike = exchange;
   return prepareCliOrder(
     { ...like, name: like.name, store: { markets: exchange.store.markets, positions, orders, tickers } },
     opts,
@@ -340,7 +340,7 @@ export const tools: Tool[] = [
       const [order] = await openOrders(exchange, [orderId]);
       const update =
         price !== undefined
-          ? { price: prepareCliAmendPrice(exchange as unknown as ExchangeLike, order.symbol, price) }
+          ? { price: prepareCliAmendPrice(exchange, order.symbol, price) }
           : { amount: prepareAmendAmount(exchange, order, amount!) };
       return exchange.updateOrder({ order, update });
     },
@@ -403,12 +403,15 @@ const capabilityOf = new Map<string, keyof ExchangeCapabilities>(
   Object.entries(CAPABILITY_METHODS).map(([capability, method]) => [method, capability as keyof ExchangeCapabilities]),
 );
 
-export const supportedTools = (exchange: Exchange, { options = false }: { options?: boolean } = {}): Tool[] => {
+export const supportedTools = (
+  exchange: Exchange & { fetchBalance?: unknown },
+  { options = false }: { options?: boolean } = {},
+): Tool[] => {
   const { capabilities } = exchange;
   return tools.filter((t) => {
     if (t.requiresOptions && !options) return false;
     if (t.requiredCapabilities?.some((capability) => !capabilities[capability])) return false;
-    if (typeof (exchange as unknown as Record<string, unknown>)[t.method] !== 'function') return false;
+    if (typeof exchange[t.method] !== 'function') return false;
     const capability = capabilityOf.get(t.method);
     return capability === undefined || capabilities[capability];
   });
