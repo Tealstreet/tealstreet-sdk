@@ -886,36 +886,40 @@ impl AsterDex {
         let mut terminal_signature = false;
         let mut signature_reported = false;
         let error = match &response {
-            Ok(r) => venue_error(r).map(|(code, m)| {
-                if signature_rejected(code, &m) {
-                    terminal_signature = true;
-                    if !matches!(
-                        &request,
-                        Request::ListenKey { .. } | Request::Keepalive { .. }
-                    ) {
-                        signature_reported = cx.startup_read_refused(
-                            &VenueError::new(SIGNATURE_REJECTED)
-                                .kind(ErrorKind::AuthInvalid)
-                                .venue_code(code.to_string())
-                                .venue_message(m),
-                        );
+            Ok(r) => match venue_error(r) {
+                Some((code, m)) => {
+                    if signature_rejected(code, &m) {
+                        terminal_signature = true;
+                        match &request {
+                            Request::ListenKey { .. } | Request::Keepalive { .. } => {}
+                            _ => {
+                                signature_reported = cx.startup_read_refused(
+                                    &VenueError::new(SIGNATURE_REJECTED)
+                                        .kind(ErrorKind::AuthInvalid)
+                                        .venue_code(code.to_string())
+                                        .venue_message(m),
+                                );
+                            }
+                        }
+                        Some(SIGNATURE_REJECTED.into())
+                    } else {
+                        // Aster's whitelist refusal does not always carry a key code; its words do.
+                        if matches!(code, -2014 | -2015)
+                            || safe_cex_engine::error::ip_whitelist_text(&m, None)
+                                .is_some_and(|(_, named)| named)
+                        {
+                            cx.startup_read_refused(
+                                &safe_cex_engine::VenueError::new(m.clone())
+                                    .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+                                    .venue_code(code.to_string())
+                                    .venue_message(m.clone()),
+                            );
+                        }
+                        Some(m)
                     }
-                    return SIGNATURE_REJECTED.into();
                 }
-                // Aster's whitelist refusal does not always carry a key code; its words do.
-                if matches!(code, -2014 | -2015)
-                    || safe_cex_engine::error::ip_whitelist_text(&m, None)
-                        .is_some_and(|(_, named)| named)
-                {
-                    cx.startup_read_refused(
-                        &safe_cex_engine::VenueError::new(m.clone())
-                            .kind(safe_cex_engine::ErrorKind::AuthInvalid)
-                            .venue_code(code.to_string())
-                            .venue_message(m.clone()),
-                    );
-                }
-                m
-            }),
+                None => None,
+            },
             Err(e) => Some((*e).into()),
         };
         let body = response.as_ref().map_or("", |r| r.body);

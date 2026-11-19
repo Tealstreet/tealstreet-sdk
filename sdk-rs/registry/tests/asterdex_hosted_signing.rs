@@ -203,7 +203,7 @@ mod wallet {
                 .map(|key| (*key, case["params"][*key].as_str().unwrap()))
                 .collect();
             let now = case["nowMs"].as_f64().unwrap();
-            for (method, expected) in [("GET", "signature"), ("POST", "codeSignature")] {
+            for method in ["GET", "POST", "DELETE"] {
                 let statement = serde_json::json!({ "method": method, "path": "/fapi/v3/order", "query": query,
                 "user": case["user"], "signer": case["signer"], "nonce": case["nonce"], "stampMs": case["nowMs"], "testnet": case["testnet"] });
                 let descriptor = |payload: &serde_json::Value| {
@@ -223,7 +223,7 @@ mod wallet {
                 let result: serde_json::Value = serde_json::from_str(&result).unwrap();
                 let raw = result["signature"].as_str().unwrap();
                 let v = u8::from_str_radix(&raw[128..], 16).unwrap() + 27;
-                assert_eq!(format!("0x{}{:02x}", &raw[..128], v), case[expected]);
+                assert_eq!(format!("0x{}{:02x}", &raw[..128], v), case["codeSignature"]);
                 for (field, value) in [
                     (
                         "user",
