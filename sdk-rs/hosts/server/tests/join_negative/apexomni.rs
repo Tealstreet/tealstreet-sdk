@@ -226,6 +226,14 @@ impl<const TESTNET: bool> Venue for Apex<TESTNET> {
 mod controls {
     use super::*;
     #[test]
+    fn replay_attempt_cannot_land_in_a_whole_prior_second() {
+        // The refused replay is resent with a whole-second stamp; a prior stamp
+        // ending in 000 recurred byte-for-byte in master run 44585942681.
+        let prior = 1_795_112_976_000;
+        let replay = prior + Apex::<false>::replay_delay().as_millis() as u64;
+        assert!(replay / 1_000 * 1_000 > prior);
+    }
+    #[test]
     fn both_pairs_are_genuinely_valid() {
         for (key, secret) in [(KEY, SECRET), (OTHER_KEY, OTHER_SECRET)] {
             let stamp = now_ms().to_string();
