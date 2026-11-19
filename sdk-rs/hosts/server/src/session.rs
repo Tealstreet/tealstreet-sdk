@@ -765,7 +765,7 @@ impl Session {
         let permit = self.registry.probe_permit(self.user(), &init);
         let out = self.handover_out(&init.account_name);
         let (signing_out, lifetime) = out.isolated();
-        let link = safe_cex_remote_signer::SignerLink::new(self.socket, signing_out.outbox());
+        let link = crate::signing_diagnostics::link(self.socket, signing_out.outbox());
         let registry = self.registry.clone();
         let user = self.user().to_owned();
         let token = self.identity.token.clone();
@@ -3599,6 +3599,7 @@ mod tests {
     mod local_proof;
     mod provider_handover_refusals;
     mod publish_interval;
+    mod signing_diagnostics;
     mod token_expiry;
 
     fn synthetic_candidate() -> crate::delegated::Credentials {

@@ -1551,7 +1551,11 @@ impl Registry {
             resident.reconfigure(init)?;
             Some(DelegatedSetup::Resident(resident.clone()))
         } else {
-            prepare(init, false, Some(SignerLink::new(holder, outbox.clone())))?;
+            prepare(
+                init,
+                false,
+                Some(crate::signing_diagnostics::link(holder, outbox.clone())),
+            )?;
             None
         };
         self.obtain_with_setup(
@@ -1942,7 +1946,7 @@ impl Registry {
             let signer = Some(resident.provider());
             (None, plan, options, None, signer, Some(resident))
         } else {
-            let link = (!public_only).then(|| SignerLink::new(socket, outbox));
+            let link = (!public_only).then(|| crate::signing_diagnostics::link(socket, outbox));
             let Prepared {
                 plan,
                 options,
