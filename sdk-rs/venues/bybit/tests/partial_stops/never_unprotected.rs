@@ -54,7 +54,10 @@ fn census(h: &mut Harness) {
         if h.has_request("/v5/position/trading-stop") {
             return;
         }
-        if h.has_request("&openOnly=0&limit=50") {
+        if h.has_request("&orderId=") {
+            // The final orderId read before placing on missing evidence: still missing.
+            h.respond("&orderId=", 200, &page(vec![], ""));
+        } else if h.has_request("&openOnly=0&limit=50") {
             h.respond("&openOnly=0&limit=50", 200, &page(vec![], CURSOR));
         } else if h.has_request("/v5/order/history") {
             h.respond("/v5/order/history", 200, &page(vec![], CURSOR));
@@ -201,7 +204,7 @@ fn any_proof_failure_after_a_landed_cancel_still_places_the_replacement() {
                 &serde_json::json!({"retCode":0,"result":{"category":"inverse","list":[row],"nextPageCursor":""}}).to_string(),
             ),
         }
-        h.advance(200.0);
+        census(&mut h);
         let writes = stop_writes(&h);
         assert_eq!(writes.len(), 1, "{shape}: {:?}", h.result(91));
         assert_eq!(writes[0]["stopLoss"], "95", "{shape}");
@@ -228,7 +231,7 @@ fn a_refused_replacement_after_a_failed_proof_puts_the_old_stop_back() {
     let mut row = native_partial_target(&h, profile, &original);
     row["triggerBy"] = "LastPrice".into();
     h.respond("&orderId=partial", 200, &page(vec![row], ""));
-    h.advance(200.0);
+    census(&mut h);
     h.respond(
         "/v5/position/trading-stop",
         200,
@@ -368,4 +371,236 @@ fn a_replacement_the_price_has_crossed_sends_the_old_stop_back_instead() {
         "{error:?}"
     );
     assert!(error.message.contains("would trigger"), "{error:?}");
+}
+
+fn lose(h: &mut Harness, path: &str) {
+    let request = h.take(path);
+    h.event(Event::HttpFailed {
+        request: request.id,
+        error: "lost native cancellation proof",
+    });
+}
+
+/// F1: the cancel was certain (retCode 0); only the reads were lost. The
+/// replacement must still go out rather than sealing Unknown with no stop.
+#[test]
+fn four_lost_proof_reads_after_an_accepted_cancel_still_send_the_replacement() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    incident_stop(&mut h, "partial");
+    edit(&mut h, 91, "partial");
+    for lost in 0..4 {
+        if lost > 0 {
+            h.advance(200.0);
+        }
+        lose(&mut h, "&orderId=partial");
+    }
+    h.advance(200.0);
+    let writes = stop_writes(&h);
+    assert_eq!(writes.len(), 1, "{:?}", h.result(91));
+    assert_eq!(writes[0]["stopLoss"], "95");
+    h.respond("/v5/position/trading-stop", 200, OK);
+    assert!(
+        h.result(91).is_some_and(Result::is_ok),
+        "{:?}",
+        h.result(91)
+    );
+    assert!(
+        h.command_errors
+            .iter()
+            .any(|(command, message)| *command == 91 && message.contains("Open Orders")),
+        "{:?}",
+        h.command_errors
+    );
+}
+
+/// Proves the target, then holds the replacement in signing preparation.
+fn replacement_held_in_preparation(
+    h: &mut Harness,
+) -> safe_cex_engine::request_context::Preparation {
+    let profile = PROFILES[0];
+    let original = incident_stop(h, "partial");
+    edit(h, 91, "partial");
+    let row = native_partial_target(h, profile, &original);
+    h.respond("&orderId=partial", 200, &page(vec![row], ""));
+    h.respond("&openOnly=0&limit=50", 200, &page(vec![], ""));
+    let history = h.take("/v5/order/history");
+    h.engine.handle(
+        h.now,
+        Event::HttpResponse {
+            request: history.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: &page(vec![], ""),
+            },
+        },
+    );
+    take_partial_preparation(h, "/v5/position/trading-stop")
+}
+
+fn release(h: &mut Harness, preparation: safe_cex_engine::request_context::Preparation) {
+    h.engine.http_prepared(
+        h.now,
+        preparation,
+        safe_cex_engine::request_context::Prepared {
+            id: preparation.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    h.collect();
+    h.advance(200.0);
+}
+
+/// F2 control: the price did not move while the replacement waited.
+#[test]
+fn a_replacement_released_at_an_unchanged_price_is_sent() {
+    let mut h = ready(PROFILES[0]);
+    let preparation = replacement_held_in_preparation(&mut h);
+    release(&mut h, preparation);
+    let writes = stop_writes(&h);
+    assert_eq!(writes.len(), 1, "{:?}", h.result(91));
+    assert_eq!(writes[0]["stopLoss"], "95");
+}
+
+/// F2: mark falls 100 -> 94 while the replacement (95) waits for release. The
+/// release guard vetoes it; the old stop (90, still valid) must go back.
+#[test]
+fn a_replacement_vetoed_at_release_puts_the_old_stop_back() {
+    let mut h = ready(PROFILES[0]);
+    let preparation = replacement_held_in_preparation(&mut h);
+    set_reference_prices(&mut h, 94.0, 94.0);
+    release(&mut h, preparation);
+    let writes = stop_writes(&h);
+    assert_eq!(
+        writes.len(),
+        1,
+        "the old stop must go back: {:?}",
+        h.result(91)
+    );
+    assert_eq!(writes[0]["stopLoss"], "90");
+    assert_eq!(writes[0]["slSize"], "0.001");
+    h.respond("/v5/position/trading-stop", 200, OK);
+    let error = failure(&h, 91);
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Restored),
+        "{error:?}"
+    );
+}
+
+/// A stale reference fails both guards: nothing is asked of the venue and the
+/// outcome says plainly that the position has no stop.
+#[test]
+fn a_stale_reference_ends_explicitly_unprotected_without_asking_the_venue() {
+    let mut h = ready(PROFILES[0]);
+    let preparation = replacement_held_in_preparation(&mut h);
+    h.advance(10_000.0);
+    release(&mut h, preparation);
+    assert!(stop_writes(&h).is_empty(), "{:?}", h.result(91));
+    let error = failure(&h, 91);
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected),
+        "{error:?}"
+    );
+    assert!(error.message.contains("re-place"), "{error:?}");
+}
+
+fn assert_not_doubled(h: &mut Harness, said: &str) {
+    census(h);
+    h.advance(200.0);
+    assert!(stop_writes(h).is_empty(), "{said}: a second stop was sent");
+    let error = failure(h, 91);
+    assert_ne!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::Unknown),
+        "{error:?}"
+    );
+    assert!(error.message.contains(said), "{error:?}");
+    assert!(
+        error.message.contains("no replacement was placed"),
+        "{error:?}"
+    );
+}
+
+/// B2: Bybit shows the old stop still live after the accepted cancel. Placing
+/// would leave two reduce-only stops; the edit ends definitely instead.
+#[test]
+fn a_still_live_old_stop_is_never_doubled() {
+    let profile = PROFILES[0];
+    for read in ["first", "census", "final"] {
+        let mut h = ready(profile);
+        let original = incident_stop(&mut h, "partial");
+        edit(&mut h, 91, "partial");
+        let row = native_partial_target(&h, profile, &original);
+        let mut live = row.clone();
+        live["orderStatus"] = "Untriggered".into();
+        match read {
+            // A live row whose fields no longer match is not retried as a lag.
+            "first" => {
+                live["qty"] = "0.002".into();
+                h.respond("&orderId=partial", 200, &page(vec![live], CURSOR));
+            }
+            "census" => {
+                h.respond("&orderId=partial", 200, &page(vec![row], CURSOR));
+                live["orderStatus"] = "New".into();
+                h.respond("&openOnly=0&limit=50", 200, &page(vec![live], CURSOR));
+            }
+            _ => {
+                h.respond("&orderId=partial", 503, "");
+                h.advance(200.0);
+                h.respond("&orderId=partial", 200, &page(vec![live], ""));
+            }
+        }
+        assert_not_doubled(&mut h, "still shows");
+    }
+}
+
+/// B2: Bybit shows the old stop already executed: no full-size replacement goes
+/// over a position that has already shrunk.
+#[test]
+fn an_executed_old_stop_is_never_replaced() {
+    let profile = PROFILES[0];
+    for status in ["Triggered", "Filled"] {
+        let mut h = ready(profile);
+        let original = incident_stop(&mut h, "partial");
+        edit(&mut h, 91, "partial");
+        let mut row = native_partial_target(&h, profile, &original);
+        row["orderStatus"] = status.into();
+        if status == "Filled" {
+            row["cumExecQty"] = "0.001".into();
+        }
+        h.respond("&orderId=partial", 200, &page(vec![row], CURSOR));
+        assert_not_doubled(&mut h, "already triggered or filled");
+    }
+}
+
+/// B2 control: unreadable evidence gets one final orderId read; a cancelled row
+/// there proves the cancel and the replacement goes out without a duplicate warning.
+#[test]
+fn unreadable_evidence_is_settled_by_a_final_order_read() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    let original = incident_stop(&mut h, "partial");
+    edit(&mut h, 91, "partial");
+    let row = native_partial_target(&h, profile, &original);
+    h.respond("&orderId=partial", 503, "");
+    h.advance(200.0);
+    h.respond("&orderId=partial", 200, &page(vec![row], CURSOR));
+    census(&mut h);
+    let writes = stop_writes(&h);
+    assert_eq!(writes.len(), 1, "{:?}", h.result(91));
+    assert_eq!(writes[0]["stopLoss"], "95");
+    h.respond("/v5/position/trading-stop", 200, OK);
+    assert!(
+        h.result(91).is_some_and(Result::is_ok),
+        "{:?}",
+        h.result(91)
+    );
+    assert!(
+        !h.command_errors.iter().any(|(command, _)| *command == 91),
+        "{:?}",
+        h.command_errors
+    );
 }
