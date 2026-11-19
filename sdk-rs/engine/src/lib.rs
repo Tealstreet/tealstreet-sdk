@@ -116,3 +116,6 @@ pub use engine::{AddressSetupSlots, SetupRetirement};
 
 /// Native UI sections of the account frame.
 pub mod store_frame_wire;
+
+#[cfg(all(test, feature = "managed-sockets"))]
+mod test_alloc;

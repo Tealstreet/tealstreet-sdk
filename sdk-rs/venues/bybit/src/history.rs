@@ -50,7 +50,8 @@ struct Execution {
     price: f64,
     qty: f64,
     side: &'static str,
-    commission: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commission: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     commission_asset: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -911,7 +912,11 @@ fn page(walk: &Walk, body: &str) -> serde_json::Result<(Rows, Option<String>)> {
                     price,
                     qty,
                     side: side_name(side),
-                    commission: or_zero(&e.exec_fee).abs(),
+                    // Positive is a cost; negative is a rebate, opposite to income cash flow.
+                    commission: {
+                        let fee = float_of(&e.exec_fee);
+                        fee.is_finite().then_some(fee)
+                    },
                     commission_asset: present(&e.fee_currency).map(str::to_owned),
                     maker: e.is_maker,
                 });
