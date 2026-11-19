@@ -13,6 +13,13 @@ const job = name => {
 };
 const suites = ['binance', 'binancespot', 'binanceinverse', 'binancepm', 'binanceoptions'];
 
+test('full harness preflights serialize files without dropping cases or widening child timeouts', () => {
+  const fullSuite = 'corepack yarn -s node --test --test-concurrency=1 sdk-rs/harness/*.test.mjs';
+  for (const name of ['harness', 'gate']) assert(job(name).includes(fullSuite), name);
+  const gateTests = readFileSync(new URL('./gate.test.mjs', import.meta.url), 'utf8');
+  assert.match(gateTests, /const GATE_CHILD_TIMEOUT_MS = 10000;/);
+});
+
 test('five isolated Binance rows preserve the original eleven exact replay identities', () => {
   const original = [
     ['binance', 'fixtures/binance-public.jsonl.gz', 'BTCUSDT,ETHUSDT,SOLUSDT'],

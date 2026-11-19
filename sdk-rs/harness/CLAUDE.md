@@ -31,6 +31,9 @@ The measurement lane's native wire/fixture assertions run in
 assertions run in `Rust / replay combined consumers`, parallel to the five rows. Nothing is
 skipped or run concurrently inside a measured process. Truncated corpora, missing
 cases and mismatched family seals still fail; budgets and policy are unchanged.
+Full harness preflights serialize unit-test files on each runner to avoid
+CPU-contention timeouts in scripted child fixtures. The full test glob, per-child
+10-second timeout and replay assertions stay unchanged.
 
 ## Generated WASM caps (AGT-23, 2026-11-19)
 

@@ -324,7 +324,7 @@ jobs:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
-      - run: corepack yarn rust:test-harness
+      - run: corepack yarn -s node --test --test-concurrency=1 sdk-rs/harness/*.test.mjs
 
 
   bans:
@@ -1358,7 +1358,7 @@ jobs:
         if: matrix.venue == 'bingx'
         run: corepack yarn rust:private-tape-bingxspot
       - name: Replay request normalization
-        run: corepack yarn rust:test-harness
+        run: corepack yarn -s node --test --test-concurrency=1 sdk-rs/harness/*.test.mjs
       - name: Credentialed lifecycle runner (scripted transport only)
         if: matrix.venue == 'binance'
         run: corepack yarn rust:test-live-smoke
