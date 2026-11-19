@@ -176,7 +176,10 @@ async fn a_page_dispose_detaches_only_its_holder_until_the_last_live_holder_leav
                 let key = KeyRef("primary.signing".into());
                 registry.release(&account, 7, disposal);
                 assert_eq!(registry.account_count(), 1, "{disposal:?}");
-                assert!(inbox.try_recv().is_err(), "{disposal:?}: algos keep running");
+                assert!(
+                    inbox.try_recv().is_err(),
+                    "{disposal:?}: algos keep running"
+                );
                 assert!(account.handle.disposal_cause().is_none());
                 assert_eq!(
                     provider.can_sign(&key, Algorithm::HmacSha256),
@@ -272,7 +275,11 @@ async fn an_unjoined_dispose_never_stops_an_account_another_live_holder_holds() 
             );
             registry.release(&account, 7, Disposal::SocketClosed);
             registry.dispose_delegated("A", "synthetic-main");
-            assert_eq!(registry.account_count(), 0, "a retained account is still removable");
+            assert_eq!(
+                registry.account_count(),
+                0,
+                "a retained account is still removable"
+            );
             assert_eq!(
                 provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
                 Capability::Unsupported
