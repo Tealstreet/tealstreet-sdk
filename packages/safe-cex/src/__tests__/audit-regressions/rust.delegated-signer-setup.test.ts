@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { SignRequest, SigningIdentities, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions, RemoteSigner } from '../../types';
 
@@ -48,7 +49,7 @@ describe('trusted delegated signer setup capsule', () => {
       await expect(setup.signer(request(config.signing), callContext())).resolves.toHaveProperty('values');
       expect(sign).toHaveBeenCalledTimes(1);
       available = false;
-      await expect(setup.signer(request(config.signing), callContext())).rejects.toThrow('unavailable');
+      await expect(setup.signer(request(config.signing), callContext())).rejects.toThrow('Signing isn’t available for this account');
       expect(sign).toHaveBeenCalledTimes(1);
     } finally { setup.dispose(); }
   });

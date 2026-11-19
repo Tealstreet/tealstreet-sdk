@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, Market, StoreData } from '../types';
 
@@ -259,7 +260,7 @@ it('writes during a cold wasm fetch fail at once and are never sent; placeOrders
   for (const [method] of writes) {
     const reply = messages.find((message) => message.op === 'callMethod:done' && message.data.requestId === method);
     expect(reply?.data.success, method).toBe(false);
-    expect(reply?.data.result.message, method).toContain('not started');
+    expect(reply?.data.result.message, method).toContain('is still loading');
   }
   expect(messages.some((message) => message.data?.requestId === 'place')).toBe(false);
   loaded();

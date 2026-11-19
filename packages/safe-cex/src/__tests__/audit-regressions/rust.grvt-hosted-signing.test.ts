@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import { expect, it, vi } from 'vitest';
 
 import { assertBetaAccount } from '../../exchanges/rust/betaVenues';
@@ -10,7 +11,7 @@ it('admits GRVT RemoteSigner while undeclared venues still refuse before signing
   for (const name of ['krakenspot', 'mode'] as const) {
     expect(deriveRemoteSigningPolicy(name)).toBeUndefined();
     expect(() => assertBetaAccount(name, { key: 'fixture-private-key', remoteSigner })).toThrowError(expect.objectContaining({ kind: 'unsupported', outcome: 'notSent',
-      message: expect.stringContaining("isn't available on the Hosted Server") }));
+      message: expect.stringContaining("isn’t available for server trading") }));
   }
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });

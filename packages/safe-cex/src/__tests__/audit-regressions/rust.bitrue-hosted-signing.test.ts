@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { HostedSigningInput, SignRequest } from '@tealstreet/safe-cex-wasm/host';
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { RemoteSigner, RemoteSignerRequest } from '../../types';
@@ -150,7 +151,7 @@ it.each([
     expect.objectContaining({
       kind: 'unsupported',
       outcome: 'notSent',
-      message: expect.stringContaining('Bitrue secondary read keys'),
+      message: expect.stringContaining('Bitrue doesn’t support extra read-only keys for server trading'),
     }),
   );
   expect(remoteSigner.sign).not.toHaveBeenCalled();
@@ -198,7 +199,7 @@ it('still refuses keyed private Bitrue accounts with the same secondary key befo
     expect.objectContaining({
       kind: 'unsupported',
       outcome: 'notSent',
-      message: expect.stringContaining('Bitrue secondary read keys'),
+      message: expect.stringContaining('Bitrue doesn’t support extra read-only keys for server trading'),
     }),
   );
   expect(remoteSigner.sign).not.toHaveBeenCalled();

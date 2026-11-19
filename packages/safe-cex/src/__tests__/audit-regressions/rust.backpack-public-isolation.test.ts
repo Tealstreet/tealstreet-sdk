@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { ExchangeName, ExchangeOptions, RemoteSigner } from '../../types';
 
 import { expect, it, vi } from 'vitest';
@@ -74,7 +75,7 @@ it('backpack_private_payload_and_undeclared_venue_stay_refused', () => {
       if (name === 'krakenspot')
         expect(error).toHaveProperty(
           'message',
-          expect.stringContaining('delegated signing is unsupported in this build'),
+          expect.stringContaining('isn’t available in this version'),
         );
     }
   }

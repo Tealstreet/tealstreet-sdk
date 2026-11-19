@@ -279,7 +279,7 @@ export const createEngineObject = ({ loadEngine, createTransport, createSigner, 
                 this.host = undefined;
                 this.hostLifetime = undefined;
                 this.startupFailure = JSON.stringify({ op: 'startupFailed', detail: {
-                  message: 'Trading was interrupted for this account; recreate the engine',
+                  message: 'Trading was interrupted for this account. Reload the account.',
                   kind: 'internal', outcome: 'unknown',
                 } });
                 this.broadcast(this.startupFailure);

@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { SignRequest, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions, PayloadSigner, RemoteSigner } from '../../types';
 
@@ -269,8 +270,8 @@ const privateRefusal = ({ name, version }: VenueCase, kind: 'remote' | 'payload'
   const policy = deriveRemoteSigningPolicy(name);
   if (policy?.enabled !== true)
     return kind === 'remote'
-      ? `${exchangeMetadata[name].prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`
-      : `${exchangeMetadata[name].prettyName} delegated signing is unsupported in this build`;
+      ? `${exchangeMetadata[name].prettyName} isn’t available for server trading yet. Use browser trading for this exchange.`
+      : `Server trading for ${exchangeMetadata[name].prettyName} isn’t available in this version`;
   if (kind === 'remote') return undefined;
   if (name === 'asterdex' && version === 'v3')
     return 'This signing connection supports AsterDEX V1 but not V3 account keys';
@@ -732,7 +733,7 @@ it('keeps the review controls for configured callbacks', () => {
     expect.objectContaining({
       kind: 'unsupported',
       outcome: 'notSent',
-      message: `${exchangeMetadata.krakenspot.prettyName} isn't available on the Hosted Server yet; turn Hosted Server off to trade it with your API key in this browser`,
+      message: `${exchangeMetadata.krakenspot.prettyName} isn’t available for server trading yet. Use browser trading for this exchange.`,
     }),
   );
   const privateKraken = new RustEngineExchange(

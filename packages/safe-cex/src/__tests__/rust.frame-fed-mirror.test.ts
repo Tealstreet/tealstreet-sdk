@@ -278,7 +278,7 @@ describe('frame-fed main-thread mirror', () => {
       await expect(mirror.exchange.placeOrder(order)).rejects.toMatchObject({ outcome: 'notSent' });
 
       expect(errors).toHaveLength(1);
-      expect(String(errors[0])).toContain('manual-write engine');
+      expect(String(errors[0])).toContain('this account makes changes through its server connection');
       expect(mirror.calls).toEqual([]);
     });
 

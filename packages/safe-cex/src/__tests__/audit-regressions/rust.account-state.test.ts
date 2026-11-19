@@ -429,7 +429,7 @@ describe('Rust native current-account reads', () => {
       { loaded },
       r.store.markets.map((row) => row.symbol),
     );
-    expect(() => r.exchange.syncAccountState()).toThrow('not started');
+    expect(() => r.exchange.syncAccountState()).toThrow('The account is still loading');
     const starting = r.exchange.start().catch(() => {});
     await vi.advanceTimersByTimeAsync(250);
     expect(() => r.exchange.syncAccountState()).toThrow('catalog is not ready');
@@ -679,7 +679,7 @@ describe('Rust native current-account reads', () => {
     exchange.command = (c) => (c.op === 'cancelAccountOrders' ? Promise.reject(new Error('refused')) : command(c));
     const nuking = r.exchange.nukeOrders().catch((error: Error) => error);
     await vi.advanceTimersByTimeAsync(600);
-    expect(((await nuking) as Error).message).toContain('including triggers and TP/SL, may remain on this venue');
+    expect(((await nuking) as Error).message).toContain('including triggers and TP/SL. Check your open orders.');
   });
 
   it('sends no account-wide cancel from a plain cancel-all, nor on a venue without one', async () => {
@@ -778,7 +778,7 @@ describe('Rust native current-account reads', () => {
     r.exchange.readPositions = () => Promise.resolve(body as never);
     const nuking = r.exchange.nukePositions().catch((thrown: Error) => thrown.message);
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(await nuking).toMatch(/could not confirm the account is flat/);
+    expect(await nuking).toMatch(/Nuke couldn’t confirm all positions were closed/);
     expect(r.commands.filter((c) => c.op === 'placeOrders')).toHaveLength(1);
   });
 

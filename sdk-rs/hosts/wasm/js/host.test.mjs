@@ -15,7 +15,7 @@ test('capabilities are read from the engine once and outlive disposal', () => {
   assert.equal(reads, 1);
   const disposed = new EngineHost({ capabilities: () => '{}' }, {});
   disposed.dispose();
-  assert.throws(() => disposed.capabilities(), /disposed/);
+  assert.throws(() => disposed.capabilities(), /The account was closed/);
 });
 
 for (const entry of ['legacy', 'actions', 'bytes']) {
@@ -481,7 +481,7 @@ test('already queued timers cannot enter the engine after disposal', () => {
   for (const callback of callbacks) callback();
   host.start();
   host.flush();
-  assert.throws(() => host.snapshot(), /disposed/);
+  assert.throws(() => host.snapshot(), /The account was closed/);
   assert.equal(calls, 0);
 });
 

@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { SignRequest } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, RemoteSignerRequest } from '../../types';
 
@@ -20,7 +21,7 @@ it('admits Backpack RemoteSigner while undeclared venues still refuse before cal
     let refusal: unknown;
     try { assertBetaAccount(name, { key: 'fixture-private-key', remoteSigner }); } catch (error) { refusal = error; }
     expect(refusal).toMatchObject({ kind: 'unsupported', outcome: 'notSent',
-      message: expect.stringContaining("isn't available on the Hosted Server") });
+      message: expect.stringContaining("isn’t available for server trading") });
   }
   expect(remoteSigner.sign).not.toHaveBeenCalled();
 });

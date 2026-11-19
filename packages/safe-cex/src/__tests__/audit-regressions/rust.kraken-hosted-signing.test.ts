@@ -1,3 +1,4 @@
+// Rule 5: update display pins only; typed refusal, ownership and no-send assertions stay intact.
 import type { SignRequest } from '@tealstreet/safe-cex-wasm/host';
 import type { RemoteSignerRequest } from '../../types';
 
@@ -44,7 +45,7 @@ it('declares Futures remote custody and base64 setup without enabling Spot or Pa
   expect(() => assertBetaAccount('kraken', { key: 'fixture-key', remoteSigner })).not.toThrow();
   expect(deriveRemoteSigningPolicy('krakenspot')).toBeUndefined();
   expect(() => assertBetaAccount('krakenspot', { key: 'fixture-key', remoteSigner }))
-    .toThrow(/isn't available on the Hosted Server/);
+    .toThrow(/isn’t available for server trading/);
   expect(
     () => new DelegatedSignerSetup('kraken', { key: 'fixture-key', secret: '', payloadSigner: vi.fn() }),
   ).toThrow();
