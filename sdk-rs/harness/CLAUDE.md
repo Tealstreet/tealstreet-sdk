@@ -17,6 +17,12 @@ certification instructions are not current CI requirements.
 - Fingerprint movers need fresh optimized web/Node size evidence with at least
   10 KiB reserve, rounded up to KiB, while preserving historical size floors.
 
+Native message-stat IDs borrow the existing topic key and one cached feed prefix
+when encoding a frame, rather than retaining another formatted copy per topic.
+The captured OKXEU X-Perp allocation regression preserves every emitted identity;
+UTF-8, empty keys, interleaved strings and reconnect controls cover the writer.
+The fixed 16-pair public replay and its 10% memory bound remain unchanged.
+
 Bybit order-history retention is decided at completion and preserves earlier
 page-failure causes. Fresh family and combined artifacts must retain the
 10 KiB reserve.

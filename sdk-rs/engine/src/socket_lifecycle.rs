@@ -595,7 +595,6 @@ fn compare_topic_parts(key: &str, parts: &[&str]) -> std::cmp::Ordering {
 }
 
 struct TopicStats {
-    id: Box<str>,
     // Like implicit_received, NaN denotes no finite receipt yet.
     received_at: f64,
     public_topic: bool,
@@ -623,6 +622,7 @@ struct Feed {
     pong_seen: bool,
     interests: Interests,
     message_stats: Map<Arc<str>, TopicStats>,
+    stats_prefix: Box<str>,
     implicit_stats: bool,
     implicit_received: f64,
     implicit_observed: bool,
@@ -859,13 +859,12 @@ impl Lifecycle {
     }
 
     pub(crate) fn prepare_stats(&mut self) {
-        for (index, f) in self.feeds.iter_mut().enumerate() {
+        for f in &mut self.feeds {
             if f.implicit_stats {
                 if f.message_stats.is_empty() {
                     f.message_stats.insert(
                         Arc::from("private"),
                         TopicStats {
-                            id: Box::default(),
                             received_at: f64::NAN,
                             public_topic: false,
                             dirty: true,
@@ -885,11 +884,6 @@ impl Lifecycle {
                 stats.received_at = received;
                 stats.observed = f.implicit_observed;
             }
-            for (key, stats) in &mut f.message_stats.0 {
-                if stats.id.is_empty() {
-                    stats.id = format!("{index}.{key}").into_boxed_str();
-                }
-            }
         }
     }
 
@@ -898,10 +892,14 @@ impl Lifecycle {
         let full = snapshot || self.stats_replace;
         self.feeds
             .iter()
-            .flat_map(|feed| feed.message_stats.values())
-            .filter(|stats| full || stats.dirty)
-            .fold((32, 0), |(bytes, strings), stats| {
-                (bytes + 24 + 4 + stats.id.len(), strings + 1)
+            .flat_map(|feed| {
+                feed.message_stats
+                    .iter()
+                    .map(move |(key, stats)| (feed.stats_prefix.len() + key.len(), stats))
+            })
+            .filter(|(_, stats)| full || stats.dirty)
+            .fold((32, 0), |(bytes, strings), (length, _)| {
+                (bytes + 24 + 4 + length, strings + 1)
             })
     }
 
@@ -934,7 +932,7 @@ impl Lifecycle {
                 SocketChannel::Business => 1,
                 SocketChannel::Private => 3,
             };
-            for (_, stats) in f
+            for (key, stats) in f
                 .message_stats
                 .iter()
                 .filter(|(_, stats)| full || stats.dirty)
@@ -944,7 +942,7 @@ impl Lifecycle {
                 } else {
                     stats.subscribed
                 };
-                let topic = writer.string(&stats.id);
+                let topic = writer.prefixed_string(&f.stats_prefix, key);
                 writer.u32(if stats.public_topic { 0 } else { group });
                 writer.u32(topic);
                 writer.u32(u32::from(subscribed) | (u32::from(subscribed && stats.observed) << 1));
@@ -1084,6 +1082,7 @@ impl Lifecycle {
             pong_seen: false,
             interests: Interests::default(),
             message_stats: Map::default(),
+            stats_prefix: format!("{}.", id.0).into_boxed_str(),
             implicit_stats,
             implicit_received: f64::NAN,
             implicit_observed: false,
@@ -1694,7 +1693,6 @@ impl Lifecycle {
                 f.message_stats.insert(
                     key.clone(),
                     TopicStats {
-                        id: Box::default(),
                         received_at: f64::NAN,
                         public_topic,
                         dirty: true,
@@ -2106,6 +2104,31 @@ mod sorted {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn emitted_stats_ids(lifecycle: &Lifecycle) -> Vec<String> {
+        let mut writer = crate::wire::FrameWriter::new(Vec::new(), 100.);
+        lifecycle.write_stats(&mut writer, 100., true);
+        let frame = writer.finish();
+        let strings = crate::wire::sections(&frame)
+            .find(|(kind, _)| *kind == crate::wire::section::STRINGS)
+            .unwrap()
+            .1;
+        let count = u32::from_le_bytes(strings[..4].try_into().unwrap()) as usize;
+        let data = 4 + 4 * (count + 1);
+        (0..count)
+            .map(|index| {
+                let start =
+                    u32::from_le_bytes(strings[4 + index * 4..8 + index * 4].try_into().unwrap())
+                        as usize;
+                let end =
+                    u32::from_le_bytes(strings[8 + index * 4..12 + index * 4].try_into().unwrap())
+                        as usize;
+                std::str::from_utf8(&strings[data + start..data + end])
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect()
+    }
 
     fn policy(auth: AuthMode) -> FeedPolicy {
         FeedPolicy {
@@ -3482,7 +3505,7 @@ mod tests {
         assert!(!l.stats_due(1_001.));
         assert!(l.stats_due(1_002.));
         l.prepare_stats();
-        let id = l.feeds[feed.0].message_stats["ticker.BTC"].id.clone();
+        let ids = emitted_stats_ids(&l);
         let retired = l.retire(feed).unwrap();
         l.record_topic(epoch, &["ticker.BTC"], 4.);
         assert_eq!(
@@ -3497,7 +3520,7 @@ mod tests {
         while l.release_batch(next, false).is_some() {}
         l.record_topic(next, &["ticker.BTC"], 1_004.);
         l.prepare_stats();
-        assert_eq!(l.feeds[feed.0].message_stats["ticker.BTC"].id, id);
+        assert_eq!(emitted_stats_ids(&l), ids);
         assert_eq!(
             l.feeds[feed.0].message_stats["ticker.BTC"].received(),
             Some(1_004.)
@@ -3541,6 +3564,86 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn captured_xperp_topic_stats_do_not_retain_duplicate_topic_id_text() {
+        #[derive(serde::Deserialize)]
+        struct Record {
+            #[serde(rename = "type")]
+            kind: String,
+            #[serde(default)]
+            text: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct Message {
+            #[serde(default)]
+            event: String,
+            arg: Option<Topic>,
+        }
+        #[derive(serde::Deserialize, serde::Serialize)]
+        #[serde(deny_unknown_fields)]
+        struct Topic {
+            channel: String,
+            #[serde(rename = "instId")]
+            instrument: String,
+        }
+        let tape = std::process::Command::new("gzip")
+            .args([
+                "-dc",
+                concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../harness/fixtures/okxeu-xperp-public.jsonl.gz"
+                ),
+            ])
+            .output()
+            .unwrap();
+        assert!(tape.status.success());
+        let keys: std::collections::BTreeSet<String> = tape
+            .stdout
+            .split(|b| *b == b'\n')
+            .filter_map(|line| {
+                let row: Record = serde_json::from_slice(line).ok()?;
+                if row.kind != "ws" {
+                    return None;
+                }
+                let message: Message = serde_json::from_str(&row.text).ok()?;
+                let topic = message.arg?;
+                if message.event != "subscribe" || topic.channel != "tickers" {
+                    return None;
+                }
+                serde_json::to_string(&topic).ok()
+            })
+            .collect();
+        assert_eq!(keys.len(), 750);
+        assert!(
+            keys.iter()
+                .any(|key| key.contains("BTC-USD_UM_XPERP-310404"))
+        );
+        let (mut lifecycle, feed, _) = started(AuthMode::None);
+        lifecycle
+            .replace_interests(
+                feed,
+                keys.iter().map(|key| interest(key)).collect(),
+                |op, items, emit| {
+                    for chunk in items.chunks(64) {
+                        encode(op, chunk, emit)?;
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+        let retained = crate::test_alloc::retained(|| lifecycle.prepare_stats());
+        eprintln!("captured topic-ID retained allocation: {retained} bytes");
+        assert!(
+            retained <= 4096,
+            "native topic IDs retained {retained} duplicate bytes"
+        );
+        let ids = emitted_stats_ids(&lifecycle);
+        assert_eq!(ids.len(), keys.len());
+        for (actual, (key, _)) in ids.iter().zip(lifecycle.feeds[feed.0].message_stats.iter()) {
+            assert_eq!(actual, &format!("0.{key}"));
         }
     }
 
