@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { expectedGateCases, gateCaseKey, replayMatrix, validateGateCoverage } from './ci-gate-suites.mjs';
 import { venueFamily } from '../hosts/wasm/js/venues.mjs';
 
@@ -69,3 +70,24 @@ test('family comparisons build the same Binance family even against a pre-shardi
   assert.match(collector, /'--venue', authority\['family'\]/);
   assert.doesNotMatch(collector, /'--venue', authority\['suite'\]/);
 });
+
+for (const suite of [...suites, 'bitget', 'bitgetusdc']) {
+  test(`${suite} retains the original diagnostic sweep's private pair count`, () => {
+    const measurement = job('gate');
+    const block = measurement.split(/^          - venue: /m).slice(1).find(row => row.startsWith(`${suite}\n`));
+    assert(block, suite);
+    const matrix = { venue: suite, family: /^            family: (\S+)/m.exec(block)?.[1] };
+    const expression = /^      PRIVATE_REPLAY_RUNS: \$\{\{ (.*) \}\}$/m.exec(measurement)?.[1];
+    assert(expression, 'evaluate the actual workflow condition');
+    const evaluate = (head_ref, ref_name = 'master') => runInNewContext(expression, {
+      matrix, github: { head_ref, ref_name }, format: (pattern, value) => pattern.replace('{0}', value),
+    }, { timeout: 100 });
+    assert.equal(evaluate('ordinary-change'), '1');
+    const sweep = `wip/harness-tape-time-${suite.startsWith('binance') ? 'binance' : 'bitget'}`;
+    assert.equal(evaluate(sweep), '5');
+    assert.equal(evaluate(`wip/harness-tape-time-${suite}`),
+      suite.startsWith('binance') && suite !== 'binance' ? '1' : '5', 'per-product branches retain their former behavior');
+    assert.equal(evaluate('', sweep), '5', 'pushes use ref_name just like PR head_ref');
+    assert.equal(evaluate('ordinary-change', sweep), '1', 'head_ref retains precedence');
+  });
+}
