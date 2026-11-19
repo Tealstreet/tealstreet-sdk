@@ -1152,6 +1152,12 @@ The error propagates through `buildFoldedPositionRecords`; never silently drop t
 position or label BNB/mixed-currency fees as USDT. Raw fills retain their native
 fee amounts and currencies. Settlement-denominated fees and rebates are unchanged.
 
+OKX's position journal marks `coverageGap` when a raw historical instrument is
+absent from the current catalogue, including when no rows can be mapped. Raw
+closed-position reads retain those source rows and instrument IDs; normalized
+symbols and base sizes are never guessed. Known inverse markets remain explicitly
+outside this linear journal grade and do not alone add an incompleteness marker.
+
 The journal fold rejects flagged fills and symbol-scoped income; with complete
 account-wide fills it discards flagged income enrichment and leaves funding
 unattributed. NX ingestion must still inspect completeness before transforms

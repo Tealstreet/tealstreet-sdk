@@ -529,6 +529,8 @@ impl Okx {
             || from.zip(to).is_some_and(|(from, to)| from > to)
         {
             Some(Err("invalid OKX history time bounds"))
+        } else if symbol.is_some() && instrument.is_none() && matches!(rows, Rows::Orders(_)) {
+            Some(Err("OKX order history has an unresolved historical market"))
         } else if symbol.is_some() && instrument.is_none() {
             Some(Ok("[]"))
         } else {
@@ -1016,17 +1018,22 @@ impl Okx {
                     return;
                 };
                 r.cursor(row.ord_id);
-                let Some(m) = cx.store.market_by_id(row.inst_id) else {
-                    return;
-                };
                 let Some(time) = positive(row.c_time) else {
                     return;
                 };
-                if row.ord_id.is_empty()
-                    || !matches!(row.side, "buy" | "sell")
-                    || !r.within(time)
-                    || r.symbol.as_deref().is_some_and(|s| s != m.symbol)
-                {
+                if row.ord_id.is_empty() || !matches!(row.side, "buy" | "sell") || !r.within(time) {
+                    return;
+                }
+                let Some(m) = cx.store.market_by_id(row.inst_id) else {
+                    if r.instrument.as_deref().is_none_or(|id| id == row.inst_id) {
+                        r.completion.incomplete(
+                            safe_cex_engine::history::IncompleteReason::CoverageGap,
+                            "OKX order history has an unresolved historical market; contract metadata is unavailable",
+                        );
+                    }
+                    return;
+                };
+                if r.symbol.as_deref().is_some_and(|s| s != m.symbol) {
                     return;
                 }
                 // Derivative fee is a signed aggregate: negative charge, positive credit.

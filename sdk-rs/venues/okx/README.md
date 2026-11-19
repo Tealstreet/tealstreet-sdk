@@ -128,6 +128,16 @@ genuine signature answers still receive only one retry before permanent refusal.
 Public/frame-fed, non-EEA and already-configured refresh paths retain their
 existing behavior. No startup step places or replays a trading write.
 
+## Unresolved historical order markets
+
+An order can outlive its instrument's current catalogue entry. An in-window row
+that cannot be normalized marks the owning history command `coverageGap`, even
+when no orders can be mapped; it cannot prove completed coverage. Available
+mapped orders retain their sizing and identity. An unrelated instrument or a row
+outside the requested time window does not mark that window incomplete.
+Symbol-scoped order history with no market metadata refuses locally rather than
+returning a successful empty result. No symbol or contract size is guessed.
+
 ## Order-history financial projection
 
 Ordinary derivative order history retains the native `pnl`, `fee` and `feeCcy`
