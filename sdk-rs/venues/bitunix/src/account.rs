@@ -250,6 +250,8 @@ pub struct AccountState {
     pub position_ids: HashMap<String, String>,
     pub ws_position_ids: HashMap<String, String>,
     pub native: HashMap<String, NativeOrder>,
+    /// Raw ids known to be a position TP/SL: the REST pending list carries no `type` (AGT-71).
+    pub full_position_ids: HashSet<String>,
     pub tifs: HashMap<String, TimeInForce>,
     pub reduces: HashMap<String, bool>,
     pub filled: HashMap<String, (f64, f64)>,
@@ -1564,8 +1566,105 @@ impl BitunixFutures {
             }
         }
         orders.extend(read.orders);
+        self.remember_full_positions(&read.native);
         self.account.native.extend(read.native);
         orders
+    }
+    /// A TP/SL order gained a leg (a position TP/SL holds both under one id): list both legs
+    /// under their derived ids instead of updating the single leg already listed (AGT-71).
+    /// A leg absent from the push is kept; the follow-up read settles removals.
+    fn list_added_tpsl_leg(&mut self, cx: &mut Cx<'_, Pending>, o: &OrderRow<'_>, raw: &str) {
+        let listed: Vec<(String, OrderType)> = cx
+            .store
+            .orders()
+            .iter()
+            .filter(|r| {
+                r.status == OrderStatus::Open
+                    && (r.id == raw
+                        || self
+                            .account
+                            .native
+                            .get(&r.id)
+                            .is_some_and(|n| !n.attached && n.raw_id == raw))
+            })
+            .map(|r| (r.id.clone(), r.kind))
+            .collect();
+        let Some(known) = listed
+            .iter()
+            .find_map(|(id, _)| self.account.native.get(id))
+            .cloned()
+        else {
+            return;
+        };
+        let has = |kind| listed.iter().any(|(_, k)| *k == kind);
+        let tp = o.tp_price.map(|n| n.0).or(known.tp);
+        let sl = o.sl_price.map(|n| n.0).or(known.sl);
+        if (tp.is_none() || has(OrderType::TakeProfit))
+            && (sl.is_none() || has(OrderType::StopLoss))
+        {
+            return;
+        }
+        let stop_text = |stop: Option<StopTriggerType>| match stop {
+            Some(StopTriggerType::MarkPrice) => "MARK_PRICE",
+            _ => "LAST_PRICE",
+        };
+        let pick = |pushed: &Str<'_>, known: Option<StopTriggerType>| -> Str<'static> {
+            if pushed.is_empty() {
+                Str::Borrowed(stop_text(known))
+            } else {
+                Str::Owned(pushed.to_string())
+            }
+        };
+        let merged = OrderRow {
+            symbol: o.symbol.clone(),
+            order_id: o.order_id.clone(),
+            position_id: if o.position_id.is_empty() {
+                Str::Owned(known.position_id.clone())
+            } else {
+                o.position_id.clone()
+            },
+            side: o.side.clone(),
+            kind: if o.kind.is_empty() && known.full_position {
+                Str::Borrowed("POSITION_TPSL")
+            } else {
+                o.kind.clone()
+            },
+            mtime: o.mtime.clone(),
+            tp_price: tp.map(Num),
+            sl_price: sl.map(Num),
+            tp_stop_type: pick(&o.tp_stop_type, known.tp_stop),
+            sl_stop_type: pick(&o.sl_stop_type, known.sl_stop),
+            tp_order_type: o.tp_order_type.clone(),
+            sl_order_type: o.sl_order_type.clone(),
+            tp_qty: o.tp_qty,
+            sl_qty: o.sl_qty,
+            tp_order_price: o.tp_order_price,
+            sl_order_price: o.sl_order_price,
+            ..OrderRow::default()
+        };
+        let (rows, native) = self.map_orders(cx, &merged, true, true);
+        let stale: Vec<&str> = listed
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .filter(|id| !rows.iter().any(|r| r.id == *id))
+            .collect();
+        cx.store.remove_orders(&stale);
+        for id in &stale {
+            self.account.native.remove(*id);
+        }
+        for row in rows {
+            cx.store.upsert_order(row);
+        }
+        self.remember_full_positions(&native);
+        self.account.native.extend(native);
+    }
+    pub(crate) fn remember_full_positions(&mut self, native: &[(String, NativeOrder)]) {
+        self.account.full_position_ids.extend(
+            native
+                .iter()
+                .filter(|(_, n)| n.full_position)
+                .map(|(_, n)| n.raw_id.clone()),
+        );
     }
     pub(crate) fn map_orders(
         &self,
@@ -1627,7 +1726,8 @@ impl BitunixFutures {
         let native = NativeOrder {
             raw_id: raw.clone(),
             position_id: o.position_id.to_string(),
-            full_position: o.kind.eq_ignore_ascii_case("POSITION_TPSL"),
+            full_position: o.kind.eq_ignore_ascii_case("POSITION_TPSL")
+                || (tpsl && o.kind.is_empty() && self.account.full_position_ids.contains(&raw)),
             attached: false,
             tp: o.tp_price.map(|n| n.0),
             sl: o.sl_price.map(|n| n.0),
@@ -1904,12 +2004,17 @@ impl BitunixFutures {
                         for row in rows {
                             cx.store.upsert_order(row);
                         }
+                        self.remember_full_positions(&native);
                         self.account.native.extend(native);
                     } else if o.event != "CREATE"
                         || (!tpsl && execution_parent.is_some() && o.side.is_empty())
                     {
                         if o.event == "CLOSE" {
                             self.account.terminal.insert(raw.to_owned(), cx.now);
+                            self.account.full_position_ids.remove(raw);
+                        }
+                        if tpsl && o.event == "UPDATE" && !stale_timestamp {
+                            self.list_added_tpsl_leg(cx, &o, raw);
                         }
                         let ids: Vec<_> = cx
                             .store
