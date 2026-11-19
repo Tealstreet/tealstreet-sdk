@@ -2219,9 +2219,8 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private refuseOnMirror() {
-    const members = this;
     for (const method of WORKER_MIRROR_UNSUPPORTED_METHODS) {
-      members[method] = () => {
+      this[method] = () => {
         const message = `${method} is not available on the main-thread exchange: it runs in the account's worker`;
         throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
       };
