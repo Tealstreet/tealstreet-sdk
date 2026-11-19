@@ -1607,3 +1607,96 @@ Pre-cutover branch provenance comments, retained verbatim:
   // Measured +10 KiB rounded up; retain all parent floors, 10,250 B reserve.
   // Same fresh Hyperliquid family measurement and retained historical floors above.
 ```
+
+## #3671 measured parent floor retained through the generated-cap migration
+
+The plain master merge of parent `793ae174cdd811ece38c3309744d257d76c481ba`
+with `655d5df09477074ad857b283b3f920188a4ef898` retains the larger Binance
+parent floor, 2,412,544 B, in `wasm-caps.json`. This migrates an already measured
+floor; it is not a new unmeasured cap raise. All other family and combined
+ceilings match master. The old per-PR census tuples are retired in favor of
+the generated mechanism tests, as AGT-23 requires. The following parent notes
+are historical provenance, not a fresh merged-head artifact certificate.
+
+Binance saturated-history paging #3671 at exact source `80e0a8fb9fa` was
+measured in Rust SDK run `44344562850`, artifact `14444829191`. Optimized
+web/Node/replay modules agree at 2,282,595 bytes (SHA256
+`52beaef3ebde8cfaaf777516cb2c87f0235d34a243c077adfe173a9dd5ea8ae3`).
+The family floor is 2,293,760 bytes: measured + 10 KiB rounded up,
+retaining the prior 2,290,688-byte floor and 11,165 bytes of reserve.
+The combined artifact `14447356528` measures 17,685,652 bytes, leaving
+140,140 bytes under its unchanged cap. Pinned Rust1.99.0, bindgen0.2.129,
+Binaryen132 and required -Oz settings are unchanged.
+
+#3671's M49 composition at `6c9370d8ecdd0e082ecb8e8942077ac011101096`
+uses its own PR CI `44441524748` and the tree-identical checkout
+`7d23ca64972600ed7bd9df6e690116388190e4c5`. All 27 optimized family
+artifacts retain pinned tools, source/run/input seals and matching web/Node/replay
+hashes. Only Binance misses the 10 KiB reserve: job `135283817066`, artifact
+`14491516834` measures 2,402,182 bytes, leaving 8,314 under the inherited cap.
+Measured +10 KiB rounded up gives 2,412,544 bytes, retaining the 2,410,496-byte
+parent floor and 10,362 bytes of reserve. The M48 census remains a floor;
+the M49 census pins every current family cap, alias and cap/cap+1 refusal.
+No runtime input or other family/combined ceiling changes. Final-head required
+coverage and actual native/combined consumers remain independent gates.
+
+The complete parent M49 measurement tuples below are archival data, not executable
+per-PR cap tests or a measurement of this new merged head. Current mechanism,
+alias mapping, inclusive ceilings and cap+1 refusal tests remain master
+`wasm-budget.test.mjs`.
+
+```js
+// #3671 M49 rule17: own merged head6c9370d8ecdd0e082ecb8e8942077ac011101096, PR run44441524748.
+// Built source7d23ca64972600ed7bd9df6e690116388190e4c5 has the identical tree117478ee4102eee550d563389ac1789a8949673a.
+// All27 family ZIP digests, source/run/input seals, JS/package/module hashes and optimized web/Node/replay pairs verified.
+// Rust1.99.0 / bindgen0.2.129 / Binaryen132 twice -Oz required; input fingerprint8ad5a8ed14c8eb46ad88ea2e22a3561612449c52d43f2a3da2682de44ef12c8e.
+// Tuples: family, measured bytes, larger parent cap, module SHA256, all routed aliases, artifact ID, family build job ID.
+const m49BinancePagingReserveMeasurements = [
+  ['apexomni', 2_221_419, 2_232_320, 'ef17b39c836a3ec30ca7d3cfcd96fe324b8b4cc9b58d4a4277824a727294aa91', ['apexomni'], 14491840280, 135283816950],
+  ['asterdex', 2_385_133, 2_396_160, '541bddd20f80d03653e79c1fadb200bdeec0698d00a909ac3b7b319c6b257958', ['asterdex'], 14490734648, 135283816919],
+  ['backpack', 2_194_252, 2_204_672, '9e4b86a0f71fe0f213ee2db58a6796e3a678a06aac921a96b289d35f106eb91e', ['backpack'], 14490783565, 135283816973],
+  ['binance', 2_402_182, 2_410_496, '4fc6206781d53b27a652363155d0410a0bc4d75b5a677efaf2fea609e64930df', ['binance', 'binanceinverse', 'binancepm', 'binanceoptions', 'binancespot'], 14491516834, 135283817066],
+  ['bingx', 2_280_457, 2_291_712, '272f2ae883b996e884840be09f0d55fcdba756b49e1892112470ce4023d991c4', ['bingx', 'bingxspot'], 14491421851, 135283816882],
+  ['bitget', 2_919_109, 2_929_664, '4b4a6a08d1dce0a40edd21b32cd59e59f59c4d4bbbec232f94b68ef09fac8ecb', ['bitget', 'bitgetinverse', 'bitgetusdc'], 14491636220, 135283816995],
+  ['bitrue', 2_030_311, 2_040_832, '6a6f2007b2e78457d33e36db142b57c892282d3fb12157ec5a56548ca6f76314', ['bitrue'], 14491950221, 135283817037],
+  ['bitunix', 2_060_309, 2_071_552, '259d7f7c42217927e3b78aa3d5dbe73a58ea575a8eeb4614a66223eec463a07a', ['bitunix'], 14490654575, 135283817028],
+  ['blofin', 2_193_059, 2_203_648, 'b6858d2b82fc868e589b5e80455ddf4f443bb1b9ac9065f1b1a133d52aed6846', ['blofin'], 14490499088, 135283817081],
+  ['bybit', 2_676_941, 2_696_192, 'e0131d879a3ab7055fd3415e898c95ab4c2ef88a83f19ce6e7e49165b9c00785', ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'], 14491576458, 135283817048],
+  ['coinbase', 2_467_165, 2_478_080, '4bc75a578c84de8e311878e198cb9c03627cefc3d13d7acf80710f0001f59690', ['coinbase', 'coinbasespot'], 14491755350, 135283816931],
+  ['cryptocom', 1_935_691, 1_946_624, '2179663ac7ec334f11dd737a18e3e6004a974ec9547a84a440648d4f9ec4588f', ['cryptocom'], 14491377094, 135283817017],
+  ['grvt', 2_161_326, 2_171_904, 'ff82bd79aa884e7bd2c761ba5e1f7f6207c29060bb2885457fc5d0110f9d075d', ['grvt'], 14491164314, 135283817063],
+  ['hyperliquid', 2_428_911, 2_440_192, '1cf92064c945d5addbe45b8d3e7d7e8a0938a4bdb841e95c4d1dbc7919caa818', ['hyperliquid', 'hyperliquidspot'], 14491995080, 135283817235],
+  ['kraken', 2_412_529, 2_423_808, '6babfbee8410ed263527da399bb25c94dea98b834f030f7500881b2db1f59465', ['kraken', 'krakenspot'], 14490979592, 135283816985],
+  ['kucoin', 1_987_327, 1_997_824, '312cfa5c38a46076c1a4c085456e7f261d46673e785090a2969e2672d52914bb', ['kucoin'], 14489904988, 135283816979],
+  ['kucoinspot', 2_669_596, 2_680_832, 'b34c4c82215750a4fc7031143cac366ed5d7cfc82399ddc96ab13deab4f520eb', ['kucoinspot'], 14491750777, 135283817042],
+  ['lighter', 2_343_190, 2_354_176, 'b45e012230d54875a5e7183a64e40a5ca1e9b4ca01579c9c34cd646e7391d442', ['lighter', 'lighter-robinhood'], 14491491797, 135283816994],
+  ['mexc', 2_074_432, 2_084_864, '21fe260572fc9a6efa99f898a9bd380fb50ae6d17e203d1f01ff85bed6857a41', ['mexc'], 14490763823, 135283817350],
+  ['okx', 2_181_378, 2_192_384, '5754641f60a4094992f8fc052990303ebbfc4188421a7938655fe5ff3e4a504a', ['okx', 'okxdemo', 'okxeu', 'okxeudemo'], 14490084851, 135283817354],
+  ['orderly', 1_904_311, 1_914_880, '74922b4fcb3dee097143f7f22be5a868f654753972442f2ada6deeba087d8f4c', ['orderly', 'kodiakfi', 'mode', 'what', 'woofi'], 14490923437, 135283817209],
+  ['paradex', 2_431_392, 2_442_240, 'ee4714b2e2bd71a89d24f139d5c2405af49238936542a8609f17e7535c52ad6d', ['paradex'], 14490874758, 135283817157],
+  ['phemex', 2_243_042, 2_253_824, '95fd0cb08905951516047c40d41ab947b99b130a68f0d7e4b44fa47fe7a191bb', ['phemex'], 14490984403, 135283817390],
+  ['polymarket', 1_786_673, 1_797_120, 'fbf879c883e9dfd8c8956c92ebdc0dfbcde371ea9e5d47f51d098b678a83a677', ['polymarket'], 14492040196, 135283817298],
+  ['txflow', 2_287_899, 2_298_880, 'fb3f1df78c15cda35023c16db94dcdd78416e9800cfe41ddefff58924f7fcabc', ['txflow'], 14491790719, 135283817687],
+  ['weex', 2_150_790, 2_161_664, 'b6007d2d6f23d3063812c2fef30a0a045605090c66abab1ffa052e28d9129c60', ['weex'], 14491323900, 135283817315],
+  ['woo', 2_875_139, 2_885_632, '3fc66068aa915daa0fba4d680d20da7193ee570e7e56592799b4045c0e80af48', ['woo'], 14491129364, 135283817394],
+];
+```
+
+
+## #3671 AGT-23 policy reconciliation (2026-11-19)
+
+Merge `287f962369782b1b989df0e08847616d20048b38` carried the historical
+2,412,544-byte Binance floor from its first parent. Sam's subsequent explicit
+ruling supersedes that manual floor with AGT-23: PRs do not change active caps.
+The ordinary follow-up restores current master
+`655d5df09477074ad857b283b3f920188a4ef898`'s generated Binance cap of
+2,410,496 bytes; all other caps, the generator and its tests remain unchanged.
+The parent measurements and complete M49 tuples above remain historical evidence.
+
+The merge's own Rust SDK run `44460589727`, artifact `14499782679`, measures
+2,402,182 bytes, below the restored ceiling by 8,314 bytes. That reserve is an
+advisory AGT-23 warning, not a reason for another per-PR cap raise. The generator
+would compute 2,412,544 bytes for this measurement, but restoration belongs to
+the master artifact bot after master measurement. These parent artifacts do not
+replace fresh final-head gates or artifact provenance, and no memory or financial
+guard changes.

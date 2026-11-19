@@ -1102,6 +1102,15 @@ value or raw parser text crosses this diagnostic boundary. Existing Bitget/Krake
 schema/reason objects retain their wire shape. NX history-window reporting needs
 the companion allowlisted forwarding change after the SDK mirror import.
 
+## Binance folded-position lookback
+
+Binance's 14-day straddle lookback uses one native fill-range request per
+symbol, under its original read root and deadline. The native adapter keeps
+its existing seven-day windows and subdivides only saturated pages. Sparse
+accounts incur no extra reads from unconditional daily subdivision. Any
+incomplete source still refuses the fold; a small target window cannot hide
+a saturated lookback. Other venues retain their existing read shape and limits.
+
 ## Rust incomplete history
 
 A successful partial Rust history read returns the available rows with a

@@ -197,3 +197,10 @@ no managed Bitunix feeds. An unopened private dial is not a login-answer timeout
 Historical #2301 measurements and retained branch ceilings are archived in
 `wasm-caps-history.md`; use the generated cap mechanism above, without restoring
 per-PR measurement census tests or superseded batch/reviewer-count holds.
+
+Binance saturated-history paging preserves the existing request pacing and caller
+deadlines. The measured #3671 Binance floor and its historical CI provenance are
+retained in `wasm-caps-history.md` as historical evidence. AGT-23 supersedes that
+PR-local floor: the active cap follows master, and only the master artifact bot
+restores its reserve. Fresh artifacts must fit the byte ceiling; reserve warnings
+remain advisory. Native/combined consumers remain independent gates.
