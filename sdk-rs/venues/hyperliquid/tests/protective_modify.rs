@@ -616,7 +616,10 @@ fn a_newer_protection_cannot_be_overwritten_by_restoring_the_old_one() {
 #[test]
 fn held_restore_rechecks_position_newer_protection_and_fresh_original_trigger() {
     use safe_cex_engine::request_context::{HttpAction, Prepared};
-    for case in ["closed", "newer", "crossed", "stale", "filled"] {
+    // "stale" left this refusal set (AGT-47 follow-up): a put-back whose mark went
+    // stale is now released, because being protected beats the freshness gate. See
+    // `stale_held_restore_is_released_with_an_unverified_outcome` in protective_mark_freshness.rs.
+    for case in ["closed", "newer", "crossed", "filled"] {
         let row = order("Take Profit Market", "120", "0");
         let (mut e, s) = setup(&row);
         let replacement = fallback_place(&mut e, &row);
@@ -658,7 +661,7 @@ fn held_restore_rechecks_position_newer_protection_and_fresh_original_trigger() 
                 _ => None,
             })
             .unwrap();
-        let at = if case == "stale" { 6501. } else { 2700. };
+        let at = 2700.;
         match case {
             "closed" => message(
                 &mut e,
