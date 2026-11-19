@@ -14,22 +14,52 @@ certification instructions are not current CI requirements.
 - The retained offline performance helpers still implement their historical
   comparisons, including the 10% retained-memory rule. Removing CPU gate jobs
   does not waive correctness, memory validation or WASM artifact budgets.
-- Fingerprint movers need fresh optimized web/Node size evidence with at least
-  10 KiB reserve, rounded up to KiB, while preserving historical size floors.
+- Fingerprint movers still need fresh optimized web/Node CI size evidence;
+  the module must fit its current cap (see Generated WASM caps).
+
+## Generated WASM caps (AGT-23, 2026-11-19)
+
+Sam approved generated caps in place of hand-edited rule-17 commits: on #3640
+those cap raises cost four extra CI/review rounds and `wasm-budget.mjs` was the
+recurring merge conflict.
+
+- **The numbers live in `wasm-caps.json`**, one cap per venue FAMILY plus
+  `combined`; aliases resolve through `venues.mjs`. `readWasmCaps` in
+  `artifact-census.mjs` refuses raw duplicates, unknown/missing families (against
+  `artifact-census.json` `budgetVenues`), non-KiB values and any reserve other
+  than 10 KiB. `wasm-budget.mjs` holds only the mechanism.
+- **PRs fail only on the byte ceiling** (`wasmBudgetError`: measured > current
+  cap). A reserve under 10 KiB is a `::warning::` and step-summary line
+  (`wasmReserveWarning`), never a failure, and PRs do not edit caps.
+- **The reserve is restored on master by a bot.** `.github/workflows/wasm-caps.yml`
+  runs after every master push run of `Rust SDK`, downloads that run's
+  `wasm-family-*` and `replay-combined-package` artifacts and runs
+  `update-wasm-caps.mjs`: every family seal is validated with the MEASURED tree's
+  own `validateCiWasm` (its input list defines that run's fingerprint), the Node
+  module must match its seal, size = max(web, Node), and
+  cap = max(cap, ceil((measured + 10 KiB) / KiB) KiB). Caps are never lowered;
+  unmeasured families keep theirs; an unknown family refuses. Raised caps are
+  pushed (lease-guarded, recreated from master, keeping raises it already
+  carried) to the bot-owned branch `bot/wasm-caps` and written to the job
+  summary. **The workflow calls no PR API and has no `pull-requests`
+  permission**: Actions PR creation/approval stays OFF in this repo because these
+  images run on boxes holding user keys (coordinator, #3686). Sam's local
+  `fleet-watch` opens "chore(wasm): restore rule-17 reserve" with his token when
+  the branch's caps differ from master and no PR is open, so CI runs on it
+  normally; nothing auto-merges.
+- **Ceilings that are decisions, not measurements** (a combined raise ahead of
+  measurement, a new family) are hand edits to `wasm-caps.json` with a dated
+  line in `wasm-caps-history.md`, which also holds every pre-cutover provenance
+  comment and measurement note. `wasm-budget.test.mjs` pins the mechanism and the
+  cutover floors; do not reintroduce per-PR measurement census tuples.
+- `wasm-caps.json`, its history and the updater are excluded from the beta
+  wasm fingerprint (`HARNESS_NOT_BUILT`), so a bot raise forces no beta cut.
 
 Bybit order-history retention is decided at completion and preserves earlier
-page-failure causes. Fresh family and combined artifacts must retain the
-10 KiB reserve.
+page-failure causes.
 
 MEXC's HTTP 425 read labels are diagnostics only; typed refusals, backoff,
-signing and write outcomes retain their existing controls. Exact source
-06c5b32372b7, Rust SDK run 44220118208, artifact 14390662738 measures equal
-optimized web/Node/replay modules at 1,962,854 bytes. The coordinator's Rule 5
-floor is 1,973,248 bytes, retaining 10,394 bytes and every historical floor.
-
-MEXC's object-envelope guard at c2455ca0e799 measures 1,963,086 bytes in run
-44255752536, artifact 14406113023. Rule 17's measured + 10 KiB rounded-up floor
-is 1,974,272 bytes, retaining 11,186 bytes and all earlier measured floors.
+signing and write outcomes retain their existing controls.
 
 WOO's exact signature-error auth classification changes diagnostics only; socket
 recovery, signing, retry and write behavior retain their lifecycle controls.
@@ -55,20 +85,9 @@ codecs. Offline production probes run through the shipped/fixture admission
 entry point and require no dispatch of unadvertised commands; perpetual capability
 flags and the Spot admission/smoke gates remain independent.
 
-WASM venue caps retain both parents' measured floors. Fresh compositions must
-retain at least 10 KiB above their optimized web/Node measurement, rounded up
-to KiB; boundary tests retain inclusive cap and cap+1 refusal checks.
-
-Bitget login clock recovery at d10ba2f3c500 measures web/Node 2,782,976 B in
-CI44135644635 jobs134225245837/134225246062. The coordinator-approved cap
-2,793,472 B retains 10,496 B reserve at that source for family/replay checks.
-M44 source7bd8f25 measures 2,784,464 B in CI44224839389/job134535952644;
-artifact14393041086 has identical web/Node hashes. The coordinator-approved
-2,795,520 B cap retains 11,056 B reserve, all earlier floors and strict boundaries.
-
 BingX history diagnostics inspect failed responses with closed streaming visitors.
 Compact optional detail preserves engine error and socket allocation budgets;
-fresh web/Node artifacts must retain the existing family cap and 10 KiB reserve.
+fresh web/Node artifacts must fit the existing family cap.
 
 TxFlow agent refresh #3314 at merge 9bb43250830d measures 2,147,684 bytes;
 refusal fix e959e2a7dc2e measures optimized web/Node 2,147,758 bytes. Its
@@ -86,14 +105,6 @@ Pinned profiles and remaining family/global budgets are unchanged.
 TxFlow construction-feature guards require dispatch signing, address/nonce setup
 and its hosted-wallet codec, with independent missing-feature refusals. The HTTP
 HMAC hosted-signing feature cannot substitute for that testnet wallet codec.
-
-The #3314 serial-placement fix at 1c2a4f8232c4 measures optimized web/Node
-2,149,614 bytes. Its 2,160,640-byte floor retains 11,026 bytes using the same
-pinned profile and 10 KiB reserve rule; older measured floors remain retained.
-
-Merge ebeb0b38c973 independently remeasures the same TxFlow and WEEX byte
-counts (2,149,614 and 2,028,106), retaining both floors and the pinned profile.
-The exact merged module hashes are recorded beside their budget entries.
 
 Bybit product parity fixtures service the engine's set/clear timers and retain
 original waiting HTTP permits until release or cancellation. Their monotonic
@@ -116,14 +127,6 @@ the generated nullable liquidation price contract: unknown prices, including
 zero-quantity placeholders, are null before fixture encoding. It retains the
 order-ID randomness and signature verification assertions.
 
-#3640 includes native store projection and wire emission in every venue-family
-artifact. Its final cap entries require optimized web/Node byte counts
-and SHA-256 hashes from Rust 1.99.0, bindgen 0.2.129 and Binaryen 132 (two -Oz
-passes), with at least 10 KiB reserve rounded up to KiB. Historical floors and
-the combined ceiling remain unchanged. After M44, remeasure all families on the
-merged tree and record new provenance in a follow-up commit; pre-M44 evidence
-does not establish the merged composition.
-
 The retained Bybit and inverse TS replay oracles publish unknown/nonpositive
 liquidation prices as native null, including flat and option positions. Their
 SCXF fixtures must pass the same generated Position contract as the Rust engine;
@@ -132,19 +135,6 @@ a zero/invalid liquidation sentinel cannot complete TS private replay startup.
 BingX Spot replay tracks production decoder receipts alongside pending account reads.
 Bounded drains precede ticks, checkpoints and final capture; event-loop yields
 alone cannot establish completion of gzip decoding or its queued text messages.
-
-#3640's final allocation/chaser sweep is CI44266062446 at source
-`283acdd2f583259fa40113dc88f58b54adac610d`. All 27 exact family builds
-completed with matching optimized web/Node bytes and hashes. Their native-input
-fingerprint `399b3f8467a191b58ea8841ec5c9292b6533b2342ba6c1efbecdbfcc49a0a8f5`
-matches branch `c0113a933d`; the complete synthetic merge tree is not asserted
-identical. The follow-up refreshes bb6590f792 provenance after the native fixes.
-Every non-Bybit cap is measured +10 KiB rounded to KiB, retaining historical floors.
-Bybit measures 2,670,297 B at its fixed 2,696,192 B ceiling. The exact local
-combined build at c0113a933d measures 17,866,681 B (paired web/Node SHA256
-`0ed474e4613e860eea7c61babae81aff07fffd8aceb282e84de9282c58e87d8f`)
-at its fixed 18,087,936 B ceiling. Final-head combined consumers must still run
-and succeed in CI; local measurements do not grant that verdict.
 
 #3640 retained BingX Spot and OKX fixture callbacks publish SCXF through the
 explicit reference producer. Aster installs its taped axios transport before
@@ -172,43 +162,6 @@ tables are allocated. Full books reserve their known level columns, and the stri
 tail includes final alignment. LOCAL copies each owned flush once to JavaScript; snapshots keep independent
 baselines.
 The public 16-pair memory gate and all compared fields remain unchanged.
-
-#3640 post-master rule-17 reserve audit uses CI44302321301, built source
-`1fdd2db8279b2d4ab697720f2169cd0b6941a078` (the exact tree of PR head
-`7e9d5723fad5e8820242a18b205c068dd8eb851f`). All 27 sealed family artifacts
-have matching optimized web/Node bytes and hashes, verified source/run/input
-fingerprints, and pinned tools. The complete 49-name routing and 31-name explicit
-budget census found shortfalls only for ApeX, Binance, Kraken, Lighter, TxFlow and
-WOO; their vetoable cap refreshes use measured +10 KiB rounded up to KiB, never
-lowering a prior cap, with shared budget aliases kept equal. The budget tests
-retain every family measurement and module SHA256 and require exact caps,
-10 KiB reserves, alias coverage, and cap/cap+1 boundaries. Combined measures
-17,869,568 B (SHA256 `b7693720dffd5c3878c09ea239e9949532c43d110e4883080aa07b476ad482a3`),
-leaving 218,368 B at the unchanged 18,087,936 B ceiling. No runtime inputs change.
-
-#3640's vetoable M46 reserve refresh uses CI44319661954 after all 31 family
-measurement jobs, including shared aliases, completed successfully. Built source
-`de42fedbb4021e94d1162e4420b8583d0d20906a` has the exact tree of PR head
-`d931514bb9750d82e2f538ed454b0d24edd0db5f`. All 27 sealed family artifacts
-pass source/run/input fingerprints, pinned Rust1.99.0/bindgen0.2.129/Binaryen132
-and optimized web/Node SHA256 checks. The complete 49-name routing and 31-entry
-budget census found shortfalls only for BingX, Hyperliquid, MEXC and OKX.
-Their caps use measured +10 KiB rounded up to KiB, never lowering a prior cap;
-shared aliases follow their parent family. Per-family bytes and hashes are pinned
-in wasm-budget.test.mjs; changed caps retain all provenance comments and floors.
-Combined measures 17,876,808 B, SHA256
-`12320b94f86e8c4561366588bc255edc0d1b438fdcd3c8989d9e22714cc44cee`,
-leaving 211,128 B at its unchanged 18,087,936 B ceiling.
-This budget-only composition changes no runtime inputs; required new-head CI
-and combined consumers still have to run and succeed.
-
-#3640's vetoable M48 reserve refresh, after merging master 04a2f14e5b at
-`d123c9b38c4559ab38b5df8142981c7fdcc008b5`, uses CI44389135230. Its built
-source `42e792c614d768737151090feb06c4da4558855a` (GitHub's merge ref) has the
-identical tree. The 27-family census found shortfalls only for Bitunix
-(10,219 B), KuCoin Spot (10,212 B) and OKX (9,982 B); each moves to measured
-+10 KiB rounded up. The M46 census becomes a floor and the M48 census pins the
-exact caps. Combined measures 18,087,936 − 206,989 B and stays at its ceiling.
 
 Managed HTTP preparation observations change shipped host JS, so they move the
 beta input fingerprint and require a new release/pin. They do not change Rust
