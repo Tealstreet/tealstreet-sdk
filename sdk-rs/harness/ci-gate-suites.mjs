@@ -6,6 +6,10 @@ const primaryBooks = Object.freeze({
   asterdex: 'BTCUSDT,ETHUSDT',
   woo: 'BTCUSDT,ETHUSDT',
   binance: 'BTCUSDT,ETHUSDT,SOLUSDT',
+  binancespot: 'BTCUSDT,ETHUSDT',
+  binanceinverse: 'BTCUSD_PERP,ETHUSD_PERP',
+  binancepm: 'BTCUSDT,ETHUSDT,SOLUSDT',
+  binanceoptions: '',
   bitunix: 'BTCUSDT,ETHUSDT',
   orderly: 'BTCUSDC,ETHUSDC',
   coinbase: 'BTC-USD,ETH-USD',
@@ -47,14 +51,13 @@ const privateCase = (venue, fixture = venue) => ({ venue, tape: `sdk-rs/harness/
 const xperpBooks = 'BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404';
 
 const suiteCases = (suite) => {
-  const cases = [publicCase(suite, primaryBooks[suite])];
+  const cases = [suite === 'binanceoptions'
+    ? { venue: suite, tape: 'sdk-rs/harness/tapes/binanceoptions.jsonl', books: '' }
+    : publicCase(suite, primaryBooks[suite], suite === 'binancepm' ? 'binance' : suite)];
   if (!['okx', 'orderly', 'coinbase'].includes(suite)) cases.push(privateCase(suite));
   if (suite === 'binance') {
-    cases.push(publicCase('binancespot', 'BTCUSDT,ETHUSDT'),
-      publicCase('binanceinverse', 'BTCUSD_PERP,ETHUSD_PERP'),
-      publicCase('binancepm', 'BTCUSDT,ETHUSDT,SOLUSDT', 'binance'));
-    cases.push(...['binancespot', 'binanceinverse', 'binancepm'].map((venue) => privateCase(venue)));
-    cases.push({ venue: 'binanceoptions', tape: 'sdk-rs/harness/tapes/binanceoptions.jsonl', books: '' }, privateCase('binanceoptions'));
+    // Lever 9 partitions the eleven-case Binance registry from c6b31e45c5ee.
+    // The four product rows retain its variants on isolated runners.
     cases.push({ venue: 'binance', tape: 'sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl', books: 'BTCUSDT' });
   } else if (suite === 'bybit') {
     cases.push(publicCase('bybitinverse', 'BTCUSD,ETHUSD'),

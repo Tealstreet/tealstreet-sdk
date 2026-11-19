@@ -8,8 +8,8 @@ import { venueFamily } from '../hosts/wasm/js/venues.mjs';
 const copy = (suite) => structuredClone(expectedGateCases(suite));
 
 test('suite registry preserves every primary, alias, profile and network replay', () => {
-  const exceptional = { binance: 11, bybit: 11, okx: 8, orderly: 11, coinbase: 9, asterdex: 3, lighter: 3, 'lighter-robinhood': 3, bitget: 3, hyperliquid: 3, bingx: 4 };
-  assert.equal(GATE_SUITES.length, 31);
+  const exceptional = { binance: 3, bybit: 11, okx: 8, orderly: 11, coinbase: 9, asterdex: 3, lighter: 3, 'lighter-robinhood': 3, bitget: 3, hyperliquid: 3, bingx: 4 };
+  assert.equal(GATE_SUITES.length, 35);
   // Retired venues remove only their own replay cases.
   assert.equal(GATE_SUITES.reduce((total, suite) => total + expectedGateCases(suite).length, 0), 109);
   for (const suite of GATE_SUITES) {
@@ -23,7 +23,7 @@ test('suite registry preserves every primary, alias, profile and network replay'
 });
 
 test('family profiles pin their exact tape paths and private books', () => {
-  assert.deepEqual(expectedGateCases('binance').find((item) => item.venue === 'binancepm' && item.books), {
+  assert.deepEqual(expectedGateCases('binancepm').find((item) => item.books), {
     venue: 'binancepm', tape: 'sdk-rs/harness/fixtures/binance-public.jsonl.gz', books: 'BTCUSDT,ETHUSDT,SOLUSDT',
   });
   assert(expectedGateCases('binance').some((item) => item.tape === 'sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl' && item.books === 'BTCUSDT'));
@@ -143,7 +143,7 @@ const workflowCases = (source, name) => {
           assert(Object.hasOwn(row, key), `matrix field ${key}`);
           return row[key];
         });
-      const mock = `set -e\ncorepack() { [[ \"$1\" == yarn ]] || return 1; shift; yarn \"$@\"; }\nyarn() {\n while [[ $# -gt 0 && \"$1\" == -* ]]; do shift; done\n if [[ "$1" == rust:gate || "$1" == rust:gate:record ]]; then\n shift\n printf 'CASE\\0'\n printf '%s\\0' "$@"\n printf 'END\\0'\n fi\n return 0\n}\n`;
+      const mock = `set -e\nPRIVATE_REPLAY_RUNS=1\ncorepack() { [[ \"$1\" == yarn ]] || return 1; shift; yarn \"$@\"; }\nyarn() {\n while [[ $# -gt 0 && \"$1\" == -* ]]; do shift; done\n if [[ "$1" == rust:gate || "$1" == rust:gate:record ]]; then\n shift\n printf 'CASE\\0'\n printf '%s\\0' "$@"\n printf 'END\\0'\n fi\n return 0\n}\n`;
       const result = spawnSync('/bin/bash', ['--noprofile', '--norc'], { input: mock + script + '\n', encoding: 'utf8', timeout: 10000, env: { PATH: '/nonexistent' } });
       assert.ifError(result.error);
       assert.equal(result.status, 0, `${row.venue}: ${result.stderr}`);
@@ -159,6 +159,10 @@ const workflowCases = (source, name) => {
           assert.equal(args.filter((value) => value === name).length, 1, `${row.venue} requires one ${name}`);
           return args[args.indexOf(name) + 1];
         };
+        const tape = argument('--tape');
+        if (name === 'gate' && row.venue.startsWith('binance'))
+          assert.equal(argument('--runs'), tape.endsWith('-private.jsonl') ? '1' : '16', tape);
+        if (name === 'replay') assert(!args.includes('--runs'), 'correctness remains independent of measurement');
         cases.push({ venue: argument('--venue'), tape: argument('--tape'), books: argument('--books') });
       }
     }

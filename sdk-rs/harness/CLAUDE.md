@@ -17,6 +17,20 @@ certification instructions are not current CI requirements.
 - Fingerprint movers still need fresh optimized web/Node CI size evidence;
   the module must fit its current cap (see Generated WASM caps).
 
+## Binance replay isolation (Lever 9)
+
+The former eleven-case Binance suite is partitioned across `binance`,
+`binancespot`, `binanceinverse`, `binancepm` and `binanceoptions` in both correctness
+and measurement matrices. The union, exact tapes/books and 16 public pairs are
+unchanged; each physical measurement row seals and verifies its complete subset.
+Every product still builds and compares the `binance` family against that same
+family at the authenticated baseline, including baselines predating this split.
+
+The measurement lane's combined build, budget and consumer assertions run in
+`Rust / replay combined consumers`, independently of those five rows. Nothing is
+skipped or run concurrently inside a measured process. Truncated corpora, missing
+cases and mismatched family seals still fail; budgets and policy are unchanged.
+
 ## Generated WASM caps (AGT-23, 2026-11-19)
 
 Sam approved generated caps in place of hand-edited rule-17 commits: on #3640
