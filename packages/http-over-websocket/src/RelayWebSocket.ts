@@ -52,10 +52,12 @@ function hasNativePing(socket: WebSocket): socket is NativePingSocket {
   );
 }
 
+declare const process: NodeJS.Process & { isBun?: unknown };
+
 // Import ws for Node.js/Bun: Bun's native WebSocket lacks ALPNProtocols, which
 // the tunnel needs to force HTTP/1.1. Same pattern as HOWWebSocket.
 let NodeWebSocket: (new (url: string, protocols?: string | string[], options?: unknown) => WebSocket) | undefined;
-const isNodeOrBun = typeof process !== 'undefined' && (process.versions?.node || (process as any).isBun);
+const isNodeOrBun = typeof process !== 'undefined' && (process.versions?.node || process.isBun);
 if (isNodeOrBun) {
   try {
     // Dynamic require so browser bundles never see `ws`.
@@ -68,7 +70,7 @@ if (isNodeOrBun) {
 type SendData = string | ArrayBufferLike | Blob | ArrayBufferView;
 
 const makeCloseEvent = (code: number, reason: string, wasClean: boolean): Event => {
-  const CloseEventCtor = (globalThis as any).CloseEvent as (new (type: string, init: any) => Event) | undefined;
+  const CloseEventCtor: (new (type: string, init: CloseEventInit) => Event) | undefined = globalThis.CloseEvent;
   if (CloseEventCtor) {
     try {
       return new CloseEventCtor('close', { code, reason, wasClean });
@@ -144,7 +146,7 @@ export class RelayWebSocket extends EventTarget {
         new WebSocket(this.tunnelUrl);
     this.inner.addEventListener('open', this.onInnerOpen);
     this.inner.addEventListener('message', this.onInnerMessage);
-    this.inner.addEventListener('close', this.onInnerClose as EventListener);
+    this.inner.addEventListener('close', this.onInnerClose);
     this.inner.addEventListener('error', this.onInnerError);
     this.handshakeTimer = setTimeout(() => this.fail('relay handshake timed out'), HANDSHAKE_TIMEOUT_MS);
   }
@@ -233,16 +235,12 @@ export class RelayWebSocket extends EventTarget {
     }
   };
 
-  private onInnerClose = (event: Event) => {
+  private onInnerClose = (event: Event & Partial<Pick<CloseEvent, 'code' | 'reason' | 'wasClean'>>) => {
     const {
       code = 1006,
       reason = '',
       wasClean = false,
-    } = event as unknown as {
-      code?: number;
-      reason?: string;
-      wasClean?: boolean;
-    };
+    } = event;
     if (!this.diagnostics.lastClose) this.diagnostics.closed(code === 1006 || !wasClean ? 'unknown' : 'remote');
     this.finish(code, reason, wasClean);
   };
@@ -291,7 +289,7 @@ export class RelayWebSocket extends EventTarget {
     this.readyState = RelayWebSocket.CLOSED;
     this.inner.removeEventListener('open', this.onInnerOpen);
     this.inner.removeEventListener('message', this.onInnerMessage);
-    this.inner.removeEventListener('close', this.onInnerClose as EventListener);
+    this.inner.removeEventListener('close', this.onInnerClose);
     // The error listener stays: closing a still-connecting Node `ws` emits its abort
     // error on a later tick, and an emitter with no listener throws it uncaught.
     const event = makeCloseEvent(code, reason, wasClean);
