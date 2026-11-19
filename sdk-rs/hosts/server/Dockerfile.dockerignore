@@ -2,7 +2,6 @@
 !sdk-rs/
 !sdk-rs/**
 !packages/safe-cex/src/exchanges/rust/construction-rules.json
-!packages/safe-cex/src/exchange-display-policy.json
 sdk-rs/target/
 sdk-rs/**/target/
 sdk-rs/hosts/wasm/pkg/
