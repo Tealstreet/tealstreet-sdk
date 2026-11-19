@@ -135,7 +135,8 @@ test('the bot workflow measures master Rust runs and only opens a reviewed PR', 
   assert.match(rust, /name: wasm-family-\$\{\{ matrix\.family \}\}/);
   assert.match(rust, /name: replay-combined-package/);
   assert.match(workflow, /pattern: wasm-family-\*/);
-  assert.match(workflow, /pattern: replay-combined-package/);
+  // A single-artifact download extracts flat, so the combined package needs its own named directory (#3689).
+  assert.match(workflow, /name: replay-combined-package\n\s+path: \$\{\{ runner\.temp \}\}\/wasm-caps\/replay-combined-package\n/);
   assert.match(workflow, /run-id: \$\{\{ github\.event\.workflow_run\.id \}\}/);
   assert.match(workflow, /node sdk-rs\/harness\/update-wasm-caps\.mjs[\s\S]*--root measured[\s\S]*--source-head "\$MEASURED_SHA" --run-id "\$MEASURED_RUN"/);
   assert.match(workflow, /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}\n\s+path: measured/);

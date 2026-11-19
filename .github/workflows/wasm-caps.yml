@@ -62,8 +62,9 @@ jobs:
         with:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
-          pattern: replay-combined-package
-          path: ${{ runner.temp }}/wasm-caps
+          # A by-name download extracts flat, so name the directory the caps script expects.
+          name: replay-combined-package
+          path: ${{ runner.temp }}/wasm-caps/replay-combined-package
       - name: Keep raises already proposed on the bot branch
         run: |
           if git fetch --depth=1 origin "$BOT_BRANCH" 2>/dev/null; then
