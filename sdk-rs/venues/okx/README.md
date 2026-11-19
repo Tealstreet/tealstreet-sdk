@@ -1,5 +1,17 @@
 # OKX legacy execution parity
 
+## Missing public subscriptions
+
+Native public WS `60018` refusals retire only an exact currently desired topic,
+bound by returned `arg` or the native `<channel> subscribe for <instId> doesn't
+exist` message. The adapter refreshes instruments once for each newly retired
+topic and excludes that topic from reconnect replay for this engine's lifetime.
+Cached market identities remain available to financial state; a refreshed
+catalogue can omit the refused instrument without deleting those cached rows.
+Private/business errors, unbound refusals and other public topics are unchanged.
+
+## Execution rules
+
 The retained TypeScript adapter is the authority for trading rules. This change
 adds outcome reporting without introducing whole-plan minimum, native cap or
 wire-grid validation. Existing formatters and native execution owners decide
