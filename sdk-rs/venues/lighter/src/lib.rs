@@ -1749,11 +1749,13 @@ impl Venue for Lighter {
                 return;
             }
             Pending::Proof { context, read } => {
-                if cx.validate_background_read_http_delivery(&context).is_ok() {
-                    let _ = cx.finish_http_context(&context);
+                let valid = cx.validate_background_read_http_delivery(&context).is_ok();
+                let _ = cx.finish_http_context(&context);
+                if valid {
                     self.proof_response(cx, read, response);
                 } else {
-                    let _ = cx.finish_http_context(&context);
+                    // An undeliverable read proves nothing; the next one follows.
+                    self.proof_failed(cx, read);
                 }
                 return;
             }

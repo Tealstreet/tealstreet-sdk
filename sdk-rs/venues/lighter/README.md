@@ -44,13 +44,17 @@ order can still be canceled at execution (margin, slippage, liquidity) or the
 transaction can fail. Every ordinary placement therefore records an engine
 pending placement and parks its Plan for at most 10 seconds while background
 reads prove it: authenticated `accountOrders` by client index (up to 20 per
-read), and `tx?by=hash` for a placement whose row has not appeared. A resting,
-filled or later-canceled row resolves it; a reason-qualified pre-rest
+read), and `tx?by=hash` for a placement whose row has not appeared. An `open` or
+`filled` row, a fill, an untriggered stop's `pending`, or a resting order's later
+`canceled`/`-expired`/`-oco`/`-child`/`-liquidation` resolves it; a reason-qualified pre-rest
 cancellation (`canceled-margin-not-allowed`, `-post-only`, `-reduce-only`,
 `-position-not-allowed`, `-too-much-slippage`, `-not-enough-liquidity`,
-`-self-trade`, `-invalid-balance`) or a failed transaction (`status` 0) refuses it
-`Rejected` with the venue reason and withdraws the optimistic row. A mix of
-refused and live lots, or no proof by the bound, is Unknown; nothing is resent.
+`-self-trade`, `-invalid-balance`), an unfilled market/IOC order that ended
+(`canceled`, `canceled-expired`, ...), or a failed transaction (`status` 0) refuses it
+`Rejected` with the venue reason and withdraws the optimistic row. Only exact
+statuses resolve: `in-progress`, an unlisted spelling and a non-trigger `pending`
+keep polling. A mix of refused and live lots, or no proof by the bound, is
+Unknown; nothing is resent.
 Reads back off 250 ms to 2 s. A proven placement keeps the legacy 100 ms pace
 before the command's next write, which continues from the settled call. Grouped
 TP/SL keep their stream proof and a guarded put-back keeps its `RestoreProof`.

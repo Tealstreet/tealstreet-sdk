@@ -1698,6 +1698,13 @@ impl Lighter {
                 let job = self.trading.active.as_ref().unwrap();
                 let prove = matches!(job.steps.front(), Some(Step::Place(_)))
                     && !job.protection.as_ref().is_some_and(|edit| edit.restoring);
+                let shapes: Vec<placement::Shape> = match job.steps.front() {
+                    Some(Step::Place(orders)) => orders
+                        .iter()
+                        .map(|p| placement::Shape::of(&p.native))
+                        .collect(),
+                    _ => Vec::new(),
+                };
                 let receipt = if prove {
                     cx.http_pending_placement(&context).ok()
                 } else {
@@ -1827,7 +1834,7 @@ impl Lighter {
                     }
                 }
                 if let Some(receipt) = receipt {
-                    self.trade_await_proof(cx, receipt, ids, hashes);
+                    self.trade_await_proof(cx, receipt, ids, hashes, shapes);
                     return;
                 }
                 let job = self.trading.active.as_mut().unwrap();
@@ -1857,6 +1864,7 @@ impl Lighter {
         receipt: safe_cex_engine::request_context::PendingPlacement,
         ids: Vec<String>,
         hashes: Vec<String>,
+        shapes: Vec<placement::Shape>,
     ) {
         self.trading.proof_token += 1;
         let token = self.trading.proof_token;
@@ -1877,6 +1885,7 @@ impl Lighter {
                     receipt,
                     ids,
                     hashes,
+                    shapes,
                     cx.now + f64::from(placement::PROOF_BOUND_MS),
                     token,
                 ));

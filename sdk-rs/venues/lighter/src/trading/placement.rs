@@ -18,12 +18,30 @@ pub(super) struct Proof {
     /// Client order indexes, in transaction order, paired with `hashes`.
     pub ids: Vec<String>,
     pub hashes: Vec<String>,
+    shapes: Vec<Shape>,
     pub deadline: f64,
     pub token: u64,
     polls: usize,
     inflight: bool,
     verdicts: HashMap<String, Verdict>,
     pub outcome: Option<Result<(), VenueError>>,
+}
+/// What a row's status can prove depends on how the order executes.
+#[derive(Clone, Copy)]
+pub(super) struct Shape {
+    /// Market or IOC limit: it either fills at once or ends with no effect.
+    pub immediate: bool,
+    /// Stop or take-profit: it waits untriggered as `pending`.
+    pub trigger: bool,
+}
+impl Shape {
+    pub(super) fn of(order: &sign::Order) -> Self {
+        let trigger = matches!(order.order_type, 2..=5);
+        Self {
+            immediate: !trigger && order.time_in_force == 0,
+            trigger,
+        }
+    }
 }
 #[derive(Clone)]
 enum Verdict {
@@ -47,6 +65,7 @@ impl Proof {
         receipt: PendingPlacement,
         ids: Vec<String>,
         hashes: Vec<String>,
+        shapes: Vec<Shape>,
         deadline: f64,
         token: u64,
     ) -> Self {
@@ -54,6 +73,7 @@ impl Proof {
             receipt: Some(receipt),
             ids,
             hashes,
+            shapes,
             deadline,
             token,
             polls: 0,
@@ -128,7 +148,17 @@ fn refusal_text(status: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
-fn verdict(row: &OrderRow) -> Option<Verdict> {
+/// The words for a refusal: a pre-rest reason, or an immediate order that ended unfilled.
+fn reason_text(status: &str) -> Option<&'static str> {
+    refusal_text(status).or(match status {
+        "canceled-expired" => Some("the order expired without filling"),
+        _ if status.starts_with("cancel") => Some("the order ended without filling"),
+        _ => None,
+    })
+}
+/// Exact native statuses only: an unlisted spelling, or `in-progress` before
+/// execution, stays unresolved and ends Unknown at the bound, never ok.
+fn verdict(row: &OrderRow, shape: Shape) -> Option<Verdict> {
     if row
         .filled_base_amount
         .as_ref()
@@ -140,10 +170,24 @@ fn verdict(row: &OrderRow) -> Option<Verdict> {
     if refusal_text(status).is_some() {
         return Some(Verdict::Refused(status.into()));
     }
-    (matches!(status, "open" | "pending" | "in-progress" | "filled")
-        || status.starts_with("canceled")
-        || status.starts_with("cancelled"))
-    .then_some(Verdict::Live)
+    let later_cancel = matches!(
+        status,
+        "canceled"
+            | "cancelled"
+            | "canceled-expired"
+            | "canceled-oco"
+            | "canceled-child"
+            | "canceled-liquidation"
+    );
+    match status {
+        "open" | "filled" => Some(Verdict::Live),
+        "pending" if shape.trigger => Some(Verdict::Live),
+        // An unfilled market/IOC order that ended had no effect at all.
+        _ if later_cancel && shape.immediate => Some(Verdict::Refused(status.into())),
+        // A resting order the venue accepted and something later cancelled.
+        _ if later_cancel => Some(Verdict::Live),
+        _ => None,
+    }
 }
 /// The text fields a failed transaction's `event_info` has been seen to carry.
 #[derive(Deserialize)]
@@ -326,24 +370,33 @@ impl Lighter {
                 let reply = serde_json::from_str::<OrdersReply>(response.body)
                     .ok()
                     .filter(|r| ok && r.code.as_ref().and_then(Number::integer) == Some(200));
+                let mut seen = HashSet::new();
                 for row in reply.iter().flat_map(|r| &r.orders) {
                     let Some(id) = row.client_order_index.as_ref().and_then(Number::integer) else {
                         continue;
                     };
                     let id = id.to_string();
-                    if proof.ids.contains(&id)
-                        && !proof.verdicts.contains_key(&id)
-                        && let Some(verdict) = verdict(row)
+                    seen.insert(id.clone());
+                    let Some(index) = proof.ids.iter().position(|own| *own == id) else {
+                        continue;
+                    };
+                    let shape = proof.shapes[index];
+                    if !proof.verdicts.contains_key(&id)
+                        && let Some(verdict) = verdict(row, shape)
                     {
                         proof.verdicts.insert(id, verdict);
                     }
                 }
                 // A row that has not appeared may belong to a failed transaction.
                 let missing = reply.is_some().then(|| {
-                    proof.unresolved().into_iter().find_map(|id| {
-                        let index = proof.ids.iter().position(|own| *own == id)?;
-                        Some((id, proof.hashes.get(index)?.clone()))
-                    })
+                    proof
+                        .unresolved()
+                        .into_iter()
+                        .filter(|id| !seen.contains(id))
+                        .find_map(|id| {
+                            let index = proof.ids.iter().position(|own| *own == id)?;
+                            Some((id, proof.hashes.get(index)?.clone()))
+                        })
                 });
                 if self.proof_conclude(cx, token) {
                     return;
@@ -440,7 +493,7 @@ impl Lighter {
             }
         } else if refused.len() == ids.len() {
             let (_, native) = &refused[0];
-            let reason = refusal_text(native).unwrap_or(native);
+            let reason = reason_text(native).unwrap_or(native);
             let error = VenueError::new(format!("Lighter did not place the order: {reason}"))
                 .kind(ErrorKind::Rejected)
                 .outcome(Outcome::Rejected)

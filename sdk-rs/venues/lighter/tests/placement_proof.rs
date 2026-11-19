@@ -221,3 +221,60 @@ fn a_late_row_after_a_miss_still_proves_the_placement() {
     let out = drain_at(&mut e, &mut timers, NOW + 300.0);
     assert_eq!(terminal(&out), Some(Ok(format!("[\"{id}\"]"))), "{out:?}");
 }
+
+/// Review of AGT-45: only exact statuses resolve a proof. In-progress, an
+/// unlisted cancellation and a non-trigger `pending` wait for a later read.
+#[test]
+fn unproven_statuses_keep_polling_instead_of_succeeding() {
+    for status in [
+        "in-progress",
+        "pending",
+        "canceled-some-new-reason",
+        "rejected",
+    ] {
+        let (mut e, mut timers) = ready_testnet();
+        let (out, id) = acknowledged(&mut e, &mut timers, limit());
+        let proof = find(&out, "/api/v1/accountOrders?").unwrap();
+        reply(&mut e, &proof, 200, &rows(&id, status, "0"));
+        let out = advance(&mut e, &mut timers, NOW + 300.0);
+        assert_eq!(terminal(&out), None, "{status} proves nothing: {out:?}");
+        assert!(
+            find(&out, "/api/v1/accountOrders?").is_some(),
+            "{status}: a later read follows: {out:?}"
+        );
+    }
+}
+
+#[test]
+fn an_unfilled_market_order_that_ended_is_refused_but_a_resting_cancel_is_placed() {
+    let market = json!({"symbol":"ETH","type":"market","side":"buy","amount":0.2});
+    for status in ["canceled", "canceled-expired"] {
+        let (mut e, mut timers) = ready_testnet();
+        let (out, id) = acknowledged(&mut e, &mut timers, market.clone());
+        let proof = find(&out, "/api/v1/accountOrders?").unwrap();
+        reply(&mut e, &proof, 200, &rows(&id, status, "0"));
+        let out = drain(&mut e, &mut timers);
+        let Some(Err(error)) = terminal(&out) else {
+            panic!("{status}: an unfilled market order had no effect: {out:?}");
+        };
+        assert_eq!(error.outcome, Some(Outcome::Rejected), "{error:?}");
+        assert!(error.message.contains("without filling"), "{error:?}");
+    }
+    let (mut e, mut timers) = ready_testnet();
+    let (out, id) = acknowledged(&mut e, &mut timers, limit());
+    let proof = find(&out, "/api/v1/accountOrders?").unwrap();
+    reply(&mut e, &proof, 200, &rows(&id, "canceled", "0"));
+    let out = drain(&mut e, &mut timers);
+    assert_eq!(terminal(&out), Some(Ok(format!("[\"{id}\"]"))), "{out:?}");
+}
+
+#[test]
+fn an_untriggered_stop_is_proven_by_its_pending_row() {
+    let (mut e, mut timers) = ready_testnet();
+    let stop = json!({"symbol":"ETH","type":"stop_market","side":"sell","amount":0.2,"price":80});
+    let (out, id) = acknowledged(&mut e, &mut timers, stop);
+    let proof = find(&out, "/api/v1/accountOrders?").unwrap();
+    reply(&mut e, &proof, 200, &rows(&id, "pending", "0"));
+    let out = drain(&mut e, &mut timers);
+    assert_eq!(terminal(&out), Some(Ok(format!("[\"{id}\"]"))), "{out:?}");
+}
