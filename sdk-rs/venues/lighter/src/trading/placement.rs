@@ -258,7 +258,8 @@ impl Lighter {
             ids.join(",")
         );
         let credential = Some(crate::primary_credential(&identity));
-        let Ok(recipe) = self.auth_recipe(identity, sign::AuthPlacement::Header) else {
+        // The query form also passes the browser CORS proxy, as the orders census does.
+        let Ok(recipe) = self.auth_recipe(identity, sign::AuthPlacement::Query) else {
             self.proof_schedule(cx);
             return;
         };

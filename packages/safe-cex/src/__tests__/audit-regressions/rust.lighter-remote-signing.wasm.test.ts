@@ -79,6 +79,14 @@ const tape = (sent: Sent[]): Transport => ({
       });
     if (pathname.endsWith('/accountLimits')) return json({ code: 200, user_tier_name: 'premium' });
     if (pathname.endsWith('/accountActiveOrders')) return json({ code: 200, orders: [] });
+    // AGT-45: a placement completes only once accountOrders shows its row.
+    if (pathname.endsWith('/accountOrders')) {
+      const ids = (new URL(request.url).searchParams.get('client_order_indexes') ?? '').split(',').filter(Boolean);
+      return json({
+        code: 200,
+        orders: ids.map((id) => ({ client_order_index: Number(id), status: 'open', filled_base_amount: '0' })),
+      });
+    }
     if (pathname.endsWith('/nextNonce')) return json({ code: 200, nonce: 10 });
     if (pathname.endsWith('/sendTx')) return json({ code: 200, tx_hash: 'documented-transaction-hash' });
     throw new Error(`Unexpected Lighter request ${request.method} ${request.url}`);
