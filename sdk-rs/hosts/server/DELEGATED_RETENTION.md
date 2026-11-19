@@ -65,7 +65,11 @@ AGT-37). Startup environment:
 | `TEALSTREET_BOX` | Sent as `X-Tealstreet-Box`; `TEALSTREET_ROUTER_BOX_ID` is the fallback. One of them is required when the URL is set. |
 
 Delivery uses its own HTTP client (never venue egress), a 5-second timeout and
-a bounded in-memory outbox that drops the oldest past 1000 and logs the count.
+a bounded in-memory outbox of 1000 that logs every drop. When full it evicts
+the oldest `fill`, then the oldest other low-priority notice (`orderRejected`);
+`delegated.shutdown`, `delegated.shutdownWarning` and `algoStopped` are never
+evicted for those, and an incoming low-priority notice is dropped instead.
+Only a queue holding nothing but priority notices drops its oldest.
 Batches carry at most 50. Network failures and non-2xx statuses retry the same
 batch in order with backoff from 1 second, doubling to a 10-minute cap; the
 gateway dedupes the at-least-once delivery on `id`. 400/413/422 drop the batch

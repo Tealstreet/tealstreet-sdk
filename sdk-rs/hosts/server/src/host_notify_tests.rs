@@ -278,6 +278,65 @@ fn outbox_drops_oldest_at_capacity() {
     assert_eq!(queue.items.back().unwrap().id, notification("late").id);
 }
 
+fn of_kind(kind: Kind, natural_key: &str) -> HostNotification {
+    HostNotification::build(
+        &scope(),
+        Draft {
+            kind,
+            ..draft(natural_key)
+        },
+        false,
+        1,
+    )
+}
+
+#[test]
+fn a_full_outbox_evicts_fills_then_rejections_never_shutdown_notices() {
+    let mut queue = Queue::default();
+    queue.push(of_kind(Kind::Shutdown, "shutdown"));
+    queue.push(of_kind(Kind::ShutdownWarning, "warning"));
+    queue.push(of_kind(Kind::AlgoStopped, "stopped"));
+    queue.push(of_kind(Kind::OrderRejected, "rejected"));
+    for index in 0..MAX_OUTBOX - 4 {
+        queue.push(of_kind(Kind::Fill, &index.to_string()));
+    }
+    for index in 0..MAX_OUTBOX {
+        queue.push(of_kind(Kind::Fill, &format!("late-{index}")));
+    }
+    let kinds = |queue: &Queue| queue.items.iter().map(|item| item.kind).collect::<Vec<_>>();
+    assert_eq!(queue.items.len(), MAX_OUTBOX);
+    assert_eq!(
+        kinds(&queue)[..4],
+        [
+            Kind::Shutdown,
+            Kind::ShutdownWarning,
+            Kind::AlgoStopped,
+            Kind::OrderRejected
+        ],
+        "fills go first, oldest first"
+    );
+    assert_eq!(queue.items[4].id, of_kind(Kind::Fill, "late-4").id);
+    // No fills left to evict for a priority notice: the rejection goes next.
+    let mut queue = Queue::default();
+    queue.push(of_kind(Kind::OrderRejected, "rejected"));
+    for index in 0..MAX_OUTBOX - 1 {
+        queue.push(of_kind(Kind::AlgoStopped, &index.to_string()));
+    }
+    queue.push(of_kind(Kind::Shutdown, "shutdown"));
+    assert!(kinds(&queue).iter().all(|kind| kind.priority()));
+    // All priority: an incoming fill is dropped, an incoming shutdown evicts the oldest.
+    queue.push(of_kind(Kind::Fill, "dropped"));
+    assert!(queue.items.iter().all(|item| item.kind != Kind::Fill));
+    queue.push(of_kind(Kind::Shutdown, "newest"));
+    assert_eq!(queue.items.len(), MAX_OUTBOX);
+    assert_eq!(queue.items[0].id, of_kind(Kind::AlgoStopped, "1").id);
+    assert_eq!(
+        queue.items.back().unwrap().id,
+        of_kind(Kind::Shutdown, "newest").id
+    );
+    assert_eq!(queue.dropped, 3);
+}
+
 #[tokio::test(start_paused = true)]
 async fn batches_hold_at_most_fifty() {
     let (transport, bodies) = scripted(Vec::new());
