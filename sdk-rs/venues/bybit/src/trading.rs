@@ -134,7 +134,17 @@ impl PartialStopGuard {
         store: &safe_cex_engine::Store,
         canceled: bool,
     ) -> Result<(), VenueError> {
-        let unchanged = match store.order(&self.original.id) {
+        self.validate_order_row(store.order(&self.original.id), store, canceled)
+    }
+
+    /// `current` is the old stop's latest known row, which may be one the proof retired.
+    fn validate_order_row(
+        &self,
+        current: Option<&Order>,
+        store: &safe_cex_engine::Store,
+        canceled: bool,
+    ) -> Result<(), VenueError> {
+        let unchanged = match current {
             Some(current) => {
                 let mut current = current.clone();
                 current.last_update = self.original.last_update;
