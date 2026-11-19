@@ -1561,9 +1561,11 @@ exact caps. Combined measures 18,087,936 − 206,989 B and stays at its ceiling.
 
 The first manual master merge carried the branch's historical 2,130,944-byte
 Bitunix ceiling into `wasm-caps.json`. Sam's explicit AGT-23/L1 ruling supersedes
-that practice: PRs do not raise measurement-derived caps or add vetoable rule-17
-commits. After the plain post-#3688 master refresh, the feature branch restores
-`wasm-caps.json` byte-for-byte to master, including its generated Bitunix ceiling.
+that routine practice: PRs do not raise measurement-derived caps or add vetoable
+rule-17 commits without an approved ceiling decision. Intermediate commit
+`29804fae7b37beee9cfe604e6064deec2dc0eb30` restored `wasm-caps.json` byte-for-byte
+to master, including its 2,071,552-byte Bitunix ceiling. That intermediate state
+was superseded by the approved Bitunix decision recorded below.
 These archived receipts set no current cap and convey no approval. The current
 byte ceiling remains a PR gate; a reserve shortfall is advisory, and the master
 measurement bot owns reserve restoration. The cutover floors remain unchanged.
@@ -1700,3 +1702,12 @@ would compute 2,412,544 bytes for this measurement, but restoration belongs to
 the master artifact bot after master measurement. These parent artifacts do not
 replace fresh final-head gates or artifact provenance, and no memory or financial
 guard changes.
+
+## 2026-11-19 — #2301 Bitunix ceiling approved
+
+Rule-17 decision (claude-psmp2r, agreeing with deaws): keep the Bitunix ceiling
+at **2,130,944 bytes**. Approval receipt: [fxdo51's CLEAR 5971731822](https://github.com/Tealstreet/tealstreet-sdk/pull/2301#pullrequestreview-5971731822)
+at `b402d387537b55d7844e677647f911e43ea929e0`. The authenticated 2,120,375-byte
+module retains 10,569 bytes. This approved ceiling supersedes #2301's intermediate
+restoration to 2,071,552 bytes; routine AGT-23 master-bot reserve restoration
+remains unchanged.
