@@ -63,7 +63,15 @@ retires that proof; other symbols' rows never supply it.
 When the mark would still not be fresh one second after sizing (capped at the
 amend bound), the amend reads `activeAssetData` once under the same owner and
 bound before anything is canceled. A failed, mismatched or unanswered read refuses
-with the order unchanged. The release veto itself is unchanged.
+with the order unchanged; a 429 retries within the same bound, as the sizing read does.
+A read's mark is discarded when the stream observed the mark after the read was
+queued, so a delayed snapshot never replaces a newer mark.
+
+The put-back after a refused replacement never waits on freshness: the position is
+unprotected until it lands, and the original trigger was already accepted. A stale
+mark is re-read once (1.5 s bound, plan held); if no fresh mark results, the original
+is re-placed anyway and the Restored outcome says no fresh mark was available. A
+fresh mark still refuses a put-back that would fire immediately.
 
 ## Candle catalogue readiness
 

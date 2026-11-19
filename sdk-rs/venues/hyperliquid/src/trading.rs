@@ -1634,6 +1634,12 @@ impl Hyperliquid {
         self.pump_trades(cx);
     }
     fn expire_amend(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.protective_restoring()
+            && let Some(symbol) = self.protective_mark_reading()
+        {
+            self.settle_restore_mark(cx, &symbol, None);
+            return;
+        }
         let message = if self
             .trading
             .active
@@ -1755,18 +1761,27 @@ impl Hyperliquid {
         id: &str,
         amend: AmendRead,
         symbol: &str,
-        read: Result<f64, String>,
+        read: Result<(f64, f64), String>,
     ) {
         if !self.amend_read_pending(cx, id, amend) {
+            return;
+        }
+        // A 429 clears soon; the read bound still ends the wait.
+        if read.as_ref().is_err_and(|error| error.contains("HTTP 429")) {
+            self.trading.amend_retry = Some((cx.set_timer(AMEND_RETRY_MS), id.to_owned(), amend));
             return;
         }
         if let Some((timer, _)) = self.trading.amend_wait.take() {
             cx.clear_timer(timer);
         }
-        match read.ok().filter(|mark| mark.is_finite() && *mark > 0.) {
-            Some(mark) => {
-                cx.store.update_ticker(symbol, |t| t.mark = mark);
-                cx.store.observe_ticker_fields(symbol, 1 << 3);
+        let mark = read.ok().filter(|(mark, _)| mark.is_finite() && *mark > 0.);
+        if self.protective_restoring() {
+            self.settle_restore_mark(cx, symbol, mark);
+            return;
+        }
+        match mark {
+            Some((mark, issued_at)) => {
+                protective::apply_read_mark(cx, symbol, mark, issued_at);
                 self.release_trade_builder(cx);
             }
             None => self.finish_trade(cx, Err(not_sent(protective::STALE_MARK))),
@@ -1784,7 +1799,10 @@ impl Hyperliquid {
             .is_some_and(|(t, _, _)| *t == timer)
             && let Some((_, id, amend)) = self.trading.amend_retry.take()
         {
-            self.read_amend_source(cx, &id, amend);
+            match self.protective_mark_reading() {
+                Some(symbol) => self.read_amend_mark(cx, &id, amend, &symbol),
+                None => self.read_amend_source(cx, &id, amend),
+            }
         }
         if let Some((current, amend)) = self.trading.amend_wait
             && current == timer
