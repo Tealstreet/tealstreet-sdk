@@ -25,8 +25,11 @@ Reads and documented definitive refusal codes on other statuses are unchanged.
 Trading validation and compensating writes follow the legacy TS adapter.
 Normal split lots and grouped rows do not gain a whole-plan native min/max gate;
 legacy partial-placement cases remain known issues. Existing zero-size and
-opening-trigger shape/provenance checks remain in the venue driver. Unknown
+trigger shape/provenance checks remain in the venue driver. Unknown
 stored protection references normalize to the TS default `last`.
+PARITY-EXCEPTION (AGT-46): TS refused reduce-only triggers; the port sends them
+on order-algo with the documented string `reduceOnly: "true"` and lists reduce-only
+trigger rows as reduce-only Conditionals. Close-only and non-GTC triggers stay refused.
 Split allocation also follows TS: round equal lots and append the rounded native
 remainder. For amount 11/12 with maximum 5 and step 1, the payload sizes are
 `[3,3,3,1]`/`[3,3,3,2]`, including TS's quantity shortfall. Rounding can also
