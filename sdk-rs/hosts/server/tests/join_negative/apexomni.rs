@@ -5,6 +5,7 @@ use safe_cex_crypto::{Encoding, encode, hmac_sha256};
 use safe_cex_engine::signing::Algorithm;
 use safe_cex_exchange_server::{accounts::now_ms, envelope::InitPayload};
 use serde_json::{Value, json};
+use std::time::Duration;
 
 pub struct Apex<const TESTNET: bool>;
 const KEY: &str = "synthetic-primary-api-key";
@@ -85,6 +86,11 @@ impl<const TESTNET: bool> Venue for Apex<TESTNET> {
         } else {
             json!({"key":KEY,"secret":SECRET,"passphrase":PASS})
         }
+    }
+    fn replay_delay() -> Duration {
+        // A refused replay is resent floored to whole seconds; start the replay
+        // in a later second so no prior stamp can recur, as Phemex does.
+        Duration::from_millis(1100)
     }
     fn replayable(frame: &Value) -> bool {
         // Replay private reads; answer setup/login freshly so an unrelated
