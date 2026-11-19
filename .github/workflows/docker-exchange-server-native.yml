@@ -20,6 +20,7 @@ on:
     paths:
       - 'sdk-rs/**'
       - 'packages/safe-cex/src/exchanges/rust/construction-rules.json'
+      - 'packages/safe-cex/src/exchange-display-policy.json'
       - '.github/workflows/docker-exchange-server-native.yml'
   workflow_dispatch:
 
