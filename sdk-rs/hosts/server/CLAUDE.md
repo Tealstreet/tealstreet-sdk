@@ -503,11 +503,25 @@ without a seed remains unchanged and supplies no placement-signing capability.
 Retained DELEGATED accounts share the canonical protected owner through the sole
 `AccountSigner`; escaped engine handles have no independent erasure authority.
 The 48-hour clock starts only after the last admitted holder disconnects and is
-cancelled only by admitted reconnect. Removal/off/key removal erase immediately.
+cancelled only by admitted reconnect. Removal/off/key removal erase immediately
+once the last live holder disposes; see DELEGATED holder-refcounted dispose.
 For a selected proxy transport, token expiry is a terminal stop/erase with
 recorded reason `proxy-token-expired`; there is no issuer renewal, direct
 fallback or authority extension (Sam, 2026-11-20, AGT-37: permanent contract).
 See `DELEGATED_RETENTION.md` for the retention and restart contracts.
+
+## DELEGATED holder-refcounted dispose
+
+AGT-79 (Sam, 2026-11-20): a page `dispose` or ping orphan on a DELEGATED account
+detaches only that holder in `Registry::release_with_labels`; the shared actor and
+resident signer stop with the last LIVE holder. Before this, one device switching
+that account to LOCAL/COSIGNED (which disposes first) stopped it for every device.
+Parked holders deliberately do not count: one may be the disposing device's own
+stale socket, which must not keep a removed key resident for 48 h.
+`dispose_delegated` (an unjoined socket) refuses while a live holder remains.
+This is not a stop reason; #3736's `superseded` stays for newer-init takeovers.
+Hard stops (`Registry::dispose`, signer failure, fence, expiry, drain, settings
+rebuild) are unchanged, and COSIGNED disposal was already holder-counted.
 
 ## Host notifications (AGT-37)
 

@@ -16,9 +16,15 @@ superseded or refused builds leave the original signing deadline intact.
 Expiry stops the account's algos and records `no client for 48 h`, with disposal
 kind `no_client_48h`. The existing retained stop-notice path tells the next
 admitted client. The resident signing material is erased at disposal, including
-when engine or host references remain. Removal or disabling through the existing
-`dispose` operation takes effect immediately, including when another client is
-attached. LOCAL and COSIGNED accounts retain their existing lifecycle.
+when engine or host references remain. A page `dispose` (removal, disabling, or a
+device switching that account to LOCAL or COSIGNED) and a ping orphan detach only
+that holder (AGT-79). While another live holder remains, the account, its algos
+and the resident signer keep running untouched; the last live holder's dispose
+stops the account and erases the key immediately. Parked holders do not count,
+since one may be the disposing device's own stale socket. An unjoined socket's
+dispose removes a retained account only when no live holder holds it. Expiry,
+signer failure, lease fence, drain, settings rebuild and `Registry::dispose`
+still stop every holder. LOCAL and COSIGNED accounts retain their existing lifecycle.
 
 A poisoned resident lock is recovered only to discard its provider and erase
 the protected material. It remains unavailable for signing or admission;

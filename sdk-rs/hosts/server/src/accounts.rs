@@ -2268,8 +2268,19 @@ impl Registry {
             (last, holders.disposed)
         };
         if account.delegated().is_some() {
+            // AGT-79: a page dispose detaches only its own holder. The shared account
+            // and its resident signer stop with the last LIVE holder: a parked one may be
+            // this device's own stale socket, which must not keep a removed key resident.
             if matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned) {
-                self.dispose_for(account, disposal, "account disposed", None);
+                if last {
+                    self.dispose_for(account, disposal, "account disposed", None);
+                } else {
+                    Log::info(&format!(
+                        "detach {}: holder {holder} left, other holders keep it (disposal={})",
+                        account.name,
+                        disposal.as_str()
+                    ));
+                }
                 return;
             }
             if disposal == Disposal::SocketClosed && !stopped {
