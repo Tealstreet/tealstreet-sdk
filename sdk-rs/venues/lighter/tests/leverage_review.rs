@@ -147,7 +147,9 @@ fn margin_mode_change_signs_current_five_x_from_percent_position() {
 }
 
 #[test]
-fn an_amend_recreates_only_what_is_left_of_the_total() {
+fn an_amend_modifies_only_what_is_left_of_the_total() {
+    // AGT-45: one native modify replaces the former cancel-then-replace; its
+    // base amount keeps the same left-of-total rule the replacement had.
     for (amount, expected) in [(None, 1250), (Some(1.25), 500)] {
         let (mut e, _) = ready_unattributed();
         e.store_mut().update_order("42", |order| {
@@ -164,31 +166,14 @@ fn an_amend_recreates_only_what_is_left_of_the_total() {
                 amount,
             }),
         );
-        let cancel = nonce(&mut e);
-        ack(&mut e, &cancel);
-        let timer = e
-            .drain_actions()
-            .find_map(|action| match action {
-                Action::SetTimer { timer, at_ms } if at_ms < NOW + 500.0 => Some(timer),
-                _ => None,
-            })
-            .unwrap();
-        e.handle(NOW + 100.0, Event::TimerFired { timer });
-        let replacement = http(&mut e, "sendTx");
-        let payload = wire(&replacement);
+        let modify = nonce(&mut e);
+        assert!(modify.body.as_deref().unwrap().contains("tx_type=17"));
+        let payload = wire(&modify);
+        assert_eq!(payload["Index"], 42);
         assert_eq!(payload["BaseAmount"], expected);
         assert_eq!(payload["Price"], 9200);
-        ack(&mut e, &replacement);
-        assert!(e.store().order("42").is_none());
-        assert_eq!(
-            e.store()
-                .orders()
-                .iter()
-                .find(|order| order.id != "42")
-                .unwrap()
-                .amount,
-            expected as f64 / 1000.0
-        );
+        ack(&mut e, &modify);
+        assert!(e.store().order("42").is_some());
     }
 }
 

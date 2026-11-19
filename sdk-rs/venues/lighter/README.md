@@ -36,3 +36,29 @@ version. See [protective edits](../../../../docs/plans/callers/lighter-protectiv
 A resolved frame receiver cannot rebind its account, including address selectors.
 Each protective edit retains its initiating account through the public read and
 final sends; foreign metadata retires pending edit bindings, even if A returns.
+
+## Placement proof (AGT-45)
+
+A `sendTx` acknowledgement only says the sequencer queued the transaction; the
+order can still be canceled at execution (margin, slippage, liquidity) or the
+transaction can fail. Every ordinary placement therefore records an engine
+pending placement and parks its Plan for at most 10 seconds while background
+reads prove it: authenticated `accountOrders` by client index (up to 20 per
+read), and `tx?by=hash` for a placement whose row has not appeared. A resting,
+filled or later-canceled row resolves it; a reason-qualified pre-rest
+cancellation (`canceled-margin-not-allowed`, `-post-only`, `-reduce-only`,
+`-position-not-allowed`, `-too-much-slippage`, `-not-enough-liquidity`,
+`-self-trade`, `-invalid-balance`) or a failed transaction (`status` 0) refuses it
+`Rejected` with the venue reason and withdraws the optimistic row. A mix of
+refused and live lots, or no proof by the bound, is Unknown; nothing is resent.
+Reads back off 250 ms to 2 s. A proven placement keeps the legacy 100 ms pace
+before the command's next write, which continues from the settled call. Grouped
+TP/SL keep their stream proof and a guarded put-back keeps its `RestoreProof`.
+
+## Plain limit amends
+
+An unguarded limit edit is one native `ModifyOrder` (tx 17) of the resting order,
+with trigger price 0 (the venue's nil trigger) and the left-of-total amount. A
+refusal leaves the original untouched. Edits that cannot be one modify (split
+lots) refuse before any write; there is no cancel-then-replace fallback. A tx 17
+acknowledgement is still the result; it is not yet proven like a placement.

@@ -1,7 +1,9 @@
 //! Serialized nonce allocation and submissions. Transport failures never replay writes.
+mod placement;
 pub(crate) mod protection;
 mod reference;
 use crate::{Lighter, Pending, sign};
+pub use placement::ProofRead;
 pub use reference::ReferenceRead;
 use safe_cex_engine::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict, WriteFact};
 use safe_cex_engine::model::*;
@@ -45,6 +47,8 @@ pub struct Trading {
     retired_snapshot: Option<u64>,
     retired_effects: Vec<Effect>,
     uncertain_settings: HashMap<String, u64>,
+    proof_timer: Option<TimerId>,
+    proof_token: u64,
 }
 struct PositionWait {
     command: CommandId,
@@ -78,6 +82,10 @@ struct Job {
     group_seen: HashSet<String>,
     /// The plan is parked in a settle-only wait for group proof.
     settled: bool,
+    /// An acknowledged ordinary placement awaiting venue proof.
+    proof: Option<placement::Proof>,
+    /// The settled placement call a released proof continues from.
+    handoff: Option<Context>,
 }
 // Field order preserves the sorted-key JSON used by the original journal.
 #[derive(Serialize)]
@@ -102,6 +110,7 @@ impl Job {
             .filter(|id| !self.group_seen.contains(*id))
             .cloned()
             .collect();
+        unknown.extend(self.proof.iter().flat_map(placement::Proof::unresolved));
         let skip = if self.settled || self.steps.is_empty() {
             0
         } else {
@@ -691,8 +700,37 @@ impl Lighter {
                         },
                         trigger_price: orders[0].native.trigger_price,
                     })]);
-                } else {
+                } else if protection.is_some() {
                     steps.push_front(Step::Cancel(Box::new(old.clone())));
+                } else {
+                    // An unguarded cancel-then-replace loses the order when the
+                    // replacement is refused, so a plain limit edits in place.
+                    let modify = match (steps.front(), steps.len()) {
+                        (Some(Step::Place(orders)), 1)
+                            if orders.len() == 1
+                                && old.kind == OrderType::Limit
+                                && orders[0].native.order_type == 0 =>
+                        {
+                            old.id.parse::<u64>().ok().map(|index| sign::Modify {
+                                market_index: orders[0].native.market_id,
+                                index,
+                                base_amount: orders[0].native.amount,
+                                price: orders[0].native.price,
+                                trigger_price: 0,
+                            })
+                        }
+                        _ => None,
+                    };
+                    let Some(modify) = modify else {
+                        refuse(
+                            cx,
+                            not_sent(
+                                "Lighter order not changed: this edit cannot be sent as one native modify; cancel and re-place it",
+                            ),
+                        );
+                        return;
+                    };
+                    steps = VecDeque::from([Step::Modify(modify)]);
                 }
                 amend = Some(old);
                 (command, steps)
@@ -801,6 +839,8 @@ impl Lighter {
             group_accepted: Vec::new(),
             group_seen: HashSet::new(),
             settled: false,
+            proof: None,
+            handoff: None,
         });
         if !queued {
             self.trade_kick(cx);
@@ -1582,13 +1622,18 @@ impl Lighter {
                     // refusal's words; the journal still owns outcome and effects.
                     error.presents = present_unknown;
                     if matches!(submission.effect, Effect::Modify) {
+                        let noun = if self.trading.active.as_ref().unwrap().protection.is_some() {
+                            "stop"
+                        } else {
+                            "order"
+                        };
                         error.message = if unknown {
                             format!(
-                                "Lighter stop edit outcome unknown: {}; check Open Orders",
+                                "Lighter {noun} edit outcome unknown: {}; check Open Orders",
                                 error.message
                             )
                         } else {
-                            format!("Lighter stop not changed: {}", error.message)
+                            format!("Lighter {noun} not changed: {}", error.message)
                         };
                     }
                     if let Some(code) = code {
@@ -1642,15 +1687,39 @@ impl Lighter {
                     }
                     _ => Vec::new(),
                 };
-                self.trading
-                    .active
-                    .as_mut()
-                    .unwrap()
-                    .ids
-                    .extend(ids.iter().cloned());
-                if cx
-                    .http_write_fact(&context, WriteFact::Accepted { order_ids: ids }, None)
-                    .is_err()
+                let hashes: Vec<String> = match hashes {
+                    Some(Hashes::One(hash)) => vec![hash.clone()],
+                    Some(Hashes::Many(hashes)) => hashes.clone(),
+                    None => Vec::new(),
+                };
+                // The ACK proves the sequencer queued it, not that it rests or
+                // filled. Ordinary placements wait for venue proof; a put-back
+                // keeps its own RestoreProof, and groups their stream proof.
+                let job = self.trading.active.as_ref().unwrap();
+                let prove = matches!(job.steps.front(), Some(Step::Place(_)))
+                    && !job.protection.as_ref().is_some_and(|edit| edit.restoring);
+                let receipt = if prove {
+                    cx.http_pending_placement(&context).ok()
+                } else {
+                    self.trading
+                        .active
+                        .as_mut()
+                        .unwrap()
+                        .ids
+                        .extend(ids.iter().cloned());
+                    None
+                };
+                if (prove && receipt.is_none())
+                    || (!prove
+                        && cx
+                            .http_write_fact(
+                                &context,
+                                WriteFact::Accepted {
+                                    order_ids: ids.clone(),
+                                },
+                                None,
+                            )
+                            .is_err())
                     || cx.validate_http_write_effects(&context).is_err()
                 {
                     self.trade_finish(cx, uncertain("Invalid Lighter write evidence"));
@@ -1757,6 +1826,10 @@ impl Lighter {
                         }
                     }
                 }
+                if let Some(receipt) = receipt {
+                    self.trade_await_proof(cx, receipt, ids, hashes);
+                    return;
+                }
                 let job = self.trading.active.as_mut().unwrap();
                 job.effective = true;
                 job.effect = None;
@@ -1774,6 +1847,49 @@ impl Lighter {
                 }
             }
         }
+    }
+
+    /// Settle the acknowledged placement call and park its Plan until the
+    /// venue proves the orders; the bound's expiry reports Unknown.
+    fn trade_await_proof(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        receipt: safe_cex_engine::request_context::PendingPlacement,
+        ids: Vec<String>,
+        hashes: Vec<String>,
+    ) {
+        self.trading.proof_token += 1;
+        let token = self.trading.proof_token;
+        let job = self.trading.active.as_mut().unwrap();
+        job.effect = None;
+        let (Some(plan), Some(slot), Some(context)) =
+            (job.plan.clone(), job.slot.take(), job.live.take())
+        else {
+            self.trade_finish(cx, uncertain(UNCERTAIN_RESULT));
+            return;
+        };
+        match cx.serial_plan_settle_wait(&plan, &slot, &context, placement::PROOF_BOUND_MS) {
+            Ok(wait) => {
+                job.condition = Some(wait);
+                job.waiting_plan = true;
+                job.handoff = Some(context);
+                job.proof = Some(placement::Proof::new(
+                    receipt,
+                    ids,
+                    hashes,
+                    cx.now + f64::from(placement::PROOF_BOUND_MS),
+                    token,
+                ));
+            }
+            Err(_) => {
+                job.slot = Some(slot);
+                job.live = Some(context);
+                self.trade_finish(cx, uncertain(UNCERTAIN_RESULT));
+                return;
+            }
+        }
+        self.refresh_orders(cx);
+        self.proof_poll(cx);
     }
 
     pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
@@ -1921,6 +2037,9 @@ impl Lighter {
         if let Some(wait) = self.trading.position_wait.take() {
             self.trading.retired_snapshot = Some(wait.serial);
         }
+        if let Some(timer) = self.trading.proof_timer.take() {
+            cx.clear_timer(timer);
+        }
         self.trading.waiting_limits = false;
         if let Some(job) = self.trading.active.take() {
             if job.effect.is_some() {
@@ -2007,6 +2126,9 @@ impl Lighter {
     }
 
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.proof_timer(cx, timer) {
+            return true;
+        }
         if self.trading.timer != Some(timer) {
             return false;
         }
@@ -2445,6 +2567,24 @@ impl Lighter {
         intent: Option<safe_cex_engine::classify::Intent>,
     ) -> Option<Context> {
         let job = self.trading.active.as_mut()?;
+        if let Some(plan) = &job.plan
+            && job.live.is_none()
+            && job.slot.is_none()
+            && let Some(handoff) = job.handoff.take()
+        {
+            // Only from the released proof's ready callback; the leg is definitive.
+            match cx.continue_settled_serial_plan(plan, &handoff, serial_call(operation)) {
+                Ok(slot) => {
+                    job.slot = Some(slot);
+                    job.delay_ms = 0;
+                }
+                Err(error) => {
+                    self.trade_finish(cx, error.venue_error());
+                    return None;
+                }
+            }
+        }
+        let job = self.trading.active.as_mut()?;
         let result = if let Some(plan) = &job.plan {
             if job.live.is_some() {
                 let context = job.live.take().unwrap();
@@ -2704,6 +2844,21 @@ impl Lighter {
         }) else {
             return;
         };
+        if let Some(outcome) = job.proof.as_mut().and_then(|proof| proof.outcome.take()) {
+            job.proof = None;
+            job.condition = None;
+            job.waiting_plan = false;
+            if let Err(error) = outcome {
+                self.trade_finish(cx, error);
+            } else if let Some(wait) = self.trading.position_wait.take()
+                && wait.confirmed != Some(true)
+            {
+                self.trade_finish(cx, not_sent("Lighter account snapshot could not confirm reduce-only exposure; order was not sent"));
+            } else {
+                self.trade_kick(cx);
+            }
+            return;
+        }
         if job.settled {
             // A released settled Plan has no bound left: every path seals it.
             job.condition = None;
@@ -2845,7 +3000,26 @@ impl Lighter {
         if !matches {
             return;
         }
-        if self.trading.active.as_ref().is_some_and(|job| job.settled) {
+        if let Some(proof) = self
+            .trading
+            .active
+            .as_ref()
+            .and_then(|job| job.proof.as_ref())
+        {
+            let proven = proof.outcome.is_some();
+            self.trading.active.as_mut().unwrap().condition = None;
+            self.refresh_orders(cx);
+            let error = if proven {
+                // Only a held reduce-only position read outlives a concluded proof.
+                not_sent("Lighter account read timed out; reduce-only order was not sent")
+            } else {
+                uncertain(format!(
+                    "Lighter accepted the transaction but did not confirm the order within {} seconds",
+                    placement::PROOF_BOUND_MS / 1_000
+                ))
+            };
+            self.trade_finish(cx, error);
+        } else if self.trading.active.as_ref().is_some_and(|job| job.settled) {
             self.trading.active.as_mut().unwrap().condition = None;
             self.trade_group_unconfirmed(cx);
         } else {

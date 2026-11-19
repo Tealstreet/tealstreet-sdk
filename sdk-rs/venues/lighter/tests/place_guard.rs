@@ -399,7 +399,7 @@ fn a_proven_placement_and_a_later_cancel_all_still_proceed() {
         200,
         r#"{"code":200,"tx_hash":"transaction-hash"}"#,
     );
-    let out = drain(&mut e, &mut t);
+    let out = drain_proven(&mut e, &mut t);
     assert!(
         matches!(&terminals(&out, 7)[..], [Notice::CommandDone { .. }]),
         "a proven placement completes: {:?}",
@@ -433,7 +433,7 @@ fn a_cancel_by_the_returned_index_before_its_row_arrives_is_sent() {
         200,
         r#"{"code":200,"tx_hash":"transaction-hash"}"#,
     );
-    let out = drain(&mut e, &mut t);
+    let out = drain_proven(&mut e, &mut t);
     let [Notice::CommandDone { result, .. }] = &terminals(&out, 7)[..] else {
         panic!("a proven placement completes");
     };

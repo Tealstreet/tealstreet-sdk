@@ -81,6 +81,10 @@ fn ack_at(e: &mut Engine<Lighter>, now: f64, r: &HttpRequest) {
         200,
         r#"{"code":200,"tx_hash":"transaction-hash"}"#,
     );
+    // An acknowledged placement completes only once the venue proves it.
+    if creates(r) {
+        prove_open(e, now);
+    }
 }
 fn timer(e: &mut Engine<Lighter>) -> TimerId {
     safe_cex_engine::test_support::prepared_actions(e, NOW)
@@ -423,7 +427,9 @@ fn known_invalid_nonce_rejection_allows_only_one_fresh_nonce_retry() {
 }
 
 #[test]
-fn rejected_cancel_preserves_order_and_amend_does_not_place_replacement() {
+fn a_limit_amend_is_one_native_modify_that_keeps_the_order() {
+    // AGT-45: cancel-then-replace lost the resting order when the replacement
+    // was refused. A plain limit now edits in place with ModifyOrder (tx 17).
     let (mut e, _) = ready_unattributed();
     e.handle(
         NOW,
@@ -436,73 +442,78 @@ fn rejected_cancel_preserves_order_and_amend_does_not_place_replacement() {
     );
     let nonce = http(&mut e, "nextNonce");
     reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
-    let cancel = http(&mut e, "sendTx");
-    assert_eq!(param(&cancel, "tx_type"), "15");
+    let modify = http(&mut e, "sendTx");
+    assert_eq!(param(&modify, "tx_type"), "17");
+    let tx = wire(&modify);
+    assert_eq!(
+        (
+            &tx["MarketIndex"],
+            &tx["Index"],
+            &tx["BaseAmount"],
+            &tx["Price"],
+            &tx["TriggerPrice"]
+        ),
+        (&json!(1), &json!(42), &json!(2000), &json!(9200), &json!(0))
+    );
     reply(
         &mut e,
-        &cancel,
+        &modify,
         200,
-        r#"{"code":21121,"message":"cancel rejected"}"#,
+        r#"{"code":200,"tx_hash":"transaction-hash"}"#,
+    );
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("sendTx")))
+    );
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result, .. }) if result == r#"["42"]"#)), "{out:?}");
+    assert!(e.store().order("42").is_some());
+}
+
+#[test]
+fn a_refused_limit_modify_reports_the_venue_reason_and_keeps_the_order() {
+    let (mut e, _) = ready_unattributed();
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 8,
+            id: "42".into(),
+            price: Some(92.0),
+            amount: None,
+        }),
+    );
+    let nonce = http(&mut e, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let modify = http(&mut e, "sendTx");
+    assert_eq!(param(&modify, "tx_type"), "17");
+    reply(
+        &mut e,
+        &modify,
+        200,
+        r#"{"code":21702,"message":"not enough margin"}"#,
+    );
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("sendTx")))
+    );
+    assert!(
+        out.iter().any(
+            |a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. })
+        if error.outcome == Some(Outcome::Rejected)
+            && error.message.contains("Lighter order not changed")
+            && error.message.contains("not enough margin"))
+        ),
+        "{out:?}"
     );
     assert!(e.store().order("42").is_some());
-    assert_eq!(failure(&mut e), "cancel rejected");
 }
 
-#[test]
-fn successful_amend_uses_fresh_generated_index() {
-    let (mut e, _) = ready_unattributed();
-    e.handle(
-        NOW,
-        Event::Command(Command::AmendOrder {
-            command: 8,
-            id: "42".into(),
-            price: Some(92.0),
-            amount: None,
-        }),
-    );
-    let nonce = http(&mut e, "nextNonce");
-    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
-    let cancel = http(&mut e, "sendTx");
-    ack(&mut e, &cancel);
-    let t = timer(&mut e);
-    e.handle(NOW + 100.0, Event::TimerFired { timer: t });
-    let replacement = http_at(&mut e, NOW + 100.0, "sendTx");
-    let tx = wire(&replacement);
-    assert_ne!(tx["ClientOrderIndex"], 42);
-    assert_eq!(tx["Price"], 9200);
-    ack_at(&mut e, NOW + 100.0, &replacement);
-    assert!(e.store().order("42").is_none());
-}
-
-#[test]
-fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
-    let (mut e, _) = ready_unattributed();
-    e.handle(
-        NOW,
-        Event::Command(Command::AmendOrder {
-            command: 8,
-            id: "42".into(),
-            price: Some(92.0),
-            amount: None,
-        }),
-    );
-    let nonce = http(&mut e, "nextNonce");
-    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
-    let cancel = http(&mut e, "sendTx");
-    ack(&mut e, &cancel);
-    let t = timer(&mut e);
-    e.handle(NOW + 100.0, Event::TimerFired { timer: t });
-    let replacement = http_at(&mut e, NOW + 100.0, "sendTx");
-    reply_at(
-        &mut e,
-        NOW + 100.0,
-        &replacement,
-        200,
-        r#"{"code":21702,"message":"replacement refused"}"#,
-    );
-    let error = failure(&mut e);
-    assert!(error.contains("order is gone"), "{error}");
-}
+// AGT-45: `a_limit_whose_replacement_is_refused_says_the_order_is_gone`,
+// `successful_amend_uses_fresh_generated_index`, `fill_overtaking_cancel_ack_aborts_amendment`
+// and `execution_after_cancel_ack_aborts_replacement_during_notification_suppression`
+// pinned the plain-limit cancel-then-replace, which now sends one native modify
+// (tests above). The fill-during-amendment guard remains for guarded replacements.
 
 #[test]
 fn a_stop_without_native_provenance_is_refused_before_cancel() {
@@ -525,29 +536,6 @@ fn a_stop_without_native_provenance_is_refused_before_cancel() {
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {error,..}) if error.outcome == Some(Outcome::NotSent) && error.message.contains("original unavailable"))));
     assert!(e.store().order("42").is_some());
-}
-
-#[test]
-fn fill_overtaking_cancel_ack_aborts_amendment() {
-    let (mut e, _) = ready_unattributed();
-    e.handle(
-        NOW,
-        Event::Command(Command::AmendOrder {
-            command: 8,
-            id: "42".into(),
-            price: Some(92.0),
-            amount: None,
-        }),
-    );
-    let nonce = http(&mut e, "nextNonce");
-    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
-    let cancel = http(&mut e, "sendTx");
-    e.store_mut().update_order("42", |o| {
-        o.filled = 1.0;
-        o.remaining = 1.0;
-    });
-    ack(&mut e, &cancel);
-    assert!(failure(&mut e).contains("filled during amendment"));
 }
 
 #[test]
@@ -751,36 +739,6 @@ fn account_snapshot_started_during_settings_write_cannot_undo_acknowledgement() 
         assert_eq!(position.margin_type, Some(margin));
         assert_eq!(position.contracts, 3.0);
     }
-}
-
-#[test]
-fn execution_after_cancel_ack_aborts_replacement_during_notification_suppression() {
-    let (mut e, socket) = ready_unattributed();
-    e.handle(
-        NOW,
-        Event::Command(Command::AmendOrder {
-            command: 8,
-            id: "42".into(),
-            price: Some(92.0),
-            amount: None,
-        }),
-    );
-    let nonce = http(&mut e, "nextNonce");
-    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
-    let cancel = http(&mut e, "sendTx");
-    ack(&mut e, &cancel);
-    let pace = timer(&mut e);
-    message(
-        &mut e,
-        socket,
-        NOW + 20.0,
-        &format!(
-            r#"{{"type":"update/account_all","channel":"account_all:718895","trades":{{"1":[{{"trade_id":1,"market_id":1,"price":"90","size":"0.2","timestamp":{},"bid_account_id":718895,"ask_account_id":2,"bid_id":"42"}}]}}}}"#,
-            NOW as u64 + 20
-        ),
-    );
-    e.handle(NOW + 100.0, Event::TimerFired { timer: pace });
-    assert!(failure(&mut e).contains("filled during amendment"));
 }
 
 #[test]
