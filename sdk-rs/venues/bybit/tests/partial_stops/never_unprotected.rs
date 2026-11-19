@@ -662,3 +662,45 @@ fn a_replacement_that_fails_signing_puts_the_old_stop_back() {
         Some(safe_cex_engine::error::Protection::Restored)
     );
 }
+
+/// The hosted action result keeps only the first 512 chars of a failure message
+/// (`order_actions::settle`). After an unconfirmed cancel, a refused replacement with a
+/// long venue retMsg, then a successful put-back, the second-stop warning must survive it.
+#[test]
+fn the_second_stop_warning_survives_a_long_venue_refusal() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    incident_stop(&mut h, "partial");
+    edit(&mut h, 91, "partial");
+    h.respond("&orderId=partial", 503, "");
+    census(&mut h);
+    let long = "x".repeat(1_000);
+    h.respond(
+        "/v5/position/trading-stop",
+        200,
+        &serde_json::json!({"retCode":10001,"retMsg":long,"result":{}}).to_string(),
+    );
+    h.advance(200.0);
+    h.respond("/v5/position/trading-stop", 200, OK);
+    let message = &failure(&h, 91).message;
+    assert!(
+        message.contains(&long),
+        "the refusal is kept in full: {}",
+        message.len()
+    );
+    let shown: String = message.chars().take(512).collect();
+    assert!(
+        shown.contains("a second stop may exist") && shown.contains("Open Orders"),
+        "{shown}"
+    );
+    assert!(
+        h.result(91)
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .chars()
+            .take(512)
+            .collect::<String>()
+            .contains("a second stop may exist")
+    );
+}

@@ -1411,8 +1411,10 @@ impl BybitLinear {
                         "put back as a new standalone order; check Open Orders"
                     };
                     // Unconfirmed cancel: the old order may still be live beside its put-back.
+                    // The bounded warning leads: the hosted action result keeps 512 chars,
+                    // and the venue's refusal text after it is unbounded.
                     let second = if run.error.is_some() {
-                        "; Bybit did not confirm the old order was cancelled, so a second stop may exist"
+                        "Bybit did not confirm the old order was cancelled, so a second stop may exist; check Open Orders. "
                     } else {
                         ""
                     };
@@ -1421,7 +1423,7 @@ impl BybitLinear {
                         outcome: Some(Outcome::Rejected),
                         protection: Some(safe_cex_engine::error::Protection::Restored),
                         ..VenueError::new(format!(
-                            "Your {symbol} {what} is unchanged: its replacement was refused, so the old {what} was {put_back}: {refusal}{second}"
+                            "{second}Your {symbol} {what} is unchanged: its replacement was refused, so the old {what} was {put_back}: {refusal}"
                         ))
                     };
                     let _ = cx.finish_plan_call(&plan, &active.slot, &active.context);
