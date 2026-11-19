@@ -49,6 +49,10 @@ fn sized_plan_keeps_its_size() {
     for plan in ["loss_plan", "profit_plan"] {
         let mut h = Harness::classic();
         h.private_message(&algo_push(plan, "0.02"));
-        assert_eq!(h.engine.store().order("plan").unwrap().amount, 0.02, "{plan}");
+        assert_eq!(
+            h.engine.store().order("plan").unwrap().amount,
+            0.02,
+            "{plan}"
+        );
     }
 }
