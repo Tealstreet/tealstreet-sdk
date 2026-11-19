@@ -1142,19 +1142,24 @@ impl Session {
                     && init.sealed.is_none()
                     && crate::delegated::enabled(&init.exchange_name) =>
             {
+                // Retire before minting: the claimed holder keeps this exact output,
+                // so later notices (algo errors, stop replay) reach this socket.
+                self.out.retire_account(&name);
                 let out = out.account(&name);
-                self.registry.resume_delegated(
-                    from,
-                    self.user(),
-                    self.socket,
-                    token.clone(),
-                    &init,
-                    out.outbox(),
-                )
+                self.registry
+                    .resume_delegated(
+                        from,
+                        self.user(),
+                        self.socket,
+                        token.clone(),
+                        &init,
+                        out.outbox(),
+                    )
+                    .map(|account| (account, out))
             }
             _ => None,
         };
-        let Some(account) = claimed else {
+        let Some((account, out)) = claimed else {
             Log::info(&format!(
                 "delegated resume {name} socket {}: unavailable, handover required",
                 self.socket
@@ -1169,8 +1174,6 @@ impl Session {
             self.socket
         ));
         self.metrics.note_init();
-        self.out.retire_account(&name);
-        let out = out.account(&name);
         let mode = envelope::AccountSigningMode::Delegated;
         self.join(account, out.clone(), mode, interval).await;
         let Some(joined) = self.joined.get(&name) else {
