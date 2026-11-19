@@ -148,6 +148,7 @@ import {
   IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS,
   inProcessPortPair,
   RustPublicFeedClient,
+  type RustPublicFeedPort,
   rustPublicFeedIdentity,
   serveInProcessPublicData,
 } from './publicFeed';
@@ -2218,7 +2219,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private refuseOnMirror() {
-    const members = this as unknown as Record<string, unknown>;
+    const members = this;
     for (const method of WORKER_MIRROR_UNSUPPORTED_METHODS) {
       members[method] = () => {
         const message = `${method} is not available on the main-thread exchange: it runs in the account's worker`;
@@ -2362,7 +2363,7 @@ export class RustEngineExchange extends BaseExchange {
 
   /** exchange-server's in-process source speaks the shared-feed protocol over an in-memory port. */
   private openSharedFeedPort = ():
-    { port: MessagePort; policy?: { handshakeTimeoutMs: number; inProcess: true } } | undefined => {
+    { port: RustPublicFeedPort; policy?: { handshakeTimeoutMs: number; inProcess: true } } | undefined => {
     if (this.options.publicFeed?.mode === 'shared') return { port: this.options.publicFeed.port };
     const external = this.options.externalPublicData;
     if (external?.type !== 'in-process' || !this.usesInProcessPublicData) return undefined;

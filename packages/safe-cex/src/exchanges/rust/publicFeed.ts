@@ -14,6 +14,14 @@ import type { RustEngineExchange } from './rust.exchange';
 /** Explicitly transfer the shared port when options cross a worker boundary. */
 export type RustPublicFeedPolicy = { mode: 'direct' | 'disabled' } | { mode: 'shared'; port: MessagePort };
 
+export type RustPublicFeedPort = {
+  postMessage(data: unknown): void;
+  addEventListener(type: 'message' | 'messageerror', listener: Listener): void;
+  removeEventListener(type: 'message' | 'messageerror', listener: Listener): void;
+  start(): void;
+  close(): void;
+};
+
 type FeedUpdate = {
   op: 'publicFeedUpdate';
   tickers?: Array<
@@ -112,10 +120,10 @@ export const rustPublicFeedIdentity = (name: ExchangeName, options: ExchangeOpti
 const sourcesWithProvider = new WeakSet<RustEngineExchange>();
 
 export class RustPublicFeedProvider {
-  private readonly clients = new Map<MessagePort, { cleanup(): void; expired(): boolean }>();
+  private readonly clients = new Map<RustPublicFeedPort, { cleanup(): void; expired(): boolean }>();
   private disposed = false;
   private sweep?: ReturnType<typeof setInterval>;
-  private readonly tickerDemands = new Map<MessagePort, string[]>();
+  private readonly tickerDemands = new Map<RustPublicFeedPort, string[]>();
   private readonly originalTickerSymbols: string[];
 
   constructor(private readonly source: RustEngineExchange) {
@@ -139,7 +147,7 @@ export class RustPublicFeedProvider {
     );
   }
 
-  attach(port: MessagePort): () => void {
+  attach(port: RustPublicFeedPort): () => void {
     if (this.disposed || this.source.isDisposed) throw new Error('Shared public feed provider disposed');
     if (this.clients.has(port)) throw new Error('Shared public feed port already attached');
     let ready = false;
@@ -311,7 +319,7 @@ export class RustPublicFeedClient {
   private reject?: (error: Error) => void;
   private resolve?: () => void;
   constructor(
-    private readonly port: MessagePort,
+    private readonly port: RustPublicFeedPort,
     private readonly identity: string,
     private readonly ingest: (update: FeedUpdate) => Promise<unknown>,
     private readonly fail: (error: Error) => void,
@@ -456,12 +464,12 @@ class InProcessPort {
 }
 
 /** A connected pair of in-memory ports for a same-realm public feed. */
-export const inProcessPortPair = (): [MessagePort, MessagePort] => {
+export const inProcessPortPair = (): [RustPublicFeedPort, RustPublicFeedPort] => {
   const a = new InProcessPort();
   const b = new InProcessPort();
   a.peer = b;
   b.peer = a;
-  return [a as unknown as MessagePort, b as unknown as MessagePort];
+  return [a, b];
 };
 
 /** In-process sources load before handing data over; TS waits as long. */
@@ -637,7 +645,7 @@ const inProcessHubs = new WeakMap<PublicDataSource, InProcessHub>();
  * restarts, so accounts keep running; catalog changes re-send `ready`, and
  * book/candle requests for symbols the source has not announced wait for it.
  */
-export const serveInProcessPublicData = (source: PublicDataSource, port: MessagePort): (() => void) => {
+export const serveInProcessPublicData = (source: PublicDataSource, port: RustPublicFeedPort): (() => void) => {
   let hub = inProcessHubs.get(source);
   if (!hub) {
     hub = new InProcessHub(source, () => inProcessHubs.delete(source));
