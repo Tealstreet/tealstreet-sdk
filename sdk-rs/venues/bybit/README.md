@@ -88,6 +88,16 @@ replies, ambiguous HTTP statuses, native `429`/`10018`, and protective edits tha
 may already have cancelled a stop retain Unknown and Open Orders guidance.
 This per-engine budget cannot account for another app or engine using the same UID.
 
+Create-batch may acknowledge a reduce-only peer resize alongside the new order.
+Immediately before dispatch, the native plan snapshots bounded open, nonvirtual,
+same-symbol/same-side reduce-only peer IDs, only for an entirely reduce-only batch.
+Aligned response/status rows may subtract those known peers; requested echoes
+match their targets, and a single remaining unnamed identity is unambiguous.
+Multiple unnamed new identities, foreign/duplicate IDs, conflicting echoes,
+misaligned arrays or a rejected peer remain Unknown without resending. The peer
+is never a caller result or algo-owned order; its private stream owns its state.
+This follows Bybit's documented [reduce-only resizing](https://www.bybit.com/en/help-center/article/Reduce-Only-Order?category=5f2fb74e9c8b771130).
+
 ## Browser reachability and beta gates
 
 Hyro is admitted in development and preview by the existing metadata. Production

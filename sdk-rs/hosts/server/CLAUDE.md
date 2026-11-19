@@ -5,6 +5,16 @@ changing server behavior. Validate scoped Rust changes with
 `cargo test -p safe-cex-exchange-server` and
 `cargo clippy -p safe-cex-exchange-server --all-targets` from `sdk-rs/`.
 
+## Bybit acknowledgement audit
+
+Order audits decode the native legacy error wrapper before their unchanged
+160-character message cap, including algo dispatch failures. The closed
+`bybitBatchAcknowledgement` field retains list shapes/counts and at most eight
+child summaries, plus at most eight bounded native IDs as reconciliation evidence.
+It accepts only the native diagnostic grammar, never arbitrary JSON metadata,
+client echoes or raw responses. This journal field changes no outcome, algo
+ownership, retry or resend authority; it is not forwarded to Sentry.
+
 ## History reply completeness
 
 Command-owned `history.incomplete` notices retain a closed reason and optional
