@@ -178,5 +178,7 @@ likewise runs every engine mode before failing. #3640 needed four runs to surfac
 
 Binance saturated-history paging preserves the existing request pacing and caller
 deadlines. The measured #3671 Binance floor and its historical CI provenance are
-retained in `wasm-caps-history.md`; the generated cap keeps that larger parent floor.
-Fresh merged-head artifacts and native/combined consumers remain independent gates.
+retained in `wasm-caps-history.md` as historical evidence. AGT-23 supersedes that
+PR-local floor: the active cap follows master, and only the master artifact bot
+restores its reserve. Fresh artifacts must fit the byte ceiling; reserve warnings
+remain advisory. Native/combined consumers remain independent gates.

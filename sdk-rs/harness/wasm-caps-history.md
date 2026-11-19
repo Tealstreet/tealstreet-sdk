@@ -1631,3 +1631,22 @@ const m49BinancePagingReserveMeasurements = [
   ['woo', 2_875_139, 2_885_632, '3fc66068aa915daa0fba4d680d20da7193ee570e7e56592799b4045c0e80af48', ['woo'], 14491129364, 135283817394],
 ];
 ```
+
+
+## #3671 AGT-23 policy reconciliation (2026-11-19)
+
+Merge `287f962369782b1b989df0e08847616d20048b38` carried the historical
+2,412,544-byte Binance floor from its first parent. Sam's subsequent explicit
+ruling supersedes that manual floor with AGT-23: PRs do not change active caps.
+The ordinary follow-up restores current master
+`655d5df09477074ad857b283b3f920188a4ef898`'s generated Binance cap of
+2,410,496 bytes; all other caps, the generator and its tests remain unchanged.
+The parent measurements and complete M49 tuples above remain historical evidence.
+
+The merge's own Rust SDK run `44460589727`, artifact `14499782679`, measures
+2,402,182 bytes, below the restored ceiling by 8,314 bytes. That reserve is an
+advisory AGT-23 warning, not a reason for another per-PR cap raise. The generator
+would compute 2,412,544 bytes for this measurement, but restoration belongs to
+the master artifact bot after master measurement. These parent artifacts do not
+replace fresh final-head gates or artifact provenance, and no memory or financial
+guard changes.
