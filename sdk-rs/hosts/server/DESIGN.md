@@ -625,7 +625,7 @@ update reapplies a preference. No preference is inherited from a shared account.
 
 | `t` | `d` | When |
 |---|---|---|
-| `session` | `{resumeId, resumed}` | On open, for `resumable=1` sockets |
+| `session` | `{resumeId, resumed, resumeProof?, delegatedResume?}` | On open, for `resumable=1` sockets; `resumeProof` authorizes a later DELEGATED claim, `delegatedResume` lists labels this socket may claim |
 | `msg` | `{op, accountName, data, ...}` | Account output (see Frames and Replies) |
 | `sign-req` | the signer request (4yjlw0) | Remote signing |
 | `echo` | `{id, pad}` | Echo probe every `SIGNER_ECHO_PROBE_MS`, default unchanged |
@@ -1132,7 +1132,7 @@ Sessions and resume (same semantics as today):
   - private accounts are parked under `resumeId` for 60s, bound to `userId`;
   - other accounts are disposed;
   - chases and TWAPs live with the account and keep running through the park (Sam, the COSIGNED blip window); a socket close no longer ends chases. A joining socket gets the algo store rows again.
-- **Resume:** a new socket presenting `resume=<id>` with the same `userId` adopts parked COSIGNED accounts. It receives `session {resumed:true}` when at least one account resumes. DELEGATED accounts use a fresh handover and shared admission; their previous parked holders retain the original expiry while verification is pending.
+- **Resume:** a new socket presenting `resume=<id>` with the same `userId` adopts parked COSIGNED accounts. It receives `session {resumed:true}` when at least one account resumes. DELEGATED accounts are not adopted at open. The socket whose resume consumed the id (and only it) may claim each parked DELEGATED label, within the same grace, with `init {signingMode:"delegated", resume:true, resumeProof}` and no `sealed`. `resumeProof` is the parking socket's in-band session-frame value, never sent in a URL; owner, label, venue, identity digest and handover settings must match the parked account. The claim keeps the resident actor and signer, with no key offer, handover or venue probe (AGT-54). Any mismatch, an expired grace, a foreign or second socket, a router fence or the DELEGATED kill switch answers the transient `resume_unavailable` init refusal, and the client falls back to the ordinary handover. Unclaimed parked holders retain their original expiry; a sealed init always takes shared admission.
   - Its first `init` with an identical fingerprint keeps the account and sends a snapshot.
   - A different private fingerprint is refused until an admitted client uses an
     explicit settings action; parked clients and resident copies keep their settings.

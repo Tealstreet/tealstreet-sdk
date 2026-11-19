@@ -20,6 +20,13 @@ pub struct InitPayload {
     /// Consumed on this connection; never included in serialized settings.
     #[serde(default, skip_serializing)]
     pub sealed: Option<crate::delegated::Sealed>,
+    /// AGT-54: claim this session's parked DELEGATED account without a handover.
+    /// Connection-local, like `sealed`; never a setting or fingerprint field.
+    #[serde(default, skip_serializing)]
+    pub resume: Option<bool>,
+    /// The previous socket's in-band `resumeProof`; the URL's resume id alone is not enough.
+    #[serde(default, skip_serializing)]
+    pub resume_proof: Option<String>,
     /// Reply provenance only; never an engine option or account fingerprint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instance_id: Option<String>,
@@ -630,6 +637,35 @@ pub fn session(resume_id: &str, resumed: bool) -> String {
     envelope(
         "session",
         json!({"resumeId": resume_id, "resumed": resumed}),
+    )
+}
+
+/// `resumeProof` travels only in-band and must accompany a later `resume` init;
+/// `delegatedResume` names the labels this socket may claim with one. The latter
+/// is omitted when empty, so clients only send that init to a box that offers it.
+pub fn session_with_delegated(
+    resume_id: &str,
+    resumed: bool,
+    proof: &str,
+    delegated: &[String],
+) -> String {
+    let mut data = json!({"resumeId": resume_id, "resumed": resumed, "resumeProof": proof});
+    if !delegated.is_empty() {
+        data["delegatedResume"] = json!(delegated);
+    }
+    envelope("session", data)
+}
+
+/// The `resume` init found nothing to claim; the client falls back to a handover.
+pub fn init_resume_unavailable(account_name: &str) -> String {
+    msg(
+        account_name,
+        "error",
+        json!([
+            "Session resume is unavailable; a fresh key handover is required",
+            {"initRefused": true, "kind": "admission", "reason": "resume_unavailable",
+             "transient": true, "attached": false, "outcome": "notSent"}
+        ]),
     )
 }
 
