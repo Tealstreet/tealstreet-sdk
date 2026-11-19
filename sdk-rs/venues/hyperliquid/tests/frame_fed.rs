@@ -557,7 +557,8 @@ fn a_retired_amend_role_cannot_resolve_or_release_its_successor() {
     e.handle(7000., Event::TimerFired { timer });
     prepared_now(&mut e);
     use base64::Engine as _;
-    let zipped = miniz_oxide::deflate::compress_to_vec(br#"{"BTC":{"markPx":"100"}}"#, 6);
+    // A moved mark: a snapshot re-sending the seeded 100 is not a fresh observation (AGT-55).
+    let zipped = miniz_oxide::deflate::compress_to_vec(br#"{"BTC":{"markPx":"101"}}"#, 6);
     let quote = serde_json::json!({"channel":"fastAssetCtxs","data":base64::engine::general_purpose::STANDARD.encode(zipped)}).to_string();
     message(&mut source, socket, 7100., &quote);
     e.apply_frame(7100., source.snapshot_frame(7100.), true)

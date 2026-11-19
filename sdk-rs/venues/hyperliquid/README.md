@@ -65,6 +65,10 @@ amend bound), the amend reads `activeAssetData` once under the same owner and
 bound before anything is canceled. A failed, mismatched or unanswered read refuses
 with the order unchanged. The release veto itself is unchanged.
 
+Rediscovering the market list (a HIP-3 catalogue retry) carries existing ticker
+rows without re-dating their marks (AGT-55), so it neither passes a stale mark nor
+pre-empts an in-flight `activeAssetData` read.
+
 ## Candle catalogue readiness
 
 The first nonempty catalogue opens MARKETS before all HIP-3 DEX and optional spot
