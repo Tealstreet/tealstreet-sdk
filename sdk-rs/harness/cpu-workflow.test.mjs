@@ -81,9 +81,9 @@ test('A/A diagnostics are explicit dispatch-only and cannot supply certification
   assert.match(scope, /else\n\s+node sdk-rs\/harness\/ci-scope\.mjs/);
 });
 
-test('Binance replay measurement has 45 minutes while other matrix venues retain 30', () => {
+test('isolated replay measurements retain the standard 30-minute safety timeout', () => {
   const first = job(source, 'gate');
-  assert.match(first, /^    timeout-minutes: \$\{\{ matrix\.venue == 'binance' && 45 \|\| 30 \}\}$/m);
+  assert.match(first, /^    timeout-minutes: 30$/m);
 });
 
 function measurementNodeCheck(text) {
@@ -127,8 +127,8 @@ for (const version of ['v22.23.4', 'v24.22.2', '']) {
   });
 }
 
-test('Bun PATH export preserves setup Node for the actual sealing assertion', t => {
-  const first = job(source, 'gate');
+test('Bun PATH export preserves setup Node in the isolated combined-consumer job', t => {
+  const first = job(source, 'replay-consumers');
   const start = first.indexOf('      - name: Install pinned Bun for standalone CLI loader proof\n');
   assert(start >= 0);
   const end = first.indexOf('      - name:', start + 1);

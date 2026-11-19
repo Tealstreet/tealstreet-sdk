@@ -32,7 +32,7 @@ test('paired raw restoration preserves bytes at original paths and refuses escap
 });
 
 test('the global plan binds all complete public rosters and rejects missing/duplicate suites or reused pairs', () => {
-  assert.equal(validatePlannedCases(plan()).suites.length, 31);
+  assert.equal(validatePlannedCases(plan()).suites.length, 35);
   const changes = [p => { p.suites = []; }, p => { p.suites.push(structuredClone(p.suites[0])); },
     p => { p.suites[0].suite = 'unknown'; }, p => { p.suites[0].cases = []; },
     p => { p.suites[0].cases.push(structuredClone(p.suites[0].cases[0])); },
@@ -76,7 +76,7 @@ test('only Bitget may plan a non-certified oracle refusal without a second measu
   }
 });
 
-test('a recorded Bitget refusal leaves 31 gates usable but never certifies Bitget', async () => {
+test('a recorded Bitget refusal leaves 35 gates usable but never certifies Bitget', async () => {
   const reason = 'NOT-CERTIFIED: Bitget TS oracle output changed';
   const { results, certificates } = await certifySuites(GATE_SUITES, async suite => {
     if (suite === 'bitget') throw new Error(reason);
@@ -221,7 +221,7 @@ test('run 40518541502: the physical producer is re-listed until GitHub records i
 });
 
 test('the CPU public roster includes generated public tapes and no private case', () => {
-  const binance = publicCases('binance').map((item) => `${item.venue} ${item.tape}`);
+  const binance = ['binance', 'binancespot', 'binanceinverse', 'binancepm', 'binanceoptions'].flatMap(publicCases).map((item) => `${item.venue} ${item.tape}`);
   assert.ok(binance.includes('binanceoptions sdk-rs/harness/tapes/binanceoptions.jsonl'));
   assert.ok(binance.includes('binance sdk-rs/harness/fixtures/binance-public.jsonl.gz'));
   assert.ok(binance.every((item) => !item.endsWith('-private.jsonl')));

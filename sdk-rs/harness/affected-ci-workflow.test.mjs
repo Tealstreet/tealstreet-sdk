@@ -41,7 +41,7 @@ function check(text) {
   assert.match(required, /replay/); assert.doesNotMatch(required, /cpu-|bitget-paired|browser|, gate/);
   // Parallel combined producers must not publish the same immutable artifact.
   assert.match(job(text, 'combined'), /name: browser-wasm-combined/);
-  assert.match(job(text, 'gate'), /name: measured-browser-wasm-combined/);
+  assert.match(job(text, 'replay-consumers'), /name: measured-browser-wasm-combined/);
   assert.doesNotMatch(job(text, 'gate'), /name: browser-wasm-combined/);
   const families = job(text, 'families');
   assert.match(families, /if: needs.selection.outputs.sizeRequired == 'true'/);
