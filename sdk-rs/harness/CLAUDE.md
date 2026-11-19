@@ -3,6 +3,8 @@
 Bybit create-batch peer acknowledgement matching changes native venue inputs;
 it needs fresh optimized family/combined artifacts and executed native consumers.
 The bounded server audit projection grants no resend or reconciliation authority.
+Its peer scope decoder and identity checks share existing codec/sort machinery;
+size-only changes still require fresh canonical artifacts, with profiles and caps unchanged.
 
 Sam removed the CPU gate matrix, shared certification, Bitget paired ratio gate,
 planner and nightly monitor on 2026-11-17, for both master and pull requests.

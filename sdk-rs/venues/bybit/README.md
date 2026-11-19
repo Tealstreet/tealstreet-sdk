@@ -96,6 +96,8 @@ match their targets, and a single remaining unnamed identity is unambiguous.
 Multiple unnamed new identities, foreign/duplicate IDs, conflicting echoes,
 misaligned arrays or a rejected peer remain Unknown without resending. The peer
 is never a caller result or algo-owned order; its private stream owns its state.
+Scope decoding shares the acknowledgement field codec, and duplicate checks
+borrow identities before moving caller results. Membership checks copy no ID strings.
 This follows Bybit's documented [reduce-only resizing](https://www.bybit.com/en/help-center/article/Reduce-Only-Order?category=5f2fb74e9c8b771130).
 
 ## Browser reachability and beta gates
