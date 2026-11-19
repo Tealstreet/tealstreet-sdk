@@ -24,8 +24,6 @@ jobs:
     name: Native image / PR dry-run (${{ matrix.image }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/native-pr-docker
     strategy:
       fail-fast: false
       matrix:
@@ -40,6 +38,7 @@ jobs:
           persist-credentials: false
       - name: Authenticate for read-only build cache imports
         env:
+          DOCKER_CONFIG: ${{ runner.temp }}/native-pr-docker
           REGISTRY_USER: ${{ github.actor }}
           REGISTRY_TOKEN: ${{ github.token }}
         run: |
@@ -47,6 +46,7 @@ jobs:
           printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
       - name: Build the production image without publishing
         env:
+          DOCKER_CONFIG: ${{ runner.temp }}/native-pr-docker
           IMAGE: ghcr.io/tealstreet/${{ matrix.image }}
           DOCKERFILE: ${{ matrix.dockerfile }}
         run: |

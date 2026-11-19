@@ -55,3 +55,9 @@ test('PR builds have read-only checkout authority and cannot publish or export c
   assert.match(candidate, /fail-fast: false/);
   assert.match(candidate, /timeout-minutes: 30/);
 });
+
+test('runner-dependent auth paths are evaluated in step environments', () => {
+  const beforeSteps = candidate.split('    steps:\n')[0];
+  assert.doesNotMatch(beforeSteps, /\$\{\{ runner\./);
+  assert.equal([...candidate.matchAll(/          DOCKER_CONFIG: \$\{\{ runner\.temp \}\}\/native-pr-docker/g)].length, 2);
+});
