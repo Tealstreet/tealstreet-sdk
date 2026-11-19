@@ -206,7 +206,7 @@ impl Hyperliquid {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         symbol: &str,
-        mark: Option<f64>,
+        mark: Option<(f64, f64)>,
     ) {
         if let Some((timer, _)) = self.trading.amend_wait.take() {
             cx.clear_timer(timer);
@@ -214,9 +214,8 @@ impl Hyperliquid {
         if let Some((timer, _, _)) = self.trading.amend_retry.take() {
             cx.clear_timer(timer);
         }
-        if let Some(mark) = mark {
-            cx.store.update_ticker(symbol, |t| t.mark = mark);
-            cx.store.observe_ticker_fields(symbol, 1 << 3);
+        if let Some((mark, issued_at)) = mark {
+            apply_read_mark(cx, symbol, mark, issued_at);
         }
         let Some(job) = self.trading.active.as_mut() else {
             return;
@@ -543,6 +542,20 @@ impl Hyperliquid {
         self.pump_trades(cx);
         None
     }
+}
+
+/// A read mark answers as of some moment after `issued_at`; a mark the stream observed
+/// since then may be newer, so it is kept and the snapshot discarded.
+pub(super) fn apply_read_mark(cx: &mut Cx<'_, Pending>, symbol: &str, mark: f64, issued_at: f64) {
+    if cx
+        .store
+        .reference_seen_at(symbol, StopTriggerType::MarkPrice)
+        .is_some_and(|seen| seen >= issued_at)
+    {
+        return;
+    }
+    cx.store.update_ticker(symbol, |t| t.mark = mark);
+    cx.store.observe_ticker_fields(symbol, 1 << 3);
 }
 
 fn has_position(store: &Store, order: &Order) -> bool {

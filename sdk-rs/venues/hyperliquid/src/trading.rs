@@ -1761,7 +1761,7 @@ impl Hyperliquid {
         id: &str,
         amend: AmendRead,
         symbol: &str,
-        read: Result<f64, String>,
+        read: Result<(f64, f64), String>,
     ) {
         if !self.amend_read_pending(cx, id, amend) {
             return;
@@ -1774,15 +1774,14 @@ impl Hyperliquid {
         if let Some((timer, _)) = self.trading.amend_wait.take() {
             cx.clear_timer(timer);
         }
-        let mark = read.ok().filter(|mark| mark.is_finite() && *mark > 0.);
+        let mark = read.ok().filter(|(mark, _)| mark.is_finite() && *mark > 0.);
         if self.protective_restoring() {
             self.settle_restore_mark(cx, symbol, mark);
             return;
         }
         match mark {
-            Some(mark) => {
-                cx.store.update_ticker(symbol, |t| t.mark = mark);
-                cx.store.observe_ticker_fields(symbol, 1 << 3);
+            Some((mark, issued_at)) => {
+                protective::apply_read_mark(cx, symbol, mark, issued_at);
                 self.release_trade_builder(cx);
             }
             None => self.finish_trade(cx, Err(not_sent(protective::STALE_MARK))),

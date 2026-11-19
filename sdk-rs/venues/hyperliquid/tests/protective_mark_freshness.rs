@@ -238,7 +238,7 @@ fn answer(e: &mut Engine<Hyperliquid>, at: f64, r: &HttpRequest, status: u16, bo
 }
 /// Cancel lands at a fresh mark; the replacement is refused at `refused_at`,
 /// with the put-back's actions left undrained.
-fn refuse_replacement(refused_at: f64) -> Engine<Hyperliquid> {
+fn refuse_replacement(refused_at: f64) -> (Engine<Hyperliquid>, SocketId) {
     let (mut e, s) = ready("disabled");
     let row = position_take_profit();
     let frame =
@@ -262,7 +262,7 @@ fn refuse_replacement(refused_at: f64) -> Engine<Hyperliquid> {
         200,
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Order has invalid price."}]}}}"#,
     );
-    e
+    (e, s)
 }
 /// The put-back's outcome once it is acknowledged.
 fn restored(e: &mut Engine<Hyperliquid>, actions: Vec<Action>, until: f64) -> String {
@@ -301,7 +301,7 @@ const UNVERIFIED: &str = "no fresh mark was available";
 
 #[test]
 fn refused_replacement_with_a_stale_mark_reads_it_then_restores_the_original() {
-    let mut e = refuse_replacement(7_500.);
+    let (mut e, _) = refuse_replacement(7_500.);
     let actions = prepared_now(&mut e);
     assert!(
         !sends(&actions),
@@ -323,7 +323,7 @@ fn refused_replacement_with_a_stale_mark_reads_it_then_restores_the_original() {
 #[test]
 fn a_failed_restore_mark_read_still_restores_the_original_with_an_explicit_outcome() {
     for failure in ["unreadable", "http", "unanswered"] {
-        let mut e = refuse_replacement(7_500.);
+        let (mut e, _) = refuse_replacement(7_500.);
         let actions = prepared_now(&mut e);
         let read = info(&actions, "activeAssetData").expect("restore mark read");
         let actions = match failure {
@@ -343,11 +343,12 @@ fn a_failed_restore_mark_read_still_restores_the_original_with_an_explicit_outco
     }
 }
 
-#[test]
-fn stale_held_restore_is_released_with_an_unverified_outcome() {
-    // Fresh when the replacement is refused, so no read; stale by the put-back's release.
+/// The next signed write, prepared and bound but not yet claimed.
+fn held_write(
+    e: &mut Engine<Hyperliquid>,
+    at: f64,
+) -> (HttpRequest, safe_cex_engine::request_context::Permit) {
     use safe_cex_engine::request_context::{HttpAction, Prepared};
-    let mut e = refuse_replacement(2_400.);
     let (preparation, r) = e
         .drain_actions()
         .find_map(|a| match a {
@@ -361,9 +362,9 @@ fn stale_held_restore_is_released_with_an_unverified_outcome() {
             },
             _ => None,
         })
-        .expect("held one-shot restore");
+        .expect("held signed write");
     e.http_prepared(
-        2_668.,
+        at,
         preparation,
         Prepared {
             id: r.id.0,
@@ -379,7 +380,15 @@ fn stale_held_restore_is_released_with_an_unverified_outcome() {
             },
             _ => None,
         })
-        .unwrap();
+        .expect("bound write");
+    (r, permit)
+}
+
+#[test]
+fn stale_held_restore_is_released_with_an_unverified_outcome() {
+    // Fresh when the replacement is refused, so no read; stale by the put-back's release.
+    let (mut e, _) = refuse_replacement(2_400.);
+    let (r, permit) = held_write(&mut e, 2_668.);
     assert!(
         e.claim_http(8_000., permit).is_ok(),
         "protection beats freshness"
@@ -397,4 +406,45 @@ fn stale_held_restore_is_released_with_an_unverified_outcome() {
     let outcome = outcome.expect("one explicit terminal");
     assert_eq!(outcome.protection, Some(Protection::Restored));
     assert!(outcome.message.contains(UNVERIFIED), "{}", outcome.message);
+}
+
+#[test]
+fn a_delayed_mark_read_never_overwrites_a_newer_streamed_mark() {
+    // Pre-cancel read: the stream's newer mark wins and the cancel still goes out.
+    let (mut e, s, row) = setup();
+    contexts(&mut e, s, 2_000., json!({"markPx":"100"}));
+    let read = info(&amend_and_size(&mut e, 9_000., &row), "activeAssetData").unwrap();
+    contexts(&mut e, s, 9_050., json!({"markPx":"100.9"}));
+    answer(
+        &mut e,
+        9_100.,
+        &read,
+        200,
+        r#"{"coin":"BTC","markPx":"101.5"}"#,
+    );
+    assert!(sends(&prepared_now(&mut e)));
+    assert_eq!(e.store().ticker("BTC-PERP").unwrap().mark, 100.9);
+    assert_eq!(
+        e.store().reference_seen_at("BTC-PERP", MarkPrice),
+        Some(9_050.)
+    );
+
+    // Put-back read: a newer streamed mark crossing the original trigger still refuses
+    // it, rather than an older snapshot letting an immediately firing stop through.
+    let (mut e, s) = refuse_replacement(7_500.);
+    let read = info(&prepared_now(&mut e), "activeAssetData").unwrap();
+    contexts(&mut e, s, 7_550., json!({"markPx":"125"}));
+    answer(
+        &mut e,
+        7_600.,
+        &read,
+        200,
+        r#"{"coin":"BTC","markPx":"100"}"#,
+    );
+    assert_eq!(e.store().ticker("BTC-PERP").unwrap().mark, 125.);
+    let (_, permit) = held_write(&mut e, 7_600.);
+    assert!(
+        e.claim_http(7_600., permit).is_err(),
+        "a put-back that would fire at once is not released"
+    );
 }
