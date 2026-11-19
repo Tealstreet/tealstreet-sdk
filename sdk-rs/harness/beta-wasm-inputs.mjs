@@ -37,6 +37,10 @@ export const HARNESS_NOT_BUILT = Object.freeze([
   // Replay measurements/verdicts only; the import-graph test proves no build, loader or shipped host depends on it.
   /^sdk-rs\/harness\/gate\.mjs$/,
   /^sdk-rs\/harness\/wasm-budget\.mjs$/,
+  // Generated caps (AGT-23): the cap bot's edits must not force a beta cut.
+  /^sdk-rs\/harness\/wasm-caps\.json$/,
+  /^sdk-rs\/harness\/wasm-caps-history\.md$/,
+  /^sdk-rs\/harness\/update-wasm-caps\.mjs$/,
 ]);
 const notBuilt = (rel) => HARNESS_NOT_BUILT.some((pattern) => pattern.test(rel));
 
