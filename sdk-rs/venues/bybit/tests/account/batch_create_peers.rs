@@ -198,9 +198,9 @@ fn create_batch_dispatch_snapshot_survives_a_terminal_peer_stream_update() {
         .to_string(),
     );
     h.reply(request.id, 200, &answer(&[PEER, SLICE], &[0, 0]));
-    let result = h.result(6105).unwrap().unwrap();
+    let result = h.result(6105).unwrap().as_ref().unwrap();
     assert_eq!(
-        serde_json::from_str::<Vec<String>>(&result).unwrap(),
+        serde_json::from_str::<Vec<String>>(result).unwrap(),
         [SLICE]
     );
     assert!(!h.has_request("/v5/order/create-batch"));
