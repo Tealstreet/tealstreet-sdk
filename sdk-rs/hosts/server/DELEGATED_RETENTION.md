@@ -89,5 +89,28 @@ Retention emits for DELEGATED residents only:
   stopped by drain/SIGTERM. The drain waits for delivery beside the engine
   shutdown, bounded to 3 seconds.
 
+The algo host (`src/algo_notify.rs`) emits, for DELEGATED residents only and
+never from a snapshot or a rejoin replay:
+
+- `fill`: live fills from flush frames, aggregated per order until 2 seconds
+  pass without another fill. `filled` when the order has left the store with
+  its size met, otherwise `partiallyFilled`. It collapses per order through an
+  opaque hash; order ids, prices and sizes stay on the box.
+- `orderRejected`: a chase or TWAP placement the venue refused outright
+  (`Outcome::Rejected`). Client writes, exec and nuke legs use the untapped
+  port and never emit; unknown and not-sent outcomes never emit. At most one
+  per algo, symbol and side per 60 seconds, so a retrying chase pages once.
+- `algoStopped`: a chase end whose recorded reason is not an explicit client
+  stop (`User cancelled`, kept order, `chaser:terminateAll`, nuke), or a TWAP
+  leaving the state map without a client `twap:stop`/`twap:cleanup` or nuke.
+  `Completed`/length-condition chase ends and TWAPs without a slice-failure or
+  shortfall report are `finished`/`algoFinished`; the rest `stopped`/`algoError`.
+  TWAP slice chases report through their TWAP. Exec has no `algoStopped`: it
+  is a one-shot client command answered on its own socket.
+
+Stops caused by account disposal, including retention expiry, drain and
+router-lease fences, emit no `algoStopped`; `delegated.shutdown` covers them.
+Fills still waiting out the debounce are sent when the algo host shuts down.
+
 The lane adds no timing, admission, custody, signing or key lifecycle behavior
 beyond the warning timer, and never cancels resting orders.
