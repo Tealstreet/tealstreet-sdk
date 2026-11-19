@@ -13,6 +13,8 @@ const SL_ONLY: &str = r#"{"code":0,"data":[{"symbol":"BTCUSDT","id":"pos-tpsl","
 const BOTH: &str = r#"{"code":0,"data":[{"symbol":"BTCUSDT","id":"pos-tpsl","positionId":"position-1","tpPrice":"90000","slPrice":"100000","tpQty":"0.01","slQty":"0.01","tpStopType":"MARK_PRICE","slStopType":"MARK_PRICE"}]}"#;
 const WS_SL: &str = r#"{"ch":"tpsl","data":{"event":"CREATE","symbol":"BTCUSDT","orderId":"pos-tpsl","positionId":"position-1","side":"Sell","positionMode":"HEDGE","status":"NEW","type":"POSITION_TPSL","slStopType":"MARK_PRICE","slPrice":"100000"}}"#;
 
+const WS_BOTH: &str = r#"{"ch":"tpsl","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"pos-tpsl","positionId":"position-1","side":"Sell","positionMode":"HEDGE","status":"NEW","type":"POSITION_TPSL","tpQty":"0","slQty":"0","tpStopType":"MARK_PRICE","tpPrice":"90000","slStopType":"MARK_PRICE","slPrice":"100000"}}"#;
+
 fn protection(kind: OrderType, price: f64) -> PlaceOrderOpts {
     let mut o: PlaceOrderOpts = serde_json::from_str(&format!(
         r#"{{"symbol":"BTCUSDT","type":"limit","side":"buy","price":{price},"amount":0}}"#
@@ -22,10 +24,12 @@ fn protection(kind: OrderType, price: f64) -> PlaceOrderOpts {
     o
 }
 
-/// Answers every read with `tpsl` for the TP/SL list and returns the writes sent.
+/// Answers every read with `tpsl` for the TP/SL list, fires the timers it arms (a bounded number
+/// of rounds) and returns the writes sent.
 fn drive(e: &mut TestEngine, mut actions: Vec<Action>, tpsl: &str) -> Vec<HttpRequest> {
     let mut sent = Vec::new();
-    for _ in 0..50 {
+    let mut timers = Vec::new();
+    for _ in 0..60 {
         let reads: Vec<_> = actions
             .iter()
             .filter_map(|a| match a {
@@ -37,10 +41,22 @@ fn drive(e: &mut TestEngine, mut actions: Vec<Action>, tpsl: &str) -> Vec<HttpRe
             Action::Http(r) if r.method != Method::Get => Some(r.clone()),
             _ => None,
         }));
-        if reads.is_empty() {
-            break;
-        }
+        timers.extend(actions.iter().filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        }));
         actions = Vec::new();
+        if reads.is_empty() {
+            // Writes wait for the test; only fire timers while nothing is in flight.
+            if !sent.is_empty() || timers.is_empty() {
+                break;
+            }
+            timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+            let (timer, at) = timers.remove(0);
+            e.handle(at, Event::TimerFired { timer });
+            actions = safe_cex_engine::test_support::prepared_actions(e, at);
+            continue;
+        }
         for r in reads {
             let answer = if r.url.contains("/tpsl/") {
                 tpsl
@@ -78,8 +94,17 @@ fn with_full_stop(ws: bool) -> (TestEngine, SocketId) {
     let (mut e, socket) = startup();
     let actions = prepared_now(&mut e);
     drive(&mut e, actions, NO_TPSL);
-    let write = place(&mut e, 2, protection(OrderType::StopLoss, 100000.0), NO_TPSL);
-    reply(&mut e, write.id, r#"{"code":0,"data":{"orderId":"pos-tpsl"}}"#);
+    let write = place(
+        &mut e,
+        2,
+        protection(OrderType::StopLoss, 100000.0),
+        NO_TPSL,
+    );
+    reply(
+        &mut e,
+        write.id,
+        r#"{"code":0,"data":{"orderId":"pos-tpsl"}}"#,
+    );
     let actions = prepared_now(&mut e);
     drive(&mut e, actions, SL_ONLY);
     if ws {
@@ -94,19 +119,39 @@ fn with_full_stop(ws: bool) -> (TestEngine, SocketId) {
 fn adding_a_full_tp_keeps_the_full_stop_after_a_typeless_rest_refresh() {
     for ws in [true, false] {
         let (mut e, _) = with_full_stop(ws);
-        let write = place(&mut e, 3, protection(OrderType::TakeProfit, 90000.0), SL_ONLY);
+        let write = place(
+            &mut e,
+            3,
+            protection(OrderType::TakeProfit, 90000.0),
+            SL_ONLY,
+        );
         let p: serde_json::Value = serde_json::from_str(write.body.as_deref().unwrap()).unwrap();
         assert_eq!(p["tpPrice"], "90000", "ws={ws} {p}");
-        assert_eq!(p["slPrice"], "100000", "ws={ws}: the stop must ride along {p}");
+        assert_eq!(
+            p["slPrice"], "100000",
+            "ws={ws}: the stop must ride along {p}"
+        );
         assert_eq!(p["positionId"], "position-1");
     }
 }
 
 #[test]
 fn a_position_tpsl_with_both_legs_lists_two_orders() {
-    let (mut e, _) = with_full_stop(false);
-    let write = place(&mut e, 3, protection(OrderType::TakeProfit, 90000.0), SL_ONLY);
-    reply(&mut e, write.id, r#"{"code":0,"data":{"orderId":"pos-tpsl"}}"#);
+    let (mut e, socket) = with_full_stop(false);
+    let write = place(
+        &mut e,
+        3,
+        protection(OrderType::TakeProfit, 90000.0),
+        SL_ONLY,
+    );
+    reply(
+        &mut e,
+        write.id,
+        r#"{"code":0,"data":{"orderId":"pos-tpsl"}}"#,
+    );
+    // The venue now holds both legs: it pushes the order, and the follow-up read lists it.
+    prepared_now(&mut e);
+    event(&mut e, socket, WS_BOTH);
     let actions = prepared_now(&mut e);
     drive(&mut e, actions, BOTH);
     let legs: Vec<_> = e
@@ -117,7 +162,15 @@ fn a_position_tpsl_with_both_legs_lists_two_orders() {
         .map(|o| (o.id.clone(), o.kind, o.price))
         .collect();
     assert_eq!(legs.len(), 2, "{legs:?}");
-    assert!(legs.iter().any(|(_, k, p)| *k == OrderType::StopLoss && *p == 100000.0), "{legs:?}");
-    assert!(legs.iter().any(|(_, k, p)| *k == OrderType::TakeProfit && *p == 90000.0), "{legs:?}");
+    assert!(
+        legs.iter()
+            .any(|(_, k, p)| *k == OrderType::StopLoss && *p == 100000.0),
+        "{legs:?}"
+    );
+    assert!(
+        legs.iter()
+            .any(|(_, k, p)| *k == OrderType::TakeProfit && *p == 90000.0),
+        "{legs:?}"
+    );
     assert_ne!(legs[0].0, legs[1].0);
 }
