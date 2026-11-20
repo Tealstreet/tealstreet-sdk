@@ -715,6 +715,44 @@ fn distinct_earlier_fill_survives_terminal_order_guard_and_deduplicates() {
     assert_eq!(fill_count(e.take_frame(10.0).unwrap()), 2);
 }
 
+// AGT-83: the native tradeId is the fill identity; a row without one keeps the order id.
+#[test]
+fn trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut e, private, _, pending) = startup();
+    complete(&mut e, pending, ORDER, 5.0);
+    e.take_frame(6.0);
+    for (filled, identity) in [
+        ("2", r#""tradeId":"t1""#),
+        ("3", r#""tradeId":"t2""#),
+        ("4", r#""fillTime":"3""#),
+    ] {
+        let row = ORDER.replace("\"live\"", "\"partially_filled\"").replace(
+            "\"accFillSz\":\"1\"",
+            &format!(r#""accFillSz":"{filled}","fillSz":"1","fillPx":"38000",{identity}"#),
+        );
+        ws(
+            &mut e,
+            private,
+            &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{row}]}}"#),
+        );
+    }
+    let fills = safe_cex_engine::wire::fills(e.take_frame(10.0).unwrap()).unwrap();
+    let identities: Vec<_> = fills
+        .iter()
+        .map(|fill| (fill.id.as_deref(), fill.order_id.as_str()))
+        .collect();
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        [
+            (Some("t1"), "123"),
+            (Some("t2"), "123"),
+            (Some("123"), "123")
+        ]
+    );
+    assert!(fills.iter().all(|fill| fill.amount == fills[0].amount));
+}
+
 #[test]
 fn invalid_execution_does_not_emit_or_consume_the_execution_identity() {
     let (mut e, private, _, pending) = startup();

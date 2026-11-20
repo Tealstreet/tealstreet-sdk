@@ -420,13 +420,16 @@ impl MexcFutures {
                 } else {
                     raw.id.to_string()
                 };
-                if !key.is_empty() && self.account.fills.insert(key, cx.now).is_some() {
+                let execution = (!key.is_empty()).then_some(key);
+                if let Some(key) = &execution
+                    && self.account.fills.insert(key.clone(), cx.now).is_some()
+                {
                     return;
                 }
                 if raw.vol > 0.0 {
                     cx.fill_with_financials(
                         Fill {
-                            id: None,
+                            id: execution,
                             order_id: raw.order_id.to_string(),
                             symbol,
                             side: side(raw.side),

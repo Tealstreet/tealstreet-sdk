@@ -395,6 +395,48 @@ fn repeated_execution_deduplicates_and_distinct_partial_fills_adjust_position_on
     assert!((e.store().positions()[0].contracts - 0.012).abs() < 1e-10);
     assert_eq!(count_fills(&mut e), 2);
 }
+// AGT-83: the native trade id is the fill identity; a row without one keeps the order id.
+#[test]
+fn trade_id_is_the_fill_identity_and_equal_partials_stay_distinct() {
+    let (mut e, socket, mut reads, _) = established_stream();
+    load(&mut e, &mut reads);
+    e.take_frame(69.0);
+    let frame = r#"{"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":9007199254740993,"status":"PARTIAL_FILLED","side":"BUY","type":"LIMIT","quantity":0.02,"totalExecutedQuantity":0.006,"executedQuantity":0.001,"executedPrice":59000,"tradeId":201}}"#;
+    ws(&mut e, socket, 70.0, frame);
+    ws(
+        &mut e,
+        socket,
+        71.0,
+        &frame.replace("0.006", "0.007").replace("201", "202"),
+    );
+    ws(
+        &mut e,
+        socket,
+        72.0,
+        &frame
+            .replace("0.006", "0.008")
+            .replace(r#","executedQuantity":0.001"#, "")
+            .replace(r#","tradeId":201"#, ""),
+    );
+    let frame = e.take_frame(100.0).unwrap();
+    let fills = safe_cex_engine::wire::fills(frame).unwrap();
+    let identities: Vec<_> = fills
+        .iter()
+        .map(|fill| {
+            let micros = (fill.amount * 1e6).round();
+            (fill.id.as_deref(), fill.order_id.as_str(), micros)
+        })
+        .collect();
+    // The frame writes the order id where `Fill.id` is None (`fill_output::event_id`).
+    assert_eq!(
+        identities,
+        vec![
+            (Some("201"), "9007199254740993", 1000.0),
+            (Some("202"), "9007199254740993", 1000.0),
+            (Some("9007199254740993"), "9007199254740993", 1000.0),
+        ]
+    );
+}
 #[test]
 fn cumulative_only_reports_emit_deltas_not_repeated_totals() {
     let (mut e, socket, mut reads, _) = established_stream();

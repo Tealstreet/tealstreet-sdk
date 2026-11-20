@@ -1526,7 +1526,7 @@ impl AsterDex {
                     }
                 }
                 cx.fill(Fill {
-                    id: None,
+                    id: Some(execution.to_string()),
                     order_id: id.clone(),
                     symbol: o.s.to_string(),
                     side: order_side(&o.side),

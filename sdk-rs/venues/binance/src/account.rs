@@ -2466,7 +2466,10 @@ impl BinanceFutures {
                 .and_modify(|seen| *seen = seen.max(filled))
                 .or_insert(filled);
             cx.fill(Fill {
-                id: None,
+                id: o
+                    .t
+                    .filter(|trade| *trade >= 0)
+                    .map(|trade| trade.to_string()),
                 order_id: id.clone(),
                 symbol: o.s.to_string(),
                 side: order_side(&o.side),
@@ -3474,7 +3477,7 @@ impl BinanceFutures {
         self.account.spot_delivery.entry(key.clone()).or_default();
         if is_trade && self.fresh_spot_execution(&key, filled, event.t) {
             cx.fill(Fill {
-                id: None,
+                id: event.t.map(|trade| trade.to_string()),
                 order_id: id.clone(),
                 symbol: event.s.to_string(),
                 side: order_side(&event.side),

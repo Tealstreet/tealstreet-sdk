@@ -187,7 +187,8 @@ it.each([false, true])(
         expect(mainFills).toHaveLength(1);
       });
       const expected = [
-        { id: 'maker', orderId: 'maker', symbol: 'BTCUSDT', side: OrderSide.Buy, price: 9100, amount: 1 },
+        // AGT-83: the native trade id `t` is the fill identity; orderId keeps attribution.
+        { id: '100', orderId: 'maker', symbol: 'BTCUSDT', side: OrderSide.Buy, price: 9100, amount: 1 },
       ];
       expect(workerFills).toEqual(expected);
       expect(mainFills).toEqual(expected);
