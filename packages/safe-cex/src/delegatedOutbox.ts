@@ -283,16 +283,19 @@ export interface EnqueueOptions {
 }
 
 export class DelegatedIntentError extends Error {
-  constructor(readonly code: 'invalidIntentId' | 'intentConflict' | 'intentNotDurable') {
+  constructor(readonly code: 'invalidIntentId' | 'intentConflict' | 'intentNotDurable' | 'intentRetired') {
     super(
       {
         invalidIntentId: 'Caller intent id must be a canonical UUIDv7',
         intentConflict: 'Intent id is already bound to different parameters',
         intentNotDurable: 'Original intent was not persisted; it cannot be submitted again',
+        intentRetired: 'This intent was retired; reconcile its original outcome instead of sending it again',
       }[code],
     );
     this.name = 'DelegatedIntentError';
   }
+
+  get outcome(): 'unknown' | undefined { return this.code === 'intentRetired' ? 'unknown' : undefined; }
 }
 
 export class DelegatedOutbox {
@@ -594,6 +597,8 @@ export class DelegatedOutbox {
       return Promise.reject(new Error('Outbox is closed or full'));
     const intentId =
       options?.intentId ?? createDelegatedIntentId(Math.floor(this.options.clock.unix()), this.options.random);
+    if (delegatedIntentTime(intentId) < this.retiredIntentBefore)
+      return Promise.reject(new DelegatedIntentError('intentRetired'));
     if (this.intents.has(intentId) || !Number.isSafeInteger(this.sequence + 1))
       return Promise.reject(new Error('Intent id or sequence exhausted'));
     const row: DelegatedIntent = {
@@ -846,13 +851,16 @@ export class DelegatedOutbox {
         ['queued', 'sending', 'acknowledged'].includes(row.state)
       )
         return false;
-      // Memory first: a failed delete keeps the stored row, which restores as before.
-      this.removeIntent(row);
+      const floor = this.checkpointVersion === 2
+        ? Math.max(this.retiredIntentBefore, delegatedIntentTime(intentId) + 1)
+        : this.retiredIntentBefore;
       await this.options.storage.compact(this.scope, {
-        version: 1,
+        ...(this.checkpointVersion === 2 ? { version: 2, retiredIntentBefore: floor } as const : { version: 1 } as const),
         sequence: this.sequence,
         retiredIntentIds: [intentId],
       });
+      this.retiredIntentBefore = floor;
+      this.removeIntent(row);
       return true;
     });
   }
@@ -1174,8 +1182,10 @@ export class DelegatedOutbox {
   private async compact(): Promise<void> {
     this.pruneCompletedIntents();
     if (this.completedIntents.size <= COMPLETED_HISTORY) return;
-    // Caller keys remain reserved across completed-history retirement.
-    const completed = [...this.completedIntents.values()].filter((row) => !row.callerSuppliedIntentId);
+    // Legacy adapters cannot persist a replay fence, so their caller keys stay reserved.
+    const completed = [...this.completedIntents.values()].filter(
+      (row) => this.checkpointVersion === 2 || !row.callerSuppliedIntentId,
+    );
     if (completed.length <= COMPLETED_HISTORY) return;
     let insertionOrder: Map<string, number> | undefined;
     completed.sort((a, b) => {
@@ -1185,11 +1195,15 @@ export class DelegatedOutbox {
       return insertionOrder.get(a.intentId)! - insertionOrder.get(b.intentId)!;
     });
     const retired = completed.slice(0, completed.length - COMPLETED_HISTORY);
+    const floor = this.checkpointVersion === 2
+      ? Math.max(this.retiredIntentBefore, ...retired.map((row) => delegatedIntentTime(row.intentId) + 1))
+      : this.retiredIntentBefore;
     await this.options.storage.compact(this.scope, {
-      version: 1,
+      ...(this.checkpointVersion === 2 ? { version: 2, retiredIntentBefore: floor } as const : { version: 1 } as const),
       sequence: this.sequence,
       retiredIntentIds: retired.map((row) => row.intentId),
     });
+    this.retiredIntentBefore = floor;
     for (const row of retired) this.removeIntent(row);
   }
   private serial<T>(operation: () => Promise<T>): Promise<T> {

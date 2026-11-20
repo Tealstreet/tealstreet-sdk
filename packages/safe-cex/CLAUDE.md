@@ -183,10 +183,15 @@ committed snapshot, preserving its handoff state and evidence even if a newer
 receipt could not be persisted. A retry never makes that newer outcome durable,
 renews replay permission, or replaces a committed handoff with an in-memory
 queued label. Persisted no-handoff claims still pass the evidence constructors.
-Caller-key rows remain reserved through ordinary history
-compaction, within the existing total capacity of 1,056 records; exhaustion
-refuses new intents rather than forgetting a key. Hosts must preserve scoped
-storage and close a writer before replacing it.
+Version-1 storage keeps caller-key rows permanently reserved within the 1,056
+record capacity. Version-2 snapshots opt into an atomic `retiredIntentBefore`
+checkpoint: compaction deletes only durably completed rows and advances that
+UUIDv7 timestamp floor in the same transaction. Older forgotten IDs refuse with
+`intentRetired` / Unknown, never another sequence or send. Existing unanswered
+rows still join below the floor; pending/Unknown retention rules are unchanged.
+An aborted transaction retains memory rows and the previous floor. Storage hosts
+must fence old writers that cannot preserve the checkpoint, keep it monotonic,
+and close the scoped writer before replacing it.
 
 Saved accounts and exchange options accept optional `signingMode` using the
 existing account-worker wire values `local`, `cosigned`, and `delegated`.
