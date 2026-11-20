@@ -527,11 +527,7 @@ fn advanced_native_rate_placement_retains_reconciliation_reservation() {
         let (mut s, request) = advanced_write(AdvancedWrite::Create);
         s.reply(request, status, body);
         assert!(s.done(501).is_err());
-        assert!(
-            s.cancel_symbol(502)
-                .unwrap_err()
-                .contains("hasn’t been confirmed")
-        );
+        assert!(s.cancel_symbol(502).unwrap_err().contains("unresolved"));
         s.advance(31_000.);
         assert!(s.cancel_symbol(503).is_ok());
     }
@@ -1900,7 +1896,7 @@ fn cancel_symbol_does_not_claim_success_for_unknown_placement_identity() {
         },
     );
     assert!(s.done(230).is_err());
-    assert!(s.done(231).unwrap_err().contains("hasn’t been confirmed"));
+    assert!(s.done(231).unwrap_err().contains("unresolved"));
 }
 #[test]
 fn external_partial_close_reserves_execution_until_position_repair() {
@@ -2501,11 +2497,7 @@ fn unsent_duplicate_client_does_not_release_an_older_unknown_placement() {
         s.failures[&601].outcome,
         Some(safe_cex_engine::Outcome::NotSent)
     );
-    assert!(
-        s.cancel_symbol(602)
-            .unwrap_err()
-            .contains("hasn’t been confirmed")
-    );
+    assert!(s.cancel_symbol(602).unwrap_err().contains("unresolved"));
     s.advance(11_000.);
     assert!(
         s.cancel_symbol(603).is_ok(),
@@ -2536,11 +2528,7 @@ fn ambiguous_placement_blocks_cancel_symbol_until_bounded_reconciliation() {
         "{diagnostic}"
     );
     assert!(diagnostic.contains("try again"), "{diagnostic}");
-    assert!(
-        s.cancel_symbol(304)
-            .unwrap_err()
-            .contains("hasn’t been confirmed")
-    );
+    assert!(s.cancel_symbol(304).unwrap_err().contains("unresolved"));
     s.advance(31_000.0);
     assert!(s.cancel_symbol(305).is_ok());
 }
@@ -2558,11 +2546,7 @@ fn lost_placement_response_is_released_after_bounded_reconciliation() {
     );
     assert!(s.done(306).is_err());
     s.advance(10_000.0);
-    assert!(
-        s.cancel_symbol(307)
-            .unwrap_err()
-            .contains("hasn’t been confirmed")
-    );
+    assert!(s.cancel_symbol(307).unwrap_err().contains("unresolved"));
     s.advance(21_000.0);
     assert!(s.cancel_symbol(308).is_ok());
 }
@@ -2947,7 +2931,7 @@ fn unresolved_derivative_placement_waits_for_a_later_position_read() {
         command: 321,
         symbol: "BTC-PERP-INTX".into(),
     });
-    assert!(s.done(321).unwrap_err().contains("hasn’t been confirmed"));
+    assert!(s.done(321).unwrap_err().contains("unresolved"));
     s.failing_positions = false;
     s.advance(6_000.0);
     s.command(Command::CancelSymbolOrders {

@@ -1510,11 +1510,12 @@ async fn a_nuke_warns_of_unseen_orders_only_where_no_cancel_reaches_them() {
             let error = nuke_answered(&failing, "all").await.unwrap_err();
             let message = error["message"].as_str().unwrap();
             assert!(
-                message.contains("may not be cancelled")
-                    && message
-                        .to_ascii_lowercase()
-                        .replace("check your open orders", "check open orders")
-                        .contains("check open orders"),
+                message.contains(
+                    "Cancellation doesn’t cover every newly placed order on this exchange."
+                ) && message
+                    .to_ascii_lowercase()
+                    .replace("check your open orders", "check open orders")
+                    .contains("check open orders"),
                 "{message}"
             );
 

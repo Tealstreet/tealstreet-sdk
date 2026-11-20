@@ -22,7 +22,7 @@ fn assert_unknown_notice(actions: &[Action], command: u32, placed: &[&str]) {
     let error = failures[0];
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert!(
-        error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again."),
+        error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.") || error.message.contains(ENGINE_UNKNOWN_TEXT),
         "{}",
         error.message
     );

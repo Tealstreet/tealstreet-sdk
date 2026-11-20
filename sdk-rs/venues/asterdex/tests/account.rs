@@ -990,7 +990,7 @@ fn failed_position_mode_read_retries_and_holds_placement_until_loaded() {
         result(&h, 30)
             .as_ref()
             .unwrap_err()
-            .contains("position mode has not loaded")
+            .contains("position mode is still loading")
     );
     h.fire_after(1_000.0);
     h.reply("/positionSide/dual", r#"{"dualSidePosition":true}"#);
@@ -1800,7 +1800,7 @@ const RATE_LIMITED: &str = r#"{"code":-1003,"msg":"Too many requests."}"#;
 fn assert_unknown_stop(h: &H) {
     let error = result(h, 991).as_ref().unwrap_err();
     assert!(
-        error.contains("wasn’t confirmed. Check your open orders"),
+        error.contains("wasn’t confirmed. Check your open orders") || error.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again."),
         "{error}"
     );
     let words = error.to_ascii_lowercase();

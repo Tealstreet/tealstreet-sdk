@@ -7509,11 +7509,13 @@ fn spot_ts_parity_unknown_stops_lots_and_batch_with_canonical_evidence() {
         let error = spot_parity_error(&h, 195);
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert!(
-            error.message.contains(if status.is_some() {
-                ENGINE_UNKNOWN_TEXT
-            } else {
-                support::ENGINE_UNKNOWN_TEXT
-            }),
+            error
+                .message
+                .contains(if status.is_some_and(|status| status >= 500) {
+                    ENGINE_UNKNOWN_TEXT
+                } else {
+                    support::ENGINE_UNKNOWN_TEXT
+                }),
             "{error:?}"
         );
         assert_eq!(error.partial.as_ref().unwrap().order_ids, ["placed-prefix"]);

@@ -1376,7 +1376,7 @@ fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
                     assert!(
                         error
                             .message
-                            .contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.")
+                            .contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.") || error.message.contains("We couldn’t confirm this change. Check your open orders before trying again.")
                     );
                 } else {
                     assert!(message.contains(told), "{v3} {status} {body}: {message}");

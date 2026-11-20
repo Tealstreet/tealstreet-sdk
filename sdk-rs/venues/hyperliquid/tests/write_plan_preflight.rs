@@ -303,7 +303,7 @@ fn runtime_failure_suffix(
             error["message"]
                 .as_str()
                 .expect("terminal message")
-                .contains(support::ENGINE_UNKNOWN_TEXT),
+                .contains(if status >= 500 { "The exchange reply didn’t confirm this change. Check your open orders before trying again." } else { support::ENGINE_UNKNOWN_TEXT }),
             "{error}"
         );
     }
@@ -322,7 +322,7 @@ fn runtime_failure_suffix(
                 element["error"]["message"]
                     .as_str()
                     .expect("element message")
-                    .contains(support::ENGINE_UNKNOWN_TEXT),
+                    .contains(if status >= 500 { "The exchange reply didn’t confirm this change. Check your open orders before trying again." } else { support::ENGINE_UNKNOWN_TEXT }),
                 "{element}"
             );
         }

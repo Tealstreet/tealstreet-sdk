@@ -1037,7 +1037,7 @@ fn partial_batch_errors_return_every_acknowledged_id_for_network_and_venue_failu
         assert_eq!(result["totalOrderCount"], 2);
         assert_eq!(result["failedOrderIndex"], 1);
         assert!(result["message"].as_str().unwrap().contains(if network {
-            "wasn’t confirmed. Check your open orders"
+            "We couldn’t confirm this change. Check your open orders before trying again."
         } else {
             "insufficient"
         }));

@@ -1126,7 +1126,7 @@ fn released_http_throttles_are_unknown_and_never_replay() {
         } else {
             assert_eq!(error.kind, Some(ErrorKind::Internal));
             assert_eq!(error.outcome, Some(Outcome::Unknown));
-            assert!(error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again."));
+            assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
             assert!(
                 error
                     .venue_message
