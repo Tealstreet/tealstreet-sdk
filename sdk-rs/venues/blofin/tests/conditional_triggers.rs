@@ -75,7 +75,9 @@ fn agt46_whole_position_trigger_snapshot_has_unspecified_quantity() {
 
 #[test]
 fn agt46_whole_position_trigger_updates_do_not_copy_the_current_position_size() {
-    let mut h = ready(false, r#"{"code":"0","data":[]}"#);
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
     let row = trigger("501", "-1", "sell", "net");
     h.ws(&format!(
         r#"{{"arg":{{"channel":"orders-algo"}},"data":[{row}]}}"#
