@@ -11,6 +11,14 @@ A contents-read-only credential scoped to NX is required as
 Fork PRs and a missing credential refuse explicitly before private checkout.
 No production credentials, self-hosted runner, artifact upload or write token
 are used. The credential is present only during resolution/checkout.
+Private NX command output stays in mode-600 runner-temporary logs and is never
+uploaded; public logs report the gate and its result. Failures retain nonzero
+status. Reproducing the pinned command in an authorized NX checkout provides
+the detailed private output.
+The required context remains named `ci`: a cheap hosted aggregate requires
+the unchanged SDK validation steps (`SDK checks`) and this reusable job.
+Failed, cancelled or skipped PR gates refuse. Master pushes and manual mirror
+CI keep their existing checks without running the PR-only consumer job.
 
 The SDK merge-base-to-head patch is mapped using pinned NX's literal
 `TEALSTREET_SDK_FILES`, `TEALSTREET_SDK_MIRROR_FILES` and `ROOT_SCAFFOLDING`
@@ -42,6 +50,7 @@ Standard public-repository hosted minutes are free ([GitHub runner reference](ht
 The new job has a 120-minute ceiling and executes serially on one runner;
 actual duration is unmeasured. A WASM input change can rebuild all beta
 families, so this is a real compute cost despite zero billed runner minutes.
+The aggregate adds one job with a five-minute ceiling and no checkout/install.
 The two existing image jobs each retain their 30-minute ceiling. No extra
 Vultr runner capacity is consumed.
 

@@ -1,0 +1,104 @@
+name: NX caller integration
+
+on:
+  workflow_call:
+    secrets:
+      NX_INTEGRATION_READ_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nx-integration-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  nx:
+    name: NX / SDK PR callers
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HUSKY: '0'
+      TURBO_TELEMETRY_DISABLED: '1'
+      TURBO_CACHE: 'local:rw'
+      DISABLE_SENTRY_SOURCEMAP_UPLOAD: 'true'
+    steps:
+      - name: Require a maintainer branch and read-only NX credential
+        env:
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          NX_TOKEN: ${{ secrets.NX_INTEGRATION_READ_TOKEN }}
+        run: |
+          test "$SAME_REPO" = true || { printf '%s\n' 'NX integration requires a maintainer branch'; exit 1; }
+          test -n "$NX_TOKEN" || { printf '%s\n' 'NX_INTEGRATION_READ_TOKEN is not configured'; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - name: Resolve NX master exactly once
+        id: nx
+        env:
+          GH_TOKEN: ${{ secrets.NX_INTEGRATION_READ_TOKEN }}
+        run: |
+          sha=$(gh api repos/Tealstreet/tealstreet-next/git/ref/heads/master --jq .object.sha)
+          [[ "$sha" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+          printf 'NX baseline: %s\n' "$sha" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@v7
+        with:
+          repository: Tealstreet/tealstreet-next
+          ref: ${{ steps.nx.outputs.sha }}
+          path: nx
+          token: ${{ secrets.NX_INTEGRATION_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply the exact SDK PR delta with conflict refusal
+        env:
+          SDK_BASE: ${{ github.event.pull_request.base.sha }}
+          SDK_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: node .github/scripts/nx-overlay.mjs "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/nx" "$SDK_BASE" "$SDK_HEAD"
+      - name: Check NX reader and release-runbook contracts
+        run: node .github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" readers node --test --test-concurrency=1 infra/tofu/exchange-services/scripts/unrolled-server-changes.test.mjs scripts/rust-release-runbook.test.mjs scripts/sdk-diagnostic-observability.test.cjs scripts/fetch-rust-beta-wasm.test.mjs
+      - name: Install frozen NX dependencies
+        run: |
+          corepack enable
+          node .github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" install corepack yarn install --frozen-lockfile --non-interactive --network-timeout 600000 --cache-folder "$RUNNER_TEMP/nx-yarn"
+          corepack yarn global add bun@1.4.3
+          corepack yarn global bin >> "$GITHUB_PATH"
+      - name: Select strict published assets or fresh candidate builds
+        id: wasm
+        run: node .github/scripts/nx-integration.mjs plan "$GITHUB_WORKSPACE/nx"
+      - name: Install pinned candidate WASM tools
+        if: ${{ steps.wasm.outputs.mode == 'candidate' }}
+        env:
+          WASM_BINDGEN_VERSION: ${{ steps.wasm.outputs.bindgen }}
+        working-directory: nx/sdk-rs
+        run: |
+          rustup show
+          cargo install --locked wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --root "$RUNNER_TEMP/nx-tools"
+          printf '%s\n' "$RUNNER_TEMP/nx-tools/bin" >> "$GITHUB_PATH"
+          bash harness/install-binaryen.sh
+      - name: Prepare all beta families from verified candidate inputs
+        id: prepared
+        run: node .github/scripts/nx-integration.mjs prepare "$GITHUB_WORKSPACE/nx" "$RUNNER_TEMP/nx-prepared.json"
+      - name: Prepare NX internal packages and Next types
+        id: types
+        run: |
+          node .github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" internal corepack yarn turbo run build --filter='@tealstreet/ui-tokens' --filter='@tealstreet/theme' --filter='@tealstreet/ui'
+          node .github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" typegen corepack yarn workspace tealstreet-next typegen
+      - name: Typecheck
+        if: ${{ !cancelled() && steps.types.outcome == 'success' }}
+        run: node .github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" typecheck corepack yarn typecheck:ci
+      - name: Lint
+        if: ${{ !cancelled() && steps.types.outcome == 'success' }}
+        run: node .github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" lint corepack yarn lint:ci
+      - name: Test
+        if: ${{ !cancelled() && steps.types.outcome == 'success' }}
+        run: node .github/scripts/nx-command.mjs "$GITHUB_WORKSPACE/nx" test corepack yarn test:ci
+      - name: Build
+        if: ${{ !cancelled() && steps.types.outcome == 'success' }}
+        run: node .github/scripts/nx-integration.mjs build "$GITHUB_WORKSPACE/nx" "$RUNNER_TEMP/nx-prepared.json"

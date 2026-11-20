@@ -1,6 +1,5 @@
-# Mirror CI for tealstreet-sdk. Source-of-truth lives in the monorepo at
-# mirrors/tealstreet-sdk/.github/workflows/ — contributors cannot edit it here
-# (CODEOWNERS + branch protection). Read-only token, no secrets, no release.
+# SDK mirror CI, authored here and imported as NX mirror scaffolding.
+# NX callers use a separate contents-read credential; no job publishes or releases.
 name: CI
 
 on:
@@ -14,7 +13,14 @@ permissions:
   contents: read
 
 jobs:
-  ci:
+  nx-integration:
+    if: ${{ github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/nx-integration.yml
+    secrets:
+      NX_INTEGRATION_READ_TOKEN: ${{ secrets.NX_INTEGRATION_READ_TOKEN }}
+
+  checks:
+    name: SDK checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,6 +56,26 @@ jobs:
           corepack yarn -s global bin >> "$GITHUB_PATH"
       - if: ${{ !cancelled() }}
         run: corepack yarn test --continue=always
+  ci:
+    name: ci
+    needs: [checks, nx-integration]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require SDK and NX caller gates
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          NX_RESULT: ${{ needs.nx-integration.result }}
+        run: |
+          printf 'SDK checks=%s; NX callers=%s; event=%s\n' "$CHECKS_RESULT" "$NX_RESULT" "$CI_EVENT"
+          test "$CHECKS_RESULT" = success
+          if [ "$CI_EVENT" = pull_request ]; then
+            test "$NX_RESULT" = success
+          else
+            test "$NX_RESULT" = skipped
+          fi
 
 
   # Open source (MIT): scan every new commit for secrets. Known test fixtures
