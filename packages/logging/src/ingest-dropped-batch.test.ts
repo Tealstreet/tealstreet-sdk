@@ -226,3 +226,17 @@ it('does not carry a rate-limit pause over to the next login owner', async () =>
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(fetchMock.mock.calls[1][1].body).toContain('successor');
 });
+
+it('reports the retries already spent when a later attempt is refused', async () => {
+  fetchMock
+    .mockResolvedValueOnce(new Response(null, { status: 503 }))
+    .mockResolvedValue(new Response(null, { status: 403 }));
+  utils.logInfo('refused after a transient failure');
+  utils.dumpLogQueue();
+  await vi.advanceTimersByTimeAsync(31_000);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  const message = getDefaultStore().get(logAtom)[0].message;
+  expect(message).toContain('refused');
+  expect(message).toContain('after 1 retry');
+  expect(message).toContain('HTTP 403');
+});

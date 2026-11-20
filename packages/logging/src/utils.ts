@@ -514,7 +514,7 @@ const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
         // would enqueue another upload into the same failing sink.
         const status = failureStatus === undefined ? '' : ` (HTTP ${failureStatus}${failureUpstreamStatus === undefined ? '' : `; upstream HTTP ${failureUpstreamStatus}`})`;
         const message = refused
-          ? `Diagnostic log upload was refused; ${queue.length} log entries were dropped without retrying${status}.`
+          ? `Diagnostic log upload was refused; ${queue.length} log entries were dropped ${retries === 0 ? 'without retrying' : `after ${retries} ${retries === 1 ? 'retry' : 'retries'}`}${status}.`
           : `Diagnostic log upload failed; ${queue.length} log entries were dropped after ${maxRetries} retries${status}.`;
         const store = getDefaultStore();
         store.set(logAtom, (previous) =>
