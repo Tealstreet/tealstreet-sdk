@@ -265,3 +265,12 @@ remain advisory. Native/combined consumers remain independent gates.
 AGT-98 OKX missing full-position TP/SL legs amend a proven complementary native
 algo without cancel/recreate. Its native row proof and acknowledgement guard move
 WASM inputs; validate fresh OKX family and combined artifacts at the PR head.
+
+## Staged import release eligibility
+
+The workflow reads only the SDK-local wrapper-owned staging ref. The read stays
+inline so older staged source needs no new guard command.
+Exact source equality exempts automatic supersession only; certification, hold,
+input deduplication and tag custody are unchanged. The contract and M58 composition
+regression live in `docs/plans/callers/beta-wasm-auto-release.md` and the existing
+release workflow/guard test files. No cross-repository read credential is needed.
