@@ -7,6 +7,9 @@ use safe_cex_engine::Response;
 use safe_cex_engine::request_context::plan::{CallTerms, RetryWindow};
 use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 
+/// The check before a protective edit lost its own state; nothing was sent.
+const UNFINISHED: &str = "Couldn't finish checking your order with Bybit, so the edit wasn't sent. Nothing changed; try again.";
+
 impl BybitLinear {
     pub(super) fn prepare_protection(
         &mut self,
@@ -35,9 +38,10 @@ impl BybitLinear {
             return Ok(None);
         };
         if !guard.is_some_and(|guard| readiness.matches(guard)) {
-            return Err(not_sent(
-                "The protective edit changed during readiness; your protection is unchanged",
-            ));
+            let what = readiness.what();
+            return Err(not_sent(format!(
+                "Your {what} edit changed while it was being checked, so it wasn't sent. Your {what} is unchanged; try again."
+            )));
         }
         // Revalidate the captured order and position after every deferred read.
         readiness.validate(cx.store, cx.now)?;
@@ -45,8 +49,12 @@ impl BybitLinear {
             return Ok(None);
         };
         self.select_category(self.category_for(readiness.symbol()));
+        let what = readiness.what();
+        // The read never reached Bybit: keep this refusal's kind unset, as before.
         let refused = || {
-            not_sent("Protective-edit readiness could not be checked; your protection is unchanged")
+            not_sent(format!(
+                "Couldn't check your current {what} with Bybit, so the edit wasn't sent. Your {what} is unchanged; try again."
+            ))
         };
         let context = cx
             .preflight_read_context(
@@ -101,9 +109,7 @@ impl BybitLinear {
         let result = entry
             .protection
             .as_mut()
-            .ok_or_else(|| {
-                not_sent("Protective-edit readiness lost its owner; your protection is unchanged")
-            })
+            .ok_or_else(|| not_sent(UNFINISHED))
             .and_then(|readiness| readiness.observe(response));
         if let Err(error) = result {
             cx.command_error(id, error.message.clone());
@@ -114,12 +120,7 @@ impl BybitLinear {
             .finish_preflight_call(&entry.preflight, &context)
             .is_err()
         {
-            let _ = cx.fail_preflight(
-                &entry.preflight,
-                not_sent(
-                    "Protective-edit readiness lost its custody; your protection is unchanged",
-                ),
-            );
+            let _ = cx.fail_preflight(&entry.preflight, not_sent(UNFINISHED));
             return;
         }
         self.park(id, entry);

@@ -1,5 +1,8 @@
 //! Live proof access before destroying a frame-fed page's Partial protection.
-use super::{Axis, Page, PartialStopGuard, matches_original, proof};
+use super::{
+    Axis, Page, PartialStopGuard, cancelled_terminal, executed, matches_original, proof,
+    shows_original_changed,
+};
 use crate::trading::{OrderType, Planned};
 use safe_cex_engine::{ErrorKind, Outcome, Response, Store, VenueError};
 
@@ -46,49 +49,82 @@ impl Readiness {
             .and_then(|()| self.guard.validate(store, now))
     }
 
+    /// The edited order, as the user names it.
+    pub(in crate::trading) fn what(&self) -> &'static str {
+        if self.guard.original.kind == OrderType::TakeProfit {
+            "take profit"
+        } else {
+            "stop"
+        }
+    }
+
+    /// Nothing was sent because the current order could not be confirmed.
+    fn unconfirmed(&self) -> VenueError {
+        let what = self.what();
+        VenueError::new(format!(
+            "Couldn't confirm your current {what} with Bybit, so the edit wasn't sent. Your {what} is unchanged; try again."
+        ))
+        .kind(ErrorKind::Network)
+        .outcome(Outcome::NotSent)
+    }
+
+    /// Nothing was sent because Bybit shows the edited order no longer as it was.
+    fn changed(&self) -> VenueError {
+        let what = self.what();
+        VenueError::new(format!(
+            "Your {what} changed or already triggered, so the edit wasn't sent. Refresh and check it before editing."
+        ))
+        .kind(ErrorKind::Network)
+        .outcome(Outcome::NotSent)
+    }
+
     pub(in crate::trading) fn observe(
         &mut self,
         response: &Response<'_>,
     ) -> Result<(), VenueError> {
-        let what = if self.guard.original.kind == OrderType::TakeProfit {
-            "take profit"
-        } else {
-            "stop"
-        };
-        let failed = || {
-            VenueError::new(format!(
-                "Couldn't confirm your current {what} with Bybit, so the edit wasn't sent. Your {what} is unchanged; try again."
-            ))
-            .kind(ErrorKind::Network)
-            .outcome(Outcome::NotSent)
-        };
         if response.status != 200 {
-            return Err(failed());
+            return Err(self.unconfirmed());
         }
-        let page: Page = super::decode_page(response.body).map_err(|_| failed())?;
+        let page: Page = super::decode_page(response.body).map_err(|_| self.unconfirmed())?;
         if page.category != self.guard.category
             || page.list.len() > 50
             || page.list.iter().any(|row| row.symbol != self.guard.symbol)
         {
-            return Err(failed());
+            return Err(self.unconfirmed());
         }
         let live_original = |row: &super::NativeStop| {
             matches!(row.order_status.as_str(), "Untriggered" | "New")
                 && matches_original(row, &self.guard)
         };
+        // "Changed" needs positive evidence on the edited order's own row: executed,
+        // ended, or still live with a field Bybit sent that differs. Anything else that
+        // fails the match is missing or unreadable evidence.
+        let shows_change = |row: &super::NativeStop| {
+            executed(row)
+                || cancelled_terminal(&row.order_status)
+                || row.order_status == "Rejected"
+                || (matches!(row.order_status.as_str(), "Untriggered" | "New")
+                    && shows_original_changed(row, &self.guard))
+        };
+        let refusal = |row: &super::NativeStop| {
+            if shows_change(row) {
+                self.changed()
+            } else {
+                self.unconfirmed()
+            }
+        };
+        let own = |row: &&super::NativeStop| row.order_id == self.guard.original.id;
         if self.axis() == Some(Axis::Target) {
             // AGT-108: as in the post-cancel proof (AGT-34), an orderId names at most one
             // order, so `nextPageCursor` is only a page token; live Bybit returns one
             // beside the single row, and refusing on it blocked every frame-fed edit.
-            if page.list.len() != 1 || !live_original(&page.list[0]) {
-                return Err(failed());
+            match page.list.as_slice() {
+                [row] if live_original(row) => {}
+                [row] if own(&row) => return Err(refusal(row)),
+                _ => return Err(self.unconfirmed()),
             }
-        } else if page
-            .list
-            .iter()
-            .any(|row| row.order_id == self.guard.original.id && !live_original(row))
-        {
-            return Err(failed());
+        } else if let Some(row) = page.list.iter().filter(own).find(|row| !live_original(row)) {
+            return Err(refusal(row));
         }
         self.next += 1;
         Ok(())
