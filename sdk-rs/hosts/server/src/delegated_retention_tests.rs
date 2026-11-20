@@ -350,6 +350,58 @@ async fn a_dispose_never_counts_its_own_registrations_stale_socket() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_stale_socket_keeps_only_its_other_registrations_labels() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, mut inbox) = resident(&registry, "A");
+            // Stale socket 8 holds the disposed registration and an identity-shared
+            // alias with its own registration, as one web page's two workers do.
+            hold_requesting(&account, 8, Delegated, "registration-7");
+            assert!(account.hold_label(
+                8,
+                Live {
+                    outbox: Arc::new(|_| true),
+                    token: None,
+                },
+                "alias-y"
+            ));
+            account.confirm_signing_mode(
+                8,
+                "alias-y",
+                Delegated,
+                Arc::new(|_| true),
+                Some("registration-y"),
+            );
+            let provider = account.delegated().as_ref().unwrap().provider();
+            let key = KeyRef("primary.signing".into());
+            registry.release(&account, 7, Disposal::PageDisposed);
+            assert_eq!(registry.account_count(), 1);
+            assert!(inbox.try_recv().is_err());
+            assert!(
+                registry.holds(&account, 8),
+                "its other registration still holds"
+            );
+            assert_eq!(account.labels(8), ["alias-y"]);
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Supported
+            );
+            registry.release_label(&account, 8, "alias-y", Disposal::PageDisposed);
+            assert_eq!(
+                registry.account_count(),
+                0,
+                "no holder may be left keeping it"
+            );
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_unjoined_dispose_still_stops_the_account_it_cannot_attribute() {
     tokio::task::LocalSet::new()
         .run_until(async {

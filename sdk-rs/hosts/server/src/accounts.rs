@@ -321,19 +321,34 @@ impl Holders {
             .collect()
     }
 
-    /// Other sockets of the leaving registrations: its own stale, half-open copies.
-    fn holders_of(&self, leaving: &[Arc<str>]) -> Vec<u64> {
-        let mut ids: Vec<u64> = self
+    /// Detaches the leaving registrations' labels on other sockets (their stale,
+    /// half-open copies) without touching those sockets' other registrations.
+    fn detach_registrations(&mut self, account: &Account, leaving: &[Arc<str>]) {
+        let stale: Vec<(u64, String)> = self
             .confirmed
             .iter()
             .filter(|(_, (_, _, registration))| {
                 registration.as_ref().is_some_and(|r| leaving.contains(r))
             })
-            .map(|((id, _), _)| *id)
+            .map(|(key, _)| key.clone())
             .collect();
-        ids.sort_unstable();
-        ids.dedup();
-        ids
+        for (id, label) in stale {
+            self.confirmed.remove(&(id, label.clone()));
+            let remaining = self.labels.get_mut(&id).and_then(|labels| {
+                labels.remove(&label);
+                labels.values().find_map(Clone::clone)
+            });
+            if let Some(live) = remaining {
+                self.by_id.insert(id, Some(live.clone()));
+                if self.signing == Some(id) {
+                    account.sign_through(self, id, &live);
+                }
+            } else if self.by_id.contains_key(&id) {
+                self.remove(id);
+                self.labels.remove(&id);
+                account.hand_over(self, id);
+            }
+        }
     }
 
     fn remove(&mut self, id: u64) {
@@ -2315,15 +2330,12 @@ impl Registry {
                 return;
             }
             account.hand_over(&mut holders, holder);
-            let delegated_live = holders.delegated_live_besides(&leaving);
-            if page_dispose && delegated_live && account.delegated().is_some() {
-                // The leaving registration's other (stale) sockets leave with it.
-                for stale in holders.holders_of(&leaving) {
-                    holders.remove(stale);
-                    holders.labels.remove(&stale);
-                    account.hand_over(&mut holders, stale);
-                }
+            if page_dispose && account.delegated().is_some() {
+                // The leaving registration's stale copies leave with it, before the
+                // keep decision, so a removed socket can never be what keeps the key.
+                holders.detach_registrations(account, &leaving);
             }
+            let delegated_live = holders.delegated_live_besides(&leaving);
             let last = if account.delegated().is_some() {
                 holders.by_id.values().all(Option::is_none)
             } else {
