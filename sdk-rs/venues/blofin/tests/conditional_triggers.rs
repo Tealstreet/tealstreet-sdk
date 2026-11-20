@@ -39,6 +39,14 @@ fn ready(hedged: bool, algos: &str) -> Harness {
     h.reply("orders-pending", r#"{"code":"0","data":[]}"#);
     h.reply("orders-tpsl-pending", r#"{"code":"0","data":[]}"#);
     h.reply("orders-algo-pending", algos);
+    if h.pending
+        .iter()
+        .any(|r| r.url.contains("orders-algo-pending"))
+    {
+        let terminal = h.take("orders-algo-pending");
+        assert!(terminal.url.contains("after=501"));
+        h.respond(terminal, r#"{"code":"0","data":[]}"#);
+    }
     assert_eq!(h.e.store().hedged(), hedged);
     h
 }
