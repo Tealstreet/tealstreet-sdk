@@ -2,10 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { PlacementIntentLedger } from '../placementIntentLedger';
 
-const intent = (number: number) => ({
-  id: `019a9b43-1000-7000-8000-${number.toString(16).padStart(12, '0')}`,
-  createdAt: 1_764_000_000_000 + number,
-});
+const intent = (number: number) => {
+  const createdAt = 1_764_000_000_000 + number;
+  const time = createdAt.toString(16).padStart(12, '0');
+  return {
+    id: `${time.slice(0, 8)}-${time.slice(8)}-7000-8000-${number.toString(16).padStart(12, '0')}`,
+    createdAt,
+  };
+};
 const order = JSON.stringify({ symbol: 'BTCUSDT', side: 'buy', type: 'market', amount: 1000 });
 
 describe('placement intent identity', () => {
