@@ -651,6 +651,9 @@ async fn order_frames_without_caller_id_keep_null_receipt_and_original_intent() 
                 "kraken",
                 "mexc",
                 "woo",
+                "backpack",
+                "grvt",
+                "hyrotrader",
             ] {
                 for unknown in [false, true] {
                     let registry = crate::accounts::tests::registry();
@@ -759,4 +762,82 @@ async fn woo_market_submit_sends_without_a_caller_id() {
             registry.dispose(&account, Disposal::PageDisposed);
         })
         .await;
+}
+
+// Actual order.submit payloads exercise the server choice before the native
+// transport fixture; codec-specific ID restrictions are audited separately.
+async fn hosted_submit_without_caller_id(venue: &str) {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for kind in ["market", "limit"] {
+                for supplied_id in [false, true] {
+                    let registry = crate::accounts::tests::registry();
+                    let tape = Tape::default();
+                    let account = delegated_account(&registry, "A", venue, tape.clone());
+                    let (mut session, mut sent) =
+                        joined(registry.clone(), "A", account.clone()).await;
+                    let key = intent(0);
+                    let mut params = placement();
+                    params["type"] = kind.into();
+                    if kind == "market" {
+                        params.as_object_mut().unwrap().remove("price");
+                    }
+                    if supplied_id {
+                        params["clientOrderId"] = key.clone().into();
+                    }
+                    let fingerprint =
+                        crate::order_contract::fingerprint("synthetic-main", &key, &params, 1)
+                            .unwrap();
+                    session
+                        .handle(
+                            &json!({"t":"order.submit","d":{"accountName":"synthetic-main",
+                                "intentId":key,"params":params,"seq":1,"ageMs":0,
+                                "fingerprint":fingerprint}})
+                            .to_string(),
+                        )
+                        .await
+                        .unwrap();
+                    let ack = order_frame(&mut sent, "order.ack").await;
+                    assert_eq!(ack["d"]["received"], true, "{venue}/{kind}");
+                    assert_eq!(ack["d"]["intentId"], key);
+                    let outcome = order_frame(&mut sent, "order.outcome").await;
+                    assert_eq!(outcome["d"]["intentId"], key);
+                    assert_eq!(
+                        outcome["d"]["outcome"], "placed",
+                        "{venue}/{kind}: {outcome}"
+                    );
+                    assert!(
+                        outcome["d"]["clientOrderId"].is_null(),
+                        "{venue}/{kind}: {outcome}"
+                    );
+                    assert_eq!(*tape.writes.lock().unwrap(), vec!["create"]);
+                    assert!(
+                        tape.client_order_ids
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .all(|id| id != &key),
+                        "{venue}/{kind}: intent UUID reached native transport"
+                    );
+                    session.close();
+                    registry.dispose(&account, Disposal::PageDisposed);
+                }
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn backpack_hosted_submit_omits_invalid_caller_id() {
+    hosted_submit_without_caller_id("backpack").await;
+}
+
+#[tokio::test]
+async fn grvt_hosted_submit_omits_invalid_caller_id() {
+    hosted_submit_without_caller_id("grvt").await;
+}
+
+#[tokio::test]
+async fn hyrotrader_hosted_submit_omits_unsupported_caller_id() {
+    hosted_submit_without_caller_id("hyrotrader").await;
 }
