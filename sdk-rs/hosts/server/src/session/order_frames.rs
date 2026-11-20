@@ -61,7 +61,11 @@ impl Session {
         if !joined.account.running.io_allowed() {
             return Some("io_fenced");
         }
-        if !self.registry.holds(&joined.account, self.socket) {
+        let label = joined.out.account_label(&joined.account.name);
+        if !self
+            .registry
+            .holds_label(&joined.account, self.socket, label)
+        {
             return Some("holder_changed");
         }
         if !joined.out.order_binding(instance) {

@@ -504,11 +504,31 @@ without a seed remains unchanged and supplies no placement-signing capability.
 Retained DELEGATED accounts share the canonical protected owner through the sole
 `AccountSigner`; escaped engine handles have no independent erasure authority.
 The 48-hour clock starts only after the last admitted holder disconnects and is
-cancelled only by admitted reconnect. Removal/off/key removal erase immediately.
+cancelled only by admitted reconnect. Removal/off/key removal erase immediately
+once the last live holder disposes; see DELEGATED holder-refcounted dispose.
 For a selected proxy transport, token expiry is a terminal stop/erase with
 recorded reason `proxy-token-expired`; there is no issuer renewal, direct
 fallback or authority extension (Sam, 2026-11-20, AGT-37: permanent contract).
 See `DELEGATED_RETENTION.md` for the retention and restart contracts.
+
+## DELEGATED holder-refcounted dispose
+
+AGT-79 (Sam, 2026-11-20): a page `dispose` or ping orphan on a DELEGATED account
+detaches only that holder in `Registry::release_with_labels`. The shared actor and
+resident signer keep running only while a LIVE holder of ANOTHER client
+registration (init `instanceId`, kept in `Holders::confirmed`) confirmed a
+DELEGATED request; otherwise `dispose_for` stops and erases as before. Before this,
+one device switching that account to LOCAL/COSIGNED (which disposes first) stopped
+it for every device. What never keeps the key: a COSIGNED tab attached to the
+resident, a parked holder, and the leaving registration's own half-open socket
+(detached with it, so its idle-out cannot start 48 h retention). An unjoined
+socket's `dispose_delegated` stays unconditional: it names no registration.
+Detachment and the keep decision run on EVERY disposed alias, including when the
+socket keeps another alias. A detached label loses command authority through
+`Registry::holds_label`, which session cleanup, order admission and the deferred
+action guard check instead of the socket-wide `holds`.
+Hard stops (`Registry::dispose`, signer failure, fence, expiry, drain, settings
+rebuild) are unchanged, and COSIGNED disposal was already holder-counted.
 
 ## Host notifications (AGT-37)
 

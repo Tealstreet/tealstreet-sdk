@@ -576,8 +576,8 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 | `msg` | `{op, data?, accountName, instanceId?}` | Account op, see below |
 | `sign-res` | `{id, config?, wsAuthSignature?, error?}`, with `ts` as a sidecar | Goes to the signer (4yjlw0) |
 | `echo-res` | `{id}` | Echo RTT sample |
-| `ping` | `{accounts?: string[], link?}` | Replies with `pong`. Then reconciles: when `accounts` is nonempty, any server account not in that list is disposed |
-| `dispose` | `{accountName}` | Disposes the account |
+| `ping` | `{accounts?: string[], link?}` | Replies with `pong`. Then reconciles: when `accounts` is nonempty, any server account not in that list is released like a `dispose` |
+| `dispose` | `{accountName}` | Releases this socket's hold. The account is disposed when no other holder remains; a DELEGATED account keeps running only for a live DELEGATED holder of another client registration (AGT-79, `DELEGATED_RETENTION.md`). A socket that never joined it disposes it outright |
 | `perf` | `{level}` | Legacy compatibility message; use `publishIntervalMs` for connection-local output pacing |
 | `verbose` | `{enabled}` | Authenticated sockets only. Diagnostics |
 
