@@ -371,7 +371,11 @@ caller IDs. Those native validators are unchanged; explicit unsupported caller
 IDs still refuse. Bybit protection also omits its unsupported caller ID and
 reports null, as do BloFin and Phemex triggers and attached TP/SL (AGT-46; Phemex
 live 2026-11-20): both adapters refuse a caller ID on those, so reduce-only stops
-failed. A newly hosted venue with such a rule joins `trigger_refuses_caller_id`.
+failed. This is not yet every hosted venue with that adapter rule: OKX (all four),
+ApeX Omni, Bitunix, KuCoin Futures, BingX and Paradex refuse a caller ID on
+non-plain orders too (BingX/Paradex also on `close`, Coinbase on `stop_market`/`close`),
+so their hosted trigger submits still refuse visibly. Add each to
+`trigger_refuses_caller_id` only with a live check.
 Other modes keep `callMethod` unchanged. Pending joins
 and elapsed ages of ten seconds or more refuse without a write. New replies
 use the existing instanceId registration helper. The NX router must durably

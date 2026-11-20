@@ -441,7 +441,9 @@ mod activation_tests {
                 ));
             }
         }
-        for other in ["okx", "bitget", "bybit", "bitrue", "weex", "not-blofin"] {
+        // Not the full set with this adapter rule: OKX, ApeX Omni, Bitunix, KuCoin, BingX,
+        // Paradex and Coinbase share it and are a tracked gap (sdk-rs/hosts/server/CLAUDE.md).
+        for other in ["bybit", "bitrue", "weex", "not-blofin"] {
             assert!(!super::trigger_refuses_caller_id(
                 other,
                 stop_market.as_object().unwrap()
