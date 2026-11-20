@@ -38,6 +38,14 @@ private custody validation, installs no signing provider or identities, and cann
 private requests. An unused RemoteSigner or PayloadSigner cannot make a public
 account require a passphrase or fail private-mode validation.
 
+COSIGNED join validation disables the read's rounded legacy signature resend
+in its temporary proof engine. A venue signature refusal therefore ends that
+proof without asking the joining device to sign a whole-second timestamp.
+The host sets this policy itself, including when input requests legacy retries;
+it never propagates the temporary option to the admitted account. LOCAL,
+DELEGATED and resident COSIGNED recovery keep their existing single resend.
+No signing-response cache, freshness-window change or write replay is added.
+
 Native fixture signing compares local and device operations/signatures across
 REST reads, ordinary/protective orders, cancellation, cancel-all, leverage,
 cancel/proof/replacement amendments, signature-rejection re-signing and private

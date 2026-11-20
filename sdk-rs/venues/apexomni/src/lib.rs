@@ -21,6 +21,8 @@ use std::collections::HashMap;
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
+    /// Temporary COSIGNED join proofs must retain millisecond signing bytes.
+    pub skip_legacy_signature_retry: bool,
     /// The provider identity for every signed request: opaque refs only. The
     /// venue holds no key material; the zkLink seed is its `zklinkSeed` role.
     pub identity: Option<safe_cex_engine::signing::Identity>,

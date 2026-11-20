@@ -259,7 +259,9 @@ impl ApexOmni {
             return;
         }
         match crate::api_response(response) {
-            crate::ApiResponse::SignatureRefusal(error) if !read.legacy => {
+            crate::ApiResponse::SignatureRefusal(error)
+                if !read.legacy && !self.options.skip_legacy_signature_retry =>
+            {
                 // The venue refused the first signature; a refused resend never leaves.
                 let error = error.outcome(safe_cex_engine::Outcome::Rejected);
                 let retries = read.retries;

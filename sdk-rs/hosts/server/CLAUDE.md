@@ -556,3 +556,10 @@ evidence (IDs, counts, `partial`, `protection`, or a non-`notSent` element) as
 `refused`/`notSent`, matching `order_frames::settle_intent`. Before AGT-68 a
 definitive refusal such as OKX 51088 settled `unknown` and left mobile's sticky
 "still unconfirmed" toast. Partial or uncertain failures stay `unknown`.
+
+## ApeX COSIGNED proof retries
+
+The temporary ApeX COSIGNED join engine disables the rounded legacy read-signature
+resend. The host owns and overrides this proof-only option; normal resident and
+DELEGATED recovery retain their existing policies. See `DESIGN.md` and
+`sdk-rs/venues/apexomni/README.md`; no replay cache or write authority is added.
