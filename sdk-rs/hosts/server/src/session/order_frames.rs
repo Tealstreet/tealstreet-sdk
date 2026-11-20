@@ -358,16 +358,25 @@ pub(super) fn settle_intent(
     id: &Value,
     client_id: Option<&str>,
     seq: u64,
+    protective_legs: usize,
     answer: Result<Value, Value>,
 ) {
     let mut data = json!({"intentId":id,"seq":seq,"outcome":"unknown","venueOrderId":null,"clientOrderId":client_id,"error":null});
     match answer {
         Ok(value) => {
+            // One native order, or one entry followed by exactly its separately placed
+            // bracket legs (AGT-111). Any other count, such as a split entry, stays unknown.
+            let valid = |id: &Value| {
+                id.as_str()
+                    .is_some_and(|id| !id.is_empty() && id.len() <= 256)
+            };
             if let Some(venue_id) = value
                 .as_array()
-                .filter(|ids| ids.len() == 1)
+                .filter(|ids| {
+                    ids.len() == 1 || (protective_legs > 0 && ids.len() == 1 + protective_legs)
+                })
+                .filter(|ids| ids.iter().all(valid))
                 .and_then(|ids| ids[0].as_str())
-                .filter(|id| !id.is_empty() && id.len() <= 256)
             {
                 data["outcome"] = "placed".into();
                 data["venueOrderId"] = venue_id.into();
@@ -424,9 +433,52 @@ mod tests {
     async fn settled(error: Value) -> Value {
         let (out, mut sent, _) = Out::channel(1);
         let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
-        settle_intent(&out, "a", &id, None, 1, Err(error));
+        settle_intent(&out, "a", &id, None, 1, 0, Err(error));
         let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
         frame["d"].clone()
+    }
+
+    async fn settled_ok(ids: Value, protective_legs: usize) -> Value {
+        let (out, mut sent, _) = Out::channel(1);
+        let id = Value::String("018bcfe5-6800-7101-8101-010101010101".into());
+        settle_intent(&out, "a", &id, None, 1, protective_legs, Ok(ids));
+        let frame: Value = serde_json::from_str(&sent.recv().await.unwrap()).unwrap();
+        frame["d"].clone()
+    }
+
+    // AGT-111 live, okx-t: a limit with an attached stopLoss completed with
+    // `[entry, stop-loss algo]` and was reported unknown although both were placed.
+    #[tokio::test]
+    async fn a_bracket_entry_followed_by_exactly_its_legs_is_placed_as_the_entry() {
+        for (ids, legs) in [
+            (json!(["entry", "sl"]), 1),
+            (json!(["entry", "sl", "tp"]), 2),
+        ] {
+            let placed = settled_ok(ids, legs).await;
+            assert_eq!(placed["outcome"], "placed", "{placed}");
+            assert_eq!(placed["venueOrderId"], "entry");
+            assert_eq!(placed["error"], Value::Null);
+        }
+        for (ids, legs) in [
+            (json!(["a", "b"]), 0),
+            (json!(["lot-1", "lot-2", "sl"]), 1),
+            (json!(["entry", "sl", "tp"]), 1),
+            (json!(["entry"]), 1),
+            (json!(["entry", ""]), 1),
+            (json!([]), 1),
+        ] {
+            let unknown = settled_ok(ids.clone(), legs).await;
+            let single = ids.as_array().is_some_and(|ids| ids.len() == 1);
+            if single {
+                assert_eq!(unknown["outcome"], "placed", "{ids}: {unknown}");
+            } else {
+                assert_eq!(
+                    unknown["outcome"], "unknown",
+                    "{ids} legs {legs}: {unknown}"
+                );
+                assert_eq!(unknown["venueOrderId"], Value::Null);
+            }
+        }
     }
 
     #[tokio::test]
@@ -490,6 +542,7 @@ mod tests {
                 &id,
                 Some(id.as_str().unwrap()),
                 1,
+                0,
                 Err(
                     json!({"message":"𐐀".repeat(20_000),"outcome":"unknown","unused":"large".repeat(20_000)}),
                 ),

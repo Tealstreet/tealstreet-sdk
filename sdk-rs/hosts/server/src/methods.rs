@@ -60,6 +60,8 @@ pub enum Reply {
     Intent {
         client_order_id: Option<String>,
         seq: u64,
+        /// Separately placed bracket legs listed after the entry (AGT-111).
+        protective_legs: usize,
     },
     Action {
         kind: &'static str,
