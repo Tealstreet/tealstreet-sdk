@@ -28,7 +28,8 @@ mod history_completeness_tests;
 
 #[derive(Clone, Copy)]
 pub(super) enum OrderReceipt {
-    Placement(u64),
+    /// `caller_id` is whether the submit carried a caller venue ID (AGT-110).
+    Placement { seq: u64, caller_id: bool },
     Action {
         seq: u64,
         kind: &'static str,
@@ -2675,7 +2676,7 @@ impl Session {
                 if let Plan::Command { reply, command } | Plan::AfterLoad { reply, command } = plan
                 {
                     *reply = match receipt {
-                        OrderReceipt::Placement(seq) => methods::Reply::Intent {
+                        OrderReceipt::Placement { seq, .. } => methods::Reply::Intent {
                             client_order_id: command["orders"]
                                 .as_array()
                                 .filter(|orders| orders.len() == 1)
