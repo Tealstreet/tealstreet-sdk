@@ -4,7 +4,9 @@
 // builds or publishes until those proofs (and the roster) succeeded.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 
@@ -171,11 +173,20 @@ const publishDecision = (event, { staged = stagedSdk, superseded = laterTag, exi
       *) [ "$1" = --input-type=module ] || return 99; printf '%s\\n' fixture-fingerprint ;;
     esac
   }\n`;
-  return spawnSync('bash', ['-e', '-o', 'pipefail', '-c', fakeNode + script], {
-    encoding: 'utf8', env: { SDK_SHA: stagedSdk, GITHUB_REPOSITORY: 'Tealstreet/tealstreet-sdk',
-      GITHUB_OUTPUT: '/dev/stdout', SUPERSEDED: superseded, STAGED: staged, EXISTING: existing,
-      STAGE_ERROR: String(stageError) },
-  });
+  // Actions supplies a regular output file; Linux cannot reopen Node's piped stdout.
+  const directory = mkdtempSync(join(tmpdir(), 'sdk-release-output-'));
+  const output = join(directory, 'step-output');
+  writeFileSync(output, '');
+  try {
+    const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', fakeNode + script], {
+      encoding: 'utf8', env: { SDK_SHA: stagedSdk, GITHUB_REPOSITORY: 'Tealstreet/tealstreet-sdk',
+        GITHUB_OUTPUT: output, SUPERSEDED: superseded, STAGED: staged, EXISTING: existing,
+        STAGE_ERROR: String(stageError) },
+    });
+    return { ...result, stdout: result.stdout + readFileSync(output, 'utf8') };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 };
 
 test('M58: the currently staged 335cab44 remains publishable after descendant release 79c0a92fbec', () => {
