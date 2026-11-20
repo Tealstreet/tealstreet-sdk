@@ -2255,7 +2255,9 @@ impl Okx {
                         (self.account.revision, cx.now, terminal || triggered),
                     );
                     let orders = self.orders(cx, &row);
-                    if matches!(row.ord_type, "oco" | "conditional") && row.state == "live" {
+                    if matches!(row.ord_type, "oco" | "conditional" | "trigger")
+                        && row.state == "live"
+                    {
                         self.drop_deleted_legs(cx, row.algo_id, &orders);
                     }
                     for order in orders {
@@ -2537,8 +2539,9 @@ impl Okx {
     }
 
     /// An amend-algos leg deletion leaves an `oco` a one-leg `conditional`; its
-    /// update no longer lists the deleted leg, so that row goes (AGT-98). The
-    /// version keeps an older census from restoring it.
+    /// update no longer lists the deleted leg, so that row goes (AGT-98). A
+    /// reduce-only `trigger` amended across the reference price changes its
+    /// leg suffix the same way. The version keeps an older census from restoring it.
     fn drop_deleted_legs(&mut self, cx: &mut Cx<'_, Pending>, algo_id: &str, listed: &[Order]) {
         for suffix in ["_sl", "_tp"] {
             let id = format!("{algo_id}{suffix}");

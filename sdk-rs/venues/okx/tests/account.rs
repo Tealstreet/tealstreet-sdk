@@ -906,6 +906,60 @@ fn an_algo_update_without_a_leg_removes_that_leg_row() {
     assert_eq!(e.store().order("algo7_tp").unwrap().price, 42000.0);
 }
 
+/// AGT-98 review: a reduce-only `trigger` amended across the reference price
+/// changes kind (TP to SL) and so its row suffix. The update removes the old
+/// suffix's row, and a cancel of the trigger stays a cancel-algos.
+#[test]
+fn a_trigger_crossing_the_reference_keeps_one_row_and_cancels_whole() {
+    let (mut e, _, business, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    let frame = |px: &str| {
+        format!(
+            r#"{{"arg":{{"channel":"orders-algo"}},"data":[{{"instId":"BTC-USDT-SWAP","algoId":"algo9","ordType":"trigger","state":"live","side":"sell","sz":"1","triggerPx":"{px}","triggerPxType":"last","ordPx":"-1","reduceOnly":"true"}}]}}"#
+        )
+    };
+    ws(&mut e, business, &frame("42000"));
+    assert_eq!(
+        e.store().order("algo9_tp").map(|o| o.kind),
+        Some(safe_cex_engine::model::OrderType::TakeProfit)
+    );
+    ws(&mut e, business, &frame("38000"));
+    assert!(
+        e.store().order("algo9_tp").is_none(),
+        "{:?}",
+        e.store().orders()
+    );
+    assert_eq!(
+        e.store().order("algo9_sl").map(|o| o.kind),
+        Some(safe_cex_engine::model::OrderType::StopLoss)
+    );
+    // A stale sibling (as a census could restore) still never turns the cancel into a leg delete.
+    let mut stale = e.store().order("algo9_sl").unwrap().clone();
+    stale.id = "algo9_tp".into();
+    stale.kind = safe_cex_engine::model::OrderType::TakeProfit;
+    e.store_mut().upsert_order(stale);
+    e.handle(
+        6.0,
+        Event::Command(safe_cex_engine::Command::CancelOrders {
+            command: 9,
+            ids: vec!["algo9_sl".into()],
+        }),
+    );
+    let out = prepared(&mut e, 6.0);
+    let write = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.method != safe_cex_engine::Method::Get => Some(r),
+            _ => None,
+        })
+        .expect("a cancel write");
+    assert!(
+        write.url.contains("/api/v5/trade/cancel-algos"),
+        "{}",
+        write.url
+    );
+}
+
 #[test]
 fn undecodable_instrument_row_still_reports_its_exposure() {
     for bad in [
