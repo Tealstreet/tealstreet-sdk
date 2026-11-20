@@ -201,3 +201,169 @@ fn venue_51088_on_a_placement_is_a_definitive_rejection() {
     assert_eq!(error.venue_code.as_deref(), Some("51088"));
     assert!(error.partial.is_none(), "{error:?}");
 }
+
+// AGT-98: complementary legs attach only to an observed native full-position algo.
+fn native_full_leg(kind: OrderType, side: OrderSide) -> Engine<Okx> {
+    let mut e = engine(FixtureOptions {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..Default::default()
+    });
+    e.start(0.);
+    let a = take_http(&mut prepared(&mut e, 0.));
+    reply(&mut e, &a, &envelope(MARKET), 1.);
+    let mut out = prepared(&mut e, 1.);
+    let ticker = take_http(&mut out);
+    reply(&mut e, &ticker, &envelope(TICKER), 2.);
+    out.extend(prepared(&mut e, 2.));
+    let config = out
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(
+        &mut e,
+        config,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.,
+    );
+    let mut row = serde_json::json!({"instId":"BTC-USDT-SWAP","algoId":"77",
+        "ordType":"conditional","state":"live","side":if side==OrderSide::Sell {"sell"} else {"buy"},
+        "sz":"","closeFraction":"1","reduceOnly":"true","tdMode":"cross","posSide":"net"});
+    let leg = if kind == OrderType::StopLoss {
+        "sl"
+    } else {
+        "tp"
+    };
+    row[format!("{leg}TriggerPx")] = "36000".into();
+    row[format!("{leg}OrdPx")] = "-1".into();
+    row[format!("{leg}TriggerPxType")] = "mark".into();
+    let mut pending = prepared(&mut e, 3.);
+    while let Some(a) = pending.pop() {
+        let Action::Http(r) = &a else { continue };
+        let rows = if r.url.contains("ordType=conditional") {
+            row.to_string()
+        } else if r.url.contains("account-position-risk") {
+            r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#.into()
+        } else {
+            String::new()
+        };
+        reply(&mut e, &a, &envelope(&rows), 4.);
+        pending.extend(prepared(&mut e, 4.));
+    }
+    let id = if kind == OrderType::StopLoss {
+        "77_sl"
+    } else {
+        "77_tp"
+    };
+    assert_eq!(
+        e.store().order(id).expect("real native full leg").amount,
+        0.
+    );
+    e
+}
+
+fn attach(e: &mut Engine<Okx>, kind: OrderType, side: OrderSide) -> Vec<Action> {
+    let input =
+        serde_json::json!({"symbol":"BTCUSDT","type":kind,"side":side,"amount":0,"price":42000});
+    place(e, &[&input.to_string()])
+}
+
+#[test]
+fn missing_full_take_profit_amends_the_observed_stop_loss() {
+    attach_success(OrderType::StopLoss, OrderType::TakeProfit, "newTp");
+}
+
+#[test]
+fn missing_full_stop_loss_amends_the_observed_take_profit() {
+    attach_success(OrderType::TakeProfit, OrderType::StopLoss, "newSl");
+}
+
+fn attach_success(held: OrderType, added: OrderType, prefix: &str) {
+    for side in [OrderSide::Sell, OrderSide::Buy] {
+        let mut e = native_full_leg(held, side);
+        let id = if held == OrderType::StopLoss {
+            "77_sl"
+        } else {
+            "77_tp"
+        };
+        let original = e.store().order(id).unwrap().clone();
+        let out = attach(&mut e, added, side);
+        let sent = writes(&out);
+        assert_eq!(
+            sent.len(),
+            1,
+            "one native amendment, not a second algo: {out:?}"
+        );
+        assert!(path(sent[0]).ends_with("/api/v5/trade/amend-algos"));
+        let b = body(sent[0]);
+        assert_eq!(b["instId"], "BTC-USDT-SWAP");
+        assert_eq!(b["algoId"], "77");
+        assert_eq!(b[format!("{prefix}TriggerPx")], "42000");
+        assert_eq!(b[format!("{prefix}OrdPx")], "-1");
+        assert_eq!(b["cxlOnFail"], false);
+        for forbidden in ["newSz", "sz", "closeFraction", "newPx", "ordType"] {
+            assert!(b.get(forbidden).is_none(), "{b}");
+        }
+        let other = if held == OrderType::StopLoss {
+            "newSl"
+        } else {
+            "newTp"
+        };
+        assert!(
+            b.get(format!("{other}TriggerPx")).is_none(),
+            "existing leg not rewritten"
+        );
+        reply(
+            &mut e,
+            sent[0],
+            r#"{"code":"0","data":[{"algoId":"77","sCode":"0","sMsg":""}]}"#,
+            6.,
+        );
+        let done = prepared(&mut e, 6.);
+        assert!(done.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command:1,data}) if data=="[\"77\"]")),"one proven placement outcome: {done:?}");
+        assert!(
+            !done
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+        );
+        assert!(writes(&done).is_empty(), "no follow-up placement or resend");
+        assert_eq!(e.store().order(id), Some(&original));
+    }
+}
+
+#[test]
+fn missing_full_leg_refusal_and_unknown_never_cancel_or_resend() {
+    for (response, outcome) in [
+        (
+            r#"{"code":"1","data":[{"algoId":"77","sCode":"51280","sMsg":"refused"}]}"#,
+            Outcome::Rejected,
+        ),
+        (
+            r#"{"code":"50004","msg":"timeout","data":[]}"#,
+            Outcome::Unknown,
+        ),
+    ] {
+        let mut e = native_full_leg(OrderType::StopLoss, OrderSide::Sell);
+        let original = e.store().order("77_sl").unwrap().clone();
+        let out = attach(&mut e, OrderType::TakeProfit, OrderSide::Sell);
+        let sent = writes(&out);
+        assert_eq!(sent.len(), 1, "{out:?}");
+        reply(&mut e, sent[0], response, 6.);
+        let done = prepared(&mut e, 6.);
+        assert_eq!(refusal(&done).outcome, Some(outcome));
+        assert!(
+            writes(&done).is_empty(),
+            "never replace/restore/resend: {done:?}"
+        );
+        assert_eq!(e.store().order("77_sl"), Some(&original));
+    }
+}
+
+#[test]
+fn an_existing_full_leg_cannot_be_attached_twice() {
+    let mut e = native_full_leg(OrderType::StopLoss, OrderSide::Sell);
+    let out = attach(&mut e, OrderType::StopLoss, OrderSide::Sell);
+    assert!(writes(&out).is_empty());
+    assert_eq!(refusal(&out).outcome, Some(Outcome::NotSent));
+}
