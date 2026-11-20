@@ -146,3 +146,53 @@ test('the reusable source step rejects a different SHA before exposing build out
   assert.match(mismatch.stdout, /sdk_sha must match the master push/);
   assert.equal(source(head, 'rust-beta-wasm-bbbbbbbbbbb').status, 1);
 });
+
+// M58: a staged source survived in NX while the one-pending-run collapse
+// cancelled its SDK push run and a later descendant published first.
+const stagedSdk = '335cab44d92b958de3d9967b7b43d3872f225cfd';
+const laterTag = 'rust-beta-wasm-79c0a92fbec';
+const publishDecision = (event, { staged = stagedSdk, superseded = laterTag, existing = '', stageError = false } = {}) => {
+  const script = job('roster').match(/- name: Publish only new sdk-rs inputs[\s\S]*?run: \|\n([\s\S]*?)(?=\n {6}# Only an authenticated)/)?.[1]
+    .replace(/^ {10}/gm, '').replaceAll('${{ github.event_name }}', event);
+  assert.ok(script, 'run the real workflow selection block');
+  const fakeNode = `node() {
+    printf 'guard:%s\\n' "$2" >&2
+    case "$2" in
+      superseded) printf '%s\\n' "$SUPERSEDED" ;;
+      staged) [ "$STAGE_ERROR" != true ] || return 1; printf '%s\\n' "$STAGED" ;;
+      published) printf '%s\\n' "$EXISTING" ;;
+      *) [ "$1" = --input-type=module ] || return 99; printf '%s\\n' fixture-fingerprint ;;
+    esac
+  }\n`;
+  return spawnSync('bash', ['-e', '-o', 'pipefail', '-c', fakeNode + script], {
+    encoding: 'utf8', env: { SDK_SHA: stagedSdk, GITHUB_REPOSITORY: 'Tealstreet/tealstreet-sdk',
+      GITHUB_OUTPUT: '/dev/stdout', SUPERSEDED: superseded, STAGED: staged, EXISTING: existing,
+      STAGE_ERROR: String(stageError) },
+  });
+};
+
+test('M58: the currently staged 335cab44 remains publishable after descendant release 79c0a92fbec', () => {
+  const result = publishDecision('workflow_run');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^publish=true$/m);
+  assert.doesNotMatch(result.stdout, /^publish=false$/m);
+});
+
+test('an ordinary superseded source remains skipped and a manual cut remains deliberate', () => {
+  const ordinary = publishDecision('workflow_run', { staged: 'a'.repeat(40) });
+  assert.equal(ordinary.status, 0, ordinary.stderr);
+  assert.match(ordinary.stdout, /^publish=false$/m);
+  const manual = publishDecision('workflow_dispatch', { stageError: true });
+  assert.equal(manual.status, 0, manual.stderr);
+  assert.match(manual.stdout, /^publish=true$/m);
+  assert.doesNotMatch(manual.stderr, /guard:(?:superseded|staged)/);
+});
+
+test('matching staged inputs still deduplicate and an unproven exemption never publishes', () => {
+  const duplicate = publishDecision('workflow_run', { existing: 'rust-beta-wasm-already-published' });
+  assert.equal(duplicate.status, 0, duplicate.stderr);
+  assert.match(duplicate.stdout, /^publish=false$/m);
+  const unproven = publishDecision('workflow_run', { stageError: true });
+  assert.notEqual(unproven.status, 0);
+  assert.doesNotMatch(unproven.stdout, /^publish=true$/m);
+});
