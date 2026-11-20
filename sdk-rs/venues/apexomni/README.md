@@ -40,8 +40,9 @@ account require a passphrase or fail private-mode validation.
 
 Native fixture signing compares local and device operations/signatures across
 REST reads, ordinary/protective orders, cancellation, cancel-all, leverage,
-cancel/proof/replacement amendments, signature-rejection re-signing and private
-socket login. Tests retain the independent npm zkLink golden signatures.
+cancel/proof/replacement amendments, write signature-rejection re-signing and private
+socket login. Signed reads never re-sign after a refusal: ApeX verifies the primary
+canonical text and refuses the whole-second legacy text wherever they differ (AGT-75). Tests retain the independent npm zkLink golden signatures.
 Malformed/canceled delegate results cannot publish partial signing batches or
 send a write; dispatched Unknown outcomes retain the existing reconciliation
 and no-replay behavior. Details: `docs/plans/callers/apexomni-hosted-signing.md`.

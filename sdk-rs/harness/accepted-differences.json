@@ -11211,7 +11211,7 @@
     {
       "venue": "apexomni",
       "tape": "sdk-rs/harness/tapes/apexomni-private.jsonl",
-      "tapeSha256": "d851f4fbe8ee28b264d7e949b44de4bfc50e4dbf755cb3314eef02a177922eaf",
+      "tapeSha256": "8899fbc5cf7240971668e11e7a10333988ff627673317b4299a06fff3c3d81fe",
       "diagnostics": [
         {
           "failures": [
