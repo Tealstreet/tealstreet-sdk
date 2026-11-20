@@ -331,6 +331,27 @@ fn a_gone_algo_satisfies_a_leg_cancellation() {
     assert_eq!(done(&out), Some("[]"), "{out:?}");
 }
 
+/// A refused leg deletion is not a stop edit: no "your stop is unchanged" text.
+#[test]
+fn a_refused_leg_deletion_reads_as_a_cancel_refusal() {
+    let mut e = trading_engine();
+    two_leg_algo(&mut e);
+    let out = cancel(&mut e, &["77_tp"]);
+    let sent = writes(&out);
+    reply(
+        &mut e,
+        sent[0],
+        r#"{"code":"1","msg":"","data":[{"algoClOrdId":"","algoId":"77","reqId":"","sCode":"51001","sMsg":"Instrument ID does not exist."}]}"#,
+        6.,
+    );
+    let out = prepared(&mut e, 6.);
+    let error = refusal(&out);
+    assert!(
+        !error.message.contains("your stop is unchanged"),
+        "{error:?}"
+    );
+}
+
 /// The same 51527 on a join is a refusal: the leg was not added.
 #[test]
 fn venue_51527_on_a_join_stays_a_rejection() {

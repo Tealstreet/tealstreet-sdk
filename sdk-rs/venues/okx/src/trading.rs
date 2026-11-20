@@ -2562,7 +2562,8 @@ impl Okx {
         if !uncertain
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             && current.is_some_and(|request| request.path == "/api/v5/trade/amend-algos")
-            && !job.steps.front().is_some_and(|step| step.leg_delete)
+            // A cancel job's amend-algos call is a leg deletion, not a stop edit.
+            && !job.continue_cancel_errors
         {
             error.message = format!("{}; your stop is unchanged by this edit", error.message);
             error.presents = true;
