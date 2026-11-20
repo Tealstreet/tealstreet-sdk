@@ -370,4 +370,45 @@ describe('Rust BOOK_DELTA reconstruction', () => {
       ]),
     );
   });
+
+  it('sorted-merge deltas match a Map reconstruction, including repeated prices in one section', () => {
+    // The Map + full sort this merge replaced, kept here as the reference.
+    const reference = (map: Map<number, number>, rows: number[], descending: boolean) => {
+      for (let i = 0; i < rows.length; i += 2) {
+        if (rows[i + 1] === 0) map.delete(rows[i]);
+        else map.set(rows[i], rows[i + 1]);
+      }
+      let total = 0;
+      return [...map]
+        .sort(([a], [b]) => (descending ? b - a : a - b))
+        .map(([price, amount]) => ({ price, amount, total: (total += amount) }));
+    };
+    let seed = 7;
+    const random = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+    const price = () => [0, -0, 1, 2, 3, 4, 5, 6, 7, 8][Math.floor(random() * 10)];
+    const applier = new FrameStore();
+    applier.apply(initial());
+    const bids = new Map([
+      [99, 2],
+      [98, 3],
+    ]);
+    const asks = new Map([
+      [101, 4],
+      [102, 5],
+    ]);
+    for (let step = 0; step < 300; step++) {
+      const changes = (offset: number) =>
+        Array.from({ length: Math.floor(random() * 6) }, () => [
+          offset ? offset + price() : price(),
+          random() < 0.3 ? 0 : 1 + Math.floor(random() * 9),
+        ]).flat();
+      const delta = { market: 0, bids: changes(0), asks: changes(100) };
+      const next = frame({ deltas: [delta] });
+      applier.apply(next);
+      expect(applier.books(next)[0].orderbook).toEqual({
+        bids: reference(bids, delta.bids, true),
+        asks: reference(asks, delta.asks, false),
+      });
+    }
+  });
 });
