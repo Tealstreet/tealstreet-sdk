@@ -161,7 +161,7 @@ test('all installs follow restore and save cache immediately only on install suc
   assert.ok(install.includes("if: inputs.cache-hit != 'true' && inputs.cache-key != ''"));
   assert.ok(!install.includes('always()'));
   const callers = {
-    'ci.yml': ['ci'],
+    'ci.yml': ['checks'],
     'rust.yml': ['cpu-budget-diagnostic', 'harness', 'native', 'families', 'combined', 'browser', 'replay', 'replay-native-consumers', 'replay-consumers', 'gate'],
     'exchange-mcp-release.yml': ['release'],
   };

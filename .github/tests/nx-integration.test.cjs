@@ -187,6 +187,8 @@ test('private checkout credential is restricted to admission, resolution and che
   assert.match(workflow, /SAME_REPO: \$\{\{ github\.event\.pull_request\.head\.repo\.full_name == github\.repository \}\}/);
   assert.match(workflow, /test -n "\$NX_TOKEN"/);
   assert.doesNotMatch(workflow, /upload-artifact|cache\/save|--push\b|id-token:/);
+  assert.doesNotMatch(workflow, /uses: \.\/\.github\/actions\/(?:prepare-yarn|install-yarn)/);
+  assert.match(workflow, /--cache-folder "\$RUNNER_TEMP\/nx-yarn"/);
   for (const name of ['Typecheck', 'Lint', 'Test', 'Build']) {
     assert.match(workflow, new RegExp(`- name: ${name}\\n        if: \\$\\{\\{ !cancelled\\(\\) && steps\\.types\\.outcome == 'success' \\}\\}`));
   }
