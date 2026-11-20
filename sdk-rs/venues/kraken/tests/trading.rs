@@ -971,13 +971,13 @@ fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
             200,
             r#"{"result":"error","error":"Unavailable"}"#.to_owned(),
             unknown,
-            "Kraken didn’t confirm this change. Check your open orders before trying again.: Kraken didn’t confirm this change. Check your open orders before trying again.: Unavailable",
+            "Kraken didn’t confirm this change. Check your open orders before trying again.: Unavailable",
         ),
         (
             200,
             r#"{"result":"error","error":"somethingNew"}"#.to_owned(),
             unknown,
-            "Kraken didn’t confirm this change. Check your open orders before trying again.: Kraken didn’t confirm this change. Check your open orders before trying again.: somethingNew",
+            "Kraken didn’t confirm this change. Check your open orders before trying again.: somethingNew",
         ),
         (
             200,
@@ -989,13 +989,13 @@ fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
             200,
             send("partiallyFilled"),
             unknown,
-            "Kraken didn’t confirm this change. Check your open orders before trying again.: Kraken didn’t confirm this change. Check your open orders before trying again.: Kraken placement rejected or incomplete: partiallyFilled",
+            "Kraken didn’t confirm this change. Check your open orders before trying again.: Kraken placement rejected or incomplete: partiallyFilled",
         ),
         (
             200,
             r#"{"result":"success"}"#.to_owned(),
             unknown,
-            "Kraken didn’t confirm this change. Check your open orders before trying again.: Kraken didn’t confirm this change. Check your open orders before trying again.: Kraken placement missing sendStatus",
+            "Kraken didn’t confirm this change. Check your open orders before trying again.: Kraken placement missing sendStatus",
         ),
     ] {
         let (mut e, _) = ready();
@@ -1070,7 +1070,7 @@ fn a_refusal_after_an_accepted_placement_is_never_rejected() {
     let [error] = failures(&mut e).try_into().unwrap();
     assert_eq!(
         error.legacy_text(),
-        r#"{"message":"Kraken didn’t confirm this change. Check your open orders before trying again.: Kraken didn’t confirm this change. Check your open orders before trying again.: insufficientFunds","partialOrderIds":["accepted"],"partialOrderCount":1}"#
+        r#"{"message":"Kraken didn’t confirm this change. Check your open orders before trying again.: insufficientFunds","partialOrderIds":["accepted"],"partialOrderCount":1}"#
     );
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
 }
@@ -1127,7 +1127,7 @@ fn edit_and_cancel_statuses_never_claim_a_refusal_after_an_effect() {
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(
         error.legacy_text(),
-        "Kraken didn’t confirm this change. Check your open orders before trying again.: Kraken didn’t confirm this change. Check your open orders before trying again.: Kraken cancellation rejected or identity mismatch: cancelled"
+        "Kraken didn’t confirm this change. Check your open orders before trying again.: Kraken cancellation rejected or identity mismatch: cancelled"
     );
 }
 

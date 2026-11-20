@@ -118,3 +118,48 @@ test('scripted cleanup recognizes old and new cancel-all fences without admittin
   }
   assert.equal(waiting({ message: 'Other refusal', outcome: 'notSent' }, Infinity), false);
 });
+
+// Rule 5 (#3726): exercise the actual Rust display predicate/template; native unit tests cover the full functions in CI.
+function rustDisplayDecorator(venue) {
+  const source = readFileSync(new URL(`../../../venues/${venue}/src/trading.rs`, import.meta.url), 'utf8');
+  const start = source.indexOf(venue === 'kraken' ? 'fn trading_failure(' : 'fn terminal_failure_text(');
+  assert.ok(start >= 0);
+  const tail = source.slice(start);
+  const guard = /if (error\.outcome[\s\S]*?)\{/.exec(tail);
+  assert.ok(guard);
+  const condition = guard[1].replaceAll('Some(Outcome::Unknown)', "'unknown'").replaceAll('.contains(', '.includes(');
+  const constant = (name) => new RegExp(`const ${name}: &str =\\s*"([^"\\n]+)"`).exec(source)?.[1];
+  const decorate = new Function('error', 'UNKNOWN_TEXT', 'UNKNOWN_WRITE', `return (${condition});`);
+  const template = /format!\(\s*"([^"\n]+)"/.exec(tail.slice(guard.index + guard[0].length))?.[1];
+  assert.ok(template);
+  return (error) => decorate(error, constant('UNKNOWN_TEXT'), constant('UNKNOWN_WRITE'))
+    ? template.replace('{UNKNOWN_TEXT}', constant('UNKNOWN_TEXT')).replace('{UNKNOWN_WRITE}', constant('UNKNOWN_WRITE')).replace('{}', error.message)
+    : error.message;
+}
+
+for (const venue of ['blofin', 'binance', 'kraken']) {
+  test(`${venue} keeps already-guided Unknown display text unchanged across repeated decoration`, () => {
+    const decorate = rustDisplayDecorator(venue);
+    for (const message of [
+      'We couldn’t confirm this change. Check your open orders before trying again.',
+      'The exchange reply didn’t confirm this change. Check your open orders before trying again.',
+      'The outcome of this order change is unknown. Check Open Orders',
+      'Restoring the original wasn’t confirmed. Check your open orders before adding protection.',
+    ]) {
+      const error = { message, outcome: 'unknown' };
+      assert.equal(decorate(error), message);
+      assert.equal(decorate({ ...error, message: decorate(error) }), message);
+      assert.equal((decorate(error).match(/Check (?:your open orders|Open Orders)/g) ?? []).length, 1);
+    }
+  });
+
+  test(`${venue} decorates an unguided Unknown once and leaves ordinary refusals unchanged`, () => {
+    const decorate = rustDisplayDecorator(venue);
+    const error = { message: 'No reply arrived', outcome: 'unknown' };
+    const message = decorate(error);
+    assert.equal(message.split(guidance).length - 1, 1);
+    for (const outcome of ['notSent', 'rejected', undefined]) {
+      assert.equal(decorate({ message: 'Order declined', outcome }), 'Order declined');
+    }
+  });
+}

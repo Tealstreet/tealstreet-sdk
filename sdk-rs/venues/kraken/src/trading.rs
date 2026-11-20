@@ -1595,3 +1595,75 @@ fn leverage_result(
         }
     )
 }
+
+// Rule 5 (#3726): display decoration must preserve existing guidance and all typed error facts.
+#[cfg(test)]
+mod notification_display_tests {
+    use super::*;
+
+    fn display(error: &VenueError) -> VenueError {
+        trading_failure(error.clone(), false)
+    }
+
+    #[test]
+    fn already_guided_unknown_display_is_idempotent() {
+        for message in [
+            "We couldn’t confirm this change. Check your open orders before trying again.",
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+            "The outcome of this order change is unknown. Check Open Orders",
+            "Restoring the original wasn’t confirmed. Check your open orders before adding protection.",
+        ] {
+            let original = VenueError::new(message)
+                .outcome(Outcome::Unknown)
+                .kind(ErrorKind::RateLimited)
+                .venue_code("429");
+            let rendered = display(&original);
+            assert_eq!(rendered.message, message);
+            assert_eq!(display(&rendered).message, message);
+            assert_eq!(rendered.outcome, original.outcome);
+            assert_eq!(rendered.kind, original.kind);
+            assert_eq!(rendered.venue_code, original.venue_code);
+        }
+    }
+
+    #[test]
+    fn unguided_unknown_gets_one_action_and_refusals_remain_unchanged() {
+        let original = VenueError::new("No reply arrived").outcome(Outcome::Unknown);
+        let rendered = display(&original);
+        assert_eq!(
+            rendered
+                .message
+                .matches("Check your open orders before trying again.")
+                .count(),
+            1
+        );
+        assert_eq!(display(&rendered).message, rendered.message);
+        assert_eq!(rendered.outcome, original.outcome);
+        for outcome in [None, Some(Outcome::NotSent), Some(Outcome::Rejected)] {
+            let mut refusal = VenueError::new("Order declined")
+                .kind(ErrorKind::Rejected)
+                .venue_code("10001");
+            refusal.outcome = outcome;
+            let rendered = display(&refusal);
+            assert_eq!(rendered.message, refusal.message);
+            assert_eq!(rendered.outcome, refusal.outcome);
+            assert_eq!(rendered.kind, refusal.kind);
+            assert_eq!(rendered.venue_code, refusal.venue_code);
+        }
+    }
+
+    #[test]
+    fn partial_effect_stays_unknown_without_repeating_existing_guidance() {
+        let original = VenueError::new(
+            "We couldn’t confirm this change. Check your open orders before trying again.",
+        )
+        .outcome(Outcome::Rejected)
+        .kind(ErrorKind::Rejected)
+        .venue_code("insufficientFunds");
+        let rendered = trading_failure(original.clone(), true);
+        assert_eq!(rendered.outcome, Some(Outcome::Unknown));
+        assert_eq!(rendered.message, original.message);
+        assert_eq!(rendered.kind, original.kind);
+        assert_eq!(rendered.venue_code, original.venue_code);
+    }
+}

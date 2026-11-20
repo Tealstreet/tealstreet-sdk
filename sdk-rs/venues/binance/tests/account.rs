@@ -543,7 +543,7 @@ fn cancel_all_reports_a_partial_failure_and_only_marks_what_succeeded() {
     assert_eq!(
         h.result(11),
         Some(&Err(
-            "The exchange reply didn’t confirm this change. Check your open orders before trying again.. We couldn’t confirm this change. Check your open orders before trying again."
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again."
                 .into()
         ))
     );
@@ -1427,7 +1427,7 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
         if status >= 500 {
             assert_eq!(
                 error.message,
-                "The exchange reply didn’t confirm this change. Check your open orders before trying again.. We couldn’t confirm this change. Check your open orders before trying again."
+                "The exchange reply didn’t confirm this change. Check your open orders before trying again."
             );
             let native: Option<serde_json::Value> = serde_json::from_str(body).ok();
             assert_eq!(
