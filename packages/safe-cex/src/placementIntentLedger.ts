@@ -30,7 +30,7 @@ export class PlacementIntentLedger<Result> {
   private readonly entries = new Map<string, Entry<Result>>();
   private retiredBefore = 0;
 
-  constructor(readonly capacity = 1024, private readonly canRetireResult: (result: Result) => boolean = () => true) {
+  constructor(readonly capacity = 1024, private readonly canRetireResult: (result: Result) => boolean = (value) => Array.isArray(value) && value.length > 0 && value.every((id) => typeof id === 'string' && id.length > 0)) {
     if (!Number.isSafeInteger(capacity) || capacity < 1) throw new RangeError('Invalid intent capacity');
   }
 

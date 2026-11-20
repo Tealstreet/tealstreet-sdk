@@ -87,9 +87,8 @@ import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { uuid } from '../../utils/uuid';
+import { capturePlacementIntent, runWithPlacementIntent } from '../../placementIntentContext';
 import { virtualClock } from '../../utils/virtualClock';
-import { capturePlacementIntent, mintPlacementIntent, runWithPlacementIntent, PLACEMENT_INTENT_METHODS } from '../../placementIntentContext';
-import { PlacementIntentLedger } from '../../placementIntentLedger';
 import { stopAccountAlgos as stopLocalAccountAlgos } from '../../webworker/stopAccountAlgos';
 import { captureTwapOwner } from '../../webworker/twap/TwapOwner';
 import {
@@ -524,15 +523,8 @@ export class RustEngineExchange extends BaseExchange {
   private workerOwnerSource?: () => { ownerId: string; generation: number } | undefined;
 
   /** Optional owner fencing; hosts without a binding retain legacy bridge dispatch behavior. */
-  private workerOwnerEpoch = 0;
-  protected override placementIntentAuthority(): unknown {
-    const owner = this.workerOwnerSource?.();
-    return [this.workerOwnerEpoch, owner?.ownerId, owner?.generation];
-  }
-
   setWorkerOwner = (source: () => { ownerId: string; generation: number } | undefined): void => {
     if (typeof source !== 'function') throw new TypeError('Worker owner source must be a function');
-    this.workerOwnerEpoch++;
     this.workerOwnerSource = source;
   };
 
@@ -2154,7 +2146,6 @@ export class RustEngineExchange extends BaseExchange {
     send: () => Promise<T>,
     sendSource?: (admitted: WorkerAdmission) => Promise<T>,
   ): Promise<T> => {
-    const intent = capturePlacementIntent();
     try {
       if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
       const admitted = this.captureWorkerAdmission();
@@ -2166,10 +2157,10 @@ export class RustEngineExchange extends BaseExchange {
         // A structurally unsupported LOCAL/COSIGNED mirror keeps its existing source writer.
         // A missing module/capability or a failed supported page engine must never reroute.
         if (this.pageWriteSupported === false && sendSource) {
-          return await runWithPlacementIntent(intent?.id, () => sendSource((sourceMethod, sourceArgs) => {
+          return await sendSource((sourceMethod, sourceArgs) => {
             admitted?.(sourceMethod, sourceArgs);
             if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
-          }));
+          });
         }
         throw this.pageWriterUnavailable(method);
       }
@@ -2177,7 +2168,7 @@ export class RustEngineExchange extends BaseExchange {
       admitted?.(method, args);
       if (this.isDisposed) throw this.workerOwnerChanged(method, args);
       if (this.isDelegatedMirror) throw this.pageWriterUnavailable(method);
-      return await runWithPlacementIntent(intent?.id, send);
+      return await send();
     } catch (error) {
       const callerReports =
         this.options.callerReportsPlacementFailures &&
@@ -2270,7 +2261,7 @@ export class RustEngineExchange extends BaseExchange {
       if (inert.has(method) || typeof members[method] !== 'function') return;
       const local = members[method];
       // An engine-owning instance calls straight through, keeping its own synchronous refusals.
-      const routeOnce = (...args: Args[M]): Promise<unknown> => {
+      const route = (...args: Args[M]): Promise<unknown> => {
         // The explicit flag, not isPublicDataOnly: a keyed account's mirror holds no key and derives public.
         if (this.routesToWorker && this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method))
           return Promise.reject(notReadOnPublicData(method));
@@ -2299,11 +2290,6 @@ export class RustEngineExchange extends BaseExchange {
         }
         if (this.frameFed && FRAME_FED_WRITES.has(method)) return local(...args);
         return viaWorker(this.captureWorkerAdmission());
-      };
-      const route = (...args: Args[M]): Promise<unknown> => {
-        if (!PLACEMENT_INTENT_METHODS.has(method)) return routeOnce(...args);
-        const intent = capturePlacementIntent() ?? mintPlacementIntent(Math.floor(virtualClock.getCurrentTimeMs()));
-        return runWithPlacementIntent(intent.id, () => routeOnce(...args));
       };
       const forwarded = FRAME_FED_WRITES.has(method)
         ? (...args: Args[M]) => this.trackWrite(() => route(...args))
@@ -3089,17 +3075,7 @@ export class RustEngineExchange extends BaseExchange {
     });
   };
 
-  private readonly pagePlacementIntents = new PlacementIntentLedger<string[]>();
-  placeOrders = (orders: AsterDEXPlaceOrderOpts[]): Promise<string[]> => {
-    this.capturePageWriteAdmission('placeOrders', [orders]);
-    if (this.isDisposed) return Promise.reject(this.workerOwnerChanged('placeOrders', [orders]));
-    const intent = capturePlacementIntent() ?? mintPlacementIntent(Math.floor(virtualClock.getCurrentTimeMs()));
-    const snapshot = structuredClone(orders);
-    return this.pagePlacementIntents.run(intent, JSON.stringify([this.placementIntentAuthority(), snapshot]),
-      () => runWithPlacementIntent(intent.id, () => this.placeOrdersOnce(snapshot)));
-  };
-
-  private placeOrdersOnce = async (orders: AsterDEXPlaceOrderOpts[]) => {
+  placeOrders = async (orders: AsterDEXPlaceOrderOpts[]) => {
     const assertCurrent = this.capturePageWriteAdmission('placeOrders', [orders]);
     const timing = claimWriteTiming('placeOrders');
     const ready = this.writeCapabilitiesFor('placeOrders');
@@ -3132,11 +3108,6 @@ export class RustEngineExchange extends BaseExchange {
         }
       }
     }
-    orders = orders.map((order) => {
-      if (order.clientOrderId !== undefined) return order;
-      const clientOrderId = this.mintClientOrderId(order);
-      return clientOrderId ? { ...order, clientOrderId } : order;
-    });
     this.assertCallerClientOrderIds(orders);
     if (isBybit) {
       for (const order of orders) {

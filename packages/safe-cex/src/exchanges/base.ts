@@ -23,6 +23,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import createHmac from 'create-hmac';
 import uniq from 'lodash/uniq';
+import { capturePlacementIntent, PLACEMENT_INTENT_METHODS } from '../placementIntentContext';
 import { nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
@@ -83,9 +84,6 @@ import { signHttpCapture } from '../utils/signHttpCapture';
 import { getTickIntervalMultiplier } from '../utils/tickIntervalOverride';
 import { workerErrorProtectionTags } from '../utils/workerErrorProtectionTags';
 import { claimWriteTiming, emitWriteTiming, TIMED_WRITE_METHODS } from '../writeTiming';
-import { capturePlacementIntent, mintPlacementIntent, runWithPlacementIntent, PLACEMENT_INTENT_METHODS } from '../placementIntentContext';
-import { PlacementIntentLedger } from '../placementIntentLedger';
-import { virtualClock } from '../utils/virtualClock';
 import { BaseWebSocket } from './base.ws';
 import {
   clientOrderIdShapeMessage,
@@ -2035,27 +2033,12 @@ export class BaseExchange implements Exchange {
     for (const abandon of [...this.pendingWorkerCalls]) abandon();
   }
 
-  protected placementIntentAuthority(): unknown { return undefined; }
-  private readonly workerPlacementIntents = new PlacementIntentLedger<unknown>();
-
   callMethodInWorker = async <M extends CallableMethodsInWorker>(
-    method: M, ...args: Parameters<this[M]>
-  ): Promise<ReturnType<this[M]>> => {
-    if (!PLACEMENT_INTENT_METHODS.has(method)) return this.callMethodInWorkerOnce(undefined, method, ...args);
-    if (this.isDisposed) throw this.workerCommandTimeoutError(method, args);
-    const intent = capturePlacementIntent() ?? mintPlacementIntent(Math.floor(virtualClock.getCurrentTimeMs()));
-    const snapshot = structuredClone(args);
-    // The fingerprint binds the method/arguments and current authority to this typed call.
-    return this.workerPlacementIntents.run(intent, JSON.stringify([this.placementIntentAuthority(), method, snapshot]),
-      () => runWithPlacementIntent(intent.id, () => this.callMethodInWorkerOnce(intent.id, method, ...snapshot))) as Promise<ReturnType<this[M]>>;
-  };
-
-  private callMethodInWorkerOnce = async <M extends CallableMethodsInWorker>(
-    intentId: string | undefined,
     method: M,
     ...args: Parameters<this[M]>
   ): Promise<ReturnType<this[M]>> => {
-    const requestId = intentId ?? nanoid();
+    const intent = PLACEMENT_INTENT_METHODS.has(method) ? capturePlacementIntent() : undefined;
+    const requestId = nanoid();
     const timing = TIMED_WRITE_METHODS.has(method) ? claimWriteTiming(method).timing : undefined;
 
     return new Promise<ReturnType<this[M]>>((resolve, reject) => {
@@ -2102,7 +2085,7 @@ export class BaseExchange implements Exchange {
       };
       this.emitter.on('callMethod:done', handleDone);
       try {
-        this.emitter.dispatch('callMethod', { method, args, requestId, ...(intentId ? { intentId } : {}), ...(timing ? { timing: timing.marks } : {}) });
+        this.emitter.dispatch('callMethod', { method, args, requestId, ...(intent ? { intentId: intent.id } : {}), ...(timing ? { timing: timing.marks } : {}) });
       } catch (error) {
         clearTimeout(timeout);
         this.pendingWorkerCalls.delete(abandon);

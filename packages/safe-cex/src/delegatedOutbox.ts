@@ -295,7 +295,7 @@ export class DelegatedIntentError extends Error {
     this.name = 'DelegatedIntentError';
   }
 
-  get outcome(): 'unknown' | undefined { return this.code === 'intentRetired' ? 'unknown' : undefined; }
+  get outcome(): 'unknown' | undefined { return this.code === 'invalidIntentId' ? undefined : 'unknown'; }
 }
 
 export class DelegatedOutbox {
@@ -851,6 +851,7 @@ export class DelegatedOutbox {
         ['queued', 'sending', 'acknowledged'].includes(row.state)
       )
         return false;
+      if (this.checkpointVersion === 2 && delegatedIntentTime(intentId) >= this.options.clock.unix()) return false;
       const floor = this.checkpointVersion === 2
         ? Math.max(this.retiredIntentBefore, delegatedIntentTime(intentId) + 1)
         : this.retiredIntentBefore;

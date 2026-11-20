@@ -141,7 +141,7 @@ fixtures exercise the same production sender. The shared fixture lives with
 the server tests for receiver interoperability; Rust consumption depends on
 the server handover implementation landing.
 
-## Placement intent identity ledger
+## Placement intent coalescing
 
 `placementIntentLedger.ts` coalesces one action identity within one caller-owned
 authority scope. Equal payloads with distinct IDs remain distinct actions; the

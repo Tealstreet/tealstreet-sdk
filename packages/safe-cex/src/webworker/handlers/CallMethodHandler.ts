@@ -6,24 +6,17 @@ import { serializeCommandError } from '../../commandOutcome';
 import { WORKER_FORWARDED_METHODS, WORKER_OPTIONAL_METHODS } from '../../exchanges/base';
 import { encodeWorkerOrderIds } from '../../exchanges/clientOrderId';
 import { historyCompletenessOf } from '../../historyCompleteness';
-import { capturePlacementIntent, runWithPlacementIntent, PLACEMENT_INTENT_METHODS } from '../../placementIntentContext';
-import { PlacementIntentError, PlacementIntentLedger } from '../../placementIntentLedger';
 import { diagnosticConsole } from '../../utils/diagnosticRedaction';
 import { runWithWriteTiming, WriteTiming } from '../../writeTiming';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { isWorkerWriteMarks } from '../workerMessage';
-import { captureTwapOwner } from '../twap/TwapOwner';
 import { BaseHandler } from './BaseHandler';
 import { ThrottleManager } from './ThrottleManager';
 
 const logging = false;
 const forwardedMethods: ReadonlySet<string> = new Set([...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS]);
 
-type MethodReply = { success: boolean; result: unknown; timing?: WriteMarks; completeness?: ReturnType<typeof historyCompletenessOf> };
-
 export class CallMethodHandler extends BaseHandler {
-  private active = true;
-  private readonly placementReplies = new PlacementIntentLedger<MethodReply>(1024, (reply) => reply.success);
   private symbolMetadataThrottler: ThrottleManager<typeof this._exchange.updateSymbolMetadata>;
   private readonly THROTTLE_DELAY = 500; // 0.5 second throttle window
 
@@ -36,10 +29,18 @@ export class CallMethodHandler extends BaseHandler {
     );
   }
 
-  private success = (result: unknown, timing?: WriteTiming): MethodReply => {
+  private replySuccess = (requestId: string, result: unknown, timing?: WriteTiming) => {
     const completeness = historyCompletenessOf(result);
-    return { result, success: true, ...(completeness ? { completeness } : {}),
-      ...(timing ? { timing: timing.marks } : {}) };
+    this._ctx.postMessage({
+      op: 'callMethod:done',
+      data: {
+        requestId,
+        result,
+        success: true,
+        ...(completeness ? { completeness } : {}),
+        ...(timing ? { timing: timing.marks } : {}),
+      },
+    });
   };
 
   private unsupportedMethod = (method: string) => {
@@ -52,38 +53,14 @@ export class CallMethodHandler extends BaseHandler {
     method: WorkerMethodName,
     args: unknown[],
     marks?: WriteMarks,
-    intentId?: string,
-  ) => this.dispatchCallMethod(requestId, method, args, marks, intentId);
+  ) => this.dispatchCallMethod(requestId, method, args, marks);
 
   private dispatchCallMethod = async (
-    requestId: string, method: string, args: unknown[], marks?: WriteMarks, intentId?: unknown,
-  ): Promise<void> => {
-    if (!PLACEMENT_INTENT_METHODS.has(method) || intentId === undefined) {
-      await this.executeCallMethod(method, args, marks,
-        (reply) => this._ctx.postMessage({ op: 'callMethod:done', data: { requestId, ...reply } }));
-      return;
-    }
-    let reply: MethodReply;
-    try {
-      if (!this.active) throw this.unsupportedMethod(method);
-      if (typeof intentId !== 'string') throw new PlacementIntentError('invalidIntentId');
-      reply = await runWithPlacementIntent(intentId, () => {
-        const intent = capturePlacementIntent();
-        if (!intent) throw new PlacementIntentError('invalidIntentId');
-        const snapshot: unknown[] = structuredClone(args);
-        return this.placementReplies.run(intent, JSON.stringify([captureTwapOwner(this._ctx.getTwapOwner), method, snapshot]),
-          () => runWithPlacementIntent(intent.id, () => this.executeCallMethod(method, snapshot, marks)));
-      });
-    } catch (error) {
-      reply = { success: false, result: serializeCommandError(error) };
-    }
-    this._ctx.postMessage({ op: 'callMethod:done', data: { requestId, ...reply } });
-  };
-
-  private executeCallMethod = async (
-    method: string, args: unknown[], marks?: WriteMarks, respond?: (reply: MethodReply) => void,
-  ): Promise<MethodReply> => {
-    const finish = (reply: MethodReply): MethodReply => { respond?.(reply); return reply; };
+    requestId: string,
+    method: string,
+    args: unknown[],
+    marks?: WriteMarks,
+  ) => {
     let result: unknown = null;
     // The caller's write timing: the exchange stamps the engine stages and the caller emits.
     const timing = marks ? new WriteTiming(method, { ...marks }) : undefined;
@@ -95,7 +72,8 @@ export class CallMethodHandler extends BaseHandler {
       // Mirrors forward every metadata refresh; the worker keeps coalescing them.
       if (method === 'updateSymbolMetadata') {
         Reflect.apply(this.symbolMetadataThrottler.call, this.symbolMetadataThrottler, args);
-        return finish(this.success(null));
+        this.replySuccess(requestId, null);
+        return;
       }
       if (forwardedMethods.has(method)) {
         const call: unknown = Reflect.get(this._exchange, method);
@@ -103,7 +81,8 @@ export class CallMethodHandler extends BaseHandler {
         const start = () => Reflect.apply(call, undefined, args);
         result = await (timing ? runWithWriteTiming(timing, start) : start());
         if (method === 'updateOrder') result = encodeWorkerOrderIds(result as string[]);
-        return finish(this.success(result, timing));
+        this.replySuccess(requestId, result, timing);
+        return;
       }
       switch (method) {
         case 'scheduleCancel':
@@ -159,11 +138,14 @@ export class CallMethodHandler extends BaseHandler {
       if (logging) {
         diagnosticConsole.log('Method called', method, result);
       }
-      return finish(this.success(result));
+      this.replySuccess(requestId, result);
     } catch (e: unknown) {
       diagnosticConsole.error('Error calling method', e);
       const serializedError = serializeCommandError(e);
-      return finish({ success: false, result: serializedError, ...(timing ? { timing: timing.marks } : {}) });
+      this._ctx.postMessage({
+        op: 'callMethod:done',
+        data: { requestId, success: false, result: serializedError, ...(timing ? { timing: timing.marks } : {}) },
+      });
     }
   };
 
@@ -183,13 +165,12 @@ export class CallMethodHandler extends BaseHandler {
         }
         // Arguments stay unknown at the wire boundary; venue validators retain their authority.
         const marks = 'timing' in data && isWorkerWriteMarks(data.timing) ? data.timing : undefined;
-        void this.dispatchCallMethod(data.requestId, data.method, data.args, marks, 'intentId' in data ? data.intentId : undefined);
+        this.dispatchCallMethod(data.requestId, data.method, data.args, marks);
         break;
     }
   }
 
   dispose() {
-    this.active = false;
     this.symbolMetadataThrottler.clear();
     super.dispose();
   }
