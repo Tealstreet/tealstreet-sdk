@@ -33,6 +33,11 @@ are documented in `DESIGN.md` under Connection-local publication interval.
 Keep cadence in the socket/account pump, never in shared engine identity or
 configuration. Private financial sections and outcomes bypass the public coalescer.
 
+The optional `activeTickerSymbols` init field and `set-active-ticker-symbols` op
+(AGT-107) select this connection's ticker rows the same way; see DESIGN.md under
+Connection-local ticker selection. A selected table renumbers rows, so every
+selection change must re-send a full `TICKERS`, never deltas against old rows.
+
 ## Sentry owner identity
 
 The native Sentry allowlist and captured authentication-subject contract live in

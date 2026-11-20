@@ -4,11 +4,13 @@ use safe_cex_engine::{
     book::{Book, BookSide},
     book_output,
     ingest::{self, Cursor, Frame, IngestError, IngestState},
+    model::Ticker,
+    store::Pending,
     wire::{self, FrameWriter, section},
 };
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
@@ -47,6 +49,156 @@ impl<'de> Deserialize<'de> for RequestedInterval {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Ok(Self::parse(&Value::deserialize(deserializer)?))
     }
+}
+
+pub const MAX_TICKER_SYMBOLS: usize = 1024;
+pub const MAX_TICKER_SYMBOL_BYTES: usize = 128;
+
+/// The ticker rows one connection receives: `None` is the venue's full table.
+pub type TickerSelection = Option<Arc<BTreeSet<String>>>;
+
+/// `activeTickerSymbols`: absent or null is the full table, a list selects rows by symbol.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum RequestedTickers {
+    #[default]
+    Absent,
+    Symbols(Arc<BTreeSet<String>>),
+    Invalid,
+}
+impl RequestedTickers {
+    pub fn parse(value: &Value) -> Self {
+        let Some(items) = value.as_array() else {
+            return if value.is_null() {
+                Self::Absent
+            } else {
+                Self::Invalid
+            };
+        };
+        if items.len() > MAX_TICKER_SYMBOLS {
+            return Self::Invalid;
+        }
+        let symbols: Option<BTreeSet<String>> = items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .filter(|symbol| (1..=MAX_TICKER_SYMBOL_BYTES).contains(&symbol.len()))
+                    .map(str::to_owned)
+            })
+            .collect();
+        symbols.map_or(Self::Invalid, |symbols| Self::Symbols(Arc::new(symbols)))
+    }
+    pub fn selection(&self) -> Option<TickerSelection> {
+        match self {
+            Self::Absent => Some(None),
+            Self::Symbols(symbols) => Some(Some(symbols.clone())),
+            Self::Invalid => None,
+        }
+    }
+}
+impl<'de> Deserialize<'de> for RequestedTickers {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self::parse(&Value::deserialize(deserializer)?))
+    }
+}
+
+/// One connection's publication choices; never engine settings or account identity.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Preferences {
+    pub interval: u16,
+    pub tickers: TickerSelection,
+}
+
+fn ticker_section(kind: u16) -> bool {
+    matches!(
+        kind,
+        section::TICKERS | section::TICKER_DELTAS | section::TICKER_OBSERVATIONS
+    )
+}
+
+/// The selected rows of the source table, in source order, as their own ticker table.
+/// Its `TICKERS` replaces the client's table; its deltas use output rows.
+struct TickerFilter {
+    symbols: Arc<BTreeSet<String>>,
+    out: Store,
+    rows: Vec<u32>,
+    by_source: HashMap<u32, u32>,
+}
+impl TickerFilter {
+    fn new(symbols: Arc<BTreeSet<String>>, source: &[Ticker]) -> Self {
+        let mut filter = Self {
+            symbols,
+            out: Store::default(),
+            rows: Vec::new(),
+            by_source: HashMap::new(),
+        };
+        filter.rebuild(source);
+        filter
+    }
+    fn rebuild(&mut self, source: &[Ticker]) {
+        self.rows = (0..source.len() as u32)
+            .filter(|&row| self.symbols.contains(&source[row as usize].symbol))
+            .collect();
+        self.by_source = self
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(out, &row)| (row, out as u32))
+            .collect();
+        self.out.set_tickers(
+            self.rows
+                .iter()
+                .map(|&row| source[row as usize].clone())
+                .collect(),
+        );
+    }
+    fn refresh(&mut self, source: &[Ticker]) {
+        for (out, &row) in self.rows.iter().enumerate() {
+            let Some(next) = source.get(row as usize) else {
+                continue;
+            };
+            self.out.update_ticker_at(out as u32, |ticker| {
+                ticker.bid = next.bid;
+                ticker.ask = next.ask;
+                ticker.last = next.last;
+                ticker.mark = next.mark;
+                ticker.index = next.index;
+                ticker.mid_price = next.mid_price;
+                ticker.percentage = next.percentage;
+                ticker.open_interest = next.open_interest;
+                ticker.funding_rate = next.funding_rate;
+                ticker.funding_time = next.funding_time;
+                ticker.volume = next.volume;
+                ticker.quote_volume = next.quote_volume;
+            });
+        }
+    }
+}
+
+fn write_observations<'a>(
+    writer: &mut FrameWriter<'a>,
+    rows: &BTreeMap<u32, [f64; 4]>,
+    remap: Option<&HashMap<u32, u32>>,
+) {
+    let mut selected: Vec<[f64; 4]> = rows
+        .iter()
+        .filter_map(|(row, values)| match remap {
+            None => Some(*values),
+            Some(remap) => remap.get(row).map(|out| {
+                let mut values = *values;
+                values[0] = *out as f64;
+                values
+            }),
+        })
+        .collect();
+    if selected.is_empty() {
+        return;
+    }
+    selected.sort_unstable_by(|a, b| a[0].total_cmp(&b[0]));
+    writer.begin(section::TICKER_OBSERVATIONS);
+    for row in selected {
+        writer.f64s(row);
+    }
+    writer.end();
 }
 
 fn public(kind: u16) -> bool {
@@ -161,6 +313,11 @@ struct PublicState {
     dirty_books: HashSet<String>,
     reset_books: HashSet<String>,
     observations: BTreeMap<u32, [f64; 4]>,
+    /// Latest observation per source row, for rows a new selection starts sending.
+    observed: BTreeMap<u32, [f64; 4]>,
+    filter: Option<TickerFilter>,
+    /// A cleared selection owes the client the full table once.
+    replace_tickers: bool,
     loaded: Option<u32>,
     stamp: f64,
     pending: bool,
@@ -169,8 +326,10 @@ impl PublicState {
     fn observe(&mut self, bytes: &[u8]) -> Result<bool, IngestError> {
         let frame = ingest::parse(bytes)?;
         self.stamp = f64::from_le_bytes(bytes[8..16].try_into().unwrap());
-        if frame.sections.iter().any(|s| s.kind == section::TICKERS) {
+        let replaced = frame.sections.iter().any(|s| s.kind == section::TICKERS);
+        if replaced {
             self.observations.clear();
+            self.observed.clear();
         }
         let selected = Frame {
             sections: frame
@@ -190,6 +349,17 @@ impl PublicState {
             strings: frame.strings,
         };
         ingest::apply(&mut self.store, &mut self.source, &selected, false)?;
+        if let Some(filter) = &mut self.filter {
+            if replaced {
+                filter.rebuild(self.store.tickers());
+            } else if frame
+                .sections
+                .iter()
+                .any(|s| s.kind == section::TICKER_DELTAS)
+            {
+                filter.refresh(self.store.tickers());
+            }
+        }
         if frame.sections.iter().any(|s| s.kind == section::MARKETS) {
             let symbols: HashSet<_> = self
                 .source
@@ -253,6 +423,7 @@ impl PublicState {
                         let mut cursor = Cursor::new(row);
                         let values = [cursor.f64()?, cursor.f64()?, cursor.f64()?, cursor.f64()?];
                         self.observations.insert(values[0] as u32, values);
+                        self.observed.insert(values[0] as u32, values);
                     }
                 }
                 section::STATUS => {
@@ -266,6 +437,65 @@ impl PublicState {
         }
         Ok(barrier)
     }
+    fn select_tickers(&mut self, selection: TickerSelection) {
+        match selection {
+            Some(symbols) => {
+                self.filter = Some(TickerFilter::new(symbols, self.store.tickers()));
+                self.replace_tickers = false;
+            }
+            None => self.replace_tickers |= self.filter.take().is_some(),
+        }
+        self.observations = self.observed.clone();
+    }
+    fn take_ticker_pending(&mut self) -> Pending {
+        let source = self.store.take_pending();
+        match &mut self.filter {
+            Some(filter) => filter.out.take_pending(),
+            None if self.replace_tickers => self.store.everything(),
+            None => source,
+        }
+    }
+    /// Ticker sections only matter here; callers keep just the public kinds.
+    fn write_tickers<'a>(&'a self, pending: &Pending, writer: &mut FrameWriter<'a>) {
+        match &self.filter {
+            Some(filter) => {
+                filter.out.write(pending, writer);
+                write_observations(writer, &self.observations, Some(&filter.by_source));
+            }
+            None => {
+                self.store.write(pending, writer);
+                write_observations(writer, &self.observations, None);
+            }
+        }
+    }
+    /// An immediate frame with a selection: its other sections keep their bytes, and
+    /// its ticker sections become the selected rows, ahead of any readiness change.
+    fn split_tickers(&mut self, bytes: &[u8], limit: usize) -> Result<Vec<Arc<[u8]>>, IngestError> {
+        let pending = self.take_ticker_pending();
+        let mut writer = FrameWriter::new(Vec::new(), self.stamp);
+        self.write_tickers(&pending, &mut writer);
+        let tickers = match filter(&writer.finish(), true)? {
+            Some(encoded) => split(encoded, limit)?,
+            None => Vec::new(),
+        };
+        if tickers.is_empty() {
+            return Ok(select(bytes, |kind| !ticker_section(kind))?
+                .map(Arc::from)
+                .into_iter()
+                .collect());
+        }
+        let mut frames: Vec<Arc<[u8]>> = Vec::new();
+        if let Some(head) = select(bytes, |kind| {
+            !ticker_section(kind) && kind != section::STATUS
+        })? {
+            frames.push(head.into());
+        }
+        frames.extend(tickers);
+        if let Some(status) = select(bytes, |kind| kind == section::STATUS)? {
+            frames.push(status.into());
+        }
+        Ok(frames)
+    }
     fn baseline(&mut self) {
         self.sent_books = self
             .books
@@ -275,6 +505,10 @@ impl PublicState {
     }
     fn acknowledge(&mut self, paced: bool) {
         self.store.take_pending();
+        if let Some(filter) = &mut self.filter {
+            filter.out.take_pending();
+        }
+        self.replace_tickers = false;
         for symbol in &self.dirty_books {
             if let Some(book) = self.books.get_mut(symbol).filter(|book| book.is_empty()) {
                 *book = Book::default();
@@ -298,16 +532,9 @@ impl PublicState {
         if !self.pending {
             return Ok(Vec::new());
         }
-        let pending = self.store.take_pending();
+        let pending = self.take_ticker_pending();
         let mut writer = FrameWriter::new(Vec::new(), self.stamp);
-        self.store.write(&pending, &mut writer);
-        if !self.observations.is_empty() {
-            writer.begin(section::TICKER_OBSERVATIONS);
-            for row in self.observations.values() {
-                writer.f64s(*row);
-            }
-            writer.end();
-        }
+        self.write_tickers(&pending, &mut writer);
         let mut symbols: Vec<_> = self.dirty_books.iter().collect();
         symbols.sort_unstable();
         for symbol in symbols {
@@ -338,6 +565,9 @@ impl PublicState {
 /// This state belongs to one socket/account pump, never to the shared account actor.
 pub struct Publisher {
     interval: u16,
+    tickers: TickerSelection,
+    /// Set once the first (snapshot) frame has gone out; nothing publishes before it.
+    started: bool,
     last_publication: Instant,
     state: Option<PublicState>,
     limit: usize,
@@ -346,6 +576,8 @@ impl Publisher {
     pub fn new(interval: u16, limit: usize) -> Self {
         Self {
             interval,
+            tickers: None,
+            started: false,
             last_publication: Instant::now(),
             state: Some(PublicState::default()),
             limit,
@@ -389,6 +621,26 @@ impl Publisher {
             Ok(Vec::new())
         }
     }
+    /// A changed selection publishes at once rather than at the next pacing deadline.
+    pub fn set_tickers(
+        &mut self,
+        selection: TickerSelection,
+    ) -> Result<Vec<Arc<[u8]>>, IngestError> {
+        if self.tickers == selection {
+            return Ok(Vec::new());
+        }
+        let state = self
+            .state
+            .as_mut()
+            .ok_or(IngestError("publication baseline unavailable"))?;
+        self.tickers = selection.clone();
+        state.select_tickers(selection);
+        if !self.started {
+            return Ok(Vec::new());
+        }
+        state.pending = true;
+        self.flush()
+    }
     pub fn receive(
         &mut self,
         bytes: Arc<[u8]>,
@@ -411,9 +663,18 @@ impl Publisher {
             }
         };
         if initial || self.interval == 0 {
-            self.state.as_mut().unwrap().acknowledge(self.interval > 0);
+            let state = self.state.as_mut().unwrap();
+            let frames = if state.filter.is_some()
+                && wire::sections(&bytes).any(|(kind, _)| ticker_section(kind))
+            {
+                state.split_tickers(&bytes, self.limit)?
+            } else {
+                vec![bytes]
+            };
+            state.acknowledge(self.interval > 0);
             self.last_publication = Instant::now();
-            return Ok(vec![bytes]);
+            self.started = true;
+            return Ok(frames);
         }
         // Catalogue/private state precedes dependent books; readiness follows its public data.
         // Ordinary deadlines run separately, after immediate output has been sent.

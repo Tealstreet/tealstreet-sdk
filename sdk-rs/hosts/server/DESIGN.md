@@ -590,6 +590,7 @@ All application messages are JSON text frames of the form `{"t": <type>, "d": <d
 | `subscribeOHLCV`, `unsubscribeOHLCV` | `data: {symbol, interval}`. Becomes the engine candle subscription |
 | `sendSnapshot` | Sends a full `snapshot: true` frame to this socket |
 | `set-publish-interval` | `data: {publishIntervalMs}`. Changes public output cadence for this connection’s admitted `accountName` only |
+| `set-active-ticker-symbols` | `data: {activeTickerSymbols}`. Changes which ticker rows this connection’s admitted `accountName` receives; `null` is the full table |
 | `updatePositions` | Answered `updatePositions:done`. Positions are already engine-owned |
 | `exec`, `chaser:*`, `twap:*` | v1 replies `error` "not supported on the Rust exchange server". These are TS worker features; the post-cutover work is listed below |
 
@@ -621,6 +622,33 @@ Re-snapshots and settings rebuilds retain this connection's interval; retired
 pumps only finish pending replies and cannot publish cached public state.
 A resumed socket starts at the absent/default rate until its own init or live
 update reapplies a preference. No preference is inherited from a shared account.
+
+### Connection-local ticker selection
+
+`init.d.activeTickerSymbols` is optional (AGT-107). Absent or `null` keeps the
+venue's full ticker table; a list of 0–1024 strings of 1–128 bytes sends only the
+rows whose `symbol` is listed (unknown symbols match nothing). Anything else
+refuses the init before attaching, with closed `kind`
+`invalid_active_ticker_symbols` and `activeTickerSymbolsRefused:true` (plus
+`initRefused`/`forceToast`). The live form is `{t:"msg",d:{op:
+"set-active-ticker-symbols",accountName,data:{activeTickerSymbols}}}`; it refuses
+with that kind, `not_admitted` or `auth_expired` and keeps the current selection.
+It is unrelated to the engine's `tuning.activeTickerSymbols` venue-subscription
+hint: like the interval it is never an engine setting, fingerprint field or
+another holder's preference, and the public pseudo-account may set it too.
+
+The pump's `Publisher` keeps the selected source rows, in source order, as their
+own small ticker table. Its `TICKERS` replaces the client's whole table whenever
+the source table is replaced or the selection changes; per-row diffs become
+`TICKER_DELTAS` on output rows and observations are remapped to them. Books,
+private sections and every unpaced frame without ticker sections keep their
+original bytes. An unpaced frame with ticker sections is split into its other
+sections, then the selected tickers, then any `STATUS`, so readiness still follows
+public rows. A changed selection publishes at once rather than at the pacing
+deadline; clearing it sends the full table once, after which source frames pass
+through again. Before the snapshot nothing publishes. Resumed sockets and
+re-snapshots follow the interval's rules. An older server ignores the init field
+and logs the live op as an ignored account op, so clients need no capability gate.
 
 ### Server to client
 
