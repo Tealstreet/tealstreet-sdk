@@ -30,7 +30,11 @@ export class PlacementIntentLedger<Result> {
   private readonly entries = new Map<string, Entry<Result>>();
   private retiredBefore = 0;
 
-  constructor(readonly capacity = 1024, private readonly canRetireResult: (result: Result) => boolean = (value) => Array.isArray(value) && value.length > 0 && value.every((id) => typeof id === 'string' && id.length > 0)) {
+  constructor(
+    readonly capacity = 1024,
+    private readonly canRetireResult: (result: Result) => boolean = (value) => Array.isArray(value) && value.length > 0 && value.every((id) => typeof id === 'string' && id.length > 0),
+    private readonly canRetireFailure: (error: unknown) => boolean = () => false,
+  ) {
     if (!Number.isSafeInteger(capacity) || capacity < 1) throw new RangeError('Invalid intent capacity');
   }
 
@@ -63,6 +67,11 @@ export class PlacementIntentLedger<Result> {
       const entry = this.entries.get(intent.id);
       if (entry) entry.retirable = retirable;
     };
+    const fail = (error: unknown) => {
+      try { markRetirable(this.canRetireFailure(error)); }
+      catch { markRetirable(false); } // An unreadable classifier never frees uncertain history.
+      return error;
+    };
     let start = () => {};
     const promise = new Promise<Result>((resolve, reject) => {
       start = () => {
@@ -72,10 +81,10 @@ export class PlacementIntentLedger<Result> {
               try { markRetirable(this.canRetireResult(value)); resolve(value); }
               catch (error) { markRetirable(false); reject(error); }
             },
-            (error: unknown) => { reject(error); },
+            (error: unknown) => { reject(fail(error)); },
           );
         } catch (error) {
-          reject(error);
+          reject(fail(error));
         }
       };
     });

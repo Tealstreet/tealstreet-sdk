@@ -148,7 +148,9 @@ authority scope. Equal payloads with distinct IDs remain distinct actions; the
 same ID joins its original promise, including an Unknown rejection. Changed
 payloads under a retained ID refuse without another dispatch.
 
-Capacity never evicts an unanswered or Unknown action. Only known records retire behind
+Capacity never evicts an unanswered or Unknown action. A caller may explicitly
+classify proven refusals for retirement; the original rejection is retained.
+Only known records retire behind
 a monotonic timestamp floor; an older forgotten ID returns Unknown and cannot
 send again. The floor cannot advance into an incoming clock rollback; records
 ahead of the clock stay retained. That refusal is not evidence of non-forwarding.
