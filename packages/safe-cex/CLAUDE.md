@@ -155,6 +155,10 @@ The caller must retain the ledger/floor for its authority lifetime and validate
 UUIDv7 timestamps at ingress. This memory ledger is not a durable outbox or
 permission to adopt an old owner's action into a new scope.
 
+`placementIntentContext.ts` carries a validated UUIDv7 only during a synchronous
+method entry. Capture it before waiting and explicitly restore it at dispatch;
+ambient identity must never survive an await or leak into another action.
+
 ## DELEGATED order outbox
 
 `OutboxOptions`, every connection ticket, persisted intent and proof bind the
