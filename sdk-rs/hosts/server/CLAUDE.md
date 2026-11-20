@@ -365,10 +365,11 @@ condition; receipts keep `clientOrderId: null`. WOO also receives none: until
 2026-11-19 it got the UUID, which WOO refuses, so every plain market submit failed
 before the venue. A numeric WOO ID needs NX router and SDK outbox outcome checks
 to accept it before the box emits one. The router UUID/fingerprint ledger
-remains primary dedupe in every case. Backpack and GRVT retain their current
-refusal pending their separate bounded-hash mapping. Bybit protection also omits
-its unsupported caller ID and reports null. HyroTrader retains its native
-caller-ID refusal. Other modes keep `callMethod` unchanged. Pending joins
+remains primary dedupe in every case. Backpack and GRVT also omit the caller ID: their numeric fields cannot carry
+the UUID losslessly. HyroTrader omits it because the native codec supports no
+caller IDs. Those native validators are unchanged; explicit unsupported caller
+IDs still refuse. Bybit protection also omits its unsupported caller ID and
+reports null. Other modes keep `callMethod` unchanged. Pending joins
 and elapsed ages of ten seconds or more refuse without a write. New replies
 use the existing instanceId registration helper. The NX router must durably
 record submits before forwarding and expose acknowledgements only after commit;
@@ -503,11 +504,44 @@ without a seed remains unchanged and supplies no placement-signing capability.
 Retained DELEGATED accounts share the canonical protected owner through the sole
 `AccountSigner`; escaped engine handles have no independent erasure authority.
 The 48-hour clock starts only after the last admitted holder disconnects and is
-cancelled only by admitted reconnect. Removal/off/key removal erase immediately.
-For a selected proxy transport, token expiry has an explicitly interim terminal
-stop/erase with recorded reason `proxy-token-expired`; no issuer renewal, direct
-fallback or authority extension is implied. Sam still owns the long-term policy.
+cancelled only by admitted reconnect. Removal/off/key removal erase immediately
+once the last live holder disposes; see DELEGATED holder-refcounted dispose.
+For a selected proxy transport, token expiry is a terminal stop/erase with
+recorded reason `proxy-token-expired`; there is no issuer renewal, direct
+fallback or authority extension (Sam, 2026-11-20, AGT-37: permanent contract).
 See `DELEGATED_RETENTION.md` for the retention and restart contracts.
+
+## DELEGATED holder-refcounted dispose
+
+AGT-79 (Sam, 2026-11-20): a page `dispose` or ping orphan on a DELEGATED account
+detaches only that holder in `Registry::release_with_labels`. The shared actor and
+resident signer keep running only while a LIVE holder of ANOTHER client
+registration (init `instanceId`, kept in `Holders::confirmed`) confirmed a
+DELEGATED request; otherwise `dispose_for` stops and erases as before. Before this,
+one device switching that account to LOCAL/COSIGNED (which disposes first) stopped
+it for every device. What never keeps the key: a COSIGNED tab attached to the
+resident, a parked holder, and the leaving registration's own half-open socket
+(detached with it, so its idle-out cannot start 48 h retention). An unjoined
+socket's `dispose_delegated` stays unconditional: it names no registration.
+Detachment and the keep decision run on EVERY disposed alias, including when the
+socket keeps another alias. A detached label loses command authority through
+`Registry::holds_label`, which session cleanup, order admission and the deferred
+action guard check instead of the socket-wide `holds`.
+Hard stops (`Registry::dispose`, signer failure, fence, expiry, drain, settings
+rebuild) are unchanged, and COSIGNED disposal was already holder-counted.
+
+## Host notifications (AGT-37)
+
+`src/host_notify.rs` queues DELEGATED notifications for the gateway when
+`TEALSTREET_HOST_NOTIFY_URL` is set; unset means off, including the warning
+timer. Retention arms `delegated.shutdownWarning` in its own task and emits
+`delegated.shutdown` on expiry and drain. The algo host's `algo_notify::Tap`
+emits `fill`, `orderRejected` (chase/TWAP placements only, through
+`RejectTap`) and `algoStopped`; it holds the signer weakly, so it never extends
+the key owner's life. Build notifications only through
+`HostNotification::build` and the typed `Fields` setters: never add a free-text
+field, and never log the token. Contract, env vars and delivery semantics:
+`DELEGATED_RETENTION.md` "Host notification lane".
 
 
 ## DELEGATED reconnect resume
@@ -535,3 +569,11 @@ Action deadlines use the same bounded age, clamp future-key wall expiry to
 arrival-time plus 10 seconds and retain the client-age monotonic bound. Deferred
 work cannot renew that budget. The paired router policy must preserve its
 coverage-quarantine and cross-clock safety bounds when adopting this tolerance.
+
+## Venue rejections in typed action outcomes
+
+`order_actions::settle` treats an engine `rejected` error with no partial
+evidence (IDs, counts, `partial`, `protection`, or a non-`notSent` element) as
+`refused`/`notSent`, matching `order_frames::settle_intent`. Before AGT-68 a
+definitive refusal such as OKX 51088 settled `unknown` and left mobile's sticky
+"still unconfirmed" toast. Partial or uncertain failures stay `unknown`.

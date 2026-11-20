@@ -51,7 +51,10 @@ export function readTickerDeltaFrame(frame: Frame, count: number, hasSnapshot = 
     let width = 0;
     for (let field = 0; field < TICKER_FIELDS.length; field++) if (mask & (1 << field)) width++;
     if (i + 2 + width > deltas.length) throw new Error('Truncated ticker delta');
-    packed.push([row, mask, ...deltas.subarray(i + 2, i + 2 + width)]);
+    // An indexed copy: spreading a typed-array view runs its iterator per value on Hermes.
+    const entry: PackedTickerDelta = [row, mask];
+    for (let value = i + 2; value < i + 2 + width; value++) entry.push(deltas[value]);
+    packed.push(entry);
     i += 2 + width;
   }
   return packed;

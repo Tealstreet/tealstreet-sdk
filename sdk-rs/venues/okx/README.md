@@ -54,9 +54,11 @@ code is restored. The legacy TS snapshot proves protective cancel/re-place, not 
 separate original-stop put-back algorithm.
 
 After failure, normal and algo placement series stop, as TS's serial placement
-helpers throw. Cancellation row errors inside a code-0 envelope continue; every
-nonzero envelope stops, matching `okx.api.ts:77-82`. Regular and algo cancellation
-tests cover both paths; WritePlan does not control dispatch.
+helpers throw. A cancellation batch whose rows are identity-validated and proven
+settles per row in any envelope (`0`, `1` or `2`) and continues to the next
+batch; see "Partial bulk cancellation". Unproven rows still stop. Other
+nonzero envelopes stop, matching `okx.api.ts:77-82`. WritePlan does not control
+dispatch.
 
 Sequence pins require all entry batches before SL/trailing/TP algos. Children
 retain the original input amount, so a child refusal leaves the accepted entry
@@ -93,6 +95,40 @@ KNOWN-ISSUE (deferred to #3359): engine-sealed Unknown telemetry. HTTP
 text; only their telemetry assertion is deferred. No shared engine code is
 changed to add this venue companion event.
 
+## Entire-position TP/SL (AGT-68, AGT-98)
+
+OKX keeps one entire-position (`closeFraction=1`) TP/SL algo per position and
+refuses a second with `51088`. A full SL and TP placed in one command become
+one `oco` algo, as OKX documents and ccxt places them.
+
+A lone full SL or TP for a position whose full algo holds only the opposite
+leg **joins** that algo: `amend-algos` with the new leg's trigger price,
+`-1` (market) order price and trigger type, and `cxlOnFail:false`, so a refusal
+keeps the held leg. Verified on a live account (AGT-98, BTC-USDT-SWAP): adding
+a TP to an SL-only `conditional` returned sCode 0, the same algoId became an
+`oco` carrying both legs, and the added TP fired (`actualSide: tp`); adding an
+SL to a TP-only one behaves the same. This answers the ccxt warning that a
+two-leg `conditional` applies only its SL: OKX converts the amended algo to
+`oco`. The command completes with the held algo's ID, like a placement.
+
+Everything else beside a held full algo is still refused before any write as
+not sent, "OKX allows one full-position TP/SL. Edit the existing order or
+remove it first.": a leg of the kind already held, a leg when both are held,
+both legs in one command while one is held, or two joins onto one algo.
+
+Cancelling one leg of a two-leg algo, while the other leg is open and not also
+being cancelled, deletes that leg through `amend-algos` (its trigger and order
+price `0`) instead of `cancel-algos`, which would take both legs. The step
+settles as a cancellation of the algo, so `51400` (already gone) satisfies it.
+OKX leaves a one-leg `conditional`; deleting a one-leg algo's only leg cancels
+the algo, so that case still uses `cancel-algos`. The live update that no
+longer lists the deleted leg removes its row (`drop_deleted_legs`), with a
+version that stops an older census restoring it. Native `trigger` algos carry one
+leg whose kind follows the reference price: they never take a leg deletion,
+and an update that moves one across the price removes its old-suffix row. Sized `oco` algos (OKX UI)
+take the same leg deletion, also verified live. Partial-size placements and
+other positions are unaffected.
+
 ## Native write refusal diagnostics
 
 One ACK decoder borrows plain messages and owns escaped messages. Owned text
@@ -103,9 +139,9 @@ the native code and message. Mixed settings rows retain Unknown and include the
 failed-row reasons; they never prove the whole call was refused. Nonempty
 settings-envelope messages and successful ACK handling are unchanged.
 
-Cancellation keeps `51400` as a satisfied intent, quiet in code-0 continuations
-and behind any genuine sibling failure. If a nonzero envelope has no message
-or other row failure, its already-absent row supplies the native code/reason
+Cancellation keeps `51400` as a satisfied intent in every envelope, quiet behind
+any genuine sibling failure. On the protective cancel/replace path, which still
+stops on a nonzero envelope, an already-absent row supplies the native code/reason
 instead of an empty `OKX 1:`. Complete identity-validated cancellation batches
 also retain passive per-order outcomes on failure. Dispatch, retry, store and
 aggregate outcome rules are unchanged. Missing or unusable row diagnostics are
@@ -116,6 +152,23 @@ and pins decoded diagnostics, accepted siblings, unchanged settings on failure,
 and no extra writes after a failure. The fixture uses the public documentation's
 example code/reason, not a private account response.
 
+
+## Partial bulk cancellation (AGT-69)
+
+OKX answers a partially successful `cancel-batch-orders` or `cancel-algos` with
+code `2` ("Bulk operation partially successful") and code `1` when every row
+failed, each row carrying its own `sCode`. Stopping on that envelope left every
+later batch unsent, so cancel-all kept the algo SL and conditional orders open
+whenever one limit row answered `51400`. A cancel job now settles such rows
+individually: `0` is cancelled, `51400` is already gone, and other definitive
+codes are refused. Then the next batch goes. Once every batch has run, a job with
+refused rows fails with `OKX left N of M orders open: <id>: <reason> (code X); ...`
+and per-order `elements` across all batches. Optimistic `Canceling` rows revert
+on completion exactly as before; the order stream publishes the final state.
+Only `0`/`1`/`2` envelopes settle per row; any other nonzero envelope stops.
+With no refused rows the command completes. Rows that are
+unproven, identity-mismatched or timed out (`51412`, etc.) still stop as Unknown,
+and nothing is retried. Pins: `tests/cancel_partial.rs`.
 
 ## EEA private startup
 

@@ -179,10 +179,10 @@ admitted account, after checking the original payload fingerprint and any caller
 | --- | --- |
 | Hyperliquid, Hyperliquid Spot | `0x` plus the UUID's 32 lowercase hex digits |
 | Bitget, Bitget inverse, Bitget USDC; OKX, OKX demo, OKX EU, OKX EU demo; BloFin; Binance PM | The UUID's 32 lowercase hex digits, without hyphens |
-| Bybit variants/HyroTrader; Binance USD-M, Spot, Options; BingX; Bitunix; KuCoin Futures/Spot; Coinbase Futures/Spot; Crypto.com; ApeX Omni; Paradex; Phemex | Original UUID |
+| Bybit variants; Binance USD-M, Spot, Options; BingX; Bitunix; KuCoin Futures/Spot; Coinbase Futures/Spot; Crypto.com; ApeX Omni; Paradex; Phemex | Original UUID |
 | Lighter, Lighter Robinhood; Binance inverse; AsterDEX; Kraken Futures; MEXC | No caller venue ID: those native adapters do not support one |
 | WOO | No caller venue ID: its positive JS-safe integer rule cannot carry the UUID losslessly, and router and outbox accept only lossless forms |
-| Backpack; GRVT | Numeric mapping is a separate follow-up; current native refusal is retained |
+| Backpack; GRVT; HyroTrader | No caller venue ID: numeric-only fields cannot carry the UUID losslessly, or the native codec supports no caller IDs (AGT-50) |
 
 Text/hex encodings preserve all 128 intent bits. They do not change the intent,
 request ID, fingerprint, age or durable router claim. SDK receipts retain the

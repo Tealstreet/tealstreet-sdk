@@ -20,3 +20,10 @@ the full tenant-qualified user ID and lifecycle generation. Logout or an owner
 change discards queued work and invalidates deferred uploads, even with a cached
 token; there is no final cleanup upload. Restarting the same active owner retains
 its generation and queue, while logout followed by login creates a new generation.
+
+Retry exhaustion increments `droppedBatches` and adds a bounded warning to the
+existing local `logAtom`. It includes only entry count, retry limit and HTTP status,
+never batch contents or raw errors, and bypasses upload logging to avoid recursion.
+For a 502, the optional ingest header adds only a validated 400–599 upstream status;
+malformed header text is ignored.
+The same owner-generation checks fence late failures after logout or replacement.

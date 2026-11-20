@@ -461,6 +461,10 @@ fn a_limit_amend_is_one_native_modify_that_keeps_the_order() {
         200,
         r#"{"code":200,"tx_hash":"transaction-hash"}"#,
     );
+    // AGT-77: the ACK no longer completes the amend; its executed tx does
+    // (refusal and Unknown cases live in tests/amend_proof.rs).
+    let tx = http(&mut e, "/api/v1/tx?by=hash&value=transaction-hash");
+    reply(&mut e, &tx, 200, r#"{"code":200,"status":2}"#);
     let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
     assert!(
         !out.iter()

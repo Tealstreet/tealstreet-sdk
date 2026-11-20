@@ -278,3 +278,33 @@ fn an_untriggered_stop_is_proven_by_its_pending_row() {
     let out = drain(&mut e, &mut timers);
     assert_eq!(terminal(&out), Some(Ok(format!("[\"{id}\"]"))), "{out:?}");
 }
+
+#[test]
+fn a_failed_placement_transaction_resyncs_the_nonce_for_the_next_write() {
+    // AGT-77: a failed tx may not consume its nonce, so the next write refetches it.
+    let (mut e, mut timers) = ready_testnet();
+    let (out, _) = acknowledged(&mut e, &mut timers, limit());
+    let proof = find(&out, "/api/v1/accountOrders?").unwrap();
+    reply(&mut e, &proof, 200, r#"{"code":200,"orders":[]}"#);
+    let out = drain(&mut e, &mut timers);
+    let tx = find(&out, "/api/v1/tx?by=hash&value=0xplaced").expect("tx status read");
+    reply(
+        &mut e,
+        &tx,
+        200,
+        r#"{"code":200,"status":0,"event_info":"{\"ae\":\"not enough margin\"}"}"#,
+    );
+    let out = drain(&mut e, &mut timers);
+    assert!(matches!(terminal(&out), Some(Err(_))), "{out:?}");
+    let order: PlaceOrderOpts = serde_json::from_value(limit()).unwrap();
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 9,
+            orders: vec![order],
+        }),
+    );
+    let out = drain(&mut e, &mut timers);
+    assert!(find(&out, "sendTx").is_none(), "{out:?}");
+    assert!(find(&out, "nextNonce").is_some(), "{out:?}");
+}

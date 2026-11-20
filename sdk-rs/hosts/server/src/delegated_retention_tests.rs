@@ -34,6 +34,26 @@ fn resident_with_authority(
     Arc<Account>,
     mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
 ) {
+    resident_from(registry, user, key, proxy, |init| {
+        prepare_delegated(
+            init,
+            DelegatedPair::new(init.key.clone(), "synthetic-secret".into(), None),
+        )
+        .unwrap()
+        .resident
+    })
+}
+
+fn resident_from(
+    registry: &Registry,
+    user: &str,
+    key: Option<&str>,
+    proxy: bool,
+    resident: impl FnOnce(&InitPayload) -> Arc<ResidentCopy>,
+) -> (
+    Arc<Account>,
+    mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+) {
     let init = InitPayload {
         account_name: "synthetic-main".into(),
         exchange_name: "bybit".into(),
@@ -58,26 +78,39 @@ fn resident_with_authority(
     if key.is_some() {
         inner.identity = identity::digest(user, &init).unwrap();
     }
-    inner.signing.set_test_resident(
-        prepare_delegated(
-            &init,
-            DelegatedPair::new(init.key.clone(), "synthetic-secret".into(), None),
-        )
-        .unwrap()
-        .resident,
-    );
+    inner.signing.set_test_resident(resident(&init));
     testing::register(registry, &account);
     hold(&account, 7);
     (account, inbox)
 }
 
 fn hold(account: &Account, id: u64) {
+    let registration = format!("registration-{id}");
+    hold_requesting(account, id, Delegated, &registration);
+}
+
+use crate::envelope::AccountSigningMode::{Cosigned, Delegated};
+
+/// A live holder whose join confirmed `requested` for a client registration.
+fn hold_requesting(
+    account: &Account,
+    id: u64,
+    requested: crate::envelope::AccountSigningMode,
+    registration: &str,
+) {
     account.hold(
         id,
         Live {
             outbox: Arc::new(|_| true),
             token: None,
         },
+    );
+    account.confirm_signing_mode(
+        id,
+        &account.name,
+        requested,
+        Arc::new(|_| true),
+        Some(registration),
     );
 }
 
@@ -148,13 +181,59 @@ async fn delegated_retention_also_covers_nonresumable_disconnects() {
         .await;
 }
 
+// AGT-79 replaced `delegated_removal_is_immediate_even_with_another_live_holder`:
+// a page dispose (or orphan) now detaches only its own holder, and the account stops
+// with the last live holder. The hard stops below still stop every holder.
 #[tokio::test(start_paused = true)]
-async fn delegated_removal_is_immediate_even_with_another_live_holder() {
+async fn a_page_dispose_detaches_only_its_holder_until_the_last_live_holder_leaves() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for disposal in [Disposal::PageDisposed, Disposal::Orphaned] {
+                let registry = tests::registry();
+                let (account, mut inbox) = resident(&registry, "A");
+                hold(&account, 8);
+                let provider = account.delegated().as_ref().unwrap().provider();
+                let key = KeyRef("primary.signing".into());
+                registry.release(&account, 7, disposal);
+                assert_eq!(registry.account_count(), 1, "{disposal:?}");
+                assert!(
+                    inbox.try_recv().is_err(),
+                    "{disposal:?}: algos keep running"
+                );
+                assert!(account.handle.disposal_cause().is_none());
+                assert_eq!(
+                    provider.can_sign(&key, Algorithm::HmacSha256),
+                    Capability::Supported,
+                    "{disposal:?}: the resident signer stays for the other holder"
+                );
+                assert!(!registry.holds(&account, 7));
+                assert!(registry.holds(&account, 8));
+                assert!(account.holders.lock().unwrap().retention.is_none());
+
+                registry.release(&account, 8, disposal);
+                assert_eq!(registry.account_count(), 0, "{disposal:?}");
+                assert!(matches!(
+                    inbox.try_recv(),
+                    Ok(crate::algos::AlgoInput::Dispose { .. })
+                ));
+                assert_eq!(
+                    provider.can_sign(&key, Algorithm::HmacSha256),
+                    Capability::Unsupported,
+                    "{disposal:?}: the last holder's dispose erases the key"
+                );
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_parked_holder_never_keeps_a_disposed_account_resident() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let registry = tests::registry();
             let (account, mut inbox) = resident(&registry, "A");
             hold(&account, 8);
+            registry.park("stale-socket".into(), "A", vec![(account.clone(), 8)]);
             let provider = account.delegated().as_ref().unwrap().provider();
             registry.release(&account, 7, Disposal::PageDisposed);
             assert_eq!(registry.account_count(), 0);
@@ -166,7 +245,267 @@ async fn delegated_removal_is_immediate_even_with_another_live_holder() {
                 provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
                 Capability::Unsupported
             );
-            assert!(!registry.holds(&account, 8));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cosigned_holder_never_keeps_the_delegated_key_resident() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for unjoined in [false, true] {
+                let registry = tests::registry();
+                let (account, mut inbox) = resident(&registry, "A");
+                hold_requesting(&account, 8, Cosigned, "registration-8");
+                let provider = account.delegated().as_ref().unwrap().provider();
+                if unjoined {
+                    registry.release(&account, 7, Disposal::SocketClosed);
+                    registry.dispose_delegated("A", "synthetic-main");
+                } else {
+                    registry.release(&account, 7, Disposal::PageDisposed);
+                }
+                assert_eq!(registry.account_count(), 0, "unjoined={unjoined}");
+                assert!(matches!(
+                    inbox.try_recv(),
+                    Ok(crate::algos::AlgoInput::Dispose { .. })
+                ));
+                assert_eq!(
+                    provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                    Capability::Unsupported,
+                    "unjoined={unjoined}: the last DELEGATED holder's dispose erases the key"
+                );
+                assert!(!registry.holds(&account, 8));
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn hard_stops_still_stop_every_holder() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for hard_stop in ["dispose", "signer"] {
+                let registry = tests::registry();
+                let (account, mut inbox) = resident(&registry, "A");
+                hold(&account, 8);
+                let provider = account.delegated().as_ref().unwrap().provider();
+                match hard_stop {
+                    "dispose" => registry.dispose(&account, Disposal::PageDisposed),
+                    _ => registry.signer_failed(&account),
+                }
+                assert_eq!(registry.account_count(), 0, "{hard_stop}");
+                assert!(matches!(
+                    inbox.try_recv(),
+                    Ok(crate::algos::AlgoInput::Dispose { .. })
+                ));
+                assert_eq!(
+                    provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                    Capability::Unsupported,
+                    "{hard_stop}"
+                );
+                assert!(!registry.holds(&account, 7));
+                assert!(!registry.holds(&account, 8));
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_dispose_never_counts_its_own_registrations_stale_socket() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for other_device in [false, true] {
+                let registry = tests::registry();
+                let (account, mut inbox) = resident(&registry, "A");
+                // Socket 8 is socket 7's half-open predecessor: same registration.
+                hold_requesting(&account, 8, Delegated, "registration-7");
+                if other_device {
+                    hold(&account, 9);
+                }
+                let provider = account.delegated().as_ref().unwrap().provider();
+                let key = KeyRef("primary.signing".into());
+                registry.release(&account, 7, Disposal::PageDisposed);
+                assert!(!registry.holds(&account, 8), "other_device={other_device}");
+                if !other_device {
+                    assert_eq!(registry.account_count(), 0);
+                    assert_eq!(
+                        provider.can_sign(&key, Algorithm::HmacSha256),
+                        Capability::Unsupported,
+                        "the stale socket never keeps a removed key resident"
+                    );
+                    continue;
+                }
+                assert_eq!(registry.account_count(), 1);
+                assert!(inbox.try_recv().is_err());
+                assert!(registry.holds(&account, 9));
+                registry.release(&account, 9, Disposal::PageDisposed);
+                assert_eq!(registry.account_count(), 0);
+                assert_eq!(
+                    provider.can_sign(&key, Algorithm::HmacSha256),
+                    Capability::Unsupported
+                );
+            }
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stale_socket_keeps_only_its_other_registrations_labels() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, mut inbox) = resident(&registry, "A");
+            // Stale socket 8 holds the disposed registration and an identity-shared
+            // alias with its own registration, as one web page's two workers do.
+            hold_requesting(&account, 8, Delegated, "registration-7");
+            assert!(account.hold_label(
+                8,
+                Live {
+                    outbox: Arc::new(|_| true),
+                    token: None,
+                },
+                "alias-y"
+            ));
+            account.confirm_signing_mode(
+                8,
+                "alias-y",
+                Delegated,
+                Arc::new(|_| true),
+                Some("registration-y"),
+            );
+            let provider = account.delegated().as_ref().unwrap().provider();
+            let key = KeyRef("primary.signing".into());
+            registry.release(&account, 7, Disposal::PageDisposed);
+            assert_eq!(registry.account_count(), 1);
+            assert!(inbox.try_recv().is_err());
+            assert!(
+                registry.holds(&account, 8),
+                "its other registration still holds"
+            );
+            assert_eq!(account.labels(8), ["alias-y"]);
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Supported
+            );
+            registry.release_label(&account, 8, "alias-y", Disposal::PageDisposed);
+            assert_eq!(
+                registry.account_count(),
+                0,
+                "no holder may be left keeping it"
+            );
+            assert_eq!(
+                provider.can_sign(&key, Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+        })
+        .await;
+}
+
+fn hold_alias(
+    account: &Account,
+    id: u64,
+    label: &str,
+    requested: crate::envelope::AccountSigningMode,
+) {
+    assert!(account.hold_label(
+        id,
+        Live {
+            outbox: Arc::new(|_| true),
+            token: None,
+        },
+        label
+    ));
+    let registration = format!("registration-{label}");
+    account.confirm_signing_mode(
+        id,
+        label,
+        requested,
+        Arc::new(|_| true),
+        Some(&registration),
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn disposing_every_alias_never_leaves_an_earlier_registrations_stale_socket() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, _inbox) = resident(&registry, "A");
+            hold_requesting(&account, 8, Delegated, "registration-7");
+            hold_alias(&account, 7, "alias-y", Delegated);
+            let provider = account.delegated().as_ref().unwrap().provider();
+            registry.release_label(&account, 7, "synthetic-main", Disposal::PageDisposed);
+            assert!(
+                !registry.holds(&account, 8),
+                "the stale copy leaves with the first alias"
+            );
+            assert_eq!(registry.account_count(), 1, "alias-y still holds it");
+            registry.release_label(&account, 7, "alias-y", Disposal::PageDisposed);
+            assert_eq!(registry.account_count(), 0);
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_remaining_cosigned_alias_never_keeps_the_key_after_its_last_delegated_alias() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, mut inbox) = resident(&registry, "A");
+            hold_alias(&account, 7, "alias-c", Cosigned);
+            let provider = account.delegated().as_ref().unwrap().provider();
+            registry.release_label(&account, 7, "synthetic-main", Disposal::PageDisposed);
+            assert_eq!(registry.account_count(), 0);
+            assert!(matches!(
+                inbox.try_recv(),
+                Ok(crate::algos::AlgoInput::Dispose { .. })
+            ));
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_detached_label_loses_its_holder_authority_but_the_other_alias_keeps_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, _inbox) = resident(&registry, "A");
+            hold_requesting(&account, 8, Delegated, "registration-7");
+            hold_alias(&account, 8, "alias-y", Delegated);
+            registry.release(&account, 7, Disposal::PageDisposed);
+            assert!(registry.holds(&account, 8));
+            assert!(!registry.holds_label(&account, 8, "synthetic-main"));
+            assert!(registry.holds_label(&account, 8, "alias-y"));
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unjoined_dispose_still_stops_the_account_it_cannot_attribute() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, mut inbox) = resident(&registry, "A");
+            let provider = account.delegated().as_ref().unwrap().provider();
+            registry.dispose_delegated("A", "synthetic-main");
+            assert_eq!(registry.account_count(), 0);
+            assert!(matches!(
+                inbox.try_recv(),
+                Ok(crate::algos::AlgoInput::Dispose { .. })
+            ));
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+            assert!(!registry.holds(&account, 7));
         })
         .await;
 }
@@ -977,5 +1316,218 @@ async fn unpublished_settings_successor_cannot_clear_the_residents_retention_dea
 async fn published_settings_successor_cancels_the_residents_old_retention_deadline() {
     tokio::task::LocalSet::new()
         .run_until(successor_publication_control(true))
+        .await;
+}
+
+/// Owns no key material, so these tests also run where protected key setup
+/// is unsupported (protected allocation is Linux-only).
+struct KeylessSigner;
+impl safe_cex_engine::signing::ProtectedSigner for KeylessSigner {}
+impl safe_cex_engine::signing::Signer for KeylessSigner {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn can_sign(&self, _: &KeyRef, _: Algorithm) -> Capability {
+        Capability::Unsupported
+    }
+    fn sign_ready(
+        &self,
+        _: &safe_cex_engine::signing::SignRequest,
+    ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+    {
+        Some(Err(safe_cex_engine::signing::SignError::Refused))
+    }
+    fn sign(
+        &self,
+        _: safe_cex_engine::signing::SignRequest,
+    ) -> safe_cex_engine::signing::SignFuture {
+        Box::pin(std::future::ready(Err(
+            safe_cex_engine::signing::SignError::Refused,
+        )))
+    }
+}
+
+fn keyless_resident(
+    registry: &Registry,
+    user: &str,
+    proxy: bool,
+) -> (
+    Arc<Account>,
+    mpsc::UnboundedReceiver<crate::algos::AlgoInput>,
+) {
+    resident_from(registry, user, Some("synthetic-key"), proxy, |_| {
+        ResidentCopy::test_protected_provider(
+            safe_cex_engine::signing::ProtectedProvider::new(Arc::new(KeylessSigner)).unwrap(),
+            safe_cex_engine::signing::Identities::default(),
+        )
+    })
+}
+
+fn notifying_registry() -> (Arc<Registry>, crate::host_notify::HostNotifier) {
+    let notifier = crate::host_notify::HostNotifier::unstarted();
+    let mut registry = Registry::new(
+        EngineThreads::start(1).unwrap(),
+        Duration::from_millis(1),
+        Duration::from_secs(60),
+    )
+    .with_host_notify(Some(notifier.clone()));
+    testing::set_join_admission(&mut registry, false);
+    (Arc::new(registry), notifier)
+}
+
+fn notified(notifier: &crate::host_notify::HostNotifier) -> Vec<serde_json::Value> {
+    notifier
+        .queued()
+        .iter()
+        .map(|notification| serde_json::to_value(notification).unwrap())
+        .collect()
+}
+
+const LEAD: Duration = crate::host_notify::WARNING_LEAD;
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_warning_fires_one_hour_before_retention_expiry_then_shutdown() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (registry, notifier) = notifying_registry();
+            let (account, mut inbox) = keyless_resident(&registry, "warned", false);
+            advance(RETAIN).await;
+            assert!(notified(&notifier).is_empty(), "a held account arms nothing");
+            registry.release(&account, 7, Disposal::SocketClosed);
+            advance(RETAIN - LEAD - Duration::from_secs(1)).await;
+            assert!(notified(&notifier).is_empty());
+            advance(Duration::from_secs(1)).await;
+            let queued = notified(&notifier);
+            assert_eq!(queued.len(), 1);
+            let warning = &queued[0];
+            assert_eq!(warning["kind"], "delegated.shutdownWarning");
+            assert_eq!(warning["severity"], "warning");
+            assert_eq!(warning["user"], "warned");
+            assert_eq!(warning["venue"], "bybit");
+            assert_eq!(warning["clientPresent"], false);
+            assert_eq!(warning["fields"], serde_json::json!({"cause": "noClient48h"}));
+            // The wall clock does not move under paused Tokio time.
+            let lead = warning["deadline"].as_u64().unwrap() - warning["occurredAt"].as_u64().unwrap();
+            let retain_ms = RETAIN.as_millis() as u64;
+            assert!((retain_ms - 5_000..=retain_ms).contains(&lead), "{lead}");
+            assert!(inbox.try_recv().is_err(), "the warning stops nothing");
+            advance(LEAD).await;
+            assert!(matches!(
+                inbox.try_recv(),
+                Ok(crate::algos::AlgoInput::Dispose { reason, .. }) if reason == "no client for 48 h"
+            ));
+            let queued = notified(&notifier);
+            assert_eq!(queued.len(), 2);
+            let shutdown = &queued[1];
+            assert_eq!(shutdown["kind"], "delegated.shutdown");
+            assert_eq!(shutdown["severity"], "critical");
+            assert_eq!(shutdown["clientPresent"], false);
+            assert_eq!(shutdown["fields"], serde_json::json!({"cause": "noClient48h"}));
+            assert!(shutdown.get("deadline").is_none());
+            assert_eq!(shutdown["accountDigest"], warning["accountDigest"]);
+            assert_ne!(shutdown["id"], warning["id"]);
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn admitted_reconnect_cancels_the_pending_warning_and_rearms_with_the_next_interval() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (registry, notifier) = notifying_registry();
+            let (account, mut inbox) = keyless_resident(&registry, "returning", false);
+            registry.release(&account, 7, Disposal::SocketClosed);
+            advance(Duration::from_secs(10)).await;
+            hold(&account, 8);
+            advance(RETAIN).await;
+            assert!(
+                notified(&notifier).is_empty(),
+                "retention cancel aborts the warning"
+            );
+            assert!(inbox.try_recv().is_err());
+            registry.release(&account, 8, Disposal::SocketClosed);
+            advance(RETAIN - LEAD).await;
+            let queued = notified(&notifier);
+            assert_eq!(queued.len(), 1);
+            assert_eq!(queued[0]["kind"], "delegated.shutdownWarning");
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn short_proxy_interval_skips_the_warning_and_reports_its_cause() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (registry, notifier) = notifying_registry();
+            let (account, mut inbox) =
+                keyless_resident(&registry, "short-proxy", true);
+            account
+                .token
+                .set(Some(("synthetic-token".into(), now_ms() + 30 * 60 * 1000)));
+            registry.release(&account, 7, Disposal::SocketClosed);
+            advance(Duration::from_secs(31 * 60)).await;
+            assert!(matches!(
+                inbox.try_recv(),
+                Ok(crate::algos::AlgoInput::Dispose { reason, .. }) if reason == "proxy-token-expired"
+            ));
+            let queued = notified(&notifier);
+            assert_eq!(queued.len(), 1, "an interval under one hour has no warning");
+            assert_eq!(queued[0]["kind"], "delegated.shutdown");
+            assert_eq!(
+                queued[0]["fields"],
+                serde_json::json!({"cause": "proxyTokenExpired"})
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn drain_reports_server_restart_for_delegated_residents_with_client_presence() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (registry, notifier) = notifying_registry();
+            let (held, _held_inbox) = keyless_resident(&registry, "held-user", false);
+            let (retained, _retained_inbox) = keyless_resident(&registry, "retained-user", false);
+            registry.release(&retained, 7, Disposal::SocketClosed);
+            let started = tokio::time::Instant::now();
+            registry.drain(Duration::from_millis(100)).await;
+            // The unstarted outbox never empties: the flush bound ends the wait.
+            assert!(
+                started.elapsed() <= crate::host_notify::RESTART_FLUSH + Duration::from_millis(100)
+            );
+            let queued = notified(&notifier);
+            assert_eq!(queued.len(), 2);
+            for notification in &queued {
+                assert_eq!(notification["kind"], "delegated.shutdown");
+                assert_eq!(
+                    notification["fields"],
+                    serde_json::json!({"cause": "serverRestart"})
+                );
+                let present = notification["user"] == "held-user";
+                assert_eq!(notification["clientPresent"], present, "{notification}");
+            }
+            assert_eq!(
+                queued.iter().filter(|n| n["user"] == "held-user").count(),
+                1
+            );
+            drop(held);
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn without_a_notifier_retention_arms_no_warning_and_queues_nothing() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, mut inbox) = keyless_resident(&registry, "off", false);
+            assert!(registry.host_notify.is_none());
+            registry.release(&account, 7, Disposal::SocketClosed);
+            advance(RETAIN).await;
+            assert!(matches!(
+                inbox.try_recv(),
+                Ok(crate::algos::AlgoInput::Dispose { .. })
+            ));
+        })
         .await;
 }

@@ -52,12 +52,18 @@ retains the original signing host and owner; it does not activate any server ven
 
 Lighter placements complete only on venue proof (an `accountOrders` row or a
 failed `tx`), never on the `sendTx` ACK alone; plain limit amends are one native
-modify. See `sdk-rs/venues/lighter/README.md` (AGT-45).
+modify, completed only by its executed `tx`. A failed or unproven transaction
+resyncs the nonce. See `sdk-rs/venues/lighter/README.md` (AGT-45, AGT-77).
 
 Bitunix keeps one position TP/SL order per position, both legs under one id, and
 a placement without a leg replaces it. The REST pending list has no `type`, so
 `full_position_ids` remembers ids learned from `POSITION_TPSL` pushes and position
 placements; a push that adds a leg lists both legs under derived ids (AGT-71).
+
+OKX keeps one entire-position TP/SL algo per position. A lone full leg beside a
+held one-leg full algo joins it through amend-algos (OKX makes it an `oco`), and
+cancelling one leg of a two-leg algo deletes only that leg. See
+`sdk-rs/venues/okx/README.md` "Entire-position TP/SL" (AGT-68, AGT-98).
 
 ## Shared artifact census
 
@@ -128,3 +134,7 @@ not promote the orders axis grade. The projection and limits are documented in
 `docker-native-server-pr.yml` builds both production Dockerfiles from the repo root on PRs.
 It imports the master image caches with a read-only automatic token; it never publishes images or caches.
 The existing master-only workflows remain the sole image publishers and signers.
+
+
+The wrapper-owned SDK staging signal and narrow automatic supersession exception
+are documented in `docs/plans/callers/beta-wasm-auto-release.md`.

@@ -265,6 +265,12 @@ pub struct Live {
     pub token: Option<(String, u64)>,
 }
 
+type Confirmed = (
+    crate::envelope::AccountSigningMode,
+    Outbox,
+    Option<Arc<str>>,
+);
+
 #[derive(Default)]
 struct Holders {
     retention: Option<retention::Retention>,
@@ -275,7 +281,8 @@ struct Holders {
     /// Live holders in init/resume order; socket IDs do not order later reinits.
     init_order: Vec<u64>,
     labels: HashMap<u64, std::collections::BTreeMap<String, Option<Live>>>,
-    confirmed: HashMap<(u64, String), (crate::envelope::AccountSigningMode, Outbox)>,
+    /// Each confirmed registration's requested mode, output and client `instanceId`.
+    confirmed: HashMap<(u64, String), Confirmed>,
     /// The socket the signer and proxy token follow.
     signing: Option<u64>,
 }
@@ -287,6 +294,64 @@ impl Holders {
             self.init_order.push(id);
         }
         self.by_id.insert(id, live);
+    }
+
+    /// AGT-79: whether a live holder of another client registration confirmed a
+    /// DELEGATED request. A COSIGNED tab, or the leaving registration's own
+    /// half-open socket, never keeps the resident key alone.
+    fn delegated_live_besides(&self, leaving: &[Arc<str>]) -> bool {
+        self.confirmed
+            .iter()
+            .any(|((holder, label), (requested, _, registration))| {
+                *requested == crate::envelope::AccountSigningMode::Delegated
+                    && registration
+                        .as_ref()
+                        .is_none_or(|registration| !leaving.contains(registration))
+                    && self
+                        .labels
+                        .get(holder)
+                        .and_then(|labels| labels.get(label))
+                        .is_some_and(Option::is_some)
+            })
+    }
+
+    /// The client registrations `holder` confirmed, for `label` or all of them.
+    fn registrations(&self, holder: u64, label: Option<&str>) -> Vec<Arc<str>> {
+        self.confirmed
+            .iter()
+            .filter(|((id, held), _)| *id == holder && label.is_none_or(|label| held == label))
+            .filter_map(|(_, (_, _, registration))| registration.clone())
+            .collect()
+    }
+
+    /// Detaches the leaving registrations' labels on other sockets (their stale,
+    /// half-open copies) without touching those sockets' other registrations.
+    fn detach_registrations(&mut self, account: &Account, leaving: &[Arc<str>]) {
+        let stale: Vec<(u64, String)> = self
+            .confirmed
+            .iter()
+            .filter(|(_, (_, _, registration))| {
+                registration.as_ref().is_some_and(|r| leaving.contains(r))
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        for (id, label) in stale {
+            self.confirmed.remove(&(id, label.clone()));
+            let remaining = self.labels.get_mut(&id).and_then(|labels| {
+                labels.remove(&label);
+                labels.values().find_map(Clone::clone)
+            });
+            if let Some(live) = remaining {
+                self.by_id.insert(id, Some(live.clone()));
+                if self.signing == Some(id) {
+                    account.sign_through(self, id, &live);
+                }
+            } else if self.by_id.contains_key(&id) {
+                self.remove(id);
+                self.labels.remove(&id);
+                account.hand_over(self, id);
+            }
+        }
     }
 
     fn remove(&mut self, id: u64) {
@@ -330,6 +395,7 @@ impl Account {
         label: &str,
         requested: crate::envelope::AccountSigningMode,
         outbox: Outbox,
+        registration: Option<&str>,
     ) {
         // Serialize confirmations with broadcasts, so an old COSIGNED
         // confirmation cannot follow the newer DELEGATED state.
@@ -348,9 +414,10 @@ impl Account {
             return;
         }
         let actual = self.actual_signing_mode();
-        holders
-            .confirmed
-            .insert((holder, label.into()), (requested, outbox.clone()));
+        holders.confirmed.insert(
+            (holder, label.into()),
+            (requested, outbox.clone(), registration.map(Arc::from)),
+        );
         outbox(crate::envelope::account_signing_mode(
             label, requested, actual,
         ));
@@ -359,7 +426,7 @@ impl Account {
     fn broadcast_signing_mode(&self) {
         let holders = self.holders.lock().unwrap();
         let actual = self.actual_signing_mode();
-        for ((holder, label), (requested, outbox)) in &holders.confirmed {
+        for ((holder, label), (requested, outbox, _)) in &holders.confirmed {
             if holders
                 .labels
                 .get(holder)
@@ -398,6 +465,10 @@ impl Account {
 
     fn proxy_authority_required(&self) -> bool {
         self.proxy_authority_required
+    }
+
+    pub(crate) fn notify_scope(&self) -> crate::host_notify::Scope {
+        crate::host_notify::Scope::new(&self.user, &self.venue, self.registry_name())
     }
 
     pub fn is_public(&self) -> bool {
@@ -816,6 +887,8 @@ pub struct Registry {
     presence: Arc<Mutex<HashMap<String, Presence>>>,
     /// The last forced-reset repair of each (user, account, topic) in this process.
     repairs: Mutex<HashMap<(String, String, String), std::time::Instant>>,
+    /// AGT-37 box -> gateway lane; `None` emits nothing and arms no timer.
+    host_notify: Option<crate::host_notify::HostNotifier>,
     /// Seeded test accounts can retain their pre-admission fixture setup.
     #[cfg(any(test, feature = "test-support"))]
     join_admission_override: Option<bool>,
@@ -1216,6 +1289,7 @@ impl Registry {
             notices: Arc::default(),
             presence: Arc::default(),
             repairs: Mutex::default(),
+            host_notify: None,
             #[cfg(any(test, feature = "test-support"))]
             join_admission_override: None,
             #[cfg(any(test, feature = "test-support"))]
@@ -1234,6 +1308,23 @@ impl Registry {
         ));
         self.router_leases = Arc::new(crate::router_lease::Users::new(config));
         self
+    }
+
+    pub fn with_host_notify(mut self, notifier: Option<crate::host_notify::HostNotifier>) -> Self {
+        self.host_notify = notifier;
+        self
+    }
+
+    /// Queues one notification scoped to `account`; callers decide DELEGATED.
+    pub(crate) fn host_notify(&self, account: &Account, draft: crate::host_notify::Draft) {
+        if let Some(notifier) = &self.host_notify {
+            notifier.push(crate::host_notify::HostNotification::build(
+                &account.notify_scope(),
+                draft,
+                account.held.load(Ordering::Relaxed),
+                now_ms(),
+            ));
+        }
     }
 
     pub fn user_lease_fenced(&self, user: &str) -> bool {
@@ -2090,6 +2181,24 @@ impl Registry {
         running.attach_restores(self.interruptions.account(user, registry_name));
         let algo_running = running.clone();
         let algo_identity = identity.clone();
+        // A weak signer: the algo host must never extend the key owner's life.
+        let algo_notify = self
+            .host_notify
+            .clone()
+            .filter(|_| !public_only)
+            .map(|notifier| {
+                let signing = Arc::downgrade(&signing);
+                crate::algo_notify::AlgoNotify::new(
+                    notifier,
+                    crate::host_notify::Scope::new(user, &venue, registry_name),
+                    Arc::new(move || {
+                        signing
+                            .upgrade()
+                            .is_some_and(|signing| signing.resident().is_some())
+                    }),
+                    held.clone(),
+                )
+            });
         let (algos, algo_inbox) = if public_only {
             (None, None)
         } else {
@@ -2165,6 +2274,7 @@ impl Registry {
                                 algo_running,
                                 algo_twap_owner,
                                 algo_identity,
+                                algo_notify,
                                 inbox,
                             ));
                         }
@@ -2227,7 +2337,7 @@ impl Registry {
 
     /// Releases a holder; DELEGATED disconnects start their separate retention clock.
     pub fn release(self: &Arc<Self>, account: &Arc<Account>, holder: u64, disposal: Disposal) {
-        self.release_with_labels(account, holder, disposal, Vec::new());
+        self.release_with_labels(account, holder, disposal, Vec::new(), Vec::new());
     }
 
     fn release_with_labels(
@@ -2236,10 +2346,13 @@ impl Registry {
         holder: u64,
         disposal: Disposal,
         mut labels: Vec<String>,
+        mut leaving: Vec<Arc<str>>,
     ) {
-        let (last, stopped) = {
+        let page_dispose = matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned);
+        let (last, stopped, delegated_live) = {
             let mut holders = account.holders.lock().unwrap();
             let removed = holders.by_id.get(&holder).cloned();
+            leaving.extend(holders.registrations(holder, None));
             holders.remove(holder);
             if let Some(held) = holders.labels.remove(&holder) {
                 labels.extend(held.into_keys());
@@ -2248,16 +2361,34 @@ impl Registry {
                 return;
             }
             account.hand_over(&mut holders, holder);
+            if page_dispose && account.delegated().is_some() {
+                // The leaving registration's stale copies leave with it, before the
+                // keep decision, so a removed socket can never be what keeps the key.
+                holders.detach_registrations(account, &leaving);
+            }
+            let delegated_live = holders.delegated_live_besides(&leaving);
             let last = if account.delegated().is_some() {
                 holders.by_id.values().all(Option::is_none)
             } else {
                 holders.by_id.is_empty()
             };
-            (last, holders.disposed)
+            (last, holders.disposed, delegated_live)
         };
         if account.delegated().is_some() {
-            if matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned) {
-                self.dispose_for(account, disposal, "account disposed", None);
+            // AGT-79: a page dispose detaches only its own holder. The account and its
+            // resident signer stop with the last live DELEGATED holder; a parked one may
+            // be this device's own stale socket and must not keep a removed key resident.
+            if page_dispose {
+                let keep = if stopped { !last } else { delegated_live };
+                if !keep {
+                    self.dispose_for(account, disposal, "account disposed", None);
+                } else {
+                    Log::info(&format!(
+                        "detach {}: holder {holder} left, a DELEGATED holder keeps it (disposal={})",
+                        account.name,
+                        disposal.as_str()
+                    ));
+                }
                 return;
             }
             if disposal == Disposal::SocketClosed && !stopped {
@@ -2277,8 +2408,11 @@ impl Registry {
         label: &str,
         disposal: Disposal,
     ) {
-        let still_held = {
+        let page_dispose = matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned)
+            && account.delegated().is_some();
+        let (still_held, leaving, stop) = {
             let mut holders = account.holders.lock().unwrap();
+            let leaving = holders.registrations(holder, Some(label));
             holders.confirmed.remove(&(holder, label.into()));
             let (remaining, removed) = if let Some(labels) = holders.labels.get_mut(&holder) {
                 let removed = labels.remove(label).is_some();
@@ -2298,13 +2432,22 @@ impl Registry {
                 if holders.signing == Some(holder) {
                     account.sign_through(&mut holders, holder, &live);
                 }
-                true
+                // AGT-79: this socket keeps another alias, but the disposed
+                // registration's stale copies still leave, and a remaining COSIGNED
+                // alias never keeps the resident key alone.
+                let stop = page_dispose && !holders.disposed && {
+                    holders.detach_registrations(account, &leaving);
+                    !holders.delegated_live_besides(&leaving)
+                };
+                (true, leaving, stop)
             } else {
-                false
+                (false, leaving, false)
             }
         };
-        if !still_held {
-            self.release_with_labels(account, holder, disposal, vec![label.to_owned()]);
+        if stop {
+            self.dispose_for(account, disposal, "account disposed", None);
+        } else if !still_held {
+            self.release_with_labels(account, holder, disposal, vec![label.to_owned()], leaving);
         }
     }
 
@@ -2537,6 +2680,18 @@ impl Registry {
         account.holders.lock().unwrap().by_id.contains_key(&holder)
     }
 
+    /// Whether `holder` still holds `account` under `label`. AGT-79 can detach a
+    /// stale DELEGATED label while its socket keeps another alias.
+    pub fn holds_label(&self, account: &Account, holder: u64, label: &str) -> bool {
+        let holders = account.holders.lock().unwrap();
+        holders.by_id.contains_key(&holder)
+            && (account.delegated().is_none()
+                || holders
+                    .labels
+                    .get(&holder)
+                    .is_none_or(|labels| labels.contains_key(label)))
+    }
+
     /// Disposes regardless of other holders (a rebuilt init or a fatal signer).
     pub fn dispose(&self, account: &Arc<Account>, disposal: Disposal) {
         self.dispose_for(account, disposal, "account disposed", None);
@@ -2656,6 +2811,9 @@ impl Registry {
         self.user_drains.box_draining(true);
         let accounts: Vec<Arc<Account>> = self.accounts.lock().unwrap().values().cloned().collect();
         for account in &accounts {
+            if account.delegated().is_some() {
+                self.host_notify(account, crate::host_notify::restart_shutdown());
+            }
             self.stop(
                 account,
                 "the server is restarting",
@@ -2664,13 +2822,22 @@ impl Registry {
             );
         }
         let until = tokio::time::Instant::now() + deadline;
-        while self.threads.accounts() > 0 {
-            if tokio::time::Instant::now() >= until {
-                return false;
+        let stopped = async {
+            while self.threads.accounts() > 0 {
+                if tokio::time::Instant::now() >= until {
+                    return false;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        true
+            true
+        };
+        // Best-effort and bounded; it runs beside, never after, the engine wait.
+        let flushed = async {
+            if let Some(notifier) = &self.host_notify {
+                notifier.flush(crate::host_notify::RESTART_FLUSH).await;
+            }
+        };
+        tokio::join!(stopped, flushed).0
     }
 
     /// The operator drains the box: sockets move as their algos end, and only
@@ -3703,6 +3870,7 @@ pub mod testing {
             account.running.clone(),
             account.twap_owner.clone(),
             account.identity.clone(),
+            None,
             inbox,
         ));
         account

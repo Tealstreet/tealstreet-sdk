@@ -1,6 +1,7 @@
 //! A sendTx acknowledgement means the sequencer queued the transaction, not that
 //! the order rests or filled. Each ordinary placement stays pending until
 //! authoritative venue state (`accountOrders`, or a failed `tx`) proves it.
+//! A plain limit modify is proven by its transaction alone (AGT-77).
 use super::*;
 use safe_cex_engine::request_context::{PendingPlacement, Scope};
 
@@ -25,6 +26,8 @@ pub(super) struct Proof {
     inflight: bool,
     verdicts: HashMap<String, Verdict>,
     pub outcome: Option<Result<(), VenueError>>,
+    /// A ModifyOrder: only its `tx` can prove it, and its receipt names the order.
+    modify: bool,
 }
 /// What a row's status can prove depends on how the order executes.
 #[derive(Clone, Copy)]
@@ -80,6 +83,28 @@ impl Proof {
             inflight: false,
             verdicts: HashMap::new(),
             outcome: None,
+            modify: false,
+        }
+    }
+    pub(super) fn modify(
+        receipt: PendingPlacement,
+        id: String,
+        hash: String,
+        deadline: f64,
+        token: u64,
+    ) -> Self {
+        Self {
+            receipt: Some(receipt),
+            ids: vec![id],
+            hashes: vec![hash],
+            shapes: Vec::new(),
+            deadline,
+            token,
+            polls: 0,
+            inflight: false,
+            verdicts: HashMap::new(),
+            outcome: None,
+            modify: true,
         }
     }
     /// Orders already proven live, kept as evidence when the batch ends Unknown.
@@ -155,6 +180,10 @@ fn refusal_text(status: &str) -> Option<&'static str> {
         "canceled-invalid-balance" => "invalid balance",
         _ => return None,
     })
+}
+/// Native tx statuses past execution (pending is 1, failed 0).
+fn executed(status: u64) -> bool {
+    (2..=5).contains(&status)
 }
 /// The words for a refusal: a pre-rest reason, or an immediate order that ended unfilled.
 fn reason_text(status: &str) -> Option<&'static str> {
@@ -249,6 +278,13 @@ impl Lighter {
             return;
         };
         if proof.inflight {
+            return;
+        }
+        if proof.modify {
+            let (token, id, hash) = (proof.token, proof.ids[0].clone(), proof.hashes[0].clone());
+            proof.polls += 1;
+            let url = format!("{}/api/v1/tx?by=hash&value={hash}", self.host());
+            self.proof_request(cx, url, None, None, ProofRead::Tx { token, id });
             return;
         }
         // Rotate the window so a batch beyond one read's limit is read in turn.
@@ -429,14 +465,22 @@ impl Lighter {
                 }
             }
             ProofRead::Tx { id, .. } => {
-                if let Ok(reply) = serde_json::from_str::<TxReply>(response.body)
-                    && ok
-                    && reply.code.as_ref().and_then(Number::integer) == Some(200)
-                    && reply.status.as_ref().and_then(Number::integer) == Some(0)
-                {
-                    proof
-                        .verdicts
-                        .insert(id, Verdict::Refused(tx_reason(&reply)));
+                let reply = serde_json::from_str::<TxReply>(response.body)
+                    .ok()
+                    .filter(|r| ok && r.code.as_ref().and_then(Number::integer) == Some(200));
+                match reply.as_ref().and_then(|r| r.status.as_ref()?.integer()) {
+                    Some(0) => {
+                        let reason = tx_reason(reply.as_ref().unwrap());
+                        proof.verdicts.insert(id, Verdict::Refused(reason));
+                        // A failed tx may not consume its nonce; the next write
+                        // reads the venue's own (AGT-77).
+                        self.trading.next_nonce.invalidate();
+                    }
+                    // A placement's executed tx can still cancel its order; a modify's cannot.
+                    Some(status) if proof.modify && executed(status) => {
+                        proof.verdicts.insert(id, Verdict::Live);
+                    }
+                    _ => {}
                 }
                 if self.proof_conclude(cx, token) {
                     return;
@@ -507,7 +551,17 @@ impl Lighter {
             .collect();
         let ids = proof.ids.clone();
         let receipt = proof.receipt.take();
-        let outcome = if refused.is_empty() {
+        let modify = proof.modify;
+        let outcome = if let (true, Some((_, native))) = (modify, refused.first()) {
+            let error = VenueError::new(format!("Lighter order not changed: {native}"))
+                .kind(ErrorKind::Rejected)
+                .outcome(Outcome::Rejected)
+                .venue_message(native.clone());
+            match receipt.map(|r| cx.reject_pending_placement(r, error.clone())) {
+                Some(Ok(())) => Err(error),
+                _ => Err(uncertain("Invalid Lighter amend evidence")),
+            }
+        } else if refused.is_empty() {
             match receipt.map(|r| cx.resolve_placement_identity(r, ids.clone())) {
                 Some(Ok(())) => Ok(()),
                 _ => Err(uncertain("Invalid Lighter placement evidence")),
@@ -537,7 +591,7 @@ impl Lighter {
             let job = self.trading.active.as_mut().unwrap();
             job.ids.extend(ids);
             job.effective = true;
-        } else if refused.len() == ids.len() {
+        } else if refused.len() == ids.len() && !modify {
             for (id, _) in &refused {
                 self.account.unnamed_placements.remove(id);
                 self.record_cancel(id, cx.now);
