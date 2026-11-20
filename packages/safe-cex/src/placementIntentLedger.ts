@@ -5,7 +5,7 @@ type Entry<Result> = {
   createdAt: number;
   fingerprint: string;
   promise: Promise<Result>;
-  settled: boolean;
+  retirable: boolean;
 };
 
 type Refusal = 'intentConflict' | 'intentRetired' | 'intentCapacity' | 'invalidIntentId';
@@ -30,7 +30,7 @@ export class PlacementIntentLedger<Result> {
   private readonly entries = new Map<string, Entry<Result>>();
   private retiredBefore = 0;
 
-  constructor(readonly capacity = 1024) {
+  constructor(readonly capacity = 1024, private readonly canRetireResult: (result: Result) => boolean = () => true) {
     if (!Number.isSafeInteger(capacity) || capacity < 1) throw new RangeError('Invalid intent capacity');
   }
 
@@ -48,35 +48,39 @@ export class PlacementIntentLedger<Result> {
     if (this.entries.size >= this.capacity) {
       let oldest = Infinity;
       for (const entry of this.entries.values())
-        if (entry.settled) oldest = Math.min(oldest, entry.createdAt);
+        if (entry.retirable) oldest = Math.min(oldest, entry.createdAt);
       if (!Number.isFinite(oldest)) return Promise.reject(new PlacementIntentError('intentCapacity'));
-      // Retire by timestamp, never by payload: forgotten IDs stay refused, including Unknowns.
-      this.retiredBefore = Math.max(this.retiredBefore, oldest + 1);
-      for (const [id, entry] of this.entries)
-        if (entry.settled && entry.createdAt < this.retiredBefore) this.entries.delete(id);
+      // Never move the floor beyond the incoming clock or discard an uncertain receipt.
+      const floor = Math.max(this.retiredBefore, Math.min(oldest + 1, intent.createdAt));
+      const retired = [...this.entries].filter(([, entry]) => entry.retirable && entry.createdAt < floor);
+      if (!retired.length) return Promise.reject(new PlacementIntentError('intentCapacity'));
+      this.retiredBefore = floor;
+      for (const [id] of retired) this.entries.delete(id);
       if (intent.createdAt < this.retiredBefore)
         return Promise.reject(new PlacementIntentError('intentRetired'));
     }
-    const settled = () => {
+    const markRetirable = (retirable: boolean) => {
       const entry = this.entries.get(intent.id);
-      if (entry) entry.settled = true;
+      if (entry) entry.retirable = retirable;
     };
     let start = () => {};
     const promise = new Promise<Result>((resolve, reject) => {
       start = () => {
         try {
           Promise.resolve(send()).then(
-            (value) => { settled(); resolve(value); },
-            (error: unknown) => { settled(); reject(error); },
+            (value) => {
+              try { markRetirable(this.canRetireResult(value)); resolve(value); }
+              catch (error) { markRetirable(false); reject(error); }
+            },
+            (error: unknown) => { reject(error); },
           );
         } catch (error) {
-          settled();
           reject(error);
         }
       };
     });
     // Reserve before invoking user callbacks, which can re-enter synchronously.
-    this.entries.set(intent.id, { createdAt: intent.createdAt, fingerprint, promise, settled: false });
+    this.entries.set(intent.id, { createdAt: intent.createdAt, fingerprint, promise, retirable: false });
     start();
     return promise;
   }

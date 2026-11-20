@@ -1,3 +1,14 @@
+## Placement action identity
+
+`callMethod.data.intentId` is optional canonical UUIDv7 metadata for placeOrder,
+placeOrders and placeOrderWithClientOrderId, never part of the venue payload.
+A handler binds it to the current owner incarnation, method and captured args;
+duplicate envelopes share one execution and each RPC receives its correlated
+receipt. Unknowns stay retained. Conflicts/retired identities cannot dispatch.
+The context exists only at synchronous entry, and original owner/generation,
+readiness, timing and error serialization fences remain authoritative. Legacy
+unkeyed calls and all reads retain their original dispatch path.
+
 # Native frame cutover
 
 `ExchangeWorker` forwards native SCXF frames in every mode and sends native

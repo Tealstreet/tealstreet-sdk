@@ -25,6 +25,15 @@ Manual writes separately await its catalogue; public mirrors need no engine.
 Account reads retain their source bridge. See `packages/safe-cex/CLAUDE.md` →
 "Rust main-thread trading".
 
+Placement entry mints a canonical UUIDv7 from the shared synchronized clock unless
+its caller supplied the captured action identity. RPC envelopes carry it outside
+order parameters. Page readiness and source-bridge waits explicitly carry it to
+dispatch; the page batch ledger and source RPC ledger join identical intents,
+retain Unknowns and refuse changed payload/owner incarnations. Current admission
+checks still run before cached receipts. Venue-native client IDs are minted once
+inside the original execution, preserving supported shapes and broker formats;
+reads, amendments and native command receipt numbering are unchanged.
+
 For per-exchange specifics (endpoints, quirks, auth signing details), see
 the `CLAUDE.md` inside each exchange's directory.
 

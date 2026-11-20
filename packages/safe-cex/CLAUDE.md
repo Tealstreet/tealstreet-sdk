@@ -148,9 +148,10 @@ authority scope. Equal payloads with distinct IDs remain distinct actions; the
 same ID joins its original promise, including an Unknown rejection. Changed
 payloads under a retained ID refuse without another dispatch.
 
-Capacity never evicts an unanswered action. Completed records may retire behind
+Capacity never evicts an unanswered or Unknown action. Only known records retire behind
 a monotonic timestamp floor; an older forgotten ID returns Unknown and cannot
-send again. That refusal is not evidence the original action was never sent.
+send again. The floor cannot advance into an incoming clock rollback; records
+ahead of the clock stay retained. That refusal is not evidence of non-forwarding.
 The caller must retain the ledger/floor for its authority lifetime and validate
 UUIDv7 timestamps at ingress. This memory ledger is not a durable outbox or
 permission to adopt an old owner's action into a new scope.
@@ -186,7 +187,8 @@ queued label. Persisted no-handoff claims still pass the evidence constructors.
 Version-1 storage keeps caller-key rows permanently reserved within the 1,056
 record capacity. Version-2 snapshots opt into an atomic `retiredIntentBefore`
 checkpoint: compaction deletes only durably completed rows and advances that
-UUIDv7 timestamp floor in the same transaction. Older forgotten IDs refuse with
+UUIDv7 timestamp floor in the same transaction. The floor cannot pass the current protocol clock; future-dated records stay.
+Older forgotten IDs refuse with
 `intentRetired` / Unknown, never another sequence or send. Existing unanswered
 rows still join below the floor; pending/Unknown retention rules are unchanged.
 An aborted transaction retains memory rows and the previous floor. Storage hosts

@@ -1184,9 +1184,14 @@ export class DelegatedOutbox {
     if (this.completedIntents.size <= COMPLETED_HISTORY) return;
     // Legacy adapters cannot persist a replay fence, so their caller keys stay reserved.
     const completed = [...this.completedIntents.values()].filter(
-      (row) => this.checkpointVersion === 2 || !row.callerSuppliedIntentId,
+      (row) => this.checkpointVersion === 2
+        ? delegatedIntentTime(row.intentId) < this.options.clock.unix()
+        : !row.callerSuppliedIntentId,
     );
-    if (completed.length <= COMPLETED_HISTORY) return;
+    const keep = this.checkpointVersion === 2
+      ? Math.max(0, COMPLETED_HISTORY - (this.completedIntents.size - completed.length))
+      : COMPLETED_HISTORY;
+    if (completed.length <= keep) return;
     let insertionOrder: Map<string, number> | undefined;
     completed.sort((a, b) => {
       if (a.seq !== b.seq) return a.seq - b.seq;
@@ -1194,7 +1199,7 @@ export class DelegatedOutbox {
       insertionOrder ??= new Map([...this.intents.keys()].map((id, index) => [id, index] as const));
       return insertionOrder.get(a.intentId)! - insertionOrder.get(b.intentId)!;
     });
-    const retired = completed.slice(0, completed.length - COMPLETED_HISTORY);
+    const retired = completed.slice(0, completed.length - keep);
     const floor = this.checkpointVersion === 2
       ? Math.max(this.retiredIntentBefore, ...retired.map((row) => delegatedIntentTime(row.intentId) + 1))
       : this.retiredIntentBefore;
