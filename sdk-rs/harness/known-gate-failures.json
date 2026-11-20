@@ -139,13 +139,15 @@
       "ciRun": 41423920329,
       "ciHead": "0dd6d7cbbe1",
       "url": "https://github.com/Tealstreet/tealstreet-sdk/actions/runs/41423920329",
-      "note": "#2831 makes a Rust symbol cancel also sweep the venue (Kraken cancelallorders, Bitunix cancel_all_orders); TS does not. Both private tapes now answer that sweep with an impl:rust record, so each transport audits only its own writes. Kraken rehashed 2bf4d2df.. -> 8142c148..; Bitunix e8d90eda.. -> fc56199e... The declared paths are unchanged: every failure line is identical locally on the new hashes."
+      "note": "#2831 makes a Rust symbol cancel also sweep the venue (Kraken cancelallorders, Bitunix cancel_all_orders); TS does not. Both private tapes now answer that sweep with an impl:rust record, so each transport audits only its own writes. Kraken rehashed 2bf4d2df.. -> 8142c148..; Bitunix e8d90eda.. -> fc56199e... The declared paths are unchanged: every failure line is identical locally on the new hashes."    },
+    "apexomniZeroBoundSignature20261121": {
+      "note": "AGT-75 removes ApeX's signed-read legacy resend. Live read-only checks showed ApeX accepts the primary signature over a zero time bound and refuses the legacy one, so the private tape now accepts the zero-bound fills read first instead of refusing it and accepting a resend. ApeX rehashed d851f4fb.. -> 8899fbc5..; the declared paths are unchanged."
     }
   },
   "failures": [
     {
       "venue": "apexomni",
-      "tapeSha256": "d851f4fbe8ee28b264d7e949b44de4bfc50e4dbf755cb3314eef02a177922eaf",
+      "tapeSha256": "8899fbc5cf7240971668e11e7a10333988ff627673317b4299a06fff3c3d81fe",
       "tape": "sdk-rs/harness/tapes/apexomni-private.jsonl",
       "diagnostics": [
         {
