@@ -60,6 +60,11 @@ a placement without a leg replaces it. The REST pending list has no `type`, so
 `full_position_ids` remembers ids learned from `POSITION_TPSL` pushes and position
 placements; a push that adds a leg lists both legs under derived ids (AGT-71).
 
+OKX keeps one entire-position TP/SL algo per position. A lone full leg beside a
+held one-leg full algo joins it through amend-algos (OKX makes it an `oco`), and
+cancelling one leg of a two-leg algo deletes only that leg. See
+`sdk-rs/venues/okx/README.md` "Entire-position TP/SL" (AGT-68, AGT-98).
+
 ## Shared artifact census
 
 Shared WASM budget and construction-policy memberships are checked against
