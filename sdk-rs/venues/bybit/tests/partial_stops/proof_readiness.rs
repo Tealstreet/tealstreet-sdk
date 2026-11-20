@@ -441,10 +441,10 @@ fn readiness_on_a_changed_or_triggered_stop_says_so_instead_of_try_again() {
             (0, "trigger-source"),
             (0, "Active"),
             (1, "Filled"),
-            (1, "Created"),
-            (2, "Active"),
             (1, "size"),
+            (1, "Created"),
             (2, "Cancelled"),
+            (2, "Active"),
         ] {
             let mut h = frame_fed(kind);
             let healthy = original(&h);
