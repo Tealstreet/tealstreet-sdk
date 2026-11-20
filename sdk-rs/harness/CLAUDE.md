@@ -1,5 +1,9 @@
 # Rust harness: replay evidence and WASM budgets
 
+BloFin whole-position trigger projection recognizes native `size: -1` without
+negative display quantities. Its hedge closing-side controls preserve wire behavior;
+native changes require fresh BloFin/combined artifacts with existing caps and flags.
+
 Bybit create-batch peer acknowledgement matching changes native venue inputs;
 it needs fresh optimized family/combined artifacts and executed native consumers.
 The bounded server audit projection grants no resend or reconciliation authority.
