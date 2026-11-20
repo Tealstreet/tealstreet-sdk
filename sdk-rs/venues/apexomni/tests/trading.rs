@@ -1098,7 +1098,9 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
         })
         .expect("a failure");
     assert!(
-        error.message.contains("Your BTCUSDT order is gone"),
+        error
+            .message
+            .contains("Your BTCUSDT order was cancelled and its replacement was declined"),
         "{}",
         error.message
     );
@@ -2217,7 +2219,7 @@ fn an_unknown_placement_fences_cancel_all_until_the_fresh_order_read_releases() 
     assert!(
         fenced.iter().any(
             |a| matches!(a, Action::Notice(Notice::CommandFailed { command: 43, error })
-            if error.message.contains("reconcile before cancel-all")
+            if error.message.contains("before cancelling all orders")
                 && error.outcome == Some(safe_cex_engine::Outcome::NotSent))
         ),
         "cancel-all is refused NotSent while the placement is uncertain"
@@ -2639,7 +2641,7 @@ fn an_unproven_cancel_sends_no_replacement_or_put_back() {
         let out = actions(&mut e);
         let error = failure_of(&out);
         assert!(
-            error.message.contains("could not be confirmed")
+            error.message.contains("wasn’t confirmed")
                 && error.message.contains("confirm")
                 && error
                     .message

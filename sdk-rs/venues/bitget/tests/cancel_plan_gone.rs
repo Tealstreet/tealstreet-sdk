@@ -9,7 +9,7 @@ use support::*;
 
 const EMPTY_ACK: &str = r#"{"code":"00000","data":{"successList":[],"failureList":[]}}"#;
 const LISTED: &str = r#"{"code":"00000","data":{"entrustedList":[{"orderId":"target","symbol":"BTCUSDT","size":"0","triggerPrice":"120","side":"buy","holdSide":"short","planType":"pos_loss","planStatus":"live"}],"endId":"target"}}"#;
-const UNACKNOWLEDGED: &str = "Bitget batch cancel did not acknowledge every order; these may still be open: BTCUSDT buy stoploss target (acknowledged [], planType pos_loss). This change wasn’t confirmed. Check your open orders before trying again.";
+const UNACKNOWLEDGED: &str = "Bitget didn’t confirm cancellation of these orders: BTCUSDT buy stoploss target (confirmed [], planType pos_loss). Check your open orders before trying again.. This change wasn’t confirmed. Check your open orders before trying again.";
 
 fn ready() -> Harness {
     let mut h = Harness::classic();

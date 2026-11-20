@@ -225,7 +225,7 @@ fn cancel_all(h: &mut Harness, command: u32) {
 fn refused_cancel_all(h: &Harness) -> bool {
     h.failures
         .iter()
-        .any(|e| e.message.contains("reconcile before cancel-all"))
+        .any(|e| e.message.contains("before cancelling all orders"))
 }
 
 #[test]
@@ -248,7 +248,7 @@ fn an_unknown_placement_fences_cancel_all_until_the_fresh_order_read_releases() 
     assert!(
         h.failures
             .iter()
-            .any(|e| e.message.contains("reconcile before cancel-all")
+            .any(|e| e.message.contains("before cancelling all orders")
                 && e.outcome == Some(safe_cex_engine::Outcome::NotSent)),
         "cancel-all is refused NotSent while the placement is uncertain"
     );

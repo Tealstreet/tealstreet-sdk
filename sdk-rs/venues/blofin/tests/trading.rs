@@ -1103,7 +1103,10 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
         })
         .expect("a failure");
     assert!(
-        error.message.contains("BTC") && error.message.contains("order is gone"),
+        error.message.contains("BTC")
+            && error
+                .message
+                .contains("order was cancelled and its replacement was declined"),
         "{}",
         error.message
     );

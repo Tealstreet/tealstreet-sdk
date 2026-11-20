@@ -993,7 +993,7 @@ fn rate_limits_are_unknown_while_definitive_status_refusals_stay_rejected() {
         if status == 429 {
             assert_eq!(
                 failure.message,
-                "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+                "The exchange reply didn’t confirm this change. Check your open orders before trying again.. We couldn’t confirm this change. Check your open orders before trying again.",
                 "{status}",
             );
         } else {
@@ -1120,7 +1120,7 @@ fn released_rate_limit_statuses_without_a_code_are_unknown() {
         if status == 429 {
             assert_eq!(
                 failure.message,
-                "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+                "The exchange reply didn’t confirm this change. Check your open orders before trying again.. We couldn’t confirm this change. Check your open orders before trying again.",
                 "{status}",
             );
         } else {

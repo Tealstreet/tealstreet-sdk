@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Behaviour ported from the TS `ChaserOrderManager`/`ChaserOrderInstance`
 //! tests, against a fake account port on a paused clock.
 use std::cell::{Cell, Ref, RefCell};
@@ -695,7 +696,7 @@ async fn a_refused_cancel_on_stop_says_the_order_may_still_be_open() {
         settle(10).await;
         assert!(
             port.errors().iter().any(|e| e.contains("o1")
-                && e.contains("may still be open")
+                && e.contains("couldn’t confirm cancellation")
                 && e.to_ascii_lowercase().contains("open orders")
                 && e.contains("Cancel it from your open orders.")),
             "{:?}",
@@ -1100,7 +1101,7 @@ async fn the_retries_end_at_their_bound_with_a_final_message() {
         assert!(
             port.errors()
                 .iter()
-                .any(|e| e.contains("may still be open"))
+                .any(|e| e.contains("couldn’t confirm cancellation"))
         );
         assert_eq!(completions(&port), 1);
     })
@@ -1127,7 +1128,7 @@ async fn a_definite_refusal_after_retries_stays_final() {
         assert!(
             port.errors()
                 .iter()
-                .any(|e| e.contains("may still be open"))
+                .any(|e| e.contains("couldn’t confirm cancellation"))
         );
     })
     .await;
@@ -1868,7 +1869,7 @@ async fn shutdown_during_the_retries_ends_them_with_one_try_and_a_final_message(
         assert!(
             port.errors()
                 .iter()
-                .any(|e| e.contains("may still be open"))
+                .any(|e| e.contains("couldn’t confirm cancellation"))
         );
         assert_eq!(completions(&port), 1);
         let seen = cancels_seen(&port);
@@ -1969,12 +1970,14 @@ async fn an_order_still_open_when_its_cancel_is_refused_is_reported() {
         settle(2000).await;
         let errors = port.errors();
         assert!(
-            errors.iter().any(|e| e.contains("failed to cancel")),
+            errors
+                .iter()
+                .any(|e| e.contains("orders couldn’t be cancelled")),
             "{errors:?}"
         );
         assert!(
             errors.iter().any(|e| e.contains("o1")
-                && e.contains("may still be open")
+                && e.contains("couldn’t confirm cancellation")
                 && e.to_ascii_lowercase().contains("open orders")
                 && e.contains("Cancel it from your open orders.")),
             "{errors:?}"

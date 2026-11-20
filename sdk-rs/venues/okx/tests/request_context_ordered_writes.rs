@@ -1390,7 +1390,7 @@ fn a_signature_code_on_an_unproven_status_is_never_resent() {
     );
     let failed = failures(&output);
     assert_eq!(failed.len(), 1);
-    support::assert_unknown_message(failed[0], support::ENGINE_UNKNOWN_TEXT);
+    support::assert_unknown_message(failed[0], support::ENGINE_HTTP_UNKNOWN_TEXT);
     assert!(
         failed
             .iter()
@@ -1419,7 +1419,7 @@ fn unknown_after_a_signature_refusal_keeps_the_engine_http_sealing_text() {
     assert_eq!(elements.len(), 1);
     assert!(matches!(&elements[0].result,
         safe_cex_engine::write_plan::ElementResult::Unknown { error }
-            if error.message.contains(support::ENGINE_UNKNOWN_TEXT)
+            if error.message.contains(support::ENGINE_HTTP_UNKNOWN_TEXT)
     ));
 }
 

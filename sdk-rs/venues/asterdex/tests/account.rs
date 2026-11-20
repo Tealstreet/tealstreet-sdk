@@ -980,7 +980,7 @@ fn failed_position_mode_read_retries_and_holds_placement_until_loaded() {
     assert!(
         h.logs
             .iter()
-            .any(|l| l.contains("position mode read failed"))
+            .any(|l| l.contains("position mode couldn’t be loaded"))
     );
     let reduce =
         json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":1,"reduceOnly":true});
@@ -1800,7 +1800,7 @@ const RATE_LIMITED: &str = r#"{"code":-1003,"msg":"Too many requests."}"#;
 fn assert_unknown_stop(h: &H) {
     let error = result(h, 991).as_ref().unwrap_err();
     assert!(
-        error.contains("outcome is unknown. Check Open Orders"),
+        error.contains("wasn’t confirmed. Check your open orders"),
         "{error}"
     );
     let words = error.to_ascii_lowercase();
@@ -2256,7 +2256,10 @@ fn an_ordinary_replacement_refused_with_an_unlisted_code_stays_refused() {
     // Exactly master's terminal: the order is gone and its replacement refused.
     let error = h.failures.last().unwrap();
     assert!(
-        error.message.contains("order is gone") && error.message.contains("replacement refused"),
+        error
+            .message
+            .contains("order was cancelled and its replacement was declined")
+            && error.message.contains("replacement was declined"),
         "{error:?}"
     );
     assert_eq!(

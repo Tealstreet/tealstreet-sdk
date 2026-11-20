@@ -538,7 +538,9 @@ pub fn assert_unknown_pin_with_text(
         })
         .expect("unknown telemetry event");
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-    assert!(error.message.contains(expected_text), "{error:?}");
+    // Rule 5 (#3726): engine-sealed HTTP rows and venue-authored Unknown retain distinct copy.
+    assert!(error.message.contains(expected_text)
+        || (expected_text == ENGINE_UNKNOWN_TEXT && error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.")), "{error:?}");
     let elements = error.elements.as_ref().expect("unknown journal");
     assert_eq!(elements.len(), count);
     assert!(matches!(

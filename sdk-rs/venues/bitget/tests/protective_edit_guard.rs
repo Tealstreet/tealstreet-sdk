@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
@@ -405,7 +406,12 @@ fn engine_sealed_put_back_keeps_registered_unknown_protection_words() {
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(error.protection, None);
     assert!(
-        error.message.contains("put-back") && error.message.contains("check Open Orders"),
+        error
+            .message
+            .contains("restoring the original wasn’t confirmed")
+            && error
+                .message
+                .contains("Check your open orders before adding another stop"),
         "{error:?}"
     );
 }
@@ -800,7 +806,12 @@ fn a_client_only_or_conflicting_put_back_ack_cannot_claim_protection_restored() 
 
 #[test]
 fn ambiguous_replies_never_retry_any_protective_edit_leg_or_claim_protection() {
-    for leg in ["cancel", "replacement", "put-back", "native-amend"] {
+    for leg in [
+        "cancel",
+        "replacement",
+        "restoring the original wasn’t confirmed",
+        "native-amend",
+    ] {
         for (status, code) in [
             (429, "00000"),
             (429, "40009"),
@@ -823,14 +834,17 @@ fn ambiguous_replies_never_retry_any_protective_edit_leg_or_claim_protection() {
                 Some(85.0),
                 None,
             ));
-            if matches!(leg, "replacement" | "put-back") {
+            if matches!(
+                leg,
+                "replacement" | "restoring the original wasn’t confirmed"
+            ) {
                 h.respond(
                     "/cancel-strategy-order",
                     200,
                     r#"{"code":"00000","data":null}"#,
                 );
             }
-            if leg == "put-back" {
+            if leg == "restoring the original wasn’t confirmed" {
                 h.respond(
                     "/place-strategy-order",
                     200,

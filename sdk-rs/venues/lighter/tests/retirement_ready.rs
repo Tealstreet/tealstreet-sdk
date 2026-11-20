@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! The venue FIFO must stay safe when readiness precedes a reconciliation notification.
 mod support;
 use safe_cex_engine::book::Book;
@@ -212,5 +213,5 @@ fn a_real_retired_setting_fences_its_fifo_before_the_reconcile_notification() {
             |action| matches!(action, Action::Http(request) if request.url.contains("sendTx"))
         )
     );
-    assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 402, error }) if error.message.contains("awaiting reconciliation"))));
+    assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 402, error }) if error.message.contains("settings update hasn’t been confirmed"))));
 }

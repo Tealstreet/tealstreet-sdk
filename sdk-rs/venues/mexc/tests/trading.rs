@@ -2087,10 +2087,11 @@ fn a_replacement_refused_after_the_cancel_says_the_order_is_gone() {
     );
     let refused = failures(&mut e);
     assert!(
-        refused
-            .iter()
-            .any(|f| f.message.contains("Your BTC_USDT order is gone")
-                || f.message.contains("Your BTCUSDT order is gone")),
+        refused.iter().any(|f| f
+            .message
+            .contains("Your BTC_USDT order was cancelled and its replacement was declined")
+            || f.message
+                .contains("Your BTCUSDT order was cancelled and its replacement was declined")),
         "{refused:?}"
     );
 }

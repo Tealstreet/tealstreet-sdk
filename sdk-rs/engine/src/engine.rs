@@ -9250,7 +9250,7 @@ mod streaming_tests {
             engine.drain_actions().any(|a| matches!(a,
                 Action::Notice(Notice::CommandFailed { command: 10, error })
                     if error.outcome == Some(crate::Outcome::NotSent)
-                        && error.legacy_text().contains("cancel-all"))),
+                        && error.legacy_text().contains("before cancelling all orders"))),
             "a fenced symbol's cancel-all is refused before any I/O"
         );
         assert_eq!(engine.venue.commands.len(), admitted);

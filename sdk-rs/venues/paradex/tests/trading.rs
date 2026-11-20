@@ -68,7 +68,13 @@ fn assert_dispatched_unknown(h: &Harness) {
         "{text}"
     );
     assert!(
-        !text.contains("refused") && !text.replace("may have no stop", "").contains("no stop"),
+        !text.contains("refused")
+            && !text
+                .replace(
+                    "stop was cancelled, but its replacement wasn’t confirmed",
+                    ""
+                )
+                .contains("no stop"),
         "{text}"
     );
     assert_eq!(error.protection, None);
@@ -902,7 +908,7 @@ fn a_refused_restore_is_visibly_unprotected_and_never_retried() {
 fn assert_unknown_stop(h: &Harness, command: u32) {
     let error = h.result(command).unwrap_err();
     assert!(
-        error.contains("outcome is unknown. Check Open Orders"),
+        error.contains("wasn’t confirmed. Check your open orders"),
         "{error}"
     );
     let words = error.to_ascii_lowercase();
@@ -921,7 +927,8 @@ fn assert_unknown_put_back(h: &Harness, command: u32) {
     let error = h.result(command).unwrap_err();
     let words = error.to_ascii_lowercase();
     assert!(
-        !words.contains("no stop") || words.contains("may have no stop"),
+        !words.contains("no stop")
+            || words.contains("stop was cancelled, but its replacement wasn’t confirmed"),
         "{error}"
     );
 }
@@ -1227,7 +1234,7 @@ fn a_crossed_reference_at_planning_or_an_already_gone_stop_never_restores() {
     assert!(
         h.result(14)
             .unwrap_err()
-            .contains("outcome of your BTC-USD-PERP protection update is unknown")
+            .contains("Your BTC-USD-PERP protection update wasn’t confirmed")
     );
 }
 
@@ -2633,7 +2640,10 @@ fn a_stop_replacement_with_unknown_outcome_says_the_stop_may_be_gone() {
         "an unknown replacement is never doubled"
     );
     let error = h.result(13).unwrap_err();
-    assert!(error.contains("may have no stop"), "{error}");
+    assert!(
+        error.contains("stop was cancelled, but its replacement wasn’t confirmed"),
+        "{error}"
+    );
     assert!(
         error
             .replace("Check your open orders", "Check Open Orders")
@@ -2691,7 +2701,7 @@ fn expire_cancel_proof(h: &mut Harness) {
             .last()
             .unwrap()
             .message
-            .contains("Check Open Orders and your position before replacing protection")
+            .contains("Check your open orders and position before adding protection")
     );
 }
 #[test]
@@ -3034,7 +3044,7 @@ fn cancel_proof_polls_are_bounded_and_share_one_nonrenewing_deadline() {
     assert!(
         h.result(13)
             .unwrap_err()
-            .contains("outcome of your BTC-USD-PERP protection update is unknown")
+            .contains("Your BTC-USD-PERP protection update wasn’t confirmed")
     );
     assert!(!h.pending.iter().any(|r| r.url.contains("/orders-history")));
 }
@@ -3152,7 +3162,7 @@ fn a_failed_cancel_proof_read_never_restores_or_retries_a_write() {
         assert!(
             h.failures[0]
                 .message
-                .contains("Check Open Orders and your position before replacing protection")
+                .contains("Check your open orders and position before adding protection")
         );
         assert!(
             !h.pending

@@ -270,7 +270,7 @@ fn unstamped_receipt_fails_closed_without_a_default_root() {
     // The initial Read entry refusal has no outcome; today the walk starts and
     // its signing times out NotSent at this clock instead.
     assert_eq!(error.kind, Some(ErrorKind::InvalidInput), "{error:?}");
-    assert_eq!(error.message, "This request was cancelled before sending");
+    assert_eq!(error.message, "This request was interrupted");
     assert_eq!(error.outcome, None, "{error:?}");
 }
 

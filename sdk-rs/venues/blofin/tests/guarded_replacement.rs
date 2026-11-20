@@ -188,8 +188,9 @@ fn assert_unknown_stop(h: &Harness) {
     assert!(
         error
             .message
-            .contains("outcome is unknown. Check Open Orders")
-            || error.message == "Response does not prove the write outcome",
+            .contains("wasn’t confirmed. Check your open orders")
+            || error.message
+                == "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
         "{}",
         error.message
     );
@@ -197,7 +198,7 @@ fn assert_unknown_stop(h: &Harness) {
         !error.message.contains("refused")
             || error
                 .message
-                .contains("replacement was refused and its put-back's outcome is unknown"),
+                .contains("restoring the original wasn’t confirmed"),
         "{}",
         error.message
     );

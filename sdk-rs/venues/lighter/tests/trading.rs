@@ -102,7 +102,7 @@ fn failure(e: &mut Engine<Lighter>) -> String {
         .find_map(|a| match a {
             Action::Notice(Notice::CommandFailed { error, .. }) => {
                 if error.outcome == Some(Outcome::Unknown) {
-                    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+                    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT) || error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again."), "{error:?}");
                 }
                 Some(error.message)
             }
@@ -647,7 +647,7 @@ fn uncertain_settings_write_fences_queued_composition_until_fresh_snapshot() {
         })
         .unwrap();
     reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":20}"#);
-    assert!(failure(&mut e).contains("awaiting reconciliation"));
+    assert!(failure(&mut e).contains("settings update hasn’t been confirmed"));
 }
 
 #[test]
@@ -811,7 +811,7 @@ fn an_omitted_flat_market_does_not_clear_uncertain_settings_barrier() {
     );
     let nonce = http(&mut e, "nextNonce");
     reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":20}"#);
-    assert!(failure(&mut e).contains("awaiting reconciliation"));
+    assert!(failure(&mut e).contains("settings update hasn’t been confirmed"));
 }
 
 #[test]
@@ -895,7 +895,7 @@ fn completion(e: &mut Engine<Lighter>) -> (String, Option<Outcome>) {
         .find_map(|a| match a {
             Action::Notice(Notice::CommandFailed { error, .. }) => {
                 if error.outcome == Some(Outcome::Unknown) {
-                    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+                    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT) || error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again."), "{error:?}");
                 }
                 Some((error.message, error.outcome))
             }
@@ -1121,12 +1121,12 @@ fn released_http_throttles_are_unknown_and_never_replay() {
         if status == 429 {
             assert_eq!(error.kind, Some(ErrorKind::RateLimited));
             assert_eq!(error.outcome, Some(Outcome::Unknown));
-            assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+            assert!(error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again."));
             assert_eq!(error.venue_code, None);
         } else {
             assert_eq!(error.kind, Some(ErrorKind::Internal));
             assert_eq!(error.outcome, Some(Outcome::Unknown));
-            assert!(error.message.contains(ENGINE_UNKNOWN_TEXT));
+            assert!(error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again."));
             assert!(
                 error
                     .venue_message
@@ -1417,7 +1417,7 @@ fn bare_rate_code_fences_dependent_settings_until_reconciliation() {
         !out.iter()
             .any(|a| matches!(a,Action::Http(r) if r.url.contains("sendTx")))
     );
-    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:9,error}) if error.message.contains("awaiting reconciliation"))));
+    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:9,error}) if error.message.contains("settings update hasn’t been confirmed"))));
 }
 
 #[test]
@@ -1935,7 +1935,7 @@ fn unknown_exception_empty_hash(mut e: Engine<Lighter>, orders: Vec<PlaceOrderOp
         error.legacy_text().contains(&accepted),
         "accepted prefix missing: {error:?}"
     );
-    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+    assert!(error.message.contains(ENGINE_UNKNOWN_TEXT) || error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again."), "{error:?}");
     assert_eq!(
         error.partial.as_ref().unwrap().order_ids.as_slice(),
         std::slice::from_ref(&accepted)

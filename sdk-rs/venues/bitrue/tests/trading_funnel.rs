@@ -232,7 +232,7 @@ fn an_unproven_verify_prepares_no_replacement() {
     let error = failure(&h, 7).expect("one terminal");
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert!(
-        error.message.contains("could not be confirmed")
+        error.message.contains("wasn’t confirmed")
             && error
                 .message
                 .replace("Check your open orders", "Check Open Orders")
@@ -555,7 +555,7 @@ fn a_signature_refusal_then_a_lost_resend_keeps_cancel_all_fenced() {
     assert!(
         failure(&h, 8).is_some_and(|e| e
             .message
-            .starts_with("Bitrue protective placement outcome is uncertain")),
+            .starts_with("A Bitrue protection order hasn’t been confirmed")),
         "the venue fence holds cancel-all: {:?}",
         failure(&h, 8)
     );
@@ -617,7 +617,7 @@ fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
     assert!(
         error
             .message
-            .contains("Your E-BTC-USDT long position may have no stop"),
+            .contains("Your E-BTC-USDT long position’s stop was cancelled, but its replacement wasn’t confirmed"),
         "{}",
         error.message
     );
@@ -647,7 +647,9 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     h.reply(create, r#"{"code":"-2019","msg":"insufficient margin"}"#);
     let error = failure(&h, 7).expect("a failure");
     assert!(
-        error.message.contains("Your E-BTC-USDT order is gone"),
+        error
+            .message
+            .contains("Your E-BTC-USDT order was cancelled and its replacement was declined"),
         "{}",
         error.message
     );

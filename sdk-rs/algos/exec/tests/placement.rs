@@ -141,7 +141,12 @@ fn linear_contract_size_and_native_position_extra_match_ts() {
         "conflicting quantities must not choose the larger size"
     );
     assert_eq!(result(&p)["success"], false);
-    assert!(result(&p)["error"].as_str().unwrap().contains("confirm"));
+    assert!(
+        result(&p)["error"]
+            .as_str()
+            .unwrap()
+            .contains("Position size is unknown")
+    );
     p.store["positions"][0]["extra"]["contractsNative"] = json!(200.0);
     e.handle(&request("sell 50%pos reduce"), &mut p);
     assert_eq!(p.calls[0].2[0]["amount"], 100.);

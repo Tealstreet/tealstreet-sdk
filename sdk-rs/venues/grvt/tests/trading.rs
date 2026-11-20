@@ -1298,7 +1298,10 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     let actions = reply(&mut e, &replacement, 400, r#"{"c":1001,"m":"refused"}"#);
     let result = done(&actions, 9).unwrap();
     let error = result.as_ref().unwrap_err();
-    assert!(error.contains("order is gone"), "{error}");
+    assert!(
+        error.contains("order was cancelled and its replacement was declined"),
+        "{error}"
+    );
 }
 #[test]
 fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {

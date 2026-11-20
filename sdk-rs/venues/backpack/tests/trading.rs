@@ -982,13 +982,12 @@ fn an_unclassified_limit_replacement_failure_warns_its_outcome_is_unknown()
     assert_eq!(error.venue_code.as_deref(), Some("INVALID_ORDER"));
     assert_eq!(error.venue_message.as_deref(), Some("bad"));
     assert!(
-        error
+        error.message.contains(
+            "Your SOL_USDC_PERP order was cancelled, but its replacement wasn’t confirmed"
+        ) && error
             .message
-            .contains("Your SOL_USDC_PERP order may be gone")
-            && error
-                .message
-                .replace("Check your open orders", "Check Open Orders")
-                .contains("Check Open Orders"),
+            .replace("Check your open orders", "Check Open Orders")
+            .contains("Check Open Orders"),
         "{}",
         error.message
     );
@@ -1650,7 +1649,7 @@ fn a_refused_replacement_still_resting_is_never_put_back() {
     assert!(
         error
             .message
-            .contains("Your SOL_USDC_PERP long position may have no stop")
+            .contains("Your SOL_USDC_PERP long position’s stop was cancelled, but its replacement wasn’t confirmed")
             && error
                 .message
                 .replace("Check your open orders", "Check Open Orders")

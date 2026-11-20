@@ -546,7 +546,8 @@ fn dispatched_ambiguous_writes_are_unknown_without_resend_or_replacement() {
                 "{text}"
             );
             assert!(
-                !text.contains("refused") && !text.contains("order is gone"),
+                !text.contains("refused")
+                    && !text.contains("order was cancelled and its replacement was declined"),
                 "{text}"
             );
             assert!(
@@ -810,7 +811,10 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     h.response("/data/order/o1", 200, &detail("o1", "CANCELED", 4.0));
     h.response("/order", 400, r#"{"error":"not enough balance"}"#);
     let error = h.done.last().unwrap().1.clone().unwrap_err();
-    assert!(error.contains("order is gone"), "{error}");
+    assert!(
+        error.contains("order was cancelled and its replacement was declined"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -1033,7 +1037,7 @@ fn partial_batch_errors_return_every_acknowledged_id_for_network_and_venue_failu
         assert_eq!(result["totalOrderCount"], 2);
         assert_eq!(result["failedOrderIndex"], 1);
         assert!(result["message"].as_str().unwrap().contains(if network {
-            "outcome is unknown. Check Open Orders"
+            "wasn’t confirmed. Check your open orders"
         } else {
             "insufficient"
         }));

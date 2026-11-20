@@ -1302,7 +1302,10 @@ fn a_refused_limit_replacement_says_the_order_is_gone() {
         r#"{"code":-2022,"msg":"ReduceOnly Order is rejected."}"#,
     );
     let message = h.result(1).as_ref().unwrap_err();
-    assert!(message.contains("order is gone"), "{message}");
+    assert!(
+        message.contains("order was cancelled and its replacement was declined"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -1373,7 +1376,7 @@ fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
                     assert!(
                         error
                             .message
-                            .contains("We couldn’t confirm this change. Check your open orders before trying again.")
+                            .contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.")
                     );
                 } else {
                     assert!(message.contains(told), "{v3} {status} {body}: {message}");

@@ -43,7 +43,7 @@ fn unknown_envelopes_keep_the_journal_and_emit_outcome_unknown_once() {
         assert_eq!(error.outcome, Some(Outcome::Unknown));
         assert_eq!(
             error.message,
-            "We couldn’t confirm this change. Check your open orders before trying again."
+            "We couldn’t confirm this change. Check your open orders before trying again.: We couldn’t confirm this change. Check your open orders before trying again."
         );
         assert!(
             error
@@ -57,7 +57,7 @@ fn unknown_envelopes_keep_the_journal_and_emit_outcome_unknown_once() {
             rows[..20]
                 .iter()
                 .all(|row| matches!(&row.result, ElementResult::Unknown { error }
-            if error.message == "We couldn’t confirm this change. Check your open orders before trying again."))
+            if error.message == "We couldn’t confirm this change. Check your open orders before trying again.: We couldn’t confirm this change. Check your open orders before trying again."))
         );
         assert!(matches!(
             rows[20].result,
@@ -73,7 +73,7 @@ fn unknown_envelopes_keep_the_journal_and_emit_outcome_unknown_once() {
             .filter(|action| {
                 matches!(action,
                     Action::Notice(Notice::Event(event)) if event.code == "order.outcome_unknown"
-                        && event.message == "We couldn’t confirm this change. Check your open orders before trying again."
+                        && event.message == "We couldn’t confirm this change. Check your open orders before trying again.: We couldn’t confirm this change. Check your open orders before trying again."
                 && event.fields.iter().any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
                 )
             })

@@ -1590,7 +1590,7 @@ fn a_selected_cfm_accounts_null_balance_is_unknown_and_keeps_its_cash() {
         s.reply(read, 200, body);
         s.collect();
         assert_eq!(s.e.store().balance(), &before);
-        assert!(s.logs.iter().any(|log| log.contains("confirm")
+        assert!(s.logs.iter().any(|log| log.contains("unknown")
             && log.contains("/api/v3/brokerage/cfm/balance_summary")
             && log.contains("field `balance_summary`")));
         let retry = next_read(&mut s, "/cfm/balance_summary");

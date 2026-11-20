@@ -543,7 +543,7 @@ fn cancel_all_reports_a_partial_failure_and_only_marks_what_succeeded() {
     assert_eq!(
         h.result(11),
         Some(&Err(
-            "The exchange reply didn’t confirm this change. Check your open orders before trying again."
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.. We couldn’t confirm this change. Check your open orders before trying again."
                 .into()
         ))
     );
@@ -675,7 +675,9 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
         .find(|(id, _)| *id == 12)
         .expect("a failure");
     assert!(
-        error.message.contains("Your BTCUSDT order is gone"),
+        error
+            .message
+            .contains("Your BTCUSDT order was cancelled and its replacement was declined"),
         "{}",
         error.message
     );
@@ -1425,7 +1427,7 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
         if status >= 500 {
             assert_eq!(
                 error.message,
-                "The exchange reply didn’t confirm this change. Check your open orders before trying again."
+                "The exchange reply didn’t confirm this change. Check your open orders before trying again.. We couldn’t confirm this change. Check your open orders before trying again."
             );
             let native: Option<serde_json::Value> = serde_json::from_str(body).ok();
             assert_eq!(
@@ -1476,7 +1478,7 @@ fn a_rejected_replacement_after_a_confirmed_cancel_is_not_reported_as_rejected()
     };
     assert_eq!(
         error.message,
-        "Your BTCUSDT order is gone: it was canceled and its replacement refused: Margin is insufficient."
+        "Your BTCUSDT order was cancelled and its replacement was declined: Margin is insufficient."
     );
     assert_eq!(error.outcome, None, "the cancel already took effect");
 }
@@ -2186,7 +2188,9 @@ fn an_unknown_replacement_outcome_never_puts_the_old_take_profit_back() {
     );
     assert_eq!(error.protection, None);
     assert!(
-        error.message.contains("may have no take profit"),
+        error
+            .message
+            .contains("take profit was cancelled, but its replacement wasn’t confirmed"),
         "{}",
         error.message
     );

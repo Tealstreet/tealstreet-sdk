@@ -2512,5 +2512,8 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
         json!({"code":"40006","msg":"invalid signature"}),
     );
     let error = done(&actions).unwrap_err();
-    assert!(error.contains("Your BTCUSDT order is gone"), "{error}");
+    assert!(
+        error.contains("Your BTCUSDT order was cancelled and its replacement was declined"),
+        "{error}"
+    );
 }

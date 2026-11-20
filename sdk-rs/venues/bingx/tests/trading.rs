@@ -2484,7 +2484,7 @@ fn rejected_entry_cannot_run_native_freshness_effects_or_start_a_write() {
     assert_eq!(h.engine.venue().admitted_entries, 0);
     assert!(h.requests.is_empty());
     assert_eq!(h.failures.len(), 1);
-    assert!(h.failures[0].message.contains("capacity"));
+    assert!(h.failures[0].message.contains("request queue is full"));
 }
 
 fn split_order(amount: f64) -> PlaceOrderOpts {

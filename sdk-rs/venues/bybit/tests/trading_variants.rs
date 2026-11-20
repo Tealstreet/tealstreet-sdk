@@ -4239,7 +4239,7 @@ fn hyro_lost_ack_reports_to_each_observer_before_its_terminal() {
         error: "lost",
     });
     let expected = format!(
-        "We couldn’t confirm this change. Check your open orders before trying again.. HyroTrader order outcome is unknown (orderLinkId {id}). Reconcile before placing a replacement: lost"
+        "We couldn’t confirm this change. Check your open orders before trying again. HyroTrader didn’t confirm order {id}: lost. Check your open orders before placing a replacement."
     );
     for command in [91, 92] {
         let notices: Vec<_> = h
@@ -7474,8 +7474,7 @@ fn spot_ts_parity_definite_lot_refusal_finishes_order_then_stops_batch() {
 #[test]
 fn spot_ts_parity_unknown_stops_lots_and_batch_with_canonical_evidence() {
     // PARITY-EXCEPTION: stop-after-UNKNOWN (Sean/daxx, 2026-11-08); TS continues at reference/bybit/bybitspot.exchange.ts:844-856.
-    const ENGINE_UNKNOWN_TEXT: &str =
-        "We couldn’t confirm this change. Check your open orders before trying again.";
+    const ENGINE_UNKNOWN_TEXT: &str = "The exchange reply didn’t confirm this change. Check your open orders before trying again.";
     for status in [Some(200), Some(503), None] {
         let mut h = spot_split_plan_market("0.01", "1190");
         place(
@@ -7509,7 +7508,14 @@ fn spot_ts_parity_unknown_stops_lots_and_batch_with_canonical_evidence() {
         );
         let error = spot_parity_error(&h, 195);
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
-        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT), "{error:?}");
+        assert!(
+            error.message.contains(if status.is_some() {
+                ENGINE_UNKNOWN_TEXT
+            } else {
+                support::ENGINE_UNKNOWN_TEXT
+            }),
+            "{error:?}"
+        );
         assert_eq!(error.partial.as_ref().unwrap().order_ids, ["placed-prefix"]);
         assert!(h.unknown.contains(&195));
     }
@@ -7892,7 +7898,7 @@ fn native_uid_limit_is_rejected_after_managed_http_end_without_resend() {
         );
         assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
         assert_eq!(error.venue_code.as_deref(), Some("10006"));
-        assert!(!error.message.contains("The outcome is unknown"));
+        assert!(!error.message.contains("We couldn’t confirm this change"));
         assert_eq!(
             h.notices
                 .iter()
@@ -7993,7 +7999,7 @@ fn assert_malformed_uid_refusal_stays_unknown(payload: &str) {
             Some(safe_cex_engine::Outcome::Unknown),
             "{variant:?}/{payload}"
         );
-        assert!(error.message.contains("The outcome is unknown"));
+        assert!(error.message.contains("We couldn’t confirm this change"));
         h.advance(2000.0);
         assert!(!h.has_request("/v5/order/create"));
         assert!(!h.has_request("/v5/order/create-batch"));
@@ -8061,7 +8067,7 @@ fn native_uid_limit_batch_preserves_accepted_ids_without_unknown_or_resend() {
     assert_eq!((partial.total, partial.failed_index), (Some(2), Some(1)));
     assert!(!h.unknown.contains(&9108));
     assert_eq!(error.venue_code.as_deref(), Some("10006"));
-    assert!(!error.message.contains("The outcome is unknown"));
+    assert!(!error.message.contains("We couldn’t confirm this change"));
     assert!(h.engine.store().order("accepted").is_some());
     h.advance(2000.0);
     assert!(!h.has_request("/v5/order/create"));

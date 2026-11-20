@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 //! Command contract cases derived from the official exchange endpoint shapes.
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -606,7 +607,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
         assert!(
             actions
                 .iter()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings are uncertain")))
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings update hasn’t been confirmed")))
         );
         message(
             &mut e,
@@ -624,7 +625,7 @@ fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() 
         );
         assert!(
             e.drain_plain()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 3, ref error }) if error.legacy_text().contains("settings are uncertain")))
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 3, ref error }) if error.legacy_text().contains("settings update hasn’t been confirmed")))
         );
 
         let fresh = STATE.replace("cross", "isolated").replace("1000}", "3500}");
@@ -1019,7 +1020,7 @@ fn unlisted_settings_error_fences_the_next_queued_command() {
             .iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings are uncertain"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, error }) if error.legacy_text().contains("settings update hasn’t been confirmed"))));
     assert!(actions.iter().any(|a| matches!(a, Action::Http(r) if kind(r) == "activeAssetData" || kind(r) == "clearinghouseState")));
 }
 
@@ -1068,7 +1069,7 @@ fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() 
     );
     assert!(
         e.drain_plain()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, ref error }) if error.legacy_text().contains("settings are uncertain")))
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 2, ref error }) if error.legacy_text().contains("settings update hasn’t been confirmed")))
     );
     reply_at(
         &mut e,
@@ -1756,7 +1757,7 @@ fn settings_engine_seal_joins_old_read_but_only_a_post_write_read_recovers() {
             .iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 103, error }) if error.legacy_text().contains("settings are uncertain"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 103, error }) if error.legacy_text().contains("settings update hasn’t been confirmed"))));
     reply_at(
         &mut e,
         &reads[0],

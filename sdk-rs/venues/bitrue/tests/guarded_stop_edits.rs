@@ -226,7 +226,7 @@ fn a_cancel_never_proven_is_unknown_with_no_replacement() {
         }
         let error = failure(&h);
         assert!(
-            error.message.contains("could not be confirmed")
+            error.message.contains("wasn’t confirmed")
                 && error
                     .message
                     .replace("Check your open orders", "Check Open Orders")

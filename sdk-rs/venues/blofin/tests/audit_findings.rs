@@ -144,7 +144,12 @@ fn an_internal_error_on_an_order_replacement_says_it_may_be_gone() {
     let r = h.take("batch-orders");
     h.respond(r, r#"{"code":"103013","msg":"Internal error; unable to process your request. Please try again.","data":null}"#);
     let e = failure(&h).unwrap();
-    assert!(e.message.contains("may be gone"), "{}", e.message);
+    assert!(
+        e.message
+            .contains("was cancelled, but its replacement wasn’t confirmed"),
+        "{}",
+        e.message
+    );
 }
 
 #[test]

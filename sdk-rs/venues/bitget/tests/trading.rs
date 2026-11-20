@@ -1,3 +1,4 @@
+// Rule 5 (#3726): display pins follow the new copy; outcome and no-send guards remain.
 mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Command, Event, Method};
@@ -1763,7 +1764,10 @@ fn a_replacement_refused_after_the_cancel_says_the_order_is_gone() {
         r#"{"code":"45110","msg":"less than the minimum amount 5 USDT"}"#,
     );
     let error = h.done[0].1.clone().unwrap_err();
-    assert!(error.contains("Your BTCUSDT order is gone"), "{error}");
+    assert!(
+        error.contains("Your BTCUSDT order was cancelled and its replacement was declined"),
+        "{error}"
+    );
 }
 
 #[test]

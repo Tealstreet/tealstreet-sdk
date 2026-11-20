@@ -433,7 +433,7 @@ fn ambiguous_http_timestamp_refusal_fences_writes_until_primary_snapshot() {
                 Action::Notice(Notice::CommandFailed { command, error })
                     if *command == COMMAND + 10
                         && error.outcome == Some(Outcome::NotSent)
-                        && error.message.contains("reconcile before placing or amending")
+                        && error.message.contains("Check your open orders before placing or editing orders")
             )),
             "HTTP {status}: follow-up must be refused by the placement fence: {held:?}"
         );

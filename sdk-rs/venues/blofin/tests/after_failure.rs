@@ -707,7 +707,7 @@ fn engine_sealed_unknown_batch(grouped: bool) {
             rows[..20]
                 .iter()
                 .all(|row| matches!(&row.result, ElementResult::Unknown { error }
-            if error.message.contains(ENGINE_UNKNOWN_TEXT)))
+            if error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.")))
         );
         assert!(matches!(
             rows[20].result,

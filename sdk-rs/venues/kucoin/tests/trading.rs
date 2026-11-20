@@ -670,7 +670,10 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     );
     h.pace();
     let error = h.done(1).unwrap_err();
-    assert!(error.contains("order is gone"), "{error}");
+    assert!(
+        error.contains("order was cancelled and its replacement was declined"),
+        "{error}"
+    );
 }
 #[test]
 fn a_partly_filled_standalone_stop_is_refused_before_any_cancel() {
@@ -1725,7 +1728,7 @@ fn assert_unknown_stop(h: &Harness) {
     assert!(
         error
             .message
-            .contains("outcome is unknown. Check Open Orders"),
+            .contains("wasn’t confirmed. Check your open orders"),
         "{}",
         error.message
     );
@@ -1875,7 +1878,7 @@ fn a_lost_cancel_confirmation_is_unknown_with_no_put_back_or_resend() {
         );
         assert_eq!(error.protection, None);
         assert!(
-            error.message.contains("could not be confirmed")
+            error.message.contains("wasn’t confirmed")
                 && error.message.contains("confirm")
                 && error.message.contains("no replacement was sent"),
             "{}",
@@ -3037,18 +3040,18 @@ fn protective_failure_words_keep_the_kind_and_protected_position_side() {
                     }
                     "refused" => format!("Your BTCUSDT {position} position has no {label}"),
                     "unknown_cancel" => format!(
-                        "Your BTCUSDT {position} position's {label} edit outcome is unknown"
+                        "The {label} edit for your BTCUSDT {position} position wasn’t confirmed"
                     ),
                     "unknown_proof" => format!(
-                        "Your BTCUSDT {position} position's {label} cancel was sent but could not be confirmed"
+                        "The {label} cancellation for your BTCUSDT {position} position wasn’t confirmed"
                     ),
                     "unknown_place" => {
                         format!(
-                            "Your BTCUSDT {position} position's {label} replacement outcome is unknown"
+                            "The replacement {label} for your BTCUSDT {position} position wasn’t confirmed"
                         )
                     }
                     _ => format!(
-                        "Your BTCUSDT {position} position's {label} put-back outcome is unknown"
+                        "Restoring the original {label} for your BTCUSDT {position} position wasn’t confirmed"
                     ),
                 };
                 assert!(
@@ -3057,7 +3060,7 @@ fn protective_failure_words_keep_the_kind_and_protected_position_side() {
                     error.message
                 );
                 assert_eq!(
-                    error.message.matches("Your BTCUSDT").count(),
+                    error.message.matches("BTCUSDT").count(),
                     1,
                     "{}",
                     error.message

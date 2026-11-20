@@ -3864,7 +3864,10 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
         r#"{"code":11001,"msg":"TE_NO_ENOUGH_AVAILABLE_BALANCE","data":null}"#,
     );
     let error = done(&a).unwrap_err();
-    assert!(error.contains("order is gone"), "{error}");
+    assert!(
+        error.contains("order was cancelled and its replacement was declined"),
+        "{error}"
+    );
 }
 
 fn refused_stop_replacement(e: &mut Engine<PhemexPerpetuals>) -> Vec<Action> {
@@ -4419,7 +4422,9 @@ fn an_unknown_stop_replacement_is_never_put_back_or_resent() {
         let error = failure(&a);
         assert_eq!(error.protection, None, "{body}");
         assert!(
-            error.message.contains("may have no stop"),
+            error
+                .message
+                .contains("stop was cancelled, but its replacement wasn’t confirmed"),
             "{body}: {}",
             error.message
         );
@@ -4803,7 +4808,7 @@ fn ordinary_replacement_text_matches_master() {
         let a = reply(&mut e, 1002., &writes(&a)[0], status, body);
         let error = failure(&a);
         let expected = if status == 200 {
-            "Phemex 11082 TE_RISK_LIMIT_EXCEEDED; Your BTCUSDT order is gone: it was canceled and its replacement refused"
+            "Phemex 11082 TE_RISK_LIMIT_EXCEEDED; Your BTCUSDT order was cancelled and its replacement was declined"
         } else {
             "The exchange reply didn’t confirm this change. Check your open orders before trying again."
         };
