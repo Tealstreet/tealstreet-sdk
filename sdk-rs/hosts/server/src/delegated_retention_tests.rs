@@ -401,6 +401,93 @@ async fn a_stale_socket_keeps_only_its_other_registrations_labels() {
         .await;
 }
 
+fn hold_alias(
+    account: &Account,
+    id: u64,
+    label: &str,
+    requested: crate::envelope::AccountSigningMode,
+) {
+    assert!(account.hold_label(
+        id,
+        Live {
+            outbox: Arc::new(|_| true),
+            token: None,
+        },
+        label
+    ));
+    let registration = format!("registration-{label}");
+    account.confirm_signing_mode(
+        id,
+        label,
+        requested,
+        Arc::new(|_| true),
+        Some(&registration),
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn disposing_every_alias_never_leaves_an_earlier_registrations_stale_socket() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, _inbox) = resident(&registry, "A");
+            hold_requesting(&account, 8, Delegated, "registration-7");
+            hold_alias(&account, 7, "alias-y", Delegated);
+            let provider = account.delegated().as_ref().unwrap().provider();
+            registry.release_label(&account, 7, "synthetic-main", Disposal::PageDisposed);
+            assert!(
+                !registry.holds(&account, 8),
+                "the stale copy leaves with the first alias"
+            );
+            assert_eq!(registry.account_count(), 1, "alias-y still holds it");
+            registry.release_label(&account, 7, "alias-y", Disposal::PageDisposed);
+            assert_eq!(registry.account_count(), 0);
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_remaining_cosigned_alias_never_keeps_the_key_after_its_last_delegated_alias() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, mut inbox) = resident(&registry, "A");
+            hold_alias(&account, 7, "alias-c", Cosigned);
+            let provider = account.delegated().as_ref().unwrap().provider();
+            registry.release_label(&account, 7, "synthetic-main", Disposal::PageDisposed);
+            assert_eq!(registry.account_count(), 0);
+            assert!(matches!(
+                inbox.try_recv(),
+                Ok(crate::algos::AlgoInput::Dispose { .. })
+            ));
+            assert_eq!(
+                provider.can_sign(&KeyRef("primary.signing".into()), Algorithm::HmacSha256),
+                Capability::Unsupported
+            );
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_detached_label_loses_its_holder_authority_but_the_other_alias_keeps_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let registry = tests::registry();
+            let (account, _inbox) = resident(&registry, "A");
+            hold_requesting(&account, 8, Delegated, "registration-7");
+            hold_alias(&account, 8, "alias-y", Delegated);
+            registry.release(&account, 7, Disposal::PageDisposed);
+            assert!(registry.holds(&account, 8));
+            assert!(!registry.holds_label(&account, 8, "synthetic-main"));
+            assert!(registry.holds_label(&account, 8, "alias-y"));
+        })
+        .await;
+}
+
 #[tokio::test(start_paused = true)]
 async fn an_unjoined_dispose_still_stops_the_account_it_cannot_attribute() {
     tokio::task::LocalSet::new()

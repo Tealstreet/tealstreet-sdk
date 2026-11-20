@@ -2377,7 +2377,9 @@ impl Registry {
         label: &str,
         disposal: Disposal,
     ) {
-        let (still_held, leaving) = {
+        let page_dispose = matches!(disposal, Disposal::PageDisposed | Disposal::Orphaned)
+            && account.delegated().is_some();
+        let (still_held, leaving, stop) = {
             let mut holders = account.holders.lock().unwrap();
             let leaving = holders.registrations(holder, Some(label));
             holders.confirmed.remove(&(holder, label.into()));
@@ -2399,12 +2401,21 @@ impl Registry {
                 if holders.signing == Some(holder) {
                     account.sign_through(&mut holders, holder, &live);
                 }
-                (true, leaving)
+                // AGT-79: this socket keeps another alias, but the disposed
+                // registration's stale copies still leave, and a remaining COSIGNED
+                // alias never keeps the resident key alone.
+                let stop = page_dispose && !holders.disposed && {
+                    holders.detach_registrations(account, &leaving);
+                    !holders.delegated_live_besides(&leaving)
+                };
+                (true, leaving, stop)
             } else {
-                (false, leaving)
+                (false, leaving, false)
             }
         };
-        if !still_held {
+        if stop {
+            self.dispose_for(account, disposal, "account disposed", None);
+        } else if !still_held {
             self.release_with_labels(account, holder, disposal, vec![label.to_owned()], leaving);
         }
     }
@@ -2636,6 +2647,18 @@ impl Registry {
     /// Whether `holder` still holds `account`; disposing drops every holder.
     pub fn holds(&self, account: &Account, holder: u64) -> bool {
         account.holders.lock().unwrap().by_id.contains_key(&holder)
+    }
+
+    /// Whether `holder` still holds `account` under `label`. AGT-79 can detach a
+    /// stale DELEGATED label while its socket keeps another alias.
+    pub fn holds_label(&self, account: &Account, holder: u64, label: &str) -> bool {
+        let holders = account.holders.lock().unwrap();
+        holders.by_id.contains_key(&holder)
+            && (account.delegated().is_none()
+                || holders
+                    .labels
+                    .get(&holder)
+                    .is_none_or(|labels| labels.contains_key(label)))
     }
 
     /// Disposes regardless of other holders (a rebuilt init or a fatal signer).

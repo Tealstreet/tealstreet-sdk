@@ -134,3 +134,40 @@ async fn another_devices_dispose_leaves_this_device_trading() {
     web.close();
     phone.close();
 }
+
+// AGT-79 review: a stale socket whose disposed registration was detached cannot
+// keep submitting under it through the alias it still holds.
+#[tokio::test]
+async fn a_detached_registration_cannot_submit_through_another_alias() {
+    let f = fixture().await;
+    let (mut web, _web_sent) = user_session(f.registry.clone(), "alice");
+    let (mut stale, mut stale_sent) = user_session(f.registry.clone(), "alice");
+    stale.order_frames_enabled = true;
+    let (mut web_ready, mut stale_ready) = (web.take_verified(), stale.take_verified());
+    admitted(&mut web, "acct", "synthetic-key", "web", &mut web_ready).await;
+    admitted(&mut stale, "acct", "synthetic-key", "web", &mut stale_ready).await;
+    admitted(
+        &mut stale,
+        "other-alias",
+        "synthetic-key",
+        "other-registration",
+        &mut stale_ready,
+    )
+    .await;
+    snapshot(&mut stale, &mut stale_sent, "acct").await;
+    let account = web.joined["acct"].account.clone();
+    web.handle(r#"{"t":"dispose","d":{"accountName":"acct"}}"#)
+        .await
+        .unwrap();
+    assert_eq!(account.labels(stale.socket), ["other-alias"]);
+    assert_eq!(
+        stale.order_admission_refusal("acct", Some("web")),
+        Some("holder_changed")
+    );
+    assert!(!stale.order_admitted("acct", Some("web")));
+    assert!(!stale.joined.contains_key("acct"), "its Joined is retired");
+    assert!(stale.order_admitted("other-alias", Some("other-registration")));
+    assert!(f.orders.lock().unwrap().is_empty());
+    web.close();
+    stale.close();
+}

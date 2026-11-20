@@ -1931,7 +1931,10 @@ impl Session {
         let gone: Vec<String> = self
             .joined
             .iter()
-            .filter(|(_, joined)| !registry.holds(&joined.account, socket))
+            .filter(|(_, joined)| {
+                let label = joined.out.account_label(&joined.account.name);
+                !registry.holds_label(&joined.account, socket, label)
+            })
             .map(|(name, _)| name.clone())
             .collect();
         for name in gone {
