@@ -792,6 +792,13 @@ the captured user, socket and init generation; dispose, another init, another
 key request or socket close retires pending work. Verification failure leaves
 any running account unchanged.
 
+For ApeX COSIGNED proofs only, the temporary engine receives
+`apexomniSkipLegacySignatureRetry: true`. The server overrides a supplied false;
+a refused private read cannot trigger the whole-second legacy signature resend.
+Other venues, DELEGATED proofs and admitted resident options remain unchanged.
+This preserves millisecond request-byte separation without a cross-request cache;
+it does not claim that timestamps are unique nonces or change the 5-second window.
+
 Both modes use a temporary native account for the requested venue's normal private
 startup reads, disposed before admission. COSIGNED uses a pending signing link
 owned only by the joining connection; DELEGATED uses the supplied pair through

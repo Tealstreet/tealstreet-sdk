@@ -18,6 +18,10 @@ macro_rules! suite {
                 delegated_consumed::<$venue>().await;
             }
             #[tokio::test]
+            async fn cosigned_signature_refusal_keeps_millisecond_proof() {
+                signature_refusal_keeps_millisecond_proof::<$venue>().await;
+            }
+            #[tokio::test]
             async fn cosigned_other_valid_key_preserves_resident() {
                 cosigned_wrong_key::<$venue>().await;
             }
@@ -46,4 +50,40 @@ suite!(testnet, Apex<true>);
 async fn fixture_routes_only_to_loopback() {
     let f = Fixture::new::<Apex<false>>().await;
     assert!(f.websocket_url.starts_with("ws://127.0.0.1:"));
+}
+
+// Valid setup succeeds; only private proof reads receive a wrong-key signature.
+async fn signature_refusal_keeps_millisecond_proof<V: Venue>() {
+    let f = Fixture::new::<V>().await;
+    let mut client = Client::new(&f);
+    client.init(V::init()).await;
+    client
+        .finish_with::<V>(&mut Device::default(), |frame| {
+            if V::replayable(frame) {
+                Answer::OtherKey
+            } else {
+                Answer::Correct
+            }
+        })
+        .await;
+    let mut attempts = std::collections::BTreeMap::new();
+    for frame in &client.frames {
+        if frame["t"] == "sign-req" && V::replayable(frame) {
+            let (slot, _, _) = V::signature(frame, false);
+            *attempts.entry(slot).or_insert(0_usize) += 1;
+        }
+    }
+    assert!(!attempts.is_empty(), "the private proof must actually run");
+    assert!(
+        attempts.values().all(|count| *count == 1),
+        "a refused COSIGNED proof must not request a rounded legacy signature: {attempts:?}"
+    );
+    assert!(f.registry.held(USER, ACCOUNT, client.socket()).is_none());
+    assert!(
+        client
+            .frames
+            .iter()
+            .any(|frame| frame["d"]["data"][1]["initRefused"] == true)
+    );
+    assert_eq!(f.seen.lock().unwrap().writes, 0);
 }

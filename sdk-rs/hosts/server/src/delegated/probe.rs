@@ -155,6 +155,23 @@ impl Drop for ProbeActor {
     }
 }
 
+fn probe_options<'a>(
+    venue: &str,
+    options: &'a str,
+    mode: Option<&str>,
+) -> Result<std::borrow::Cow<'a, str>, ProbeRefusal> {
+    if venue != "apexomni" || mode != Some("hosted_cosign") {
+        return Ok(std::borrow::Cow::Borrowed(options));
+    }
+    let mut value: serde_json::Value = serde_json::from_str(options)
+        .map_err(|_| ProbeRefusal::INVALID.at(RefusalStage::Options))?;
+    let fields = value
+        .as_object_mut()
+        .ok_or_else(|| ProbeRefusal::INVALID.at(RefusalStage::Options))?;
+    fields.insert("apexomniSkipLegacySignatureRetry".into(), true.into());
+    Ok(std::borrow::Cow::Owned(value.to_string()))
+}
+
 pub(crate) async fn run<T: Transport + 'static>(
     venue: &str,
     options_json: &str,
@@ -182,11 +199,12 @@ pub(crate) async fn run<T: Transport + 'static>(
     if !allowed() {
         return Err(ProbeRefusal::TRANSIENT.at(RefusalStage::Authority));
     }
+    let options_json = probe_options(venue, options_json, config.signing_mode)?;
     let private = (venue == "kraken").then(|| Arc::new(kraken_private_startup::Gate::default()));
     let (handle, task) = if let Some(gate) = &private {
         safe_cex_native::spawn_venue_account(
             venue,
-            options_json,
+            &options_json,
             kraken_private_startup::PrivateStartup {
                 inner: transport,
                 gate: gate.clone(),
@@ -196,7 +214,13 @@ pub(crate) async fn run<T: Transport + 'static>(
             config,
         )
     } else {
-        safe_cex_native::spawn_venue_account(venue, options_json, transport, Some(provider), config)
+        safe_cex_native::spawn_venue_account(
+            venue,
+            &options_json,
+            transport,
+            Some(provider),
+            config,
+        )
     }
     .map_err(|_| ProbeRefusal::INVALID.at(RefusalStage::Construction))?;
     let mut actor = ProbeActor { handle, task };
@@ -287,6 +311,27 @@ fn notice_refusal(text: &str) -> Option<ProbeRefusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apex_cosigned_probe_overrides_only_its_temporary_retry_policy() {
+        let source = r#"{"apexomniSkipLegacySignatureRetry":false,"testnet":true}"#;
+        let proof = probe_options("apexomni", source, Some("hosted_cosign")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&proof).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "apexomniSkipLegacySignatureRetry": true, "testnet": true
+            })
+        );
+        for (venue, mode) in [
+            ("apexomni", Some("hosted_delegated")),
+            ("apexomni", None),
+            ("bybit", Some("hosted_cosign")),
+        ] {
+            assert_eq!(probe_options(venue, source, mode).unwrap(), source);
+        }
+        assert!(probe_options("apexomni", "[]", Some("hosted_cosign")).is_err());
+    }
 
     #[test]
     fn cosigned_readiness_is_asterdex_v1_shape_scoped() {

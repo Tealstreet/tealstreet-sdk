@@ -2022,6 +2022,7 @@ pub fn build_with_signer_in_context<T: Visit>(
                     public_data_only: options.public_data_only,
                     identity: identities.primary.clone(),
                     credentials_ignored,
+                    skip_legacy_signature_retry: options.apexomni_skip_legacy_signature_retry,
                     tick_interval_ms: None,
                 }),
                 entropy,
@@ -3005,6 +3006,10 @@ pub struct EngineOptions {
     #[cfg(feature = "apexomni")]
     #[serde(default)]
     pub omni_key_seed: Option<String>,
+    /// Set on the temporary COSIGNED proof engine, never the resident options.
+    #[cfg(feature = "apexomni")]
+    #[serde(default)]
+    pub apexomni_skip_legacy_signature_retry: bool,
     #[serde(default)]
     pub application_id: Option<String>,
     #[serde(default)]
