@@ -958,8 +958,7 @@ impl Okx {
         let mut joined = HashSet::new();
         let mut writes = Vec::with_capacity(placed.len());
         for payload in placed {
-            if payload.close_fraction != Some("1") || !self.holds_full_position_algo(cx, &payload)
-            {
+            if payload.close_fraction != Some("1") || !self.holds_full_position_algo(cx, &payload) {
                 writes.push(AlgoWrite::Place(Box::new(payload)));
                 continue;
             }
@@ -2124,14 +2123,15 @@ impl Okx {
             serde_json::from_str(&step.body)
         }
         .unwrap_or_default();
-        if step.cancels() && (requested.len() != step.expected
-            || acks.iter().enumerate().any(|(index, ack)| {
-                requested.get(index).is_none_or(|named| {
-                    named.id().is_empty()
-                        || ack.ord_id != named.ord_id
-                        || ack.algo_id != named.algo_id
-                })
-            }))
+        if step.cancels()
+            && (requested.len() != step.expected
+                || acks.iter().enumerate().any(|(index, ack)| {
+                    requested.get(index).is_none_or(|named| {
+                        named.id().is_empty()
+                            || ack.ord_id != named.ord_id
+                            || ack.algo_id != named.algo_id
+                    })
+                }))
         {
             return self.unproven(cx, request, "OKX cancel row identity missing or mismatched");
         }
@@ -2262,9 +2262,8 @@ impl Okx {
         // A cancellation whose rows are all identity-validated and proven settles
         // per row, whatever the envelope code: OKX answers a partial batch `2`,
         // and stopping there left every later algo cancel unsent (AGT-69).
-        let cancel_rows = continue_cancel_errors
-            && matches!(envelope.code, "0" | "1" | "2")
-            && step.cancels();
+        let cancel_rows =
+            continue_cancel_errors && matches!(envelope.code, "0" | "1" | "2") && step.cancels();
         // Legacy TS's response interceptor throws on every nonzero envelope.
         if envelope.code != "0" && !cancel_rows {
             let mut error = if errors.is_empty() {
@@ -3066,8 +3065,7 @@ fn lone_leg(cx: &Cx<'_, Pending>, cancelling: &[String], order: &Order) -> Optio
     let algo = order.id.strip_suffix(if stop { "_sl" } else { "_tp" })?;
     let sibling = format!("{algo}{sibling}");
     let held = cx.store.order(&sibling).is_some_and(|o| {
-        o.symbol == order.symbol
-            && matches!(o.status, OrderStatus::Open | OrderStatus::Updating)
+        o.symbol == order.symbol && matches!(o.status, OrderStatus::Open | OrderStatus::Updating)
     });
     (held && !cancelling.contains(&sibling)).then_some(stop)
 }

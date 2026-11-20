@@ -874,6 +874,38 @@ fn partially_effective_algo_remains_visible_and_accepts_later_live_updates() {
     assert_eq!(e.store().order("algo123_tp").unwrap().price, 43000.0);
 }
 
+/// AGT-98: amend-algos adds a leg (`conditional` -> `oco`) or deletes one
+/// (`oco` -> `conditional`) under the same algoId. The update after a deletion
+/// no longer lists that leg, so its row goes and the other leg stays.
+#[test]
+fn an_algo_update_without_a_leg_removes_that_leg_row() {
+    let (mut e, _, business, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    let frame = |row: &str| format!(r#"{{"arg":{{"channel":"orders-algo"}},"data":[{row}]}}"#);
+    let stop_only = r#"{"instId":"BTC-USDT-SWAP","algoId":"algo7","ordType":"conditional","state":"live","side":"sell","sz":"","closeFraction":"1","slTriggerPx":"36000","slOrdPx":"-1","slTriggerPxType":"mark","reduceOnly":"true"}"#;
+    let both = r#"{"instId":"BTC-USDT-SWAP","algoId":"algo7","ordType":"oco","state":"live","side":"sell","sz":"","closeFraction":"1","slTriggerPx":"36000","slOrdPx":"-1","slTriggerPxType":"mark","tpTriggerPx":"42000","tpOrdPx":"-1","tpTriggerPxType":"last","reduceOnly":"true"}"#;
+    ws(&mut e, business, &frame(stop_only));
+    assert!(e.store().order("algo7_sl").is_some());
+    assert!(e.store().order("algo7_tp").is_none());
+    ws(&mut e, business, &frame(both));
+    assert_eq!(e.store().order("algo7_tp").unwrap().price, 42000.0);
+    assert_eq!(e.store().order("algo7_sl").unwrap().price, 36000.0);
+    ws(&mut e, business, &frame(stop_only));
+    assert!(
+        e.store().order("algo7_tp").is_none(),
+        "{:?}",
+        e.store().orders()
+    );
+    assert_eq!(e.store().order("algo7_sl").unwrap().price, 36000.0);
+    let tp_only = both.replace("\"oco\"", "\"conditional\"").replace(
+        r#""slTriggerPx":"36000","slOrdPx":"-1","slTriggerPxType":"mark","#,
+        "",
+    );
+    ws(&mut e, business, &frame(&tp_only));
+    assert!(e.store().order("algo7_sl").is_none());
+    assert_eq!(e.store().order("algo7_tp").unwrap().price, 42000.0);
+}
+
 #[test]
 fn undecodable_instrument_row_still_reports_its_exposure() {
     for bad in [
