@@ -585,6 +585,7 @@ impl Session {
                                 &completed.account_name,
                                 requested_mode,
                                 out.outbox(),
+                                out.instance_id(),
                             );
                         if self.joined[&completed.account_name]
                             .account
@@ -1180,7 +1181,7 @@ impl Session {
             return;
         };
         let account = joined.account.clone();
-        account.confirm_signing_mode(self.socket, &name, mode, out.outbox());
+        account.confirm_signing_mode(self.socket, &name, mode, out.outbox(), out.instance_id());
         self.registry.interruptions.delegated_status(
             self.user(),
             &name,
@@ -1672,6 +1673,7 @@ impl Session {
                     &init.account_name,
                     envelope::AccountSigningMode::requested(&init),
                     out.outbox(),
+                    out.instance_id(),
                 );
             }
             return Ok(());
@@ -1929,7 +1931,10 @@ impl Session {
         let gone: Vec<String> = self
             .joined
             .iter()
-            .filter(|(_, joined)| !registry.holds(&joined.account, socket))
+            .filter(|(_, joined)| {
+                let label = joined.out.account_label(&joined.account.name);
+                !registry.holds_label(&joined.account, socket, label)
+            })
             .map(|(name, _)| name.clone())
             .collect();
         for name in gone {
