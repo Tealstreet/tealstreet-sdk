@@ -183,7 +183,7 @@ admitted account, after checking the original payload fingerprint and any caller
 | Lighter, Lighter Robinhood; Binance inverse; AsterDEX; Kraken Futures; MEXC | No caller venue ID: those native adapters do not support one |
 | WOO | No caller venue ID: its positive JS-safe integer rule cannot carry the UUID losslessly, and router and outbox accept only lossless forms |
 | Backpack; GRVT; HyroTrader | No caller venue ID: numeric-only fields cannot carry the UUID losslessly, or the native codec supports no caller IDs (AGT-50) |
-| Bybit protection; BloFin triggers and attached TP/SL | No caller venue ID for that order: the native adapter refuses one on a trigger type or an order carrying `triggerPrice`, `stopLoss` or `takeProfit` (BloFin: AGT-46). Plain orders keep the row above |
+| Bybit protection; BloFin and Phemex triggers and attached TP/SL | No caller venue ID for that order: the native adapter refuses one on a trigger type or an order carrying `triggerPrice`, `stopLoss` or `takeProfit` (BloFin: AGT-46; Phemex: live 2026-11-20). Plain orders keep the row above. WEEX and Bitrue have the same adapter rule but no native hosted origin, so they are not hosted |
 
 Text/hex encodings preserve all 128 intent bits. They do not change the intent,
 request ID, fingerprint, age or durable router claim. SDK receipts retain the

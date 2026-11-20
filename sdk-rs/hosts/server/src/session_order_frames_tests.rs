@@ -765,52 +765,77 @@ async fn woo_market_submit_sends_without_a_caller_id() {
 }
 
 // AGT-46 live, blofin-t: a reduce-only conditional carried the bare-hex caller ID,
-// which BloFin's adapter refuses on triggers. Plain BloFin orders keep the hex ID.
+// which BloFin's adapter refuses on triggers; phemex-t refused the UUID on a reduce-only
+// stop and an attached stopLoss (2026-11-20). Plain orders keep their venue ID form.
+// Was `blofin_reduce_only_trigger_submit_sends_without_a_caller_id` (#3754).
 #[tokio::test]
-async fn blofin_reduce_only_trigger_submit_sends_without_a_caller_id() {
+async fn trigger_submit_sends_without_a_caller_id_where_the_adapter_refuses_one() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let stop = json!({"symbol":"BTCUSDT","type":"conditional","side":"sell",
                 "amount":0.001,"triggerPrice":45000,"reduceOnly":true});
             let mut stop_limit = stop.clone();
             stop_limit["price"] = 44900.into();
+            let bracket = json!({"symbol":"BTCUSDT","type":"limit","side":"buy",
+                "amount":0.001,"price":40000,"stopLoss":35000});
             let plain = json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":0.001});
-            for (params, caller_id) in [(stop, false), (stop_limit, false), (plain, true)] {
-                let registry = crate::accounts::tests::registry();
-                let tape = Tape::default();
-                let account = delegated_account(&registry, "A", "blofin", tape.clone());
-                let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
-                let key = intent(0);
-                let hex = key.replace('-', "");
-                let fingerprint =
-                    crate::order_contract::fingerprint("synthetic-main", &key, &params, 1).unwrap();
-                session
-                    .handle(
-                        &json!({"t":"order.submit","d":{"accountName":"synthetic-main",
+            let cases = [
+                (stop, false),
+                (stop_limit, false),
+                (bracket, false),
+                (plain, true),
+            ];
+            for venue in ["blofin", "phemex"] {
+                for (params, caller_id) in cases.clone() {
+                    let registry = crate::accounts::tests::registry();
+                    let tape = Tape::default();
+                    let account = delegated_account(&registry, "A", venue, tape.clone());
+                    let (mut session, mut sent) =
+                        joined(registry.clone(), "A", account.clone()).await;
+                    let key = intent(0);
+                    let hex = key.replace('-', "");
+                    let venue_id = if venue == "blofin" {
+                        hex.clone()
+                    } else {
+                        key.clone()
+                    };
+                    let fingerprint =
+                        crate::order_contract::fingerprint("synthetic-main", &key, &params, 1)
+                            .unwrap();
+                    session
+                        .handle(
+                            &json!({"t":"order.submit","d":{"accountName":"synthetic-main",
                 "intentId":key,"params":params,"seq":1,"ageMs":0,"fingerprint":fingerprint}})
-                        .to_string(),
-                    )
-                    .await
-                    .unwrap();
-                assert_eq!(
-                    order_frame(&mut sent, "order.ack").await["d"]["received"],
-                    true
-                );
-                let outcome = order_frame(&mut sent, "order.outcome").await;
-                assert_eq!(outcome["d"]["outcome"], "placed", "{params}: {outcome}");
-                let sent_ids = tape.client_order_ids.lock().unwrap().clone();
-                if caller_id {
-                    assert_eq!(outcome["d"]["clientOrderId"], hex, "{outcome}");
-                    assert_eq!(sent_ids, vec![hex]);
-                } else {
-                    assert!(outcome["d"]["clientOrderId"].is_null(), "{outcome}");
-                    assert!(
-                        sent_ids.iter().all(|id| id != &hex && id != &key),
-                        "{sent_ids:?}"
+                            .to_string(),
+                        )
+                        .await
+                        .unwrap();
+                    assert_eq!(
+                        order_frame(&mut sent, "order.ack").await["d"]["received"],
+                        true
                     );
+                    let outcome = order_frame(&mut sent, "order.outcome").await;
+                    assert_eq!(
+                        outcome["d"]["outcome"], "placed",
+                        "{venue} {params}: {outcome}"
+                    );
+                    let sent_ids = tape.client_order_ids.lock().unwrap().clone();
+                    if caller_id {
+                        assert_eq!(
+                            outcome["d"]["clientOrderId"], venue_id,
+                            "{venue}: {outcome}"
+                        );
+                        assert_eq!(sent_ids, vec![venue_id]);
+                    } else {
+                        assert!(outcome["d"]["clientOrderId"].is_null(), "{outcome}");
+                        assert!(
+                            sent_ids.iter().all(|id| id != &hex && id != &key),
+                            "{sent_ids:?}"
+                        );
+                    }
+                    session.close();
+                    registry.dispose(&account, Disposal::PageDisposed);
                 }
-                session.close();
-                registry.dispose(&account, Disposal::PageDisposed);
             }
         })
         .await;
