@@ -61,15 +61,28 @@ describe('placement intent identity', () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
-  it('bounds completed history and refuses retired identity replay, including Unknown', async () => {
+  it('bounds known history without dropping Unknowns to make room', async () => {
+    // Rule 5: AGT-105 retention requires Unknowns to remain; only known records retire.
     const ledger = new PlacementIntentLedger<string[]>(2);
-    await expect(ledger.run(intent(1), order, async () => { throw { outcome: 'unknown' }; })).rejects.toMatchObject({ outcome: 'unknown' });
+    const unknown = Object.assign(new Error('response lost'), { outcome: 'unknown' });
+    await expect(ledger.run(intent(1), order, async () => { throw unknown; })).rejects.toBe(unknown);
     await ledger.run(intent(2), order, async () => ['two']);
     await ledger.run(intent(3), order, async () => ['three']);
     const resend = vi.fn(async () => ['duplicate']);
-    await expect(ledger.run(intent(1), order, resend)).rejects.toMatchObject({ code: 'intentRetired', outcome: 'unknown' });
+    await expect(ledger.run(intent(1), order, resend)).rejects.toBe(unknown);
+    await expect(ledger.run(intent(2), order, resend)).rejects.toMatchObject({ code: 'intentRetired', outcome: 'unknown' });
     expect(resend).not.toHaveBeenCalled();
     expect(ledger.size).toBeLessThanOrEqual(2);
+  });
+
+  it('refuses capacity rather than discarding an unanswered or Unknown intent', async () => {
+    const ledger = new PlacementIntentLedger<string[]>(1);
+    const unknown = Object.assign(new Error('response lost'), { outcome: 'unknown' });
+    await expect(ledger.run(intent(1), order, async () => { throw unknown; })).rejects.toBe(unknown);
+    const send = vi.fn(async () => ['extra']);
+    await expect(ledger.run(intent(2), order, send)).rejects.toMatchObject({ code: 'intentCapacity', outcome: 'notSent' });
+    await expect(ledger.run(intent(1), order, send)).rejects.toBe(unknown);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('never evicts an unanswered intent to admit another', async () => {

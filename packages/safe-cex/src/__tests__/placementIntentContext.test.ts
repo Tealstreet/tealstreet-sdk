@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { delegatedIntentTime } from '../delegatedOrderFrames';
-import { capturePlacementIntent, runWithPlacementIntent } from '../placementIntentContext';
+import { capturePlacementIntent, mintPlacementIntent, placementLegIntent, runWithPlacementIntent } from '../placementIntentContext';
 
 const first = '019a9b43-1000-7000-8000-000000000001';
 const second = '019a9b43-1001-7000-8000-000000000002';
@@ -41,4 +41,17 @@ describe('placement intent propagation', () => {
       expect(capturePlacementIntent()).toBeUndefined();
     });
   });
+});
+
+
+it('mints separate canonical actions at the same synchronized time and stable child UUIDs', () => {
+  const first = mintPlacementIntent(1_764_000_000_000);
+  const second = mintPlacementIntent(first.createdAt);
+  expect(second.id).not.toBe(first.id);
+  expect(delegatedIntentTime(first.id)).toBe(first.createdAt);
+  const stop = placementLegIntent(first, 'stop');
+  expect(stop).toEqual(placementLegIntent(first, 'stop'));
+  expect(stop.id).not.toBe(placementLegIntent(first, 'take-profit').id);
+  expect(stop.id).not.toBe(first.id);
+  expect(delegatedIntentTime(stop.id)).toBe(first.createdAt);
 });
