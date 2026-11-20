@@ -6,7 +6,11 @@ import { utf8ToBytes } from '@noble/hashes/utils.js';
 import { createDelegatedIntentId, delegatedIntentTime } from './delegatedOrderFrames';
 import { PlacementIntentError } from './placementIntentLedger';
 
-export const PLACEMENT_INTENT_METHODS: ReadonlySet<string> = new Set(['placeOrder', 'placeOrders', 'placeOrderWithClientOrderId']);
+export const PLACEMENT_INTENT_METHODS: ReadonlySet<string> = new Set([
+  'placeOrder',
+  'placeOrders',
+  'placeOrderWithClientOrderId',
+]);
 
 let current: PlacementIntentIdentity | undefined;
 
@@ -34,7 +38,9 @@ export const runWithPlacementIntent = <Result>(id: string | undefined, start: ()
 
 /** Supply the shared synchronized protocol clock; never use the write-budget clock. */
 export const mintPlacementIntent = (unixMs: number): PlacementIntentIdentity => {
-  const id = createDelegatedIntentId(unixMs, (bytes) => { crypto.getRandomValues(bytes); });
+  const id = createDelegatedIntentId(unixMs, (bytes) => {
+    crypto.getRandomValues(bytes);
+  });
   return Object.freeze({ id, createdAt: unixMs });
 };
 
@@ -43,6 +49,8 @@ export const placementLegIntent = (parent: PlacementIntentIdentity, leg: string)
   const createdAt = delegatedIntentTime(parent.id);
   if (createdAt !== parent.createdAt || !leg) throw new PlacementIntentError('invalidIntentId');
   const digest = sha256(utf8ToBytes(JSON.stringify([parent.id, leg])));
-  const id = createDelegatedIntentId(createdAt, (bytes) => { bytes.set(digest.subarray(0, bytes.length)); });
+  const id = createDelegatedIntentId(createdAt, (bytes) => {
+    bytes.set(digest.subarray(0, bytes.length));
+  });
   return Object.freeze({ id, createdAt });
 };

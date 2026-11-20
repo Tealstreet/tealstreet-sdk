@@ -12,16 +12,25 @@ function fixture(version: 1 | 2 = 2) {
   let failCompaction = false;
   const rows = new Map<string, DelegatedIntent>();
   const options: OutboxOptions = {
-    owner: 'owner-A', accountName: 'main', accountId: 'account-A', venue: 'bybit',
+    owner: 'owner-A',
+    accountName: 'main',
+    accountId: 'account-A',
+    venue: 'bybit',
     clock: { epoch: 'boot-A', now: () => now - 1_764_000_000_000, unix: () => now },
-    random: (bytes) => { bytes.fill(1); },
+    random: (bytes) => {
+      bytes.fill(1);
+    },
     schedule: () => () => {},
     storage: {
       async load(): Promise<OutboxSnapshot> {
         const intents = structuredClone([...rows.values()]);
-        return version === 2 ? { version, sequence, retiredIntentBefore: floor, intents } : { version, sequence, intents };
+        return version === 2
+          ? { version, sequence, retiredIntentBefore: floor, intents }
+          : { version, sequence, intents };
       },
-      async put(_scope, row) { rows.set(row.intentId, structuredClone(row)); },
+      async put(_scope, row) {
+        rows.set(row.intentId, structuredClone(row));
+      },
       async compact(_scope, checkpoint) {
         if (failCompaction) throw new Error('transaction aborted');
         sequence = Math.max(sequence, checkpoint.sequence);
@@ -30,10 +39,17 @@ function fixture(version: 1 | 2 = 2) {
       },
     },
   };
-  return { options, rows, floor: () => floor,
+  return {
+    options,
+    rows,
+    floor: () => floor,
     id: () => createDelegatedIntentId(now++, options.random),
-    abort: () => { failCompaction = true; },
-    recover: () => { failCompaction = false; },
+    abort: () => {
+      failCompaction = true;
+    },
+    recover: () => {
+      failCompaction = false;
+    },
   };
 }
 async function completed(box: DelegatedOutbox, id: string) {
@@ -49,7 +65,9 @@ describe('durable caller-intent retirement', () => {
       for (let i = 0; i < 1060; i++) await completed(box, f.id());
       expect(box.entries().length).toBeLessThanOrEqual(32);
       expect(f.floor()).toBeGreaterThan(0);
-    } finally { box.close(); }
+    } finally {
+      box.close();
+    }
   });
 
   it('refuses a forgotten caller UUID after restoring the durable checkpoint', async () => {
@@ -62,9 +80,14 @@ describe('durable caller-intent retirement', () => {
     box.close();
     box = await DelegatedOutbox.open(f.options);
     try {
-      await expect(box.enqueue(params, { intentId: first })).rejects.toMatchObject({ code: 'intentRetired', outcome: 'unknown' });
+      await expect(box.enqueue(params, { intentId: first })).rejects.toMatchObject({
+        code: 'intentRetired',
+        outcome: 'unknown',
+      });
       expect(f.rows.has(first)).toBe(false);
-    } finally { box.close(); }
+    } finally {
+      box.close();
+    }
   });
 
   it('keeps an older unanswered intent joinable even below the retirement floor', async () => {
@@ -77,7 +100,9 @@ describe('durable caller-intent retirement', () => {
       expect(f.floor()).toBeGreaterThan(0);
       expect(await box.enqueue(params, { intentId: pending })).toBe(pending);
       expect(box.entries().find((row) => row.intentId === pending)?.state).toBe('queued');
-    } finally { box.close(); }
+    } finally {
+      box.close();
+    }
   });
 
   it('an aborted compaction preserves both the old rows and rejection floor', async () => {
@@ -104,7 +129,9 @@ describe('durable caller-intent retirement', () => {
       expect(f.floor()).toBeLessThan(1_764_000_000_100);
       expect(f.rows.has(future)).toBe(true);
       expect(box.entries().length).toBeLessThanOrEqual(32);
-    } finally { box.close(); }
+    } finally {
+      box.close();
+    }
   });
 
   it('a conflict with restored Unknown work cannot claim the original was not sent', async () => {
@@ -112,9 +139,19 @@ describe('durable caller-intent retirement', () => {
     const { owner, accountName, venue, accountId } = f.options;
     let writes = 0;
     let box = await DelegatedOutbox.open(f.options);
-    box.connect({ owner, accountName, venue, accountId, instanceId: 'registration', signingMode: 'delegated', ready: true,
+    box.connect({
+      owner,
+      accountName,
+      venue,
+      accountId,
+      instanceId: 'registration',
+      signingMode: 'delegated',
+      ready: true,
       capabilities: { delegatedOrderFramesV1: true, delegatedOrderLedgerV1: true },
-      send: () => { writes++; return true; },
+      send: () => {
+        writes++;
+        return true;
+      },
     });
     const id = f.id();
     await box.enqueue(params, { intentId: id });
@@ -123,10 +160,14 @@ describe('durable caller-intent retirement', () => {
     box = await DelegatedOutbox.open(f.options);
     try {
       expect(box.entries()[0].state).toBe('unknown');
-      await expect(box.enqueue({ ...params, amount: 2000 }, { intentId: id }))
-        .rejects.toMatchObject({ code: 'intentConflict', outcome: 'unknown' });
+      await expect(box.enqueue({ ...params, amount: 2000 }, { intentId: id })).rejects.toMatchObject({
+        code: 'intentConflict',
+        outcome: 'unknown',
+      });
       expect(writes).toBe(1);
-    } finally { box.close(); }
+    } finally {
+      box.close();
+    }
   });
 
   it('explicit retirement cannot move the durable floor past a rolled-back clock', async () => {
@@ -139,7 +180,9 @@ describe('durable caller-intent retirement', () => {
       expect(await box.retire(id)).toBe(false);
       expect(f.floor()).toBe(0);
       expect(f.rows.has(id)).toBe(true);
-    } finally { box.close(); }
+    } finally {
+      box.close();
+    }
   });
 
   it('legacy storage keeps permanent caller reservations instead of forgetting replay protection', async () => {

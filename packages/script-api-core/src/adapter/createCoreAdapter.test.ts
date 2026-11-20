@@ -1,4 +1,8 @@
-import { capturePlacementIntent, runWithPlacementIntent, placementLegIntent } from '../../../safe-cex/src/placementIntentContext';
+import {
+  capturePlacementIntent,
+  runWithPlacementIntent,
+  placementLegIntent,
+} from '../../../safe-cex/src/placementIntentContext';
 import { delegatedIntentTime } from '../../../safe-cex/src/delegatedOrderFrames';
 import { FrameStore } from '../../../safe-cex/src/store/frameStore';
 import { nativeFixture } from '../../../safe-cex/src/__tests__/cutover/nativeFixture';

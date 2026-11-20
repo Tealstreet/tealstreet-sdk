@@ -16,7 +16,9 @@ describe('placement intent identity', () => {
   it('sends three deliberate identical actions while all replies are pending', async () => {
     const ledger = new PlacementIntentLedger<string[]>();
     let finish = (_ids: string[]) => {};
-    const pending = new Promise<string[]>((resolve) => { finish = resolve; });
+    const pending = new Promise<string[]>((resolve) => {
+      finish = resolve;
+    });
     const send = vi.fn(() => pending);
     const actions = [1, 2, 3].map((number) => ledger.run(intent(number), order, send));
     expect(send).toHaveBeenCalledTimes(3);
@@ -27,7 +29,9 @@ describe('placement intent identity', () => {
   it('double-delivering one action dispatches one order and shares its receipt', async () => {
     const ledger = new PlacementIntentLedger<string[]>();
     let finish = (_ids: string[]) => {};
-    const pending = new Promise<string[]>((resolve) => { finish = resolve; });
+    const pending = new Promise<string[]>((resolve) => {
+      finish = resolve;
+    });
     const send = vi.fn(() => pending);
     const first = ledger.run(intent(1), order, send);
     const duplicate = ledger.run({ ...intent(1) }, order, send);
@@ -65,12 +69,19 @@ describe('placement intent identity', () => {
     // Rule 5: AGT-105 retention requires Unknowns to remain; only known records retire.
     const ledger = new PlacementIntentLedger<string[]>(2);
     const unknown = Object.assign(new Error('response lost'), { outcome: 'unknown' });
-    await expect(ledger.run(intent(1), order, async () => { throw unknown; })).rejects.toBe(unknown);
+    await expect(
+      ledger.run(intent(1), order, async () => {
+        throw unknown;
+      }),
+    ).rejects.toBe(unknown);
     await ledger.run(intent(2), order, async () => ['two']);
     await ledger.run(intent(3), order, async () => ['three']);
     const resend = vi.fn(async () => ['duplicate']);
     await expect(ledger.run(intent(1), order, resend)).rejects.toBe(unknown);
-    await expect(ledger.run(intent(2), order, resend)).rejects.toMatchObject({ code: 'intentRetired', outcome: 'unknown' });
+    await expect(ledger.run(intent(2), order, resend)).rejects.toMatchObject({
+      code: 'intentRetired',
+      outcome: 'unknown',
+    });
     expect(resend).not.toHaveBeenCalled();
     expect(ledger.size).toBeLessThanOrEqual(2);
   });
@@ -78,9 +89,16 @@ describe('placement intent identity', () => {
   it('refuses capacity rather than discarding an unanswered or Unknown intent', async () => {
     const ledger = new PlacementIntentLedger<string[]>(1);
     const unknown = Object.assign(new Error('response lost'), { outcome: 'unknown' });
-    await expect(ledger.run(intent(1), order, async () => { throw unknown; })).rejects.toBe(unknown);
+    await expect(
+      ledger.run(intent(1), order, async () => {
+        throw unknown;
+      }),
+    ).rejects.toBe(unknown);
     const send = vi.fn(async () => ['extra']);
-    await expect(ledger.run(intent(2), order, send)).rejects.toMatchObject({ code: 'intentCapacity', outcome: 'notSent' });
+    await expect(ledger.run(intent(2), order, send)).rejects.toMatchObject({
+      code: 'intentCapacity',
+      outcome: 'notSent',
+    });
     await expect(ledger.run(intent(1), order, send)).rejects.toBe(unknown);
     expect(send).not.toHaveBeenCalled();
   });
@@ -89,7 +107,10 @@ describe('placement intent identity', () => {
     const ledger = new PlacementIntentLedger<string[]>(1);
     await ledger.run(intent(100), order, async () => ['future-known']);
     const send = vi.fn(async () => ['extra']);
-    await expect(ledger.run(intent(1), order, send)).rejects.toMatchObject({ code: 'intentCapacity', outcome: 'notSent' });
+    await expect(ledger.run(intent(1), order, send)).rejects.toMatchObject({
+      code: 'intentCapacity',
+      outcome: 'notSent',
+    });
     expect(send).not.toHaveBeenCalled();
     await expect(ledger.run(intent(100), order, send)).resolves.toEqual(['future-known']);
   });
@@ -97,7 +118,9 @@ describe('placement intent identity', () => {
   it('never evicts an unanswered intent to admit another', async () => {
     const ledger = new PlacementIntentLedger<string[]>(1);
     let finish = (_ids: string[]) => {};
-    const pending = new Promise<string[]>((resolve) => { finish = resolve; });
+    const pending = new Promise<string[]>((resolve) => {
+      finish = resolve;
+    });
     const original = ledger.run(intent(1), order, () => pending);
     const send = vi.fn(async () => ['extra']);
     const next = ledger.run(intent(2), order, send);
@@ -109,13 +132,22 @@ describe('placement intent identity', () => {
 });
 
 it('can retire caller-proven refusals without forgetting unknown outcomes', async () => {
-  const canRetireFailure = (error: unknown) => typeof error === 'object' && error !== null && 'outcome' in error && error.outcome === 'notSent';
+  const canRetireFailure = (error: unknown) =>
+    typeof error === 'object' && error !== null && 'outcome' in error && error.outcome === 'notSent';
   const ledger = new PlacementIntentLedger<string[]>(2, () => true, canRetireFailure);
   const unknown = Object.assign(new Error('lost reply'), { outcome: 'unknown' });
   const refused = Object.assign(new Error('proven refusal'), { outcome: 'notSent' });
-  await expect(ledger.run(intent(1), order, async () => { throw unknown; })).rejects.toBe(unknown);
+  await expect(
+    ledger.run(intent(1), order, async () => {
+      throw unknown;
+    }),
+  ).rejects.toBe(unknown);
   for (let n = 2; n < 12; n++)
-    await expect(ledger.run(intent(n), order, async () => { throw refused; })).rejects.toBe(refused);
+    await expect(
+      ledger.run(intent(n), order, async () => {
+        throw refused;
+      }),
+    ).rejects.toBe(refused);
   const resend = vi.fn(async () => ['duplicate']);
   await expect(ledger.run(intent(1), order, resend)).rejects.toBe(unknown);
   await expect(ledger.run(intent(2), order, resend)).rejects.toMatchObject({ code: 'intentRetired' });

@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { delegatedIntentTime } from '../delegatedOrderFrames';
-import { capturePlacementIntent, mintPlacementIntent, placementLegIntent, runWithPlacementIntent } from '../placementIntentContext';
+import {
+  capturePlacementIntent,
+  mintPlacementIntent,
+  placementLegIntent,
+  runWithPlacementIntent,
+} from '../placementIntentContext';
 
 const first = '019a9b43-1000-7000-8000-000000000001';
 const second = '019a9b43-1001-7000-8000-000000000002';
@@ -42,7 +47,6 @@ describe('placement intent propagation', () => {
     });
   });
 });
-
 
 it('mints separate canonical actions at the same synchronized time and stable child UUIDs', () => {
   const first = mintPlacementIntent(1_764_000_000_000);
