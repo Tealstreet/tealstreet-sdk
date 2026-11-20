@@ -108,11 +108,12 @@ it('bounds local drop notices and never copies a raw network exception into them
 });
 
 it('shows only a closed numeric upstream status from the ingest header', async () => {
-  fetchMock.mockResolvedValue(new Response(null, { status: 502, headers: { 'X-Log-Ingest-Upstream-Status': '429' } }));
+  // An upstream 429 now pauses rather than drops (AGT-67), so a refusal status shows the header.
+  fetchMock.mockResolvedValue(new Response(null, { status: 502, headers: { 'X-Log-Ingest-Upstream-Status': '413' } }));
   utils.logInfo('lost');
   utils.dumpLogQueue();
   await vi.advanceTimersByTimeAsync(31_000);
-  expect(getDefaultStore().get(logAtom)[0].message).toContain('upstream HTTP 429');
+  expect(getDefaultStore().get(logAtom)[0].message).toContain('upstream HTTP 413');
 });
 
 it('ignores malformed upstream status text instead of copying it into the local log', async () => {
@@ -132,9 +133,8 @@ it.each([
   [400, undefined],
   [403, undefined],
   [413, undefined],
-  [429, undefined],
   [502, '400'],
-  [502, '429'],
+  [502, '413'],
 ])('drops a refused batch (HTTP %s, upstream %s) without retrying', async (status, upstream) => {
   fetchMock.mockResolvedValue(
     new Response(null, { status, headers: upstream ? { 'X-Log-Ingest-Upstream-Status': upstream } : {} }),
@@ -186,4 +186,43 @@ it('retries a 401 with a freshly requested ingest token', async () => {
   expect(uploads).toHaveLength(2);
   expect(uploads[1][1].headers.Authorization).toBe('Bearer token-2');
   expect(getDefaultStore().get(logAtom)).toEqual([]);
+});
+
+// A 429 is the one 4xx that waiting fixes: pause this owner's uploads instead of dropping or resending.
+it.each([
+  [429, undefined],
+  [502, '429'],
+])('pauses uploads for the cooldown after HTTP %s (upstream %s), then delivers the held batch', async (status, upstream) => {
+  fetchMock
+    .mockResolvedValueOnce(new Response(null, { status, headers: upstream ? { 'X-Log-Ingest-Upstream-Status': upstream } : {} }))
+    .mockResolvedValue(new Response(null, { status: 204 }));
+  utils.logInfo('held');
+  utils.dumpLogQueue();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  // New logs inside the window queue up but send nothing.
+  utils.logInfo('during window');
+  utils.dumpLogQueue();
+  await vi.advanceTimersByTimeAsync(utils.RATE_LIMIT_COOLDOWN_MS - 1_000);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  const sent = fetchMock.mock.calls.slice(1).map((call) => call[1].body as string);
+  expect(sent[0]).toContain('held');
+  expect(sent[1]).toContain('during window');
+  expect(getDefaultStore().get(logAtom)).toEqual([]);
+});
+
+it('does not carry a rate-limit pause over to the next login owner', async () => {
+  fetchMock.mockResolvedValueOnce(new Response(null, { status: 429 })).mockResolvedValue(new Response(null, { status: 204 }));
+  utils.logInfo('first owner');
+  utils.dumpLogQueue();
+  await vi.advanceTimersByTimeAsync(0);
+  stop();
+  stop = utils.startLoggingToGrafana('synthetic-successor');
+  utils.logInfo('successor');
+  utils.dumpLogQueue();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[1][1].body).toContain('successor');
 });

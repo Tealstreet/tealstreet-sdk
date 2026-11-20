@@ -27,8 +27,12 @@ never batch contents or raw errors, and bypasses upload logging to avoid recursi
 For a 502, the optional ingest header adds only a validated 400–599 upstream status;
 malformed header text is ignored.
 **A refusal is dropped without retrying** (AGT-67): a 4xx from the ingest Worker
-other than 401/408, or a 502 whose upstream status is 4xx. Resending those five
-times only multiplied the load on a sink that refused them. A 401 clears the
-owner's cached ingest token and retries with a fresh one; 408, 5xx and transport
-failures keep the bounded backoff.
+other than 401/408/429, or a 502 whose upstream status is a 4xx other than 429.
+Resending those five times only multiplied the load on a sink that refused them.
+**A 429 (the Worker's per-subject limit, or Loki's) pauses that owner's uploads**
+for `RATE_LIMIT_COOLDOWN_MS` and keeps the batch pending (the pending cap bounds
+memory); a self-rescheduling timeout resumes the drain, and an owner change clears
+the pause. Dropping and moving on would send more into the window, not less. A 401
+clears the owner's cached ingest token and retries with a fresh one; 408, 5xx and
+transport failures keep the bounded backoff.
 The same owner-generation checks fence late failures after logout or replacement.

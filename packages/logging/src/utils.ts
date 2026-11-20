@@ -82,6 +82,19 @@ let logIngestTokenRequest: { userId: string; epoch: number; promise: Promise<Log
 let logIngestTokenEpoch = 0;
 
 const LOG_INGEST_TOKEN_REFRESH_SKEW_MS = 60_000;
+/** A 429 (the Worker's per-subject limit, or Loki's) pauses this owner's uploads, not drops them. */
+export const RATE_LIMIT_COOLDOWN_MS = 60_000;
+let rateLimitedUntil: (LoggingOwner & { until: number }) | undefined;
+let rateLimitResume: ReturnType<typeof setTimeout> | undefined;
+
+const clearRateLimit = () => {
+  rateLimitedUntil = undefined;
+  if (rateLimitResume !== undefined) clearTimeout(rateLimitResume);
+  rateLimitResume = undefined;
+};
+
+const isRateLimitedNow = (owner: LoggingOwner) =>
+  rateLimitedUntil !== undefined && sameLoggingOwner(rateLimitedUntil, owner) && Date.now() < rateLimitedUntil.until;
 
 function resetLogIngestToken() {
   logIngestTokenEpoch++;
@@ -106,6 +119,7 @@ export const resetLoggingStateForTests = () => {
   logQueueSizeApprox = 0;
   pendingLogBatches = [];
   uploadInProgress = false;
+  clearRateLimit();
   resetLogIngestToken();
 };
 
@@ -201,6 +215,7 @@ function discardLoggingOwnerWork() {
   logQueue = [];
   logQueueSizeApprox = 0;
   pendingLogBatches = [];
+  clearRateLimit();
 }
 
 export const startLoggingToGrafana = (userId: string, username?: string) => {
@@ -334,6 +349,8 @@ const drainLogBatches = async () => {
   try {
     while (pendingLogBatches.length > 0 && isLoggingOwnerCurrent(owner.userId, owner.epoch)) {
       if (!isPageReadyForLogging()) return;
+      // Sending into a rate-limit window only earns another 429; the scheduled resume drains.
+      if (isRateLimitedNow(owner)) return;
       const batch = pendingLogBatches[0];
       if (batch) {
         if (!sameLoggingOwner(batch.owner, owner)) {
@@ -359,8 +376,11 @@ const drainLogBatches = async () => {
  * multiplied the load on a refusing sink. 401 (token refresh) and 408 stay retryable, as do
  * 5xx and transport failures.
  */
+const isRateLimit = (status: number | undefined, upstreamStatus: number | undefined) =>
+  status === 429 || (status === 502 && upstreamStatus === 429);
+
 const isRefusal = (status: number | undefined, upstreamStatus: number | undefined) => {
-  if (status === undefined) return false;
+  if (status === undefined || isRateLimit(status, upstreamStatus)) return false;
   if (status >= 400 && status < 500) return status !== 401 && status !== 408;
   return status === 502 && upstreamStatus !== undefined && upstreamStatus >= 400 && upstreamStatus < 500;
 };
@@ -462,6 +482,18 @@ const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
       return true;
     } catch (error) {
       if (!isAuthorized()) return true;
+      if (isRateLimit(failureStatus, failureUpstreamStatus)) {
+        // Keep the batch pending (the pending cap bounds memory) and resume after the window.
+        loggingMetrics.retries++;
+        rateLimitedUntil = { userId, epoch: ownerEpoch, until: Date.now() + RATE_LIMIT_COOLDOWN_MS };
+        if (rateLimitResume !== undefined) clearTimeout(rateLimitResume);
+        rateLimitResume = setTimeout(() => {
+          rateLimitResume = undefined;
+          void drainLogBatches();
+        }, RATE_LIMIT_COOLDOWN_MS);
+        console.error(`Error in startLoggingToGrafana: ${error}. Rate limited; pausing uploads for ${RATE_LIMIT_COOLDOWN_MS / 1000}s`);
+        return false;
+      }
       const refused = isRefusal(failureStatus, failureUpstreamStatus);
       // An expired or rotated ingest token is the one 4xx a fresh token can fix.
       if (failureStatus === 401 && cachedLogIngestToken?.userId === userId && cachedLogIngestToken.epoch === ownerEpoch) {
