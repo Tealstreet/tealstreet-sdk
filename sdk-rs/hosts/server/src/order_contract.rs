@@ -158,7 +158,7 @@ pub fn check_key(id: &str, now: u64) -> Result<(), &'static str> {
 
 /// #3630 audits native formats: keep all validated UUID bits in supported text
 /// IDs. Adapters without caller-ID support omit it; the router ledger still
-/// owns dedupe. Numeric-ID adapters retain their refusal pending a follow-up.
+/// owns dedupe. IDs that cannot carry the intent losslessly are omitted.
 pub(crate) fn client_order_id(venue: &str, intent: &str) -> Option<String> {
     let hex = || intent.replace('-', "");
     match venue {
@@ -169,6 +169,9 @@ pub(crate) fn client_order_id(venue: &str, intent: &str) -> Option<String> {
         // WOO refuses the UUID, and router/outbox accept only lossless forms, so it
         // omits the ID exactly as the action path's WOO limits already do.
         "woo" => None,
+        // AGT-50: numeric-only Backpack/GRVT and no-ID HyroTrader cannot carry
+        // this UUID; use the existing null-receipt path without a lossy mapping.
+        "backpack" | "grvt" | "hyrotrader" => None,
         _ => Some(intent.to_owned()),
     }
 }
