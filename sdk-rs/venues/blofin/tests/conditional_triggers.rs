@@ -156,15 +156,18 @@ fn agt46_reduce_only_hedge_triggers_target_the_closing_position_side() {
                 request,
                 r#"{"code":"0","data":{"algoId":"601","code":"0"}}"#,
             );
-            let row = trigger("601", "1", side, position_side);
-            h.ws(&format!(
-                r#"{{"arg":{{"channel":"orders-algo"}},"data":[{row}]}}"#
-            ));
+            let mut row = body;
+            row["algoId"] = serde_json::json!("601");
+            row["state"] = serde_json::json!("live");
+            h.ws(&serde_json::json!({"arg":{"channel":"orders-algo"},"data":[row]}).to_string());
             let stored =
                 h.e.store()
                     .order("601")
                     .expect("accepted closing trigger is listed");
             assert_eq!(stored.kind, OrderType::Conditional);
+            assert_eq!(stored.price, f64::from(trigger_price));
+            assert_eq!(stored.amount, 0.001);
+            assert_eq!(stored.close, None);
             assert!(stored.reduce_only);
             assert_eq!(
                 stored.side,
