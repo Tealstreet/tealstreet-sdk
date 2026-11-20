@@ -103,6 +103,10 @@ impl Readiness {
             executed(row)
                 || cancelled_terminal(&row.order_status)
                 || row.order_status == "Rejected"
+                // Bybit's (since removed) docs gave `Active` only one meaning: triggered and
+                // placed. A stop the page saw as live that now reads `Active` or `Created` has
+                // moved off `Untriggered`, so it is not the stop the user edited.
+                || matches!(row.order_status.as_str(), "Active" | "Created")
                 || (matches!(row.order_status.as_str(), "Untriggered" | "New")
                     && shows_original_changed(row, &self.guard))
         };
