@@ -203,6 +203,13 @@ fn venue_51088_on_a_placement_is_a_definitive_rejection() {
 }
 
 // AGT-98: complementary legs attach only to an observed native full-position algo.
+fn full_leg_price(kind: OrderType, side: OrderSide) -> &'static str {
+    match (kind, side) {
+        (OrderType::TakeProfit, OrderSide::Sell) | (OrderType::StopLoss, OrderSide::Buy) => "42000",
+        _ => "36000",
+    }
+}
+
 fn native_full_leg(kind: OrderType, side: OrderSide) -> Engine<Okx> {
     let mut e = engine(FixtureOptions {
         key: Some("test-key".into()),
@@ -235,7 +242,7 @@ fn native_full_leg(kind: OrderType, side: OrderSide) -> Engine<Okx> {
     } else {
         "tp"
     };
-    row[format!("{leg}TriggerPx")] = "36000".into();
+    row[format!("{leg}TriggerPx")] = full_leg_price(kind, side).into();
     row[format!("{leg}OrdPx")] = "-1".into();
     row[format!("{leg}TriggerPxType")] = "mark".into();
     let mut pending = prepared(&mut e, 3.);
@@ -264,8 +271,7 @@ fn native_full_leg(kind: OrderType, side: OrderSide) -> Engine<Okx> {
 }
 
 fn attach(e: &mut Engine<Okx>, kind: OrderType, side: OrderSide) -> Vec<Action> {
-    let input =
-        serde_json::json!({"symbol":"BTCUSDT","type":kind,"side":side,"amount":0,"price":42000});
+    let input = serde_json::json!({"symbol":"BTCUSDT","type":kind,"side":side,"amount":0,"price":full_leg_price(kind, side).parse::<f64>().unwrap()});
     place(e, &[&input.to_string()])
 }
 
@@ -299,7 +305,7 @@ fn attach_success(held: OrderType, added: OrderType, prefix: &str) {
         let b = body(sent[0]);
         assert_eq!(b["instId"], "BTC-USDT-SWAP");
         assert_eq!(b["algoId"], "77");
-        assert_eq!(b[format!("{prefix}TriggerPx")], "42000");
+        assert_eq!(b[format!("{prefix}TriggerPx")], full_leg_price(added, side));
         assert_eq!(b[format!("{prefix}OrdPx")], "-1");
         assert_eq!(b["cxlOnFail"], false);
         for forbidden in ["newSz", "sz", "closeFraction", "newPx", "ordType"] {
