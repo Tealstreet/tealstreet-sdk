@@ -107,3 +107,18 @@ describe('placement intent identity', () => {
     expect(send).not.toHaveBeenCalled();
   });
 });
+
+it('can retire caller-proven refusals without forgetting unknown outcomes', async () => {
+  const canRetireFailure = (error: unknown) => typeof error === 'object' && error !== null && 'outcome' in error && error.outcome === 'notSent';
+  const ledger = new PlacementIntentLedger<string[]>(2, () => true, canRetireFailure);
+  const unknown = Object.assign(new Error('lost reply'), { outcome: 'unknown' });
+  const refused = Object.assign(new Error('proven refusal'), { outcome: 'notSent' });
+  await expect(ledger.run(intent(1), order, async () => { throw unknown; })).rejects.toBe(unknown);
+  for (let n = 2; n < 12; n++)
+    await expect(ledger.run(intent(n), order, async () => { throw refused; })).rejects.toBe(refused);
+  const resend = vi.fn(async () => ['duplicate']);
+  await expect(ledger.run(intent(1), order, resend)).rejects.toBe(unknown);
+  await expect(ledger.run(intent(2), order, resend)).rejects.toMatchObject({ code: 'intentRetired' });
+  expect(resend).not.toHaveBeenCalled();
+  expect(ledger.size).toBeLessThanOrEqual(2);
+});
