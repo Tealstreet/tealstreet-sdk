@@ -209,6 +209,67 @@ fn edited_stop_still_requires_its_exact_known_trigger_source_on_every_axis() {
     }
 }
 
+// AGT-108: AGT-34 already accepts an orderId page's cursor after cancel;
+// the frame-fed readiness check must accept the same single original before cancel.
+#[test]
+fn readiness_matching_stop_with_cursor_reaches_the_remaining_proof_reads() {
+    for kind in ["StopLoss", "TakeProfit"] {
+        let mut h = frame_fed(kind);
+        let mut target = original(&h);
+        // Decimal formatting is not a changed stop.
+        target["triggerPrice"] = if kind == "StopLoss" { "90.0000" } else { "110.0000" }.into();
+        target["qty"] = "7.000".into();
+        start(&mut h, kind);
+        h.respond("&orderId=partial", 200, &serde_json::json!({
+            "retCode":0,
+            "result":{"category":"linear","list":[target],"nextPageCursor":"opaque-page-token"}
+        }).to_string());
+        assert!(h.has_request("&openOnly=0&limit=50"), "{kind}: {:?}", h.result(91));
+        assert!(!h.has_request(PROFILES[0].cancel_path()));
+        page(&mut h, "&openOnly=0&limit=50", vec![]);
+        page(&mut h, "/v5/order/history", vec![]);
+        assert!(h.has_request(PROFILES[0].cancel_path()));
+        finish(&mut h, kind, None);
+    }
+}
+
+#[test]
+fn readiness_cursor_does_not_authorize_a_changed_original() {
+    let mut h = frame_fed("StopLoss");
+    let before = h.engine.store().order("partial").unwrap().clone();
+    let mut target = original(&h);
+    target["triggerPrice"] = "89".into();
+    start(&mut h, "StopLoss");
+    h.respond("&orderId=partial", 200, &serde_json::json!({
+        "retCode":0,
+        "result":{"category":"linear","list":[target],"nextPageCursor":"opaque-page-token"}
+    }).to_string());
+    assert_eq!(h.engine.store().order("partial"), Some(&before));
+    assert!(!h.requests.iter().any(|r| r.method == safe_cex_engine::Method::Post));
+    assert!(h.notices.iter().any(|notice| matches!(notice,
+        safe_cex_engine::Notice::CommandFailed { command:91, error }
+            if error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+    )));
+}
+
+#[test]
+fn readiness_refusal_has_plain_copy_and_closed_failure_axis() {
+    let mut h = frame_fed("StopLoss");
+    let before = h.engine.store().order("partial").unwrap().clone();
+    start(&mut h, "StopLoss");
+    h.respond("&orderId=partial", 503, "secret-response-canary");
+    let error = h.notices.iter().find_map(|notice| match notice {
+        safe_cex_engine::Notice::CommandFailed { command:91, error } => Some(error),
+        _ => None,
+    }).unwrap();
+    assert_eq!(error.message, "Couldn't confirm your current stop with Bybit, so the edit wasn't sent. Your stop is unchanged; try again.");
+    let encoded = serde_json::to_value(error).unwrap();
+    assert_eq!(encoded["protectiveProof"], serde_json::json!({"axis":"target", "reason":"http", "status":503}));
+    assert!(!encoded.to_string().contains("secret-response-canary"));
+    assert_eq!(h.engine.store().order("partial"), Some(&before));
+    assert!(!h.requests.iter().any(|r| r.method == safe_cex_engine::Method::Post));
+}
+
 fn replacement_after_peer_census(missing_lineage: bool) -> Harness {
     let mut h = ready(PROFILES[0]);
     seed(

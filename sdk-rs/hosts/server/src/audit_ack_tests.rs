@@ -54,6 +54,36 @@ fn audit_create_ack_survives_the_actual_algo_dispatch_wrapper() {
 }
 
 #[test]
+fn audit_protective_proof_retains_only_the_closed_native_reason() {
+    let proof = json!({"axis":"target","reason":"http","status":503});
+    let error = json!({
+        "message":"Couldn't confirm your current stop with Bybit, so the edit wasn't sent. Your stop is unchanged; try again.",
+        "kind":"network", "outcome":"notSent", "protectiveProof":proof,
+        "body":"secret-response-canary", "apiKey":"secret-key-canary"
+    });
+    for result in [result(&Err(error.clone())), result(&Err(json!({"message":error.to_string()})))] {
+        assert_eq!(result["protectiveProof"], proof);
+        assert!(!result.to_string().contains("canary"));
+        assert_eq!(result["outcome"], "notSent");
+    }
+}
+
+#[test]
+fn audit_protective_proof_drops_unknown_fields_or_values() {
+    for proof in [
+        json!({"axis":"secret-axis-canary","reason":"http","status":503}),
+        json!({"axis":"target","reason":"secret-reason-canary"}),
+        json!({"axis":"target","reason":"http","status":503,"body":"secret-canary"}),
+        json!({"axis":"target","reason":"http","status":99}),
+        json!({"axis":"target","reason":"original","field":"secret-field-canary"}),
+    ] {
+        let detail = result(&Err(json!({"message":"fixed", "protectiveProof":proof})));
+        assert!(detail.get("protectiveProof").is_none());
+        assert!(!detail.to_string().contains("canary"));
+    }
+}
+
+#[test]
 fn audit_create_ack_unknown_metadata_never_becomes_an_ack_field() {
     let detail = result(&Err(
         json!({"message":"ordinary error", "bybitBatchAcknowledgement":{"apiKey":"secret-canary"}}),
