@@ -1,6 +1,6 @@
 //! Live proof access before destroying a frame-fed page's Partial protection.
 use super::{Axis, Page, PartialStopGuard, matches_original, proof};
-use crate::trading::Planned;
+use crate::trading::{OrderType, Planned};
 use safe_cex_engine::{ErrorKind, Outcome, Response, Store, VenueError};
 
 pub(in crate::trading) struct Readiness {
@@ -50,10 +50,17 @@ impl Readiness {
         &mut self,
         response: &Response<'_>,
     ) -> Result<(), VenueError> {
+        let what = if self.guard.original.kind == OrderType::TakeProfit {
+            "take profit"
+        } else {
+            "stop"
+        };
         let failed = || {
-            VenueError::new("Native protective-edit proof is unavailable or changed; your protection is unchanged")
-                .kind(ErrorKind::Network)
-                .outcome(Outcome::NotSent)
+            VenueError::new(format!(
+                "Couldn't confirm your current {what} with Bybit, so the edit wasn't sent. Your {what} is unchanged; try again."
+            ))
+            .kind(ErrorKind::Network)
+            .outcome(Outcome::NotSent)
         };
         if response.status != 200 {
             return Err(failed());
@@ -70,10 +77,10 @@ impl Readiness {
                 && matches_original(row, &self.guard)
         };
         if self.axis() == Some(Axis::Target) {
-            if page.list.len() != 1
-                || !page.next_page_cursor.is_empty()
-                || !live_original(&page.list[0])
-            {
+            // AGT-108: as in the post-cancel proof (AGT-34), an orderId names at most one
+            // order, so `nextPageCursor` is only a page token; live Bybit returns one
+            // beside the single row, and refusing on it blocked every frame-fed edit.
+            if page.list.len() != 1 || !live_original(&page.list[0]) {
                 return Err(failed());
             }
         } else if page

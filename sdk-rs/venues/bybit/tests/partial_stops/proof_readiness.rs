@@ -318,3 +318,68 @@ fn cancelled_target_without_its_trigger_source_fails_the_proof_but_sends_the_rep
     assert_eq!(posts.len(), 1, "{posts:?}");
     assert!(posts[0].contains("/v5/position/trading-stop"), "{posts:?}");
 }
+
+/// The cursor live Bybit returns beside the single row of an orderId-filtered read.
+fn live_cursor(h: &Harness) -> String {
+    format!("partial%3A{0}%2Cpartial%3A{0}", h.now as u64)
+}
+
+fn cursor_page(h: &mut Harness, path: &str, rows: Vec<serde_json::Value>) {
+    let cursor = live_cursor(h);
+    h.respond(
+        path,
+        200,
+        &serde_json::json!({
+            "retCode":0, "result":{"category":"linear", "list":rows, "nextPageCursor":cursor}
+        })
+        .to_string(),
+    );
+}
+
+/// AGT-108: readiness kept the `target-cursor` refusal AGT-34 removed from the
+/// post-cancel proof. Live Bybit (probed 2026-11-20 on a live Partial stop) sends a
+/// cursor beside the single orderId row, so every frame-fed Partial edit was refused.
+#[test]
+fn live_target_cursor_beside_the_single_row_does_not_refuse_the_edit() {
+    for kind in ["StopLoss", "TakeProfit"] {
+        let mut h = frame_fed(kind);
+        let target = original(&h);
+        start(&mut h, kind);
+        for (path, rows) in [
+            ("&orderId=partial", vec![target.clone()]),
+            ("&openOnly=0&limit=50", vec![target.clone()]),
+            ("/v5/order/history", vec![]),
+        ] {
+            cursor_page(&mut h, path, rows);
+            assert!(h.result(91).is_none(), "{kind}, {path}: {:?}", h.result(91));
+        }
+        assert!(h.has_request(PROFILES[0].cancel_path()), "{kind}");
+        finish(&mut h, kind, None);
+    }
+}
+
+/// AGT-108: a genuine readiness refusal says plainly that nothing was sent.
+#[test]
+fn readiness_refusal_says_plainly_that_the_edit_was_not_sent() {
+    for (kind, what) in [("StopLoss", "stop"), ("TakeProfit", "take profit")] {
+        let mut h = frame_fed(kind);
+        let mut target = original(&h);
+        target["orderStatus"] = "Triggered".into();
+        start(&mut h, kind);
+        page(&mut h, "&orderId=partial", vec![target]);
+        let expected = format!(
+            "Couldn't confirm your current {what} with Bybit, so the edit wasn't sent. Your {what} is unchanged; try again."
+        );
+        assert!(
+            h.notices.iter().any(|notice| matches!(notice,
+                safe_cex_engine::Notice::CommandFailed { command:91, error }
+                if error.message == expected
+                    && error.kind == Some(safe_cex_engine::ErrorKind::Network)
+                    && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+            )),
+            "{kind}: {:?}",
+            h.result(91)
+        );
+        assert!(!h.has_request(PROFILES[0].cancel_path()), "{kind}");
+    }
+}
