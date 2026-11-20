@@ -518,6 +518,7 @@
     "module-symbolBar": "Symbol Bar",
     "module-polymarketPreview": "Polymarket",
     "module-bots": "Trading Bots",
+    "module-cloudJobs": "Cloud Jobs",
     "bots-not-enabled": "Trading bots are not enabled for your account.",
     "bots-no-linked-keys": "No API keys are linked to bots yet.",
     "bots-none-on-account": "No bots on this account yet.",
