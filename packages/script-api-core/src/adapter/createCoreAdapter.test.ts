@@ -1,3 +1,5 @@
+import { capturePlacementIntent, runWithPlacementIntent, placementLegIntent } from '@tealstreet/safe-cex/src/placementIntentContext';
+import { delegatedIntentTime } from '@tealstreet/safe-cex/src/delegatedOrderFrames';
 import { FrameStore } from '../../../safe-cex/src/store/frameStore';
 import { nativeFixture } from '../../../safe-cex/src/__tests__/cutover/nativeFixture';
 import type { Market, Order, Position } from '@tealstreet/safe-cex/src/types';
@@ -67,14 +69,14 @@ interface Fake {
   readonly writes: HostWriteEvent[];
 }
 
-const fakeHost = (over: Partial<HostBindings> & { exchangeName?: string } = {}): Fake => {
+const fakeHost = (over: Partial<HostBindings> & { exchangeName?: string; positions?: Position[] } = {}): Fake => {
   const placeOrder = vi.fn(async () => ['order-1']);
   const cancelOrders = vi.fn(async () => undefined);
   const writes: HostWriteEvent[] = [];
   const store = {
     markets: [market()],
     tickers: [{ symbol: 'BTCUSDT', mark: 60_000, last: 60_000 }],
-    positions: [position()],
+    positions: over.positions ?? [position()],
     orders: [order()],
     balance: { total: 1000, free: 800, used: 200, upnl: 5 },
   };
@@ -739,4 +741,22 @@ describe('createCoreAdapter', () => {
     );
     expect(binance.placeOrder.mock.calls[0][0].amount).toBe(5);
   });
+});
+
+it('retains distinct child identities across a two-leg script close await', async () => {
+  const f = fakeHost({ positions: [position(), position({ side: PositionSide.Short })] });
+  const observed: (string | undefined)[] = [];
+  f.placeOrder.mockImplementation(async () => {
+    observed.push(capturePlacementIntent()?.id);
+    await Promise.resolve();
+    return ['native-id'];
+  });
+  const id = '019a9b43-1000-7000-8000-000000000001';
+  const parent = { id, createdAt: delegatedIntentTime(id) };
+  await runWithPlacementIntent(id, () => createCoreAdapter(f.host).closePosition({ symbol: 'BTCUSDT' }, 'main'));
+  expect(observed).toEqual([
+    placementLegIntent(parent, JSON.stringify(['BTCUSDT', PositionSide.Long])).id,
+    placementLegIntent(parent, JSON.stringify(['BTCUSDT', PositionSide.Short])).id,
+  ]);
+  expect(capturePlacementIntent()).toBeUndefined();
 });
