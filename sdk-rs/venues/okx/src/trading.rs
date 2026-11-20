@@ -1954,13 +1954,29 @@ impl Okx {
                         .iter()
                         .all(|ack| matches!(&ack.s_msg, std::borrow::Cow::Borrowed(_)))
             });
-        let Some(acks) = acks else {
+        let Some(mut acks) = acks else {
             if matches!(envelope.code, "0" | "2") {
                 return self.unproven(cx, request, "Malformed OKX write response");
             }
             let message = write_failure_message(&envelope);
             return self.failure(cx, request, Some(envelope.code), message, response.status);
         };
+        // A leg deletion on an algo that is already gone answers 51527 with no
+        // algoId (live okx-t, AGT-98); like 51400 for cancel-algos, the leg is gone.
+        let deleted_leg = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .and_then(|job| job.steps.front())
+            .filter(|step| step.leg_delete)
+            .and_then(|step| serde_json::from_str::<Requested>(&step.body).ok());
+        if let (Some(named), [ack]) = (&deleted_leg, acks.as_mut_slice())
+            && ack.s_code == "51527"
+            && ack.algo_id.is_empty()
+        {
+            ack.s_code = "51400";
+            ack.algo_id = &named.algo_id;
+        }
         // A refused envelope with no failing rows is one whole native failure.
         if !matches!(envelope.code, "0" | "2") && acks.iter().all(|a| matches!(a.s_code, "" | "0"))
         {
@@ -2546,6 +2562,7 @@ impl Okx {
         if !uncertain
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             && current.is_some_and(|request| request.path == "/api/v5/trade/amend-algos")
+            && !job.steps.front().is_some_and(|step| step.leg_delete)
         {
             error.message = format!("{}; your stop is unchanged by this edit", error.message);
             error.presents = true;

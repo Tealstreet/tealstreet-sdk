@@ -313,6 +313,8 @@ fn cancelling_one_leg_of_a_two_leg_algo_deletes_only_that_leg() {
     }
 }
 
+/// Live okx-t, AGT-98: amend-algos on an algo that is already gone answers
+/// 51527 with an empty algoId. The leg is gone, so the cancellation is satisfied.
 #[test]
 fn a_gone_algo_satisfies_a_leg_cancellation() {
     let mut e = trading_engine();
@@ -322,11 +324,30 @@ fn a_gone_algo_satisfies_a_leg_cancellation() {
     reply(
         &mut e,
         sent[0],
-        r#"{"code":"1","msg":"","data":[{"algoId":"77","sCode":"51400","sMsg":"Order cancellation failed as the order has been filled, canceled or does not exist."}]}"#,
+        r#"{"code":"1","msg":"","data":[{"algoClOrdId":"","algoId":"","reqId":"","sCode":"51527","sMsg":"Order modification failed. At least 1 of the attached TP/SL orders does not exist. "}]}"#,
         6.,
     );
     let out = prepared(&mut e, 6.);
     assert_eq!(done(&out), Some("[]"), "{out:?}");
+}
+
+/// The same 51527 on a join is a refusal: the leg was not added.
+#[test]
+fn venue_51527_on_a_join_stays_a_rejection() {
+    let mut e = trading_engine();
+    e.store_mut()
+        .upsert_order(full_leg("77_sl", OrderType::StopLoss, OrderSide::Sell));
+    let out = place(&mut e, &[FULL_TP]);
+    let sent = writes(&out);
+    reply(
+        &mut e,
+        sent[0],
+        r#"{"code":"1","msg":"","data":[{"algoClOrdId":"","algoId":"","reqId":"","sCode":"51527","sMsg":"Order modification failed. At least 1 of the attached TP/SL orders does not exist. "}]}"#,
+        6.,
+    );
+    let out = prepared(&mut e, 6.);
+    assert!(done(&out).is_none(), "{out:?}");
+    assert!(refusal(&out).message.contains("51527"), "{out:?}");
 }
 
 #[test]
