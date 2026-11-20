@@ -358,28 +358,92 @@ fn live_target_cursor_beside_the_single_row_does_not_refuse_the_edit() {
     }
 }
 
-/// AGT-108: a genuine readiness refusal says plainly that nothing was sent.
+fn refused_with(h: &Harness, kind: &str, expected: &str) {
+    assert!(
+        h.notices.iter().any(|notice| matches!(notice,
+            safe_cex_engine::Notice::CommandFailed { command:91, error }
+            if error.message == expected
+                && error.kind == Some(safe_cex_engine::ErrorKind::Network)
+                && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+        )),
+        "{kind}: {:?}",
+        h.result(91)
+    );
+    assert!(!h.has_request(PROFILES[0].cancel_path()), "{kind}");
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == safe_cex_engine::Method::Post),
+        "{kind}"
+    );
+}
+
+/// AGT-108: an unreadable or unexpected answer says the stop could not be confirmed.
 #[test]
-fn readiness_refusal_says_plainly_that_the_edit_was_not_sent() {
+fn readiness_without_evidence_says_the_edit_was_not_sent_and_to_try_again() {
     for (kind, what) in [("StopLoss", "stop"), ("TakeProfit", "take profit")] {
-        let mut h = frame_fed(kind);
-        let mut target = original(&h);
-        target["orderStatus"] = "Triggered".into();
-        start(&mut h, kind);
-        page(&mut h, "&orderId=partial", vec![target]);
         let expected = format!(
             "Couldn't confirm your current {what} with Bybit, so the edit wasn't sent. Your {what} is unchanged; try again."
         );
-        assert!(
-            h.notices.iter().any(|notice| matches!(notice,
-                safe_cex_engine::Notice::CommandFailed { command:91, error }
-                if error.message == expected
-                    && error.kind == Some(safe_cex_engine::ErrorKind::Network)
-                    && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-            )),
-            "{kind}: {:?}",
-            h.result(91)
+        for answer in ["http", "empty", "other-order"] {
+            let mut h = frame_fed(kind);
+            start(&mut h, kind);
+            match answer {
+                "http" => h.respond("&orderId=partial", 503, "unavailable"),
+                "empty" => page(&mut h, "&orderId=partial", vec![]),
+                _ => {
+                    let mut other = original(&h);
+                    other["orderId"] = "other".into();
+                    page(&mut h, "&orderId=partial", vec![other]);
+                }
+            }
+            refused_with(&h, &format!("{kind} {answer}"), &expected);
+        }
+    }
+}
+
+/// AGT-108: the edited order's own row, no longer live as it was, says it changed;
+/// retrying the same edit cannot succeed, so the copy does not say "try again".
+#[test]
+fn readiness_on_a_changed_or_triggered_stop_says_so_instead_of_try_again() {
+    for (kind, what) in [("StopLoss", "stop"), ("TakeProfit", "take profit")] {
+        let expected = format!(
+            "Your {what} changed or already triggered, so the edit wasn't sent. Refresh and check it before editing."
         );
-        assert!(!h.has_request(PROFILES[0].cancel_path()), "{kind}");
+        for (axis, change) in [
+            (0, "Triggered"),
+            (0, "price"),
+            (1, "Filled"),
+            (2, "Cancelled"),
+        ] {
+            let mut h = frame_fed(kind);
+            let healthy = original(&h);
+            let mut changed = healthy.clone();
+            if change == "price" {
+                changed["triggerPrice"] = "89".into();
+            } else {
+                changed["orderStatus"] = change.into();
+            }
+            start(&mut h, kind);
+            for (index, path) in [
+                "&orderId=partial",
+                "&openOnly=0&limit=50",
+                "/v5/order/history",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let row = if index == axis {
+                    changed.clone()
+                } else {
+                    healthy.clone()
+                };
+                page(&mut h, path, vec![row]);
+                if index == axis {
+                    break;
+                }
+            }
+            refused_with(&h, &format!("{kind} axis={axis} {change}"), &expected);
+        }
     }
 }
