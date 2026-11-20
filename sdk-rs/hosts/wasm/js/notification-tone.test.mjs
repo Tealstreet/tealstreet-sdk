@@ -211,7 +211,7 @@ function bitunixFinalDisplay(detail) {
   if (!detail) return summary;
   const guard = /if (detail\.contains[\s\S]*?)\{/.exec(body)?.[1];
   if (guard && new Function('detail', `return (${guard.replaceAll('.contains(', '.includes(')});`)(detail)) {
-    const suffixes = [...body.matchAll(/summary\.strip_suffix\("([^"\n]+)"\)/g)].map((match) => match[1]);
+    const suffixes = [...body.matchAll(/summary\s*\.strip_suffix\(\s*"([^"\n]+)"\s*\)/g)].map((match) => match[1]);
     assert.ok(suffixes.length);
     for (const suffix of suffixes) if (summary.endsWith(suffix)) { summary = summary.slice(0, -suffix.length); break; }
   }

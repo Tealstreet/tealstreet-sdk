@@ -138,3 +138,5 @@ missing protection remains explicit. Keep structured outcomes, retries and
 severity unchanged, including recognition of retained older messages.
 Venue display decorators preserve retained and current check-open-orders guidance
 without adding a second action.
+Summary formatting retains diagnostic context and checks each warning separately
+from the terminal error when omitting repeated guidance.

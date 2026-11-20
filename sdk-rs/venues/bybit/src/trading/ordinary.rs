@@ -176,7 +176,9 @@ fn unknown_outcome(mut error: VenueError) -> VenueError {
     if error.outcome == Some(Outcome::Unknown) {
         let canonical =
             "We couldn’t confirm this change. Check your open orders before trying again.";
-        if !error.message.contains(canonical) {
+        if !error.message.contains("Check your open orders")
+            && !error.message.contains("Check Open Orders")
+        {
             error.message = format!("{canonical} {}", error.message);
         }
         error.presents = true;

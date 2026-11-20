@@ -660,10 +660,20 @@ fn fence_refusal(message: &str, hold: Option<&str>) -> VenueError {
     .outcome(crate::Outcome::NotSent)
 }
 
+// Each warning and terminal detail owns its existing action; summary guidance is a fallback.
 fn command_failure_message(summary: &str, detail: &str) -> String {
     if detail.is_empty() {
         return summary.to_owned();
     }
+    let summary =
+        if detail.contains("Check your open orders") || detail.contains("Check Open Orders") {
+            summary
+                .strip_suffix(" Check your open orders before trying again.")
+                .or_else(|| summary.strip_suffix(" Check Open Orders"))
+                .unwrap_or(summary)
+        } else {
+            summary
+        };
     format!("{summary}\nContext: {detail}")
 }
 
@@ -8911,6 +8921,47 @@ mod streaming_tests {
         assert_eq!(
             command_failure_message("SUMMARY", "detail"),
             "SUMMARY\nContext: detail"
+        );
+    }
+
+    #[test]
+    fn guided_summary_preserves_native_error_and_warning_facts() {
+        let mut engine = frame_engine();
+        engine.io.core.command_failure_summary = |error| {
+            (error.outcome == Some(crate::Outcome::Unknown))
+            .then(|| "Bitunix couldn’t confirm this change. Check your open orders before trying again.".to_owned())
+        };
+        let detail = "The exchange reply didn’t confirm this change. Check your open orders before trying again.";
+        let expected = VenueError::new(detail)
+            .kind(ErrorKind::Network)
+            .outcome(crate::Outcome::Unknown)
+            .venue_code("native-code")
+            .venue_message("native diagnostic");
+        Cx {
+            now: 1.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .core()
+        .finish_sealed_command(
+            7,
+            None,
+            request_context_registry::Seal::Failure(
+                expected.clone(),
+                vec![detail.into(), "raw warning".into()],
+            ),
+        )
+        .unwrap();
+        let mut presented = expected;
+        presented.message = format!("Bitunix couldn’t confirm this change.\nContext: {detail}");
+        let guided = presented.message.clone();
+        let raw = "Bitunix couldn’t confirm this change. Check your open orders before trying again.\nContext: raw warning";
+        assert!(
+            matches!(engine.drain_actions().collect::<Vec<_>>().as_slice(), [
+            Action::Notice(Notice::CommandError { command: 7, message: first }),
+            Action::Notice(Notice::CommandError { command: 7, message: second }),
+            Action::Notice(Notice::CommandFailed { command: 7, error }),
+        ] if first == &guided && second == raw && *error == presented)
         );
     }
 

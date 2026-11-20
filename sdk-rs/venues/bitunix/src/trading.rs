@@ -453,6 +453,9 @@ fn split_quantities(
 }
 
 fn unknown_failure_text(message: &str) -> String {
+    if message.contains("Check your open orders") || message.contains("Check Open Orders") {
+        return message.to_owned();
+    }
     if message.is_empty() {
         "We couldn’t confirm this change. Check your open orders before trying again.".into()
     } else {

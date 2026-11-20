@@ -76,11 +76,11 @@ pub(crate) const ENGINE_UNKNOWN_TEXT: &str =
 pub(crate) fn write_failure_text(error: &VenueError) -> String {
     if error.outcome == Some(Outcome::Unknown) {
         // Projection retains uncertainty context without its presentation marker.
-        if error.message.contains(ENGINE_UNKNOWN_TEXT)
-            || error.message.contains("Check your open orders")
+        if error.message.contains("Check your open orders")
+            || error.message.contains("Check Open Orders")
         {
             error.message.clone()
-        } else if error.presents || error.message.contains("Check Open Orders") {
+        } else if error.presents {
             format!("{}: {ENGINE_UNKNOWN_TEXT}", error.message)
         } else {
             ENGINE_UNKNOWN_TEXT.to_owned()

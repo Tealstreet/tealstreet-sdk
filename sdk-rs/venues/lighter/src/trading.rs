@@ -266,7 +266,7 @@ struct Integrator {
 }
 
 fn protection_unknown_text(message: &str) -> String {
-    if message.contains(UNKNOWN_TEXT) {
+    if message.contains("Check your open orders") || message.contains("Check Open Orders") {
         message.to_owned()
     } else {
         format!("{message}. {UNKNOWN_TEXT}")

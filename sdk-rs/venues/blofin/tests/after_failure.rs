@@ -696,7 +696,7 @@ fn engine_sealed_unknown_batch(grouped: bool) {
         assert_eq!(h.failures.len(), 1);
         let error = &h.failures[0];
         assert_eq!(error.outcome, Some(Outcome::Unknown));
-        assert!(error.message.contains(ENGINE_UNKNOWN_TEXT)
+        assert!(error.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.")
             || error.message.contains("This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again."));
         let rows = error
             .elements
@@ -717,7 +717,7 @@ fn engine_sealed_unknown_batch(grouped: bool) {
             h.actions.iter().filter(|action| matches!(action,
             Action::Notice(safe_cex_engine::Notice::Event(event))
             if event.code == safe_cex_engine::log::code::CHILD_LEG_FAILED
-                && event.message.contains(ENGINE_UNKNOWN_TEXT)
+                && event.message.contains("The exchange reply didn’t confirm this change. Check your open orders before trying again.")
                 && event.fields.iter().any(|(key, value)| *key == "outcome" && value.as_str() == Some("unknown"))
         )).count()
         };

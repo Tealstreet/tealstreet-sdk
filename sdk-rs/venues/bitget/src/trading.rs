@@ -38,6 +38,12 @@ const UNKNOWN_TEXT: &str =
     "We couldn’t confirm this change. Check your open orders before trying again.";
 
 fn unproven_cancel_text(message: String) -> String {
+    if message.contains("Check your open orders")
+        || message.contains("Check Open Orders")
+        || message.contains("check Open Orders")
+    {
+        return message;
+    }
     format!("{message}. This change wasn’t confirmed. Check your open orders before trying again.")
 }
 

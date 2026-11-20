@@ -3665,7 +3665,10 @@ fn unknown_event(cx: &mut Cx<'_, Pending>, command: CommandId, message: &str) {
 }
 
 fn unknown_guidance(mut error: VenueError) -> VenueError {
-    if error.outcome == Some(Outcome::Unknown) && !error.message.contains(UNKNOWN_WRITE) {
+    if error.outcome == Some(Outcome::Unknown)
+        && !error.message.contains("Check your open orders")
+        && !error.message.contains("Check Open Orders")
+    {
         error.message = if error.presents
             || matches!(error.kind, Some(ErrorKind::Network | ErrorKind::Timeout))
         {

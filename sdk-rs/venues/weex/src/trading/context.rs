@@ -210,7 +210,7 @@ pub(super) struct Recorded {
 }
 
 pub(super) fn unknown_message(message: &str) -> String {
-    if message.contains(UNKNOWN_OUTCOME_TEXT) {
+    if message.contains("Check your open orders") || message.contains("Check Open Orders") {
         message.to_owned()
     } else {
         format!("{message}. {UNKNOWN_OUTCOME_TEXT}")

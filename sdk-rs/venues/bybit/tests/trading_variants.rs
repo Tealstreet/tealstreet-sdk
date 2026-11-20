@@ -4239,7 +4239,7 @@ fn hyro_lost_ack_reports_to_each_observer_before_its_terminal() {
         error: "lost",
     });
     let expected = format!(
-        "We couldn’t confirm this change. Check your open orders before trying again. HyroTrader didn’t confirm order {id}: lost. Check your open orders before placing a replacement."
+        "HyroTrader didn’t confirm order {id}: lost. Check your open orders before placing a replacement."
     );
     for command in [91, 92] {
         let notices: Vec<_> = h

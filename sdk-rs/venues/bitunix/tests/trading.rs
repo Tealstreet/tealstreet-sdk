@@ -1821,7 +1821,7 @@ fn unknown_fallback_replacement_http503_keeps_engine_sealed_wording() {
     assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert_eq!(
         failures[0].message,
-        "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again."
+        "Bitunix couldn’t confirm this change.\nContext: This order change wasn’t confirmed because a later request didn’t complete. Check your open orders before trying again."
     );
 }
 

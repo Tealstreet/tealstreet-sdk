@@ -86,7 +86,7 @@ fn write_failures_classify_http_before_body_and_keep_native_diagnostics() {
         if unproven {
             assert_eq!(
                 error.message,
-                "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: The exchange reply didn’t confirm this change. Check your open orders before trying again."
+                "Bitunix couldn’t confirm this change.\nContext: The exchange reply didn’t confirm this change. Check your open orders before trying again."
             );
         } else {
             assert_eq!(error.message, "Sign signature error");
@@ -158,7 +158,7 @@ fn write_transport_and_malformed_success_are_unknown_but_preflight_is_not_sent()
         if body.is_none() {
             assert_eq!(
                 error.message,
-                "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: response lost. We couldn’t confirm this change. Check your open orders before trying again."
+                "Bitunix couldn’t confirm this change.\nContext: response lost. We couldn’t confirm this change. Check your open orders before trying again."
             );
         }
     }
@@ -651,7 +651,7 @@ fn undocumented_native_code_is_uncertain_even_with_an_empty_message() {
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(
         error.message,
-        "The outcome of this Bitunix write is unknown. Check Open Orders\nContext: We couldn’t confirm this change. Check your open orders before trying again."
+        "Bitunix couldn’t confirm this change.\nContext: We couldn’t confirm this change. Check your open orders before trying again."
     );
     assert_eq!(error.venue_code.as_deref(), Some("99999"));
 }
