@@ -87,16 +87,14 @@ export interface OutboxStorage {
   /** Atomically delete the listed IDs and advance (never lower) the checkpoint. */
   compact(scope: Readonly<OutboxScope>, checkpoint: OutboxCompaction): Promise<void>;
 }
-export interface OutboxSnapshot {
-  version: 1;
+export type OutboxSnapshot = {
   sequence: number;
   intents: DelegatedIntent[];
-}
-export interface OutboxCompaction {
-  version: 1;
+} & ({ version: 1 } | { version: 2; retiredIntentBefore: number });
+export type OutboxCompaction = {
   sequence: number;
   retiredIntentIds: string[];
-}
+} & ({ version: 1 } | { version: 2; retiredIntentBefore: number });
 export interface OutboxOptions extends OutboxScope {
   storage: OutboxStorage;
   clock: { epoch: string; now(): number; unix(): number };
@@ -313,6 +311,8 @@ export class DelegatedOutbox {
   private activationConnection?: Readonly<OutboxConnection>;
   private active = true;
   private sequence = 0;
+  private checkpointVersion: 1 | 2 = 1;
+  private retiredIntentBefore = 0;
   private readonly outcomeSequences = new Map<string, number>();
   private work: Promise<unknown> = Promise.resolve();
 
@@ -322,9 +322,12 @@ export class DelegatedOutbox {
       const saved = await options.storage.load(box.scope);
       const rows = Array.isArray(saved) ? saved : saved.intents;
       if (!Array.isArray(saved)) {
-        if (saved.version !== 1 || !Number.isSafeInteger(saved.sequence) || saved.sequence < 0)
+        if (![1, 2].includes(saved.version) || !Number.isSafeInteger(saved.sequence) || saved.sequence < 0 ||
+            (saved.version === 2 && (!Number.isSafeInteger(saved.retiredIntentBefore) || saved.retiredIntentBefore < 0 || saved.retiredIntentBefore > 0x1000000000000)))
           throw new Error('Invalid outbox checkpoint');
         box.sequence = saved.sequence;
+        box.checkpointVersion = saved.version;
+        if (saved.version === 2) box.retiredIntentBefore = saved.retiredIntentBefore;
       }
       if (!Array.isArray(rows) || rows.length > MAX_PENDING + COMPLETED_HISTORY)
         throw new Error('Outbox capacity exceeded');
