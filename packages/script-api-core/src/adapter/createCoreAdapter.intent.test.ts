@@ -14,8 +14,8 @@ const symbol = 'BTCUSDT';
 function fixture() {
   const store = new FrameStore();
   store.apply(nativeFixture({
-    markets: [{ symbol, base: 'BTC', quote: 'USDT', contractSize: 1, isSpot: false,
-      precision: { amount: 0.1, price: 1 }, limits: { amount: { min: 0.1, max: 100 } } }],
+    markets: [{ id: symbol, symbol, base: 'BTC', quote: 'USDT', active: true, contractSize: 1, isSpot: false,
+      precision: { amount: 0.1, price: 1 }, limits: { amount: { min: 0.1, max: 100 }, leverage: { min: 1, max: 100 } } }],
     positions: [PositionSide.Long, PositionSide.Short].map((side) => ({
       id: symbol + side, symbol, side, contracts: 2, notional: 200, entryPrice: 100, leverage: 1,
       unrealizedPnl: 0, liquidationPrice: null, extra: { contractsNative: 2 },
