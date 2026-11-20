@@ -93,6 +93,19 @@ const clearRateLimit = () => {
   rateLimitResume = undefined;
 };
 
+// Re-arms when it fires early (timers may), so the held batch never waits for an unrelated flush.
+// unref: safe-cex runs this in Node/Bun, where a pending pause must not keep the process alive.
+const scheduleRateLimitResume = (delayMs: number) => {
+  if (rateLimitResume !== undefined) clearTimeout(rateLimitResume);
+  rateLimitResume = setTimeout(() => {
+    rateLimitResume = undefined;
+    const remaining = rateLimitedUntil ? rateLimitedUntil.until - Date.now() : 0;
+    if (remaining > 0) scheduleRateLimitResume(remaining);
+    else void drainLogBatches();
+  }, delayMs);
+  (rateLimitResume as { unref?: () => void }).unref?.();
+};
+
 const isRateLimitedNow = (owner: LoggingOwner) =>
   rateLimitedUntil !== undefined && sameLoggingOwner(rateLimitedUntil, owner) && Date.now() < rateLimitedUntil.until;
 
@@ -486,11 +499,7 @@ const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
         // Keep the batch pending (the pending cap bounds memory) and resume after the window.
         loggingMetrics.retries++;
         rateLimitedUntil = { userId, epoch: ownerEpoch, until: Date.now() + RATE_LIMIT_COOLDOWN_MS };
-        if (rateLimitResume !== undefined) clearTimeout(rateLimitResume);
-        rateLimitResume = setTimeout(() => {
-          rateLimitResume = undefined;
-          void drainLogBatches();
-        }, RATE_LIMIT_COOLDOWN_MS);
+        scheduleRateLimitResume(RATE_LIMIT_COOLDOWN_MS);
         console.error(`Error in startLoggingToGrafana: ${error}. Rate limited; pausing uploads for ${RATE_LIMIT_COOLDOWN_MS / 1000}s`);
         return false;
       }
