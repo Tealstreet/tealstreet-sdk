@@ -4,6 +4,35 @@ fn action_key() -> String {
     let hex = format!("{:012x}", crate::accounts::now_ms());
     format!("{}-{}-7101-8101-010101010101", &hex[..8], &hex[8..])
 }
+
+#[tokio::test]
+async fn typed_algo_amend_updates_the_existing_job_without_a_new_order() {
+    tokio::task::LocalSet::new().run_until(async {
+        for family in ["chaser", "twap"] {
+            let registry = crate::accounts::tests::registry();
+            let tape = Tape::default();
+            let account = delegated_account_with_algos(&registry, "A", "bybit", tape.clone(), true);
+            let (mut session, mut sent) = joined(registry.clone(), "A", account.clone()).await;
+            action(&mut session, json!({"kind":"algo","op":format!("{family}:start"),"data":j6b_options(family)}), 1, false).await;
+            assert_eq!(action_frame(&mut sent, "order.actionOutcome").await["d"]["outcome"], "unknown");
+            j6b_wait_writes(&tape, 1).await;
+            let jobs = account.running.jobs().0;
+            assert_eq!(jobs.len(), 1);
+            let update = if family == "chaser" {json!({"maxAttempts":20})} else {json!({"intervalMs":60000,"remainingSlices":2})};
+            j6b_raw_action(&mut session, json!({"kind":"algo","op":format!("{family}:amend"),"data":{"id":jobs[0].id,"update":update}}), 0).await;
+            let outcome = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(outcome["d"]["outcome"], "unknown", "{family}: {outcome}");
+            assert_eq!(account.running.jobs().0, jobs, "same resident job, never stop-and-replace");
+            assert_eq!(native_request_rows(&tape, "create").len(), 1);
+            j6b_raw_action(&mut session, json!({"kind":"algo","op":format!("{family}:amend"),"data":{"id":"missing","update":update}}), 0).await;
+            let refused = action_frame(&mut sent, "order.actionOutcome").await;
+            assert_eq!(refused["d"]["outcome"], "refused", "{refused}");
+            assert!(refused["d"]["error"]["message"].as_str().unwrap().contains("not amendable"));
+            session.close();
+            registry.dispose(&account, Disposal::PageDisposed);
+        }
+    }).await;
+}
 async fn action(session: &mut Session, action: Value, version: u8, corrupt: bool) -> String {
     let id = action_key();
     let fp = crate::order_contract::action_fingerprint("synthetic-main", &id, &action, 1).unwrap();

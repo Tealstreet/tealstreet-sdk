@@ -357,6 +357,70 @@ fn start(port: &Rc<FakePort>, payload: &str) -> (ChaserFactory, AlgoCx) {
 const BUY_ONE: &str =
     r#"{"symbol":"BTCUSDT","size":1,"side":"buy","maxAttempts":10,"delay":0,"clientId":"c1"}"#;
 
+#[tokio::test(start_paused = true)]
+async fn amend_changes_only_the_next_chaser_attempt() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let id = factory.book().active_chasers()[0].id.clone();
+        factory.handle("chaser:amend", &serde_json::json!({"id":id,"update":{"limitPrice":101.0,"offset":0.5,"maxAttempts":20}}).to_string(), &cx).unwrap();
+        assert_eq!(port.placements(), vec![(100.0, 1.0)]);
+        assert!(port.cancels().is_empty(), "amend never cancels or replaces a job/order");
+        assert_eq!(factory.book().active_chasers()[0].id, id);
+        assert_eq!(factory.book().active_chasers()[0].max_attempts, 20.0);
+        port.set_ticker(102.0, 102.5);
+        settle(100).await;
+        assert_eq!(port.placements(), vec![(100.0, 1.0), (101.0, 1.0)]);
+        assert_eq!(factory.book().active_chasers()[0].size, 1.0);
+    }).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn amend_refuses_immutable_chaser_fields_and_ended_jobs() {
+    local(async {
+        let port = FakePort::new("bybit");
+        port.accept_placements();
+        let (factory, cx) = start(&port, BUY_ONE);
+        settle(1100).await;
+        let id = factory.book().active_chasers()[0].id.clone();
+        for update in [
+            serde_json::json!({"size":2}),
+            serde_json::json!({"side":"sell"}),
+            serde_json::json!({"symbol":"ETHUSDT"}),
+        ] {
+            let error = factory
+                .handle(
+                    "chaser:amend",
+                    &serde_json::json!({"id":id,"update":update}).to_string(),
+                    &cx,
+                )
+                .unwrap_err();
+            assert!(error.contains("unsupported amend field"), "{error}");
+        }
+        factory.book().remove(&id);
+        let error = factory
+            .handle(
+                "chaser:amend",
+                &serde_json::json!({"id":id,"update":{"maxAttempts":20}}).to_string(),
+                &cx,
+            )
+            .unwrap_err();
+        assert!(error.contains("not amendable"), "{error}");
+        let error = factory
+            .handle(
+                "chaser:amend",
+                r#"{"id":"missing","update":{"maxAttempts":20}}"#,
+                &cx,
+            )
+            .unwrap_err();
+        assert!(error.contains("not amendable"), "{error}");
+        assert_eq!(port.placements(), vec![(100.0, 1.0)]);
+    })
+    .await;
+}
+
 async fn settle(ms: u64) {
     tokio::time::sleep(Duration::from_millis(ms)).await;
 }

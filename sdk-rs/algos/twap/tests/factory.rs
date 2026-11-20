@@ -111,6 +111,92 @@ fn placed_amounts(port: &Port) -> Vec<f64> {
         .collect()
 }
 
+#[tokio::test(start_paused = true)]
+async fn amend_repartitions_only_unplaced_twap_quantity() {
+    LocalSet::new()
+        .run_until(async {
+            let _clock = support::ClockGuard::new();
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+            factory
+                .handle("twap:start", &twap_options(json!({"ordersCount":4})), &cx)
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            settle().await;
+            let id = factory.active_twaps("a")[0]["id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            assert_eq!(placed_amounts(&port), vec![0.25]);
+            factory
+                .handle(
+                    "twap:amend",
+                    &json!({"id":id,"update":{"intervalMs":1000,"remainingSlices":2}}).to_string(),
+                    &cx,
+                )
+                .unwrap();
+            assert_eq!(
+                placed_amounts(&port),
+                vec![0.25],
+                "amend has no immediate venue effect"
+            );
+            tokio::time::sleep(Duration::from_millis(999)).await;
+            assert_eq!(placed_amounts(&port), vec![0.25]);
+            tokio::time::sleep(Duration::from_millis(3)).await;
+            settle().await;
+            assert_eq!(placed_amounts(&port), vec![0.25, 0.375]);
+            tokio::time::sleep(Duration::from_millis(1002)).await;
+            settle().await;
+            tokio::time::sleep(Duration::from_millis(1002)).await;
+            settle().await;
+            assert_eq!(placed_amounts(&port), vec![0.25, 0.375, 0.375]);
+            assert!(factory.active_twaps("a").is_empty());
+            let error = factory
+                .handle(
+                    "twap:amend",
+                    &json!({"id":id,"update":{"intervalMs":1000}}).to_string(),
+                    &cx,
+                )
+                .unwrap_err();
+            assert!(error.contains("not amendable"), "{error}");
+            cx.scope.dispose();
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn amend_refuses_unknown_twap_and_immutable_quantity() {
+    LocalSet::new()
+        .run_until(async {
+            let _clock = support::ClockGuard::new();
+            let port = Rc::new(Port::default());
+            let cx = AlgoCx::new(port.clone(), Scope::new());
+            let factory = TwapFactory::new("a", cx.clone(), Rc::new(Chasers::default()));
+            for field in ["size", "side", "symbol"] {
+                let error = factory
+                    .handle(
+                        "twap:amend",
+                        &json!({"id":"missing","update":{field:2}}).to_string(),
+                        &cx,
+                    )
+                    .unwrap_err();
+                assert!(error.contains("unsupported amend field"), "{error}");
+            }
+            let error = factory
+                .handle(
+                    "twap:amend",
+                    r#"{"id":"missing","update":{"remainingSlices":3}}"#,
+                    &cx,
+                )
+                .unwrap_err();
+            assert!(error.contains("not amendable"), "{error}");
+            assert!(port.commands.borrow().is_empty());
+            cx.scope.dispose();
+        })
+        .await;
+}
+
 async fn settle() {
     for _ in 0..8 {
         tokio::task::yield_now().await;
