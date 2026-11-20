@@ -1674,9 +1674,3 @@ still emit their single exchange error event.
 Rust algo actions use `EngineHost.checkAlgosForExecution`, not the observational
 `runsRustAlgos`/`algosRunning` getters. Status reads and disposal do not manufacture
 engine deaths; action admission retains strict ownership retirement.
-
-## Explicit delegated action metadata
-
-The base worker bridge copies a captured action UUID into optional envelope
-metadata only for placement methods. Rust source-bridge readiness captures it
-before waiting and restores it at dispatch. No payload or client ID is changed.

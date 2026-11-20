@@ -1,4 +1,3 @@
-import { runWithPlacementIntent, capturePlacementIntent } from '../placementIntentContext';
 import type { ExchangeName } from '../types';
 import type { AppSettingsWorkerType } from '../webworker/AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../webworker/ExchangeMetadataWorkerType';
@@ -24,23 +23,6 @@ describe('main-thread Rust trading routing', () => {
     main = undefined;
     vi.useRealTimers();
     vi.restoreAllMocks();
-  });
-
-  it('carries explicit action metadata across the actual delegated source bridge wait', async () => {
-    setWasmEngineLoader(() => new Promise(() => {}));
-    main = new RustEngineExchange('bybit', { key: '', secret: '', workerMirror: true, signingMode: 'delegated' }, new FrameStore());
-    const id = '019a9b43-1000-7000-8000-000000000001';
-    const observed: unknown[] = [];
-    const pending = runWithPlacementIntent(id, () => main!.placeOrder(order));
-    expect(capturePlacementIntent()).toBeUndefined();
-    await Promise.resolve();
-    main.on('callMethod', (event: { requestId: string; method: string; intentId?: string; args: unknown[] }) => {
-      observed.push({ method: event.method, intentId: event.intentId, args: event.args });
-      main!.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: ['native-id'] });
-    });
-    await expect(pending).resolves.toEqual(['native-id']);
-    expect(observed).toEqual([{ method: 'placeOrder', intentId: id, args: [order] }]);
-    expect(order).not.toHaveProperty('intentId');
   });
 
   it('keeps forwarding to the worker after a main-thread read started a local engine', async () => {

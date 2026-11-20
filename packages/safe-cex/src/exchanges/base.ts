@@ -23,7 +23,6 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import createHmac from 'create-hmac';
 import uniq from 'lodash/uniq';
-import { capturePlacementIntent, PLACEMENT_INTENT_METHODS } from '../placementIntentContext';
 import { nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
 
@@ -2037,7 +2036,6 @@ export class BaseExchange implements Exchange {
     method: M,
     ...args: Parameters<this[M]>
   ): Promise<ReturnType<this[M]>> => {
-    const intent = PLACEMENT_INTENT_METHODS.has(method) ? capturePlacementIntent() : undefined;
     const requestId = nanoid();
     const timing = TIMED_WRITE_METHODS.has(method) ? claimWriteTiming(method).timing : undefined;
 
@@ -2085,7 +2083,7 @@ export class BaseExchange implements Exchange {
       };
       this.emitter.on('callMethod:done', handleDone);
       try {
-        this.emitter.dispatch('callMethod', { method, args, requestId, ...(intent ? { intentId: intent.id } : {}), ...(timing ? { timing: timing.marks } : {}) });
+        this.emitter.dispatch('callMethod', { method, args, requestId, ...(timing ? { timing: timing.marks } : {}) });
       } catch (error) {
         clearTimeout(timeout);
         this.pendingWorkerCalls.delete(abandon);

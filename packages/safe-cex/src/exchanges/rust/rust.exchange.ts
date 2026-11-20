@@ -87,7 +87,6 @@ import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { uuid } from '../../utils/uuid';
-import { capturePlacementIntent, runWithPlacementIntent } from '../../placementIntentContext';
 import { virtualClock } from '../../utils/virtualClock';
 import { stopAccountAlgos as stopLocalAccountAlgos } from '../../webworker/stopAccountAlgos';
 import { captureTwapOwner } from '../../webworker/twap/TwapOwner';
@@ -2074,7 +2073,6 @@ export class RustEngineExchange extends BaseExchange {
     method: string,
     ...args: unknown[]
   ): Promise<unknown> => {
-    const intent = capturePlacementIntent();
     const timing = TIMED_WRITE_METHODS.has(method) ? new WriteTiming(method) : undefined;
     timing?.mark('called');
     admitted?.(method, args);
@@ -2086,7 +2084,7 @@ export class RustEngineExchange extends BaseExchange {
     const workerCall =
       this.isWorkerMirror && FRAME_FED_WRITES.has(method) ? this.sourceWorkerCall : this.callMethodInWorker;
     const call = () => (workerCall as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
-    return runWithPlacementIntent(intent?.id, () => timing ? runWithWriteTiming(timing, call) : call());
+    return timing ? runWithWriteTiming(timing, call) : call();
   };
 
   private callCandleWorker = async (call: typeof this.callMethodInWorker, args: unknown[]): Promise<unknown> => {
