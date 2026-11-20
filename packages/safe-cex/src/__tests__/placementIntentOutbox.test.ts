@@ -129,6 +129,19 @@ describe('durable caller-intent retirement', () => {
     } finally { box.close(); }
   });
 
+  it('explicit retirement cannot move the durable floor past a rolled-back clock', async () => {
+    const f = fixture();
+    const box = await DelegatedOutbox.open(f.options);
+    const id = await box.enqueue(params);
+    await box.cancel(id);
+    f.options.clock.unix = () => 1_763_999_999_999;
+    try {
+      expect(await box.retire(id)).toBe(false);
+      expect(f.floor()).toBe(0);
+      expect(f.rows.has(id)).toBe(true);
+    } finally { box.close(); }
+  });
+
   it('legacy storage keeps permanent caller reservations instead of forgetting replay protection', async () => {
     const f = fixture(1);
     const box = await DelegatedOutbox.open(f.options);
