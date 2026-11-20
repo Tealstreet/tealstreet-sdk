@@ -353,6 +353,18 @@ const drainLogBatches = async () => {
   }
 };
 
+/**
+ * A refusal resending cannot fix (AGT-67): a 4xx from the ingest Worker (malformed, too large,
+ * forbidden, rate limited) or a 502 carrying Loki's own 4xx. Retrying those five times only
+ * multiplied the load on a refusing sink. 401 (token refresh) and 408 stay retryable, as do
+ * 5xx and transport failures.
+ */
+const isRefusal = (status: number | undefined, upstreamStatus: number | undefined) => {
+  if (status === undefined) return false;
+  if (status >= 400 && status < 500) return status !== 401 && status !== 408;
+  return status === 502 && upstreamStatus !== undefined && upstreamStatus >= 400 && upstreamStatus < 500;
+};
+
 const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
   const { userId, epoch: ownerEpoch } = batch.owner;
   const queue = batch.entries.filter((entry) => sameLoggingOwner(entry.owner, batch.owner)).map((entry) => entry.value);
@@ -450,11 +462,19 @@ const sendToGrafana = async (batch: LogBatch): Promise<boolean> => {
       return true;
     } catch (error) {
       if (!isAuthorized()) return true;
-      if (retries === maxRetries) {
+      const refused = isRefusal(failureStatus, failureUpstreamStatus);
+      // An expired or rotated ingest token is the one 4xx a fresh token can fix.
+      if (failureStatus === 401 && cachedLogIngestToken?.userId === userId && cachedLogIngestToken.epoch === ownerEpoch) {
+        cachedLogIngestToken = undefined;
+      }
+      if (retries === maxRetries || refused) {
         loggingMetrics.droppedBatches++;
         // Keep the failure in the existing local log; logging it through log()
         // would enqueue another upload into the same failing sink.
-        const message = `Diagnostic log upload failed; ${queue.length} log entries were dropped after ${maxRetries} retries${failureStatus === undefined ? '' : ` (HTTP ${failureStatus}${failureUpstreamStatus === undefined ? '' : `; upstream HTTP ${failureUpstreamStatus}`})`}.`;
+        const status = failureStatus === undefined ? '' : ` (HTTP ${failureStatus}${failureUpstreamStatus === undefined ? '' : `; upstream HTTP ${failureUpstreamStatus}`})`;
+        const message = refused
+          ? `Diagnostic log upload was refused; ${queue.length} log entries were dropped without retrying${status}.`
+          : `Diagnostic log upload failed; ${queue.length} log entries were dropped after ${maxRetries} retries${status}.`;
         const store = getDefaultStore();
         store.set(logAtom, (previous) =>
           previous.concat({ timestamp: Date.now(), message, severity: LogSeverity.Warning }).slice(-200),

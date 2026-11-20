@@ -126,3 +126,64 @@ it('ignores malformed upstream status text instead of copying it into the local 
   expect(notice).not.toContain('upstream');
   expect(notice).not.toContain(canary);
 });
+
+// AGT-67: resending a refusal only multiplied the load on a sink that would refuse it again.
+it.each([
+  [400, undefined],
+  [403, undefined],
+  [413, undefined],
+  [429, undefined],
+  [502, '400'],
+  [502, '429'],
+])('drops a refused batch (HTTP %s, upstream %s) without retrying', async (status, upstream) => {
+  fetchMock.mockResolvedValue(
+    new Response(null, { status, headers: upstream ? { 'X-Log-Ingest-Upstream-Status': upstream } : {} }),
+  );
+  utils.logInfo('refused');
+  utils.dumpLogQueue();
+  await vi.advanceTimersByTimeAsync(31_000);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const notices = getDefaultStore().get(logAtom);
+  expect(notices).toHaveLength(1);
+  expect(notices[0].message).toContain('refused');
+  expect(notices[0].message).toContain('without retrying');
+  expect(notices[0].message).toContain(`HTTP ${status}`);
+});
+
+it.each([
+  [502, undefined],
+  [502, '503'],
+  [503, undefined],
+  [408, undefined],
+])('keeps retrying a failure that may recover (HTTP %s, upstream %s)', async (status, upstream) => {
+  fetchMock.mockResolvedValue(
+    new Response(null, { status, headers: upstream ? { 'X-Log-Ingest-Upstream-Status': upstream } : {} }),
+  );
+  utils.logInfo('transient');
+  utils.dumpLogQueue();
+  await vi.advanceTimersByTimeAsync(31_000);
+  expect(fetchMock).toHaveBeenCalledTimes(6);
+  expect(getDefaultStore().get(logAtom)[0].message).toContain('after 5 retries');
+});
+
+it('retries a 401 with a freshly requested ingest token', async () => {
+  vi.stubEnv('NEXT_PUBLIC_LOG_INGEST_ORIGIN', 'https://log-ingest.example.test');
+  stop();
+  utils.resetLoggingStateForTests();
+  stop = utils.startLoggingToGrafana('synthetic-owner');
+  let tokens = 0;
+  fetchMock.mockReset().mockImplementation(async (url: string) => {
+    if (String(url).endsWith('/api/logs/token')) {
+      tokens++;
+      return Response.json({ token: `token-${tokens}`, expiresAt: Date.now() + 15 * 60_000 });
+    }
+    return new Response(null, { status: tokens === 1 ? 401 : 204 });
+  });
+  utils.logInfo('expired token');
+  utils.dumpLogQueue();
+  await vi.advanceTimersByTimeAsync(2_000);
+  const uploads = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/v1/logs'));
+  expect(uploads).toHaveLength(2);
+  expect(uploads[1][1].headers.Authorization).toBe('Bearer token-2');
+  expect(getDefaultStore().get(logAtom)).toEqual([]);
+});
