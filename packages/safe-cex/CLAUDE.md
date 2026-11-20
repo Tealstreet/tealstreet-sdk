@@ -141,6 +141,20 @@ fixtures exercise the same production sender. The shared fixture lives with
 the server tests for receiver interoperability; Rust consumption depends on
 the server handover implementation landing.
 
+## Placement intent identity ledger
+
+`placementIntentLedger.ts` coalesces one action identity within one caller-owned
+authority scope. Equal payloads with distinct IDs remain distinct actions; the
+same ID joins its original promise, including an Unknown rejection. Changed
+payloads under a retained ID refuse without another dispatch.
+
+Capacity never evicts an unanswered action. Completed records may retire behind
+a monotonic timestamp floor; an older forgotten ID returns Unknown and cannot
+send again. That refusal is not evidence the original action was never sent.
+The caller must retain the ledger/floor for its authority lifetime and validate
+UUIDv7 timestamps at ingress. This memory ledger is not a durable outbox or
+permission to adopt an old owner's action into a new scope.
+
 ## DELEGATED order outbox
 
 `OutboxOptions`, every connection ticket, persisted intent and proof bind the
