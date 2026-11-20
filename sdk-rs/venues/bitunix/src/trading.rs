@@ -452,6 +452,16 @@ fn split_quantities(
     Ok(sizes)
 }
 
+fn unknown_failure_text(message: &str) -> String {
+    if message.is_empty() {
+        "We couldn’t confirm this change. Check your open orders before trying again.".into()
+    } else {
+        format!(
+            "{message}. We couldn’t confirm this change. Check your open orders before trying again."
+        )
+    }
+}
+
 impl BitunixFutures {
     /// The Primary credential and identity every trading call signs with.
     pub(crate) fn trade_identity(&self) -> Option<(Credential, SigningIdentity)> {
@@ -1879,15 +1889,7 @@ impl BitunixFutures {
     fn end(&mut self, cx: &mut Cx<'_, Pending>, command: u32, mut error: VenueError) {
         self.kept_gone(command, &mut error);
         if error.outcome == Some(Outcome::Unknown) {
-            error.message = if error.message.is_empty() {
-                "We couldn’t confirm this change. Check your open orders before trying again."
-                    .into()
-            } else {
-                format!(
-                    "{}. We couldn’t confirm this change. Check your open orders before trying again.",
-                    error.message
-                )
-            };
+            error.message = unknown_failure_text(&error.message);
             error.presents = true;
         }
         let Some(live) = self.take_live(command) else {
@@ -3236,5 +3238,26 @@ mod real_ack_tests {
             ack_identity(r#"{"orderId":null,"clientId":null}"#, true).unwrap(),
             (None, false)
         );
+    }
+}
+
+// Rule 5 (#3726): preserve current and retained guidance in inner write formatting.
+#[cfg(test)]
+mod notification_guard_tests {
+    use super::*;
+    #[test]
+    fn guided_inner_write_text_stays_unchanged() {
+        for message in [
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+            "This change is unknown. Check Open Orders",
+        ] {
+            assert_eq!(unknown_failure_text(message), message);
+        }
+    }
+    #[test]
+    fn unguided_inner_write_text_keeps_one_action() {
+        let message = unknown_failure_text("lost write");
+        assert!(message.contains("lost write"));
+        assert_eq!(message.matches("Check your open orders").count(), 1);
     }
 }

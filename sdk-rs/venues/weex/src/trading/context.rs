@@ -623,3 +623,24 @@ pub(super) fn rate_limited(cx: &Cx<'_, Pending>, context: &Context) -> bool {
     cx.classify_write(context, &TABLE, None, "WEEX write rate deferral")
         .is_ok_and(|fact| fact.error().kind == Some(ErrorKind::RateLimited))
 }
+
+// Rule 5 (#3726): preserve current and retained guidance in inner write formatting.
+#[cfg(test)]
+mod notification_guard_tests {
+    use super::*;
+    #[test]
+    fn guided_inner_write_text_stays_unchanged() {
+        for message in [
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+            "This change is unknown. Check Open Orders",
+        ] {
+            assert_eq!(unknown_message(message), message);
+        }
+    }
+    #[test]
+    fn unguided_inner_write_text_keeps_one_action() {
+        let message = unknown_message("lost write");
+        assert!(message.contains("lost write"));
+        assert_eq!(message.matches("Check your open orders").count(), 1);
+    }
+}

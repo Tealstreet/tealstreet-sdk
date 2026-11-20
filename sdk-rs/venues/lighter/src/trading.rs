@@ -265,6 +265,14 @@ struct Integrator {
     max_perps_taker_fee: Option<Number>,
 }
 
+fn protection_unknown_text(message: &str) -> String {
+    if message.contains(UNKNOWN_TEXT) {
+        message.to_owned()
+    } else {
+        format!("{message}. {UNKNOWN_TEXT}")
+    }
+}
+
 impl Lighter {
     /// An authoritative stream row. `client_index` is the row's own client order
     /// index when present; only it can prove a grouped leg.
@@ -2097,10 +2105,7 @@ impl Lighter {
                     .venue_message
                     .get_or_insert_with(|| error.message.clone().into());
                 if job.protection.is_some() || job.amend.is_some() {
-                    if !error.message.contains(UNKNOWN_TEXT) {
-                        error.message.push_str(". ");
-                        error.message.push_str(UNKNOWN_TEXT);
-                    }
+                    error.message = protection_unknown_text(&error.message);
                 } else {
                     error.message = UNKNOWN_TEXT.into();
                 }
@@ -3141,5 +3146,26 @@ mod client_index_parity_tests {
             assert!(next > first && next <= MAX_CLIENT_INDEX);
         }));
         engine.start(1_700_000_000_000.);
+    }
+}
+
+// Rule 5 (#3726): preserve current and retained guidance in inner write formatting.
+#[cfg(test)]
+mod notification_guard_tests {
+    use super::*;
+    #[test]
+    fn guided_inner_write_text_stays_unchanged() {
+        for message in [
+            "The exchange reply didn’t confirm this change. Check your open orders before trying again.",
+            "This change is unknown. Check Open Orders",
+        ] {
+            assert_eq!(protection_unknown_text(message), message);
+        }
+    }
+    #[test]
+    fn unguided_inner_write_text_keeps_one_action() {
+        let message = protection_unknown_text("lost write");
+        assert!(message.contains("lost write"));
+        assert_eq!(message.matches("Check your open orders").count(), 1);
     }
 }

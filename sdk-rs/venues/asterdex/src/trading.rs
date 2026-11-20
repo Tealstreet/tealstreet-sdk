@@ -2134,3 +2134,27 @@ mod tests {
 #[cfg(test)]
 #[path = "../tests/support/local_trade_refusals.rs"]
 mod local_trade_refusals;
+
+// Rule 5 (#3726): retained guidance remains a single action at the presentation boundary.
+#[cfg(test)]
+mod notification_guard_tests {
+    use super::*;
+    #[test]
+    fn retained_guidance_is_not_repeated() {
+        let original =
+            VenueError::new("The outcome is unknown. Check Open Orders").outcome(Outcome::Unknown);
+        assert_eq!(write_failure_text(&original), original.message);
+    }
+    #[test]
+    fn unguided_unknown_and_known_refusals_keep_their_distinction() {
+        let original = VenueError::new("lost").outcome(Outcome::Unknown);
+        assert_eq!(
+            write_failure_text(&original)
+                .matches("Check your open orders")
+                .count(),
+            1
+        );
+        let original = VenueError::new("declined").outcome(Outcome::Rejected);
+        assert_eq!(write_failure_text(&original), original.message);
+    }
+}

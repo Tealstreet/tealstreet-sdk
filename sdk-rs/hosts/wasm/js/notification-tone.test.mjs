@@ -120,9 +120,9 @@ test('scripted cleanup recognizes old and new cancel-all fences without admittin
 });
 
 // Rule 5 (#3726): exercise the actual Rust display predicate/template; native unit tests cover the full functions in CI.
-function rustDisplayDecorator(venue) {
+function rustDisplayDecorator(venue, functionName) {
   const source = readFileSync(new URL(`../../../venues/${venue}/src/trading.rs`, import.meta.url), 'utf8');
-  const start = source.indexOf(venue === 'kraken' ? 'fn trading_failure(' : 'fn terminal_failure_text(');
+  const start = source.indexOf(`fn ${functionName ?? (venue === 'kraken' ? 'trading_failure' : 'terminal_failure_text')}(`);
   assert.ok(start >= 0);
   const tail = source.slice(start);
   const guard = /if (error\.outcome[\s\S]*?)\{/.exec(tail);
@@ -254,4 +254,65 @@ test('Bitunix guides raw warning details and empty details without losing contex
   assert.equal(actionCount(bitunixFinalDisplay('raw warning')), 1);
   assert.ok(bitunixFinalDisplay('raw warning').endsWith('\nContext: raw warning'));
   assert.equal(actionCount(bitunixFinalDisplay('')), 1);
+});
+
+function innerWriteDisplay(path, name, message) {
+  const body = rustFunctionSource(path, name);
+  const source = readFileSync(new URL(path, import.meta.url), 'utf8');
+  const engine = readFileSync(new URL('../../../engine/src/unknown_outcome.rs', import.meta.url), 'utf8');
+  const constant = (key) => new RegExp(`const ${key}: &str =\\s*"([^"\\n]+)"`).exec(`${source}\n${engine}`)?.[1];
+  const guard = /if (message\.contains[\s\S]*?)\{/.exec(body)?.[1];
+  if (guard && new Function('message', 'UNKNOWN_TEXT', 'UNKNOWN_OUTCOME_TEXT', `return (${guard.replaceAll('.contains(', '.includes(')});`)(message, constant('UNKNOWN_TEXT'), constant('UNKNOWN_OUTCOME_TEXT'))) return message;
+  const template = /format!\(\s*"([^"\n]+)"/.exec(body)?.[1];
+  assert.ok(template);
+  return template.replace('{message}', message).replace('{UNKNOWN_TEXT}', constant('UNKNOWN_TEXT')).replace('{UNKNOWN_OUTCOME_TEXT}', constant('UNKNOWN_OUTCOME_TEXT'));
+}
+
+function asterWriteDisplay(error) {
+  const body = rustFunctionSource('../../../venues/asterdex/src/trading.rs', 'write_failure_text');
+  const source = readFileSync(new URL('../../../venues/asterdex/src/trading.rs', import.meta.url), 'utf8');
+  const canonical = /const ENGINE_UNKNOWN_TEXT: &str =\s*"([^"\n]+)"/.exec(source)?.[1];
+  const guided = /if (error\.message\.contains[\s\S]*?)\{/.exec(body)?.[1];
+  const presented = /else if ([\s\S]*?)\{/.exec(body)?.[1];
+  const template = /format!\(\s*"([^"\n]+)"/.exec(body)?.[1];
+  assert.ok(canonical && guided && presented && template);
+  if (error.outcome !== 'unknown') return error.message;
+  const evaluate = (condition) => new Function('error', 'ENGINE_UNKNOWN_TEXT', `return (${condition.replaceAll('.contains(', '.includes(')});`)(error, canonical);
+  if (evaluate(guided)) return error.message;
+  return evaluate(presented) ? template.replace('{}', error.message).replace('{ENGINE_UNKNOWN_TEXT}', canonical) : canonical;
+}
+
+for (const [venue, path, name] of [
+  ['Bitunix', '../../../venues/bitunix/src/trading.rs', 'unknown_failure_text'],
+  ['Lighter', '../../../venues/lighter/src/trading.rs', 'protection_unknown_text'],
+  ['WEEX', '../../../venues/weex/src/trading/context.rs', 'unknown_message'],
+]) {
+  test(`${venue} inner guidance keeps an existing engine HTTP action`, () => {
+    const message = 'The exchange reply didn’t confirm this change. Check your open orders before trying again.';
+    assert.equal(innerWriteDisplay(path, name, message), message);
+    assert.equal(actionCount(innerWriteDisplay(path, name, message)), 1);
+  });
+  test(`${venue} inner guidance supplies one action for unguided details`, () => {
+    const message = innerWriteDisplay(path, name, 'lost write');
+    assert.match(message, /lost write/);
+    assert.equal(actionCount(message), 1);
+  });
+}
+test('BloFin secondary guidance preserves an already-guided engine error', () => {
+  const decorate = rustDisplayDecorator('blofin', 'unknown_guidance');
+  const message = 'The exchange reply didn’t confirm this change. Check your open orders before trying again.';
+  assert.equal(decorate({ message, outcome: 'unknown', presents: true }), message);
+});
+test('BloFin secondary guidance still supplies an action to an unguided error', () => {
+  const decorate = rustDisplayDecorator('blofin', 'unknown_guidance');
+  assert.equal(actionCount(decorate({ message: 'lost', outcome: 'unknown', presents: true })), 1);
+  assert.equal(decorate({ message: 'declined', outcome: 'rejected', presents: true }), 'declined');
+});
+test('Aster secondary guidance preserves retained legacy actions', () => {
+  const message = 'The outcome is unknown. Check Open Orders';
+  assert.equal(asterWriteDisplay({ message, outcome: 'unknown', presents: false }), message);
+});
+test('Aster secondary guidance still distinguishes unguided uncertainty and known refusal', () => {
+  assert.equal(actionCount(asterWriteDisplay({ message: 'lost', outcome: 'unknown', presents: false })), 1);
+  assert.equal(asterWriteDisplay({ message: 'declined', outcome: 'rejected', presents: false }), 'declined');
 });

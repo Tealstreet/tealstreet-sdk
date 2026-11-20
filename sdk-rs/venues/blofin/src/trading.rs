@@ -3959,3 +3959,31 @@ mod notification_display_tests {
         }
     }
 }
+
+// Rule 5 (#3726): inner guidance cannot repeat an engine HTTP action.
+#[cfg(test)]
+mod notification_guard_tests {
+    use super::*;
+    #[test]
+    fn guided_inner_failure_retains_text_and_facts() {
+        let original = VenueError::new("The exchange reply didn’t confirm this change. Check your open orders before trying again.")
+            .outcome(Outcome::Unknown).kind(ErrorKind::Network).venue_code("429");
+        let shown = unknown_guidance(original.clone());
+        assert_eq!(shown.message, original.message);
+        assert_eq!(shown.outcome, original.outcome);
+        assert_eq!(shown.kind, original.kind);
+        assert_eq!(shown.venue_code, original.venue_code);
+    }
+    #[test]
+    fn unguided_inner_failure_keeps_one_action_and_refusals_remain_unchanged() {
+        let shown = unknown_guidance(
+            VenueError::new("lost")
+                .outcome(Outcome::Unknown)
+                .kind(ErrorKind::Network),
+        );
+        assert!(shown.message.contains("lost"));
+        assert_eq!(shown.message.matches("Check your open orders").count(), 1);
+        let original = VenueError::new("declined").outcome(Outcome::Rejected);
+        assert_eq!(unknown_guidance(original.clone()).message, original.message);
+    }
+}
