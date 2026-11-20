@@ -123,7 +123,9 @@ settles as a cancellation of the algo, so `51400` (already gone) satisfies it.
 OKX leaves a one-leg `conditional`; deleting a one-leg algo's only leg cancels
 the algo, so that case still uses `cancel-algos`. The live update that no
 longer lists the deleted leg removes its row (`drop_deleted_legs`), with a
-version that stops an older census restoring it. Sized `oco` algos (OKX UI)
+version that stops an older census restoring it. Native `trigger` algos carry one
+leg whose kind follows the reference price: they never take a leg deletion,
+and an update that moves one across the price removes its old-suffix row. Sized `oco` algos (OKX UI)
 take the same leg deletion, also verified live. Partial-size placements and
 other positions are unaffected.
 

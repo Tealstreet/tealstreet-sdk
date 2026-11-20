@@ -1163,7 +1163,7 @@ impl Okx {
                     .market(&o.symbol)
                     .ok_or_else(|| "unknown market".to_owned())?;
                 optimistic.push((id.clone(), o.status));
-                if let Some(stop) = lone_leg(cx, &ids, o) {
+                if let Some(stop) = lone_leg(cx, &ids, o, &self.trading.algo_orders) {
                     // Cancel-algos would take the sibling leg with it.
                     if seen.insert((m.id.as_str(), native_id(id))) {
                         legs.push(LegAmend::delete(&m.id, native_id(id), stop));
@@ -3056,7 +3056,17 @@ fn job(steps: Vec<Step>, finish: Finish) -> Job {
 }
 /// `Some(true)` when cancelling `order`, the SL leg of a two-leg OKX algo whose
 /// TP leg stays open and is not also being cancelled (`Some(false)` for a TP).
-fn lone_leg(cx: &Cx<'_, Pending>, cancelling: &[String], order: &Order) -> Option<bool> {
+/// Native `trigger` algos carry one leg whose kind follows the reference price,
+/// so they never take a leg deletion.
+fn lone_leg(
+    cx: &Cx<'_, Pending>,
+    cancelling: &[String],
+    order: &Order,
+    observed: &HashMap<String, ObservedAlgo>,
+) -> Option<bool> {
+    if observed.get(&order.id).is_some_and(|algo| algo.trigger) {
+        return None;
+    }
     let (stop, sibling) = match order.kind {
         OrderType::StopLoss => (true, "_tp"),
         OrderType::TakeProfit => (false, "_sl"),
@@ -3065,7 +3075,9 @@ fn lone_leg(cx: &Cx<'_, Pending>, cancelling: &[String], order: &Order) -> Optio
     let algo = order.id.strip_suffix(if stop { "_sl" } else { "_tp" })?;
     let sibling = format!("{algo}{sibling}");
     let held = cx.store.order(&sibling).is_some_and(|o| {
-        o.symbol == order.symbol && matches!(o.status, OrderStatus::Open | OrderStatus::Updating)
+        o.symbol == order.symbol
+            && matches!(o.status, OrderStatus::Open | OrderStatus::Updating)
+            && !observed.get(&sibling).is_some_and(|algo| algo.trigger)
     });
     (held && !cancelling.contains(&sibling)).then_some(stop)
 }
